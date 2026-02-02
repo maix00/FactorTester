@@ -9,6 +9,8 @@ import os
 from Products import Futures, ProductBase
 import logging
 
+from tqdm import tqdm
+
 logger_dir_path_default = '../data/factor_tester_log/'
 
 PriceColumnMapping = {
@@ -19,7 +21,29 @@ PriceColumnMapping = {
     'CA': 'close_price_adjusted',
     'OA': 'open_price_adjusted',
     'HA': 'highest_price_adjusted',
-    'LA': 'lowest_price_adjusted'
+    'LA': 'lowest_price_adjusted',
+    'V': 'vwap',
+    'T': 'twap',
+}
+
+OtherColumnMapping = {
+    'V': 'volume',
+    'A': 'amount',
+    'T': 'turnover',
+    'P': 'premium',
+    'D': 'dividend',
+    'R': 'right',
+    'E': 'exchange_rate',
+    'S': 'spread',
+    'M': 'mid_price',
+    'I': 'implied_volatility',
+    'B': 'bid_price',
+    'A': 'ask_price',
+    'BW': 'bid_width',
+    'AW': 'ask_width',
+    'BW/A': 'bid_ask_width_ratio',
+    'B/A': 'bid_ask_ratio',
+    'B/A/M': 'bid_ask_mid_ratio'
 }
 
 import inspect
@@ -549,7 +573,7 @@ class FactorTester:
         assert all(isinstance(factor[0], str) for factor in factors)
         assert all(isinstance(factor[1], Callable) for factor in factors)
         
-        for factor_name, factor_func in factors:
+        for factor_name, factor_func in tqdm(factors, desc='Factor processing'):
             factors_df = factor_func(self.data, self.data_freq)
             if not factors_df.empty:
                 self.factor_data[factor_name] = factors_df
@@ -866,8 +890,21 @@ def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callabl
     tester = get_factor_tester()
     tester.calc_factor(factors)
 
-    _, stats = tester.calc_ic(factors=factors, return_price_col='open_price_adjusted',
+    ic_series, stats = tester.calc_ic(factors=factors, return_price_col='open_price_adjusted',
                               return_daily_anchors='open_market')#, return_freq='5 days')
+    # import matplotlib.pyplot as plt
+
+    # plt.figure(figsize=(14, 6))
+    # for col in ic_series.columns:
+    #     plt.plot(ic_series.index, ic_series[col], label=col, alpha=0.7)
+    # plt.xlabel('Date')
+    # plt.ylabel('IC')
+    # plt.title('IC Series Over Time')
+    # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    # plt.grid(True, alpha=0.3)
+    # plt.tight_layout()
+    # plt.show()
+
     print('IC Stats Median t_stat:', stats.loc['t_stat'].median())
     if len(stats.columns) >= 4:
         stats = stats.T.sort_values('t_stat', ascending=False)
