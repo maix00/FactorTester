@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
+factor_group_figs_path = '../data/Factors/figs/'
 
 PriceColumnMapping = {
     'C': 'close_price',
@@ -791,7 +792,7 @@ class FactorTester:
         else:
             raise ValueError(f"Unknown sift method: {method}")
 
-    def group_classes(self, factor_name: str, n_groups: int = 5, plot_flag: bool = False, 
+    def group_classes(self, factor_name: str, n_groups: int = 5, plot_flag: bool = False, save_plot: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_price_col: str = 'close_price_adjusted',
                       return_daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
@@ -919,6 +920,10 @@ class FactorTester:
             tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
             plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
             plt.tight_layout()
+            if save_plot:
+                if not os.path.exists(factor_group_figs_path):
+                    os.makedirs(factor_group_figs_path)
+                plt.savefig(os.path.join(factor_group_figs_path, f'{factor_name}_group_performance.png'))
             plt.show()
 
         return groups, returns_groups, report_df
