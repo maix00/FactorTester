@@ -12,6 +12,7 @@ import logging
 from tqdm import tqdm
 
 logger_dir_path_default = '../data/factor_tester_log/'
+factor_info_path = '../data/Factors/'
 
 PriceColumnMapping = {
     'C': 'close_price',
@@ -163,9 +164,54 @@ class FactorGrid:
         params = self._get_complete_params(**kwargs)
         factor_test(self.get_factor(**params), n_groups=n_groups, plot_n_group_list=plot_n_group_list)
 
-    def factor_grid_test(self, **kwargs):
-        self._set_current_params_space(**kwargs)
-        factor_test(self)
+    # def factor_grid_test(self, **kwargs):
+    #     self._set_current_params_space(**kwargs)
+    #     factor_test(self)
+
+    def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, **kwargs):
+        
+        factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem + '.csv')
+        if not os.path.exists(factor_info_path):
+            os.makedirs(factor_info_path)
+        if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
+            factor_table = pd.read_csv(factor_cache_path)
+        else:
+            factor_table = pd.DataFrame()
+        
+        tester = get_factor_tester()
+        
+        all_values = self.get_param_tensor(**kwargs).flatten().tolist()
+        all_keys = self.params_space.keys()
+        for values in all_values:
+            params = dict(zip(all_keys, values))
+            factor = self.get_factor(**params)
+            factor_name = factor[0]
+
+            tester.calc_factor(factor)
+            _, ic_stats = tester.calc_ic(factor, return_price_col='open_price_adjusted',
+                                         return_daily_anchors='open_market')
+            
+            _, _, report_df = tester.group_classes(factor_name, 
+                plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
+                start_date='2025-01-01', end_date='2025-12-31',
+                return_price_col='open_price_adjusted', return_daily_anchors='open_market'
+                )
+            
+            report_dict = {}
+            for col in report_df.columns:
+                key_0 = f"{col} {report_df.index[0]}"
+                report_dict[key_0] = report_df.loc[report_df.index[0], col]
+            for col in report_df.columns:
+                key_1 = f"{col} {report_df.index[1]}"
+                report_dict[key_1] = report_df.loc[report_df.index[1], col]
+
+            new_row = pd.Series({
+                'factor_stem': self.factor_name_stem,
+                'serial_num': pd.Timestamp.now(),
+                'factor_name': factor_name,
+            } | params | ic_stats.iloc[:, 0].to_dict() | report_dict)
+            factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
+            factor_table.to_csv(factor_cache_path, index=False)
         
 class FactorTester:
     def __init__(self, file_paths: List[str], 
@@ -750,7 +796,8 @@ class FactorTester:
                       return_price_col: str = 'close_price_adjusted',
                       return_daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
                       return_freq: Optional[str|pd.Timedelta] = None,
-                      plot_n_group_list: Optional[List[int]] = None) -> Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]]]:
+                      plot_n_group_list: Optional[List[int]] = None) -> \
+        Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
         """
         For each datetime, split contracts into n_groups groups.
         Each group is a dict: {datetime_str: [contract names]}.
@@ -874,7 +921,7 @@ class FactorTester:
             plt.tight_layout()
             plt.show()
 
-        return groups, returns_groups
+        return groups, returns_groups, report_df
     
 def process_daily_anchors(data_freq: pd.Timedelta, daily_anchors: Any) -> List[int]:
     if not isinstance(daily_anchors, list) and not isinstance(daily_anchors, tuple):
@@ -981,7 +1028,7 @@ def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callabl
         which_factor = input(f'选择哪一个因子进行分类回测 (1 - {len(factor_names)}): ')
         if which_factor.isdigit() and 1 <= int(which_factor) <= len(factor_names):
             which_factor = int(which_factor) - 1
-            groups, returns_groups = tester.group_classes(factor_names[which_factor], 
+            groups, returns_groups, _ = tester.group_classes(factor_names[which_factor], 
                                                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                                                 start_date='2025-01-01', end_date='2025-12-31',
                                                 return_price_col='open_price_adjusted', return_daily_anchors='open_market'
