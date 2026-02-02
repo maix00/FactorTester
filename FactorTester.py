@@ -3,7 +3,7 @@ from enum import Enum
 import itertools
 import pandas as pd
 import numpy as np
-from typing import Callable, List, Dict, Optional, Tuple, Any
+from typing import Callable, List, Dict, Optional, Set, Tuple, Any
 import os
 
 from Products import Futures, ProductBase
@@ -170,7 +170,7 @@ class FactorGrid:
 class FactorTester:
     def __init__(self, file_paths: List[str], 
                  start_date: Optional[str] = None, end_date: Optional[str] = None,
-                 time_col: str|List[str] = ['trading_day', 'trade_time'], #'trade_time',#['trading_day', 'trade_time'], 
+                 time_col: str|List[str] = ['trading_day', 'trade_time'],
                  futures_flag: bool = True, futures_adjust_col: Optional[List[str]] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
@@ -687,6 +687,64 @@ class FactorTester:
         return self.cache_return(price_col=price_col, date_index=date_index, daily_anchors=daily_anchors,
                                  return_freq=return_freq, calc_freq=calc_freq)
 
+    def sift_product(self, method: Optional[str] = None, 
+                     volume_threshold: Optional[float] = None, volume_col: Optional[str] = None,
+                     in_place: bool = False, in_place_reset: bool = True,
+                    #  sift_freq: Optional[str|pd.Timedelta] = None,
+                     start_date: Optional[str|pd.Timestamp] = None,
+                     end_date: Optional[str|pd.Timestamp] = None) -> List[ProductBase]|Set[ProductBase]:
+        if in_place_reset:
+            self.products = set(self.data.keys())
+        if method is None:
+            return self.products
+        elif method == 'volume':
+            if volume_threshold is None:
+                raise ValueError("volume_threshold is required for volume method")
+            if volume_col is None:
+                raise ValueError("volume_col is required for volume method")
+            if start_date is None:
+                if self.start_date is not None:
+                    start_date = self.start_date
+                if start_date is None:
+                    start_date_list = [self.data[product]['trading_day'][0] for product in self.products]
+                    start_date_list = np.unique(start_date_list)
+                    if len(start_date_list) > 1:
+                        raise ValueError("Multiple start dates found in data. Please specify start_date.")
+            else:
+                start_date = pd.to_datetime(start_date)
+            if end_date is None:
+                if self.end_date is not None:
+                    end_date = self.end_date
+                if end_date is None:
+                    end_date_list = [self.data[product]['trading_day'][-1] for product in self.products]
+                    end_date_list = np.unique(end_date_list)
+                    if len(end_date_list) > 1:
+                        raise ValueError("Multiple end dates found in data. Please specify end_date.")
+            else:
+                end_date = pd.to_datetime(end_date)
+            if start_date is not None and end_date is not None:
+                assert isinstance(start_date, pd.Timestamp)
+                assert isinstance(end_date, pd.Timestamp)
+                assert start_date <= end_date
+            sift_dict = {}
+            for product in self.products.copy():
+                volume_seq = self.data[product][volume_col]
+                if start_date is not None:
+                    volume_seq = volume_seq[volume_seq.index.get_level_values(0) >= start_date]
+                if end_date is not None:
+                    volume_seq = volume_seq[volume_seq.index.get_level_values(0) <= end_date]
+                sift_dict[product] = volume_seq.sum()
+            sift_dict_sorted = dict(sorted(sift_dict.items(), key=lambda x: x[1]))
+            threshold_idx = int(len(sift_dict_sorted) * volume_threshold)
+            products_to_keep = set(list(sift_dict_sorted.keys())[:threshold_idx])
+            if in_place:
+                self.products = products_to_keep
+                return self.products
+            else:
+                return products_to_keep
+        else:
+            raise ValueError(f"Unknown sift method: {method}")
+
     def group_classes(self, factor_name: str, n_groups: int = 5, plot_flag: bool = False, 
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_price_col: str = 'close_price_adjusted',
@@ -731,10 +789,13 @@ class FactorTester:
         end_date = pd.to_datetime(end_date) if end_date is not None else None
         
         for dt, row in factor_df.iterrows():
-            dt_str = dt #str(dt)
-            sorted_contracts = row.dropna().sort_values(ascending=False)
-            n = len(sorted_contracts)
-            idx = list(sorted_contracts.index)
+            dt_str = dt
+            sifted_products = self.sift_product(method='volume', volume_threshold=0.6,
+                                                volume_col='volume', start_date=dt, end_date=dt)
+            sorted_products = row.dropna().sort_values(ascending=False)
+            sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
+            n = len(sorted_products)
+            idx = list(sorted_products.index)
             
             # Split contracts into n_groups groups
             if n > 0:
