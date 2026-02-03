@@ -795,7 +795,7 @@ class FactorTester:
                 if end_date is not None:
                     volume_seq = volume_seq[volume_seq.index.get_level_values(0) <= end_date]
                 sift_dict[product] = volume_seq.sum()
-            sift_dict_sorted = dict(sorted(sift_dict.items(), key=lambda x: x[1]))
+            sift_dict_sorted = dict(sorted(sift_dict.items(), key=lambda x: x[1], reverse=True))
             threshold_idx = int(len(sift_dict_sorted) * volume_threshold)
             products_to_keep = set(list(sift_dict_sorted.keys())[:threshold_idx])
             if sift_in_place:
