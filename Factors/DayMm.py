@@ -31,7 +31,7 @@ class DayMm(FactorGrid): # Day Momentum
             temp_high = day_high.copy()
             day_high.loc[mask] = day_low.loc[mask]
             day_low.loc[mask] = temp_high.loc[mask]
-            factors[product] = - (day_high - day_low) / day_high
+            factors[product] = (day_high - day_low) / day_high
         return pd.DataFrame(factors)
 
 if __name__ == '__main__':
