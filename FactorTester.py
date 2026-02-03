@@ -11,9 +11,13 @@ import logging
 
 from tqdm import tqdm
 
+default_test_start_date = '2025-01-01'
+default_test_end_date = '2025-05-31'
+default_plot_test_start_date = '2025-01-01'
+default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
-factor_group_figs_path = '../data/Factors/figs/'
+factor_group_figs_path = '../data/Factors/group_figs/'
 
 PriceColumnMapping = {
     'C': 'close_price',
@@ -194,7 +198,7 @@ class FactorGrid:
             
             _, _, report_df = tester.group_classes(factor_name, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
-                start_date='2025-01-01', end_date='2025-12-31',
+                start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
                 return_price_col='open_price_adjusted', return_daily_anchors='open_market'
                 )
             
@@ -210,6 +214,9 @@ class FactorGrid:
                 'factor_stem': self.factor_name_stem,
                 'serial_num': pd.Timestamp.now(),
                 'factor_name': factor_name,
+                'factor_freq': tester.factor_freq[factor_name],
+                'start_date': tester.start_date,
+                'end_date': tester.end_date,
             } | params | ic_stats.iloc[:, 0].to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor_table.to_csv(factor_cache_path, index=False)
@@ -253,8 +260,8 @@ class FactorTester:
             product_name = path.split('/')[-1].replace('.parquet', '')
             product = Futures(product_name) if futures_flag else ProductBase(product_name)
             self.add_data(product, path, futures_adjust_col=futures_adjust_col)
-        self.start_date = start_date
-        self.end_date = end_date
+        self.start_date = pd.to_datetime(start_date) if start_date is not None else None
+        self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.futures_flag = futures_flag
         self.futures_adjust_col = futures_adjust_col
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
@@ -638,7 +645,8 @@ class FactorTester:
                 return_price_col: str = 'close_price_adjusted',
                 return_freq: Optional[str|pd.Timedelta] = None,
                 return_daily_anchors: Optional[Any] = None,
-                start_date: Optional[str] = None, end_date: Optional[str] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+                start_date: Optional[str|pd.Timestamp] = None, 
+                end_date: Optional[str|pd.Timestamp] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
         
         if isinstance(factors, FactorGrid):
             factors = factors.get_factor_name_list()
@@ -674,8 +682,8 @@ class FactorTester:
                 return_df = return_df.shift(-1)
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
-            start_date = start_date if start_date is not None else self.start_date
-            end_date = end_date if end_date is not None else self.end_date
+            start_date = pd.to_datetime(start_date) if start_date is not None else self.start_date
+            end_date = pd.to_datetime(end_date) if end_date is not None else self.end_date
             if start_date is not None:
                 dt_index = dt_index[dt_index >= start_date]
             if end_date is not None:
@@ -863,13 +871,34 @@ class FactorTester:
 
         report_groups = {}
         for name in group_names:
+
             dates = list(returns_groups[name].keys()) if returns_groups[name] else []
+            test_dates = [date for date in dates if self.start_date <= date] if self.start_date else dates
+            test_dates = [date for date in test_dates if date <= self.end_date] if self.end_date else dates
             dates = [date for date in dates if start_date <= date] if start_date else dates
             dates = [date for date in dates if date <= end_date] if end_date else dates
+            
             returns = [returns_groups[name][date] for date in dates]
             returns_series = pd.Series(returns).dropna()
             cumulative_returns = (1 + returns_series).cumprod()
+
+            test_returns = [returns_groups[name][date] for date in test_dates]
+            test_returns_series = pd.Series(test_returns).dropna()
+            test_cumulative_returns = (1 + test_returns_series).cumprod()
+
             metrics = {
+
+            '(Test) Total Return': (test_cumulative_returns.iloc[-1] - 1) * 100 if len(test_cumulative_returns) > 0 else 0,
+            '(Test) Annual Return': ((test_cumulative_returns.iloc[-1]) ** (252 / len(test_cumulative_returns)) - 1) * 100 if len(test_cumulative_returns) > 1 else 0,
+            '(Test) Volatility': pd.Series(test_returns).std() * np.sqrt(252) * 100,
+            '(Test) Sharpe Ratio': (pd.Series(test_returns).mean() * 252) / (pd.Series(test_returns).std() * np.sqrt(252)) if pd.Series(test_returns).std() != 0 else 0,
+            '(Test) Max Drawdown': ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100 if len(test_cumulative_returns) > 0 else 0,
+            '(Test) Calmar Ratio': ((test_cumulative_returns.iloc[-1] ** (252 / len(test_cumulative_returns)) - 1) * 100) / (((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100) if ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() != 0 else 0,
+            '(Test) Win Rate': (pd.Series(test_returns) > 0).sum() / len(pd.Series(test_returns)) * 100 if len(pd.Series(test_returns)) > 0 else 0,
+            '(Test) Mean Return': pd.Series(test_returns).mean() * 100,
+            '(Test) Skewness': pd.Series(test_returns).skew(),
+            '(Test) Kurtosis': pd.Series(test_returns).kurtosis(),
+
             'Total Return': (cumulative_returns.iloc[-1] - 1) * 100 if len(cumulative_returns) > 0 else 0,
             'Annual Return': ((cumulative_returns.iloc[-1]) ** (252 / len(cumulative_returns)) - 1) * 100 if len(cumulative_returns) > 1 else 0,
             'Volatility': pd.Series(returns).std() * np.sqrt(252) * 100,
@@ -880,7 +909,9 @@ class FactorTester:
             'Mean Return': pd.Series(returns).mean() * 100,
             'Skewness': pd.Series(returns).skew(),
             'Kurtosis': pd.Series(returns).kurtosis(),
+
             }
+
             name = int(name.split('_')[-1])
             report_groups[name] = pd.Series(metrics)
         
@@ -923,7 +954,7 @@ class FactorTester:
             if save_plot:
                 if not os.path.exists(factor_group_figs_path):
                     os.makedirs(factor_group_figs_path)
-                plt.savefig(os.path.join(factor_group_figs_path, f'{factor_name}_group_performance.png'))
+                plt.savefig(os.path.join(factor_group_figs_path, f'{factor_name}_{start_date}_{end_date}.png'))
             plt.show()
 
         return groups, returns_groups, report_df
@@ -977,7 +1008,7 @@ def daily_return(df: pd.DataFrame, price_col: str = 'close_price',
     assert isinstance(returns, pd.Series)
     return returns
 
-def get_factor_tester(start_date: Optional[str] = None, end_date: Optional[str] = None) -> FactorTester:
+def get_factor_tester(start_date: Optional[str] = default_test_start_date, end_date: Optional[str] = default_test_end_date) -> FactorTester:
     parquet_dir = '../data/main_mink/'
     file_list = [
         os.path.join(parquet_dir, f)
@@ -985,9 +1016,9 @@ def get_factor_tester(start_date: Optional[str] = None, end_date: Optional[str] 
         if f.endswith('.parquet') and '_S' not in f and '-S' not in f
     ]
     
-    tester = FactorTester(file_list, #start_date='2025-01-01', 
-                    end_date='2025-05-30', 
-                    futures_flag=True, futures_adjust_col=['close_price', 'open_price', 'highest_price', 'lowest_price'])
+    tester = FactorTester(file_list,
+                          start_date=start_date, end_date=end_date,
+                          futures_flag=True, futures_adjust_col=['close_price', 'open_price', 'highest_price', 'lowest_price'])
     
     return tester
 
