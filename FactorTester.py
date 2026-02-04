@@ -11,9 +11,9 @@ import logging
 
 from tqdm import tqdm
 
-default_test_start_date = '2025-01-01'
+default_test_start_date = '2024-01-01'
 default_test_end_date = '2025-05-31'
-default_plot_test_start_date = '2025-01-01'
+default_plot_test_start_date = '2024-01-01'
 default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
@@ -199,7 +199,7 @@ class FactorGrid:
             _, _, report_df = tester.group_classes(factor_name, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
-                return_price_col='open_price_adjusted', return_daily_anchors='open_market'
+                return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False
                 )
             
             report_dict = {}
@@ -806,7 +806,8 @@ class FactorTester:
         else:
             raise ValueError(f"Unknown sift sift_method: {sift_method}")
 
-    def group_classes(self, factor_name: str, n_groups: int = 5, plot_flag: bool = False, save_plot: bool = True,
+    def group_classes(self, factor_name: str, n_groups: int = 5, 
+                      plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_price_col: str = 'close_price_adjusted',
                       return_daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
@@ -922,8 +923,9 @@ class FactorTester:
             report_groups[name] = pd.Series(metrics)
         
         report_df = pd.DataFrame(report_groups).T.sort_index()  # Convert to DataFrame, transpose, and sort by name
-        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-            print("Group Performance Summary:\n", report_df)
+        if not plot_flag or (plot_flag and plot_show):
+            with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                print("Group Performance Summary:\n", report_df)
 
         if plot_flag:
             import matplotlib.pyplot as plt
@@ -961,7 +963,8 @@ class FactorTester:
                 if not os.path.exists(factor_group_figs_path):
                     os.makedirs(factor_group_figs_path)
                 plt.savefig(os.path.join(factor_group_figs_path, f'{factor_name}_{start_date}_{end_date}.png'))
-            plt.show()
+            if plot_show:
+                plt.show()
 
         return groups, returns_groups, report_df
     

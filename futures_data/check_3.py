@@ -14,9 +14,9 @@ from tqdm import tqdm
 import shutil
 
 # 文件路径
-unique_ids_file = './futures_data_mink/unique_instrument_ids.txt'
+unique_ids_file = './futures_data/unique_instrument_ids.txt'
 data_folder = '../data/data_mink/'
-output_folder = '../data/data_mink_product_2025/'
+output_folder = '../data/data_mink_product/'
 
 # 处理输出文件夹命名冲突
 if os.path.exists(output_folder):

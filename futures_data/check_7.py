@@ -10,7 +10,7 @@
 输入数据：
 - 产品与合约映射关系（../data/wind_mapping.parquet）
 - 合约日行情数据（../data/data_dayk.parquet）
-- 合约分钟行情数据目录（../data/data_mink_product_2025/）
+- 合约分钟行情数据目录（../data/data_mink_product/）
 
 输出数据：
 - 主力合约分钟行情（../data/main_mink.parquet）
@@ -109,9 +109,9 @@ detector.add_data_table('contract_dayk', pd.read_parquet('../data/data_dayk.parq
 detector.rollover_points_cache_path = '../data/rollover_points_cache.pkl'
 detector.rollover_adjustments_cache_path = '../data/rollover_adjustments.csv'
 detector.generate_main_contract_series(source_data_label='mink', 
-                                       source_data_folder_UID_path='../data/data_mink_product_2025/',
+                                       source_data_folder_UID_path='../data/data_mink_product/',
                                        add_adjust_col_bool=True, save_per_product=True,
-                                       update_mode=True, save_path='../data/main_mink/',
+                                       update_mode=False, save_path='../data/main_mink/',
                                        issues_save_path='../data/main_mink_issues.csv')
 detector.generate_main_contract_series_adjusted(data=pd.read_parquet('../data/main_mink.parquet'),
                                                 save_path='../data/main_mink_adjusted.parquet',
