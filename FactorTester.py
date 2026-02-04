@@ -11,6 +11,7 @@ import logging
 
 from tqdm import tqdm
 
+sift_volume_threshold = 0.5
 default_test_start_date = '2024-01-01'
 default_test_end_date = '2025-05-31'
 default_plot_test_start_date = '2024-01-01'
@@ -173,7 +174,8 @@ class FactorGrid:
     #     self._set_current_params_space(**kwargs)
     #     factor_test(self)
 
-    def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, **kwargs):
+    def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
+                         sift_method: Optional[str] = 'volume', sift_volume_threshold: float = sift_volume_threshold, **kwargs):
         
         factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem, self.factor_name_stem + '.csv')
         if not os.path.exists(factor_info_path):
@@ -194,12 +196,14 @@ class FactorGrid:
 
             tester.calc_factor(factor)
             _, ic_stats = tester.calc_ic(factor, return_price_col='open_price_adjusted',
-                                         return_daily_anchors='open_market', sift_method='volume', volume_threshold=0.6)
+                                         return_daily_anchors='open_market', 
+                                         sift_method=sift_method, volume_threshold=sift_volume_threshold)
             
             _, _, report_df = tester.group_classes(factor_name, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
-                return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False
+                return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False,
+                sift_method=sift_method, volume_threshold=sift_volume_threshold
                 )
             
             report_dict = {}
@@ -217,6 +221,8 @@ class FactorGrid:
                 'factor_freq': tester.factor_freq[factor_name],
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
+                'sift_method': 'volume',
+                'sift_volume_threshold': sift_volume_threshold,
             } | params | ic_stats.iloc[:, 0].to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor_table.to_csv(factor_cache_path, index=False)
@@ -752,7 +758,7 @@ class FactorTester:
                      sift_in_place: bool = False, sift_in_place_reset: bool = True,
                     #  sift_freq: Optional[str|pd.Timedelta] = None,
                      start_date: Optional[str|pd.Timestamp] = None,
-                     end_date: Optional[str|pd.Timestamp] = None) -> List[ProductBase]|Set[ProductBase]:
+                     end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> List[ProductBase]|Set[ProductBase]:
         if sift_in_place_reset:
             self.products = set(self.data.keys())
         if sift_method is None:
@@ -812,7 +818,7 @@ class FactorTester:
                       return_price_col: str = 'close_price_adjusted',
                       return_daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
                       return_freq: Optional[str|pd.Timedelta] = None,
-                      plot_n_group_list: Optional[List[int]] = None) -> \
+                      plot_n_group_list: Optional[List[int]] = None, **kwargs) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
         """
         For each datetime, split contracts into n_groups groups.
@@ -853,8 +859,7 @@ class FactorTester:
         
         for dt, row in factor_df.iterrows():
             dt_str = dt
-            sifted_products = self.sift_product(sift_method='volume', volume_threshold=0.6,
-                                                volume_col='volume', start_date=dt, end_date=dt)
+            sifted_products = self.sift_product(**kwargs, volume_col='volume', start_date=dt, end_date=dt)
             sorted_products = row.dropna().sort_values(ascending=False)
             sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
             n = len(sorted_products)
