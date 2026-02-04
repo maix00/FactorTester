@@ -18,7 +18,6 @@ default_plot_test_start_date = '2024-01-01'
 default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
-factor_group_figs_path = '../data/Factors/group_figs/'
 
 PriceColumnMapping = {
     'C': 'close_price',
