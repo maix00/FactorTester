@@ -175,7 +175,7 @@ class FactorGrid:
 
     def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, **kwargs):
         
-        factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem + '.csv')
+        factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem, self.factor_name_stem + '.csv')
         if not os.path.exists(factor_info_path):
             os.makedirs(factor_info_path)
         if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
@@ -960,9 +960,11 @@ class FactorTester:
             plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
             plt.tight_layout()
             if save_plot:
-                if not os.path.exists(factor_group_figs_path):
-                    os.makedirs(factor_group_figs_path)
-                plt.savefig(os.path.join(factor_group_figs_path, f'{factor_name}_{start_date}_{end_date}.png'))
+                factor_stem = factor_name.split('|')[0]
+                figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
+                if not os.path.exists(figs_path):
+                    os.makedirs(figs_path)
+                plt.savefig(os.path.join(figs_path, f'{factor_name}_{start_date}_{end_date}.png'))
             if plot_show:
                 plt.show()
 
