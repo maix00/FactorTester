@@ -35,4 +35,4 @@ class DayMm(FactorGrid): # Day Momentum
         return pd.DataFrame(factors)
 
 if __name__ == '__main__':
-    DayMm().factor_grid_test()
+    DayMm().factor_grid_test(category_names=['农产品'])

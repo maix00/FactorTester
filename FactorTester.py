@@ -7,11 +7,12 @@ from typing import Callable, List, Dict, Optional, Set, Tuple, Any
 import os
 
 from Products import Futures, ProductBase
+from CNFutSect import get_categories_with_products
 import logging
 
 from tqdm import tqdm
 
-sift_volume_threshold = 0.5
+sift_volume_threshold = 1.0
 default_test_start_date = '2024-01-01'
 default_test_end_date = '2025-05-31'
 default_plot_test_start_date = '2024-01-01'
@@ -174,6 +175,7 @@ class FactorGrid:
     #     factor_test(self)
 
     def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
+                         category_names: Optional[str|List[str]] = None,
                          sift_method: Optional[str] = 'volume', sift_volume_threshold: float = sift_volume_threshold, **kwargs):
         
         factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem, self.factor_name_stem + '.csv')
@@ -184,7 +186,7 @@ class FactorGrid:
         else:
             factor_table = pd.DataFrame()
         
-        tester = get_factor_tester()
+        tester = get_factor_tester(category_names=category_names)
         
         all_values = self.get_param_tensor(**kwargs).flatten().tolist()
         all_keys = self.params_space.keys()
@@ -222,6 +224,7 @@ class FactorGrid:
                 'end_date': tester.end_date,
                 'sift_method': 'volume',
                 'sift_volume_threshold': sift_volume_threshold,
+                'category_names': category_names,
             } | params | ic_stats.iloc[:, 0].to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor_table.to_csv(factor_cache_path, index=False)
@@ -1023,12 +1026,21 @@ def daily_return(df: pd.DataFrame, price_col: str = 'close_price',
     assert isinstance(returns, pd.Series)
     return returns
 
-def get_factor_tester(start_date: Optional[str] = default_test_start_date, end_date: Optional[str] = default_test_end_date) -> FactorTester:
+def get_factor_tester(
+        category_names: Optional[str|List[str]] = None,
+        start_date: Optional[str] = default_test_start_date, 
+        end_date: Optional[str] = default_test_end_date) -> FactorTester:
+    product_name_list = []
+    if category_names is not None:
+        if isinstance(category_names, str):
+            category_names = [category_names]
+        product_name_list = [product.name for category_name in category_names for product in get_categories_with_products().get(category_name, [])]
     parquet_dir = '../data/main_mink/'
     file_list = [
         os.path.join(parquet_dir, f)
         for f in os.listdir(parquet_dir)
         if f.endswith('.parquet') and '_S' not in f and '-S' not in f
+        if not product_name_list or product_name_list and f.rstrip('.parquet') in product_name_list
     ]
     
     tester = FactorTester(file_list,
