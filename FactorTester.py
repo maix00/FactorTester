@@ -7,15 +7,15 @@ from typing import Callable, List, Dict, Optional, Set, Tuple, Any
 import os
 
 from Products import Futures, ProductBase
-from CNFutSect import get_categories_with_products
+from CNFutures import CNFutures, get_categories_with_products
 import logging
 
 from tqdm import tqdm
 
-sift_volume_threshold = 1.0
-default_test_start_date = '2024-01-01'
+sift_volume_threshold = 0.8
+default_test_start_date = '2025-01-01'
 default_test_end_date = '2025-05-31'
-default_plot_test_start_date = '2024-01-01'
+default_plot_test_start_date = '2025-01-01'
 default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
@@ -204,7 +204,8 @@ class FactorGrid:
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
                 return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False,
-                sift_method=sift_method, volume_threshold=sift_volume_threshold
+                sift_method=sift_method, volume_threshold=sift_volume_threshold,
+                plot_remark_str=','.join(category_names) if category_names else None,
                 )
             
             report_dict = {}
@@ -267,7 +268,7 @@ class FactorTester:
         self.return_data = {}
         for path in file_paths:
             product_name = path.split('/')[-1].replace('.parquet', '')
-            product = Futures(product_name) if futures_flag else ProductBase(product_name)
+            product = CNFutures(product_name) if futures_flag else ProductBase(product_name)
             self.add_data(product, path, futures_adjust_col=futures_adjust_col)
         self.start_date = pd.to_datetime(start_date) if start_date is not None else None
         self.end_date = pd.to_datetime(end_date) if end_date is not None else None
@@ -815,6 +816,7 @@ class FactorTester:
             raise ValueError(f"Unknown sift sift_method: {sift_method}")
 
     def group_classes(self, factor_name: str, n_groups: int = 5, 
+                      plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_price_col: str = 'close_price_adjusted',
@@ -958,7 +960,11 @@ class FactorTester:
                 plt.plot([str(date) for date in dates], cumulative_returns, label=name)
             plt.xlabel('Date')
             plt.ylabel('Average Next Day Open Return')
-            plt.title(f'Average Next Day Open Return by Factor Groups for {factor_name}')
+            if plot_remark_str:
+                plt.title(f'Average Open Return: {factor_name} - {plot_remark_str}')
+            else:
+                plt.title(f'Average Open Return: {factor_name}')
+            plt.rcParams['font.sans-serif'] = ['Kaiti SC']
             plt.legend()
             # Only show every nth tick to reduce crowding
             n_ticks = 10

@@ -14,7 +14,8 @@ from weakref import WeakValueDictionary  # Using weak references to avoid memory
 # 定义一个金融产品的基类，包括它的产品名字、类别、币种、产业类别等信息
 class ProductBase(ABC):
     _instances = WeakValueDictionary()  # Class-level dictionary to store instances by name
-    
+    _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+
     def __new__(cls, name: str, *args, **kwargs):
         # Create a unique key that includes the class type
         key = (name, cls.__name__)
@@ -28,12 +29,15 @@ class ProductBase(ABC):
         return instance
 
     def __init__(self, name: str,
-                 point_value: Optional[int] = None, currency: Optional[str] = None):
+                 point_value: Optional[int] = None,
+                 currency: Optional[str] = None,
+                 category_attr_name: Optional[str] = None,):
         # Only initialize if this is a new instance (not already initialized)
         if not hasattr(self, 'initialized'):
             self.name = name
             self.point_value = point_value
             self.currency = currency
+            self.category_attr_name = category_attr_name if category_attr_name else self._default_category_attr_name
             self.initialized = True
             self.data: Optional[pd.DataFrame] = None
             self.data_path: Optional[str] = None
@@ -47,31 +51,55 @@ class ProductBase(ABC):
     def __repr__(self):
         return self.name
     
-    def set_data(self, file_path: str):
-        # 根据file_path的文件类型，导入数据
-        if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith('.xlsx'):
-            df = pd.read_excel(file_path)
-        elif file_path.endswith('.parquet'):
-            df = pd.read_parquet(file_path)
-        else:
-            raise ValueError("Unsupported file type")
-        self.data = df
-    
-    def get_price(self, price_col: str, date_col: str, date: str|datetime, data_path: Optional[str] = None) -> float:
-        
+    def load_data(self, data_path: Optional[str] = None, reload_falg: bool = False):
+        if self.data is None or reload_falg:
+            data_path = self.data_path if data_path is None else data_path
+            assert data_path is not None, "data_path must be provided if data is not loaded"
+            self.data_path = data_path
+            if data_path.endswith('.csv'):
+                df = pd.read_csv(data_path)
+            elif data_path.endswith('.xlsx'):
+                df = pd.read_excel(data_path)
+            elif data_path.endswith('.parquet'):
+                df = pd.read_parquet(data_path)
+            else:
+                raise ValueError("Unsupported file type")
+            if df.empty:
+                raise ValueError("DataFrame is empty")
+            self.data = df
+
+    def get_data(self, data_path: Optional[str] = None) -> pd.DataFrame:
         if self.data is None:
             if self.data_path is None:
                 assert data_path is not None, "data_path must be provided if data is not loaded"
                 self.data_path = data_path
-            self.set_data(self.data_path)
-        
+            self.load_data(self.data_path)
+            assert self.data is not None, "Data not loaded"
+        return self.data
+    
+    def get_price(self, price_col: str, date_col: str, date: str|datetime, data_path: Optional[str] = None) -> float:
+        self.load_data(data_path)  # Ensure data is loaded
         assert self.data is not None, "Data is not loaded"
         date = pd.to_datetime(date)
         df_filtered = self.data[[price_col, date_col]].copy()
         df_filtered[date_col] = pd.to_datetime(df_filtered[date_col])
         return df_filtered[df_filtered[date_col] == date][price_col].values[0]
+    
+    def set_category_attr_name_as_default(self):
+        self.category_attr_name = self._default_category_attr_name
+
+    def _get_attr_nested(self, attr_str: str):
+        attr_list = attr_str.split('.')
+        attr_value = self
+        for attr in attr_list:
+            attr_value = getattr(attr_value, attr)
+        return attr_value
+
+    def get_category(self) -> str:
+        return str(self._get_attr_nested(self.category_attr_name))
+    
+    def get_default_category(self) -> str:
+        return str(self._get_attr_nested(self._default_category_attr_name))
 
 class FuturesContract(ProductBase):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None):
@@ -79,10 +107,12 @@ class FuturesContract(ProductBase):
 
 class Futures(ProductBase):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
-                 mappings_path: Optional[str] = None, data_path: Optional[str] = None):
+                 mappings_path: Optional[str] = None, data_path: Optional[str] = None,
+                 FuturesContractClass: type = FuturesContract):
         super().__init__(name, point_value, currency)
         self.mappings_path = mappings_path
         self.mappings: Optional[pd.DataFrame] = None
+        self.FuturesContractClass = FuturesContractClass
 
     def set_mappings(self, path: str):
         self.mappings_path = path
@@ -118,11 +148,11 @@ class Futures(ProductBase):
         if trading_day < self.mappings['old_contract_start_date'].iloc[0]:
             return None
         elif trading_day > self.mappings['old_contract_end_date'].iloc[-1]:
-            return FuturesContract(self.mappings['new_unique_instrument_id'].iloc[-1])
+            return self.FuturesContractClass(self.mappings['new_unique_instrument_id'].iloc[-1])
         else:
             for i in range(len(self.mappings)):
                 if trading_day >= self.mappings['old_contract_start_date'].iloc[i] and trading_day <= self.mappings['old_contract_end_date'].iloc[i]:
-                    return FuturesContract(self.mappings['new_unique_instrument_id'].iloc[i])
+                    return self.FuturesContractClass(self.mappings['new_unique_instrument_id'].iloc[i])
         
 # class PortfolioBackTester:
 #     def __init__(self, start_date: Optional[datetime|str] = None, end_date: Optional[datetime|str] = None,
