@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Products import ProductBase
 from FactorTester import FactorFamily, PriceColumnMapping
-from typing import List, Dict, Any, Sequence
+from typing import List, Dict, Any, Sequence, Tuple
 
 class DayMm(FactorFamily): # Day Momentum
 
@@ -15,7 +15,8 @@ class DayMm(FactorFamily): # Day Momentum
     }
 
     def func(self, products: Sequence[ProductBase], data_freq: Any = '1min',
-             PCH: str = 'HA', PCL: str = 'LA') -> pd.DataFrame:
+             PCH: str = 'HA', PCL: str = 'LA') -> Tuple[pd.DataFrame, Any]:
+        self.freq = '1day'
         factors = {}
         for product in products:
             df = product.get_data(data_freq)
@@ -28,7 +29,7 @@ class DayMm(FactorFamily): # Day Momentum
             day_high.loc[mask] = day_low.loc[mask]
             day_low.loc[mask] = temp_high.loc[mask]
             factors[product] = (day_high - day_low) / day_high
-        return pd.DataFrame(factors)
+        return pd.DataFrame(factors), '1 day'
 
 if __name__ == '__main__':
     ff = DayMm()

@@ -66,7 +66,9 @@ class Factor:
         if isinstance(products, ProductBase):
             products = [products]
         products = list(products)
-        return self.func(products)
+        df, freq = self.func(products)
+        self.freq = pd.Timedelta(freq)
+        return df
     
 class FactorFamily:
     params_space: Dict[str, List[Any]] = {}
@@ -76,7 +78,7 @@ class FactorFamily:
         self.set_default_params()
         self.freq = None
     
-    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> pd.DataFrame:
+    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> Tuple[pd.DataFrame, Any]:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def set_default_params(self, **kwargs):
@@ -454,42 +456,6 @@ class FactorTester:
         returns_df = pd.DataFrame(returns_all)
         return (returns_df, delta_return, log_return)
 
-    def calc_factor_freq(self, data: pd.DataFrame, name: Optional[str] = None) -> Optional[pd.Timedelta]:
-        
-        if name is None:
-            name = 'Factor_' + str(len(self.factor_freq))
-
-        all_freqs = {}
-
-        if isinstance(data.index, pd.MultiIndex):
-            # 确保第一层是datetime(date)，第二层是datetime
-            data.index = pd.MultiIndex.from_arrays([
-                pd.to_datetime(data.index.get_level_values(0)),
-                pd.to_datetime(data.index.get_level_values(1))
-            ])
-        elif not isinstance(data.index, pd.DatetimeIndex):
-            data.index = pd.to_datetime(data.index)
-
-        for product_name in data.columns:
-            assert product_name in self.products
-            freq_series = data[product_name]
-            if len(freq_series) > 0:
-                if len(freq_series.index) > 1:
-                    all_freqs[product_name] = pd.Series(freq_series.index.get_level_values(len(freq_series.index.names) - 1).sort_values().diff().dropna()).mode()[0]
-                    self.logger.info(f"产品 {product_name} 的因子 {name} 频率为 {all_freqs[product_name]}")
-                else:
-                    self.logger.warning(f"产品 {product_name} 因子 {name} 只有一个数据点，无法确定频率。")
-            else:
-                self.logger.warning(f"产品 {product_name} 因子 {name} 没有数据。")
-        if all_freqs:
-            self.factor_freq[name] = pd.Series(all_freqs.values()).mode()[0]
-            for product_name in all_freqs:
-                if all_freqs[product_name] != self.factor_freq[name]:
-                    self.logger.warning(f"产品 {product_name} 的因子 {name} 频率 {all_freqs[product_name]} 与整体因子频率 {self.factor_freq[name]} 不符。")
-            return self.factor_freq[name]
-        else:
-            return None
-        
     def calc_factor(self, factors: Factor|List[Factor]):
         if isinstance(factors, Factor):
             factors = [factors]
@@ -497,7 +463,8 @@ class FactorTester:
             factors_df = factor.calc(self.products)
             if not factors_df.empty:
                 self.factor_data[factor.name] = factors_df
-                self.calc_factor_freq(data=factors_df, name=factor.name)
+                assert factor.freq is not None, f"因子 {factor.name} 的频率未定义。请在创建因子时指定频率，或确保因子函数返回的数据具有可识别的频率。"
+                self.factor_freq[factor.name] = factor.freq
             else:
                 message = f"因子 {factor.name} 未能计算出任何数据。"
                 self.logger.error(message)
