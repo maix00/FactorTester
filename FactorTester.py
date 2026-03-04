@@ -166,7 +166,7 @@ class FactorFamily:
                 'factor_stem': self.name_stem,
                 'serial_num': pd.Timestamp.now(),
                 'factor_name': factor.name,
-                'factor_freq': tester.factor_freq[factor.name],
+                'factor_freq': factor.freq,
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
                 'sift_method': 'volume',
@@ -205,60 +205,19 @@ class FactorTester:
         
         self.volume_col = volume_col
         self.products = []
+        for product in products:
+            if not product.get_some_data().empty:
+                self.products.append(product)
+        self.products = set(self.products)
+        self.all_products = set(self.products)
         self.factors = []
-        self.all_products = products
-        self.data = {}
-        self.data_freq = {}
-        self.factor_data = {}
-        self.factor_freq = {}
         self.product_mapping = {}
         self.return_data = {}
-        for product in products:
-            self.add_data(product, product.get_some_data(), futures_adjust_col=futures_adjust_col)
         self.start_date = pd.to_datetime(start_date) if start_date is not None else None
         self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.futures_flag = futures_flag
         self.futures_adjust_col = futures_adjust_col
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
-
-    def add_data(self, product: ProductBase, df: pd.DataFrame, futures_adjust_col: Optional[List[str]] = None):
-        _freq = sorted(product.data_path.keys(), key=lambda x: x.value)[0]
-        df = product.get_data(_freq)
-        if df.empty:
-            self.logger.warning(f"{product}的数据为空，跳过添加。")
-            return
-        assert self.volume_col in df.columns, f"{product}的数据中缺少`volume_col`: {self.volume_col}。"
-        if isinstance(product, Futures):
-            futures_adjust_col = futures_adjust_col or self.futures_adjust_col
-            if futures_adjust_col:
-                product.adjust_cols(price_cols=futures_adjust_col, data_freq=_freq)
-        self.data[product] = df
-        self.data_freq[product] = _freq.value
-        self.logger.info(f"{product}的数据频率为{self.data_freq[product]}")
-        self.products = set(self.data.keys())
-        self.product_mapping[product.name] = product
-
-    def calc_interval_return(self, data_freq: Any, interval: int = 1, price_col: str = 'close_price_adjusted') -> pd.DataFrame:
-        returns = {}
-        for c in self.products:
-            df = c.get_data(data_freq)
-            assert price_col in df.columns, f"{price_col} not in DataFrame columns for product {c}"
-            returns[c] = df[price_col].pct_change(periods=interval).shift(-interval)
-        return pd.DataFrame(returns)
-    
-    def calc_daily_return(self, data_freq: Any,
-                          price_col: str = 'open_price', date_index: bool = False,
-                          return_freq: pd.Timedelta|int = pd.Timedelta('1 day'),
-                          daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None) -> pd.DataFrame:
-        daily_returns = {}
-        for c in self.products:
-            df = c.get_data(data_freq)
-            daily_return_c = daily_return(df, price_col=price_col, data_freq=data_freq,
-                                          return_freq=return_freq, daily_anchors=daily_anchors)
-            if date_index and len(daily_return_c.index.names) == 2:
-                daily_return_c = daily_return_c.droplevel(1)
-            daily_returns[c] = daily_return_c
-        return pd.DataFrame(daily_returns)
     
     def calc_return_by_factor(self, factor: Factor, return_period: Any, 
                               price_cols: Tuple[Tuple[str, str], Tuple[str,str]] 
@@ -308,220 +267,12 @@ class FactorTester:
             returns[product] = df.loc[idx_loc]
         return pd.DataFrame(returns)
         
-    def calc_return(self, data_freq: Optional[pd.Timedelta] = None,
-                    price_col: str = 'close_price', date_index: bool = False, 
-                    time_cols: Optional[str|List[str]] = ['trading_day', 'trade_time'], 
-                    calc_freq: Optional[str|pd.Timedelta] = None, return_freq: Optional[str|pd.Timedelta] = None,
-                    continuous_calc: bool = True, delta_return: bool = False, log_return: bool = False,
-                    daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None) -> tuple[pd.DataFrame, bool, bool]:
-        
-        self.logger.info(f"收益率是否按日期而非时间索引: {date_index}")
-
-        assert not (delta_return and log_return), "`delta_return`和`log_return`不能同时为True。"
-        self.logger.info(f"是否计算百分比收益率: {delta_return}")
-        self.logger.info(f"是否计算对数收益率: {log_return}")
-
-        factor_freq = pd.Series(self.factor_freq.values()).unique()
-        factor_freq = factor_freq[0] if len(factor_freq) == 1 else None
-        assert factor_freq is None or isinstance(factor_freq, pd.Timedelta)
-        self.logger.info(f"因子池中的因子有共同频率: {factor_freq}")
-
-        l_data_freq = pd.Series(self.data_freq.values()).unique()
-        data_freq = l_data_freq[0] if len(l_data_freq) == 1 else None
-        assert data_freq is None or isinstance(data_freq, pd.Timedelta)
-        self.logger.info(f"数据池中的数据有共同频率: {data_freq}")
-
-        if calc_freq is None:
-            calc_freq = factor_freq if factor_freq is not None else data_freq
-        elif isinstance(calc_freq, str):
-            calc_freq = pd.Timedelta(calc_freq)
-        self.logger.info(f"计算频率为: {calc_freq}")
-        
-        if return_freq is None:
-            return_freq = factor_freq if factor_freq is not None else data_freq
-        elif isinstance(return_freq, str):
-            return_freq = pd.Timedelta(return_freq)
-        self.logger.info(f"收益率频率为: {return_freq}")
-
-        if return_freq is not None and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 and\
-            calc_freq is not None and calc_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 and\
-            daily_anchors is not None:
-            self.logger.info("收益率频率与计算频率均为一日的整数倍, 且选择距离该日开盘或收盘的固定时间点作为计算点, 采用快速计算方式.")
-            self.logger.info(f"选择自开盘后或收盘前某个偏移量作为计算点: {daily_anchors}")
-            returns_df = self.calc_daily_return(data_freq=data_freq, price_col=price_col, date_index=date_index,
-                                                return_freq=return_freq, daily_anchors=daily_anchors)
-            step = int(calc_freq / pd.Timedelta('1 day'))
-            if step > 1:
-                all_dates = returns_df.index.get_level_values(0).unique()
-                samp_dates = all_dates[::step]
-                returns_df = returns_df.loc[returns_df.index.get_level_values(0).isin(samp_dates)]
-            self.logger.info(f"计算完毕, 返回结果长度为 {len(returns_df)}, 起始索引为 {returns_df.index[0]}, 结束索引为 {returns_df.index[-1]}")
-            if not delta_return:
-                returns_df = returns_df + 1
-            if log_return:
-                returns_df = pd.DataFrame(np.log(returns_df))
-            return (returns_df, delta_return, log_return)
-        
-        if continuous_calc and data_freq is not None and\
-            calc_freq is not None and calc_freq.total_seconds() % data_freq.total_seconds() == 0 and\
-            return_freq is not None and return_freq.total_seconds() % data_freq.total_seconds() == 0:
-            self.logger.info("连续计算下, 计算频率、收益率频率是数据共同频率的整数倍, 采用快速计算方式.")
-            step = int(calc_freq / data_freq)
-            interval = int(return_freq / data_freq)
-            self.logger.info(f"收益率频率是数据共同频率的 {interval} 倍")
-            returns_df = self.calc_interval_return(data_freq=data_freq, interval=interval, price_col=price_col)
-            returns_df = returns_df[0::step]
-            self.logger.info(f"计算完毕, 返回结果长度为 {len(returns_df)}, 起始索引为 {returns_df.index[0]}, 结束索引为 {returns_df.index[-1]}")
-            if not delta_return:
-                returns_df = returns_df + 1
-            if log_return:
-                returns_df = pd.DataFrame(np.log(returns_df))
-            return (returns_df, delta_return, log_return)
-
-        returns_all = {}
-    
-        # for product in self.products:
-        #     df = product.get_data(data_freq)
-
-        for product, df in self.data.items():
-            if price_col not in df.columns:
-                raise ValueError(f"DataFrame {product} 中缺少列 {price_col}")
-            
-            data_freq = self.data_freq[product]
-
-            calc_freq = calc_freq if calc_freq is not None else data_freq
-            assert isinstance(calc_freq, pd.Timedelta)
-
-            return_freq = return_freq if return_freq is not None else data_freq
-            assert isinstance(return_freq, pd.Timedelta)
-            
-            if len(df.index.names) == 2:
-                pass
-            elif len(df.index.names) == 1:
-                self.logger.info(f"产品 {product} 的数据索引列长度为 1，将使用 {time_cols} 列作为索引")
-                df = df.copy()
-                if time_cols and len(time_cols) == 2:
-                    df = df.reset_index()
-                    df[time_cols[0]] = pd.to_datetime(df[time_cols[0]])#.dt.date
-                    df[time_cols[1]] = pd.to_datetime(df[time_cols[1]])
-                    df = df.set_index(time_cols)
-                else:
-                    message = f"新的索引列长度应为2, 现在为 {len(time_cols) if time_cols else 0}"
-                    self.logger.error(message); raise AssertionError(message)
-                df = df.sort_index()
-            else:
-                message = f"产品 {product} 索引列长度错误, 应为一或二: {df.index.names}"
-                self.logger.error(message); raise AssertionError(message)
-            temp_series = df[price_col].droplevel(0)
-
-            offset = process_daily_anchors(data_freq=data_freq, daily_anchors=daily_anchors) if daily_anchors is not None else None
-            num_offset_neg = len([1 for off in offset if off < 0]) if offset is not None else None
-
-            all_dates = df.index.get_level_values(0)
-            indices_of_next_row_changed = np.concatenate(([-1], np.where(all_dates[:-1] != all_dates[1:])[0]))
-            indices_market = sorted(itertools.chain.from_iterable([off + indices_of_next_row_changed + 1 for off in offset])) if offset is not None else None
-            calc_step = int(calc_freq / pd.Timedelta('1 day'))
-            return_step = int(return_freq / pd.Timedelta('1 day'))
-            all_datetimes = df.index.get_level_values(1)
-            self.logger.info(f"产品 {product} 计算收益率序列的起始时间共有 {len(all_datetimes)} 个时间点")
-
-            if calc_freq:
-                if calc_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 and offset is not None:
-                    assert indices_market is not None
-                    assert num_offset_neg is not None
-                    keep_indices = [
-                        indices_market[p + off]
-                        for p in range(0, len(indices_market), calc_step * len(offset))
-                        for off in range(len(offset))
-                        if p + off < len(indices_market) and p + off > num_offset_neg - 1
-                    ]
-                    start_datetimes = all_datetimes[0:1].append(all_datetimes[indices_market[calc_step-1::calc_step]])
-                    start_datetimes = all_datetimes[keep_indices]
-                    self.logger.info(f"产品 {product} 使用的计算频率 {calc_freq} 是一日的倍数, 且采用开盘或收盘时间点")
-                else:
-                    last_t = all_datetimes[0] - calc_freq # 保证第一个点被选中
-                    keep_indices = []
-                    for i, t in enumerate(all_datetimes):
-                        if t >= last_t + calc_freq:
-                            keep_indices.append(i)
-                            last_t = t
-                    start_datetimes = all_datetimes[np.array(keep_indices)]
-                self.logger.info(f"产品 {product} 使用计算频率 {calc_freq}, 起始时间缩减到共有 {len(start_datetimes)} 个时间点")
-            else:
-                start_datetimes = all_datetimes
-                keep_indices = None
-            start_prices = temp_series.reindex(start_datetimes)
-            assert len(start_prices) == len(start_datetimes), "start_prices 和 start_datetimes 长度不一致。"
-
-            if return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 and offset is not None:
-                assert indices_market is not None
-                assert num_offset_neg is not None
-                indices = [
-                    indices_market[p + off]
-                    for p in range(return_step * len(offset), len(indices_market), calc_step * len(offset))
-                    for off in range(len(offset))
-                    if p + off < len(indices_market) and p + off > return_step * len(offset) + num_offset_neg - 1
-                ]
-                end_datetimes = all_datetimes[indices]
-                len_diff = len(start_datetimes) - len(end_datetimes)
-                assert len_diff >= 0, "start_datetimes 长度不得比 end_datetimes 短。"
-                if len_diff > 0:
-                    end_datetimes = end_datetimes.append(all_datetimes[indices_market[-len_diff:]] + return_freq)
-                self.logger.info(f"产品 {product} 使用的收益率频率 {return_freq} 是一日的倍数, 且采用开盘或收盘时间点")
-            else:
-                if continuous_calc and\
-                    return_freq.total_seconds() % data_freq.total_seconds() == 0:
-                    off = int(return_freq / data_freq)
-                    base_indices = keep_indices if keep_indices is not None else list(range(len(all_datetimes)))
-                    end_keep_indices = [idx + off for idx in base_indices if idx + off < len(all_datetimes)]
-                    end_datetimes = all_datetimes[end_keep_indices]
-                    len_diff = len(start_datetimes) - len(end_datetimes)
-                    assert len_diff >= 0, "start_datetimes 长度不得比 end_datetimes 短。"
-                    if len_diff > 0:
-                        end_datetimes = end_datetimes.append(all_datetimes[-len_diff:] + return_freq)
-                else:
-                    end_datetimes = start_datetimes + return_freq
-
-            assert len(start_datetimes) == len(end_datetimes), "start_datetimes 和 end_datetimes 长度不一致。"
-            
-            end_prices = temp_series.reindex(end_datetimes)
-            assert len(end_prices) == len(end_datetimes), "end_prices 和 end_datetimes 长度不一致。"
-            
-            raw_return = end_prices.values / start_prices.values
-            
-            if date_index:
-                index = df.index[df.index.get_level_values(1).isin(start_datetimes)].get_level_values(0)
-                assert len(index) == len(start_datetimes), "index 和 start_datetimes 长度不一致。"
-                final_series = pd.Series(raw_return, index=index)
-                self.logger.info(f"产品 {product} 采用日期索引的收益率序列计算完毕")
-            else:
-                final_series = pd.Series(raw_return, index=df.index[np.array(keep_indices)] if keep_indices else df.index)
-            
-            if delta_return:
-                final_series = final_series - 1
-            elif log_return:
-                final_series = np.log(final_series)
-                
-            returns_all[product] = final_series
-
-        returns_df = pd.DataFrame(returns_all)
-        return (returns_df, delta_return, log_return)
-
     def calc_factor(self, factors: Factor|List[Factor]):
         if isinstance(factors, Factor):
             factors = [factors]
         self.factors = factors
         for factor in tqdm(factors, desc='Factor processing'):
             factor.calc(self.products)
-            if factor.data is not None and not factor.data.empty:
-                self.factor_data[factor.name] = factor.data
-                assert factor.freq is not None
-                self.factor_freq[factor.name] = factor.freq
-            else:
-                message = f"因子 {factor.name} 未能计算出任何数据。"
-                self.logger.error(message)
-                raise ValueError(message)
-        return self.factor_data
     
     def calc_rank(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
         sifted_products = self.sift_product(**kwargs)
@@ -578,40 +329,16 @@ class FactorTester:
             'mean': mean, 'std': std, 'IR': ir, 't_stat': t_stat, 'max': max_ic, 'min': min_ic
         })
         return stats_df
-    
-    def cache_return(self, data_freq: Optional[Any] = None,
-                     price_col: str = 'close_price_adjusted',
-                     date_index: bool = False, return_freq: Optional[str|pd.Timedelta] = None, daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
-                     calc_freq: Optional[str|pd.Timedelta] = None) -> tuple[pd.DataFrame, bool, bool]:
-        return_label = (return_freq, calc_freq, price_col, date_index, daily_anchors)
-        if return_label in self.return_data and\
-            set(self.return_data[return_label][0].columns) == self.products:
-            return self.return_data[return_label]
-        else:
-            outcome = self.calc_return(data_freq=data_freq, price_col=price_col, return_freq=return_freq, 
-                                       calc_freq=calc_freq, daily_anchors=daily_anchors, date_index=date_index)
-            self.return_data[return_label] = outcome
-            return outcome
-        
-    def cache_return_by_factor_name(self, factor_name: str, price_col: str = 'close_price_adjusted',
-                     date_index: Optional[bool] = None, return_freq: Optional[str|pd.Timedelta] = None,
-                     daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
-                     calc_freq: Optional[str|pd.Timedelta] = None) -> tuple[pd.DataFrame, bool, bool]:
-        return_freq = return_freq if return_freq is not None else self.factor_freq[factor_name]
-        calc_freq = calc_freq if calc_freq is not None else self.factor_freq[factor_name]
-        date_index = date_index if date_index is not None else \
-            True if self.factor_freq[factor_name] == pd.Timedelta('1 day') else False
-        return self.cache_return(data_freq=self.factor_freq[factor_name], price_col=price_col, date_index=date_index, daily_anchors=daily_anchors,
-                                 return_freq=return_freq, calc_freq=calc_freq)
 
     def sift_product(self, sift_method: Optional[str] = None, 
+                     data_freq: Any = '1min',
                      volume_threshold: Optional[float] = None, volume_col: Optional[str] = None,
                      sift_in_place: bool = False, sift_in_place_reset: bool = True,
                     #  sift_freq: Optional[str|pd.Timedelta] = None,
                      start_date: Optional[str|pd.Timestamp] = None,
                      end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> List[ProductBase]|Set[ProductBase]:
         if sift_in_place_reset:
-            self.products = set(self.data.keys())
+            self.products = set(self.all_products)
         if sift_method is None:
             return self.products
         elif sift_method == 'volume':
@@ -624,7 +351,7 @@ class FactorTester:
                 if self.start_date is not None:
                     start_date = self.start_date
                 if start_date is None:
-                    start_date_list = [self.data[product]['trading_day'][0] for product in self.products]
+                    start_date_list = [product.get_data(data_freq)['trading_day'][0] for product in self.products]
                     start_date_list = np.unique(start_date_list)
                     if len(start_date_list) > 1:
                         raise ValueError("Multiple start dates found in data. Please specify start_date.")
@@ -634,7 +361,7 @@ class FactorTester:
                 if self.end_date is not None:
                     end_date = self.end_date
                 if end_date is None:
-                    end_date_list = [self.data[product]['trading_day'][-1] for product in self.products]
+                    end_date_list = [product.get_data(data_freq)['trading_day'][-1] for product in self.products]
                     end_date_list = np.unique(end_date_list)
                     if len(end_date_list) > 1:
                         raise ValueError("Multiple end dates found in data. Please specify end_date.")
@@ -646,7 +373,7 @@ class FactorTester:
                 assert start_date <= end_date
             sift_dict = {}
             for product in self.products.copy():
-                volume_seq = self.data[product][volume_col]
+                volume_seq = product.get_data(data_freq)[volume_col]
                 if start_date is not None:
                     volume_seq = volume_seq[volume_seq.index.get_level_values(0) >= start_date]
                 if end_date is not None:
@@ -809,55 +536,6 @@ class FactorTester:
 
         return groups, returns_groups, report_df
     
-def process_daily_anchors(data_freq: pd.Timedelta, daily_anchors: Any) -> List[int]:
-    if not isinstance(daily_anchors, list) and not isinstance(daily_anchors, tuple):
-        daily_anchors = [daily_anchors]
-    offset = []
-    for idx in range(len(daily_anchors)):
-        to = daily_anchors[idx]
-        if isinstance(to, str):
-            if to == 'open_market':
-                off = 0
-                offset.append(off)
-                continue
-            elif to == 'close_market':
-                off = -1
-                offset.append(off)
-                continue
-            else:
-                try:
-                    to = pd.Timedelta(to)
-                except:
-                    raise ValueError(f"无法将字符串{to}转换为pd.Timedelta")
-        if isinstance(to, pd.Timedelta):
-            off = int(to.total_seconds() / data_freq.total_seconds())
-            if off < 0:
-                off = off - 1
-        else:
-            raise ValueError(f"Invalid `daily_anchors`: {to}")
-        offset.append(off)
-    return offset
-
-def daily_return(df: pd.DataFrame, price_col: str = 'close_price', 
-                 data_freq: Optional[pd.Timedelta] = None,
-                 daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
-                 return_freq: pd.Timedelta|int = pd.Timedelta('1 day')) -> pd.Series:
-    daily_price = df.groupby('trading_day')[price_col]
-    assert daily_anchors is not None
-    offset = None
-    if daily_anchors is not None:
-        assert data_freq is not None
-        offset = process_daily_anchors(data_freq, daily_anchors)
-    if isinstance(return_freq, pd.Timedelta):
-        assert return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0
-        return_freq = int(return_freq.total_seconds() / pd.Timedelta('1 day').total_seconds())
-        if daily_anchors is not None:
-            return_freq = return_freq * len(offset)
-    assert isinstance(return_freq, int) and return_freq > 0
-    returns = daily_price.nth(offset).pct_change(periods=return_freq).shift(-return_freq)
-    assert isinstance(returns, pd.Series)
-    return returns
-
 def get_factor_tester(
         category_names: Optional[str|List[str]] = None,
         start_date: Optional[str] = default_test_start_date, 

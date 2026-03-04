@@ -19,6 +19,8 @@ class DayMm(FactorFamily): # Day Momentum
         factors = {}
         for product in products:
             df = product.get_data(data_freq)
+            if df.empty:
+                continue
             day_high = df[PriceColumnMapping[PCH]].groupby('trading_day').max()
             day_low = df[PriceColumnMapping[PCL]].groupby('trading_day').min()
             idx_high = df[PriceColumnMapping[PCH]].groupby('trading_day').idxmax()
@@ -33,4 +35,4 @@ class DayMm(FactorFamily): # Day Momentum
 if __name__ == '__main__':
     ff = DayMm()
     ff.add_params(PCH='H', PCL='L')
-    ff.test(category_names=['贵金属'])
+    ff.test(category_names=['农产品'])
