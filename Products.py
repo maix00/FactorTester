@@ -16,6 +16,31 @@ class DataFreq(Enum):
     MIN1 = pd.Timedelta('1min')
     DAY1 = pd.Timedelta('1day')
 
+class DataColumn(Enum):
+    OPEN = 0
+    HIGH = 1
+    LOW = 2
+    CLOSE = 3
+    VOLUME = 4
+    TURNOVER = 5
+    OPEN_INTEREST = 6
+    TIME_COL_DAY = 7
+    TIME_COL_MIN = 8
+    TWAP = 9
+    VWAP = 10
+    SETTLEMENT_PRICE = 11
+    ADJUSTMENT_MUL = 12
+    ADJUSTMENT_ADD = 13
+    UPPER_LIMIT_PRICE = 14
+    LOWER_LIMIT_PRICE = 15
+    PRE_SETTLEMENT_PRICE = 16
+    OPEN_ADJUSTED = 17
+    HIGH_ADJUSTED = 18
+    LOW_ADJUSTED = 19
+    CLOSE_ADJUSTED = 20
+    TIME_COL = 21
+    ADJUST_SUFFIX = 22
+
 class ProductBase(ABC):
     _instances = WeakValueDictionary()  # Class-level dictionary to store instances by name
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
@@ -47,6 +72,7 @@ class ProductBase(ABC):
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
             self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
+            self.data_cols_mapping: Dict[DataColumn, str] = {}
 
     def __str__(self):
         return self.name
@@ -67,6 +93,13 @@ class ProductBase(ABC):
         data_freq = self._process_data_freq(data_freq)
         self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
     
+    def set_data_cols_mapping(self, mapping: Dict[DataColumn, str]) -> None:
+        for k, v in mapping.items():
+            self.data_cols_mapping[k] = v
+    
+    def get_col_name(self, data_col: DataColumn) -> str:
+        return self.data_cols_mapping[data_col]
+
     @staticmethod
     def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
         if isinstance(data_freq, DataFreq):
@@ -146,7 +179,8 @@ class ProductBase(ABC):
     def get_loaded_freqs(self) -> List[DataFreq]:
         return list(self.data.keys())
     
-    def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
+    def get_slices(self, target_cols: DataColumn|List[DataColumn|str],
+                   time_col: Optional[DataColumn|str] = None,
                    time_range: Optional[Any] = None, data_freq: Optional[Any] = None) -> pd.DataFrame:
         data = self.get_some_data(data_freq)
         if data.empty:
@@ -154,14 +188,17 @@ class ProductBase(ABC):
         data_freq = self.get_some_data_freq()
         assert data_freq is not None
         time_cols_mapping = self.time_cols_mapping.get(data_freq)
-        if isinstance(target_cols, str):
+        if isinstance(target_cols, DataColumn):
             target_cols = [target_cols]
+        target_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in target_cols]
         if time_cols_mapping is None:
             return pd.DataFrame(columns=target_cols)
         assert time_cols_mapping is not None
         time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
         if time_col is None:
             time_col = time_cols[0]
+        if isinstance(time_col, DataColumn):
+            time_col = self.get_col_name(time_col)
         if time_col not in time_cols:
             return pd.DataFrame(columns=target_cols)
         else:
@@ -253,22 +290,33 @@ class Futures(ProductBase):
                 if trading_day >= self.mappings['old_contract_start_date'].iloc[i] and trading_day <= self.mappings['old_contract_end_date'].iloc[i]:
                     return self.FuturesContractClass(self.mappings['new_unique_instrument_id'].iloc[i])
     
+    def get_col_name_adjusted(self, data_col: DataColumn|str) -> str:
+        preffix = self.get_col_name(data_col) if isinstance(data_col, DataColumn) else data_col
+        return preffix + self.get_col_name(DataColumn.ADJUST_SUFFIX)
+    
+    def get_col_name_nonadjusted(self, data_col: DataColumn|str) -> str:
+        col_name = self.get_col_name(data_col) if isinstance(data_col, DataColumn) else data_col
+        return col_name.removesuffix(self.get_col_name(DataColumn.ADJUST_SUFFIX))
 
-    def adjust_cols(self, data_freq: Any, price_cols: List[str]|str):
-        if isinstance(price_cols, str):
+    def check_col_is_adjusted(self, col_name: DataColumn|str) -> bool:
+        if isinstance(col_name, DataColumn):
+            col_name = self.get_col_name(col_name)
+        return col_name.endswith(self.get_col_name(DataColumn.ADJUST_SUFFIX))
+
+    def adjust_cols(self, data_freq: Any, price_cols: List[DataColumn|str]|DataColumn|str):
+        if not isinstance(price_cols, list):
             price_cols = [price_cols]
+        price_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in price_cols]
         data_freq = self._process_data_freq(data_freq)
-        adjust_cols = [col + '_adjusted' for col in price_cols]
+        adjust_cols = [self.get_col_name_adjusted(col) for col in price_cols]
         df = self.get_data(data_freq)
         if any(col not in df.columns for col in adjust_cols):
-            try:
-                assert 'adjustment_mul' in df.columns
-                assert 'adjustment_add' in df.columns
-            except:
-                message = f"{self}的数据中缺少调整列`adjustment_mul`和`adjustment_add`，无法进行价格调整。"
-                raise AssertionError(message)
+            assert self.get_col_name(DataColumn.ADJUSTMENT_MUL) in df.columns
+            assert self.get_col_name(DataColumn.ADJUSTMENT_ADD) in df.columns
             for col, col_adj in zip(price_cols, adjust_cols):
-                df[col_adj] = df[col] * df['adjustment_mul'] + df['adjustment_add']
+                df[col_adj] = df[col] * df[self.get_col_name(DataColumn.ADJUSTMENT_MUL)] \
+                    + df[self.get_col_name(DataColumn.ADJUSTMENT_ADD)]
+
 # class PortfolioBackTester:
 #     def __init__(self, start_date: Optional[datetime|str] = None, end_date: Optional[datetime|str] = None,
 #                  initial_capital: Optional[float] = None, risk_free_rate: Optional[float] = None,

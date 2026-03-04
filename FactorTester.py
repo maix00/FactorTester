@@ -6,8 +6,8 @@ import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
-from Products import Futures, ProductBase, DataFreq
-from CNFutures import get_categories_with_products, get_cnfutures
+from Products import DataColumn, Futures, ProductBase, DataFreq
+from CNFutures import get_all_products
 import logging
 
 from tqdm import tqdm
@@ -19,6 +19,12 @@ default_plot_test_start_date = '2025-01-01'
 default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
+
+class ReturnPriceCols(Enum):
+    NEXT_OPEN_TO_OPEN = (('first', DataColumn.OPEN), ('first', DataColumn.OPEN))
+    NEXT_OPEN_TO_OPEN_ADJUSTED = (('first', DataColumn.OPEN_ADJUSTED), ('first', DataColumn.OPEN_ADJUSTED))
+    THIS_CLOSE_TO_CLOSE = (('last', DataColumn.CLOSE), ('last', DataColumn.CLOSE))
+    THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
 
 PriceColumnMapping = {
     'C': 'close_price',
@@ -55,32 +61,40 @@ OtherColumnMapping = {
 
 import inspect
 
-class Factor:
+def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
+    products = get_all_products()
+    tester = FactorTester(products=products, time_range=time_range)
+    return tester
+
+class Factor(ProductBase):
     def __init__(self, name: str, func: Callable[..., pd.DataFrame],
                  freq: Any, params: Dict[str, Any]):
-        self.name = name
+        super().__init__(name=name)
         self.func = func
         self.freq = freq
         self.params = params
-        self.data: pd.DataFrame = pd.DataFrame()
+        self.table: pd.DataFrame = pd.DataFrame()
         self.end_market_signal = False
+        self.ic_series: pd.Series = pd.Series()
+        self.ic_stats: pd.Series = pd.Series()
+        self.report: pd.DataFrame = pd.DataFrame()
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, ProductBase):
             products = [products]
         products = list(products)
-        self.data = self.func(products)
-        for col in self.data.columns:
-            if max(self.data[col].dropna()) == min(self.data[col].dropna()):
-                self.data.drop(columns=col, inplace=True)
-        if isinstance(self.data.index, pd.MultiIndex):
-            idx_lvls = len(self.data.index.names)
-            self.freq = pd.Timedelta(self.data.index.get_level_values(idx_lvls-1).to_series().diff().mode()[0])
+        self.table = self.func(products)
+        for col in self.table.columns:
+            if max(self.table[col].dropna()) == min(self.table[col].dropna()):
+                self.table.drop(columns=col, inplace=True)
+        if isinstance(self.table.index, pd.MultiIndex):
+            idx_lvls = len(self.table.index.names)
+            self.freq = pd.Timedelta(self.table.index.get_level_values(idx_lvls-1).to_series().diff().mode()[0])
         else:
-            self.freq = pd.Timedelta(self.data.index.to_series().diff().mode()[0])
+            self.freq = pd.Timedelta(self.table.index.to_series().diff().mode()[0])
             if self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
                 self.end_market_signal = True
-        return self.data
+        return self.table
     
 class FactorFamily:
     params_space: Dict[str, List[Any]] = {}
@@ -129,7 +143,7 @@ class FactorFamily:
         return factors
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
-            category_names: Optional[str|List[str]] = None,
+            categories: Optional[str|List[str]] = None,
             sift_volume_ratio: float = sift_volume_ratio):
         
         factor_cache_path = os.path.join(factor_info_path, self.name_stem, self.name_stem + '.csv')
@@ -140,19 +154,21 @@ class FactorFamily:
         else:
             factor_table = pd.DataFrame()
         
-        tester = get_factor_tester(category_names=category_names)
+        tester = get_factor_tester(time_range=(default_test_start_date, default_test_end_date))
+        tester.sift_product_by_category(categories=categories)
+        price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
+
+        factors = self.get_factors()
+        tester.calc_factor(factors)
+        tester.calc_ic(return_price_cols=price_cols)
         
-        for factor in self.get_factors():
-
-            tester.calc_factor(factor)
-
-            _, ic_stats = tester.calc_ic()
+        for factor in tqdm(factors, desc=f"Ploting {n_groups}-Groups"):
             
-            _, _, report_df = tester.group_classes(factor, 
+            _, _, report_df = tester.group_classes(factor, return_price_cols=price_cols,
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
-                plot_show=False,
-                sift_volume_ratio=sift_volume_ratio, plot_remark_str=','.join(category_names) if category_names else None,
+                plot_show=False, sift_volume_ratio=sift_volume_ratio,
+                plot_remark_str=','.join(categories) if categories else None,
                 )
             
             report_dict = {}
@@ -170,18 +186,16 @@ class FactorFamily:
                 'factor_freq': factor.freq,
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
-                'sift_method': 'volume',
                 'sift_volume_ratio': sift_volume_ratio,
-                'category_names': category_names,
-            } | factor.params | ic_stats.iloc[:, 0].to_dict() | report_dict)
+                'categories': categories,
+            } | factor.params | factor.ic_stats.to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
+            factor.report = factor_table
             factor_table.to_csv(factor_cache_path, index=False)
         
 class FactorTester:
     def __init__(self, products: Sequence[ProductBase],
-                 start_date: Optional[str] = None, end_date: Optional[str] = None,
-                 volume_col: str = 'volume',
-                 futures_flag: bool = True, futures_adjust_col: Optional[List[str]] = None,
+                 time_range: Optional[Tuple] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
         
@@ -204,29 +218,37 @@ class FactorTester:
                 file_handler.setFormatter(formatter)
                 self.logger.addHandler(file_handler)
         
-        self.volume_col = volume_col
         self.products = set(products)
         self.all_products = set(products)
         self.sift_product_by_empty_data_bool = False
         self.factors = []
-        self.product_mapping = {}
-        self.return_data = {}
-        self.start_date = pd.to_datetime(start_date) if start_date is not None else None
-        self.end_date = pd.to_datetime(end_date) if end_date is not None else None
-        self.futures_flag = futures_flag
-        self.futures_adjust_col = futures_adjust_col
+        self.start_date = pd.to_datetime(time_range[0]) if time_range is not None else None
+        self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
+    def sift_product_by_category(self, categories: Optional[str|List[str]] = None):
+        if categories is None:
+            return
+        if isinstance(categories, str):
+            categories = [categories]
+        new_products = set()
+        for product in self.products:
+            for category in categories:
+                if product.get_category() == category:
+                    new_products.add(product)
+                    break
+        self.products = new_products
+
     def sift_product_by_empty_data(self):
         new_products = set()
         for product in self.products:
             df = product.get_some_data()
-            if not df.empty and max(df[self.volume_col]) > 0:
+            if not df.empty and max(df[product.get_col_name(DataColumn.VOLUME)]) > 0:
                 new_products.add(product)
         self.products = new_products
         self.sift_product_by_empty_data_bool = True
 
-    def sift_product_by_volumes(self, ratio: Optional[float] = None,
+    def sift_product_by_volumes(self, ratio: Optional[float] = None, time_col: Optional[str] = None,
                                 time_range: Optional[Any] = None) -> Set[ProductBase]:
         if ratio is None:
             return self.products
@@ -234,81 +256,82 @@ class FactorTester:
             self.sift_product_by_empty_data()
         results = {}
         for product in self.products:
-            results[product] = product.get_slices(self.volume_col, time_range=time_range).sum().values
+            results[product] = product.get_slices(target_cols=DataColumn.VOLUME, time_col=time_col, time_range=time_range).sum().values
         sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
         return set(sorted_products[:int(len(sorted_products) * ratio)])
 
-    def calc_return_by_factor(self, factor: Factor, return_period: Any, 
-                              price_cols: Tuple[Tuple[str, str], Tuple[str,str]] 
-                                = (('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')),
+    def calc_return_by_factor(self, factor: Factor, return_freq: Any, 
+                              price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
                             ) -> pd.DataFrame:
         
-        assert all(price_cols[0][i] == price_cols[1][i] for i in range(1))
-        assert all(price_cols[i][0] in ['last', 'first'] for i in range(1))
-        assert all(any(price_cols[i][1].startswith(prefix) for prefix in ['open_price', 'close_price']) for i in range(1))
-        
         returns = {}
-        assert factor.data is not None and factor.freq is not None
-        return_period = pd.Timedelta(return_period)
-        assert return_period <= factor.freq
-        for product in factor.data.columns:
+        assert factor.table is not None and factor.freq is not None
+        return_freq = pd.Timedelta(return_freq)
+        assert return_freq <= factor.freq
+        for product in factor.table.columns:
             assert isinstance(product, ProductBase)
+            PC = price_cols
+            if isinstance(product, Futures):
+                if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
+                    PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
+                elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
+                    PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
             all_f = product.get_available_freqs()
             if factor.end_market_signal and DataFreq.DAY1 in all_f \
-                and return_period.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
+                and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
                 data_freq = DataFreq.DAY1
             else:
                 assert len(all_f) > 0
                 data_freq = sorted([_f for _f in all_f if _f.value <= factor.freq \
                                     and factor.freq.total_seconds() % _f.value.total_seconds() == 0], 
                                     key=lambda x: x.value)[-1]
-            assert return_period.total_seconds() % data_freq.value.total_seconds() == 0, f"return_period必须是数据频率{data_freq}的整数倍，现在为{return_period}"
+            assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
             time_cols_mapping = product.time_cols_mapping[data_freq]
             time_col_freq = sorted(
-                [_f for _f in time_cols_mapping.keys() if return_period.total_seconds() % _f.value.total_seconds() == 0], 
+                [_f for _f in time_cols_mapping.keys() if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
                 key=lambda x: x.value)[-1]
             time_col = time_cols_mapping[time_col_freq]
             df = product.get_data(data_freq)
             if isinstance(product, Futures):
-                for _, col in price_cols:
-                    if col.endswith('_adjusted') and col not in df.columns:
-                        product.adjust_cols(data_freq, col.removesuffix('_adjusted'))
+                for _, col in PC.value:
+                    if product.check_col_is_adjusted(col) and col not in df.columns:
+                        product.adjust_cols(data_freq, product.get_col_name_nonadjusted(col))
             df_grouped = df.groupby(time_col)
-            period = int(return_period.total_seconds() / time_col_freq.value.total_seconds())
+            period = int(return_freq.total_seconds() / time_col_freq.value.total_seconds())
             offset = 0
-            if price_cols[0][0] == 'first':
+            if PC.value[0][0] == 'first':
                 df = df_grouped.first()
                 offset = -1
             else:
                 df = df_grouped.last()
-            df = df[price_cols[0][1]].pct_change(periods=period).shift(-period+offset)
-            idx_loc = factor.data.index.intersection(df.index)
+            df = df[product.get_col_name(PC.value[0][1])].pct_change(periods=period).shift(-period+offset)
+            idx_loc = factor.table.index.intersection(df.index)
             returns[product] = df.loc[idx_loc]
         return pd.DataFrame(returns)
         
-    def calc_factor(self, factors: Factor|List[Factor], 
-                    sift_settings: Optional[Dict[str, Any]] = None):
+    def calc_factor(self, factors: Factor|List[Factor]):
         if isinstance(factors, Factor):
             factors = [factors]
         self.factors = factors
         self.sift_product_by_empty_data()
-        for factor in tqdm(factors, desc='Factor processing'):
+        for factor in tqdm(factors, desc='Calculating factors'):
             factor.calc(self.products)
     
     def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
-    def calc_ic(self, return_freq: Optional[str|pd.Timedelta] = None,
+    def calc_ic(self, return_price_cols: ReturnPriceCols,
+                return_freq: Optional[str|pd.Timedelta] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
                 end_date: Optional[str|pd.Timestamp] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
         ic_series = {}
         ic_stats = {}
-        for factor in self.factors:
-            factor_rank = self.calc_rank(factor.data)
-            return_df = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
-                                                   price_cols=(('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')))
+        for factor in tqdm(self.factors, desc='Calculating IC'):
+            factor_rank = self.calc_rank(factor.table)
+            return_df = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
+                                                   price_cols=return_price_cols)
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
             start_date = pd.to_datetime(start_date) if start_date is not None else self.start_date
@@ -328,10 +351,12 @@ class FactorTester:
                     ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
                 else:
                     ic.append(np.nan)
-            ic_series[factor.name] = pd.Series(ic, index=dt_index)
+            factor.ic_series = pd.Series(ic, index=dt_index)
+            ic_series[factor.name] = factor.ic_series
             avg_coverage = np.mean(coverage)
             stats_df = self.ic_stats(ic_series[factor.name])
             stats_df['avg_coverage'] = avg_coverage
+            factor.ic_stats = stats_df
             ic_stats[factor.name] = stats_df
         return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
 
@@ -347,7 +372,9 @@ class FactorTester:
         })
         return stats_df
 
-    def group_classes(self, factor: Factor, n_groups: int = 5, 
+    def group_classes(self, factor: Optional[Factor|List[Factor]] = None,
+                      return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
+                      n_groups: int = 5, 
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
@@ -356,8 +383,13 @@ class FactorTester:
                       sift_volume_ratio: Optional[float] = None) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
 
-        returns = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
-                                            price_cols=(('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')))
+        if factor is None:
+            factor = self.factors[0]
+        if isinstance(factor, list):
+            factor = factor[0]
+        
+        returns = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
+                                            price_cols=return_price_cols)
 
         # Plot adjustment for group numbers
         plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
@@ -370,7 +402,7 @@ class FactorTester:
         start_date = pd.to_datetime(start_date) if start_date is not None else None
         end_date = pd.to_datetime(end_date) if end_date is not None else None
         
-        for dt, row in factor.data.iterrows():
+        for dt, row in factor.table.iterrows():
             dt_str = dt
             sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
             sorted_products = row.dropna().sort_values(ascending=False)
@@ -491,24 +523,6 @@ class FactorTester:
                 plt.show()
 
         return groups, returns_groups, report_df
-    
-def get_factor_tester(
-        category_names: Optional[str|List[str]] = None,
-        start_date: Optional[str] = default_test_start_date, 
-        end_date: Optional[str] = default_test_end_date) -> FactorTester:
-    
-    if category_names is not None:
-        if isinstance(category_names, str):
-            category_names = [category_names]
-        products = [product for category_name in category_names for product in get_categories_with_products().get(category_name, [])]
-    else:
-        products = get_cnfutures()
-    
-    tester = FactorTester(products=products,
-                          start_date=start_date, end_date=end_date,
-                          futures_flag=True, futures_adjust_col=['close_price', 'open_price', 'highest_price', 'lowest_price'])
-    
-    return tester
 
 # def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callable]],
 #                 n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None,):

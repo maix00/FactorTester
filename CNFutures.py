@@ -1,7 +1,7 @@
 from typing import Any, List, Optional
 import pandas as pd
 import os
-from Products import Futures, FuturesContract
+from Products import Futures, FuturesContract, DataColumn
 
 _data = pd.read_csv('../data/sectors.csv')
 data_dir_min = '../data/main_mink/'
@@ -17,6 +17,31 @@ file_list_day = [
     for f in os.listdir(data_dir_day)
     if f.endswith('.' + data_type) and '_S' not in f and '-S' not in f
 ]
+DataColumnMapping = {
+    DataColumn.OPEN: 'open_price',
+    DataColumn.HIGH: 'highest_price',
+    DataColumn.LOW: 'lowest_price',
+    DataColumn.CLOSE: 'close_price',
+    DataColumn.VOLUME: 'volume',
+    DataColumn.TURNOVER: 'turnover',
+    DataColumn.OPEN_INTEREST: 'open_interest',
+    DataColumn.TIME_COL_DAY: 'trading_day',
+    DataColumn.TIME_COL_MIN: 'trade_time',
+    DataColumn.TIME_COL: 'trade_time',
+    DataColumn.TWAP: 'twap',
+    DataColumn.VWAP: 'vwap',
+    DataColumn.SETTLEMENT_PRICE: 'settlement_price',
+    DataColumn.ADJUSTMENT_MUL: 'adjustment_mul',
+    DataColumn.ADJUSTMENT_ADD: 'adjustment_add',
+    DataColumn.UPPER_LIMIT_PRICE: 'upper_limit_price',
+    DataColumn.LOWER_LIMIT_PRICE: 'lower_limit_price',
+    DataColumn.PRE_SETTLEMENT_PRICE: 'pre_settlement_price',
+    DataColumn.OPEN_ADJUSTED: 'open_price_adjusted',
+    DataColumn.HIGH_ADJUSTED: 'highest_price_adjusted',
+    DataColumn.LOW_ADJUSTED: 'lowest_price_adjusted',
+    DataColumn.CLOSE_ADJUSTED: 'close_price_adjusted',
+    DataColumn.ADJUST_SUFFIX: '_adjusted',
+}
 
 exchange_map = {
     "DCE": "DCE",
@@ -101,11 +126,13 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
                 if data_path_min in file_list_min:
                     product.set_data_path(data_freq='1min', data_path=data_path_min)
                     product.set_time_cols_mapping('1min', {'1min': 'trade_time', '1day': 'trading_day'})
+                    product.set_data_cols_mapping(DataColumnMapping)
                 
                 data_path_day = os.path.join(data_dir_day, name + '.' + data_type)
                 if data_path_day in file_list_day:
                     product.set_data_path(data_freq='1day', data_path=data_path_day)
                     product.set_time_cols_mapping('1day', {'1day': 'trading_day'})
+                    product.set_data_cols_mapping(DataColumnMapping)
 
                 products.append(product)
         categories_with_products[category] = products
@@ -123,7 +150,7 @@ class CNFutures(Futures):
         self.category_sector_cn = get_category_by_code(name.split('.')[0])
         self.category_attr_name = 'category_sector_cn'
 
-def get_cnfutures() -> List[CNFutures]:
+def get_all_products() -> List[CNFutures]:
     categories_with_products = get_categories_with_products()
     cnfutures_list = []
     for products in categories_with_products.values():
@@ -137,5 +164,5 @@ if __name__ == '__main__':
         print(f"Category: {category}")
         print(f"  Products: {products}")
 
-    all_cn_futures = get_cnfutures()
+    all_cn_futures = get_all_products()
     print(all_cn_futures[0].get_some_data())
