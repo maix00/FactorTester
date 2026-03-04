@@ -1,7 +1,7 @@
 from enum import Enum
 import os
 import sys
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 import pandas as pd
 from datetime import datetime
 from abc import ABC  # Add this import
@@ -13,7 +13,6 @@ mappings_path = '../data/rollover_adjustments.csv'
 from weakref import WeakValueDictionary  # Using weak references to avoid memory issues
 
 class DataFreq(Enum):
-    NotKnown = None
     MIN1 = pd.Timedelta('1min')
     DAY1 = pd.Timedelta('1day')
 
@@ -47,7 +46,8 @@ class ProductBase(ABC):
             self.initialized = True
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
-            self.data_time_cols: Dict[DataFreq, List[str]] = {}
+            self.data_time_cols: Dict[DataFreq, List[Tuple[str, DataFreq]]] = {}
+            self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
 
     def __str__(self):
         return self.name
@@ -55,94 +55,87 @@ class ProductBase(ABC):
     def __repr__(self):
         return self.name
     
+    def set_time_cols_mapping(self, data_freq: DataFreq|str|pd.Timedelta,
+                              mapping: Dict[DataFreq|str|pd.Timedelta, str]) -> None:
+        data_freq = self._process_data_freq(data_freq)
+        self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
+    
     @staticmethod
     def _process_data_freq(data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> DataFreq:
-        if data_freq is None:
-            return DataFreq.NotKnown
         if isinstance(data_freq, DataFreq):
             return data_freq
         if isinstance(data_freq, str):
             data_freq = pd.Timedelta(data_freq)
         if isinstance(data_freq, pd.Timedelta):
-            try:
-                data_freq = DataFreq(data_freq)
-            except ValueError:
-                return DataFreq.NotKnown
+            data_freq = DataFreq(data_freq)
             return DataFreq(data_freq)
-        return DataFreq.NotKnown
+        raise ValueError("Invalid data frequency")
     
-    def set_data_path(self, data_path: str, 
-                      data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> None:
+    def set_data_path(self, data_path: str, data_freq: DataFreq|str|pd.Timedelta) -> None:
         data_freq = self._process_data_freq(data_freq)
         self.data_path[data_freq] = data_path
 
-    def load_data(self, data_path: Optional[str] = None, reload: bool = False,
-                   data_freq: Optional[DataFreq|str|pd.Timedelta] = None,
-                   time_cols: Optional[str|List[str]] = None) -> None:
+    def load_all_data(self) -> None:
+        for freq in self.data_path.keys():
+            self.load_data(freq, reload=True)
+
+    def load_data(self, data_freq: DataFreq|str|pd.Timedelta,
+                  data_path: Optional[str] = None, reload: bool = False,
+                  time_cols_mapping: Optional[Dict[DataFreq, str]] = None) -> None:
         data_freq = self._process_data_freq(data_freq)
         if data_path is not None:
             self.set_data_path(data_path, data_freq)
-        _freq = None
-        for freq, path in self.data_path.items():
-            if self.data.get(freq) is None or freq == data_freq or reload:
-                if path.endswith('.csv'):
-                    df = pd.read_csv(path)
-                elif path.endswith('.xlsx'):
-                    df = pd.read_excel(path)
-                elif path.endswith('.parquet'):
-                    df = pd.read_parquet(path)
-                else:
-                    continue
-                if not df.empty:
-                    if time_cols is not None:
-                        if isinstance(time_cols, str):
-                            time_cols = [time_cols]
-                        _freqs = {}
-                        for time_col in time_cols:
-                            df[time_col] = pd.to_datetime(df[time_col])
-                            _freqs[time_col] = pd.Timedelta(pd.Series(df[time_col].sort_values().unique()).diff().dropna().mode()[0])
-                        time_cols = sorted(time_cols, key=lambda col: _freqs[col], reverse=True)
-                        df = df.reset_index().set_index(time_cols)
-                        _freq = DataFreq(_freqs[time_cols[-1]])
-                        if freq == DataFreq.NotKnown:
-                            freq = _freq
-                        self.data_time_cols[freq] = time_cols
-                    self.data[freq] = df
-        if _freq is not None and _freq != DataFreq.NotKnown and self.data.get(DataFreq.NotKnown) is not None:
-            self.data_path[_freq] = self.data_path[DataFreq.NotKnown]
+        data_path = self.data_path.get(data_freq)
+        if data_path is not None and (self.data.get(data_freq) is None or reload):
+            if data_path.endswith('.csv'):
+                df = pd.read_csv(data_path)
+            elif data_path.endswith('.xlsx'):
+                df = pd.read_excel(data_path)
+            elif data_path.endswith('.parquet'):
+                df = pd.read_parquet(data_path)
+            else:
+                return
+            if not df.empty:
+                time_cols_mapping = time_cols_mapping if time_cols_mapping is not None \
+                    else self.time_cols_mapping.get(data_freq)
+                if time_cols_mapping is not None:
+                    time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
+                    for col in time_cols:
+                        df[col] = pd.to_datetime(df[col])
+                    df = df.reset_index().set_index(time_cols)
+                self.data[data_freq] = df
 
-    def _process_not_known_data_freq(self) -> DataFreq:
-        if self.data:
-            # 返回已有数据的最小频率
-            _freqs = sorted([_f.value for _f in self.data.keys() if _f != DataFreq.NotKnown])
-            if _freqs:
-                return DataFreq(_freqs[0])
-        return DataFreq.NotKnown
-
-    def get_data(self, data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> pd.DataFrame:
+    def get_data(self, data_freq: DataFreq|str|pd.Timedelta) -> pd.DataFrame:
         data_freq = self._process_data_freq(data_freq)
-        if data_freq == DataFreq.NotKnown:
-            data_freq = self._process_not_known_data_freq()
         data = self.data.get(data_freq)
         if data is None:
-            self.load_data(data_freq=data_freq)
+            self.load_data(data_freq)
             data = self.data.get(data_freq)
         data = pd.DataFrame() if data is None else data
         return data
     
+    def get_some_data(self) -> pd.DataFrame:
+        if self.data_path:
+            freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
+            if not self.data:
+                self.load_data(freq, reload=True)
+            return self.get_data(freq)
+        else:
+            return pd.DataFrame()
+    
     def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
                    time_range: Optional[Any] = None,
                    data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> pd.DataFrame:
-        
         data_freq = self._process_data_freq(data_freq)
-        if data_freq == DataFreq.NotKnown:
-            data_freq = self._process_not_known_data_freq()
         data = self.get_data(data_freq)
-        time_cols = self.data_time_cols.get(data_freq)
-        
+        time_cols_mapping = self.time_cols_mapping.get(data_freq)
         if isinstance(target_cols, str):
             target_cols = [target_cols]
-        if time_cols is None or (time_cols is not None and time_col not in time_cols):
+        if time_cols_mapping is None:
+            return pd.DataFrame(columns=target_cols)
+        assert time_cols_mapping is not None
+        time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
+        if time_col not in time_cols:
             return pd.DataFrame(columns=target_cols)
         else:
             assert time_col in time_cols

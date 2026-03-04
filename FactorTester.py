@@ -267,7 +267,7 @@ class FactorTester:
         self.product_mapping = {}
         self.return_data = {}
         for product in products:
-            self.add_data(product, product.get_data(), futures_adjust_col=futures_adjust_col)
+            self.add_data(product, product.get_some_data(), futures_adjust_col=futures_adjust_col)
         self.start_date = pd.to_datetime(start_date) if start_date is not None else None
         self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.futures_flag = futures_flag
@@ -294,19 +294,9 @@ class FactorTester:
                 self.data[product] = df.reset_index().set_index(self.time_col)
                 self.logger.info(f"将{product}的索引设置为{self.time_col}")
 
-    def add_data(self, product: ProductBase, df: pd.DataFrame|str, futures_adjust_col: Optional[List[str]] = None):
-        if isinstance(df, str):
-            assert os.path.exists(df), "数据文件不存在。"
-            self.logger.info(f"{product}的数据文件开始加载: {df}")
-            if df.endswith('.parquet'):
-                df = pd.read_parquet(df)
-            elif df.endswith('.csv'):
-                df = pd.read_csv(df)
-            elif df.endswith('.xlsx'):
-                df = pd.read_excel(df)
-            else:
-                raise ValueError(f"不支持的数据格式：{df}")
-            self.logger.info(f"{product}的数据文件加载完成，数据行数: {len(df)}")
+    def add_data(self, product: ProductBase, df: pd.DataFrame, futures_adjust_col: Optional[List[str]] = None):
+        _freq = sorted(product.data_path.keys(), key=lambda x: x.value)[0]
+        df = product.get_data(_freq)
         if df.empty:
             self.logger.warning(f"{product}的数据为空，跳过添加。")
             return
@@ -326,44 +316,9 @@ class FactorTester:
                     for col, col_adj in zip(futures_adjust_col, futures_adjust_col_adjusted):
                         df[col_adj] = df[col] * df['adjustment_mul'] + df['adjustment_add']
                         self.logger.info(f"{product}的`{col}`列已进行价格调整, 新列名为`{col_adj}`。")
-        if self.time_col_num == 1:
-            try:
-                assert self.time_col[0] in df.columns
-            except:
-                self.logger.error(f"{product}的数据中缺少时间列{self.time_col[0]}，无法设置索引。")
-                raise AssertionError(f"{product}的数据中缺少时间列{self.time_col[0]}，无法设置索引。")
-            try:
-                df[self.time_col[0]] = pd.to_datetime(df[self.time_col[0]])
-                self.logger.info(f"将{product}的时间列{self.time_col[0]}转换为datetime格式")
-            except:
-                self.logger.error(f"将{product}的时间列{self.time_col[0]}转换为datetime格式失败")
-                raise TypeError(f"无法将{product}的{self.time_col[0]}转换为datetime格式")
-        elif self.time_col_num == 2:
-            try:
-                assert self.time_col[0] in df.columns
-            except:
-                self.logger.error(f"{product}的数据中缺少时间列{self.time_col[0]}，无法设置索引。")
-                raise AssertionError(f"{product}的数据中缺少时间列{self.time_col[0]}，无法设置索引。")
-            try:
-                df[self.time_col[0]] = pd.to_datetime(df[self.time_col[0]])
-                self.logger.info(f"将{product}的时间列{self.time_col[0]}转换为datetime格式")
-            except:
-                self.logger.error(f"将{product}的时间列{self.time_col[0]}转换为datetime格式失败")
-                raise TypeError(f"无法将{product}的{self.time_col[0]}转换为datetime格式")
-            try:
-                assert self.time_col[1] in df.columns
-            except:
-                self.logger.error(f"{product}的数据中缺少时间列{self.time_col[1]}，无法设置索引。")
-                raise AssertionError(f"{product}的数据中缺少时间列{self.time_col[1]}，无法设置索引。")
-            try:
-                df[self.time_col[1]] = pd.to_datetime(df[self.time_col[1]])
-                self.logger.info(f"将{product}的时间列{self.time_col[1]}转换为datetime格式")
-            except:
-                self.logger.error(f"将{product}的时间列{self.time_col[1]}转换为datetime格式失败")
-                raise TypeError(f"无法将{product}的{self.time_col[1]}转换为datetime格式")
         self.data[product] = df.reset_index().set_index(self.time_col)
         self.logger.info(f"将{product}的索引设置为{self.time_col}")
-        self.data_freq[product] = pd.Series(self.data[product].index.get_level_values(self.time_col_num - 1).sort_values().diff().dropna()).mode()[0]
+        self.data_freq[product] = _freq.value
         self.logger.info(f"{product}的数据频率为{self.data_freq[product]}")
         self.products = set(self.data.keys())
         self.product_mapping[product.name] = product
