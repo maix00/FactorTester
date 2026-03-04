@@ -1,14 +1,20 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 import pandas as pd
 import os
 from Products import Futures, FuturesContract
 
 _data = pd.read_csv('../data/sectors.csv')
-data_dir = '../data/main_mink/'
+data_dir_min = '../data/main_mink/'
+data_dir_day = '../data/main_dayk/'
 data_type = 'parquet'
-file_list = [
-    os.path.join(data_dir, f)
-    for f in os.listdir(data_dir)
+file_list_min = [
+    os.path.join(data_dir_min, f)
+    for f in os.listdir(data_dir_min)
+    if f.endswith('.' + data_type) and '_S' not in f and '-S' not in f
+]
+file_list_day = [
+    os.path.join(data_dir_day, f)
+    for f in os.listdir(data_dir_day)
     if f.endswith('.' + data_type) and '_S' not in f and '-S' not in f
 ]
 
@@ -64,17 +70,19 @@ def get_categories_with_codes() -> dict[str, list[str]]:
 
 def check_data_files():
     """检查数据文件是否与代码表中的品种匹配"""
-    codes_in_data = set()
-    for file_path in file_list:
-        code = file_path.split('/')[-1].split('.')[0]
-        codes_in_data.add(code)
-    codes_in_table = set(_data[code_col_name].tolist())
-    missing_in_data = codes_in_table - codes_in_data
-    extra_in_data = codes_in_data - codes_in_table
-    if missing_in_data:
-        print('Codes in table but missing in data files:', missing_in_data)
-    if extra_in_data:
-        print('Codes in data files but not in table:', extra_in_data)
+    for string in ['min', 'day']:
+        file_list = file_list_min if string == 'min' else file_list_day
+        codes_in_data = set()
+        for file_path in file_list:
+            code = file_path.split('/')[-1].split('.')[0]
+            codes_in_data.add(code)
+        codes_in_table = set(_data[code_col_name].tolist())
+        missing_in_data = codes_in_table - codes_in_data
+        extra_in_data = codes_in_data - codes_in_table
+        if missing_in_data:
+            print(f'Codes in table but missing in data files ({string}):', missing_in_data)
+        if extra_in_data:
+            print(f'Codes in data files ({string}) but not in table:', extra_in_data)
 
 def get_categories_with_products() -> dict[str, list[CNFutures]]:
     """返回所有类别及其对应的品种的dict"""
@@ -87,11 +95,18 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
             if exchange is not None:
                 mapped_exchange = exchange_map.get(exchange, exchange)
                 name = code + '.' + mapped_exchange
-                data_path = os.path.join(data_dir, name + '.' + data_type)
                 product = CNFutures(name=name)
-                if data_path in file_list:
-                    product.set_data_path(data_freq='1min', data_path=data_path)
+
+                data_path_min = os.path.join(data_dir_min, name + '.' + data_type)
+                if data_path_min in file_list_min:
+                    product.set_data_path(data_freq='1min', data_path=data_path_min)
                     product.set_time_cols_mapping('1min', {'1min': 'trade_time', '1day': 'trading_day'})
+                
+                data_path_day = os.path.join(data_dir_day, name + '.' + data_type)
+                if data_path_day in file_list_day:
+                    product.set_data_path(data_freq='1day', data_path=data_path_day)
+                    product.set_time_cols_mapping('1day', {'1day': 'trading_day'})
+
                 products.append(product)
         categories_with_products[category] = products
     return categories_with_products

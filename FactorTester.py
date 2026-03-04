@@ -63,7 +63,7 @@ class Factor:
         self.freq = freq
         self.params = params
         self.data: pd.DataFrame = pd.DataFrame()
-        self.signals_at_end_market = False
+        self.end_market_signal = False
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, ProductBase):
@@ -76,7 +76,7 @@ class Factor:
         else:
             self.freq = pd.Timedelta(self.data.index.to_series().diff().mode()[0])
             if self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
-                self.signals_at_end_market = True
+                self.end_market_signal = True
         return self.data
     
 class FactorFamily:
@@ -142,14 +142,14 @@ class FactorFamily:
         for factor in self.get_factors():
 
             tester.calc_factor(factor)
+
             _, ic_stats = tester.calc_ic(return_price_col='open_price_adjusted',
-                                         return_daily_anchors='open_market', 
                                          sift_method=sift_method, volume_threshold=sift_volume_threshold)
             
-            _, _, report_df = tester.group_classes(factor.name, 
+            _, _, report_df = tester.group_classes(factor, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
-                return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False,
+                return_price_col='open_price_adjusted', plot_show=False,
                 sift_method=sift_method, volume_threshold=sift_volume_threshold,
                 plot_remark_str=','.join(category_names) if category_names else None,
                 )
@@ -231,18 +231,7 @@ class FactorTester:
         if isinstance(product, Futures):
             futures_adjust_col = futures_adjust_col or self.futures_adjust_col
             if futures_adjust_col:
-                futures_adjust_col_adjusted = [col + '_adjusted' for col in futures_adjust_col]
-                if any(col not in df.columns for col in futures_adjust_col_adjusted):
-                    try:
-                        assert 'adjustment_mul' in df.columns
-                        assert 'adjustment_add' in df.columns
-                    except:
-                        message = f"{product}的数据中缺少调整列`adjustment_mul`和`adjustment_add`，无法进行价格调整。"
-                        self.logger.error(message)
-                        raise AssertionError(message)
-                    for col, col_adj in zip(futures_adjust_col, futures_adjust_col_adjusted):
-                        df[col_adj] = df[col] * df['adjustment_mul'] + df['adjustment_add']
-                        self.logger.info(f"{product}的`{col}`列已进行价格调整, 新列名为`{col_adj}`。")
+                product.adjust_cols(price_cols=futures_adjust_col, data_freq=_freq)
         self.data[product] = df
         self.data_freq[product] = _freq.value
         self.logger.info(f"{product}的数据频率为{self.data_freq[product]}")
@@ -271,13 +260,52 @@ class FactorTester:
             daily_returns[c] = daily_return_c
         return pd.DataFrame(daily_returns)
     
-    def calc_return_by_factor(self, factor: Factor, return_period: Any, price_cols: Tuple[str, str],
-                              end_day_factor_start_at_next_open: bool = True,
-                              delta_return: bool = False, log_return: bool = False) -> pd.DataFrame:
+    def calc_return_by_factor(self, factor: Factor, return_period: Any, 
+                              price_cols: Tuple[Tuple[str, str], Tuple[str,str]] 
+                                = (('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')),
+                            ) -> pd.DataFrame:
+        
+        assert all(price_cols[0][i] == price_cols[1][i] for i in range(1))
+        assert all(price_cols[i][0] in ['last', 'first'] for i in range(1))
+        assert all(any(price_cols[i][1].startswith(prefix) for prefix in ['open_price', 'close_price']) for i in range(1))
+        
         returns = {}
-        assert factor.data is not None
+        assert factor.data is not None and factor.freq is not None
+        return_period = pd.Timedelta(return_period)
+        assert return_period <= factor.freq
         for product in factor.data.columns:
-            data_freq = factor.freq
+            assert isinstance(product, ProductBase)
+            all_f = product.get_available_freqs()
+            if factor.end_market_signal and DataFreq.DAY1 in all_f \
+                and return_period.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
+                data_freq = DataFreq.DAY1
+            else:
+                assert len(all_f) > 0
+                data_freq = sorted([_f for _f in all_f if _f.value <= factor.freq \
+                                    and factor.freq.total_seconds() % _f.value.total_seconds() == 0], 
+                                    key=lambda x: x.value)[-1]
+            assert return_period.total_seconds() % data_freq.value.total_seconds() == 0, f"return_period必须是数据频率{data_freq}的整数倍，现在为{return_period}"
+            time_cols_mapping = product.time_cols_mapping[data_freq]
+            time_col_freq = sorted(
+                [_f for _f in time_cols_mapping.keys() if return_period.total_seconds() % _f.value.total_seconds() == 0], 
+                key=lambda x: x.value)[-1]
+            time_col = time_cols_mapping[time_col_freq]
+            df = product.get_data(data_freq)
+            if isinstance(product, Futures):
+                for _, col in price_cols:
+                    if col.endswith('_adjusted') and col not in df.columns:
+                        product.adjust_cols(data_freq, col.removesuffix('_adjusted'))
+            df_grouped = df.groupby(time_col)
+            period = int(return_period.total_seconds() / time_col_freq.value.total_seconds())
+            offset = 0
+            if price_cols[0][0] == 'first':
+                df = df_grouped.first()
+                offset = -1
+            else:
+                df = df_grouped.last()
+            df = df[price_cols[0][1]].pct_change(periods=period).shift(-period+offset)
+            idx_loc = factor.data.index.intersection(df.index)
+            returns[product] = df.loc[idx_loc]
         return pd.DataFrame(returns)
         
     def calc_return(self, data_freq: Optional[pd.Timedelta] = None,
@@ -506,27 +534,13 @@ class FactorTester:
                 return_daily_anchors: Optional[Any] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
                 end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
-        
-        assert self.factors is not None
-        
-        shift_one = True
-        if return_daily_anchors is not None:
-            if isinstance(return_daily_anchors, list) or isinstance(return_daily_anchors, tuple):
-                assert len(return_daily_anchors) == 1, "IC测试仅支持单一时间点作为每日锚点。"
-                return_daily_anchors = return_daily_anchors[0]
-            assert isinstance(return_daily_anchors, str) or isinstance(return_daily_anchors, pd.Timedelta)
-            if return_daily_anchors == 'close_market':
-                shift_one = False
                         
         ic_series = {}
         ic_stats = {}
-        for factor_name in [factor.name for factor in self.factors]:
-            assert isinstance(factor_name, str)
-            factor_rank = self.calc_rank(self.factor_data[factor_name], **kwargs)
-            return_df, _, _ = self.cache_return_by_factor_name(factor_name, price_col=return_price_col, 
-                                                               return_freq=return_freq, daily_anchors=return_daily_anchors)
-            if shift_one:
-                return_df = return_df.shift(-1)
+        for factor in self.factors:
+            factor_rank = self.calc_rank(factor.data, **kwargs)
+            return_df = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
+                                                   price_cols=(('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')))
             return_rank = self.calc_rank(return_df, **kwargs)
             dt_index = factor_rank.index.intersection(return_rank.index)
             start_date = pd.to_datetime(start_date) if start_date is not None else self.start_date
@@ -546,11 +560,11 @@ class FactorTester:
                     ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
                 else:
                     ic.append(np.nan)
-            ic_series[factor_name] = pd.Series(ic, index=dt_index)
+            ic_series[factor.name] = pd.Series(ic, index=dt_index)
             avg_coverage = np.mean(coverage)
-            stats_df = self.ic_stats(ic_series[factor_name])
+            stats_df = self.ic_stats(ic_series[factor.name])
             stats_df['avg_coverage'] = avg_coverage
-            ic_stats[factor_name] = stats_df
+            ic_stats[factor.name] = stats_df
         return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
@@ -649,7 +663,7 @@ class FactorTester:
         else:
             raise ValueError(f"Unknown sift sift_method: {sift_method}")
 
-    def group_classes(self, factor_name: str, n_groups: int = 5, 
+    def group_classes(self, factor: Factor, n_groups: int = 5, 
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
@@ -658,31 +672,9 @@ class FactorTester:
                       return_freq: Optional[str|pd.Timedelta] = None,
                       plot_n_group_list: Optional[List[int]] = None, **kwargs) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
-        """
-        For each datetime, split contracts into n_groups groups.
-        Each group is a dict: {datetime_str: [contract names]}.
-        n_groups: number of groups to split into (default: 5)
-        """
 
-        shift_one = True
-        if return_daily_anchors is not None:
-            if isinstance(return_daily_anchors, list) or isinstance(return_daily_anchors, tuple):
-                assert len(return_daily_anchors) == 1, "分类等权回测仅支持单一时间点作为每日锚点。"
-                return_daily_anchors = return_daily_anchors[0]
-            assert isinstance(return_daily_anchors, str) or isinstance(return_daily_anchors, pd.Timedelta)
-            if return_daily_anchors == 'close_market':
-                shift_one = False
-
-        returns, delta_return, _ = self.cache_return_by_factor_name(factor_name, price_col=return_price_col,
-                                                                    return_freq=return_freq, daily_anchors=return_daily_anchors)
-        if shift_one:
-            returns = returns.shift(-1)
-
-        if not delta_return:
-            returns = returns - 1
-
-        assert factor_name in self.factor_data, "Factor name must be in factor_data."
-        factor_df = self.factor_data[factor_name]
+        returns = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
+                                            price_cols=(('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')))
 
         # Plot adjustment for group numbers
         plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
@@ -695,7 +687,7 @@ class FactorTester:
         start_date = pd.to_datetime(start_date) if start_date is not None else None
         end_date = pd.to_datetime(end_date) if end_date is not None else None
         
-        for dt, row in factor_df.iterrows():
+        for dt, row in factor.data.iterrows():
             dt_str = dt
             sifted_products = self.sift_product(**kwargs, volume_col='volume', start_date=dt, end_date=dt)
             sorted_products = row.dropna().sort_values(ascending=False)
@@ -795,9 +787,9 @@ class FactorTester:
             plt.xlabel('Date')
             plt.ylabel('Average Next Day Open Return')
             if plot_remark_str:
-                plt.title(f'Average Open Return: {factor_name} - {plot_remark_str}')
+                plt.title(f'Average Open Return: {factor.name} - {plot_remark_str}')
             else:
-                plt.title(f'Average Open Return: {factor_name}')
+                plt.title(f'Average Open Return: {factor.name}')
             plt.rcParams['font.sans-serif'] = ['Kaiti SC']
             plt.legend()
             # Only show every nth tick to reduce crowding
@@ -807,11 +799,11 @@ class FactorTester:
             plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
             plt.tight_layout()
             if save_plot:
-                factor_stem = factor_name.split('|')[0]
+                factor_stem = factor.name.split('|')[0]
                 figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
                 if not os.path.exists(figs_path):
                     os.makedirs(figs_path)
-                plt.savefig(os.path.join(figs_path, f'{factor_name}_{start_date}_{end_date}.png'))
+                plt.savefig(os.path.join(figs_path, f'{factor.name}_{start_date}_{end_date}.png'))
             if plot_show:
                 plt.show()
 

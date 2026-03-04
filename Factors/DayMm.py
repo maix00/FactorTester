@@ -33,4 +33,4 @@ class DayMm(FactorFamily): # Day Momentum
 if __name__ == '__main__':
     ff = DayMm()
     ff.add_params(PCH='H', PCL='L')
-    ff.test(category_names=['农产品'])
+    ff.test(category_names=['贵金属'])

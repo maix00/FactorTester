@@ -121,16 +121,6 @@ class ProductBase(ABC):
         data = pd.DataFrame() if data is None else data
         return data
     
-    def get_data_with_freq_less_than(self, data_freq: Any) -> pd.DataFrame:
-        data_freq = self._process_data_freq(data_freq)
-        available_freqs = [_f for _f in self.data.keys() if data_freq in self.time_cols_mapping[_f].keys()]
-        data_freq = sorted(available_freqs, key=lambda x: x.value)[0] if available_freqs else None
-        
-        if not available_freqs:
-            return pd.DataFrame()
-        best_freq = max(available_freqs, key=lambda x: x.value)
-        return self.get_data(best_freq)
-    
     def get_some_data(self) -> pd.DataFrame:
         if self.data_path:
             freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
@@ -139,6 +129,12 @@ class ProductBase(ABC):
             return self.get_data(freq)
         else:
             return pd.DataFrame()
+        
+    def get_available_freqs(self) -> List[DataFreq]:
+        return list(self.data_path.keys())
+    
+    def get_loaded_freqs(self) -> List[DataFreq]:
+        return list(self.data.keys())
     
     def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
                    time_range: Optional[Any] = None, data_freq: Optional[Any] = None) -> pd.DataFrame:
@@ -240,7 +236,23 @@ class Futures(ProductBase):
             for i in range(len(self.mappings)):
                 if trading_day >= self.mappings['old_contract_start_date'].iloc[i] and trading_day <= self.mappings['old_contract_end_date'].iloc[i]:
                     return self.FuturesContractClass(self.mappings['new_unique_instrument_id'].iloc[i])
-        
+    
+
+    def adjust_cols(self, data_freq: Any, price_cols: List[str]|str):
+        if isinstance(price_cols, str):
+            price_cols = [price_cols]
+        data_freq = self._process_data_freq(data_freq)
+        adjust_cols = [col + '_adjusted' for col in price_cols]
+        df = self.get_data(data_freq)
+        if any(col not in df.columns for col in adjust_cols):
+            try:
+                assert 'adjustment_mul' in df.columns
+                assert 'adjustment_add' in df.columns
+            except:
+                message = f"{self}的数据中缺少调整列`adjustment_mul`和`adjustment_add`，无法进行价格调整。"
+                raise AssertionError(message)
+            for col, col_adj in zip(price_cols, adjust_cols):
+                df[col_adj] = df[col] * df['adjustment_mul'] + df['adjustment_add']
 # class PortfolioBackTester:
 #     def __init__(self, start_date: Optional[datetime|str] = None, end_date: Optional[datetime|str] = None,
 #                  initial_capital: Optional[float] = None, risk_free_rate: Optional[float] = None,
