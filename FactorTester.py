@@ -233,7 +233,7 @@ class FactorGrid:
 class FactorTester:
     def __init__(self, products: Sequence[ProductBase],
                  start_date: Optional[str] = None, end_date: Optional[str] = None,
-                 time_col: str|List[str] = ['trading_day', 'trade_time'], volume_col: str = 'volume',
+                 volume_col: str = 'volume',
                  futures_flag: bool = True, futures_adjust_col: Optional[List[str]] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
@@ -257,7 +257,6 @@ class FactorTester:
                 file_handler.setFormatter(formatter)
                 self.logger.addHandler(file_handler)
         
-        self.set_time_col(time_col)
         self.volume_col = volume_col
         self.products = []
         self.data = {}
@@ -273,26 +272,6 @@ class FactorTester:
         self.futures_flag = futures_flag
         self.futures_adjust_col = futures_adjust_col
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
-
-    def set_time_col(self, time_col: str|List[str]):
-        self.time_col = time_col
-        self.time_col_num = 0
-        if isinstance(time_col, str):
-            self.time_col = [time_col]
-        if len(self.time_col) == 1:
-            self.time_col_num = 1
-            self.logger.info(f"将`time_col`设置为单列: {self.time_col[0]}")
-        elif len(self.time_col) == 2:
-            self.time_col_num = 2
-            self.logger.info(f"将`time_col`设置为双列: {self.time_col[0]} and {self.time_col[1]}")
-            self.logger.info("首列假定为`trading_day`，第二列假定为`trade_time`")
-        else:
-            raise ValueError("`time_col`必须是一个字符串或两个字符串：交易时间，或者交易日和交易时间的组合。")
-        if hasattr(self, "products"):
-            for product in self.products:
-                df = self.data[product]
-                self.data[product] = df.reset_index().set_index(self.time_col)
-                self.logger.info(f"将{product}的索引设置为{self.time_col}")
 
     def add_data(self, product: ProductBase, df: pd.DataFrame, futures_adjust_col: Optional[List[str]] = None):
         _freq = sorted(product.data_path.keys(), key=lambda x: x.value)[0]
@@ -316,8 +295,7 @@ class FactorTester:
                     for col, col_adj in zip(futures_adjust_col, futures_adjust_col_adjusted):
                         df[col_adj] = df[col] * df['adjustment_mul'] + df['adjustment_add']
                         self.logger.info(f"{product}的`{col}`列已进行价格调整, 新列名为`{col_adj}`。")
-        self.data[product] = df.reset_index().set_index(self.time_col)
-        self.logger.info(f"将{product}的索引设置为{self.time_col}")
+        self.data[product] = df
         self.data_freq[product] = _freq.value
         self.logger.info(f"{product}的数据频率为{self.data_freq[product]}")
         self.products = set(self.data.keys())
