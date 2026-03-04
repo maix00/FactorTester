@@ -70,6 +70,9 @@ class Factor:
             products = [products]
         products = list(products)
         self.data = self.func(products)
+        for col in self.data.columns:
+            if max(self.data[col].dropna()) == min(self.data[col].dropna()):
+                self.data.drop(columns=col, inplace=True)
         if isinstance(self.data.index, pd.MultiIndex):
             idx_lvls = len(self.data.index.names)
             self.freq = pd.Timedelta(self.data.index.get_level_values(idx_lvls-1).to_series().diff().mode()[0])
@@ -280,9 +283,7 @@ class FactorTester:
         df = df.loc[:, df.columns.isin(sifted_products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
-    def calc_ic(self, return_price_col: str = 'close_price_adjusted',
-                return_freq: Optional[str|pd.Timedelta] = None,
-                return_daily_anchors: Optional[Any] = None,
+    def calc_ic(self, return_freq: Optional[str|pd.Timedelta] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
                 end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
@@ -394,8 +395,6 @@ class FactorTester:
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
-                      return_price_col: str = 'close_price_adjusted',
-                      return_daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
                       return_freq: Optional[str|pd.Timedelta] = None,
                       plot_n_group_list: Optional[List[int]] = None, **kwargs) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
