@@ -87,11 +87,11 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
             if exchange is not None:
                 mapped_exchange = exchange_map.get(exchange, exchange)
                 name = code + '.' + mapped_exchange
-                data_path = data_dir + name + '.' + data_type
+                data_path = os.path.join(data_dir, name + '.' + data_type)
+                product = CNFutures(name=name)
                 if data_path in file_list:
-                    products.append(CNFutures(name=name, data_path=data_path))
-                else:
-                    products.append(CNFutures(name=name))
+                    product.set_data_path(data_path)
+                products.append(product)
         categories_with_products[category] = products
     return categories_with_products
 
@@ -120,3 +120,5 @@ if __name__ == '__main__':
     for category, products in categories_with_products.items():
         print(f"Category: {category}")
         print(f"  Products: {products}")
+
+    print(get_cnfutures())

@@ -3,11 +3,11 @@ from enum import Enum
 import itertools
 import pandas as pd
 import numpy as np
-from typing import Callable, List, Dict, Optional, Set, Tuple, Any
+from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
 from Products import Futures, ProductBase
-from CNFutures import CNFutures, get_categories_with_products
+from CNFutures import CNFutures, get_categories_with_products, get_cnfutures
 import logging
 
 from tqdm import tqdm
@@ -231,7 +231,7 @@ class FactorGrid:
             factor_table.to_csv(factor_cache_path, index=False)
         
 class FactorTester:
-    def __init__(self, file_paths: List[str], 
+    def __init__(self, products: Sequence[ProductBase],
                  start_date: Optional[str] = None, end_date: Optional[str] = None,
                  time_col: str|List[str] = ['trading_day', 'trade_time'], volume_col: str = 'volume',
                  futures_flag: bool = True, futures_adjust_col: Optional[List[str]] = None,
@@ -266,10 +266,10 @@ class FactorTester:
         self.factor_freq = {}
         self.product_mapping = {}
         self.return_data = {}
-        for path in file_paths:
-            product_name = path.split('/')[-1].replace('.parquet', '')
-            product = CNFutures(product_name) if futures_flag else ProductBase(product_name)
-            self.add_data(product, path, futures_adjust_col=futures_adjust_col)
+        for product in products:
+            product.load_data()
+            if product.data is not None:
+                self.add_data(product, product.data, futures_adjust_col=futures_adjust_col)
         self.start_date = pd.to_datetime(start_date) if start_date is not None else None
         self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.futures_flag = futures_flag
@@ -1036,20 +1036,15 @@ def get_factor_tester(
         category_names: Optional[str|List[str]] = None,
         start_date: Optional[str] = default_test_start_date, 
         end_date: Optional[str] = default_test_end_date) -> FactorTester:
-    product_name_list = []
+    
     if category_names is not None:
         if isinstance(category_names, str):
             category_names = [category_names]
-        product_name_list = [product.name for category_name in category_names for product in get_categories_with_products().get(category_name, [])]
-    parquet_dir = '../data/main_mink/'
-    file_list = [
-        os.path.join(parquet_dir, f)
-        for f in os.listdir(parquet_dir)
-        if f.endswith('.parquet') and '_S' not in f and '-S' not in f
-        if not product_name_list or product_name_list and f.rstrip('.parquet') in product_name_list
-    ]
+        products = [product for category_name in category_names for product in get_categories_with_products().get(category_name, [])]
+    else:
+        products = get_cnfutures()
     
-    tester = FactorTester(file_list,
+    tester = FactorTester(products=products,
                           start_date=start_date, end_date=end_date,
                           futures_flag=True, futures_adjust_col=['close_price', 'open_price', 'highest_price', 'lowest_price'])
     

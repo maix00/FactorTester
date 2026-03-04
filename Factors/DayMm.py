@@ -35,9 +35,4 @@ class DayMm(FactorGrid): # Day Momentum
         return pd.DataFrame(factors)
 
 if __name__ == '__main__':
-    
-    # DayMm().factor_grid_test(category_names=['农产品'])
-
-    from CNFutures import get_cnfutures
-    cnfutures_list = get_cnfutures()
-    print(cnfutures_list)
+    DayMm().factor_grid_test(category_names=['农产品'])

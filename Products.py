@@ -31,7 +31,7 @@ class ProductBase(ABC):
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
                  currency: Optional[str] = None,
-                 category_attr_name: Optional[str] = None,):
+                 category_attr_name: Optional[str] = None):
         # Only initialize if this is a new instance (not already initialized)
         if not hasattr(self, 'initialized'):
             self.name = name
@@ -51,10 +51,14 @@ class ProductBase(ABC):
     def __repr__(self):
         return self.name
     
-    def load_data(self, data_path: Optional[str] = None, reload_falg: bool = False):
-        if self.data is None or reload_falg:
+    def set_data_path(self, data_path: str):
+        self.data_path = data_path
+    
+    def load_data(self, data_path: Optional[str] = None, reload_flag: bool = False):
+        if self.data is None or reload_flag:
             data_path = self.data_path if data_path is None else data_path
-            assert data_path is not None, "data_path must be provided if data is not loaded"
+            if data_path is None:
+                return
             self.data_path = data_path
             if data_path.endswith('.csv'):
                 df = pd.read_csv(data_path)
@@ -63,17 +67,17 @@ class ProductBase(ABC):
             elif data_path.endswith('.parquet'):
                 df = pd.read_parquet(data_path)
             else:
-                raise ValueError("Unsupported file type")
+                return
             if df.empty:
-                raise ValueError("DataFrame is empty")
+                return
             self.data = df
 
     def get_data(self, data_path: Optional[str] = None) -> pd.DataFrame:
         if self.data is None:
-            if self.data_path is None:
-                assert data_path is not None, "data_path must be provided if data is not loaded"
-                self.data_path = data_path
-            self.load_data(self.data_path)
+            if self.data_path == data_path:
+                self.load_data()
+            else:
+                self.load_data(data_path, reload_flag=True)
             assert self.data is not None, "Data not loaded"
         return self.data
     
