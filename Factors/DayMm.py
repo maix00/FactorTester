@@ -17,12 +17,11 @@ class DayMm(FactorGrid): # Day Momentum
 
     default_params: Dict[str, Any] = {'PCH': 'HA', 'PCL': 'LA'}
 
-    def _factor_func(self, data: Dict[ProductBase, pd.DataFrame], data_freq: Dict[ProductBase, pd.Timedelta],
+    def _factor_func(self, products: List[ProductBase], data_freq: Any = '1min',
                      PCH: str = 'HA', PCL: str = 'LA') -> pd.DataFrame:
-        assert all(data_freq[product] < pd.Timedelta('1 day') for product in data_freq)
-        assert len({v for v in data_freq.values()}) == 1
         factors = {}
-        for product, df in data.items():
+        for product in products:
+            df = product.get_data(data_freq)
             day_high = df[PriceColumnMapping[PCH]].groupby('trading_day').max()
             day_low = df[PriceColumnMapping[PCL]].groupby('trading_day').min()
             idx_high = df[PriceColumnMapping[PCH]].groupby('trading_day').idxmax()

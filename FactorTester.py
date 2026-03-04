@@ -65,8 +65,7 @@ class FactorGrid:
         self.factor_name_stem = factor_name_stem if factor_name_stem else self.__class__.__name__
         self.current_params_space = self.params_space
 
-    def _factor_func(self, data: Dict[ProductBase, pd.DataFrame], 
-                     data_freq: Dict[ProductBase, pd.Timedelta], *args, **kwargs) -> pd.DataFrame:
+    def _factor_func(self, products: List[ProductBase], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def _set_current_params_space(self, **kwargs):
@@ -96,9 +95,9 @@ class FactorGrid:
         # 3. 排序以保证 get_factor_name 的一致性
         return dict(sorted(full_params.items()))
 
-    def get_factor_func(self, **kwargs) -> Callable[[Dict[ProductBase, pd.DataFrame], Dict[ProductBase, pd.Timedelta]], pd.DataFrame]:
+    def get_factor_func(self, **kwargs) -> Callable[[List[ProductBase]], pd.DataFrame]:
         params = self._get_complete_params(**kwargs)
-        return lambda data, data_freq: self._factor_func(data, data_freq, **params)
+        return lambda products: self._factor_func(products, **params)
 
     def get_factor_name(self, **kwargs) -> str:
         params = self._get_complete_params(**kwargs)
@@ -106,7 +105,7 @@ class FactorGrid:
         parts = [self.factor_name_stem, kwargs_str]
         return '|'.join(p for p in parts if p)
 
-    def get_factor(self, **kwargs) -> tuple[str, Callable[[Dict[ProductBase, pd.DataFrame], Dict[ProductBase, pd.Timedelta]], pd.DataFrame]]:
+    def get_factor(self, **kwargs) -> tuple[str, Callable[[List[ProductBase]], pd.DataFrame]]:
         return self.get_factor_name(**kwargs), self.get_factor_func(**kwargs)
     
     def get_factor_list(self, **kwargs) -> List[tuple[str, Callable]]:
@@ -259,6 +258,7 @@ class FactorTester:
         
         self.volume_col = volume_col
         self.products = []
+        self.all_products = products
         self.data = {}
         self.data_freq = {}
         self.factor_data = {}
@@ -301,19 +301,21 @@ class FactorTester:
         self.products = set(self.data.keys())
         self.product_mapping[product.name] = product
 
-    def calc_interval_return(self, interval: int = 1, price_col: str = 'close_price_adjusted') -> pd.DataFrame:
+    def calc_interval_return(self, data_freq: Any, interval: int = 1, price_col: str = 'close_price_adjusted') -> pd.DataFrame:
         returns = {}
-        for c, df in self.data.items():
-            assert price_col in df.columns, f"{price_col} not in DataFrame columns for contract {c}"
+        for c in self.products:
+            df = c.get_data(data_freq)
+            assert price_col in df.columns, f"{price_col} not in DataFrame columns for product {c}"
             returns[c] = df[price_col].pct_change(periods=interval).shift(-interval)
         return pd.DataFrame(returns)
     
-    def calc_daily_return(self, price_col: str = 'open_price', date_index: bool = False,
+    def calc_daily_return(self, data_freq: Any,
+                          price_col: str = 'open_price', date_index: bool = False,
                           return_freq: pd.Timedelta|int = pd.Timedelta('1 day'),
                           daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None) -> pd.DataFrame:
         daily_returns = {}
-        for c, df in self.data.items():
-            data_freq = self.data_freq[c]
+        for c in self.products:
+            df = c.get_data(data_freq)
             daily_return_c = daily_return(df, price_col=price_col, data_freq=data_freq,
                                           return_freq=return_freq, daily_anchors=daily_anchors)
             if date_index and len(daily_return_c.index.names) == 2:
@@ -360,7 +362,7 @@ class FactorTester:
             daily_anchors is not None:
             self.logger.info("收益率频率与计算频率均为一日的整数倍, 且选择距离该日开盘或收盘的固定时间点作为计算点, 采用快速计算方式.")
             self.logger.info(f"选择自开盘后或收盘前某个偏移量作为计算点: {daily_anchors}")
-            returns_df = self.calc_daily_return(price_col=price_col, date_index=date_index,
+            returns_df = self.calc_daily_return(data_freq=data_freq, price_col=price_col, date_index=date_index,
                                                 return_freq=return_freq, daily_anchors=daily_anchors)
             step = int(calc_freq / pd.Timedelta('1 day'))
             if step > 1:
@@ -381,7 +383,7 @@ class FactorTester:
             step = int(calc_freq / data_freq)
             interval = int(return_freq / data_freq)
             self.logger.info(f"收益率频率是数据共同频率的 {interval} 倍")
-            returns_df = self.calc_interval_return(interval=interval, price_col=price_col)
+            returns_df = self.calc_interval_return(data_freq=data_freq, interval=interval, price_col=price_col)
             returns_df = returns_df[0::step]
             self.logger.info(f"计算完毕, 返回结果长度为 {len(returns_df)}, 起始索引为 {returns_df.index[0]}, 结束索引为 {returns_df.index[-1]}")
             if not delta_return:
@@ -570,7 +572,8 @@ class FactorTester:
         assert all(isinstance(factor[1], Callable) for factor in factors)
         
         for factor_name, factor_func in tqdm(factors, desc='Factor processing'):
-            factors_df = factor_func(self.data, self.data_freq)
+            factors_df = factor_func(self.products)
+            # factors_df = factor_func(self.data, self.data_freq)
             if not factors_df.empty:
                 self.factor_data[factor_name] = factors_df
                 self.calc_factor_freq(data=factors_df, name=factor_name)
