@@ -1,7 +1,7 @@
 from enum import Enum
 import os
 import sys
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 import pandas as pd
 from datetime import datetime
 from abc import ABC  # Add this import
@@ -11,7 +11,12 @@ from tqdm import tqdm
 mappings_path = '../data/rollover_adjustments.csv'
 
 from weakref import WeakValueDictionary  # Using weak references to avoid memory issues
-# 定义一个金融产品的基类，包括它的产品名字、类别、币种、产业类别等信息
+
+class DataFreq(Enum):
+    NotKnown = None
+    MIN1 = pd.Timedelta('1min')
+    DAY1 = pd.Timedelta('1day')
+
 class ProductBase(ABC):
     _instances = WeakValueDictionary()  # Class-level dictionary to store instances by name
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
@@ -37,13 +42,12 @@ class ProductBase(ABC):
             self.name = name
             self.point_value = point_value
             self.currency = currency
-            self.category_attr_name = category_attr_name if category_attr_name else self._default_category_attr_name
+            self.category_attr_name = category_attr_name if category_attr_name \
+                else self._default_category_attr_name
             self.initialized = True
-            self.data: Optional[pd.DataFrame] = None
-            self.data_path: Optional[str] = None
-        
-        # Always set security_type to the actual class
-        self.security_type = type(self)
+            self.data: Dict[DataFreq, pd.DataFrame] = {}
+            self.data_path: Dict[DataFreq, str] = {}
+            self.data_time_cols: Dict[DataFreq, List[str]] = {}
 
     def __str__(self):
         return self.name
@@ -51,43 +55,111 @@ class ProductBase(ABC):
     def __repr__(self):
         return self.name
     
-    def set_data_path(self, data_path: str):
-        self.data_path = data_path
+    @staticmethod
+    def _process_data_freq(data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> DataFreq:
+        if data_freq is None:
+            return DataFreq.NotKnown
+        if isinstance(data_freq, DataFreq):
+            return data_freq
+        if isinstance(data_freq, str):
+            data_freq = pd.Timedelta(data_freq)
+        if isinstance(data_freq, pd.Timedelta):
+            try:
+                data_freq = DataFreq(data_freq)
+            except ValueError:
+                return DataFreq.NotKnown
+            return DataFreq(data_freq)
+        return DataFreq.NotKnown
     
-    def load_data(self, data_path: Optional[str] = None, reload_flag: bool = False):
-        if self.data is None or reload_flag:
-            data_path = self.data_path if data_path is None else data_path
-            if data_path is None:
-                return
-            self.data_path = data_path
-            if data_path.endswith('.csv'):
-                df = pd.read_csv(data_path)
-            elif data_path.endswith('.xlsx'):
-                df = pd.read_excel(data_path)
-            elif data_path.endswith('.parquet'):
-                df = pd.read_parquet(data_path)
-            else:
-                return
-            if df.empty:
-                return
-            self.data = df
+    def set_data_path(self, data_path: str, 
+                      data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> None:
+        data_freq = self._process_data_freq(data_freq)
+        self.data_path[data_freq] = data_path
 
-    def get_data(self, data_path: Optional[str] = None) -> pd.DataFrame:
-        if self.data is None:
-            if self.data_path == data_path:
-                self.load_data()
-            else:
-                self.load_data(data_path, reload_flag=True)
-            assert self.data is not None, "Data not loaded"
-        return self.data
+    def load_data(self, data_path: Optional[str] = None, reload: bool = False,
+                   data_freq: Optional[DataFreq|str|pd.Timedelta] = None,
+                   time_cols: Optional[str|List[str]] = None) -> None:
+        data_freq = self._process_data_freq(data_freq)
+        if data_path is not None:
+            self.set_data_path(data_path, data_freq)
+        for freq, path in self.data_path.items():
+            if self.data.get(freq) is None or freq == data_freq or reload:
+                if path.endswith('.csv'):
+                    df = pd.read_csv(path)
+                elif path.endswith('.xlsx'):
+                    df = pd.read_excel(path)
+                elif path.endswith('.parquet'):
+                    df = pd.read_parquet(path)
+                else:
+                    continue
+                if not df.empty:
+                    if time_cols is not None:
+                        if isinstance(time_cols, str):
+                            time_cols = [time_cols]
+                        _freqs = {}
+                        for time_col in time_cols:
+                            df[time_col] = pd.to_datetime(df[time_col])
+                            _freqs[time_col] = pd.Timedelta(pd.Series(df[time_col].sort_values().diff().dropna()).mode()[0])
+                        time_cols = sorted(time_cols, key=lambda col: _freqs[col], reverse=True)
+                        df = df.reset_index().set_index(time_cols)
+                        _freq = DataFreq(_freqs[time_cols[-1]])
+                        if freq == DataFreq.NotKnown:
+                            freq = _freq
+                            self.data_path[_freq] = path
+                        self.data_time_cols[freq] = time_cols
+                    self.data[freq] = df
+
+    def _process_not_known_data_freq(self) -> DataFreq:
+        if self.data:
+            # 返回已有数据的最小频率
+            _freqs = sorted([_f.value for _f in self.data.keys() if _f != DataFreq.NotKnown])
+            if _freqs:
+                return DataFreq(_freqs[0])
+        return DataFreq.NotKnown
+
+    def get_data(self, data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> pd.DataFrame:
+        data_freq = self._process_data_freq(data_freq)
+        if data_freq == DataFreq.NotKnown:
+            data_freq = self._process_not_known_data_freq()
+        data = self.data.get(data_freq)
+        if data is None:
+            self.load_data(data_freq=data_freq)
+            data = self.data.get(data_freq)
+        data = pd.DataFrame() if data is None else data
+        return data
     
-    def get_price(self, price_col: str, date_col: str, date: str|datetime, data_path: Optional[str] = None) -> float:
-        self.load_data(data_path)  # Ensure data is loaded
-        assert self.data is not None, "Data is not loaded"
-        date = pd.to_datetime(date)
-        df_filtered = self.data[[price_col, date_col]].copy()
-        df_filtered[date_col] = pd.to_datetime(df_filtered[date_col])
-        return df_filtered[df_filtered[date_col] == date][price_col].values[0]
+    def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
+                   time_range: Optional[Any] = None,
+                   data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> pd.DataFrame:
+        
+        data_freq = self._process_data_freq(data_freq)
+        if data_freq == DataFreq.NotKnown:
+            data_freq = self._process_not_known_data_freq()
+        data = self.get_data(data_freq)
+        time_cols = self.data_time_cols.get(data_freq)
+        
+        if isinstance(target_cols, str):
+            target_cols = [target_cols]
+        if time_cols is None or (time_cols is not None and time_col not in time_cols):
+            return pd.DataFrame(columns=target_cols)
+        else:
+            assert time_col in time_cols
+            time_col_level = time_cols.index(time_col)
+            if time_range is None:
+                return data[target_cols]
+            if not isinstance(time_range, (list, tuple)):
+                time_range = [time_range]
+            assert len(time_range) <= 2 and len(time_range) > 0
+            _tr = {}
+            for i, time in enumerate(time_range):
+                if not isinstance(time, pd.Timestamp):
+                    _tr[i] = pd.to_datetime(time)
+            if len(_tr) == 1:
+                _tr[1] = _tr[0]
+            if _tr[0] > _tr[1]:
+                _tr[1], _tr[0] = _tr[0], _tr[1]
+            data_filtered = data.xs(slice(_tr[0], _tr[1]), level=time_col_level)[target_cols]
+            return pd.DataFrame(data_filtered)
     
     def set_category_attr_name_as_default(self):
         self.category_attr_name = self._default_category_attr_name

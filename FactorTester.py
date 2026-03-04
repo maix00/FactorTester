@@ -267,9 +267,7 @@ class FactorTester:
         self.product_mapping = {}
         self.return_data = {}
         for product in products:
-            product.load_data()
-            if product.data is not None:
-                self.add_data(product, product.data, futures_adjust_col=futures_adjust_col)
+            self.add_data(product, product.get_data(), futures_adjust_col=futures_adjust_col)
         self.start_date = pd.to_datetime(start_date) if start_date is not None else None
         self.end_date = pd.to_datetime(end_date) if end_date is not None else None
         self.futures_flag = futures_flag
