@@ -7,12 +7,12 @@ from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
 from Products import Futures, ProductBase, DataFreq
-from CNFutures import CNFutures, get_categories_with_products, get_cnfutures
+from CNFutures import get_categories_with_products, get_cnfutures
 import logging
 
 from tqdm import tqdm
 
-sift_volume_threshold = 0.8
+sift_volume_ratio = 0.8
 default_test_start_date = '2025-01-01'
 default_test_end_date = '2025-05-31'
 default_plot_test_start_date = '2025-01-01'
@@ -130,7 +130,7 @@ class FactorFamily:
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
             category_names: Optional[str|List[str]] = None,
-            sift_method: Optional[str] = 'volume', sift_volume_threshold: float = sift_volume_threshold, **kwargs):
+            sift_volume_ratio: float = sift_volume_ratio):
         
         factor_cache_path = os.path.join(factor_info_path, self.name_stem, self.name_stem + '.csv')
         if not os.path.exists(factor_info_path):
@@ -146,15 +146,13 @@ class FactorFamily:
 
             tester.calc_factor(factor)
 
-            _, ic_stats = tester.calc_ic(return_price_col='open_price_adjusted',
-                                         sift_method=sift_method, volume_threshold=sift_volume_threshold)
+            _, ic_stats = tester.calc_ic()
             
             _, _, report_df = tester.group_classes(factor, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
-                return_price_col='open_price_adjusted', plot_show=False,
-                sift_method=sift_method, volume_threshold=sift_volume_threshold,
-                plot_remark_str=','.join(category_names) if category_names else None,
+                plot_show=False,
+                sift_volume_ratio=sift_volume_ratio, plot_remark_str=','.join(category_names) if category_names else None,
                 )
             
             report_dict = {}
@@ -173,7 +171,7 @@ class FactorFamily:
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
                 'sift_method': 'volume',
-                'sift_volume_threshold': sift_volume_threshold,
+                'sift_volume_ratio': sift_volume_ratio,
                 'category_names': category_names,
             } | factor.params | ic_stats.iloc[:, 0].to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
@@ -207,12 +205,9 @@ class FactorTester:
                 self.logger.addHandler(file_handler)
         
         self.volume_col = volume_col
-        self.products = []
-        for product in products:
-            if not product.get_some_data().empty:
-                self.products.append(product)
-        self.products = set(self.products)
-        self.all_products = set(self.products)
+        self.products = set(products)
+        self.all_products = set(products)
+        self.sift_product_by_empty_data_bool = False
         self.factors = []
         self.product_mapping = {}
         self.return_data = {}
@@ -222,6 +217,27 @@ class FactorTester:
         self.futures_adjust_col = futures_adjust_col
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
+    def sift_product_by_empty_data(self):
+        new_products = set()
+        for product in self.products:
+            df = product.get_some_data()
+            if not df.empty and max(df[self.volume_col]) > 0:
+                new_products.add(product)
+        self.products = new_products
+        self.sift_product_by_empty_data_bool = True
+
+    def sift_product_by_volumes(self, ratio: Optional[float] = None,
+                                time_range: Optional[Any] = None) -> Set[ProductBase]:
+        if ratio is None:
+            return self.products
+        if not self.sift_product_by_empty_data_bool:
+            self.sift_product_by_empty_data()
+        results = {}
+        for product in self.products:
+            results[product] = product.get_slices(self.volume_col, time_range=time_range).sum().values
+        sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
+        return set(sorted_products[:int(len(sorted_products) * ratio)])
+
     def calc_return_by_factor(self, factor: Factor, return_period: Any, 
                               price_cols: Tuple[Tuple[str, str], Tuple[str,str]] 
                                 = (('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')),
@@ -270,30 +286,30 @@ class FactorTester:
             returns[product] = df.loc[idx_loc]
         return pd.DataFrame(returns)
         
-    def calc_factor(self, factors: Factor|List[Factor]):
+    def calc_factor(self, factors: Factor|List[Factor], 
+                    sift_settings: Optional[Dict[str, Any]] = None):
         if isinstance(factors, Factor):
             factors = [factors]
         self.factors = factors
+        self.sift_product_by_empty_data()
         for factor in tqdm(factors, desc='Factor processing'):
             factor.calc(self.products)
     
-    def calc_rank(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
-        sifted_products = self.sift_product(**kwargs)
-        self.logger.info(f"计算Rank，使用的产品数量: {len(sifted_products)}/{len(df.columns)}")
-        df = df.loc[:, df.columns.isin(sifted_products)]
+    def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
     def calc_ic(self, return_freq: Optional[str|pd.Timedelta] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
-                end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
+                end_date: Optional[str|pd.Timestamp] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
         ic_series = {}
         ic_stats = {}
         for factor in self.factors:
-            factor_rank = self.calc_rank(factor.data, **kwargs)
+            factor_rank = self.calc_rank(factor.data)
             return_df = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
                                                    price_cols=(('first', 'open_price_adjusted'), ('first', 'open_price_adjusted')))
-            return_rank = self.calc_rank(return_df, **kwargs)
+            return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
             start_date = pd.to_datetime(start_date) if start_date is not None else self.start_date
             end_date = pd.to_datetime(end_date) if end_date is not None else self.end_date
@@ -331,72 +347,13 @@ class FactorTester:
         })
         return stats_df
 
-    def sift_product(self, sift_method: Optional[str] = None, 
-                     data_freq: Any = '1min',
-                     volume_threshold: Optional[float] = None, volume_col: Optional[str] = None,
-                     sift_in_place: bool = False, sift_in_place_reset: bool = True,
-                    #  sift_freq: Optional[str|pd.Timedelta] = None,
-                     start_date: Optional[str|pd.Timestamp] = None,
-                     end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> List[ProductBase]|Set[ProductBase]:
-        if sift_in_place_reset:
-            self.products = set(self.all_products)
-        if sift_method is None:
-            return self.products
-        elif sift_method == 'volume':
-            if volume_threshold is None:
-                raise ValueError("volume_threshold is required for volume sift_method")
-            volume_col = volume_col or self.volume_col
-            if volume_col is None:
-                raise ValueError("volume_col is required for volume sift_method")
-            if start_date is None:
-                if self.start_date is not None:
-                    start_date = self.start_date
-                if start_date is None:
-                    start_date_list = [product.get_data(data_freq)['trading_day'][0] for product in self.products]
-                    start_date_list = np.unique(start_date_list)
-                    if len(start_date_list) > 1:
-                        raise ValueError("Multiple start dates found in data. Please specify start_date.")
-            else:
-                start_date = pd.to_datetime(start_date)
-            if end_date is None:
-                if self.end_date is not None:
-                    end_date = self.end_date
-                if end_date is None:
-                    end_date_list = [product.get_data(data_freq)['trading_day'][-1] for product in self.products]
-                    end_date_list = np.unique(end_date_list)
-                    if len(end_date_list) > 1:
-                        raise ValueError("Multiple end dates found in data. Please specify end_date.")
-            else:
-                end_date = pd.to_datetime(end_date)
-            if start_date is not None and end_date is not None:
-                assert isinstance(start_date, pd.Timestamp)
-                assert isinstance(end_date, pd.Timestamp)
-                assert start_date <= end_date
-            sift_dict = {}
-            for product in self.products.copy():
-                volume_seq = product.get_data(data_freq)[volume_col]
-                if start_date is not None:
-                    volume_seq = volume_seq[volume_seq.index.get_level_values(0) >= start_date]
-                if end_date is not None:
-                    volume_seq = volume_seq[volume_seq.index.get_level_values(0) <= end_date]
-                sift_dict[product] = volume_seq.sum()
-            sift_dict_sorted = dict(sorted(sift_dict.items(), key=lambda x: x[1], reverse=True))
-            threshold_idx = int(len(sift_dict_sorted) * volume_threshold)
-            products_to_keep = set(list(sift_dict_sorted.keys())[:threshold_idx])
-            if sift_in_place:
-                self.products = products_to_keep
-                return self.products
-            else:
-                return products_to_keep
-        else:
-            raise ValueError(f"Unknown sift sift_method: {sift_method}")
-
     def group_classes(self, factor: Factor, n_groups: int = 5, 
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_freq: Optional[str|pd.Timedelta] = None,
-                      plot_n_group_list: Optional[List[int]] = None, **kwargs) -> \
+                      plot_n_group_list: Optional[List[int]] = None,
+                      sift_volume_ratio: Optional[float] = None) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
 
         returns = self.calc_return_by_factor(factor, return_period=return_freq if return_freq is not None else factor.freq,
@@ -415,7 +372,7 @@ class FactorTester:
         
         for dt, row in factor.data.iterrows():
             dt_str = dt
-            sifted_products = self.sift_product(**kwargs, volume_col='volume', start_date=dt, end_date=dt)
+            sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
             sorted_products = row.dropna().sort_values(ascending=False)
             sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
             n = len(sorted_products)

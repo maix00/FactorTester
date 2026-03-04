@@ -121,7 +121,17 @@ class ProductBase(ABC):
         data = pd.DataFrame() if data is None else data
         return data
     
-    def get_some_data(self) -> pd.DataFrame:
+    def get_some_data_freq(self) -> Optional[DataFreq]:
+        if self.data_path:
+            return sorted(self.data_path.keys(), key=lambda x: x.value)[0]
+        else:
+            return None
+    
+    def get_some_data(self, data_freq: Optional[Any] = None) -> pd.DataFrame:
+        if data_freq is not None:
+            df = self.get_data(data_freq)
+            if df is not None:
+                return df
         if self.data_path:
             freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
             if not self.data:
@@ -138,8 +148,11 @@ class ProductBase(ABC):
     
     def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
                    time_range: Optional[Any] = None, data_freq: Optional[Any] = None) -> pd.DataFrame:
-        data_freq = self._process_data_freq(data_freq)
-        data = self.get_data(data_freq)
+        data = self.get_some_data(data_freq)
+        if data.empty:
+            return data
+        data_freq = self.get_some_data_freq()
+        assert data_freq is not None
         time_cols_mapping = self.time_cols_mapping.get(data_freq)
         if isinstance(target_cols, str):
             target_cols = [target_cols]
@@ -147,6 +160,8 @@ class ProductBase(ABC):
             return pd.DataFrame(columns=target_cols)
         assert time_cols_mapping is not None
         time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
+        if time_col is None:
+            time_col = time_cols[0]
         if time_col not in time_cols:
             return pd.DataFrame(columns=target_cols)
         else:
@@ -160,13 +175,14 @@ class ProductBase(ABC):
             _tr = {}
             for i, time in enumerate(time_range):
                 if not isinstance(time, pd.Timestamp):
-                    _tr[i] = pd.to_datetime(time)
+                    time = pd.to_datetime(time)
+                _tr[i] = time
             if len(_tr) == 1:
                 _tr[1] = _tr[0]
             if _tr[0] > _tr[1]:
                 _tr[1], _tr[0] = _tr[0], _tr[1]
-            data_filtered = data.xs(slice(_tr[0], _tr[1]), level=time_col_level)[target_cols]
-            return pd.DataFrame(data_filtered)
+            mask = (data.index.get_level_values(time_col_level) >= _tr[0]) & (data.index.get_level_values(time_col_level) <= _tr[1])
+            return pd.DataFrame(data.loc[mask, target_cols])
     
     def set_category_attr_name_as_default(self):
         self.category_attr_name = self._default_category_attr_name
