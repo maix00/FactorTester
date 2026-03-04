@@ -1,7 +1,7 @@
 from typing import List, Optional
 import pandas as pd
 import os
-from Products import DataFreq, Futures, FuturesContract
+from Products import Futures, FuturesContract
 
 _data = pd.read_csv('../data/sectors.csv')
 data_dir = '../data/main_mink/'
@@ -90,8 +90,8 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
                 data_path = os.path.join(data_dir, name + '.' + data_type)
                 product = CNFutures(name=name)
                 if data_path in file_list:
-                    product.set_data_path(data_freq=DataFreq.MIN1, data_path=data_path)
-                    product.set_time_cols_mapping(DataFreq.MIN1, {DataFreq.MIN1: 'trade_time', DataFreq.DAY1: 'trading_day'})
+                    product.set_data_path(data_freq='1min', data_path=data_path)
+                    product.set_time_cols_mapping('1min', {'1min': 'trade_time', '1day': 'trading_day'})
                 products.append(product)
         categories_with_products[category] = products
     return categories_with_products

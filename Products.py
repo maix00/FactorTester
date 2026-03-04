@@ -46,7 +46,6 @@ class ProductBase(ABC):
             self.initialized = True
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
-            self.data_time_cols: Dict[DataFreq, List[Tuple[str, DataFreq]]] = {}
             self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
 
     def __str__(self):
@@ -55,13 +54,12 @@ class ProductBase(ABC):
     def __repr__(self):
         return self.name
     
-    def set_time_cols_mapping(self, data_freq: DataFreq|str|pd.Timedelta,
-                              mapping: Dict[DataFreq|str|pd.Timedelta, str]) -> None:
+    def set_time_cols_mapping(self, data_freq: Any, mapping: Dict[Any, str]) -> None:
         data_freq = self._process_data_freq(data_freq)
         self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
     
     @staticmethod
-    def _process_data_freq(data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> DataFreq:
+    def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
         if isinstance(data_freq, DataFreq):
             return data_freq
         if isinstance(data_freq, str):
@@ -71,7 +69,7 @@ class ProductBase(ABC):
             return DataFreq(data_freq)
         raise ValueError("Invalid data frequency")
     
-    def set_data_path(self, data_path: str, data_freq: DataFreq|str|pd.Timedelta) -> None:
+    def set_data_path(self, data_path: str, data_freq: Any) -> None:
         data_freq = self._process_data_freq(data_freq)
         self.data_path[data_freq] = data_path
 
@@ -79,9 +77,8 @@ class ProductBase(ABC):
         for freq in self.data_path.keys():
             self.load_data(freq, reload=True)
 
-    def load_data(self, data_freq: DataFreq|str|pd.Timedelta,
-                  data_path: Optional[str] = None, reload: bool = False,
-                  time_cols_mapping: Optional[Dict[DataFreq, str]] = None) -> None:
+    def load_data(self, data_freq: Any, data_path: Optional[str] = None, 
+                  reload: bool = False, time_cols_mapping: Optional[Dict[Any, str]] = None) -> None:
         data_freq = self._process_data_freq(data_freq)
         if data_path is not None:
             self.set_data_path(data_path, data_freq)
@@ -96,8 +93,9 @@ class ProductBase(ABC):
             else:
                 return
             if not df.empty:
-                time_cols_mapping = time_cols_mapping if time_cols_mapping is not None \
-                    else self.time_cols_mapping.get(data_freq)
+                if time_cols_mapping is not None:
+                    self.set_time_cols_mapping(data_freq, time_cols_mapping)
+                time_cols_mapping = self.time_cols_mapping.get(data_freq)
                 if time_cols_mapping is not None:
                     time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
                     for col in time_cols:
@@ -105,7 +103,7 @@ class ProductBase(ABC):
                     df = df.reset_index().set_index(time_cols)
                 self.data[data_freq] = df
 
-    def get_data(self, data_freq: DataFreq|str|pd.Timedelta) -> pd.DataFrame:
+    def get_data(self, data_freq: Any) -> pd.DataFrame:
         data_freq = self._process_data_freq(data_freq)
         data = self.data.get(data_freq)
         if data is None:
@@ -124,8 +122,7 @@ class ProductBase(ABC):
             return pd.DataFrame()
     
     def get_slices(self, target_cols: str|List[str], time_col: Optional[str] = None,
-                   time_range: Optional[Any] = None,
-                   data_freq: Optional[DataFreq|str|pd.Timedelta] = None) -> pd.DataFrame:
+                   time_range: Optional[Any] = None, data_freq: Optional[Any] = None) -> pd.DataFrame:
         data_freq = self._process_data_freq(data_freq)
         data = self.get_data(data_freq)
         time_cols_mapping = self.time_cols_mapping.get(data_freq)
