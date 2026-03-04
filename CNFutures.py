@@ -121,4 +121,6 @@ if __name__ == '__main__':
         print(f"Category: {category}")
         print(f"  Products: {products}")
 
-    print(get_cnfutures())
+    all_cn_futures = get_cnfutures()
+    all_cn_futures[0].load_data(time_cols=['trade_time', 'trading_day'])
+    print(all_cn_futures[0].data)

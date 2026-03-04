@@ -82,6 +82,7 @@ class ProductBase(ABC):
         data_freq = self._process_data_freq(data_freq)
         if data_path is not None:
             self.set_data_path(data_path, data_freq)
+        _freq = None
         for freq, path in self.data_path.items():
             if self.data.get(freq) is None or freq == data_freq or reload:
                 if path.endswith('.csv'):
@@ -99,15 +100,16 @@ class ProductBase(ABC):
                         _freqs = {}
                         for time_col in time_cols:
                             df[time_col] = pd.to_datetime(df[time_col])
-                            _freqs[time_col] = pd.Timedelta(pd.Series(df[time_col].sort_values().diff().dropna()).mode()[0])
+                            _freqs[time_col] = pd.Timedelta(pd.Series(df[time_col].sort_values().unique()).diff().dropna().mode()[0])
                         time_cols = sorted(time_cols, key=lambda col: _freqs[col], reverse=True)
                         df = df.reset_index().set_index(time_cols)
                         _freq = DataFreq(_freqs[time_cols[-1]])
                         if freq == DataFreq.NotKnown:
                             freq = _freq
-                            self.data_path[_freq] = path
                         self.data_time_cols[freq] = time_cols
                     self.data[freq] = df
+        if _freq is not None and _freq != DataFreq.NotKnown and self.data.get(DataFreq.NotKnown) is not None:
+            self.data_path[_freq] = self.data_path[DataFreq.NotKnown]
 
     def _process_not_known_data_freq(self) -> DataFreq:
         if self.data:

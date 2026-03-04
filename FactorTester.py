@@ -6,7 +6,7 @@ import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
-from Products import Futures, ProductBase
+from Products import Futures, ProductBase, DataFreq
 from CNFutures import CNFutures, get_categories_with_products, get_cnfutures
 import logging
 
