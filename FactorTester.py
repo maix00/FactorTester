@@ -226,6 +226,13 @@ class FactorTester:
         self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
+    def sift_product(self, sift_func: Callable[[ProductBase], bool]):
+        new_products = set()
+        for product in self.products:
+            if sift_func(product):
+                new_products.add(product)
+        self.products = new_products
+
     def sift_product_by_category(self, categories: Optional[str|List[str]] = None):
         if categories is None:
             return
@@ -523,66 +530,3 @@ class FactorTester:
                 plt.show()
 
         return groups, returns_groups, report_df
-
-# def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callable]],
-#                 n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None,):
-    
-#     # import cProfile
-#     # import pstats
-
-#     # profiler = cProfile.Profile()
-#     # profiler.enable()
-
-#     tester = get_factor_tester()
-#     tester.calc_factor(factors)
-
-#     ic_series, stats = tester.calc_ic(factors=factors, return_price_col='open_price_adjusted',
-#                               return_daily_anchors='open_market')#, return_freq='5 days')
-#     # import matplotlib.pyplot as plt
-
-#     # plt.figure(figsize=(14, 6))
-#     # for col in ic_series.columns:
-#     #     plt.plot(ic_series.index, ic_series[col], label=col, alpha=0.7)
-#     # plt.xlabel('Date')
-#     # plt.ylabel('IC')
-#     # plt.title('IC Series Over Time')
-#     # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-#     # plt.grid(True, alpha=0.3)
-#     # plt.tight_layout()
-#     # plt.show()
-
-#     print('IC Stats Median t_stat:', stats.loc['t_stat'].median())
-#     if len(stats.columns) >= 4:
-#         stats = stats.T.sort_values('t_stat', ascending=False)
-#         mid = len(stats.columns)//2
-#         stats = pd.concat([
-#             stats[:2].T, stats[mid:mid+1].T, stats[-1:].T
-#         ], axis=1)
-#     print('Selected by t_stat:\n', stats)
-#     factor_names = stats.columns.tolist()
-    
-#     loop_bool = True
-#     while loop_bool:
-#         which_factor = input(f'选择哪一个因子进行分类回测 (1 - {len(factor_names)}): ')
-#         if which_factor.isdigit() and 1 <= int(which_factor) <= len(factor_names):
-#             which_factor = int(which_factor) - 1
-#             groups, returns_groups, _ = tester.group_classes(factor_names[which_factor], 
-#                                                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
-#                                                 start_date='2025-01-01', end_date='2025-12-31',
-#                                                 return_price_col='open_price_adjusted', return_daily_anchors='open_market'
-#                                                 )
-#         else:
-#             loop_bool = False
-
-#     # # Get the earliest five dates from the 'top' group
-#     # earliest_dates = sorted(groups['group_0'].keys())[:5]
-#     # for date in earliest_dates:
-#     #     print(date, groups['group_0'][date])
-#     #     print(date, returns_groups['group_0'][date])
-#     #     pass
-
-#     # profiler.disable()
-#     # # 输出分析结果
-#     # stats = pstats.Stats(profiler)
-#     # stats.sort_stats('cumulative')  # 按累计时间排序
-#     # stats.print_stats(20)  # 显示前20个耗时最多的函数
