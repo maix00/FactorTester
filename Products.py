@@ -121,6 +121,16 @@ class ProductBase(ABC):
         data = pd.DataFrame() if data is None else data
         return data
     
+    def get_data_with_freq_less_than(self, data_freq: Any) -> pd.DataFrame:
+        data_freq = self._process_data_freq(data_freq)
+        available_freqs = [_f for _f in self.data.keys() if data_freq in self.time_cols_mapping[_f].keys()]
+        data_freq = sorted(available_freqs, key=lambda x: x.value)[0] if available_freqs else None
+        
+        if not available_freqs:
+            return pd.DataFrame()
+        best_freq = max(available_freqs, key=lambda x: x.value)
+        return self.get_data(best_freq)
+    
     def get_some_data(self) -> pd.DataFrame:
         if self.data_path:
             freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]

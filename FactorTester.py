@@ -56,19 +56,27 @@ OtherColumnMapping = {
 import inspect
 
 class Factor:
-    def __init__(self, name: str, func: Callable, freq: Any, params: Dict[str, Any]):
+    def __init__(self, name: str, func: Callable[..., pd.DataFrame],
+                 freq: Any, params: Dict[str, Any]):
         self.name = name
         self.func = func
         self.freq = freq
         self.params = params
-        self.data = None
+        self.data: pd.DataFrame = pd.DataFrame()
+        self.signals_at_end_market = False
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, ProductBase):
             products = [products]
         products = list(products)
-        self.data, freq = self.func(products)
-        self.freq = pd.Timedelta(freq)
+        self.data = self.func(products)
+        if isinstance(self.data.index, pd.MultiIndex):
+            idx_lvls = len(self.data.index.names)
+            self.freq = pd.Timedelta(self.data.index.get_level_values(idx_lvls-1).to_series().diff().mode()[0])
+        else:
+            self.freq = pd.Timedelta(self.data.index.to_series().diff().mode()[0])
+            if self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
+                self.signals_at_end_market = True
         return self.data
     
 class FactorFamily:
@@ -79,7 +87,7 @@ class FactorFamily:
         self.set_default_params()
         self.freq = None
     
-    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> Tuple[pd.DataFrame, Any]:
+    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def set_default_params(self, **kwargs):
@@ -262,8 +270,18 @@ class FactorTester:
                 daily_return_c = daily_return_c.droplevel(1)
             daily_returns[c] = daily_return_c
         return pd.DataFrame(daily_returns)
-
-    def calc_return(self, price_col: str = 'close_price', date_index: bool = False, 
+    
+    def calc_return_by_factor(self, factor: Factor, return_period: Any, price_cols: Tuple[str, str],
+                              end_day_factor_start_at_next_open: bool = True,
+                              delta_return: bool = False, log_return: bool = False) -> pd.DataFrame:
+        returns = {}
+        assert factor.data is not None
+        for product in factor.data.columns:
+            data_freq = factor.freq
+        return pd.DataFrame(returns)
+        
+    def calc_return(self, data_freq: Optional[pd.Timedelta] = None,
+                    price_col: str = 'close_price', date_index: bool = False, 
                     time_cols: Optional[str|List[str]] = ['trading_day', 'trade_time'], 
                     calc_freq: Optional[str|pd.Timedelta] = None, return_freq: Optional[str|pd.Timedelta] = None,
                     continuous_calc: bool = True, delta_return: bool = False, log_return: bool = False,
@@ -280,8 +298,8 @@ class FactorTester:
         assert factor_freq is None or isinstance(factor_freq, pd.Timedelta)
         self.logger.info(f"因子池中的因子有共同频率: {factor_freq}")
 
-        data_freq = pd.Series(self.data_freq.values()).unique()
-        data_freq = data_freq[0] if len(data_freq) == 1 else None
+        l_data_freq = pd.Series(self.data_freq.values()).unique()
+        data_freq = l_data_freq[0] if len(l_data_freq) == 1 else None
         assert data_freq is None or isinstance(data_freq, pd.Timedelta)
         self.logger.info(f"数据池中的数据有共同频率: {data_freq}")
 
@@ -334,6 +352,9 @@ class FactorTester:
 
         returns_all = {}
     
+        # for product in self.products:
+        #     df = product.get_data(data_freq)
+
         for product, df in self.data.items():
             if price_col not in df.columns:
                 raise ValueError(f"DataFrame {product} 中缺少列 {price_col}")
@@ -544,7 +565,8 @@ class FactorTester:
         })
         return stats_df
     
-    def cache_return(self, price_col: str = 'close_price_adjusted',
+    def cache_return(self, data_freq: Optional[Any] = None,
+                     price_col: str = 'close_price_adjusted',
                      date_index: bool = False, return_freq: Optional[str|pd.Timedelta] = None, daily_anchors: Optional[str|pd.Timedelta|List[pd.Timedelta|str]] = None,
                      calc_freq: Optional[str|pd.Timedelta] = None) -> tuple[pd.DataFrame, bool, bool]:
         return_label = (return_freq, calc_freq, price_col, date_index, daily_anchors)
@@ -552,8 +574,8 @@ class FactorTester:
             set(self.return_data[return_label][0].columns) == self.products:
             return self.return_data[return_label]
         else:
-            outcome = self.calc_return(price_col=price_col, return_freq=return_freq, calc_freq=calc_freq, 
-                                       daily_anchors=daily_anchors, date_index=date_index)
+            outcome = self.calc_return(data_freq=data_freq, price_col=price_col, return_freq=return_freq, 
+                                       calc_freq=calc_freq, daily_anchors=daily_anchors, date_index=date_index)
             self.return_data[return_label] = outcome
             return outcome
         
@@ -565,7 +587,7 @@ class FactorTester:
         calc_freq = calc_freq if calc_freq is not None else self.factor_freq[factor_name]
         date_index = date_index if date_index is not None else \
             True if self.factor_freq[factor_name] == pd.Timedelta('1 day') else False
-        return self.cache_return(price_col=price_col, date_index=date_index, daily_anchors=daily_anchors,
+        return self.cache_return(data_freq=self.factor_freq[factor_name], price_col=price_col, date_index=date_index, daily_anchors=daily_anchors,
                                  return_freq=return_freq, calc_freq=calc_freq)
 
     def sift_product(self, sift_method: Optional[str] = None, 
