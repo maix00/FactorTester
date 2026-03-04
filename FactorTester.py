@@ -61,14 +61,15 @@ class Factor:
         self.func = func
         self.freq = freq
         self.params = params
+        self.data = None
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, ProductBase):
             products = [products]
         products = list(products)
-        df, freq = self.func(products)
+        self.data, freq = self.func(products)
         self.freq = pd.Timedelta(freq)
-        return df
+        return self.data
     
 class FactorFamily:
     params_space: Dict[str, List[Any]] = {}
@@ -133,7 +134,7 @@ class FactorFamily:
         for factor in self.get_factors():
 
             tester.calc_factor(factor)
-            _, ic_stats = tester.calc_ic(factor, return_price_col='open_price_adjusted',
+            _, ic_stats = tester.calc_ic(return_price_col='open_price_adjusted',
                                          return_daily_anchors='open_market', 
                                          sift_method=sift_method, volume_threshold=sift_volume_threshold)
             
@@ -196,6 +197,7 @@ class FactorTester:
         
         self.volume_col = volume_col
         self.products = []
+        self.factors = []
         self.all_products = products
         self.data = {}
         self.data_freq = {}
@@ -459,11 +461,12 @@ class FactorTester:
     def calc_factor(self, factors: Factor|List[Factor]):
         if isinstance(factors, Factor):
             factors = [factors]
+        self.factors = factors
         for factor in tqdm(factors, desc='Factor processing'):
-            factors_df = factor.calc(self.products)
-            if not factors_df.empty:
-                self.factor_data[factor.name] = factors_df
-                assert factor.freq is not None, f"因子 {factor.name} 的频率未定义。请在创建因子时指定频率，或确保因子函数返回的数据具有可识别的频率。"
+            factor.calc(self.products)
+            if factor.data is not None and not factor.data.empty:
+                self.factor_data[factor.name] = factor.data
+                assert factor.freq is not None
                 self.factor_freq[factor.name] = factor.freq
             else:
                 message = f"因子 {factor.name} 未能计算出任何数据。"
@@ -477,15 +480,13 @@ class FactorTester:
         df = df.loc[:, df.columns.isin(sifted_products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
-    def calc_ic(self, factors: Factor|List[Factor], 
-                return_price_col: str = 'close_price_adjusted',
+    def calc_ic(self, return_price_col: str = 'close_price_adjusted',
                 return_freq: Optional[str|pd.Timedelta] = None,
                 return_daily_anchors: Optional[Any] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
                 end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         
-        if isinstance(factors, Factor):
-            factors = [factors]
+        assert self.factors is not None
         
         shift_one = True
         if return_daily_anchors is not None:
@@ -498,7 +499,7 @@ class FactorTester:
                         
         ic_series = {}
         ic_stats = {}
-        for factor_name in [factor.name for factor in factors]:
+        for factor_name in [factor.name for factor in self.factors]:
             assert isinstance(factor_name, str)
             factor_rank = self.calc_rank(self.factor_data[factor_name], **kwargs)
             return_df, _, _ = self.cache_return_by_factor_name(factor_name, price_col=return_price_col, 
