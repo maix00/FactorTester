@@ -55,129 +55,70 @@ OtherColumnMapping = {
 
 import inspect
 
-class FactorGrid:
-    # 子类需覆盖：参数的可选范围
+class Factor:
+    def __init__(self, name: str, func: Callable, freq: Any, params: Dict[str, Any]):
+        self.name = name
+        self.func = func
+        self.freq = freq
+        self.params = params
+
+    def calc(self, products: Any) -> pd.DataFrame:
+        if isinstance(products, ProductBase):
+            products = [products]
+        products = list(products)
+        return self.func(products)
+    
+class FactorFamily:
     params_space: Dict[str, List[Any]] = {}
-    # 子类需覆盖：默认参数
-    default_params: Dict[str, Any] = {}
 
-    def __init__(self, factor_name_stem: Optional[str] = None):
-        self.factor_name_stem = factor_name_stem if factor_name_stem else self.__class__.__name__
-        self.current_params_space = self.params_space
-
-    def _factor_func(self, products: List[ProductBase], *args, **kwargs) -> pd.DataFrame:
+    def __init__(self, name_stem: Optional[str] = None):
+        self.name_stem = name_stem if name_stem else self.__class__.__name__
+        self.set_default_params()
+        self.freq = None
+    
+    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
-    def _set_current_params_space(self, **kwargs):
-        if not kwargs:
-            return
+    def set_default_params(self, **kwargs):
+        self._params_list = [{key: self.params_space[key][0] for key in self.params_space.keys()}]
+
+    def clear_params(self):
+        self._params_list = []
+    
+    def _check_in_space(self, **kwargs):
         for key in kwargs:
-            if not isinstance(kwargs[key], list):
-                kwargs[key] = [kwargs[key]]
-        self.current_params_space = self._get_complete_params(**{**self.params_space, **kwargs})
-
-    def _get_complete_params(self, **kwargs) -> Dict[str, Any]:
-        """合并默认参数并校验合法性"""
-        # 1. 以默认值为基础，用传入的 kwargs 覆盖
-        full_params = {**self.default_params, **kwargs}
-        
-        # 2. 校验参数是否在定义的范围内
-        for k, v in full_params.items():
-            if k in self.params_space:
-                if not isinstance(v, list):
-                    v = [v]
-                if not all(vv in self.params_space[k] for vv in v):
-                    raise ValueError(f"参数 '{k}' 的值 '{v}' 不在允许范围 {self.params_space[k]} 内")
-            else:
-                # 如果传入了 params_space 没定义的参数，可以报错或警告
-                raise KeyError(f"未定义的参数名: '{k}'")
-        
-        # 3. 排序以保证 get_factor_name 的一致性
-        return dict(sorted(full_params.items()))
-
-    def get_factor_func(self, **kwargs) -> Callable[[List[ProductBase]], pd.DataFrame]:
-        params = self._get_complete_params(**kwargs)
-        return lambda products: self._factor_func(products, **params)
-
-    def get_factor_name(self, **kwargs) -> str:
-        params = self._get_complete_params(**kwargs)
-        kwargs_str = '|'.join(f"{k}:{v}" for k, v in params.items())
-        parts = [self.factor_name_stem, kwargs_str]
-        return '|'.join(p for p in parts if p)
-
-    def get_factor(self, **kwargs) -> tuple[str, Callable[[List[ProductBase]], pd.DataFrame]]:
-        return self.get_factor_name(**kwargs), self.get_factor_func(**kwargs)
-    
-    def get_factor_list(self, **kwargs) -> List[tuple[str, Callable]]:
-        return self.get_factor_tensor(**kwargs).flatten().tolist()
-    
-    def get_factor_name_list(self, **kwargs) -> List[str]:
-        return [name for name, func in self.get_factor_list(**kwargs)]
-    
-    def get_param_tensor_shape(self, **kwargs) -> tuple[int, ...]:
-        self._set_current_params_space(**kwargs)
-        return tuple(len(v) for v in self.current_params_space.values())
-
-    def get_param_tensor(self, **kwargs) -> np.ndarray:
-        """
-        生成多维张量，每个维度对应一个参数，值为参数取值列表
-        """
-        self._set_current_params_space(**kwargs)
-        keys = list(self.current_params_space.keys())
-        values = list(self.current_params_space.values())
-        
-        # 获取每个参数的取值数量
-        shape = tuple(len(v) for v in values)
-        
-        # 创建对象数组来存储参数取值列表
-        tensor = np.empty(shape, dtype=object)
-        
-        # 填充张量
-        for combination in itertools.product(*values):
-            # 根据combination获取索引
-            indices = tuple(values[i].index(combination[i]) for i in range(len(keys)))
-            tensor[indices] = combination
-        
-        return tensor
-    
-    def get_factor_tensor(self, **kwargs) -> np.ndarray:
-        """
-        生成多维张量，每个维度对应一个参数，值为(因子名, 因子函数)的元组
-        """
-        self._set_current_params_space(**kwargs)
-        keys = list(self.current_params_space.keys())
-        values = list(self.current_params_space.values())
-        
-        # 获取每个参数的取值数量
-        shape = tuple(len(v) for v in values)
-        
-        # 创建对象数组来存储元组
-        tensor = np.empty(shape, dtype=object)
-        
-        # 填充张量
-        for combination in itertools.product(*values):
-            spec_kwargs = dict(zip(keys, combination))
-            factor_name, factor_func = self.get_factor(**spec_kwargs)
+            if key not in self.params_space:
+                raise KeyError(f"参数 '{key}' 不在定义的参数空间中")
+            if kwargs[key] not in self.params_space[key]:
+                raise ValueError(f"参数 '{key}' 的值 '{kwargs[key]}' 不在允许范围 {self.params_space[key]} 内")
             
-            # 根据combination获取索引
-            indices = tuple(values[i].index(combination[i]) for i in range(len(keys)))
-            tensor[indices] = (factor_name, factor_func)
-        
-        return tensor
+    def add_params(self, **kwargs):
+        self._check_in_space(**kwargs)
+        new_params = {key: kwargs[key] if key in kwargs else self.params_space[key][0] for key in self.params_space.keys()}
+        if new_params not in self._params_list:
+            self._params_list.append(new_params)
+
+    def set_all_params(self):
+        all_combinations = list(itertools.product(*self.params_space.values()))
+        self._params_list = [dict(zip(self.params_space.keys(), combination)) for combination in all_combinations]
+
+    def get_name(self, **params):
+        params_str = '|'.join(f"{key}:{value}" for key, value in params.items())
+        return f"{self.name_stem}|{params_str}" if params_str else self.name_stem
+
+    def get_factors(self):
+        factors = []
+        for params in self._params_list:
+            factor_name = self.get_name(**params)
+            factor_func = lambda products: self.func(products, **params)
+            factors.append(Factor(name=factor_name, func=factor_func, freq=self.freq, params=params))
+        return factors
     
-    def factor_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, **kwargs):
-        params = self._get_complete_params(**kwargs)
-        factor_test(self.get_factor(**params), n_groups=n_groups, plot_n_group_list=plot_n_group_list)
-
-    # def factor_grid_test(self, **kwargs):
-    #     self._set_current_params_space(**kwargs)
-    #     factor_test(self)
-
-    def factor_grid_test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
-                         category_names: Optional[str|List[str]] = None,
-                         sift_method: Optional[str] = 'volume', sift_volume_threshold: float = sift_volume_threshold, **kwargs):
+    def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
+            category_names: Optional[str|List[str]] = None,
+            sift_method: Optional[str] = 'volume', sift_volume_threshold: float = sift_volume_threshold, **kwargs):
         
-        factor_cache_path = os.path.join(factor_info_path, self.factor_name_stem, self.factor_name_stem + '.csv')
+        factor_cache_path = os.path.join(factor_info_path, self.name_stem, self.name_stem + '.csv')
         if not os.path.exists(factor_info_path):
             os.makedirs(factor_info_path)
         if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
@@ -187,19 +128,14 @@ class FactorGrid:
         
         tester = get_factor_tester(category_names=category_names)
         
-        all_values = self.get_param_tensor(**kwargs).flatten().tolist()
-        all_keys = self.params_space.keys()
-        for values in all_values:
-            params = dict(zip(all_keys, values))
-            factor = self.get_factor(**params)
-            factor_name = factor[0]
+        for factor in self.get_factors():
 
             tester.calc_factor(factor)
             _, ic_stats = tester.calc_ic(factor, return_price_col='open_price_adjusted',
                                          return_daily_anchors='open_market', 
                                          sift_method=sift_method, volume_threshold=sift_volume_threshold)
             
-            _, _, report_df = tester.group_classes(factor_name, 
+            _, _, report_df = tester.group_classes(factor.name, 
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
                 start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
                 return_price_col='open_price_adjusted', return_daily_anchors='open_market', plot_show=False,
@@ -216,16 +152,16 @@ class FactorGrid:
                 report_dict[key_1] = report_df.loc[report_df.index[1], col]
 
             new_row = pd.Series({
-                'factor_stem': self.factor_name_stem,
+                'factor_stem': self.name_stem,
                 'serial_num': pd.Timestamp.now(),
-                'factor_name': factor_name,
-                'factor_freq': tester.factor_freq[factor_name],
+                'factor_name': factor.name,
+                'factor_freq': tester.factor_freq[factor.name],
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
                 'sift_method': 'volume',
                 'sift_volume_threshold': sift_volume_threshold,
                 'category_names': category_names,
-            } | params | ic_stats.iloc[:, 0].to_dict() | report_dict)
+            } | factor.params | ic_stats.iloc[:, 0].to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor_table.to_csv(factor_cache_path, index=False)
         
@@ -554,31 +490,16 @@ class FactorTester:
         else:
             return None
         
-    def calc_factor(self, factors):
-        if isinstance(factors, FactorGrid):
-            factors = factors.get_factor_list()
-        elif isinstance(factors, Callable):
-            factors = [('Factor_' + str(len(self.factor_data)), factors)]
-        elif isinstance(factors, list) and factors and isinstance(factors[0], Callable):
-            assert all(isinstance(factor, Callable) for factor in factors)
-            factors = [('Factor_' + str(len(self.factor_data) + idx), factors[idx]) for idx in range(len(factors))]
-        elif isinstance(factors, tuple):
+    def calc_factor(self, factors: Factor|List[Factor]):
+        if isinstance(factors, Factor):
             factors = [factors]
-        elif isinstance(factors, np.ndarray):
-            factors = factors.flatten().tolist()
-        assert isinstance(factors, list)
-        assert all(isinstance(factor, tuple) for factor in factors)
-        assert all(isinstance(factor[0], str) for factor in factors)
-        assert all(isinstance(factor[1], Callable) for factor in factors)
-        
-        for factor_name, factor_func in tqdm(factors, desc='Factor processing'):
-            factors_df = factor_func(self.products)
-            # factors_df = factor_func(self.data, self.data_freq)
+        for factor in tqdm(factors, desc='Factor processing'):
+            factors_df = factor.calc(self.products)
             if not factors_df.empty:
-                self.factor_data[factor_name] = factors_df
-                self.calc_factor_freq(data=factors_df, name=factor_name)
+                self.factor_data[factor.name] = factors_df
+                self.calc_factor_freq(data=factors_df, name=factor.name)
             else:
-                message = f"因子 {factor_name} 未能计算出任何数据。"
+                message = f"因子 {factor.name} 未能计算出任何数据。"
                 self.logger.error(message)
                 raise ValueError(message)
         return self.factor_data
@@ -589,27 +510,16 @@ class FactorTester:
         df = df.loc[:, df.columns.isin(sifted_products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
-    def calc_ic(self, factors: str|List[str]|FactorGrid|tuple|List[tuple], 
+    def calc_ic(self, factors: Factor|List[Factor], 
                 return_price_col: str = 'close_price_adjusted',
                 return_freq: Optional[str|pd.Timedelta] = None,
                 return_daily_anchors: Optional[Any] = None,
                 start_date: Optional[str|pd.Timestamp] = None, 
                 end_date: Optional[str|pd.Timestamp] = None, **kwargs) -> tuple[pd.DataFrame, pd.DataFrame]:
         
-        if isinstance(factors, FactorGrid):
-            factors = factors.get_factor_name_list()
-        elif isinstance(factors, str):
+        if isinstance(factors, Factor):
             factors = [factors]
-        elif isinstance(factors, tuple):
-            assert isinstance(factors[0], str)
-            factors = [factors[0]]
-        elif isinstance(factors, list) and factors and isinstance(factors[0], tuple):
-            assert all(isinstance(t, tuple) for t in factors)
-            assert all(len(t) == 2 for t in factors)
-            assert all(isinstance(fn, str) for fn, _ in factors)
-            factors = [fn for fn, _ in factors]
-        assert isinstance(factors, list)
-
+        
         shift_one = True
         if return_daily_anchors is not None:
             if isinstance(return_daily_anchors, list) or isinstance(return_daily_anchors, tuple):
@@ -621,7 +531,7 @@ class FactorTester:
                         
         ic_series = {}
         ic_stats = {}
-        for factor_name in factors:
+        for factor_name in [factor.name for factor in factors]:
             assert isinstance(factor_name, str)
             factor_rank = self.calc_rank(self.factor_data[factor_name], **kwargs)
             return_df, _, _ = self.cache_return_by_factor_name(factor_name, price_col=return_price_col, 
@@ -984,65 +894,65 @@ def get_factor_tester(
     
     return tester
 
-def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callable]],
-                n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None,):
+# def factor_test(factors: FactorGrid|tuple[str, Callable]|List[tuple[str, Callable]],
+#                 n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None,):
     
-    # import cProfile
-    # import pstats
+#     # import cProfile
+#     # import pstats
 
-    # profiler = cProfile.Profile()
-    # profiler.enable()
+#     # profiler = cProfile.Profile()
+#     # profiler.enable()
 
-    tester = get_factor_tester()
-    tester.calc_factor(factors)
+#     tester = get_factor_tester()
+#     tester.calc_factor(factors)
 
-    ic_series, stats = tester.calc_ic(factors=factors, return_price_col='open_price_adjusted',
-                              return_daily_anchors='open_market')#, return_freq='5 days')
-    # import matplotlib.pyplot as plt
+#     ic_series, stats = tester.calc_ic(factors=factors, return_price_col='open_price_adjusted',
+#                               return_daily_anchors='open_market')#, return_freq='5 days')
+#     # import matplotlib.pyplot as plt
 
-    # plt.figure(figsize=(14, 6))
-    # for col in ic_series.columns:
-    #     plt.plot(ic_series.index, ic_series[col], label=col, alpha=0.7)
-    # plt.xlabel('Date')
-    # plt.ylabel('IC')
-    # plt.title('IC Series Over Time')
-    # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    # plt.grid(True, alpha=0.3)
-    # plt.tight_layout()
-    # plt.show()
+#     # plt.figure(figsize=(14, 6))
+#     # for col in ic_series.columns:
+#     #     plt.plot(ic_series.index, ic_series[col], label=col, alpha=0.7)
+#     # plt.xlabel('Date')
+#     # plt.ylabel('IC')
+#     # plt.title('IC Series Over Time')
+#     # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+#     # plt.grid(True, alpha=0.3)
+#     # plt.tight_layout()
+#     # plt.show()
 
-    print('IC Stats Median t_stat:', stats.loc['t_stat'].median())
-    if len(stats.columns) >= 4:
-        stats = stats.T.sort_values('t_stat', ascending=False)
-        mid = len(stats.columns)//2
-        stats = pd.concat([
-            stats[:2].T, stats[mid:mid+1].T, stats[-1:].T
-        ], axis=1)
-    print('Selected by t_stat:\n', stats)
-    factor_names = stats.columns.tolist()
+#     print('IC Stats Median t_stat:', stats.loc['t_stat'].median())
+#     if len(stats.columns) >= 4:
+#         stats = stats.T.sort_values('t_stat', ascending=False)
+#         mid = len(stats.columns)//2
+#         stats = pd.concat([
+#             stats[:2].T, stats[mid:mid+1].T, stats[-1:].T
+#         ], axis=1)
+#     print('Selected by t_stat:\n', stats)
+#     factor_names = stats.columns.tolist()
     
-    loop_bool = True
-    while loop_bool:
-        which_factor = input(f'选择哪一个因子进行分类回测 (1 - {len(factor_names)}): ')
-        if which_factor.isdigit() and 1 <= int(which_factor) <= len(factor_names):
-            which_factor = int(which_factor) - 1
-            groups, returns_groups, _ = tester.group_classes(factor_names[which_factor], 
-                                                plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
-                                                start_date='2025-01-01', end_date='2025-12-31',
-                                                return_price_col='open_price_adjusted', return_daily_anchors='open_market'
-                                                )
-        else:
-            loop_bool = False
+#     loop_bool = True
+#     while loop_bool:
+#         which_factor = input(f'选择哪一个因子进行分类回测 (1 - {len(factor_names)}): ')
+#         if which_factor.isdigit() and 1 <= int(which_factor) <= len(factor_names):
+#             which_factor = int(which_factor) - 1
+#             groups, returns_groups, _ = tester.group_classes(factor_names[which_factor], 
+#                                                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
+#                                                 start_date='2025-01-01', end_date='2025-12-31',
+#                                                 return_price_col='open_price_adjusted', return_daily_anchors='open_market'
+#                                                 )
+#         else:
+#             loop_bool = False
 
-    # # Get the earliest five dates from the 'top' group
-    # earliest_dates = sorted(groups['group_0'].keys())[:5]
-    # for date in earliest_dates:
-    #     print(date, groups['group_0'][date])
-    #     print(date, returns_groups['group_0'][date])
-    #     pass
+#     # # Get the earliest five dates from the 'top' group
+#     # earliest_dates = sorted(groups['group_0'].keys())[:5]
+#     # for date in earliest_dates:
+#     #     print(date, groups['group_0'][date])
+#     #     print(date, returns_groups['group_0'][date])
+#     #     pass
 
-    # profiler.disable()
-    # # 输出分析结果
-    # stats = pstats.Stats(profiler)
-    # stats.sort_stats('cumulative')  # 按累计时间排序
-    # stats.print_stats(20)  # 显示前20个耗时最多的函数
+#     # profiler.disable()
+#     # # 输出分析结果
+#     # stats = pstats.Stats(profiler)
+#     # stats.sort_stats('cumulative')  # 按累计时间排序
+#     # stats.print_stats(20)  # 显示前20个耗时最多的函数

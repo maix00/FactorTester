@@ -4,21 +4,18 @@ import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Products import ProductBase
-from FactorTester import FactorGrid, PriceColumnMapping
-from typing import List, Dict, Any
+from FactorTester import FactorFamily, PriceColumnMapping
+from typing import List, Dict, Any, Sequence
 
-class DayMm(FactorGrid): # Day Momentum
+class DayMm(FactorFamily): # Day Momentum
 
     params_space: Dict[str, List[Any]] = {
         'PCH': ['HA', 'H'],
         'PCL': ['LA', 'L'],
-        # 'W': [100, 150, 200],
     }
 
-    default_params: Dict[str, Any] = {'PCH': 'HA', 'PCL': 'LA'}
-
-    def _factor_func(self, products: List[ProductBase], data_freq: Any = '1min',
-                     PCH: str = 'HA', PCL: str = 'LA') -> pd.DataFrame:
+    def func(self, products: Sequence[ProductBase], data_freq: Any = '1min',
+             PCH: str = 'HA', PCL: str = 'LA') -> pd.DataFrame:
         factors = {}
         for product in products:
             df = product.get_data(data_freq)
@@ -34,4 +31,6 @@ class DayMm(FactorGrid): # Day Momentum
         return pd.DataFrame(factors)
 
 if __name__ == '__main__':
-    DayMm().factor_grid_test(category_names=['农产品'])
+    ff = DayMm()
+    ff.add_params(PCH='H', PCL='L')
+    ff.test(category_names=['农产品'])
