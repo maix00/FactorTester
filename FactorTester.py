@@ -67,24 +67,24 @@ def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     return tester
 
 class FactorFreqType(Enum):
-    IN_MINS = 0
+    CONSTANT = 0
     AT_EVENT = 1
 
 class EventType(Enum):
-    AMID_SESSION = 0
-    END_PERIOD = 1
+    AMID_PERIOD = 0
+    END_OF_PERIOD = 1
+    START_OF_PERIOD = 2
 
 class Factor(UniqueObject):
-    def __init__(self, name: str, func: Callable[..., pd.DataFrame],
-                 freq: Any, params: Dict[str, Any]):
+    def __init__(self, name: str, func: Callable[..., pd.DataFrame], params: Dict[str, Any]):
         super().__init__(name=name)
         self.func = func
-        self.freq = freq
+        self.freq: Optional[pd.Timedelta] = None
+        self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
         self.params = params
         self.table: pd.DataFrame = pd.DataFrame()
         self.products: Set[Product] = set()
         self.returns: pd.DataFrame = pd.DataFrame()
-        self.end_market_signal = False
         self.ic_series: pd.Series = pd.Series()
         self.ic_stats: pd.Series = pd.Series()
         self.report: pd.DataFrame = pd.DataFrame()
@@ -95,7 +95,7 @@ class Factor(UniqueObject):
             self.products = set([col for col in self.table.columns if isinstance(col, Product)])
         return self.products
 
-    def _calc_freq(self) -> FactorFreqType:
+    def _calc_freq(self) -> Tuple[FactorFreqType, Any]:
         if self.table.empty:
             raise ValueError("Cannot calculate frequency without table.")
         if not self.products:
@@ -109,24 +109,33 @@ class Factor(UniqueObject):
             series = self.table.index.get_level_values(idx_lvls-1).to_series()
         diffs = series.diff().dropna()
         day_dividable = all(diff.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 for diff in diffs)
-        return FactorFreqType.AT_EVENT
+        end_of_day = all(ts.hour == 0 and ts.minute == 0 and ts.second == 0 for ts in series.dropna())
+        if day_dividable and end_of_day:
+            return FactorFreqType.AT_EVENT, pd.Timedelta('1day')
+        end_of_session = []
+        for i in range(min(5, len(series))):
+            end = all(not product.if_time_is_in_data(list(series)[i] + pd.Timedelta('1min')) for product in self.products) 
+            start = all(not product.if_time_is_in_data(list(series)[i] - pd.Timedelta('1min')) for product in self.products)
+            end_of_session.append(end or start)
+        end_of_session = all(end_of_session)
+        if day_dividable or end_of_day or end_of_session:
+            return FactorFreqType.AT_EVENT, None
+        mode = diffs.mode()[0]
+        minimum = diffs.min()
+        if mode != minimum:
+            return FactorFreqType.AT_EVENT, None
+        return FactorFreqType.CONSTANT, minimum
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, Product):
             products = [products]
         products = list(products)
         self.table = self.func(products)
-        self._set_products()
         for col in self.table.columns:
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
-        if isinstance(self.table.index, pd.MultiIndex):
-            idx_lvls = len(self.table.index.names)
-            self.freq = pd.Timedelta(self.table.index.get_level_values(idx_lvls-1).to_series().diff().mode()[0])
-        else:
-            self.freq = pd.Timedelta(self.table.index.to_series().diff().mode()[0])
-            if self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
-                self.end_market_signal = True
+        self._set_products()
+        self.freq_type, self.freq = self._calc_freq()
         return self.table
     
 class FactorFamily:
@@ -135,7 +144,6 @@ class FactorFamily:
     def __init__(self, name_stem: Optional[str] = None):
         self.name_stem = name_stem if name_stem else self.__class__.__name__
         self.set_default_params()
-        self.freq = None
     
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
@@ -172,7 +180,7 @@ class FactorFamily:
         for params in self._params_list:
             factor_name = self.get_name(**params)
             factor_func = lambda products: self.func(products, **params)
-            factors.append(Factor(name=factor_name, func=factor_func, freq=self.freq, params=params))
+            factors.append(Factor(name=factor_name, func=factor_func, params=params))
         return factors
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
@@ -319,7 +327,7 @@ class FactorTester:
                 elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
                     PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
             all_f = product.get_available_freqs()
-            if factor.end_market_signal and DataFreq.DAY1 in all_f \
+            if factor.freq_type == FactorFreqType.AT_EVENT and DataFreq.DAY1 in all_f \
                 and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
                 data_freq = DataFreq.DAY1
             else:

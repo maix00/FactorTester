@@ -35,12 +35,12 @@ class DayMm(FactorFamily): # Day Momentum
         factors = {}
         for product in products:
             df = product.get_data(data_freq)
-            trading_day = df.index.get_level_values('trading_day').to_series()
-            trade_time = df.index.get_level_values('trade_time').to_series()
+            trading_day = df.index.get_level_values('trading_day').to_series().reset_index(drop=True)
+            trade_time = df.index.get_level_values('trade_time').to_series().reset_index(drop=True)
             time_part = trade_time.dt.time
             cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
             end_session = trading_day + pd.Timedelta('9 hours')
-            end_session = end_session.mask(cond, trading_day + pd.Timedelta('15 hours'))
+            end_session[cond] = trading_day[cond] + pd.Timedelta('15 hours')
             df.index = pd.MultiIndex.from_arrays([trading_day, end_session], names=['trading_day', 'end_session'])
             df_grouped = df.groupby(['trading_day', 'end_session'])
 

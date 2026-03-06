@@ -252,7 +252,11 @@ class Product(UniqueObject):
                 return pd.DataFrame(data.loc[mask, target_cols]).copy()
             else:
                 return pd.DataFrame(data.loc[mask, target_cols])
-    
+            
+    def if_time_is_in_data(self, time: Any) -> bool:
+        slice = self.get_slices(time_col=DataColumn.TIME_COL, time_range=time)
+        return not slice.empty
+        
     def set_category_attr_name_as_default(self):
         self.category_attr_name = self._default_category_attr_name
 
