@@ -41,9 +41,8 @@ class DataColumn(Enum):
     TIME_COL = 21
     ADJUST_SUFFIX = 22
 
-class ProductBase(ABC):
-    _instances = WeakValueDictionary()  # Class-level dictionary to store instances by name
-    _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+class UniqueObject(ABC):
+    _instances = WeakValueDictionary()
 
     def __new__(cls, name: str, *args, **kwargs):
         # Create a unique key that includes the class type
@@ -56,23 +55,12 @@ class ProductBase(ABC):
         instance = super().__new__(cls)
         cls._instances[key] = instance
         return instance
-
-    def __init__(self, name: str,
-                 point_value: Optional[int] = None,
-                 currency: Optional[str] = None,
-                 category_attr_name: Optional[str] = None):
+    
+    def __init__(self, name: str):
         # Only initialize if this is a new instance (not already initialized)
         if not hasattr(self, 'initialized'):
             self.name = name
-            self.point_value = point_value
-            self.currency = currency
-            self.category_attr_name = category_attr_name if category_attr_name \
-                else self._default_category_attr_name
             self.initialized = True
-            self.data: Dict[DataFreq, pd.DataFrame] = {}
-            self.data_path: Dict[DataFreq, str] = {}
-            self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
-            self.data_cols_mapping: Dict[DataColumn, str] = {}
 
     def __str__(self):
         return self.name
@@ -88,6 +76,28 @@ class ProductBase(ABC):
     
     def __repr__(self):
         return self.name
+
+class Product(UniqueObject):
+    _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+
+    def __init__(self, name: str,
+                 point_value: Optional[int] = None,
+                 currency: Optional[str] = None,
+                 category_attr_name: Optional[str] = None):
+        if not hasattr(self, 'initialized'):
+            super().__init__(name)
+            self.point_value = point_value
+            self.currency = currency
+            self.category_attr_name = category_attr_name if category_attr_name \
+                else self._default_category_attr_name
+            self.data: Dict[DataFreq, pd.DataFrame] = {}
+            self.data_path: Dict[DataFreq, str] = {}
+            self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
+            self.data_cols_mapping: Dict[DataColumn, str] = {}
+            self.sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]] = {}
+
+    def set_sessions(self, sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]]) -> None:
+        self.sessions = sessions
     
     def set_time_cols_mapping(self, data_freq: Any, mapping: Dict[Any, str]) -> None:
         data_freq = self._process_data_freq(data_freq)
@@ -145,13 +155,15 @@ class ProductBase(ABC):
                     df = df.reset_index().set_index(time_cols)
                 self.data[data_freq] = df
 
-    def get_data(self, data_freq: Any) -> pd.DataFrame:
+    def get_data(self, data_freq: Any, copy: bool = True) -> pd.DataFrame:
         data_freq = self._process_data_freq(data_freq)
         data = self.data.get(data_freq)
         if data is None:
             self.load_data(data_freq)
             data = self.data.get(data_freq)
         data = pd.DataFrame() if data is None else data
+        if copy:
+            data = data.copy()
         return data
     
     def get_some_data_freq(self) -> Optional[DataFreq]:
@@ -160,16 +172,16 @@ class ProductBase(ABC):
         else:
             return None
     
-    def get_some_data(self, data_freq: Optional[Any] = None) -> pd.DataFrame:
+    def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
         if data_freq is not None:
-            df = self.get_data(data_freq)
+            df = self.get_data(data_freq, copy=copy)
             if df is not None:
                 return df
         if self.data_path:
             freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
             if not self.data:
                 self.load_data(freq, reload=True)
-            return self.get_data(freq)
+            return self.get_data(freq, copy=copy)
         else:
             return pd.DataFrame()
         
@@ -180,17 +192,21 @@ class ProductBase(ABC):
         return list(self.data.keys())
     
     def get_slices(self, target_cols: DataColumn|List[DataColumn|str],
-                   time_col: Optional[DataColumn|str] = None,
-                   time_range: Optional[Any] = None, data_freq: Optional[Any] = None) -> pd.DataFrame:
-        data = self.get_some_data(data_freq)
-        if data.empty:
-            return data
-        data_freq = self.get_some_data_freq()
-        assert data_freq is not None
-        time_cols_mapping = self.time_cols_mapping.get(data_freq)
+                   time_col: Optional[DataColumn|str] = None, time_range: Optional[Any] = None,
+                   data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
+        
         if isinstance(target_cols, DataColumn):
             target_cols = [target_cols]
         target_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in target_cols]
+        
+        data = self.get_some_data(data_freq, copy=False)
+        if data.empty:
+            return pd.DataFrame(columns=target_cols)
+        
+        data_freq = self.get_some_data_freq()
+        assert data_freq is not None
+        time_cols_mapping = self.time_cols_mapping.get(data_freq)
+        
         if time_cols_mapping is None:
             return pd.DataFrame(columns=target_cols)
         assert time_cols_mapping is not None
@@ -205,7 +221,10 @@ class ProductBase(ABC):
             assert time_col in time_cols
             time_col_level = time_cols.index(time_col)
             if time_range is None:
-                return data[target_cols]
+                if copy:
+                    return data[target_cols].copy()
+                else:
+                    return data[target_cols]
             if not isinstance(time_range, (list, tuple)):
                 time_range = [time_range]
             assert len(time_range) <= 2 and len(time_range) > 0
@@ -219,7 +238,10 @@ class ProductBase(ABC):
             if _tr[0] > _tr[1]:
                 _tr[1], _tr[0] = _tr[0], _tr[1]
             mask = (data.index.get_level_values(time_col_level) >= _tr[0]) & (data.index.get_level_values(time_col_level) <= _tr[1])
-            return pd.DataFrame(data.loc[mask, target_cols])
+            if copy:
+                return pd.DataFrame(data.loc[mask, target_cols]).copy()
+            else:
+                return pd.DataFrame(data.loc[mask, target_cols])
     
     def set_category_attr_name_as_default(self):
         self.category_attr_name = self._default_category_attr_name
@@ -237,11 +259,11 @@ class ProductBase(ABC):
     def get_default_category(self) -> str:
         return str(self._get_attr_nested(self._default_category_attr_name))
 
-class FuturesContract(ProductBase):
+class FuturesContract(Product):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None):
         super().__init__(name, point_value, currency)
 
-class Futures(ProductBase):
+class Futures(Product):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  mappings_path: Optional[str] = None, data_path: Optional[str] = None,
                  FuturesContractClass: type = FuturesContract):
@@ -303,19 +325,22 @@ class Futures(ProductBase):
             col_name = self.get_col_name(col_name)
         return col_name.endswith(self.get_col_name(DataColumn.ADJUST_SUFFIX))
 
-    def adjust_cols(self, data_freq: Any, price_cols: List[DataColumn|str]|DataColumn|str):
+    def adjust_cols(self, data_freq: Any, price_cols: List[DataColumn|str]|DataColumn|str, copy: bool = True) -> pd.DataFrame:
         if not isinstance(price_cols, list):
             price_cols = [price_cols]
-        price_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in price_cols]
+        price_cols = list(set([self.get_col_name(col) if isinstance(col, DataColumn) else col for col in price_cols]))
         data_freq = self._process_data_freq(data_freq)
         adjust_cols = [self.get_col_name_adjusted(col) for col in price_cols]
-        df = self.get_data(data_freq)
+        df = self.get_data(data_freq, copy=False)
         if any(col not in df.columns for col in adjust_cols):
             assert self.get_col_name(DataColumn.ADJUSTMENT_MUL) in df.columns
             assert self.get_col_name(DataColumn.ADJUSTMENT_ADD) in df.columns
             for col, col_adj in zip(price_cols, adjust_cols):
                 df[col_adj] = df[col] * df[self.get_col_name(DataColumn.ADJUSTMENT_MUL)] \
                     + df[self.get_col_name(DataColumn.ADJUSTMENT_ADD)]
+        if copy:
+            df = df.copy()
+        return df
 
 # class PortfolioBackTester:
 #     def __init__(self, start_date: Optional[datetime|str] = None, end_date: Optional[datetime|str] = None,

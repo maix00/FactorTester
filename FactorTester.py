@@ -6,7 +6,7 @@ import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
-from Products import DataColumn, Futures, ProductBase, DataFreq
+from Products import DataColumn, Futures, Product, DataFreq, UniqueObject
 from CNFutures import get_all_products
 import logging
 
@@ -66,7 +66,27 @@ def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     tester = FactorTester(products=products, time_range=time_range)
     return tester
 
-class Factor(ProductBase):
+class FactorFreq(Enum):
+    MIN1 = pd.Timedelta('1min')
+    MIN5 = pd.Timedelta('5min')
+    MIN10 = pd.Timedelta('10min')
+    MIN15 = pd.Timedelta('15min')
+    MIN20 = pd.Timedelta('20min')
+    MIN30 = pd.Timedelta('30min')
+    HOUR1 = pd.Timedelta('1hour')
+    HOUR2 = pd.Timedelta('2hour')
+    HOUR3 = pd.Timedelta('3hour')
+    END_PERIOD = None
+    END_SESSION = None
+    END_DAY = None
+    END_WEEK = None
+    END_MONTH = None
+    END_QUARTER = None
+    END_HALF_YEAR = None
+    END_YEAR = None
+    AT_EVENT = None
+
+class Factor(UniqueObject):
     def __init__(self, name: str, func: Callable[..., pd.DataFrame],
                  freq: Any, params: Dict[str, Any]):
         super().__init__(name=name)
@@ -74,16 +94,41 @@ class Factor(ProductBase):
         self.freq = freq
         self.params = params
         self.table: pd.DataFrame = pd.DataFrame()
+        self.products: Set[Product] = set()
+        self.returns: pd.DataFrame = pd.DataFrame()
         self.end_market_signal = False
         self.ic_series: pd.Series = pd.Series()
         self.ic_stats: pd.Series = pd.Series()
         self.report: pd.DataFrame = pd.DataFrame()
 
+    def _set_products(self) -> Set[Product]:
+        if not self.table.empty:
+            assert all(isinstance(col, Product) for col in self.table.columns)
+            self.products = set([col for col in self.table.columns if isinstance(col, Product)])
+        return self.products
+
+    def _calc_freq(self) -> FactorFreq:
+        if self.table.empty:
+            raise ValueError("Cannot calculate frequency without table.")
+        if not self.products:
+            self._set_products()
+        if not self.products:
+            raise ValueError("Cannot calculate frequency without products.")
+        if not isinstance(self.table.index, pd.MultiIndex):
+            series = self.table.index.to_series()
+        else:
+            idx_lvls = len(self.table.index.names)
+            series = self.table.index.get_level_values(idx_lvls-1).to_series()
+        diffs = series.diff().dropna()
+        day_dividable = all(diff.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 for diff in diffs)
+        return FactorFreq.AT_EVENT
+
     def calc(self, products: Any) -> pd.DataFrame:
-        if isinstance(products, ProductBase):
+        if isinstance(products, Product):
             products = [products]
         products = list(products)
         self.table = self.func(products)
+        self._set_products()
         for col in self.table.columns:
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
@@ -104,7 +149,7 @@ class FactorFamily:
         self.set_default_params()
         self.freq = None
     
-    def func(self, products: Sequence[ProductBase], *args, **kwargs) -> pd.DataFrame:
+    def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def set_default_params(self, **kwargs):
@@ -162,7 +207,7 @@ class FactorFamily:
         tester.calc_factor(factors)
         tester.calc_ic(return_price_cols=price_cols)
         
-        for factor in tqdm(factors, desc=f"Ploting {n_groups}-Groups"):
+        for factor in factors:
             
             _, _, report_df = tester.test_by_group(factor, return_price_cols=price_cols,
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
@@ -194,7 +239,7 @@ class FactorFamily:
             factor_table.to_csv(factor_cache_path, index=False)
         
 class FactorTester:
-    def __init__(self, products: Sequence[ProductBase],
+    def __init__(self, products: Sequence[Product],
                  time_range: Optional[Tuple] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
@@ -226,7 +271,7 @@ class FactorTester:
         self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
         self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
-    def sift_product(self, sift_func: Callable[[ProductBase], bool]):
+    def sift_product(self, sift_func: Callable[[Product], bool]):
         new_products = set()
         for product in self.products:
             if sift_func(product):
@@ -249,25 +294,27 @@ class FactorTester:
     def sift_product_by_empty_data(self):
         new_products = set()
         for product in self.products:
-            df = product.get_some_data()
+            df = product.get_some_data(copy=False)
             if not df.empty and max(df[product.get_col_name(DataColumn.VOLUME)]) > 0:
                 new_products.add(product)
         self.products = new_products
         self.sift_product_by_empty_data_bool = True
 
     def sift_product_by_volumes(self, ratio: Optional[float] = None, time_col: Optional[str] = None,
-                                time_range: Optional[Any] = None) -> Set[ProductBase]:
+                                time_range: Optional[Any] = None) -> Set[Product]:
         if ratio is None:
             return self.products
         if not self.sift_product_by_empty_data_bool:
             self.sift_product_by_empty_data()
         results = {}
         for product in self.products:
-            results[product] = product.get_slices(target_cols=DataColumn.VOLUME, time_col=time_col, time_range=time_range).sum().values
+            results[product] = product.get_slices(target_cols=DataColumn.VOLUME, 
+                                                  time_col=time_col, time_range=time_range,
+                                                  copy=False).sum().values
         sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
         return set(sorted_products[:int(len(sorted_products) * ratio)])
 
-    def calc_return_by_factor(self, factor: Factor, return_freq: Any, 
+    def calc_return_by_factor(self, factor: Factor, return_freq: Any, next_return: bool = True,
                               price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
                             ) -> pd.DataFrame:
         
@@ -276,7 +323,7 @@ class FactorTester:
         return_freq = pd.Timedelta(return_freq)
         assert return_freq <= factor.freq
         for product in factor.table.columns:
-            assert isinstance(product, ProductBase)
+            assert isinstance(product, Product)
             PC = price_cols
             if isinstance(product, Futures):
                 if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
@@ -298,19 +345,23 @@ class FactorTester:
                 [_f for _f in time_cols_mapping.keys() if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
                 key=lambda x: x.value)[-1]
             time_col = time_cols_mapping[time_col_freq]
-            df = product.get_data(data_freq)
             if isinstance(product, Futures):
+                df = product.get_data(data_freq, copy=False)
+                cols = []
                 for _, col in PC.value:
                     if product.check_col_is_adjusted(col) and col not in df.columns:
-                        product.adjust_cols(data_freq, product.get_col_name_nonadjusted(col))
+                        cols.append(product.get_col_name_nonadjusted(col))
+                df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
+            else:
+                df = product.get_data(data_freq)
             df_grouped = df.groupby(time_col)
             period = int(return_freq.total_seconds() / time_col_freq.value.total_seconds())
-            offset = 0
             if PC.value[0][0] == 'first':
                 df = df_grouped.first()
-                offset = -1
+                offset = -1 if next_return else 0
             else:
                 df = df_grouped.last()
+                offset = 1 if not next_return else 0
             df = df[product.get_col_name(PC.value[0][1])].pct_change(periods=period).shift(-period+offset)
             idx_loc = factor.table.index.intersection(df.index)
             returns[product] = df.loc[idx_loc]
@@ -392,7 +443,7 @@ class FactorTester:
                       return_freq: Optional[str|pd.Timedelta] = None,
                       plot_n_group_list: Optional[List[int]] = None,
                       sift_volume_ratio: Optional[float] = None) -> \
-        Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
+        Tuple[Dict[str, Dict[str, List[Product]]], Dict[str, Dict[str, float]], pd.DataFrame]:
 
         factors = [factors] if isinstance(factors, Factor) else \
             (factors if factors is not None else self.factors)
@@ -413,7 +464,7 @@ class FactorTester:
             returns = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
                                             price_cols=return_price_cols)
             
-            for dt, row in factor.table.iterrows():
+            for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
                 sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
                 sorted_products = row.dropna().sort_values(ascending=False)
                 sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
