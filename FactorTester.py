@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 import itertools
+from matplotlib import units
 import pandas as pd
 import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
@@ -208,15 +209,12 @@ ReturnFreq = Parameter(
     name = '$RF',
     default_value = None,
     check_in_space = lambda x: x is None or pd.Timedelta(x) > pd.Timedelta(0),
-    get_value_name = lambda x: 'N' if x is None else \
-        (lambda in_days: (str(in_days) + 'd' if in_days >= 1 else '') + \
-            (lambda in_hours: (str(in_hours) + 'h' if in_hours >= 1 else '') + \
-                (lambda in_minutes: (str(in_minutes) + 'm' if in_minutes >= 1 else '') + \
-                    (lambda in_seconds: (str(in_seconds) + 's' if in_seconds >= 1 else ''))
-                    (int((pd.Timedelta(x).total_seconds() - in_minutes * 60 - in_hours * 3600 - in_days * 86400) / pd.Timedelta('1 second').total_seconds()))
-                )(int((pd.Timedelta(x).total_seconds() - in_hours * 3600 - in_days * 86400) / pd.Timedelta('1 minute').total_seconds()))
-            )(int((pd.Timedelta(x).total_seconds() - in_days * 86400) / pd.Timedelta('1 hour').total_seconds()))
-        )(int(pd.Timedelta(x).total_seconds() / pd.Timedelta('1 day').total_seconds()))
+    get_value_name = lambda x: 'N' if x is None else (
+        (c := pd.Timedelta(x).components) and
+        (units := {'days': 'd', 'hours': 'h', 'minutes': 'm', 'seconds': 's', 
+                   'milliseconds': 'ms', 'microseconds': 'us', 'nanoseconds': 'ns'}) and
+        ''.join(f"{v}{units[k]}" for k, v in c._asdict().items() if v > 0) or 'N'
+    )
 )
     
 if __name__ == '__main__':
