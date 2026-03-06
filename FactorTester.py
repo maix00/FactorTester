@@ -66,25 +66,13 @@ def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     tester = FactorTester(products=products, time_range=time_range)
     return tester
 
-class FactorFreq(Enum):
-    MIN1 = pd.Timedelta('1min')
-    MIN5 = pd.Timedelta('5min')
-    MIN10 = pd.Timedelta('10min')
-    MIN15 = pd.Timedelta('15min')
-    MIN20 = pd.Timedelta('20min')
-    MIN30 = pd.Timedelta('30min')
-    HOUR1 = pd.Timedelta('1hour')
-    HOUR2 = pd.Timedelta('2hour')
-    HOUR3 = pd.Timedelta('3hour')
-    END_PERIOD = None
-    END_SESSION = None
-    END_DAY = None
-    END_WEEK = None
-    END_MONTH = None
-    END_QUARTER = None
-    END_HALF_YEAR = None
-    END_YEAR = None
-    AT_EVENT = None
+class FactorFreqType(Enum):
+    IN_MINS = 0
+    AT_EVENT = 1
+
+class EventType(Enum):
+    AMID_SESSION = 0
+    END_PERIOD = 1
 
 class Factor(UniqueObject):
     def __init__(self, name: str, func: Callable[..., pd.DataFrame],
@@ -107,7 +95,7 @@ class Factor(UniqueObject):
             self.products = set([col for col in self.table.columns if isinstance(col, Product)])
         return self.products
 
-    def _calc_freq(self) -> FactorFreq:
+    def _calc_freq(self) -> FactorFreqType:
         if self.table.empty:
             raise ValueError("Cannot calculate frequency without table.")
         if not self.products:
@@ -121,7 +109,7 @@ class Factor(UniqueObject):
             series = self.table.index.get_level_values(idx_lvls-1).to_series()
         diffs = series.diff().dropna()
         day_dividable = all(diff.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 for diff in diffs)
-        return FactorFreq.AT_EVENT
+        return FactorFreqType.AT_EVENT
 
     def calc(self, products: Any) -> pd.DataFrame:
         if isinstance(products, Product):

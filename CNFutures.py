@@ -91,7 +91,7 @@ def get_codes_by_category(category) -> list[str]:
 
 def get_categories_with_codes() -> dict[str, list[str]]:
     """返回所有类别及其对应的代码的dict"""
-    return _data.groupby(category_col_name)[code_col_name].apply(list).to_dict()
+    return _data.groupby(category_col_name)[code_col_name].apply(list).to_dict()  # type: ignore
 
 def check_data_files():
     """检查数据文件是否与代码表中的品种匹配"""
@@ -126,13 +126,13 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
                 if data_path_min in file_list_min:
                     product.set_data_path(data_freq='1min', data_path=data_path_min)
                     product.set_time_cols_mapping('1min', {'1min': 'trade_time', '1day': 'trading_day'})
-                    product.set_data_cols_mapping(DataColumnMapping)
+                    product.set_data_cols_mapping('1min', DataColumnMapping)
                 
                 data_path_day = os.path.join(data_dir_day, name + '.' + data_type)
                 if data_path_day in file_list_day:
                     product.set_data_path(data_freq='1day', data_path=data_path_day)
                     product.set_time_cols_mapping('1day', {'1day': 'trading_day'})
-                    product.set_data_cols_mapping(DataColumnMapping)
+                    product.set_data_cols_mapping('1day', DataColumnMapping)
 
                 products.append(product)
         categories_with_products[category] = products

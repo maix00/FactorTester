@@ -93,8 +93,9 @@ class Product(UniqueObject):
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
             self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
-            self.data_cols_mapping: Dict[DataColumn, str] = {}
+            self.data_cols_mapping: Dict[DataFreq, Dict[DataColumn, str]] = {}
             self.sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]] = {}
+            self.recent_data_freq: Optional[DataFreq] = None
 
     def set_sessions(self, sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]]) -> None:
         self.sessions = sessions
@@ -103,12 +104,15 @@ class Product(UniqueObject):
         data_freq = self._process_data_freq(data_freq)
         self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
     
-    def set_data_cols_mapping(self, mapping: Dict[DataColumn, str]) -> None:
-        for k, v in mapping.items():
-            self.data_cols_mapping[k] = v
+    def set_data_cols_mapping(self, data_freq: Any, mapping: Dict[DataColumn, str]) -> None:
+        data_freq = self._process_data_freq(data_freq)
+        self.data_cols_mapping[data_freq] = {k: v for k, v in mapping.items()}
     
-    def get_col_name(self, data_col: DataColumn) -> str:
-        return self.data_cols_mapping[data_col]
+    def get_col_name(self, data_col: DataColumn, data_freq: Optional[Any] = None) -> str:
+        if data_freq is None:
+            data_freq = self.recent_data_freq
+        data_freq = self._process_data_freq(data_freq)
+        return self.data_cols_mapping[data_freq][data_col]
 
     @staticmethod
     def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
@@ -162,13 +166,16 @@ class Product(UniqueObject):
             self.load_data(data_freq)
             data = self.data.get(data_freq)
         data = pd.DataFrame() if data is None else data
+        self.recent_data_freq = data_freq
         if copy:
             data = data.copy()
         return data
     
     def get_some_data_freq(self) -> Optional[DataFreq]:
         if self.data_path:
-            return sorted(self.data_path.keys(), key=lambda x: x.value)[0]
+            data_freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
+            self.recent_data_freq = data_freq
+            return data_freq
         else:
             return None
     
@@ -181,6 +188,7 @@ class Product(UniqueObject):
             freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
             if not self.data:
                 self.load_data(freq, reload=True)
+            self.recent_data_freq = freq
             return self.get_data(freq, copy=copy)
         else:
             return pd.DataFrame()
