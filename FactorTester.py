@@ -414,7 +414,6 @@ class FactorTester:
                                             price_cols=return_price_cols)
             
             for dt, row in factor.table.iterrows():
-                dt_str = dt
                 sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
                 sorted_products = row.dropna().sort_values(ascending=False)
                 sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
@@ -429,13 +428,13 @@ class FactorTester:
                     # Fill groups from bottom to top (ascending order of factor values)
                     for i, group_products in enumerate(split):
                         group_idx = n_groups - 1 - i  # Reverse order: bottom group first
-                        groups[group_names[group_idx]][dt_str] = list(group_products)
-                        returns_groups[group_names[group_idx]][dt_str] = np.mean(np.asarray(returns.loc[dt_str][group_products].values, dtype=float))
+                        groups[group_names[group_idx]][dt] = list(group_products)
+                        returns_groups[group_names[group_idx]][dt] = np.mean(np.asarray(returns.loc[dt][group_products].values, dtype=float))
                 
                 # Fill remaining groups (if n < n_groups) with empty lists
                 for i in range(min(n, n_groups), n_groups):
-                    groups[group_names[i]][dt_str] = []
-                    returns_groups[group_names[i]][dt_str] = np.nan
+                    groups[group_names[i]][dt] = []
+                    returns_groups[group_names[i]][dt] = np.nan
 
             report_groups = {}
             for name in group_names:
