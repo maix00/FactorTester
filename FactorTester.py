@@ -1,7 +1,6 @@
 from datetime import datetime
 from enum import Enum
 import itertools
-from matplotlib import units
 import pandas as pd
 import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
@@ -130,7 +129,8 @@ class Factor(UniqueObject):
                     PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
             all_f = product.get_available_freqs()
             if self.freq_type == FactorFreqType.AT_EVENT \
-                and self.freq == pd.Timedelta('1day') \
+                and self.freq is not None \
+                and self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 \
                 and DataFreq.DAY1 in all_f \
                 and return_freq is not None \
                 and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
