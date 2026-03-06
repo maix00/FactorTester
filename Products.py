@@ -96,9 +96,6 @@ class Product(UniqueObject):
             self.data_cols_mapping: Dict[DataFreq, Dict[DataColumn, str]] = {}
             self.sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]] = {}
             self.recent_data_freq: Optional[DataFreq] = None
-
-    def set_sessions(self, sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]]) -> None:
-        self.sessions = sessions
     
     def set_time_cols_mapping(self, data_freq: Any, mapping: Dict[Any, str]) -> None:
         data_freq = self._process_data_freq(data_freq)
@@ -180,7 +177,8 @@ class Product(UniqueObject):
             return None
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
-        if data_freq is not None:
+        if data_freq is not None or self.recent_data_freq is not None:
+            data_freq = data_freq if data_freq is not None else self.recent_data_freq
             df = self.get_data(data_freq, copy=copy)
             if df is not None:
                 return df
@@ -199,20 +197,24 @@ class Product(UniqueObject):
     def get_loaded_freqs(self) -> List[DataFreq]:
         return list(self.data.keys())
     
-    def get_slices(self, target_cols: DataColumn|List[DataColumn|str],
+    def get_slices(self, target_cols: Optional[DataColumn|List[DataColumn|str]] = None,
                    time_col: Optional[DataColumn|str] = None, time_range: Optional[Any] = None,
                    data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
         
+        if data_freq is None:
+            data_freq = self.get_some_data_freq()
+            assert data_freq is not None
+        data = self.get_some_data(data_freq, copy=False)
+
         if isinstance(target_cols, DataColumn):
             target_cols = [target_cols]
-        target_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in target_cols]
-        
-        data = self.get_some_data(data_freq, copy=False)
+        if target_cols is None:
+            target_cols = list(data.columns)
+        else:
+            target_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in target_cols]
         if data.empty:
             return pd.DataFrame(columns=target_cols)
-        
-        data_freq = self.get_some_data_freq()
-        assert data_freq is not None
+
         time_cols_mapping = self.time_cols_mapping.get(data_freq)
         
         if time_cols_mapping is None:
