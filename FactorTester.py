@@ -164,9 +164,9 @@ class FactorFamily:
         
         for factor in tqdm(factors, desc=f"Ploting {n_groups}-Groups"):
             
-            _, _, report_df = tester.group_classes(factor, return_price_cols=price_cols,
+            _, _, report_df = tester.test_by_group(factor, return_price_cols=price_cols,
                 plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
-                start_date=default_plot_test_start_date, end_date=default_plot_test_end_date,
+                time_range=(default_plot_test_start_date, default_plot_test_end_date),
                 plot_show=False, sift_volume_ratio=sift_volume_ratio,
                 plot_remark_str=','.join(categories) if categories else None,
                 )
@@ -328,21 +328,25 @@ class FactorTester:
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
-    def calc_ic(self, return_price_cols: ReturnPriceCols,
+    def calc_ic(self, return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
+                factors: Optional[Factor|List[Factor]] = None,
                 return_freq: Optional[str|pd.Timedelta] = None,
-                start_date: Optional[str|pd.Timestamp] = None, 
-                end_date: Optional[str|pd.Timestamp] = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+                time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
+        factors = [factors] if isinstance(factors, Factor) else \
+            (factors if factors is not None else self.factors)
+        start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
+        end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
+        
         ic_series = {}
         ic_stats = {}
-        for factor in tqdm(self.factors, desc='Calculating IC'):
+
+        for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
             return_df = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
                                                    price_cols=return_price_cols)
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
-            start_date = pd.to_datetime(start_date) if start_date is not None else self.start_date
-            end_date = pd.to_datetime(end_date) if end_date is not None else self.end_date
             if start_date is not None:
                 dt_index = dt_index[dt_index >= start_date]
             if end_date is not None:
@@ -379,154 +383,154 @@ class FactorTester:
         })
         return stats_df
 
-    def group_classes(self, factor: Optional[Factor|List[Factor]] = None,
+    def test_by_group(self, factors: Optional[Factor|List[Factor]] = None,
                       return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
-                      n_groups: int = 5, 
+                      n_groups: int = 5, n_groups_name: Dict[int, str] = {},
+                      time_range: Optional[Tuple] = None,
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
-                      start_date: Optional[str|pd.Timestamp] = None, end_date: Optional[str|pd.Timestamp] = None,
                       return_freq: Optional[str|pd.Timedelta] = None,
                       plot_n_group_list: Optional[List[int]] = None,
                       sift_volume_ratio: Optional[float] = None) -> \
         Tuple[Dict[str, Dict[str, List[ProductBase]]], Dict[str, Dict[str, float]], pd.DataFrame]:
 
-        if factor is None:
-            factor = self.factors[0]
-        if isinstance(factor, list):
-            factor = factor[0]
-        
-        returns = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
-                                            price_cols=return_price_cols)
+        factors = [factors] if isinstance(factors, Factor) else \
+            (factors if factors is not None else self.factors)
 
-        # Plot adjustment for group numbers
-        plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
+        if plot_flag and plot_n_group_list is not None:
+            plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
 
-        group_names = ['group_' + str(i) for i in range(n_groups)]
-        group_names = group_names[::-1]
+        group_names = [n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)][::-1]
         groups = {name: {} for name in group_names}
         returns_groups = {name: {} for name in group_names}
 
-        start_date = pd.to_datetime(start_date) if start_date is not None else None
-        end_date = pd.to_datetime(end_date) if end_date is not None else None
+        start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
+        end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
         
-        for dt, row in factor.table.iterrows():
-            dt_str = dt
-            sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
-            sorted_products = row.dropna().sort_values(ascending=False)
-            sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
-            n = len(sorted_products)
-            idx = list(sorted_products.index)
+        report_df = pd.DataFrame()
+        for factor in factors:
+
+            returns = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
+                                            price_cols=return_price_cols)
             
-            # Split contracts into n_groups groups
-            if n > 0:
-                idx_array = np.asarray(idx)
-                split = np.array_split(idx_array, min(n, n_groups))
+            for dt, row in factor.table.iterrows():
+                dt_str = dt
+                sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
+                sorted_products = row.dropna().sort_values(ascending=False)
+                sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
+                n = len(sorted_products)
+                idx = list(sorted_products.index)
                 
-                # Fill groups from bottom to top (ascending order of factor values)
-                for i, group_products in enumerate(split):
-                    group_idx = n_groups - 1 - i  # Reverse order: bottom group first
-                    groups[group_names[group_idx]][dt_str] = list(group_products)
-                    returns_groups[group_names[group_idx]][dt_str] = np.mean(np.asarray(returns.loc[dt_str][group_products].values, dtype=float))
-            
-            # Fill remaining groups (if n < n_groups) with empty lists
-            for i in range(min(n, n_groups), n_groups):
-                groups[group_names[i]][dt_str] = []
-                returns_groups[group_names[i]][dt_str] = np.nan
+                # Split contracts into n_groups groups
+                if n > 0:
+                    idx_array = np.asarray(idx)
+                    split = np.array_split(idx_array, min(n, n_groups))
+                    
+                    # Fill groups from bottom to top (ascending order of factor values)
+                    for i, group_products in enumerate(split):
+                        group_idx = n_groups - 1 - i  # Reverse order: bottom group first
+                        groups[group_names[group_idx]][dt_str] = list(group_products)
+                        returns_groups[group_names[group_idx]][dt_str] = np.mean(np.asarray(returns.loc[dt_str][group_products].values, dtype=float))
+                
+                # Fill remaining groups (if n < n_groups) with empty lists
+                for i in range(min(n, n_groups), n_groups):
+                    groups[group_names[i]][dt_str] = []
+                    returns_groups[group_names[i]][dt_str] = np.nan
 
-        report_groups = {}
-        for name in group_names:
-
-            dates = list(returns_groups[name].keys()) if returns_groups[name] else []
-            test_dates = [date for date in dates if self.start_date <= date] if self.start_date else dates
-            test_dates = [date for date in test_dates if date <= self.end_date] if self.end_date else dates
-            dates = [date for date in dates if start_date <= date] if start_date else dates
-            dates = [date for date in dates if date <= end_date] if end_date else dates
-            
-            returns = [returns_groups[name][date] for date in dates]
-            returns_series = pd.Series(returns).dropna()
-            cumulative_returns = (1 + returns_series).cumprod()
-
-            test_returns = [returns_groups[name][date] for date in test_dates]
-            test_returns_series = pd.Series(test_returns).dropna()
-            test_cumulative_returns = (1 + test_returns_series).cumprod()
-
-            metrics = {
-
-            '(Test) Total Return': (test_cumulative_returns.iloc[-1] - 1) * 100 if len(test_cumulative_returns) > 0 else 0,
-            '(Test) Annual Return': ((test_cumulative_returns.iloc[-1]) ** (252 / len(test_cumulative_returns)) - 1) * 100 if len(test_cumulative_returns) > 1 else 0,
-            '(Test) Volatility': pd.Series(test_returns).std() * np.sqrt(252) * 100,
-            '(Test) Sharpe Ratio': (pd.Series(test_returns).mean() * 252) / (pd.Series(test_returns).std() * np.sqrt(252)) if pd.Series(test_returns).std() != 0 else 0,
-            '(Test) Max Drawdown': ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100 if len(test_cumulative_returns) > 0 else 0,
-            '(Test) Calmar Ratio': ((test_cumulative_returns.iloc[-1] ** (252 / len(test_cumulative_returns)) - 1) * 100) / (((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100) if ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() != 0 else 0,
-            '(Test) Win Rate': (pd.Series(test_returns) > 0).sum() / len(pd.Series(test_returns)) * 100 if len(pd.Series(test_returns)) > 0 else 0,
-            '(Test) Mean Return': pd.Series(test_returns).mean() * 100,
-            '(Test) Skewness': pd.Series(test_returns).skew(),
-            '(Test) Kurtosis': pd.Series(test_returns).kurtosis(),
-
-            'Total Return': (cumulative_returns.iloc[-1] - 1) * 100 if len(cumulative_returns) > 0 else 0,
-            'Annual Return': ((cumulative_returns.iloc[-1]) ** (252 / len(cumulative_returns)) - 1) * 100 if len(cumulative_returns) > 1 else 0,
-            'Volatility': pd.Series(returns).std() * np.sqrt(252) * 100,
-            'Sharpe Ratio': (pd.Series(returns).mean() * 252) / (pd.Series(returns).std() * np.sqrt(252)) if pd.Series(returns).std() != 0 else 0,
-            'Max Drawdown': ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100 if len(cumulative_returns) > 0 else 0,
-            'Calmar Ratio': ((cumulative_returns.iloc[-1] ** (252 / len(cumulative_returns)) - 1) * 100) / (((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100) if ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() != 0 else 0,
-            'Win Rate': (pd.Series(returns) > 0).sum() / len(pd.Series(returns)) * 100 if len(pd.Series(returns)) > 0 else 0,
-            'Mean Return': pd.Series(returns).mean() * 100,
-            'Skewness': pd.Series(returns).skew(),
-            'Kurtosis': pd.Series(returns).kurtosis(),
-
-            }
-
-            name = int(name.split('_')[-1])
-            report_groups[name] = pd.Series(metrics)
-        
-        report_df = pd.DataFrame(report_groups).T.sort_index()  # Convert to DataFrame, transpose, and sort by name
-        if not plot_flag or (plot_flag and plot_show):
-            with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-                print("Group Performance Summary:\n", report_df)
-
-        if plot_flag:
-            import matplotlib.pyplot as plt
-            # Plot average open returns per group over time
-            plt.figure(figsize=(12, 6))
-            start_date = start_date if start_date is not None else self.start_date
-            end_date = end_date if end_date is not None else self.end_date
-            # print(start_date, end_date)
-            dates = []  # Initialize dates as an empty list
+            report_groups = {}
             for name in group_names:
-                if plot_n_group_list is not None and name.split('_')[-1] not in [str(n) for n in plot_n_group_list]:
-                    continue
+
                 dates = list(returns_groups[name].keys()) if returns_groups[name] else []
+                test_dates = [date for date in dates if self.start_date <= date] if self.start_date else dates
+                test_dates = [date for date in test_dates if date <= self.end_date] if self.end_date else dates
                 dates = [date for date in dates if start_date <= date] if start_date else dates
                 dates = [date for date in dates if date <= end_date] if end_date else dates
+                
                 returns = [returns_groups[name][date] for date in dates]
-                cumulative_returns = []
-                prev_value = 10000
-                for ret in returns:
-                    if not np.isnan(ret):
-                        prev_value = prev_value * (1 + ret)
-                    cumulative_returns.append(prev_value)
-                plt.plot([str(date) for date in dates], cumulative_returns, label=name)
-            plt.xlabel('Date')
-            plt.ylabel('Average Next Day Open Return')
-            if plot_remark_str:
-                plt.title(f'Average Open Return: {factor.name} - {plot_remark_str}')
-            else:
-                plt.title(f'Average Open Return: {factor.name}')
-            plt.rcParams['font.sans-serif'] = ['Kaiti SC']
-            plt.legend()
-            # Only show every nth tick to reduce crowding
-            n_ticks = 10
-            assert len(dates) > 0, "No dates available for plotting."
-            tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
-            plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
-            plt.tight_layout()
-            if save_plot:
-                factor_stem = factor.name.split('|')[0]
-                figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
-                if not os.path.exists(figs_path):
-                    os.makedirs(figs_path)
-                plt.savefig(os.path.join(figs_path, f'{factor.name}_{start_date}_{end_date}.png'))
-            if plot_show:
-                plt.show()
+                returns_series = pd.Series(returns).dropna()
+                cumulative_returns = (1 + returns_series).cumprod()
+
+                test_returns = [returns_groups[name][date] for date in test_dates]
+                test_returns_series = pd.Series(test_returns).dropna()
+                test_cumulative_returns = (1 + test_returns_series).cumprod()
+
+                metrics = {
+
+                '(Test) Total Return': (test_cumulative_returns.iloc[-1] - 1) * 100 if len(test_cumulative_returns) > 0 else 0,
+                '(Test) Annual Return': ((test_cumulative_returns.iloc[-1]) ** (252 / len(test_cumulative_returns)) - 1) * 100 if len(test_cumulative_returns) > 1 else 0,
+                '(Test) Volatility': pd.Series(test_returns).std() * np.sqrt(252) * 100,
+                '(Test) Sharpe Ratio': (pd.Series(test_returns).mean() * 252) / (pd.Series(test_returns).std() * np.sqrt(252)) if pd.Series(test_returns).std() != 0 else 0,
+                '(Test) Max Drawdown': ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100 if len(test_cumulative_returns) > 0 else 0,
+                '(Test) Calmar Ratio': ((test_cumulative_returns.iloc[-1] ** (252 / len(test_cumulative_returns)) - 1) * 100) / (((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100) if ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() != 0 else 0,
+                '(Test) Win Rate': (pd.Series(test_returns) > 0).sum() / len(pd.Series(test_returns)) * 100 if len(pd.Series(test_returns)) > 0 else 0,
+                '(Test) Mean Return': pd.Series(test_returns).mean() * 100,
+                '(Test) Skewness': pd.Series(test_returns).skew(),
+                '(Test) Kurtosis': pd.Series(test_returns).kurtosis(),
+
+                'Total Return': (cumulative_returns.iloc[-1] - 1) * 100 if len(cumulative_returns) > 0 else 0,
+                'Annual Return': ((cumulative_returns.iloc[-1]) ** (252 / len(cumulative_returns)) - 1) * 100 if len(cumulative_returns) > 1 else 0,
+                'Volatility': pd.Series(returns).std() * np.sqrt(252) * 100,
+                'Sharpe Ratio': (pd.Series(returns).mean() * 252) / (pd.Series(returns).std() * np.sqrt(252)) if pd.Series(returns).std() != 0 else 0,
+                'Max Drawdown': ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100 if len(cumulative_returns) > 0 else 0,
+                'Calmar Ratio': ((cumulative_returns.iloc[-1] ** (252 / len(cumulative_returns)) - 1) * 100) / (((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100) if ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() != 0 else 0,
+                'Win Rate': (pd.Series(returns) > 0).sum() / len(pd.Series(returns)) * 100 if len(pd.Series(returns)) > 0 else 0,
+                'Mean Return': pd.Series(returns).mean() * 100,
+                'Skewness': pd.Series(returns).skew(),
+                'Kurtosis': pd.Series(returns).kurtosis(),
+
+                }
+
+                name = int(name.split('_')[-1])
+                report_groups[name] = pd.Series(metrics)
+            
+            report_df = pd.DataFrame(report_groups).T.sort_index()  # Convert to DataFrame, transpose, and sort by name
+            if not plot_flag or (plot_flag and plot_show):
+                with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                    print("Group Performance Summary:\n", report_df)
+
+            if plot_flag:
+                import matplotlib.pyplot as plt
+                # Plot average open returns per group over time
+                plt.figure(figsize=(12, 6))
+                start_date = start_date if start_date is not None else self.start_date
+                end_date = end_date if end_date is not None else self.end_date
+                # print(start_date, end_date)
+                dates = []  # Initialize dates as an empty list
+                for name in group_names:
+                    if plot_n_group_list is not None and name.split('_')[-1] not in [str(n) for n in plot_n_group_list]:
+                        continue
+                    dates = list(returns_groups[name].keys()) if returns_groups[name] else []
+                    dates = [date for date in dates if start_date <= date] if start_date else dates
+                    dates = [date for date in dates if date <= end_date] if end_date else dates
+                    returns = [returns_groups[name][date] for date in dates]
+                    cumulative_returns = []
+                    prev_value = 10000
+                    for ret in returns:
+                        if not np.isnan(ret):
+                            prev_value = prev_value * (1 + ret)
+                        cumulative_returns.append(prev_value)
+                    plt.plot([str(date) for date in dates], cumulative_returns, label=name)
+                plt.xlabel('Date')
+                plt.ylabel('Average Next Day Open Return')
+                if plot_remark_str:
+                    plt.title(f'Average Open Return: {factor.name} - {plot_remark_str}')
+                else:
+                    plt.title(f'Average Open Return: {factor.name}')
+                plt.rcParams['font.sans-serif'] = ['Kaiti SC']
+                plt.legend()
+                # Only show every nth tick to reduce crowding
+                n_ticks = 10
+                assert len(dates) > 0, "No dates available for plotting."
+                tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
+                plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
+                plt.tight_layout()
+                if save_plot:
+                    factor_stem = factor.name.split('|')[0]
+                    figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
+                    if not os.path.exists(figs_path):
+                        os.makedirs(figs_path)
+                    plt.savefig(os.path.join(figs_path, f'{factor.name}_{start_date}_{end_date}.png'))
+                if plot_show:
+                    plt.show()
 
         return groups, returns_groups, report_df
