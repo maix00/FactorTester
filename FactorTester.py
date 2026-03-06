@@ -26,39 +26,6 @@ class ReturnPriceCols(Enum):
     THIS_CLOSE_TO_CLOSE = (('last', DataColumn.CLOSE), ('last', DataColumn.CLOSE))
     THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
 
-PriceColumnMapping = {
-    'C': 'close_price',
-    'O': 'open_price',
-    'H': 'highest_price',
-    'L': 'lowest_price',
-    'CA': 'close_price_adjusted',
-    'OA': 'open_price_adjusted',
-    'HA': 'highest_price_adjusted',
-    'LA': 'lowest_price_adjusted',
-    'V': 'vwap',
-    'T': 'twap',
-}
-
-OtherColumnMapping = {
-    'V': 'volume',
-    'A': 'amount',
-    'T': 'turnover',
-    'P': 'premium',
-    'D': 'dividend',
-    'R': 'right',
-    'E': 'exchange_rate',
-    'S': 'spread',
-    'M': 'mid_price',
-    'I': 'implied_volatility',
-    'B': 'bid_price',
-    'A': 'ask_price',
-    'BW': 'bid_width',
-    'AW': 'ask_width',
-    'BW/A': 'bid_ask_width_ratio',
-    'B/A': 'bid_ask_ratio',
-    'B/A/M': 'bid_ask_mid_ratio'
-}
-
 import inspect
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
@@ -79,6 +46,7 @@ class Factor(UniqueObject):
     def __init__(self, name: str, func: Callable[..., pd.DataFrame], params: Dict[str, Any]):
         super().__init__(name=name)
         self.func = func
+        self.min_gap: Optional[pd.Timedelta] = None
         self.freq: Optional[pd.Timedelta] = None
         self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
         self.params = params
@@ -108,20 +76,21 @@ class Factor(UniqueObject):
             idx_lvls = len(self.table.index.names)
             series = self.table.index.get_level_values(idx_lvls-1).to_series()
         diffs = series.diff().dropna()
+        minimum = diffs.min()
+        self.min_gap = minimum
         day_dividable = all(diff.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 for diff in diffs)
         end_of_day = all(ts.hour == 0 and ts.minute == 0 and ts.second == 0 for ts in series.dropna())
         if day_dividable and end_of_day:
             return FactorFreqType.AT_EVENT, pd.Timedelta('1day')
         end_of_session = []
         for i in range(min(5, len(series))):
-            end = all(not product.if_time_is_in_data(list(series)[i] + pd.Timedelta('1min')) for product in self.products) 
-            start = all(not product.if_time_is_in_data(list(series)[i] - pd.Timedelta('1min')) for product in self.products)
+            end = all(not product.if_time_is_in_data(list(series)[i] + product.get_recent_data_freq().value) for product in self.products) 
+            start = all(not product.if_time_is_in_data(list(series)[i] - product.get_recent_data_freq().value) for product in self.products)
             end_of_session.append(end or start)
         end_of_session = all(end_of_session)
         if day_dividable or end_of_day or end_of_session:
             return FactorFreqType.AT_EVENT, None
         mode = diffs.mode()[0]
-        minimum = diffs.min()
         if mode != minimum:
             return FactorFreqType.AT_EVENT, None
         return FactorFreqType.CONSTANT, minimum
@@ -138,41 +107,200 @@ class Factor(UniqueObject):
         self.freq_type, self.freq = self._calc_freq()
         return self.table
     
+    def calc_returns(self, next_return: bool = True,
+                     price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+        returns = {}
+        changeable_return_freq = self.params.get('$RF') is None and self.freq is None
+        return_freq = self.params.get('$RF') or self.freq
+        if not changeable_return_freq:
+            assert return_freq is not None
+            return_freq = pd.Timedelta(return_freq)
+            assert return_freq <= (self.freq if self.freq is not None else \
+                self.min_gap if self.min_gap is not None else return_freq)
+        if changeable_return_freq:
+            price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
+        for product in self.table.columns:
+            assert isinstance(product, Product)
+            PC = price_cols
+            if isinstance(product, Futures):
+                if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
+                    PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
+                elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
+                    PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
+            all_f = product.get_available_freqs()
+            if self.freq_type == FactorFreqType.AT_EVENT \
+                and self.freq == pd.Timedelta('1day') \
+                and DataFreq.DAY1 in all_f \
+                and return_freq is not None \
+                and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
+                data_freq = DataFreq.DAY1
+            else:
+                assert self.min_gap is not None
+                assert len(all_f) > 0
+                data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
+                                    and self.min_gap.total_seconds() % _f.value.total_seconds() == 0], 
+                                    key=lambda x: x.value)[-1]
+            if not changeable_return_freq:
+                assert return_freq is not None
+                assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
+            time_cols_mapping = product.time_cols_mapping[data_freq]
+            if isinstance(product, Futures):
+                df = product.get_data(data_freq, copy=False)
+                cols = []
+                for _, col in PC.value:
+                    if product.check_col_is_adjusted(col) and col not in df.columns:
+                        cols.append(product.get_col_name_nonadjusted(col))
+                df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
+            else:
+                df = product.get_data(data_freq)
+            if not changeable_return_freq:
+                assert return_freq is not None
+                time_col_freq = sorted(
+                    [_f for _f in time_cols_mapping.keys() 
+                        if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
+                    key=lambda x: x.value)[-1]
+                time_col = time_cols_mapping[time_col_freq]
+                df_grouped = df.groupby(time_col)
+                period = int(return_freq.total_seconds() / time_col_freq.value.total_seconds())
+                if PC.value[0][0] == 'first':
+                    df = df_grouped.first()
+                    offset = -1 if next_return else 0
+                else:
+                    df = df_grouped.last()
+                    offset = 1 if not next_return else 0
+                df = df[product.get_col_name(PC.value[0][1])].pct_change(periods=period).shift(-period+offset)
+                idx_loc = self.table.index.intersection(df.index)
+                returns[product] = df.loc[idx_loc]
+            else:
+                assert PC.value[0][0] == 'first'
+                offset = -1 if next_return else 0
+                target_col = product.get_col_name(PC.value[0][1])
+                target_series = pd.Series(index=self.table.index, dtype=float)
+                pos = df.index.searchsorted(self.table.index, side='right')
+                valid = (pos < len(df.index)) & (np.concatenate(([True], pos[:-1] != pos[1:])))
+                if valid.any():
+                    indecies = self.table.index[valid]
+                    next_indecies = df.index[pos[valid]]
+                    valid_series = df.loc[next_indecies, target_col]
+                    return_series = valid_series.pct_change(periods=1).shift(offset)
+                    target_series.loc[indecies] = return_series.values
+                returns[product] = target_series
+        self.returns = pd.DataFrame(returns)
+        return self.returns
+    
+class Parameter(UniqueObject):
+    def __init__(self, name: str, default_value: Any,
+                 check_in_space: Callable[[Any], bool],
+                 get_value_name: Callable[[Any], str]):
+        self.abbrev = name
+        super().__init__(name = 'Parameter@' + name)
+        self.check_in_space = check_in_space
+        self.default_value = default_value
+        self.get_value_name = get_value_name
+
+    def set_default_value(self, value: Any) -> Parameter:
+        if not self.check_in_space(value):
+            raise ValueError(f"Invalid value for parameter {self.name}: {value}")
+        self.default_value = value
+        return self
+    
+ReturnFreq = Parameter(
+    name = '$RF',
+    default_value = None,
+    check_in_space = lambda x: x is None or pd.Timedelta(x) > pd.Timedelta(0),
+    get_value_name = lambda x: 'N' if x is None else \
+        (lambda in_days: (str(in_days) + 'd' if in_days >= 1 else '') + \
+            (lambda in_hours: (str(in_hours) + 'h' if in_hours >= 1 else '') + \
+                (lambda in_minutes: (str(in_minutes) + 'm' if in_minutes >= 1 else '') + \
+                    (lambda in_seconds: (str(in_seconds) + 's' if in_seconds >= 1 else ''))
+                    (int((pd.Timedelta(x).total_seconds() - in_minutes * 60 - in_hours * 3600 - in_days * 86400) / pd.Timedelta('1 second').total_seconds()))
+                )(int((pd.Timedelta(x).total_seconds() - in_hours * 3600 - in_days * 86400) / pd.Timedelta('1 minute').total_seconds()))
+            )(int((pd.Timedelta(x).total_seconds() - in_days * 86400) / pd.Timedelta('1 hour').total_seconds()))
+        )(int(pd.Timedelta(x).total_seconds() / pd.Timedelta('1 day').total_seconds()))
+)
+    
+if __name__ == '__main__':
+    print(ReturnFreq.get_value_name('2h45m10s11ms'))
+
+class FinRangeParam(Parameter):
+    def __init__(self, name: str, value_space: List[Any], 
+                 get_value_name: Optional[Callable[[Any], str]] = None):
+        super().__init__(
+            name = name,
+            default_value = value_space[0],
+            check_in_space = lambda x: x in value_space,
+            get_value_name = get_value_name if get_value_name else lambda x: str(x)
+        )
+        self.value_space = value_space
+
+class DataColumnParam(FinRangeParam):
+    def __init__(self, name: str):
+        super().__init__(
+            name = name,
+            value_space = [col for col in DataColumn],
+            get_value_name = lambda x: {col: col.value for col in DataColumn}.get(x, str(x))
+        )
+    
+    def col(self, col: DataColumn):
+        return self.get_value_name(col)
+
+if __name__ == '__main__':
+    C1 = DataColumnParam('C1')
+    print(C1.col(DataColumn.CLOSE))
+
+ReturnPriceColsParam = FinRangeParam(
+    name = '$RPC',
+    value_space = [rpc for rpc in ReturnPriceCols],
+    get_value_name = lambda x: {rpc: rpc.value for rpc in ReturnPriceCols}.get(x, str(x))
+)
+
 class FactorFamily:
-    params_space: Dict[str, List[Any]] = {}
+    params: List[Parameter] = [ReturnFreq]
+    additional_params: List[Parameter] = []
 
     def __init__(self, name_stem: Optional[str] = None):
         self.name_stem = name_stem if name_stem else self.__class__.__name__
+        for param in self.additional_params:
+            if param not in self.params:
+                self.params.append(param)
         self.set_default_params()
     
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def set_default_params(self, **kwargs):
-        self._params_list = [{key: self.params_space[key][0] for key in self.params_space.keys()}]
+        self._params_list = [{p.abbrev: p.default_value for p in self.params}]
+
+    def change_param_default_value(self, **kwargs):
+        self._check_in_space(**kwargs)
+        for key, value in kwargs.items():
+            param = next(p for p in self.params if p.abbrev == key)
+            param.default_value = value
 
     def clear_params(self):
         self._params_list = []
     
     def _check_in_space(self, **kwargs):
         for key in kwargs:
-            if key not in self.params_space:
-                raise KeyError(f"参数 '{key}' 不在定义的参数空间中")
-            if kwargs[key] not in self.params_space[key]:
-                raise ValueError(f"参数 '{key}' 的值 '{kwargs[key]}' 不在允许范围 {self.params_space[key]} 内")
+            if all(key != p.abbrev for p in self.params):
+                raise KeyError(f"参数 '{key}' 不在定义的参数列表中")
+            param = next(p for p in self.params if p.abbrev == key)
+            if not param.check_in_space(kwargs[key]):
+                raise ValueError(f"参数 '{key}' 的值 '{kwargs[key]}' 不在允许范围 \
+                    {param.value_space if isinstance(param, FinRangeParam) else 'Unkown Range'} 内")
             
     def add_params(self, **kwargs):
         self._check_in_space(**kwargs)
-        new_params = {key: kwargs[key] if key in kwargs else self.params_space[key][0] for key in self.params_space.keys()}
+        new_params = {p.abbrev: kwargs[p.abbrev] if p.abbrev in kwargs else p.default_value for p in self.params}
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
     def set_all_params(self):
-        all_combinations = list(itertools.product(*self.params_space.values()))
-        self._params_list = [dict(zip(self.params_space.keys(), combination)) for combination in all_combinations]
+        all_combinations = list(itertools.product(*[p.value_space if isinstance(p, FinRangeParam) else [p.default_value] for p in self.params]))
+        self._params_list = [dict(zip([p.abbrev for p in self.params], combination)) for combination in all_combinations]
 
     def get_name(self, **params):
-        params_str = '|'.join(f"{key}:{value}" for key, value in params.items())
+        params_str = '|'.join(f"{key}:{(next(p for p in self.params if p.abbrev == key)).get_value_name(value)}" for key, value in params.items())
         return f"{self.name_stem}|{params_str}" if params_str else self.name_stem
 
     def get_factors(self):
@@ -180,7 +308,8 @@ class FactorFamily:
         for params in self._params_list:
             factor_name = self.get_name(**params)
             factor_func = lambda products: self.func(products, **params)
-            factors.append(Factor(name=factor_name, func=factor_func, params=params))
+            factor = Factor(name=factor_name, func=factor_func, params=params)
+            factors.append(factor)
         return factors
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
@@ -309,59 +438,6 @@ class FactorTester:
                                                   copy=False).sum().values
         sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
         return set(sorted_products[:int(len(sorted_products) * ratio)])
-
-    def calc_return_by_factor(self, factor: Factor, return_freq: Any, next_return: bool = True,
-                              price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
-                            ) -> pd.DataFrame:
-        
-        returns = {}
-        assert factor.table is not None and factor.freq is not None
-        return_freq = pd.Timedelta(return_freq)
-        assert return_freq <= factor.freq
-        for product in factor.table.columns:
-            assert isinstance(product, Product)
-            PC = price_cols
-            if isinstance(product, Futures):
-                if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
-                    PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
-                elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
-                    PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
-            all_f = product.get_available_freqs()
-            if factor.freq_type == FactorFreqType.AT_EVENT and DataFreq.DAY1 in all_f \
-                and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
-                data_freq = DataFreq.DAY1
-            else:
-                assert len(all_f) > 0
-                data_freq = sorted([_f for _f in all_f if _f.value <= factor.freq \
-                                    and factor.freq.total_seconds() % _f.value.total_seconds() == 0], 
-                                    key=lambda x: x.value)[-1]
-            assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
-            time_cols_mapping = product.time_cols_mapping[data_freq]
-            time_col_freq = sorted(
-                [_f for _f in time_cols_mapping.keys() if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
-                key=lambda x: x.value)[-1]
-            time_col = time_cols_mapping[time_col_freq]
-            if isinstance(product, Futures):
-                df = product.get_data(data_freq, copy=False)
-                cols = []
-                for _, col in PC.value:
-                    if product.check_col_is_adjusted(col) and col not in df.columns:
-                        cols.append(product.get_col_name_nonadjusted(col))
-                df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
-            else:
-                df = product.get_data(data_freq)
-            df_grouped = df.groupby(time_col)
-            period = int(return_freq.total_seconds() / time_col_freq.value.total_seconds())
-            if PC.value[0][0] == 'first':
-                df = df_grouped.first()
-                offset = -1 if next_return else 0
-            else:
-                df = df_grouped.last()
-                offset = 1 if not next_return else 0
-            df = df[product.get_col_name(PC.value[0][1])].pct_change(periods=period).shift(-period+offset)
-            idx_loc = factor.table.index.intersection(df.index)
-            returns[product] = df.loc[idx_loc]
-        return pd.DataFrame(returns)
         
     def calc_factor(self, factors: Factor|List[Factor]):
         if isinstance(factors, Factor):
@@ -390,14 +466,13 @@ class FactorTester:
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            return_df = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
-                                                   price_cols=return_price_cols)
+            return_df = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
             if start_date is not None:
-                dt_index = dt_index[dt_index >= start_date]
+                dt_index = dt_index[[start_date <= (max(k) if not isinstance(k, pd.Timestamp) else k) for k in dt_index]]
             if end_date is not None:
-                dt_index = dt_index[dt_index <= end_date]
+                dt_index = dt_index[[(min(k) if not isinstance(k, pd.Timestamp) else k) <= end_date for k in dt_index]]
             ic = []
             coverage = []
             for dt in dt_index:
@@ -457,8 +532,7 @@ class FactorTester:
         report_df = pd.DataFrame()
         for factor in factors:
 
-            returns = self.calc_return_by_factor(factor, return_freq=return_freq if return_freq is not None else factor.freq,
-                                            price_cols=return_price_cols)
+            returns = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
             
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
                 sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
@@ -487,10 +561,10 @@ class FactorTester:
             for name in group_names:
 
                 dates = list(returns_groups[name].keys()) if returns_groups[name] else []
-                test_dates = [date for date in dates if self.start_date <= date] if self.start_date else dates
-                test_dates = [date for date in test_dates if date <= self.end_date] if self.end_date else dates
-                dates = [date for date in dates if start_date <= date] if start_date else dates
-                dates = [date for date in dates if date <= end_date] if end_date else dates
+                test_dates = [date for date in dates if self.start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if self.start_date else dates
+                test_dates = [date for date in test_dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= self.end_date] if self.end_date else dates
+                dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
+                dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
                 
                 returns = [returns_groups[name][date] for date in dates]
                 returns_series = pd.Series(returns).dropna()
@@ -546,8 +620,8 @@ class FactorTester:
                     if plot_n_group_list is not None and name.split('_')[-1] not in [str(n) for n in plot_n_group_list]:
                         continue
                     dates = list(returns_groups[name].keys()) if returns_groups[name] else []
-                    dates = [date for date in dates if start_date <= date] if start_date else dates
-                    dates = [date for date in dates if date <= end_date] if end_date else dates
+                    dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
+                    dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
                     returns = [returns_groups[name][date] for date in dates]
                     cumulative_returns = []
                     prev_value = 10000

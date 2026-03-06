@@ -17,29 +17,29 @@ class DataFreq(Enum):
     DAY1 = pd.Timedelta('1day')
 
 class DataColumn(Enum):
-    OPEN = 0
-    HIGH = 1
-    LOW = 2
-    CLOSE = 3
-    VOLUME = 4
-    TURNOVER = 5
-    OPEN_INTEREST = 6
-    TIME_COL_DAY = 7
-    TIME_COL_MIN = 8
-    TWAP = 9
-    VWAP = 10
-    SETTLEMENT_PRICE = 11
-    ADJUSTMENT_MUL = 12
-    ADJUSTMENT_ADD = 13
-    UPPER_LIMIT_PRICE = 14
-    LOWER_LIMIT_PRICE = 15
-    PRE_SETTLEMENT_PRICE = 16
-    OPEN_ADJUSTED = 17
-    HIGH_ADJUSTED = 18
-    LOW_ADJUSTED = 19
-    CLOSE_ADJUSTED = 20
-    TIME_COL = 21
-    ADJUST_SUFFIX = 22
+    OPEN = 'O'
+    HIGH = 'H'
+    LOW = 'L'
+    CLOSE = 'C'
+    VOLUME = 'V'
+    TURNOVER = 'TO'
+    OPEN_INTEREST = 'OI'
+    TIME_COL_DAY = 'TD'
+    TIME_COL_MIN = 'TM'
+    TWAP = 'TW'
+    VWAP = 'VW'
+    SETTLEMENT_PRICE = 'SP'
+    ADJUSTMENT_MUL = 'AM'
+    ADJUSTMENT_ADD = 'AA'
+    UPPER_LIMIT_PRICE = 'ULP'
+    LOWER_LIMIT_PRICE = 'LLP'
+    PRE_SETTLEMENT_PRICE = 'PSP'
+    OPEN_ADJUSTED = 'OA'
+    HIGH_ADJUSTED = 'HA'
+    LOW_ADJUSTED = 'LA'
+    CLOSE_ADJUSTED = 'CA'
+    TIME_COL = 'T'
+    ADJUST_SUFFIX = 'ADJ'
 
 class UniqueObject(ABC):
     _instances = WeakValueDictionary()
@@ -168,7 +168,14 @@ class Product(UniqueObject):
             data = data.copy()
         return data
     
+    def get_recent_data_freq(self) -> DataFreq:
+        data_freq = self.get_some_data_freq()
+        assert data_freq is not None, "No data frequency available"
+        return data_freq
+    
     def get_some_data_freq(self) -> Optional[DataFreq]:
+        if self.recent_data_freq is not None:
+            return self.recent_data_freq
         if self.data_path:
             data_freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
             self.recent_data_freq = data_freq
@@ -238,6 +245,8 @@ class Product(UniqueObject):
             if not isinstance(time_range, (list, tuple)):
                 time_range = [time_range]
             assert len(time_range) <= 2 and len(time_range) > 0
+            if any(isinstance(k, (list, tuple)) for k in time_range):
+                time_range = (k[-1] if isinstance(k, (list, tuple)) else k for k in time_range)
             _tr = {}
             for i, time in enumerate(time_range):
                 if not isinstance(time, pd.Timestamp):
@@ -245,8 +254,14 @@ class Product(UniqueObject):
                 _tr[i] = time
             if len(_tr) == 1:
                 _tr[1] = _tr[0]
-            if _tr[0] > _tr[1]:
-                _tr[1], _tr[0] = _tr[0], _tr[1]
+            reverse = _tr[0] > _tr[1]
+            try:
+                reverse = reverse.all()
+            except:
+                pass
+            finally:
+                if reverse:
+                    _tr[1], _tr[0] = _tr[0], _tr[1]
             mask = (data.index.get_level_values(time_col_level) >= _tr[0]) & (data.index.get_level_values(time_col_level) <= _tr[1])
             if copy:
                 return pd.DataFrame(data.loc[mask, target_cols]).copy()
