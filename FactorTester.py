@@ -170,13 +170,14 @@ class Factor(UniqueObject):
             data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
                                 and self.min_gap.total_seconds() % _f.value.total_seconds() == 0
                                 and (return_freq.total_seconds() % _f.value.total_seconds() == 0 
-                                    if return_freq is not None else True)], 
+                                    if return_freq is not None else True)
+                                and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
+                                    if self.freq is not None else True)], 
                                 key=lambda x: x.value)[-1]
             # data_freq = DataFreq.MIN1
             if not changeable_return_freq:
                 assert return_freq is not None
                 assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
-            time_cols_mapping = product.time_cols_mapping[data_freq]
             if isinstance(product, Futures):
                 df = product.get_data(data_freq, copy=False)
                 cols = []
@@ -186,49 +187,47 @@ class Factor(UniqueObject):
                 df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
             else:
                 df = product.get_data(data_freq)
+            target_series = pd.Series(index=self.table.index, dtype=float)
             if not changeable_return_freq:
                 assert return_freq is not None
-                offset = -1 if next_return else 0
-                
-                return_time_col_freq = sorted(
-                    [_f for _f in time_cols_mapping.keys() 
-                        if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
-                    key=lambda x: x.value)[-1]
-                time_cols_freq = sorted([_f for _f in time_cols_mapping.keys()
-                    if _f.value >= return_time_col_freq.value], key=lambda x: x.value, reverse=True)
+                time_cols_mapping = product.time_cols_mapping[data_freq]
                 index_time_col_freq = sorted(
-                    [_f for _f in time_cols_freq if
-                        (self.freq.total_seconds() % _f.value.total_seconds() == 0 
+                    [_f for _f in time_cols_mapping.keys() if
+                        self.min_gap.total_seconds() % _f.value.total_seconds() == 0
+                        and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
                             if self.freq is not None else True)], 
                     key=lambda x: x.value)[-1]
-                time_cols = [time_cols_mapping[_f] for _f in time_cols_freq]
-                return_time_col = time_cols_mapping[return_time_col_freq]
                 index_time_col = time_cols_mapping[index_time_col_freq]
-
-                duplicate = df.index.get_level_values(return_time_col).duplicated().any()
-                if duplicate:
-                    df_grouped = df.groupby(time_cols)
-                    df = df_grouped.first() if PC.value[0][0] == 'first' else df_grouped.last()
-
-                target_col = product.get_col_name(PC.value[0][1])
-                target_series = pd.Series(index=self.table.index, dtype=float)
-                pos = df.index.get_level_values(index_time_col).searchsorted(self.table.index, side='right')
+                pos = df.index.get_level_values(index_time_col).searchsorted(
+                    self.table.index.get_level_values(self.table.index.nlevels-1), 
+                    side='right'
+                )
                 if PC.value[0][0] == 'last':
                     pos = pos - 1
-                valid = (pos < len(df.index)) & (pos >= 0)
+                period = int(return_freq.total_seconds() / data_freq.value.total_seconds())
+                pos_end = pos + period
+                valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
+                if valid.any():
+                    indecies = self.table.index[valid]
+                    start_indecies = df.index[pos[valid]]
+                    end_indecies = df.index[pos_end[valid]]
+                    start_series = df.loc[start_indecies, product.get_col_name(PC.value[0][1])].reset_index(drop=True)
+                    end_series = df.loc[end_indecies, product.get_col_name(PC.value[1][1])].reset_index(drop=True)
+                    return_series = (end_series - start_series) / start_series
+                    return_series = return_series.shift(-1) if next_return else return_series
+                    target_series.loc[indecies] = return_series.values
             else:
                 assert PC.value[0][0] == 'first'
-                offset = -1 if next_return else 0
-                target_col = product.get_col_name(PC.value[0][1])
-                target_series = pd.Series(index=self.table.index, dtype=float)
                 pos = df.index.searchsorted(self.table.index, side='right')
                 valid = (pos < len(df.index)) & (np.concatenate(([True], pos[:-1] != pos[1:])))
-            if valid.any():
-                indecies = self.table.index[valid]
-                next_indecies = df.index[pos[valid]]
-                valid_series = df.loc[next_indecies, target_col]
-                return_series = valid_series.pct_change(periods=1).shift(offset)
-                target_series.loc[indecies] = return_series.values
+                if valid.any():
+                    target_col = product.get_col_name(PC.value[0][1])
+                    indecies = self.table.index[valid]
+                    start_indecies = df.index[pos[valid]]
+                    start_series = df.loc[start_indecies, target_col]
+                    offset = -1 if next_return else 0
+                    return_series = start_series.pct_change(periods=1).shift(offset)
+                    target_series.loc[indecies] = return_series.values
             returns[product] = target_series
         self.returns = pd.DataFrame(returns)
         return self.returns

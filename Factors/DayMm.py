@@ -15,32 +15,32 @@ class DayMm(FactorFamily): # Day Momentum
         DataColumnParam('L').set_default_value(DataColumn.LOW_ADJUSTED)
     ]
 
-    def funcMIN1(self, products: Sequence[Product], data_freq: Any = '1min',
+    def funcMIN1(self, products: Sequence[Product],
              H: DataColumn = DataColumn.HIGH_ADJUSTED,
              L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
             _H = product.get_col_name(H)
-            df = product.get_data(data_freq)[_H]
+            df = product.get_data('1min')[_H]
             factors[product] = df
         return pd.DataFrame(factors)
     
-    def funcMIN5(self, products: Sequence[Product], data_freq: Any = '1min',
+    def funcMIN5(self, products: Sequence[Product],
              H: DataColumn = DataColumn.HIGH_ADJUSTED,
              L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
             _H = product.get_col_name(H)
-            df = product.get_data(data_freq)[_H]
+            df = product.get_data('1min')[_H]
             factors[product] = df[4::5]
         return pd.DataFrame(factors)
 
-    def func(self, products: Sequence[Product], data_freq: Any = '1min',
+    def func1(self, products: Sequence[Product],
              H: DataColumn = DataColumn.HIGH_ADJUSTED,
              L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
-            df = product.get_data(data_freq)
+            df = product.get_data('1min')
             _H = product.get_col_name(H)
             _L = product.get_col_name(L)
             _TD = product.get_col_name(DataColumn.TIME_COL_DAY)
@@ -55,14 +55,14 @@ class DayMm(FactorFamily): # Day Momentum
             factors[product] = (day_high - day_low) / day_high
         return pd.DataFrame(factors)
     
-    def func2(self, products: Sequence[Product], data_freq: Any = '1min',
+    def func(self, products: Sequence[Product],
              H: DataColumn = DataColumn.HIGH_ADJUSTED,
              L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
             if not isinstance(product, CNFutures):
                 continue
-            df = product.get_data(data_freq)
+            df = product.get_data('1min')
 
             _TD = product.get_col_name(DataColumn.TIME_COL_DAY)
             _TM = product.get_col_name(DataColumn.TIME_COL_MIN)
