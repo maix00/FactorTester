@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 import itertools
+from functools import partial
 import pandas as pd
 import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
@@ -187,7 +188,8 @@ class Factor(UniqueObject):
                 df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
             else:
                 df = product.get_data(data_freq)
-            target_series = pd.Series(index=self.table.index, dtype=float)
+            notna_index = self.table.index[self.table[product].notna()]
+            target_series = pd.Series(index=notna_index, dtype=float)
             if not changeable_return_freq:
                 assert return_freq is not None
                 time_cols_mapping = product.time_cols_mapping[data_freq]
@@ -199,7 +201,7 @@ class Factor(UniqueObject):
                     key=lambda x: x.value)[-1]
                 index_time_col = time_cols_mapping[index_time_col_freq]
                 pos = df.index.get_level_values(index_time_col).searchsorted(
-                    self.table.index.get_level_values(self.table.index.nlevels-1), 
+                    notna_index.get_level_values(notna_index.nlevels-1), 
                     side='right'
                 )
                 pos = pos - 1 if PC.value[0][0] == 'last' else pos
@@ -207,7 +209,7 @@ class Factor(UniqueObject):
                 pos_end = pos + period
                 valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
                 if valid.any():
-                    indecies = self.table.index[valid]
+                    indecies = notna_index[valid]
                     start_indecies = df.index[pos[valid]]
                     end_indecies = df.index[pos_end[valid]]
                     start_series = df.loc[start_indecies, product.get_col_name(PC.value[0][1])].reset_index(drop=True)
@@ -217,11 +219,13 @@ class Factor(UniqueObject):
                     target_series.loc[indecies] = return_series.values
             else:
                 assert PC.value[0][0] == 'first'
-                pos = df.index.searchsorted(self.table.index, side='right')
-                valid = (pos < len(df.index)) & (np.concatenate(([True], pos[:-1] != pos[1:])))
+                if product.name == 'FB.DCE':
+                    pass
+                pos = df.index.searchsorted(notna_index, side='right')
+                valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
                 if valid.any():
                     target_col = product.get_col_name(PC.value[0][1])
-                    indecies = self.table.index[valid]
+                    indecies = notna_index[valid]
                     start_indecies = df.index[pos[valid]]
                     start_series = df.loc[start_indecies, target_col]
                     offset = -1 if next_return else 0
@@ -351,7 +355,7 @@ class FactorFamily:
         factors = []
         for params in self._params_list:
             factor_name = self.get_name(**params)
-            factor_func = lambda products: self.func(products, **params)
+            factor_func = partial(self.func, **params)
             factor = Factor(name=factor_name, func=factor_func, params=params)
             factors.append(factor)
         return factors
@@ -568,6 +572,9 @@ class FactorTester:
 
         group_names = [n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)][::-1]
         groups = {name: {} for name in group_names}
+        products = {i: {} for i in range(n_groups)}
+        returns = {i: {} for i in range(n_groups)}
+        names = {i: n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)}
         returns_groups = {name: {} for name in group_names}
 
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
@@ -576,10 +583,13 @@ class FactorTester:
         report_df = pd.DataFrame()
         for factor in factors:
 
-            returns = factor.calc_returns(next_return=False, price_cols=return_price_cols) if factor.returns.empty else factor.returns
-            assert not returns.empty
+            if factor.returns.empty:
+                factor.calc_returns(next_return=True, price_cols=return_price_cols)
+            assert not factor.returns.empty
 
+            last_dt, last_row = next(factor.table.iterrows())
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
+                # sifted_products = self.products
                 sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
                 sorted_products = row.dropna().sort_values(ascending=False)
                 sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
@@ -587,20 +597,35 @@ class FactorTester:
                 idx = list(sorted_products.index)
                 
                 # Split contracts into n_groups groups
-                if n > 0:
-                    idx_array = np.asarray(idx)
-                    split = np.array_split(idx_array, min(n, n_groups))
-                    
-                    # Fill groups from bottom to top (ascending order of factor values)
-                    for i, group_products in enumerate(split):
-                        group_idx = n_groups - 1 - i  # Reverse order: bottom group first
-                        groups[group_names[group_idx]][dt] = list(group_products)
-                        returns_groups[group_names[group_idx]][dt] = np.mean(np.asarray(returns.loc[dt][group_products].values, dtype=float))
-                
-                # Fill remaining groups (if n < n_groups) with empty lists
-                for i in range(min(n, n_groups), n_groups):
-                    groups[group_names[i]][dt] = []
-                    returns_groups[group_names[i]][dt] = np.nan
+                if n == 0:
+                    for i in range(n_groups):
+                        products[i][dt] = []
+                else:
+                    n_split = n_groups
+                    last_dt_has_product_now_at_market = set(range(n_groups))
+                    for i in range(n_groups):
+                        if not products[i]:
+                            products[i][dt] = []
+                        else:
+                            products[i][dt] = [product for product in products[i][last_dt]
+                                if np.isnan(factor.returns[product].loc[dt])]
+                            if len(products[i][dt]) == len(products[i][last_dt]):
+                                last_dt_has_product_now_at_market.remove(i)
+                            n_split = len(last_dt_has_product_now_at_market)
+                    bucket_idx = np.floor(np.linspace(0, n_split, len(idx), endpoint=False)).astype(int)
+                    split = [list(np.asarray(idx)[bucket_idx == i]) for i in range(n_split)]
+                    last_dt_has_product_now_at_market = sorted(list(last_dt_has_product_now_at_market))
+                    for i, group in enumerate(split):
+                        products[last_dt_has_product_now_at_market[i]][dt].extend(group)
+
+                for i in range(n_groups):
+                    series = factor.returns[products[i][dt]].loc[dt].fillna(0)
+                    returns[i][dt] = 0 if series.empty else np.mean(series.values)
+
+                returns_groups = {names[i]: returns[i] for i in range(n_groups)}
+                groups = {names[i]: products[i] for i in range(n_groups)}
+
+                last_dt, last_row = dt, row
 
             report_groups = {}
             for name in group_names:
