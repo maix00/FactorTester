@@ -135,12 +135,12 @@ class Factor(UniqueObject):
         if isinstance(products, Product):
             products = [products]
         products = list(products)
-        self.table = self.func(products)
+        self.table = self.func(products).reset_index()
+        self._set_time_index()
         for col in self.table.columns:
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
         self._set_products()
-        self._set_time_index()
         self.freq_type, self.freq = self._calc_freq()
         return self.table
     
@@ -202,8 +202,7 @@ class Factor(UniqueObject):
                     self.table.index.get_level_values(self.table.index.nlevels-1), 
                     side='right'
                 )
-                if PC.value[0][0] == 'last':
-                    pos = pos - 1
+                pos = pos - 1 if PC.value[0][0] == 'last' else pos
                 period = int(return_freq.total_seconds() / data_freq.value.total_seconds())
                 pos_end = pos + period
                 valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
@@ -214,7 +213,7 @@ class Factor(UniqueObject):
                     start_series = df.loc[start_indecies, product.get_col_name(PC.value[0][1])].reset_index(drop=True)
                     end_series = df.loc[end_indecies, product.get_col_name(PC.value[1][1])].reset_index(drop=True)
                     return_series = (end_series - start_series) / start_series
-                    return_series = return_series.shift(-1) if next_return else return_series
+                    return_series = return_series if next_return else return_series.shift(1)
                     target_series.loc[indecies] = return_series.values
             else:
                 assert PC.value[0][0] == 'first'
@@ -498,7 +497,6 @@ class FactorTester:
 
     def calc_ic(self, return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
                 factors: Optional[Factor|List[Factor]] = None,
-                return_freq: Optional[str|pd.Timedelta] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
         factors = [factors] if isinstance(factors, Factor) else \
@@ -578,7 +576,7 @@ class FactorTester:
         report_df = pd.DataFrame()
         for factor in factors:
 
-            returns = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
+            returns = factor.calc_returns(next_return=False, price_cols=return_price_cols) if factor.returns.empty else factor.returns
             assert not returns.empty
 
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
