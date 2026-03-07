@@ -3,6 +3,7 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from CNFutures import CNFutures
 from Products import Product, DataColumn
 from FactorTester import FactorFamily, DataColumnParam
 from typing import List, Dict, Any, Sequence, Tuple
@@ -59,6 +60,8 @@ class DayMm(FactorFamily): # Day Momentum
              L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
+            if not isinstance(product, CNFutures):
+                continue
             df = product.get_data(data_freq)
 
             _TD = product.get_col_name(DataColumn.TIME_COL_DAY)
@@ -90,5 +93,6 @@ class DayMm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = DayMm()
+    ff.change_default_return_freq('1h')
     ff.add_params(H=DataColumn.HIGH, L=DataColumn.LOW)
     ff.test(categories=['农产品'])

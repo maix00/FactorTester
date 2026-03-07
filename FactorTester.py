@@ -62,6 +62,39 @@ class Factor(UniqueObject):
             assert all(isinstance(col, Product) for col in self.table.columns)
             self.products = set([col for col in self.table.columns if isinstance(col, Product)])
         return self.products
+    
+    def _set_time_index(self):
+        if self.table.empty:
+            return
+        if isinstance(self.table.index, pd.RangeIndex):
+            time_cols = []
+            for col in self.table.columns:
+                if pd.api.types.is_datetime64_any_dtype(self.table[col]) or \
+                    (self.table[col].dtype == 'object' and pd.to_datetime(self.table[col], errors='coerce').notna().any()):
+                    time_cols.append(col)
+            if not time_cols:
+                raise ValueError("Cannot calculate frequency without time columns.")
+            else:
+                # Convert to datetime if needed
+                for col in time_cols:
+                    if not pd.api.types.is_datetime64_any_dtype(self.table[col]):
+                        self.table[col] = pd.to_datetime(self.table[col], errors='coerce')
+                # Sort time columns by precision (fewer non-zero time components = less precise = left side)
+                def get_time_precision(col):
+                    ls_comp = ['year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond', 'nanosecond']
+                    series = self.table[col]
+                    comp = (any(getattr(series.dt, c) != 0) for c in ls_comp)
+                    diffs = series.drop_duplicates().diff().dropna()
+                    minimum = diffs.min()
+                    mode = diffs.mode()[0]
+                    if mode == minimum:
+                        comp = list(comp) + [True, -mode]
+                    else:
+                        comp = list(comp) + [False, -minimum]
+                    return comp
+                time_cols_sorted = sorted(time_cols, key=lambda col: get_time_precision(col))
+                # Set as index
+                self.table.set_index(time_cols_sorted, inplace=True)
 
     def _calc_freq(self) -> Tuple[FactorFreqType, Any]:
         if self.table.empty:
@@ -75,6 +108,8 @@ class Factor(UniqueObject):
         else:
             idx_lvls = len(self.table.index.names)
             series = self.table.index.get_level_values(idx_lvls-1).to_series()
+        series = pd.to_datetime(series, errors='coerce').sort_values()
+        assert series.notna().all(), "Unable to convert all values to datetime"
         diffs = series.diff().dropna()
         minimum = diffs.min()
         self.min_gap = minimum
@@ -82,12 +117,13 @@ class Factor(UniqueObject):
         end_of_day = all(ts.hour == 0 and ts.minute == 0 and ts.second == 0 for ts in series.dropna())
         if day_dividable and end_of_day:
             return FactorFreqType.AT_EVENT, pd.Timedelta('1day')
-        end_of_session = []
-        for i in range(min(5, len(series))):
+        end_of_session = True
+        for i in range(min(20, len(series))):
             end = all(not product.if_time_is_in_data(list(series)[i] + product.get_recent_data_freq().value) for product in self.products) 
             start = all(not product.if_time_is_in_data(list(series)[i] - product.get_recent_data_freq().value) for product in self.products)
-            end_of_session.append(end or start)
-        end_of_session = all(end_of_session)
+            if not (end or start):
+                end_of_session = False
+                break
         if day_dividable or end_of_day or end_of_session:
             return FactorFreqType.AT_EVENT, None
         mode = diffs.mode()[0]
@@ -104,6 +140,7 @@ class Factor(UniqueObject):
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
         self._set_products()
+        self._set_time_index()
         self.freq_type, self.freq = self._calc_freq()
         return self.table
     
@@ -127,20 +164,15 @@ class Factor(UniqueObject):
                     PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
                 elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
                     PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
+            assert self.min_gap is not None
             all_f = product.get_available_freqs()
-            if self.freq_type == FactorFreqType.AT_EVENT \
-                and self.freq is not None \
-                and self.freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 \
-                and DataFreq.DAY1 in all_f \
-                and return_freq is not None \
-                and return_freq.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0:
-                data_freq = DataFreq.DAY1
-            else:
-                assert self.min_gap is not None
-                assert len(all_f) > 0
-                data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
-                                    and self.min_gap.total_seconds() % _f.value.total_seconds() == 0], 
-                                    key=lambda x: x.value)[-1]
+            assert len(all_f) > 0
+            data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
+                                and self.min_gap.total_seconds() % _f.value.total_seconds() == 0
+                                and (return_freq.total_seconds() % _f.value.total_seconds() == 0 
+                                    if return_freq is not None else True)], 
+                                key=lambda x: x.value)[-1]
+            # data_freq = DataFreq.MIN1
             if not changeable_return_freq:
                 assert return_freq is not None
                 assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
@@ -156,22 +188,34 @@ class Factor(UniqueObject):
                 df = product.get_data(data_freq)
             if not changeable_return_freq:
                 assert return_freq is not None
-                time_col_freq = sorted(
+                offset = -1 if next_return else 0
+                
+                return_time_col_freq = sorted(
                     [_f for _f in time_cols_mapping.keys() 
                         if return_freq.total_seconds() % _f.value.total_seconds() == 0], 
                     key=lambda x: x.value)[-1]
-                time_col = time_cols_mapping[time_col_freq]
-                df_grouped = df.groupby(time_col)
-                period = int(return_freq.total_seconds() / time_col_freq.value.total_seconds())
-                if PC.value[0][0] == 'first':
-                    df = df_grouped.first()
-                    offset = -1 if next_return else 0
-                else:
-                    df = df_grouped.last()
-                    offset = 1 if not next_return else 0
-                df = df[product.get_col_name(PC.value[0][1])].pct_change(periods=period).shift(-period+offset)
-                idx_loc = self.table.index.intersection(df.index)
-                returns[product] = df.loc[idx_loc]
+                time_cols_freq = sorted([_f for _f in time_cols_mapping.keys()
+                    if _f.value >= return_time_col_freq.value], key=lambda x: x.value, reverse=True)
+                index_time_col_freq = sorted(
+                    [_f for _f in time_cols_freq if
+                        (self.freq.total_seconds() % _f.value.total_seconds() == 0 
+                            if self.freq is not None else True)], 
+                    key=lambda x: x.value)[-1]
+                time_cols = [time_cols_mapping[_f] for _f in time_cols_freq]
+                return_time_col = time_cols_mapping[return_time_col_freq]
+                index_time_col = time_cols_mapping[index_time_col_freq]
+
+                duplicate = df.index.get_level_values(return_time_col).duplicated().any()
+                if duplicate:
+                    df_grouped = df.groupby(time_cols)
+                    df = df_grouped.first() if PC.value[0][0] == 'first' else df_grouped.last()
+
+                target_col = product.get_col_name(PC.value[0][1])
+                target_series = pd.Series(index=self.table.index, dtype=float)
+                pos = df.index.get_level_values(index_time_col).searchsorted(self.table.index, side='right')
+                if PC.value[0][0] == 'last':
+                    pos = pos - 1
+                valid = (pos < len(df.index)) & (pos >= 0)
             else:
                 assert PC.value[0][0] == 'first'
                 offset = -1 if next_return else 0
@@ -179,13 +223,13 @@ class Factor(UniqueObject):
                 target_series = pd.Series(index=self.table.index, dtype=float)
                 pos = df.index.searchsorted(self.table.index, side='right')
                 valid = (pos < len(df.index)) & (np.concatenate(([True], pos[:-1] != pos[1:])))
-                if valid.any():
-                    indecies = self.table.index[valid]
-                    next_indecies = df.index[pos[valid]]
-                    valid_series = df.loc[next_indecies, target_col]
-                    return_series = valid_series.pct_change(periods=1).shift(offset)
-                    target_series.loc[indecies] = return_series.values
-                returns[product] = target_series
+            if valid.any():
+                indecies = self.table.index[valid]
+                next_indecies = df.index[pos[valid]]
+                valid_series = df.loc[next_indecies, target_col]
+                return_series = valid_series.pct_change(periods=1).shift(offset)
+                target_series.loc[indecies] = return_series.values
+            returns[product] = target_series
         self.returns = pd.DataFrame(returns)
         return self.returns
     
@@ -266,7 +310,7 @@ class FactorFamily:
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
-    def set_default_params(self, **kwargs):
+    def set_default_params(self):
         self._params_list = [{p.abbrev: p.default_value for p in self.params}]
 
     def change_param_default_value(self, **kwargs):
@@ -274,6 +318,10 @@ class FactorFamily:
         for key, value in kwargs.items():
             param = next(p for p in self.params if p.abbrev == key)
             param.default_value = value
+
+    def change_default_return_freq(self, return_freq: Any):
+        self.change_param_default_value(**{'$RF': return_freq})
+        self.set_default_params()
 
     def clear_params(self):
         self._params_list = []
@@ -465,6 +513,7 @@ class FactorTester:
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
             return_df = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
+            assert not return_df.empty
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
             if start_date is not None:
@@ -531,7 +580,8 @@ class FactorTester:
         for factor in factors:
 
             returns = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
-            
+            assert not returns.empty
+
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
                 sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
                 sorted_products = row.dropna().sort_values(ascending=False)
