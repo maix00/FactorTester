@@ -62,6 +62,9 @@ class UniqueObject(ABC):
             self.name = name
             self.initialized = True
 
+    def __reduce__(self):
+        return (self.__class__, (self.name,))
+
     def __str__(self):
         return self.name
         
@@ -246,23 +249,26 @@ class Product(UniqueObject):
                 time_range = [time_range]
             assert len(time_range) <= 2 and len(time_range) > 0
             if any(isinstance(k, (list, tuple)) for k in time_range):
-                time_range = (k[-1] if isinstance(k, (list, tuple)) else k for k in time_range)
+                time_range = [k[-1] if isinstance(k, (list, tuple)) else k for k in time_range]
             _tr = {}
             for i, time in enumerate(time_range):
-                if not isinstance(time, pd.Timestamp):
+                if time is not None:
                     time = pd.to_datetime(time)
                 _tr[i] = time
             if len(_tr) == 1:
                 _tr[1] = _tr[0]
-            reverse = _tr[0] > _tr[1]
             try:
+                reverse = _tr[0] > _tr[1]
                 reverse = reverse.all()
             except:
-                pass
+                reverse = False
             finally:
                 if reverse:
                     _tr[1], _tr[0] = _tr[0], _tr[1]
-            mask = (data.index.get_level_values(time_col_level) >= _tr[0]) & (data.index.get_level_values(time_col_level) <= _tr[1])
+            mask = (data.index.get_level_values(time_col_level) >= _tr[0]) \
+                if _tr[0] is not None else pd.Series(True, index=data.index) \
+                    & (data.index.get_level_values(time_col_level) <= _tr[1]) \
+                        if _tr[1] is not None else pd.Series(True, index=data.index)
             if copy:
                 return pd.DataFrame(data.loc[mask, target_cols]).copy()
             else:

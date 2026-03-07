@@ -219,8 +219,6 @@ class Factor(UniqueObject):
                     target_series.loc[indecies] = return_series.values
             else:
                 assert PC.value[0][0] == 'first'
-                if product.name == 'FB.DCE':
-                    pass
                 pos = df.index.searchsorted(notna_index, side='right')
                 valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
                 if valid.any():
@@ -362,7 +360,7 @@ class FactorFamily:
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
             categories: Optional[str|List[str]] = None,
-            sift_volume_ratio: float = sift_volume_ratio):
+            sift_volume_ratio: float = sift_volume_ratio) -> FactorTester:
         
         factor_cache_path = os.path.join(factor_info_path, self.name_stem, self.name_stem + '.csv')
         if not os.path.exists(factor_info_path):
@@ -410,7 +408,9 @@ class FactorFamily:
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor.report = factor_table
             factor_table.to_csv(factor_cache_path, index=False)
-        
+
+        return tester
+
 class FactorTester:
     def __init__(self, products: Sequence[Product],
                  time_range: Optional[Tuple] = None,
@@ -481,9 +481,12 @@ class FactorTester:
             self.sift_product_by_empty_data()
         results = {}
         for product in self.products:
-            results[product] = product.get_slices(target_cols=DataColumn.VOLUME, 
+            sum_volume = product.get_slices(target_cols=DataColumn.VOLUME, 
                                                   time_col=time_col, time_range=time_range,
                                                   copy=False).sum().values
+            if sum_volume == 0:
+                continue
+            results[product] = sum_volume
         sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
         return set(sorted_products[:int(len(sorted_products) * ratio)])
         
@@ -559,10 +562,8 @@ class FactorTester:
                       time_range: Optional[Tuple] = None,
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
-                      return_freq: Optional[str|pd.Timedelta] = None,
                       plot_n_group_list: Optional[List[int]] = None,
-                      sift_volume_ratio: Optional[float] = None) -> \
-        Tuple[Dict[str, Dict[str, List[Product]]], Dict[str, Dict[str, float]], pd.DataFrame]:
+                      sift_volume_ratio: Optional[float] = None) -> Tuple[Any, Any, pd.DataFrame]:
 
         factors = [factors] if isinstance(factors, Factor) else \
             (factors if factors is not None else self.factors)
@@ -570,12 +571,9 @@ class FactorTester:
         if plot_flag and plot_n_group_list is not None:
             plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
 
-        group_names = [n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)][::-1]
-        groups = {name: {} for name in group_names}
         products = {i: {} for i in range(n_groups)}
         returns = {i: {} for i in range(n_groups)}
         names = {i: n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)}
-        returns_groups = {name: {} for name in group_names}
 
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
@@ -587,14 +585,17 @@ class FactorTester:
                 factor.calc_returns(next_return=True, price_cols=return_price_cols)
             assert not factor.returns.empty
 
-            last_dt, last_row = next(factor.table.iterrows())
+            last_dt, _ = next(factor.table.iterrows())
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
                 # sifted_products = self.products
-                sifted_products = self.sift_product_by_volumes(ratio=sift_volume_ratio, time_range=(dt, dt))
-                sorted_products = row.dropna().sort_values(ascending=False)
-                sorted_products = sorted_products[sorted_products.index.isin(sifted_products)]
+                sifted_products = self.sift_product_by_volumes(
+                    ratio=sift_volume_ratio, 
+                    time_range=(last_dt if dt != last_dt else None, dt)
+                )
+                sorted_products = sorted(row.dropna().index, key=lambda x: (row[x], x.name), reverse=True)
+                sorted_products = [product for product in sorted_products if product in sifted_products]
                 n = len(sorted_products)
-                idx = list(sorted_products.index)
+                idx = list(sorted_products)
                 
                 # Split contracts into n_groups groups
                 if n == 0:
@@ -607,9 +608,10 @@ class FactorTester:
                         if not products[i]:
                             products[i][dt] = []
                         else:
+                            # products[i][dt] = []
                             products[i][dt] = [product for product in products[i][last_dt]
                                 if np.isnan(factor.returns[product].loc[dt])]
-                            if len(products[i][dt]) == len(products[i][last_dt]):
+                            if products[i][dt] and len(products[i][dt]) == len(products[i][last_dt]):
                                 last_dt_has_product_now_at_market.remove(i)
                             n_split = len(last_dt_has_product_now_at_market)
                     bucket_idx = np.floor(np.linspace(0, n_split, len(idx), endpoint=False)).astype(int)
@@ -622,25 +624,22 @@ class FactorTester:
                     series = factor.returns[products[i][dt]].loc[dt].fillna(0)
                     returns[i][dt] = 0 if series.empty else np.mean(series.values)
 
-                returns_groups = {names[i]: returns[i] for i in range(n_groups)}
-                groups = {names[i]: products[i] for i in range(n_groups)}
-
-                last_dt, last_row = dt, row
+                last_dt, _ = dt, row
 
             report_groups = {}
-            for name in group_names:
+            for idx in range(n_groups):
 
-                dates = list(returns_groups[name].keys()) if returns_groups[name] else []
+                dates = list(returns[idx].keys()) if returns[idx] else []
                 test_dates = [date for date in dates if self.start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if self.start_date else dates
                 test_dates = [date for date in test_dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= self.end_date] if self.end_date else dates
                 dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
                 dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
                 
-                returns = [returns_groups[name][date] for date in dates]
-                returns_series = pd.Series(returns).dropna()
+                returns_list = [returns[idx][date] for date in dates]
+                returns_series = pd.Series(returns_list).dropna()
                 cumulative_returns = (1 + returns_series).cumprod()
 
-                test_returns = [returns_groups[name][date] for date in test_dates]
+                test_returns = [returns[idx][date] for date in test_dates]
                 test_returns_series = pd.Series(test_returns).dropna()
                 test_cumulative_returns = (1 + test_returns_series).cumprod()
 
@@ -659,19 +658,18 @@ class FactorTester:
 
                 'Total Return': (cumulative_returns.iloc[-1] - 1) * 100 if len(cumulative_returns) > 0 else 0,
                 'Annual Return': ((cumulative_returns.iloc[-1]) ** (252 / len(cumulative_returns)) - 1) * 100 if len(cumulative_returns) > 1 else 0,
-                'Volatility': pd.Series(returns).std() * np.sqrt(252) * 100,
-                'Sharpe Ratio': (pd.Series(returns).mean() * 252) / (pd.Series(returns).std() * np.sqrt(252)) if pd.Series(returns).std() != 0 else 0,
+                'Volatility': pd.Series(returns_list).std() * np.sqrt(252) * 100,
+                'Sharpe Ratio': (pd.Series(returns_list).mean() * 252) / (pd.Series(returns_list).std() * np.sqrt(252)) if pd.Series(returns_list).std() != 0 else 0,
                 'Max Drawdown': ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100 if len(cumulative_returns) > 0 else 0,
                 'Calmar Ratio': ((cumulative_returns.iloc[-1] ** (252 / len(cumulative_returns)) - 1) * 100) / (((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100) if ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() != 0 else 0,
-                'Win Rate': (pd.Series(returns) > 0).sum() / len(pd.Series(returns)) * 100 if len(pd.Series(returns)) > 0 else 0,
-                'Mean Return': pd.Series(returns).mean() * 100,
-                'Skewness': pd.Series(returns).skew(),
-                'Kurtosis': pd.Series(returns).kurtosis(),
+                'Win Rate': (pd.Series(returns_list) > 0).sum() / len(pd.Series(returns_list)) * 100 if len(pd.Series(returns_list)) > 0 else 0,
+                'Mean Return': pd.Series(returns_list).mean() * 100,
+                'Skewness': pd.Series(returns_list).skew(),
+                'Kurtosis': pd.Series(returns_list).kurtosis(),
 
                 }
 
-                name = int(name.split('_')[-1])
-                report_groups[name] = pd.Series(metrics)
+                report_groups[idx] = pd.Series(metrics)
             
             report_df = pd.DataFrame(report_groups).T.sort_index()  # Convert to DataFrame, transpose, and sort by name
             if not plot_flag or (plot_flag and plot_show):
@@ -686,33 +684,35 @@ class FactorTester:
                 end_date = end_date if end_date is not None else self.end_date
                 # print(start_date, end_date)
                 dates = []  # Initialize dates as an empty list
-                for name in group_names:
-                    if plot_n_group_list is not None and name.split('_')[-1] not in [str(n) for n in plot_n_group_list]:
+                for idx in range(n_groups):
+                    if plot_n_group_list is not None and idx not in plot_n_group_list:
                         continue
-                    dates = list(returns_groups[name].keys()) if returns_groups[name] else []
+                    dates = list(returns[idx].keys()) if returns[idx] else []
                     dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
                     dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
-                    returns = [returns_groups[name][date] for date in dates]
+                    returns_list = [returns[idx][date] for date in dates]
                     cumulative_returns = []
                     prev_value = 10000
-                    for ret in returns:
+                    for ret in returns_list:
                         if not np.isnan(ret):
                             prev_value = prev_value * (1 + ret)
                         cumulative_returns.append(prev_value)
-                    plt.plot([str(date) for date in dates], cumulative_returns, label=name)
-                plt.xlabel('Date')
-                plt.ylabel('Average Next Day Open Return')
+                    plt.plot([str(date[-1].date()) if isinstance(date, tuple) else str(date.date()) for date in dates], cumulative_returns, label=names[idx])
+                plt.xlabel('日期')
+                plt.ylabel('平均收益')
                 if plot_remark_str:
-                    plt.title(f'Average Open Return: {factor.name} - {plot_remark_str}')
+                    plt.title(f'平均收益: {factor.name} - {plot_remark_str}')
                 else:
-                    plt.title(f'Average Open Return: {factor.name}')
+                    plt.title(f'平均收益: {factor.name}')
                 plt.rcParams['font.sans-serif'] = ['Kaiti SC']
                 plt.legend()
                 # Only show every nth tick to reduce crowding
                 n_ticks = 10
                 assert len(dates) > 0, "No dates available for plotting."
                 tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
-                plt.xticks(ticks=[str(dates[i]) for i in tick_indices], rotation=45)
+                # plt.xticks(ticks=[str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices], rotation=45)
+                ticks = [str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices]
+                plt.xticks(ticks=ticks, rotation=45)
                 plt.tight_layout()
                 if save_plot:
                     factor_stem = factor.name.split('|')[0]
@@ -723,4 +723,4 @@ class FactorTester:
                 if plot_show:
                     plt.show()
 
-        return groups, returns_groups, report_df
+        return products, returns, report_df
