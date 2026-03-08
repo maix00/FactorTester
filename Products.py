@@ -58,9 +58,9 @@ class UniqueObject(ABC):
     
     def __init__(self, name: str):
         # Only initialize if this is a new instance (not already initialized)
-        if not hasattr(self, 'initialized'):
+        if not hasattr(self, '_initialized'):
             self.name = name
-            self.initialized = True
+            self._initialized = True
 
     def __reduce__(self):
         return (self.__class__, (self.name,))
@@ -87,7 +87,7 @@ class Product(UniqueObject):
                  point_value: Optional[int] = None,
                  currency: Optional[str] = None,
                  category_attr_name: Optional[str] = None):
-        if not hasattr(self, 'initialized'):
+        if not hasattr(self, '_initialized'):
             super().__init__(name)
             self.point_value = point_value
             self.currency = currency
@@ -302,10 +302,11 @@ class Futures(Product):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  mappings_path: Optional[str] = None, data_path: Optional[str] = None,
                  FuturesContractClass: type = FuturesContract):
-        super().__init__(name, point_value, currency)
-        self.mappings_path = mappings_path
-        self.mappings: Optional[pd.DataFrame] = None
-        self.FuturesContractClass = FuturesContractClass
+        if not hasattr(self, '_initialized'):
+            super().__init__(name, point_value, currency)
+            self.mappings_path = mappings_path
+            self.mappings: Optional[pd.DataFrame] = None
+            self.FuturesContractClass = FuturesContractClass
 
     def set_mappings(self, path: str):
         self.mappings_path = path

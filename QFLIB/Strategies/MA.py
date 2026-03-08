@@ -6,7 +6,7 @@ from qf_lib.backtesting.order.execution_style import MarketOrder
 from qf_lib.backtesting.order.time_in_force import TimeInForce
 from qf_lib.backtesting.trading_session.backtest_trading_session import BacktestTradingSession
 
-from FactorTester import get_price_series
+from Factor import get_price_series
 
 class SimpleMAStrategy(AbstractStrategy):
     """

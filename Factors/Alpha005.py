@@ -4,7 +4,7 @@ import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from Products import ProductBase
-from FactorTester import FactorGrid, PriceColumnMapping, OtherColumnMapping
+from Factor import FactorGrid, PriceColumnMapping, OtherColumnMapping
 from typing import List, Dict, Any
 from tqdm import tqdm
 

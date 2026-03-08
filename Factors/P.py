@@ -5,11 +5,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from CNFutures import CNFutures
 from Products import Product, DataColumn
-from Factor import FactorFamily
-from Parameter import DataColumnParam, FinRangeParam
+from Factor import FactorFamily, DataColumnParam, FinRangeParam
 from typing import List, Dict, Any, Sequence, Tuple
 
-class Mm(FactorFamily): # Day Momentum
+class P(FactorFamily): # Day Momentum
 
     additional_params = [
         DataColumnParam('H').set_default_value(DataColumn.HIGH),
@@ -36,21 +35,47 @@ class Mm(FactorFamily): # Day Momentum
             df = product.get_data('1min')[_H]
             factors[product] = df[4::5]
         return pd.DataFrame(factors)
+
+    def func1(self, products: Sequence[Product],
+             H: DataColumn = DataColumn.HIGH_ADJUSTED,
+             L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.DataFrame:
+        factors = {}
+        for product in products:
+            df = product.get_data('1min')
+            _H = product.get_col_name(H)
+            _L = product.get_col_name(L)
+            _TD = product.get_col_name(DataColumn.TIME_COL_DAY)
+            day_high = df[_H].groupby(_TD).max()
+            day_low = df[_L].groupby(_TD).min()
+            idx_high = df[_H].groupby(_TD).idxmax()
+            idx_low = df[_L].groupby(_TD).idxmin()
+            mask = idx_low < idx_high
+            temp_high = day_high.copy()
+            day_high.loc[mask] = day_low.loc[mask]
+            day_low.loc[mask] = temp_high.loc[mask]
+            factors[product] = (day_high - day_low) / day_high
+        return pd.DataFrame(factors)
     
     def func(self, products: Sequence[Product], F: str = '1d',
              H: DataColumn = DataColumn.HIGH,
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
+            if not isinstance(product, CNFutures):
+                continue
             df = product.get_data('1min')
-            
             _H = product.get_col_name(H)
             _L = product.get_col_name(L)
             _TD = product.get_col_name(DataColumn.TIME_COL_DAY)
             _TM = product.get_col_name(DataColumn.TIME_COL_MIN)
 
+            day_high = df[_H].groupby(_TD).max()
+            day_low = df[_L].groupby(_TD).min()
+            idx_high = df[_H].groupby(_TD).idxmax()
+            idx_low = df[_L].groupby(_TD).idxmin()
+
             if F == '1d':
-                idx = _TD
+                pass
             elif F == 'S':
                 _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True)
                 _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True)
@@ -59,33 +84,22 @@ class Mm(FactorFamily): # Day Momentum
                 end_session = _TD_ + pd.Timedelta('9 hours')
                 end_session[cond] = _TD_[cond] + pd.Timedelta('15 hours')
                 df.index = pd.MultiIndex.from_arrays([_TD_, end_session], names=[_TD, 'end_session'])
-                idx = [_TD, 'end_session']
-            elif F == '5h' or F == '3h':
-                period = pd.Timedelta('5 hours') % pd.Timedelta('1 min')
-                idx = _TD
-            else:
-                continue
+                df_grouped = df.groupby([_TD, 'end_session'])
 
-            day_high, day_low, idx_high, idx_low = (
-                df.groupby(idx)
-                .agg({_H: ['max', 'idxmax'], _L: ['min', 'idxmin']})
-                .pipe(lambda x: (x[(_H,'max')], x[(_L,'min')], x[(_H,'idxmax')], x[(_L,'idxmin')]))
-            )
+                day_high = df_grouped[_H].max()
+                day_low = df_grouped[_L].min()
+                idx_high = df_grouped[_H].idxmax()
+                idx_low = df_grouped[_L].idxmin()
 
             mask = idx_low < idx_high
             temp_high = day_high.copy()
             day_high.loc[mask] = day_low.loc[mask]
             day_low.loc[mask] = temp_high.loc[mask]
             factors[product] = (day_high - day_low) / day_high
-
-            if F == 'S':
-                factors[product] = - factors[product]
-
         return pd.DataFrame(factors)
 
 if __name__ == '__main__':
-    ff = Mm()
-    # ff.change_default_return_freq('3h')
-    # ff.add_params(F = 'S')
-    # ff.add_params(F = '5h')
-    fft = ff.test()
+    ff = P()
+    ff.change_default_return_freq('3h')
+    ff.add_params(F = 'S')
+    ff.test()

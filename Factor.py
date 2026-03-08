@@ -2,12 +2,14 @@ from datetime import datetime
 from enum import Enum
 import itertools
 from functools import partial
+from weakref import WeakValueDictionary
 import pandas as pd
 import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
 from Products import DataColumn, Futures, Product, DataFreq, UniqueObject
+from Parameter import Parameter, FinRangeParam, TimeParam
 from CNFutures import get_all_products
 import logging
 
@@ -45,18 +47,19 @@ class EventType(Enum):
 
 class Factor(UniqueObject):
     def __init__(self, name: str, func: Callable[..., pd.DataFrame], params: Dict[str, Any]):
-        super().__init__(name=name)
-        self.func = func
-        self.min_gap: Optional[pd.Timedelta] = None
-        self.freq: Optional[pd.Timedelta] = None
-        self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
-        self.params = params
-        self.table: pd.DataFrame = pd.DataFrame()
-        self.products: Set[Product] = set()
-        self.returns: pd.DataFrame = pd.DataFrame()
-        self.ic_series: pd.Series = pd.Series()
-        self.ic_stats: pd.Series = pd.Series()
-        self.report: pd.DataFrame = pd.DataFrame()
+        if not hasattr(self, '_initialized'):
+            super().__init__(name=name)
+            self.func = func
+            self.min_gap: Optional[pd.Timedelta] = None
+            self.freq: Optional[pd.Timedelta] = None
+            self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
+            self.params = params
+            self.table: pd.DataFrame = pd.DataFrame()
+            self.products: Set[Product] = set()
+            self.returns: pd.DataFrame = pd.DataFrame()
+            self.ic_series: pd.Series = pd.Series()
+            self.ic_stats: pd.Series = pd.Series()
+            self.report: pd.DataFrame = pd.DataFrame()
 
     def _set_products(self) -> Set[Product]:
         if not self.table.empty:
@@ -232,72 +235,11 @@ class Factor(UniqueObject):
             returns[product] = target_series
         self.returns = pd.DataFrame(returns)
         return self.returns
-    
-class Parameter(UniqueObject):
-    def __init__(self, name: str, default_value: Any,
-                 check_in_space: Callable[[Any], bool],
-                 get_value_name: Callable[[Any], str]):
-        self.abbrev = name
-        super().__init__(name = 'Parameter@' + name)
-        self.check_in_space = check_in_space
-        self.default_value = default_value
-        self.get_value_name = get_value_name
-
-    def set_default_value(self, value: Any) -> Parameter:
-        if not self.check_in_space(value):
-            raise ValueError(f"Invalid value for parameter {self.name}: {value}")
-        self.default_value = value
-        return self
-    
-ReturnFreq = Parameter(
-    name = '$RF',
-    default_value = None,
-    check_in_space = lambda x: x is None or pd.Timedelta(x) > pd.Timedelta(0),
-    get_value_name = lambda x: 'N' if x is None else (
-        (c := pd.Timedelta(x).components) and
-        (units := {'days': 'd', 'hours': 'h', 'minutes': 'm', 'seconds': 's', 
-                   'milliseconds': 'ms', 'microseconds': 'us', 'nanoseconds': 'ns'}) and
-        ''.join(f"{v}{units[k]}" for k, v in c._asdict().items() if v > 0) or 'N'
-    )
-)
-    
-if __name__ == '__main__':
-    print(ReturnFreq.get_value_name('2h45m10s11ms'))
-
-class FinRangeParam(Parameter):
-    def __init__(self, name: str, value_space: List[Any], 
-                 get_value_name: Optional[Callable[[Any], str]] = None):
-        super().__init__(
-            name = name,
-            default_value = value_space[0],
-            check_in_space = lambda x: x in value_space,
-            get_value_name = get_value_name if get_value_name else lambda x: str(x)
-        )
-        self.value_space = value_space
-
-class DataColumnParam(FinRangeParam):
-    def __init__(self, name: str):
-        super().__init__(
-            name = name,
-            value_space = [col for col in DataColumn],
-            get_value_name = lambda x: {col: col.value for col in DataColumn}.get(x, str(x))
-        )
-    
-    def col(self, col: DataColumn):
-        return self.get_value_name(col)
-
-if __name__ == '__main__':
-    C1 = DataColumnParam('C1')
-    print(C1.col(DataColumn.CLOSE))
-
-ReturnPriceColsParam = FinRangeParam(
-    name = '$RPC',
-    value_space = [rpc for rpc in ReturnPriceCols],
-    get_value_name = lambda x: {rpc: rpc.value for rpc in ReturnPriceCols}.get(x, str(x))
-)
 
 class FactorFamily:
-    params: List[Parameter] = [ReturnFreq]
+    params: List[Parameter] = [
+        FinRangeParam('$RF', [None], lambda _: 'N') + TimeParam(flag='pos') # ReturnFreq
+    ]
     additional_params: List[Parameter] = []
 
     def __init__(self, name_stem: Optional[str] = None):
@@ -305,18 +247,19 @@ class FactorFamily:
         for param in self.additional_params:
             if param not in self.params:
                 self.params.append(param)
+        self.params_dict = {param.alias: param for param in self.params}
         self.set_default_params()
     
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
     
     def set_default_params(self):
-        self._params_list = [{p.abbrev: p.default_value for p in self.params}]
+        self._params_list = [{p.alias: p.default_value for p in self.params}]
 
     def change_param_default_value(self, **kwargs):
         self._check_in_space(**kwargs)
         for key, value in kwargs.items():
-            param = next(p for p in self.params if p.abbrev == key)
+            param = next(p for p in self.params if p.alias == key)
             param.default_value = value
 
     def change_default_return_freq(self, return_freq: Any):
@@ -328,25 +271,24 @@ class FactorFamily:
     
     def _check_in_space(self, **kwargs):
         for key in kwargs:
-            if all(key != p.abbrev for p in self.params):
-                raise KeyError(f"参数 '{key}' 不在定义的参数列表中")
-            param = next(p for p in self.params if p.abbrev == key)
-            if not param.check_in_space(kwargs[key]):
-                raise ValueError(f"参数 '{key}' 的值 '{kwargs[key]}' 不在允许范围 \
-                    {param.value_space if isinstance(param, FinRangeParam) else 'Unkown Range'} 内")
+            if not self.params_dict[key].check_in_space(kwargs[key]):
+                raise ValueError
             
-    def add_params(self, **kwargs):
+    def add_params(self, return_freq: Optional[Any] = None, **kwargs):
+        if return_freq is not None:
+            self._check_in_space(**{'$RF': return_freq})
         self._check_in_space(**kwargs)
-        new_params = {p.abbrev: kwargs[p.abbrev] if p.abbrev in kwargs else p.default_value for p in self.params}
+        new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
+        new_params['$RF'] = return_freq
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
     def set_all_params(self):
         all_combinations = list(itertools.product(*[p.value_space if isinstance(p, FinRangeParam) else [p.default_value] for p in self.params]))
-        self._params_list = [dict(zip([p.abbrev for p in self.params], combination)) for combination in all_combinations]
+        self._params_list = [dict(zip([p.alias for p in self.params], combination)) for combination in all_combinations]
 
     def get_name(self, **params):
-        params_str = '|'.join(f"{key}:{(next(p for p in self.params if p.abbrev == key)).get_value_name(value)}" for key, value in params.items())
+        params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
         return f"{self.name_stem}|{params_str}" if params_str else self.name_stem
 
     def get_factors(self):
