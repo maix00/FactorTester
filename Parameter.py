@@ -1,30 +1,22 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
-from weakref import WeakValueDictionary
 import pandas as pd
 
-from Products import DataColumn, Futures, Product, DataFreq, UniqueObject
+from UniqueObject import SerialObject
+from Products import DataColumn
 
-class Parameter(UniqueObject):
+class Parameter(SerialObject):
     _instance_count: int = -1
-    _serial_map: Dict[int, Parameter] = {}
+    _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
-        Parameter._instance_count += 1
-        name = 'P@' + str(Parameter._instance_count)
-        name = name if alias is None else name + ':' + alias
-        instance = super().__new__(cls, name = name)
+        instance = super().__new__(cls, type_alias='P', alias=alias)
         return instance
 
     def __init__(self, alias: Optional[str], default_value: Any,
                  check_in_space: Callable[[Any], bool],
                  get_value_alias: Callable[[Any], str]):
         if not hasattr(self, '_initialized'):
-            self.serial_number = Parameter._instance_count
-            name = 'P@' + str(self.serial_number)
-            self.alias = alias or name
-            name = name if alias is None else name + ':' + alias
-            super().__init__(name = name)
-            Parameter._serial_map[self.serial_number] = self
+            super().__init__(type_alias='P', alias=alias)
             self.check_in_space = check_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
@@ -61,15 +53,6 @@ class Parameter(UniqueObject):
             )
             return new_param
         return NotImplemented
-    
-    @classmethod
-    def get_by_serial(cls, serial_number):
-        return cls._serial_map.get(serial_number)
-    
-    def __class_getitem__(cls, key):
-        if isinstance(key, int):
-            return cls.get_by_serial(key)
-        raise TypeError
     
 class FinRangeParam(Parameter):
     def __init__(self, alias: Optional[str], value_space: List[Any], 

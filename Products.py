@@ -4,13 +4,11 @@ import sys
 from typing import Any, List, Optional, Dict, Tuple
 import pandas as pd
 from datetime import datetime
-from abc import ABC  # Add this import
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tqdm import tqdm
+from UniqueObject import UniqueObject
 
 mappings_path = '../data/rollover_adjustments.csv'
-
-from weakref import WeakValueDictionary  # Using weak references to avoid memory issues
 
 class DataFreq(Enum):
     MIN1 = pd.Timedelta('1min')
@@ -40,45 +38,6 @@ class DataColumn(Enum):
     CLOSE_ADJUSTED = 'CA'
     TIME_COL = 'T'
     ADJUST_SUFFIX = 'ADJ'
-
-class UniqueObject(ABC):
-    _instances = WeakValueDictionary()
-
-    def __new__(cls, name: str, *args, **kwargs):
-        # Create a unique key that includes the class type
-        key = (name, cls.__name__)
-        # Check if an instance with this name and class already exists
-        if key in cls._instances:
-            return cls._instances[key]
-        
-        # Create a new instance if it doesn't exist
-        instance = super().__new__(cls)
-        cls._instances[key] = instance
-        return instance
-    
-    def __init__(self, name: str):
-        # Only initialize if this is a new instance (not already initialized)
-        if not hasattr(self, '_initialized'):
-            self.name = name
-            self._initialized = True
-
-    def __reduce__(self):
-        return (self.__class__, (self.name,))
-
-    def __str__(self):
-        return self.name
-        
-    def __lt__(self, other):
-        return self.name < other.name
-
-    def __eq__(self, other):
-        return self.name == other.name
-
-    def __hash__(self):
-        return hash(self.name)
-    
-    def __repr__(self):
-        return self.name
 
 class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category

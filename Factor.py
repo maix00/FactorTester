@@ -8,7 +8,8 @@ import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
-from Products import DataColumn, Futures, Product, DataFreq, UniqueObject
+from UniqueObject import SerialObject
+from Products import DataColumn, Futures, Product, DataFreq
 from Parameter import Parameter, FinRangeParam, TimeParam, get_return_freq_param
 from CNFutures import get_all_products
 import logging
@@ -45,25 +46,17 @@ class EventType(Enum):
     END_OF_PERIOD = 1
     START_OF_PERIOD = 2
 
-class Factor(UniqueObject):
+class Factor(SerialObject):
     _instance_count: int = -1
-    _serial_map: Dict[int, Factor] = {}
+    _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
-        Factor._instance_count += 1
-        name = 'F@' + str(Factor._instance_count)
-        name = name if alias is None else name + ':' + alias
-        instance = super().__new__(cls, name = name)
+        instance = super().__new__(cls, type_alias='F', alias=alias)
         return instance
     
     def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], params: Dict[str, Any]):
         if not hasattr(self, '_initialized'):
-            self.serial_number = Factor._instance_count
-            name = 'F@' + str(self.serial_number)
-            self.alias = alias or name
-            name = name if alias is None else name + ':' + alias
-            super().__init__(name = name)
-            Factor._serial_map[self.serial_number] = self
+            super().__init__(type_alias='F', alias=alias)
             self.func = func
             self.min_gap: Optional[pd.Timedelta] = None
             self.freq: Optional[pd.Timedelta] = None
@@ -75,15 +68,6 @@ class Factor(UniqueObject):
             self.ic_series: pd.Series = pd.Series()
             self.ic_stats: pd.Series = pd.Series()
             self.report: pd.DataFrame = pd.DataFrame()
-
-    @classmethod
-    def get_by_serial(cls, serial_number):
-        return cls._serial_map.get(serial_number)
-    
-    def __class_getitem__(cls, key):
-        if isinstance(key, int):
-            return cls.get_by_serial(key)
-        raise TypeError
 
     def _set_products(self) -> Set[Product]:
         if not self.table.empty:
