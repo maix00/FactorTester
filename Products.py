@@ -1,7 +1,7 @@
 from enum import Enum
 import os
 import sys
-from typing import Any, List, Optional, Dict, Tuple
+from typing import Any, Callable, List, Optional, Dict, Tuple
 import pandas as pd
 from datetime import datetime
 from Tools import UniqueObject, SerialObject
@@ -98,16 +98,17 @@ class DataSourceRegister(UniqueObject):
     def get_default_source(self) -> DataSource:
         return self.get('default_source')
 
-
 class DataSource(SerialObject):
     _instances = WeakValueDictionary()
     _instance_count: int = -1
     _serial_map = {}
 
-    def __new__(cls, alias: str):
+    def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, type_alias='DS', alias=alias)
 
-    def __init__(self, alias: str, data_freq: DataFreq):
+    def __init__(self, alias: str, data_freq: DataFreq,
+                 if_product_is_in_source: Callable[[Product], bool],
+                 get_product_path: Callable[[Product], Any]):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='DS', alias=alias)
             self._register = DataSourceRegister() # Weak Value
@@ -115,18 +116,20 @@ class DataSource(SerialObject):
             if len(self._register.get_all_sources()) == 1:
                 self._register.set_default_source(self)
             self.alias = alias
-            self.data_freq = data_freq
-            self.time_cols_mapping: Dict[DataColumn, DataFreq] = {}
+            self.freq = data_freq
+            self.time_cols_mapping: Dict[Any, DataFreq] = {}
             self.data_cols_mapping: Dict[Any, DataColumn] = {}
+            self._is_product_in_source_func = if_product_is_in_source
+            self._get_product_path_func = get_product_path
 
     def if_product_is_in_source(self, product: Product) -> bool:
-        raise NotImplementedError
+        return self._is_product_in_source_func(product)
 
     def get_product_path(self, product: Product) -> Any:
-        raise NotImplementedError
+        return self._get_product_path_func(product)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
-        self.time_cols_mapping = {_process_data_col(k): _process_data_freq(v) for k, v in mapping.items()}
+        self.time_cols_mapping = {k: _process_data_freq(v) for k, v in mapping.items()}
 
     def set_data_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         self.data_cols_mapping = {k: _process_data_col(v) for k, v in mapping.items()}
@@ -144,7 +147,7 @@ class DataMeta(UniqueObject):
         if not hasattr(self, '_initialized'):
             super().__init__(name=name)
             self.product = product
-            self.data_freq = data_freq
+            self.freq = data_freq
             self.data: pd.DataFrame = pd.DataFrame()
             self.current_source: DataSource
             self.path: Any
@@ -154,9 +157,12 @@ class DataMeta(UniqueObject):
     def list_available_sources(self) -> List[DataSource]:
         lst = []
         for source in DataSourceRegister().get_all_sources():
-            if source.if_product_is_in_source(self.product):
+            if source.if_product_is_in_source(self.product) and source.freq == self.freq:
                 lst.append(source)
         return lst
+    
+    def is_available(self) -> bool:
+        return len(self.list_available_sources()) > 0
     
     def set_current_source(self, source: Any) -> DataSource:
         dsr = DataSourceRegister()
@@ -169,7 +175,10 @@ class DataMeta(UniqueObject):
         
     def get_current_source(self) -> DataSource:
         if not hasattr(self, 'current_source'):
-            self.current_source = self.list_available_sources()[0]
+            available_sources = self.list_available_sources()
+            if len(available_sources) == 0:
+                raise ValueError(f"No data source available for product {self.product.name}")
+            self.current_source = available_sources[0]
         return self.get('current_source')
 
     def _load_data(self, source: Optional[Any] = None) -> pd.DataFrame:
@@ -194,11 +203,11 @@ class DataMeta(UniqueObject):
                   filter_product: bool = False,
                   filter_product_attr: str = 'name') -> pd.DataFrame:
         self.data = loaded_data if loaded_data is not None else self._load_data(source)
+        self._map_time_cols(time_cols_mapping)
         self._map_data_cols(data_cols_mapping)
         if filter_product:
             filter_product_name = getattr(self.product, filter_product_attr)
             self.data = self.data[self.data[DataColumn.PRODUCT_NAME] == filter_product_name]
-        self._map_time_cols(time_cols_mapping)
         self._set_time_index(time_index)
         return self.data
     
@@ -207,7 +216,7 @@ class DataMeta(UniqueObject):
         ds = self.get_current_source()
         if mapping is not None:
             ds.set_data_cols_mapping(mapping)
-        self.data.reset_index(inplace=True)
+        self.data.reset_index(inplace=True, drop=True)
         self.data.rename(columns=ds.data_cols_mapping, inplace=True)
         return self.data
 
@@ -216,7 +225,7 @@ class DataMeta(UniqueObject):
         ds = self.get_current_source()
         if mapping is not None:
             ds.set_time_cols_mapping(mapping)
-        self.data.reset_index(inplace=True)
+        self.data.reset_index(inplace=True, drop=True)
         self.data.rename(columns=ds.time_cols_mapping, inplace=True)
         return self.data
 
@@ -230,6 +239,8 @@ class DataMeta(UniqueObject):
 
 class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+    MIN1: DataMeta
+    DAY1: DataMeta
 
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
@@ -237,12 +248,14 @@ class Product(UniqueObject):
                  category_attr_name: Optional[str] = None):
         if not hasattr(self, '_initialized'):
             super().__init__(name)
+            self.alias = self.name
             self.point_value = point_value
             self.currency = currency
             self.category_attr_name = category_attr_name if category_attr_name \
                 else self._default_category_attr_name
-            for name in DataFreq.__members__.keys():
-                setattr(self, name, DataMeta(name=f"{self.name}_{name}", product=self, data_freq=DataFreq[name]))
+            for key, val in DataFreq.__members__.items():
+                setattr(self, key, DataMeta(name=f"{self.name}_{key}", product=self, data_freq=val))
+            
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
             self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
@@ -349,8 +362,36 @@ class Product(UniqueObject):
             return data_freq
         else:
             return None
+        
+    def list_available_freqs(self) -> List[DataFreq]:
+        return [freq for freq in DataFreq if getattr(self, freq.name).is_available()]
+    
+    def set_current_freq(self, freq: Any) -> DataSource:
+        dsr = DataSourceRegister()
+        freq = dsr.register(freq)
+        if freq in self.list_available_freqs():
+            self.current_freq = freq
+            return freq
+        else:
+            raise ValueError(f"Data frequency {freq} is not available for product {self.name}")
+        
+    def get_current_freq(self) -> DataSource:
+        if not hasattr(self, 'current_freq'):
+            available_freqs = self.list_available_freqs()
+            if len(available_freqs) == 0:
+                raise ValueError(f"No data frequency available for product {self.name}")
+            self.current_freq = available_freqs[0]
+        return self.get('current_freq')
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
+        # try:
+        #     data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)
+        #     datam = getattr(self, data_freq.name)
+        #     if datam.data.empty:
+        #         datam.load_data()
+        #     return datam.data.copy() if copy else datam.data
+        # except:
+        #     return pd.DataFrame()
         if data_freq is not None or self.recent_data_freq is not None:
             data_freq = data_freq if data_freq is not None else self.recent_data_freq
             df = self.get_data(data_freq, copy=copy)
@@ -364,12 +405,6 @@ class Product(UniqueObject):
             return self.get_data(freq, copy=copy)
         else:
             return pd.DataFrame()
-        
-    def get_available_freqs(self) -> List[DataFreq]:
-        return list(self.data_path.keys())
-    
-    def get_loaded_freqs(self) -> List[DataFreq]:
-        return list(self.data.keys())
     
     def get_slices(self, target_cols: Optional[DataColumn|List[DataColumn|str]] = None,
                    time_col: Optional[DataColumn|str] = None, time_range: Optional[Any] = None,

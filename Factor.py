@@ -172,7 +172,7 @@ class Factor(SerialObject):
                 elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
                     PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
             assert self.min_gap is not None
-            all_f = product.get_available_freqs()
+            all_f = product.list_available_freqs()
             assert len(all_f) > 0
             data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
                                 and self.min_gap.total_seconds() % _f.value.total_seconds() == 0

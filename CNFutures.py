@@ -41,6 +41,7 @@ DataColumnMapping = {
     DataColumn.LOW_ADJUSTED: 'lowest_price_adjusted',
     DataColumn.CLOSE_ADJUSTED: 'close_price_adjusted',
     DataColumn.ADJUST_SUFFIX: '_adjusted',
+    DataColumn.PRODUCT_NAME: 'unique_instrument_id',
 }
 
 exchange_map = {
@@ -53,6 +54,7 @@ exchange_map = {
 }
 
 exchange_map_reversed = {v: k for k, v in exchange_map.items()}
+datacolumn_map_reversed = {v: k for k, v in DataColumnMapping.items()}
 
 code_col_name = '品种代码'
 variety_col_name = '合约标的'
@@ -151,10 +153,38 @@ class CNFutures(Futures):
         self.category_attr_name = 'category_sector_cn'
 
 def get_all_products() -> List[CNFutures]:
+
+    from Products import DataSource, DataFreq
+    LocalCNFuturesMIN1 = DataSource(
+        alias = 'LocalCNFuturesMIN1',
+        data_freq = DataFreq.MIN1,
+        if_product_is_in_source=lambda product: 
+            os.path.isfile(os.path.join(data_dir_min, product.name + '.' + data_type)),
+        get_product_path=lambda product: os.path.join(data_dir_min, product.name + '.' + data_type)
+    )
+    LocalCNFuturesDAY1 = DataSource(
+        alias = 'LocalCNFuturesDAY1',
+        data_freq = DataFreq.DAY1,
+        if_product_is_in_source=lambda product: 
+            os.path.isfile(os.path.join(data_dir_day, product.name + '.' + data_type)),
+        get_product_path=lambda product: os.path.join(data_dir_day, product.name + '.' + data_type)
+    )
+
+    LocalCNFuturesMIN1.set_data_cols_mapping(datacolumn_map_reversed)
+    LocalCNFuturesDAY1.set_data_cols_mapping(datacolumn_map_reversed)
+
+    LocalCNFuturesMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
+    LocalCNFuturesDAY1.set_time_cols_mapping({'trading_day': '1day'})
+
+    from Products import DataSourceRegister
+    DataSourceRegister().register(LocalCNFuturesMIN1)
+    DataSourceRegister().register(LocalCNFuturesDAY1)
+
     categories_with_products = get_categories_with_products()
     cnfutures_list = []
     for products in categories_with_products.values():
         cnfutures_list.extend(products)
+
     return cnfutures_list
 
 if __name__ == '__main__':
@@ -166,3 +196,5 @@ if __name__ == '__main__':
 
     all_cn_futures = get_all_products()
     print(all_cn_futures[0].get_some_data())
+
+
