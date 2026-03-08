@@ -1,6 +1,7 @@
 from abc import ABC
 from weakref import WeakValueDictionary
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
+import pandas as pd
 
 class UniqueObject(ABC):
     _instances = WeakValueDictionary()
@@ -41,24 +42,57 @@ class UniqueObject(ABC):
     def __repr__(self):
         return self.name
     
+    def get(self, attr_name: str) -> Any:
+        if hasattr(self, attr_name):
+            attr_value = getattr(self, attr_name)
+            if attr_value is not None:
+                return attr_value
+            else:
+                raise AttributeError(f"{self.__class__.__name__} has no attribute {attr_name}")
+        else:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {attr_name}")
+        
+    def set(self, **kwargs) -> None:
+        for attr_name, value in kwargs.items():
+            setattr(self, attr_name, value)
+    
 class SerialObject(UniqueObject):
     _instance_count: int = -1
     _serial_map: Dict[int, SerialObject] = {}
-    _used_type_aliases = WeakValueDictionary()
+    _type_alias_owners: Dict[str, type] = {}
+
+    @classmethod
+    def _get_family_root(cls):
+        if getattr(cls, '_override_family_root', False):
+            return cls
+        for base in cls.__mro__:
+            if SerialObject in base.__bases__:
+                return base
+            if base is SerialObject:
+                break
+        return SerialObject
 
     def __new__(cls, type_alias: str, alias: Optional[str] = None, *args, **kwargs):
+
+        if type_alias in cls._type_alias_owners:
+            owner = cls._type_alias_owners[type_alias]
+            if not issubclass(cls, owner):
+                raise ValueError(f"type_alias '{type_alias}' is already used by {owner.__name__} family")
+        else:
+            cls._type_alias_owners[type_alias] = cls._get_family_root()
+
         cls._instance_count += 1
-        name = type_alias + '@' + str(cls._instance_count)
-        name = name if alias is None else name + ':' + alias
+        name = f"{type_alias}@{cls._instance_count}"
+        name = name if alias is None else f"{name}:{alias}"
         instance = super().__new__(cls, name=name)
         return instance
 
     def __init__(self, type_alias: str, alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             self.serial_number = self._instance_count
-            name = type_alias + '@' + str(self.serial_number)
+            name = f"{type_alias}@{self.serial_number}"
             self.alias = alias or name
-            name = name if alias is None else name + ':' + alias
+            name = name if alias is None else f"{name}:{alias}"
             super().__init__(name=name)
             self._set_serial_map(self.serial_number, self)
 
@@ -76,5 +110,5 @@ class SerialObject(UniqueObject):
             if item is not None:
                 return item
             else:
-                raise KeyError
-        raise TypeError
+                raise KeyError(f"No instance with serial number {key} found in {cls.__name__} family")
+        raise TypeError(f"Invalid key type: {type(key).__name__}. Expected int for serial number lookup.")

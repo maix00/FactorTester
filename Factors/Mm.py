@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CNFutures import CNFutures
 from Products import Product, DataColumn
 from Factor import FactorFamily
-from Parameter import DataColumnParam, FinRangeParam
+from Parameter import DataColumnParam, FinRangeParam, TimeParam
 from typing import List, Dict, Any, Sequence, Tuple
 
 class Mm(FactorFamily): # Day Momentum
@@ -14,7 +14,7 @@ class Mm(FactorFamily): # Day Momentum
     additional_params = [
         DataColumnParam('H').set_default_value(DataColumn.HIGH),
         DataColumnParam('L').set_default_value(DataColumn.LOW),
-        FinRangeParam('F', ['1d', 'S', '5h', '3h'])
+        FinRangeParam('F', 'S') + TimeParam(flag='pos')
     ]
 
     def funcMIN1(self, products: Sequence[Product],
@@ -37,12 +37,13 @@ class Mm(FactorFamily): # Day Momentum
             factors[product] = df[4::5]
         return pd.DataFrame(factors)
     
-    def func(self, products: Sequence[Product], F: str = '1d',
+    def func(self, products: Sequence[Product], F: Any = '1d',
              H: DataColumn = DataColumn.HIGH,
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
+        data_freq = pd.Timedelta('1min')
         for product in products:
-            df = product.get_data('1min')
+            df = product.get_data(data_freq)
             
             _H = product.get_col_name(H)
             _L = product.get_col_name(L)
@@ -61,7 +62,8 @@ class Mm(FactorFamily): # Day Momentum
                 df.index = pd.MultiIndex.from_arrays([_TD_, end_session], names=[_TD, 'end_session'])
                 idx = [_TD, 'end_session']
             elif F == '5h' or F == '3h':
-                period = pd.Timedelta('5 hours') % pd.Timedelta('1 min')
+                period = pd.Timedelta(F) % data_freq
+                
                 idx = _TD
             else:
                 continue
@@ -85,7 +87,7 @@ class Mm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = Mm()
-    ff.add_params(return_freq = '5h')
+    # ff.add_params(return_freq = '5h')
     # ff.change_default_return_freq('3h')
     # ff.add_params(F = 'S')
     # ff.add_params(F = '5h')

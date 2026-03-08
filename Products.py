@@ -4,15 +4,26 @@ import sys
 from typing import Any, List, Optional, Dict, Tuple
 import pandas as pd
 from datetime import datetime
+from Tools import UniqueObject, SerialObject
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tqdm import tqdm
-from UniqueObject import UniqueObject
+from weakref import WeakValueDictionary
 
 mappings_path = '../data/rollover_adjustments.csv'
 
 class DataFreq(Enum):
     MIN1 = pd.Timedelta('1min')
     DAY1 = pd.Timedelta('1day')
+
+def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
+    if isinstance(data_freq, DataFreq):
+        return data_freq
+    if isinstance(data_freq, str):
+        data_freq = pd.Timedelta(data_freq)
+    if isinstance(data_freq, pd.Timedelta):
+        data_freq = DataFreq(data_freq)
+        return DataFreq(data_freq)
+    raise ValueError("Invalid data frequency")
 
 class DataColumn(Enum):
     OPEN = 'O'
@@ -38,6 +49,184 @@ class DataColumn(Enum):
     CLOSE_ADJUSTED = 'CA'
     TIME_COL = 'T'
     ADJUST_SUFFIX = 'ADJ'
+    PRODUCT_NAME = 'PN'
+
+def _process_data_col(col: Optional[Any] = None) -> DataColumn:
+    if isinstance(col, DataColumn):
+        return col
+    if isinstance(col, str):
+        col = DataColumn(col)
+    raise ValueError("Invalid data column")
+
+class DataSourceRegister(UniqueObject):
+    _instances = WeakValueDictionary()
+    _data_sources = WeakValueDictionary()
+
+    def __new__(cls):
+        return super().__new__(cls, name='DataSourceRegister')
+
+    def __init__(self):
+        if not hasattr(self, '_initialized'):
+            super().__init__('DataSourceRegister')
+            self.default_source: DataSource
+
+    @staticmethod
+    def _process_source(name: Any) -> DataSource:
+        if isinstance(name, DataSource):
+            return name
+        elif isinstance(name, str):
+            return DataSource(name)
+        else:
+            raise ValueError
+    
+    def register(self, source: Any) -> DataSource:
+        source = self._process_source(source)
+        if source.alias not in self._data_sources:
+            self._data_sources[source.alias] = self._process_source(source)
+        return source
+
+    def set_default_source(self, source: Any) -> DataSource:
+        self.default_source = self.register(source)
+        return self.default_source
+    
+    def get_source(self, name: str) -> DataSource:
+        return self._data_sources[name]
+    
+    def get_all_sources(self) -> List[DataSource]:
+        return list(self._data_sources.values())
+
+    def get_default_source(self) -> DataSource:
+        return self.get('default_source')
+
+
+class DataSource(SerialObject):
+    _instances = WeakValueDictionary()
+    _instance_count: int = -1
+    _serial_map = {}
+
+    def __new__(cls, alias: str):
+        return super().__new__(cls, type_alias='DS', alias=alias)
+
+    def __init__(self, alias: str, data_freq: DataFreq):
+        if not hasattr(self, '_initialized'):
+            super().__init__(type_alias='DS', alias=alias)
+            self._register = DataSourceRegister() # Weak Value
+            self._register.register(self)
+            if len(self._register.get_all_sources()) == 1:
+                self._register.set_default_source(self)
+            self.alias = alias
+            self.data_freq = data_freq
+            self.time_cols_mapping: Dict[DataColumn, DataFreq] = {}
+            self.data_cols_mapping: Dict[Any, DataColumn] = {}
+
+    def if_product_is_in_source(self, product: Product) -> bool:
+        raise NotImplementedError
+
+    def get_product_path(self, product: Product) -> Any:
+        raise NotImplementedError
+    
+    def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
+        self.time_cols_mapping = {_process_data_col(k): _process_data_freq(v) for k, v in mapping.items()}
+
+    def set_data_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
+        self.data_cols_mapping = {k: _process_data_col(v) for k, v in mapping.items()}
+
+if __name__ == '__main__':
+    ds1 = DataSource('source1')
+    print(ds1)
+    ds = DataSourceRegister().get_default_source()
+    print(ds)
+
+class DataMeta(UniqueObject):
+    _instances = WeakValueDictionary()
+
+    def __init__(self, name: str, product: Product, data_freq: DataFreq):
+        if not hasattr(self, '_initialized'):
+            super().__init__(name=name)
+            self.product = product
+            self.data_freq = data_freq
+            self.data: pd.DataFrame = pd.DataFrame()
+            self.current_source: DataSource
+            self.path: Any
+            self.start_date: pd.Timestamp
+            self.end_date: pd.Timestamp
+
+    def list_available_sources(self) -> List[DataSource]:
+        lst = []
+        for source in DataSourceRegister().get_all_sources():
+            if source.if_product_is_in_source(self.product):
+                lst.append(source)
+        return lst
+    
+    def set_current_source(self, source: Any) -> DataSource:
+        dsr = DataSourceRegister()
+        source = dsr.register(source)
+        if source in self.list_available_sources():
+            self.current_source = source
+            return source
+        else:
+            raise ValueError(f"Data source {source.alias} is not available for product {self.product.name}")
+        
+    def get_current_source(self) -> DataSource:
+        if not hasattr(self, 'current_source'):
+            self.current_source = self.list_available_sources()[0]
+        return self.get('current_source')
+
+    def _load_data(self, source: Optional[Any] = None) -> pd.DataFrame:
+        source = self.set_current_source(source) if source is not None else self.get_current_source()
+        assert source is not None
+        self.path = source.get_product_path(self.product)
+        if self.path.endswith('.csv'):
+            self.data = pd.read_csv(self.path)
+        elif self.path.endswith('.xlsx'):
+            self.data = pd.read_excel(self.path)
+        elif self.path.endswith('.parquet'):
+            self.data = pd.read_parquet(self.path)
+        else:
+            raise ValueError("Unsupported file type")
+        return self.data
+    
+    def load_data(self, source: Optional[Any] = None,
+                  loaded_data: Optional[pd.DataFrame] = None,
+                  data_cols_mapping: Optional[Dict[Any, Any]] = None,
+                  time_cols_mapping: Optional[Dict[Any, Any]] = None,
+                  time_index: Optional[Any] = None,
+                  filter_product: bool = False,
+                  filter_product_attr: str = 'name') -> pd.DataFrame:
+        self.data = loaded_data if loaded_data is not None else self._load_data(source)
+        self._map_data_cols(data_cols_mapping)
+        if filter_product:
+            filter_product_name = getattr(self.product, filter_product_attr)
+            self.data = self.data[self.data[DataColumn.PRODUCT_NAME] == filter_product_name]
+        self._map_time_cols(time_cols_mapping)
+        self._set_time_index(time_index)
+        return self.data
+    
+    def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
+        assert not self.data.empty
+        ds = self.get_current_source()
+        if mapping is not None:
+            ds.set_data_cols_mapping(mapping)
+        self.data.reset_index(inplace=True)
+        self.data.rename(columns=ds.data_cols_mapping, inplace=True)
+        return self.data
+
+    def _map_time_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
+        assert not self.data.empty
+        ds = self.get_current_source()
+        if mapping is not None:
+            ds.set_time_cols_mapping(mapping)
+        self.data.reset_index(inplace=True)
+        self.data.rename(columns=ds.time_cols_mapping, inplace=True)
+        return self.data
+
+    def _set_time_index(self, index: Optional[Any] = None) -> pd.DataFrame:
+        assert not self.data.empty
+        if index is None:
+            ds = self.get_current_source()
+            index = sorted(ds.time_cols_mapping.values(), key=lambda x: x.value, reverse=True)
+        self.data.set_index(index, inplace=True)
+        return self.data
 
 class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
@@ -52,6 +241,8 @@ class Product(UniqueObject):
             self.currency = currency
             self.category_attr_name = category_attr_name if category_attr_name \
                 else self._default_category_attr_name
+            for name in DataFreq.__members__.keys():
+                setattr(self, name, DataMeta(name=f"{self.name}_{name}", product=self, data_freq=DataFreq[name]))
             self.data: Dict[DataFreq, pd.DataFrame] = {}
             self.data_path: Dict[DataFreq, str] = {}
             self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
@@ -59,6 +250,16 @@ class Product(UniqueObject):
             self.sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]] = {}
             self.recent_data_freq: Optional[DataFreq] = None
     
+    def _datam(self, data_freq: Any) -> DataMeta:
+        if not isinstance(data_freq, DataFreq):
+            data_freq = self._process_data_freq(data_freq)
+        return getattr(self, data_freq.name)
+    
+    def _datam_recent(self, data_freq: Any) -> DataMeta:
+        if data_freq is None:
+            data_freq = self.recent_data_freq
+        return self._datam(data_freq)
+
     def set_time_cols_mapping(self, data_freq: Any, mapping: Dict[Any, str]) -> None:
         data_freq = self._process_data_freq(data_freq)
         self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
@@ -117,13 +318,16 @@ class Product(UniqueObject):
                         df[col] = pd.to_datetime(df[col])
                     df = df.reset_index().set_index(time_cols)
                 self.data[data_freq] = df
+                self._datam(data_freq).data = df
 
     def get_data(self, data_freq: Any, copy: bool = True) -> pd.DataFrame:
         data_freq = self._process_data_freq(data_freq)
         data = self.data.get(data_freq)
+        data = self._datam(data_freq).data
         if data is None:
             self.load_data(data_freq)
             data = self.data.get(data_freq)
+            data = self._datam(data_freq).data
         data = pd.DataFrame() if data is None else data
         self.recent_data_freq = data_freq
         if copy:
@@ -138,6 +342,7 @@ class Product(UniqueObject):
     def get_some_data_freq(self) -> Optional[DataFreq]:
         if self.recent_data_freq is not None:
             return self.recent_data_freq
+        # data_freq = sorted([datam.data_freq for datam in self.datams])
         if self.data_path:
             data_freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
             self.recent_data_freq = data_freq

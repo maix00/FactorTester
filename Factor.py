@@ -8,7 +8,7 @@ import numpy as np
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
 import os
 
-from UniqueObject import SerialObject
+from Tools import SerialObject
 from Products import DataColumn, Futures, Product, DataFreq
 from Parameter import Parameter, FinRangeParam, TimeParam, get_return_freq_param
 from CNFutures import get_all_products
@@ -40,11 +40,6 @@ def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
 class FactorFreqType(Enum):
     CONSTANT = 0
     AT_EVENT = 1
-
-class EventType(Enum):
-    AMID_PERIOD = 0
-    END_OF_PERIOD = 1
-    START_OF_PERIOD = 2
 
 class Factor(SerialObject):
     _instance_count: int = -1
@@ -306,6 +301,20 @@ class FactorFamily:
             factors.append(factor)
         return factors
     
+    def get_factor(self, return_freq: Optional[Any] = None, **kwargs):
+        if return_freq is not None:
+            self._check_in_space(**{'$RF': return_freq})
+        self._check_in_space(**kwargs)
+        new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
+        new_params['$RF'] = return_freq
+        factor_name = self.get_alias(**new_params)
+        factor_func = partial(self.func, **new_params)
+        return Factor(alias=factor_name, func=factor_func, params=new_params)
+    
+    # def get_common_start(self, products: Sequence[Product]):
+    #     for product in products:
+
+    
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
             categories: Optional[str|List[str]] = None,
             sift_volume_ratio: float = sift_volume_ratio) -> FactorTester:
@@ -346,7 +355,7 @@ class FactorFamily:
             new_row = pd.Series({
                 'factor_stem': self.name_stem,
                 'serial_num': pd.Timestamp.now(),
-                'factor_name': factor.name,
+                'factor_name': factor.alias,
                 'factor_freq': factor.freq,
                 'start_date': tester.start_date,
                 'end_date': tester.end_date,
@@ -484,12 +493,12 @@ class FactorTester:
                 else:
                     ic.append(np.nan)
             factor.ic_series = pd.Series(ic, index=dt_index)
-            ic_series[factor.name] = factor.ic_series
+            ic_series[factor.alias] = factor.ic_series
             avg_coverage = np.mean(coverage)
-            stats_df = self.ic_stats(ic_series[factor.name])
+            stats_df = self.ic_stats(ic_series[factor.alias])
             stats_df['avg_coverage'] = avg_coverage
             factor.ic_stats = stats_df
-            ic_stats[factor.name] = stats_df
+            ic_stats[factor.alias] = stats_df
         return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
@@ -534,7 +543,7 @@ class FactorTester:
             assert not factor.returns.empty
 
             last_dt, _ = next(factor.table.iterrows())
-            for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.name):
+            for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.alias):
                 # sifted_products = self.products
                 sifted_products = self.sift_product_by_volumes(
                     ratio=sift_volume_ratio, 
@@ -649,9 +658,9 @@ class FactorTester:
                 plt.xlabel('日期')
                 plt.ylabel('平均收益')
                 if plot_remark_str:
-                    plt.title(f'平均收益: {factor.name} - {plot_remark_str}')
+                    plt.title(f'平均收益: {factor.alias} - {plot_remark_str}')
                 else:
-                    plt.title(f'平均收益: {factor.name}')
+                    plt.title(f'平均收益: {factor.alias}')
                 plt.rcParams['font.sans-serif'] = ['Kaiti SC']
                 plt.legend()
                 # Only show every nth tick to reduce crowding
@@ -663,11 +672,11 @@ class FactorTester:
                 plt.xticks(ticks=ticks, rotation=45)
                 plt.tight_layout()
                 if save_plot:
-                    factor_stem = factor.name.split('|')[0]
+                    factor_stem = factor.alias.split('|')[0]
                     figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
                     if not os.path.exists(figs_path):
                         os.makedirs(figs_path)
-                    plt.savefig(os.path.join(figs_path, f'{factor.name}_{start_date}_{end_date}.png'))
+                    plt.savefig(os.path.join(figs_path, f'{factor.alias}_{start_date}_{end_date}.png'))
                 if plot_show:
                     plt.show()
 

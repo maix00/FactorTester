@@ -1,7 +1,7 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
 
-from UniqueObject import SerialObject
+from Tools import SerialObject
 from Products import DataColumn
 
 class Parameter(SerialObject):
@@ -9,8 +9,7 @@ class Parameter(SerialObject):
     _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
-        instance = super().__new__(cls, type_alias='P', alias=alias)
-        return instance
+        return super().__new__(cls, type_alias='P', alias=alias)
 
     def __init__(self, alias: Optional[str], default_value: Any,
                  check_in_space: Callable[[Any], bool],
@@ -55,9 +54,11 @@ class Parameter(SerialObject):
         return NotImplemented
     
 class FinRangeParam(Parameter):
-    def __init__(self, alias: Optional[str], value_space: List[Any], 
+    def __init__(self, alias: Optional[str], value_space: List[Any]|Any, 
                  get_value_alias: Optional[Callable[[Any], str]] = None):
         if not hasattr(self, '_initialized'):
+            if not isinstance(value_space, list):
+                value_space = [value_space]
             super().__init__(
                 alias = alias,
                 default_value = value_space[0],
@@ -122,7 +123,7 @@ class TimeParam(Parameter):
             return str(value)
         
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
-    return FinRangeParam(alias, [None], lambda _: 'N') + TimeParam(flag='pos')
+    return FinRangeParam(alias, None, lambda _: 'N') + TimeParam(flag='pos')
     
 if __name__ == '__main__':
     ReturnFreq = get_return_freq_param()
