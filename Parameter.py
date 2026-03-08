@@ -5,7 +5,8 @@ import pandas as pd
 from Products import DataColumn, Futures, Product, DataFreq, UniqueObject
 
 class Parameter(UniqueObject):
-    _instance_count: int = 0
+    _instance_count: int = -1
+    _serial_map: Dict[int, Parameter] = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
         Parameter._instance_count += 1
@@ -23,6 +24,7 @@ class Parameter(UniqueObject):
             self.alias = alias or name
             name = name if alias is None else name + ':' + alias
             super().__init__(name = name)
+            Parameter._serial_map[self.serial_number] = self
             self.check_in_space = check_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
@@ -59,6 +61,15 @@ class Parameter(UniqueObject):
             )
             return new_param
         return NotImplemented
+    
+    @classmethod
+    def get_by_serial(cls, serial_number):
+        return cls._serial_map.get(serial_number)
+    
+    def __class_getitem__(cls, key):
+        if isinstance(key, int):
+            return cls.get_by_serial(key)
+        raise TypeError
     
 class FinRangeParam(Parameter):
     def __init__(self, alias: Optional[str], value_space: List[Any], 
@@ -126,7 +137,10 @@ class TimeParam(Parameter):
             return ''.join(f"{v}{units[k]}" for k, v in c._asdict().items() if v > 0) or '0'
         except Exception:
             return str(value)
+        
+def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
+    return FinRangeParam(alias, [None], lambda _: 'N') + TimeParam(flag='pos')
     
 if __name__ == '__main__':
-    ReturnFreq = FinRangeParam('$RF', [None], lambda _: 'N') + TimeParam(flag='pos')
+    ReturnFreq = get_return_freq_param()
     print(ReturnFreq.get_value_alias('2h45m10s11ms'))

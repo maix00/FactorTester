@@ -85,6 +85,7 @@ class Mm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = Mm()
+    ff.add_params(return_freq = '5h')
     # ff.change_default_return_freq('3h')
     # ff.add_params(F = 'S')
     # ff.add_params(F = '5h')
