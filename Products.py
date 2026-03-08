@@ -19,7 +19,10 @@ def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
     if isinstance(data_freq, DataFreq):
         return data_freq
     if isinstance(data_freq, str):
-        data_freq = pd.Timedelta(data_freq)
+        try:
+            data_freq = DataFreq[data_freq]
+        except KeyError:
+            data_freq = pd.Timedelta(data_freq)
     if isinstance(data_freq, pd.Timedelta):
         data_freq = DataFreq(data_freq)
         return DataFreq(data_freq)
@@ -117,8 +120,8 @@ class DataSource(SerialObject):
                 self._register.set_default_source(self)
             self.alias = alias
             self.freq = data_freq
-            self.time_cols_mapping: Dict[Any, DataFreq] = {}
-            self.data_cols_mapping: Dict[Any, DataColumn] = {}
+            self.time_cols_mapping: Dict[Any, str] = {}
+            self.data_cols_mapping: Dict[Any, str] = {}
             self._is_product_in_source_func = if_product_is_in_source
             self._get_product_path_func = get_product_path
 
@@ -129,10 +132,10 @@ class DataSource(SerialObject):
         return self._get_product_path_func(product)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
-        self.time_cols_mapping = {k: _process_data_freq(v) for k, v in mapping.items()}
+        self.time_cols_mapping = {k: _process_data_freq(v).name for k, v in mapping.items()}
 
     def set_data_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
-        self.data_cols_mapping = {k: _process_data_col(v) for k, v in mapping.items()}
+        self.data_cols_mapping = {k: _process_data_col(v).name for k, v in mapping.items()}
 
 if __name__ == '__main__':
     ds1 = DataSource('source1')
@@ -211,6 +214,11 @@ class DataMeta(UniqueObject):
         self._set_time_index(time_index)
         return self.data
     
+    def get_data(self, copy: bool = True) -> pd.DataFrame:
+        if self.data.empty:
+            self.load_data()
+        return self.data.copy() if copy else self.data
+    
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
         ds = self.get_current_source()
@@ -233,9 +241,43 @@ class DataMeta(UniqueObject):
         assert not self.data.empty
         if index is None:
             ds = self.get_current_source()
-            index = sorted(ds.time_cols_mapping.values(), key=lambda x: x.value, reverse=True)
+            index = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq[x].value, reverse=True)
+        for col in index:
+            if col not in self.data.columns:
+                raise ValueError(f"Column {col} not found in data")
+            self.data[col] = pd.to_datetime(self.data[col])
         self.data.set_index(index, inplace=True)
         return self.data
+    
+    @staticmethod
+    def _get_adjusted_col_name(col: str) -> str:
+        return f"{col}_ADJUSTED"
+    
+    @staticmethod
+    def _get_nonadjusted_col_name(col: str) -> str:
+        return col.replace("_ADJUSTED", "")
+    
+    @staticmethod
+    def _check_is_adjusted(col: str) -> bool:
+        return col.endswith("_ADJUSTED")
+
+    def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True) -> pd.DataFrame:
+        if not isinstance(self.product, Futures):
+            return self.get_data(copy)
+        if not isinstance(cols, list):
+            cols = [cols]
+        df = self.get_data(copy)
+        cols = list(set(cols))
+        adjust_cols = [col if self._check_is_adjusted(col) else self._get_adjusted_col_name(col) for col in cols]
+        adjust_cols = [col for col in adjust_cols if col not in df.columns]
+        if len(adjust_cols) > 0:
+            assert DataColumn.ADJUSTMENT_MUL.name in df.columns
+            assert DataColumn.ADJUSTMENT_ADD.name in df.columns
+            cols = [self._get_nonadjusted_col_name(col) for col in adjust_cols]
+            for col, col_adj in zip(cols, adjust_cols):
+                df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
+                    + df[DataColumn.ADJUSTMENT_ADD.name]
+        return df
 
 class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
@@ -255,127 +297,18 @@ class Product(UniqueObject):
                 else self._default_category_attr_name
             for key, val in DataFreq.__members__.items():
                 setattr(self, key, DataMeta(name=f"{self.name}_{key}", product=self, data_freq=val))
-            
-            self.data: Dict[DataFreq, pd.DataFrame] = {}
-            self.data_path: Dict[DataFreq, str] = {}
-            self.time_cols_mapping: Dict[DataFreq, Dict[DataFreq, str]] = {}
-            self.data_cols_mapping: Dict[DataFreq, Dict[DataColumn, str]] = {}
-            self.sessions: Dict[str, List[Tuple[pd.Timestamp, pd.Timestamp]]] = {}
-            self.recent_data_freq: Optional[DataFreq] = None
-    
-    def _datam(self, data_freq: Any) -> DataMeta:
-        if not isinstance(data_freq, DataFreq):
-            data_freq = self._process_data_freq(data_freq)
-        return getattr(self, data_freq.name)
-    
-    def _datam_recent(self, data_freq: Any) -> DataMeta:
-        if data_freq is None:
-            data_freq = self.recent_data_freq
-        return self._datam(data_freq)
-
-    def set_time_cols_mapping(self, data_freq: Any, mapping: Dict[Any, str]) -> None:
-        data_freq = self._process_data_freq(data_freq)
-        self.time_cols_mapping[data_freq] = {self._process_data_freq(k): v for k, v in mapping.items()}
-    
-    def set_data_cols_mapping(self, data_freq: Any, mapping: Dict[DataColumn, str]) -> None:
-        data_freq = self._process_data_freq(data_freq)
-        self.data_cols_mapping[data_freq] = {k: v for k, v in mapping.items()}
-    
-    def get_col_name(self, data_col: DataColumn, data_freq: Optional[Any] = None) -> str:
-        if data_freq is None:
-            data_freq = self.recent_data_freq
-        data_freq = self._process_data_freq(data_freq)
-        return self.data_cols_mapping[data_freq][data_col]
-
-    @staticmethod
-    def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
-        if isinstance(data_freq, DataFreq):
-            return data_freq
-        if isinstance(data_freq, str):
-            data_freq = pd.Timedelta(data_freq)
-        if isinstance(data_freq, pd.Timedelta):
-            data_freq = DataFreq(data_freq)
-            return DataFreq(data_freq)
-        raise ValueError("Invalid data frequency")
-    
-    def set_data_path(self, data_path: str, data_freq: Any) -> None:
-        data_freq = self._process_data_freq(data_freq)
-        self.data_path[data_freq] = data_path
-
-    def load_all_data(self) -> None:
-        for freq in self.data_path.keys():
-            self.load_data(freq, reload=True)
-
-    def load_data(self, data_freq: Any, data_path: Optional[str] = None, 
-                  reload: bool = False, time_cols_mapping: Optional[Dict[Any, str]] = None) -> None:
-        data_freq = self._process_data_freq(data_freq)
-        if data_path is not None:
-            self.set_data_path(data_path, data_freq)
-        data_path = self.data_path.get(data_freq)
-        if data_path is not None and (self.data.get(data_freq) is None or reload):
-            if data_path.endswith('.csv'):
-                df = pd.read_csv(data_path)
-            elif data_path.endswith('.xlsx'):
-                df = pd.read_excel(data_path)
-            elif data_path.endswith('.parquet'):
-                df = pd.read_parquet(data_path)
-            else:
-                return
-            if not df.empty:
-                if time_cols_mapping is not None:
-                    self.set_time_cols_mapping(data_freq, time_cols_mapping)
-                time_cols_mapping = self.time_cols_mapping.get(data_freq)
-                if time_cols_mapping is not None:
-                    time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
-                    for col in time_cols:
-                        df[col] = pd.to_datetime(df[col])
-                    df = df.reset_index().set_index(time_cols)
-                self.data[data_freq] = df
-                self._datam(data_freq).data = df
-
-    def get_data(self, data_freq: Any, copy: bool = True) -> pd.DataFrame:
-        data_freq = self._process_data_freq(data_freq)
-        data = self.data.get(data_freq)
-        data = self._datam(data_freq).data
-        if data is None:
-            self.load_data(data_freq)
-            data = self.data.get(data_freq)
-            data = self._datam(data_freq).data
-        data = pd.DataFrame() if data is None else data
-        self.recent_data_freq = data_freq
-        if copy:
-            data = data.copy()
-        return data
-    
-    def get_recent_data_freq(self) -> DataFreq:
-        data_freq = self.get_some_data_freq()
-        assert data_freq is not None, "No data frequency available"
-        return data_freq
-    
-    def get_some_data_freq(self) -> Optional[DataFreq]:
-        if self.recent_data_freq is not None:
-            return self.recent_data_freq
-        # data_freq = sorted([datam.data_freq for datam in self.datams])
-        if self.data_path:
-            data_freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
-            self.recent_data_freq = data_freq
-            return data_freq
-        else:
-            return None
         
     def list_available_freqs(self) -> List[DataFreq]:
         return [freq for freq in DataFreq if getattr(self, freq.name).is_available()]
     
-    def set_current_freq(self, freq: Any) -> DataSource:
-        dsr = DataSourceRegister()
-        freq = dsr.register(freq)
+    def set_current_freq(self, freq: Any) -> DataFreq:
         if freq in self.list_available_freqs():
             self.current_freq = freq
             return freq
         else:
             raise ValueError(f"Data frequency {freq} is not available for product {self.name}")
         
-    def get_current_freq(self) -> DataSource:
+    def get_current_freq(self) -> DataFreq:
         if not hasattr(self, 'current_freq'):
             available_freqs = self.list_available_freqs()
             if len(available_freqs) == 0:
@@ -384,35 +317,20 @@ class Product(UniqueObject):
         return self.get('current_freq')
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
-        # try:
-        #     data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)
-        #     datam = getattr(self, data_freq.name)
-        #     if datam.data.empty:
-        #         datam.load_data()
-        #     return datam.data.copy() if copy else datam.data
-        # except:
-        #     return pd.DataFrame()
-        if data_freq is not None or self.recent_data_freq is not None:
-            data_freq = data_freq if data_freq is not None else self.recent_data_freq
-            df = self.get_data(data_freq, copy=copy)
-            if df is not None:
-                return df
-        if self.data_path:
-            freq = sorted(self.data_path.keys(), key=lambda x: x.value)[0]
-            if not self.data:
-                self.load_data(freq, reload=True)
-            self.recent_data_freq = freq
-            return self.get_data(freq, copy=copy)
-        else:
+        try:
+            data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)
+            return getattr(self, data_freq.name).get_data(copy=copy)
+        except:
             return pd.DataFrame()
+
+    def get_time_cols(self, data_freq: Optional[Any] = None) -> List[str]:
+        data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)
+        return getattr(self, data_freq.name).get_current_source().time_cols_mapping.values()
     
-    def get_slices(self, target_cols: Optional[DataColumn|List[DataColumn|str]] = None,
-                   time_col: Optional[DataColumn|str] = None, time_range: Optional[Any] = None,
+    def get_slices(self, target_cols: Optional[Any] = None,
+                   time_col: Optional[str] = None, time_range: Optional[Any] = None,
                    data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
         
-        if data_freq is None:
-            data_freq = self.get_some_data_freq()
-            assert data_freq is not None
         data = self.get_some_data(data_freq, copy=False)
 
         if isinstance(target_cols, DataColumn):
@@ -420,20 +338,17 @@ class Product(UniqueObject):
         if target_cols is None:
             target_cols = list(data.columns)
         else:
-            target_cols = [self.get_col_name(col) if isinstance(col, DataColumn) else col for col in target_cols]
+            target_cols = [col.name if isinstance(col, DataColumn) else col for col in target_cols]
         if data.empty:
             return pd.DataFrame(columns=target_cols)
 
-        time_cols_mapping = self.time_cols_mapping.get(data_freq)
+        time_cols = self.get_time_cols(data_freq)
         
-        if time_cols_mapping is None:
+        if time_cols is None:
             return pd.DataFrame(columns=target_cols)
-        assert time_cols_mapping is not None
-        time_cols = [time_cols_mapping[_f] for _f in sorted(time_cols_mapping.keys(), key=lambda x: x.value, reverse=True)]
+        time_cols = sorted(time_cols, key=lambda x: DataFreq[str(x)].value, reverse=True)
         if time_col is None:
-            time_col = time_cols[0]
-        if isinstance(time_col, DataColumn):
-            time_col = self.get_col_name(time_col)
+            time_col = time_cols[0] # Default time column
         if time_col not in time_cols:
             return pd.DataFrame(columns=target_cols)
         else:
@@ -474,7 +389,7 @@ class Product(UniqueObject):
                 return pd.DataFrame(data.loc[mask, target_cols])
             
     def if_time_is_in_data(self, time: Any) -> bool:
-        slice = self.get_slices(time_col=DataColumn.TIME_COL, time_range=time)
+        slice = self.get_slices(time_col=DataColumn.TIME_COL.name, time_range=time)
         return not slice.empty
         
     def set_category_attr_name_as_default(self):
@@ -546,36 +461,6 @@ class Futures(Product):
             for i in range(len(self.mappings)):
                 if trading_day >= self.mappings['old_contract_start_date'].iloc[i] and trading_day <= self.mappings['old_contract_end_date'].iloc[i]:
                     return self.FuturesContractClass(self.mappings['new_unique_instrument_id'].iloc[i])
-    
-    def get_col_name_adjusted(self, data_col: DataColumn|str) -> str:
-        preffix = self.get_col_name(data_col) if isinstance(data_col, DataColumn) else data_col
-        return preffix + self.get_col_name(DataColumn.ADJUST_SUFFIX)
-    
-    def get_col_name_nonadjusted(self, data_col: DataColumn|str) -> str:
-        col_name = self.get_col_name(data_col) if isinstance(data_col, DataColumn) else data_col
-        return col_name.removesuffix(self.get_col_name(DataColumn.ADJUST_SUFFIX))
-
-    def check_col_is_adjusted(self, col_name: DataColumn|str) -> bool:
-        if isinstance(col_name, DataColumn):
-            col_name = self.get_col_name(col_name)
-        return col_name.endswith(self.get_col_name(DataColumn.ADJUST_SUFFIX))
-
-    def adjust_cols(self, data_freq: Any, price_cols: List[DataColumn|str]|DataColumn|str, copy: bool = True) -> pd.DataFrame:
-        if not isinstance(price_cols, list):
-            price_cols = [price_cols]
-        price_cols = list(set([self.get_col_name(col) if isinstance(col, DataColumn) else col for col in price_cols]))
-        data_freq = self._process_data_freq(data_freq)
-        adjust_cols = [self.get_col_name_adjusted(col) for col in price_cols]
-        df = self.get_data(data_freq, copy=False)
-        if any(col not in df.columns for col in adjust_cols):
-            assert self.get_col_name(DataColumn.ADJUSTMENT_MUL) in df.columns
-            assert self.get_col_name(DataColumn.ADJUSTMENT_ADD) in df.columns
-            for col, col_adj in zip(price_cols, adjust_cols):
-                df[col_adj] = df[col] * df[self.get_col_name(DataColumn.ADJUSTMENT_MUL)] \
-                    + df[self.get_col_name(DataColumn.ADJUSTMENT_ADD)]
-        if copy:
-            df = df.copy()
-        return df
 
 # class PortfolioBackTester:
 #     def __init__(self, start_date: Optional[datetime|str] = None, end_date: Optional[datetime|str] = None,

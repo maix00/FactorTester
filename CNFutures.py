@@ -121,22 +121,7 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
             exchange = get_exchange_code_by_code(code)
             if exchange is not None:
                 mapped_exchange = exchange_map.get(exchange, exchange)
-                name = code + '.' + mapped_exchange
-                product = CNFutures(name=name)
-
-                data_path_min = os.path.join(data_dir_min, name + '.' + data_type)
-                if data_path_min in file_list_min:
-                    product.set_data_path(data_freq='1min', data_path=data_path_min)
-                    product.set_time_cols_mapping('1min', {'1min': 'trade_time', '1day': 'trading_day'})
-                    product.set_data_cols_mapping('1min', DataColumnMapping)
-                
-                data_path_day = os.path.join(data_dir_day, name + '.' + data_type)
-                if data_path_day in file_list_day:
-                    product.set_data_path(data_freq='1day', data_path=data_path_day)
-                    product.set_time_cols_mapping('1day', {'1day': 'trading_day'})
-                    product.set_data_cols_mapping('1day', DataColumnMapping)
-
-                products.append(product)
+                products.append(CNFutures(name = code + '.' + mapped_exchange))
         categories_with_products[category] = products
     return categories_with_products
 

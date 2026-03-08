@@ -126,8 +126,8 @@ class Factor(SerialObject):
             return FactorFreqType.AT_EVENT, pd.Timedelta('1day')
         end_of_session = True
         for i in range(min(20, len(series))):
-            end = all(not product.if_time_is_in_data(list(series)[i] + product.get_recent_data_freq().value) for product in self.products) 
-            start = all(not product.if_time_is_in_data(list(series)[i] - product.get_recent_data_freq().value) for product in self.products)
+            end = all(not product.if_time_is_in_data(list(series)[i] + product.get_current_freq().value) for product in self.products) 
+            start = all(not product.if_time_is_in_data(list(series)[i] - product.get_current_freq().value) for product in self.products)
             if not (end or start):
                 end_of_session = False
                 break
@@ -185,27 +185,17 @@ class Factor(SerialObject):
             if not changeable_return_freq:
                 assert return_freq is not None
                 assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
-            if isinstance(product, Futures):
-                df = product.get_data(data_freq, copy=False)
-                cols = []
-                for _, col in PC.value:
-                    if product.check_col_is_adjusted(col) and col not in df.columns:
-                        cols.append(product.get_col_name_nonadjusted(col))
-                df = product.adjust_cols(data_freq, cols) if cols else product.get_data(data_freq)
-            else:
-                df = product.get_data(data_freq)
+            df = getattr(product, data_freq.name).get_and_adjust_cols([col.name for _, col in PC.value])
             notna_index = self.table.index[self.table[product].notna()]
             target_series = pd.Series(index=notna_index, dtype=float)
             if not changeable_return_freq:
                 assert return_freq is not None
-                time_cols_mapping = product.time_cols_mapping[data_freq]
-                index_time_col_freq = sorted(
-                    [_f for _f in time_cols_mapping.keys() if
-                        self.min_gap.total_seconds() % _f.value.total_seconds() == 0
-                        and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
-                            if self.freq is not None else True)], 
-                    key=lambda x: x.value)[-1]
-                index_time_col = time_cols_mapping[index_time_col_freq]
+                time_cols = product.get_time_cols(data_freq)
+                index_time_col = [col for col in time_cols if
+                    self.min_gap.total_seconds() % DataFreq[col].value.total_seconds() == 0
+                    and (self.freq.total_seconds() % DataFreq[col].value.total_seconds() == 0 
+                        if self.freq is not None else True)]
+                index_time_col = sorted(index_time_col, key=lambda x: DataFreq[str(x)].value)[-1]
                 pos = df.index.get_level_values(index_time_col).searchsorted(
                     notna_index.get_level_values(notna_index.nlevels-1), 
                     side='right'
@@ -218,8 +208,8 @@ class Factor(SerialObject):
                     indecies = notna_index[valid]
                     start_indecies = df.index[pos[valid]]
                     end_indecies = df.index[pos_end[valid]]
-                    start_series = df.loc[start_indecies, product.get_col_name(PC.value[0][1])].reset_index(drop=True)
-                    end_series = df.loc[end_indecies, product.get_col_name(PC.value[1][1])].reset_index(drop=True)
+                    start_series = df.loc[start_indecies, PC.value[0][1].name].reset_index(drop=True)
+                    end_series = df.loc[end_indecies, PC.value[1][1].name].reset_index(drop=True)
                     return_series = (end_series - start_series) / start_series
                     return_series = return_series if next_return else return_series.shift(1)
                     target_series.loc[indecies] = return_series.values
@@ -228,7 +218,7 @@ class Factor(SerialObject):
                 pos = df.index.searchsorted(notna_index, side='right')
                 valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
                 if valid.any():
-                    target_col = product.get_col_name(PC.value[0][1])
+                    target_col = PC.value[0][1].name
                     indecies = notna_index[valid]
                     start_indecies = df.index[pos[valid]]
                     start_series = df.loc[start_indecies, target_col]
@@ -425,12 +415,12 @@ class FactorTester:
         new_products = set()
         for product in self.products:
             df = product.get_some_data(copy=False)
-            if not df.empty and max(df[product.get_col_name(DataColumn.VOLUME)]) > 0:
+            if not df.empty and max(df[DataColumn.VOLUME.name]) > 0:
                 new_products.add(product)
         self.products = new_products
         self.sift_product_by_empty_data_bool = True
 
-    def sift_product_by_volumes(self, ratio: Optional[float] = None, time_col: Optional[str] = None,
+    def sift_product_by_volumes(self, ratio: Optional[float] = None, time_col: Optional[Any] = None,
                                 time_range: Optional[Any] = None) -> Set[Product]:
         if ratio is None:
             return self.products
