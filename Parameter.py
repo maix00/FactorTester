@@ -14,20 +14,20 @@ class Parameter(SerialObject):
         return super().__new__(cls, type_alias='P', alias=alias)
 
     def __init__(self, alias: Optional[str], default_value: Any,
-                 check_in_space: Callable[[Any], bool],
+                 whether_in_space: Callable[[Any], bool],
                  get_value_alias: Callable[[Any], str]):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='P', alias=alias)
-            self._check_in_space = check_in_space
+            self.whether_in_space = whether_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
             self.get_value_alias = lambda x: get_value_alias(x) if self.check_in_space(x) else ''
 
-    def check_in_space(self, value: Any) -> bool:
-        check = self._check_in_space(value)
-        if not check:
+    def check_in_space(self, value: Any, error: bool = True) -> bool:
+        check = self.whether_in_space(value)
+        if not check and error:
             raise ValueError(f"{value} is not in the value space")
-        return True
+        return check
 
     def change_default_value(self, value: Any) -> Parameter:
         self.check_in_space(value)
@@ -36,26 +36,52 @@ class Parameter(SerialObject):
     
     def __iadd__(self, other):
         if isinstance(other, Parameter):
-            old_check = self._check_in_space
+            old_whether = self.whether_in_space
             old_get_alias = self.get_value_alias
-            other_check = other._check_in_space
+            other_whether = other.whether_in_space
             other_get_alias = other.get_value_alias
-            self._check_in_space = lambda x: old_check(x) or other_check(x)
-            self.get_value_alias = lambda x: old_get_alias(x) if old_check(x) else other_get_alias(x)
+            self.whether_in_space = lambda x: old_whether(x) or other_whether(x)
+            self.get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
             return self
         return NotImplemented
     
     def __add__(self, other):
         if isinstance(other, Parameter):
-            old_check = self._check_in_space
+            old_whether = self.whether_in_space
             old_get_alias = self.get_value_alias
-            other_check = other._check_in_space
+            other_whether = other.whether_in_space
             other_get_alias = other.get_value_alias
             new_param = Parameter(
                 alias = self.alias,
                 default_value = self.default_value,
-                check_in_space = lambda x: old_check(x) or other_check(x),
-                get_value_alias = lambda x: old_get_alias(x) if old_check(x) else other_get_alias(x)
+                whether_in_space = lambda x: old_whether(x) or other_whether(x),
+                get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
+            )
+            return new_param
+        return NotImplemented
+    
+    def __isub__(self, other):
+        if isinstance(other, Parameter):
+            old_whether = self.whether_in_space
+            old_get_alias = self.get_value_alias
+            other_whether = other.whether_in_space
+            other_get_alias = other.get_value_alias
+            self.whether_in_space = lambda x: old_whether(x) and not other_whether(x)
+            self.get_value_alias = lambda x: old_get_alias(x) if old_whether(x) and not other_whether(x) else (other_get_alias(x) if other_whether(x) and not old_whether(x) else '')
+            return self
+        return NotImplemented
+    
+    def __sub__(self, other):
+        if isinstance(other, Parameter):
+            old_whether = self.whether_in_space
+            old_get_alias = self.get_value_alias
+            other_whether = other.whether_in_space
+            other_get_alias = other.get_value_alias
+            new_param = Parameter(
+                alias = self.alias,
+                default_value = self.default_value,
+                whether_in_space = lambda x: old_whether(x) and not other_whether(x),
+                get_value_alias = lambda x: old_get_alias(x) if old_whether(x) and not other_whether(x) else (other_get_alias(x) if other_whether(x) and not old_whether(x) else '')
             )
             return new_param
         return NotImplemented
@@ -70,6 +96,18 @@ class Parameter(SerialObject):
     def get_value(self, factor: Factor) -> Any:
         return self._register.get(factor, self.default_value)
     
+if __name__ == '__main__':
+    param1 = Parameter(alias='P1', default_value=1, whether_in_space=lambda x: isinstance(x, int) and 0 <= x <= 10, get_value_alias=lambda x: f"{x}")
+    param2 = Parameter(alias='P2', default_value=5, whether_in_space=lambda x: isinstance(x, int) and 5 <= x <= 15, get_value_alias=lambda x: f"{x}")
+    combined_param = param1 + param2
+    minus_param = param1 - param2
+    print(combined_param.whether_in_space(3))  # True
+    print(combined_param.whether_in_space(8))  # True
+    print(combined_param.whether_in_space(12)) # True
+    print(minus_param.whether_in_space(3))     # True
+    print(minus_param.whether_in_space(8))     # False
+    print(minus_param.whether_in_space(12))    # False
+    
 class FinRangeParam(Parameter):
     def __init__(self, alias: Optional[str], value_space: List[Any]|Any, 
                  get_value_alias: Optional[Callable[[Any], str]] = None):
@@ -79,7 +117,7 @@ class FinRangeParam(Parameter):
             super().__init__(
                 alias = alias,
                 default_value = value_space[0],
-                check_in_space = lambda x: x in value_space,
+                whether_in_space = lambda x: x in value_space,
                 get_value_alias = get_value_alias if get_value_alias else lambda x: str(x)
             )
             self.value_space = value_space
@@ -110,11 +148,11 @@ class TimeParam(Parameter):
             super().__init__(
                 alias = alias,
                 default_value = default_value,
-                check_in_space = self._check_in_space,
+                whether_in_space = self._whether_in_space,
                 get_value_alias = self._get_value_alias
             )
 
-    def _check_in_space(self, value: Any) -> bool:
+    def _whether_in_space(self, value: Any) -> bool:
         try:
             td = pd.Timedelta(value)
             if self.flag == 'pos':
