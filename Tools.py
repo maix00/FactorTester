@@ -22,6 +22,8 @@ class UniqueObject(ABC):
         # Only initialize if this is a new instance (not already initialized)
         if not hasattr(self, '_initialized'):
             self.name = name
+            if not hasattr(self, 'alias'):
+                self.alias = name
             self._initialized = True
 
     def __reduce__(self):

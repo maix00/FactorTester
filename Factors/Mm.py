@@ -11,17 +11,16 @@ from typing import List, Dict, Any, Sequence, Tuple
 
 class Mm(FactorFamily): # Day Momentum
 
-    additional_params = [
-        DataColumnParam('H').set_default_value(DataColumn.HIGH),
-        DataColumnParam('L').set_default_value(DataColumn.LOW),
-        (FinRangeParam('F', 'S') + TimeParam(flag='pos')).set_default_value('1d'),
+    params = [
+        DataColumnParam('H').change_default_value(DataColumn.HIGH),
+        DataColumnParam('L').change_default_value(DataColumn.LOW),
+        (FinRangeParam('F', 'S') + TimeParam(flag='pos')).change_default_value('1d'),
     ]
 
     def func(self, products: Sequence[Product], F: Any = '1d',
              H: DataColumn = DataColumn.HIGH,
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
-        data_freq = pd.Timedelta('1min')
         for product in products:
             df = product.MIN1.get_data()
             
@@ -29,13 +28,10 @@ class Mm(FactorFamily): # Day Momentum
             _TM = DataFreq.MIN1.name
 
             if F == '1d':
-                df = df.reset_index()
-                df = df.rename(columns={_TD: str(_TD), _TM: str(_TM)})
-                df = df.set_index([str(_TD), str(_TM)])
-                idx = str(_TD)
+                idx = _TD
             elif F == 'S':
-                _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True) # type: ignore
-                _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True) # type: ignore
+                _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True)
+                _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True)
                 time_part = _TM_.dt.time
                 cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
                 end_session = _TD_ + pd.Timedelta('9 hours')
@@ -64,7 +60,7 @@ class Mm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = Mm()
-    # ff.add_params(return_freq = '5h')
+    # ff.add_params(return_freq = '6h')
     # ff.change_default_return_freq('3h')
     # ff.add_params(F = 'S')
     # ff.add_params(F = '5h')

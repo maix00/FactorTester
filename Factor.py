@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 import itertools
@@ -5,7 +6,7 @@ from functools import partial
 from weakref import WeakValueDictionary
 import pandas as pd
 import numpy as np
-from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any
+from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import os
 
 from Tools import SerialObject
@@ -23,6 +24,18 @@ default_plot_test_start_date = '2025-01-01'
 default_plot_test_end_date = '2025-12-31'
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
+
+@dataclass
+class ReturnType:
+    return_freq: Optional[Any]
+    start_type: Literal['first', 'last']
+    start_col: DataColumn
+    end_type: Literal['first', 'last']
+    end_col: DataColumn
+
+if __name__ == '__main__':
+    ri = ReturnType('1d', 'first', DataColumn.OPEN, 'last', DataColumn.CLOSE)
+    print(ri)
 
 class ReturnPriceCols(Enum):
     NEXT_OPEN_TO_OPEN = (('first', DataColumn.OPEN), ('first', DataColumn.OPEN))
@@ -44,19 +57,26 @@ class FactorFreqType(Enum):
 class Factor(SerialObject):
     _instance_count: int = -1
     _serial_map = {}
+    _additional_params: List[Parameter] = [get_return_freq_param(alias='$RF')]
 
-    def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
+    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         instance = super().__new__(cls, type_alias='F', alias=alias)
         return instance
     
-    def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], params: Dict[str, Any]):
+    def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], 
+                 family: FactorFamily):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='F', alias=alias)
             self.func = func
             self.min_gap: Optional[pd.Timedelta] = None
             self.freq: Optional[pd.Timedelta] = None
             self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
-            self.params = params
+            self.family = family
+            self.params: List[Parameter] = self.family.params
+            for param in self._additional_params:
+                if param not in self.params:
+                    self.params.append(param)
+            self.params_dict = {param.alias: param for param in self.params}
             self.table: pd.DataFrame = pd.DataFrame()
             self.products: Set[Product] = set()
             self.returns: pd.DataFrame = pd.DataFrame()
@@ -154,8 +174,9 @@ class Factor(SerialObject):
     def calc_returns(self, next_return: bool = True,
                      price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
         returns = {}
-        changeable_return_freq = self.params.get('$RF') is None and self.freq is None
-        return_freq = self.params.get('$RF') or self.freq
+        return_freq = self.params_dict['$RF'].get_value(self)
+        changeable_return_freq = return_freq is None and self.freq is None
+        return_freq = return_freq or self.freq
         if not changeable_return_freq:
             assert return_freq is not None
             return_freq = pd.Timedelta(return_freq)
@@ -229,17 +250,22 @@ class Factor(SerialObject):
         self.returns = pd.DataFrame(returns)
         return self.returns
 
-class FactorFamily:
-    params: List[Parameter] = [get_return_freq_param(alias='$RF')]
-    additional_params: List[Parameter] = []
+class FactorFamily(SerialObject):
+    _instances = WeakValueDictionary()
+    _instance_count: int = -1
+    _serial_map = {}
+    params: List[Parameter] = []
 
-    def __init__(self, name_stem: Optional[str] = None):
-        self.name_stem = name_stem if name_stem else self.__class__.__name__
-        for param in self.additional_params:
-            if param not in self.params:
-                self.params.append(param)
-        self.params_dict = {param.alias: param for param in self.params}
-        self.set_default_params()
+    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
+        alias=alias if alias else cls.__name__
+        return super().__new__(cls, type_alias='FF', alias=alias)
+
+    def __init__(self, alias: Optional[str] = None):
+        if not hasattr(self, '_initialized'):
+            alias=alias if alias else self.__class__.__name__
+            super().__init__(type_alias='FF', alias=alias)
+            self.params_dict = {param.alias: param for param in self.params}
+            self.set_default_params()
     
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
@@ -250,8 +276,7 @@ class FactorFamily:
     def change_param_default_value(self, **kwargs):
         self._check_in_space(**kwargs)
         for key, value in kwargs.items():
-            param = next(p for p in self.params if p.alias == key)
-            param.default_value = value
+            self.params_dict[key].default_value = value
 
     def change_default_return_freq(self, return_freq: Any):
         self.change_param_default_value(**{'$RF': return_freq})
@@ -280,14 +305,17 @@ class FactorFamily:
 
     def get_alias(self, **params):
         params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
-        return f"{self.name_stem}|{params_str}" if params_str else self.name_stem
+        return f"{self.alias}|{params_str}" if params_str else self.alias
 
     def get_factors(self):
         factors = []
         for params in self._params_list:
-            factor_name = self.get_alias(**params)
+            factor_alias = self.get_alias(**params)
             factor_func = partial(self.func, **params)
-            factor = Factor(alias=factor_name, func=factor_func, params=params)
+            factor = Factor(alias=factor_alias, func=factor_func, family=self)
+            for param_alias, value in params.items():
+                param = self.params_dict[param_alias]
+                param.register(factor, value)
             factors.append(factor)
         return factors
     
@@ -297,9 +325,9 @@ class FactorFamily:
         self._check_in_space(**kwargs)
         new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
         new_params['$RF'] = return_freq
-        factor_name = self.get_alias(**new_params)
+        factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
-        return Factor(alias=factor_name, func=factor_func, params=new_params)
+        return Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
     
     # def get_common_start(self, products: Sequence[Product]):
     #     for product in products:
@@ -309,7 +337,7 @@ class FactorFamily:
             categories: Optional[str|List[str]] = None,
             sift_volume_ratio: float = sift_volume_ratio) -> FactorTester:
         
-        factor_cache_path = os.path.join(factor_info_path, self.name_stem, self.name_stem + '.csv')
+        factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
         if not os.path.exists(factor_info_path):
             os.makedirs(factor_info_path)
         if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
@@ -343,7 +371,7 @@ class FactorFamily:
                 report_dict[key_1] = report_df.loc[report_df.index[1], col]
 
             new_row = pd.Series({
-                'factor_stem': self.name_stem,
+                'factor_stem': self.alias,
                 'serial_num': pd.Timestamp.now(),
                 'factor_name': factor.alias,
                 'factor_freq': factor.freq,
@@ -351,7 +379,7 @@ class FactorFamily:
                 'end_date': tester.end_date,
                 'sift_volume_ratio': sift_volume_ratio,
                 'categories': categories,
-            } | factor.params | factor.ic_stats.to_dict() | report_dict)
+            } | factor.params_dict | factor.ic_stats.to_dict() | report_dict)
             factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
             factor.report = factor_table
             factor_table.to_csv(factor_cache_path, index=False)
@@ -448,7 +476,7 @@ class FactorTester:
     def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
-
+    
     def calc_ic(self, return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
                 factors: Optional[Factor|List[Factor]] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -534,11 +562,11 @@ class FactorTester:
 
             last_dt, _ = next(factor.table.iterrows())
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.alias):
-                # sifted_products = self.products
-                sifted_products = self.sift_product_by_volumes(
-                    ratio=sift_volume_ratio, 
-                    time_range=(last_dt if dt != last_dt else None, dt)
-                )
+                sifted_products = self.products
+                # sifted_products = self.sift_product_by_volumes(
+                #     ratio=sift_volume_ratio, 
+                #     time_range=(last_dt if dt != last_dt else None, dt)
+                # )
                 sorted_products = sorted(row.dropna().index, key=lambda x: (row[x], x.name), reverse=True)
                 sorted_products = [product for product in sorted_products if product in sifted_products]
                 n = len(sorted_products)
