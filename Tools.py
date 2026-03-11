@@ -126,7 +126,7 @@ def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
         return data_freq
     if isinstance(data_freq, str):
         try:
-            data_freq = DataFreq[data_freq]
+            return DataFreq[data_freq]
         except KeyError:
             data_freq = pd.Timedelta(data_freq)
     if isinstance(data_freq, pd.Timedelta):

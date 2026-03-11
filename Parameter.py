@@ -1,7 +1,7 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
 
-from Tools import SerialObject
+from Tools import SerialObject, _process_data_freq
 from Products import DataColumn
 from typing import TYPE_CHECKING
 
@@ -138,9 +138,6 @@ if __name__ == '__main__':
     C1 = DataColumnParam('C1')
     print(C1.col(DataColumn.CLOSE))
 
-# class TimeParam(Parameter):
-
-
 class TimeDeltaParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None,
                  flag: Optional[Literal['pos', 'neg', 'nonneg', 'nonpos']] = None):
@@ -186,3 +183,50 @@ def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
 if __name__ == '__main__':
     ReturnFreq = get_return_freq_param()
     print(ReturnFreq.get_value_alias('2h45m10s11ms'))
+
+class ColumnTimeParam(Parameter):
+
+    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None):
+
+        from Tools import DataFreq
+
+        if not hasattr(self, '_initialized'):
+            if default_value is None:
+                default_value = (DataFreq.MIN1.name, '2024-01-02 09:00:00')
+            super().__init__(
+                alias = alias,
+                default_value = default_value,
+                whether_in_space = self._whether_in_space,
+                get_value_alias = self._get_value_alias
+            )
+
+    def _whether_in_space(self, value: Any) -> bool:
+        if not isinstance(value, (list, tuple)):
+            return False
+        try:
+            from Tools import DataFreq, _process_data_freq
+            freq = _process_data_freq(value[0])
+            time = pd.Timestamp(value[1])  # Check if the second element can be converted to a timestamp
+            check = True
+            if freq == DataFreq.DAY1 and time.time() != pd.Timestamp('00:00:00').time():
+                    check = False
+            return check
+        except Exception:
+            return False
+        
+    def _get_value_alias(self, value: Any) -> str:
+        try:
+            from Tools import _process_data_freq
+            freq = _process_data_freq(value[0])
+            time = pd.Timestamp(value[1])  # Check if the second element can be converted to a timestamp
+            return f"{freq.name}: {time}"
+        except Exception:
+            return str(value)
+
+def get_start_calc_param(alias: Optional[str] = '$SC') -> Parameter:
+    return ColumnTimeParam(alias)
+
+if __name__ == '__main__':
+    StartCalc = get_start_calc_param()
+    print(StartCalc.get_value_alias(('1d', '2024-01-02')))
+    print(StartCalc.get_value_alias(StartCalc.default_value))

@@ -11,7 +11,7 @@ import os
 
 from Tools import SerialObject
 from Products import DataColumn, Futures, Product, DataFreq
-from Parameter import Parameter, FinRangeParam, get_return_freq_param
+from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_start_calc_param
 from CNFutures import get_all_products
 import logging
 
@@ -59,6 +59,7 @@ class Factor(SerialObject):
     _serial_map = {}
     _additional_params: List[Parameter] = [
         get_return_freq_param(alias='$RF'),
+        get_start_calc_param(alias='$SC'),
     ]
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
