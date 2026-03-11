@@ -35,7 +35,7 @@ class Product(SerialObject):
             self.category_attr_name = category_attr_name if category_attr_name \
                 else self._default_category_attr_name
             for key, val in DataFreq.__members__.items():
-                setattr(self, key, DataMeta(name=f"{self.name}_{key}", product=self, data_freq=val))
+                setattr(self, key, DataMeta(name=f"{self.name}_{key}", object=self, data_freq=val))
         
     def list_available_freqs(self) -> List[DataFreq]:
         return [freq for freq in DataFreq if getattr(self, freq.name).is_available()]

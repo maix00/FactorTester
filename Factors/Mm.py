@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from CNFutures import CNFutures
 from Products import Product, DataColumn, DataFreq
 from Factor import FactorFamily
-from Parameter import DataColumnParam, FinRangeParam, TimeParam
+from Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
 from typing import List, Dict, Any, Sequence, Tuple
 
 class Mm(FactorFamily): # Day Momentum
@@ -14,7 +14,7 @@ class Mm(FactorFamily): # Day Momentum
     params = [
         DataColumnParam('H').change_default_value(DataColumn.HIGH),
         DataColumnParam('L').change_default_value(DataColumn.LOW),
-        (FinRangeParam('F', 'S') + TimeParam(flag='pos')).change_default_value('1d'),
+        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('1d'),
     ]
 
     def func(self, products: Sequence[Product], F: Any = '1d',

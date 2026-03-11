@@ -138,7 +138,10 @@ if __name__ == '__main__':
     C1 = DataColumnParam('C1')
     print(C1.col(DataColumn.CLOSE))
 
-class TimeParam(Parameter):
+# class TimeParam(Parameter):
+
+
+class TimeDeltaParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None,
                  flag: Optional[Literal['pos', 'neg', 'nonneg', 'nonpos']] = None):
         if not hasattr(self, '_initialized'):
@@ -178,7 +181,7 @@ class TimeParam(Parameter):
             return str(value)
         
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
-    return FinRangeParam(alias, None, lambda _: 'N') + TimeParam(flag='pos')
+    return FinRangeParam(alias, None, lambda _: 'N') + TimeDeltaParam(flag='pos')
     
 if __name__ == '__main__':
     ReturnFreq = get_return_freq_param()

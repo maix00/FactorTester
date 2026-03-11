@@ -11,7 +11,7 @@ import os
 
 from Tools import SerialObject
 from Products import DataColumn, Futures, Product, DataFreq
-from Parameter import Parameter, FinRangeParam, TimeParam, get_return_freq_param
+from Parameter import Parameter, FinRangeParam, get_return_freq_param
 from CNFutures import get_all_products
 import logging
 
@@ -57,7 +57,9 @@ class FactorFreqType(Enum):
 class Factor(SerialObject):
     _instance_count: int = -1
     _serial_map = {}
-    _additional_params: List[Parameter] = [get_return_freq_param(alias='$RF')]
+    _additional_params: List[Parameter] = [
+        get_return_freq_param(alias='$RF'),
+    ]
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         instance = super().__new__(cls, type_alias='F', alias=alias)

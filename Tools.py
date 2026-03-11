@@ -217,13 +217,10 @@ class DataSource(SerialObject):
 
     def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, type_alias='DS', alias=alias)
-    
-    if TYPE_CHECKING:
-        from Products import Product
 
     def __init__(self, alias: str, data_freq: DataFreq,
-                 if_product_is_in_source: Callable[[Product], bool],
-                 get_product_path: Callable[[Product], Any]):
+                 if_object_is_in_source: Callable[[UniqueObject], bool],
+                 get_object_path: Callable[[UniqueObject], Any]):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='DS', alias=alias)
             self._register = DataSourceRegister() # Weak Value
@@ -234,14 +231,14 @@ class DataSource(SerialObject):
             self.freq = data_freq
             self.time_cols_mapping: Dict[Any, str] = {}
             self.data_cols_mapping: Dict[Any, str] = {}
-            self._is_product_in_source_func = if_product_is_in_source
-            self._get_product_path_func = get_product_path
+            self._is_object_in_source_func = if_object_is_in_source
+            self._get_object_path_func = get_object_path
 
-    def if_product_is_in_source(self, product: Product) -> bool:
-        return self._is_product_in_source_func(product)
+    def if_object_is_in_source(self, object: UniqueObject) -> bool:
+        return self._is_object_in_source_func(object)
 
-    def get_product_path(self, product: Product) -> Any:
-        return self._get_product_path_func(product)
+    def get_object_path(self, object: UniqueObject) -> Any:
+        return self._get_object_path_func(object)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         self.time_cols_mapping = {k: _process_data_freq(v).name for k, v in mapping.items()}
@@ -258,13 +255,10 @@ if __name__ == '__main__':
 class DataMeta(UniqueObject):
     _instances = WeakValueDictionary()
 
-    if TYPE_CHECKING:
-        from Products import Product
-
-    def __init__(self, name: str, product: Product, data_freq: DataFreq):
+    def __init__(self, name: str, object: UniqueObject, data_freq: DataFreq):
         if not hasattr(self, '_initialized'):
             super().__init__(name=name)
-            self.product = product
+            self.object = object
             self.freq = data_freq
             self.data: pd.DataFrame = pd.DataFrame()
             self.current_source: DataSource
@@ -275,7 +269,7 @@ class DataMeta(UniqueObject):
     def list_available_sources(self) -> List[DataSource]:
         lst = []
         for source in DataSourceRegister().get_all_sources():
-            if source.if_product_is_in_source(self.product) and source.freq == self.freq:
+            if source.if_object_is_in_source(self.object) and source.freq == self.freq:
                 lst.append(source)
         return lst
     
@@ -289,20 +283,20 @@ class DataMeta(UniqueObject):
             self.current_source = source
             return source
         else:
-            raise ValueError(f"Data source {source.alias} is not available for product {self.product.name}")
+            raise ValueError(f"Data source {source.alias} is not available for object {self.object.name}")
         
     def get_current_source(self) -> DataSource:
         if not hasattr(self, 'current_source'):
             available_sources = self.list_available_sources()
             if len(available_sources) == 0:
-                raise ValueError(f"No data source available for product {self.product.name}")
+                raise ValueError(f"No data source available for object {self.object.name}")
             self.current_source = available_sources[0]
         return self.get('current_source')
 
     def _load_data(self, source: Optional[Any] = None) -> pd.DataFrame:
         source = self.set_current_source(source) if source is not None else self.get_current_source()
         assert source is not None
-        self.path = source.get_product_path(self.product)
+        self.path = source.get_object_path(self.object)
         if self.path.endswith('.csv'):
             self.data = pd.read_csv(self.path)
         elif self.path.endswith('.xlsx'):
@@ -318,14 +312,14 @@ class DataMeta(UniqueObject):
                   data_cols_mapping: Optional[Dict[Any, Any]] = None,
                   time_cols_mapping: Optional[Dict[Any, Any]] = None,
                   time_index: Optional[Any] = None,
-                  filter_product: bool = False,
-                  filter_product_attr: str = 'name') -> pd.DataFrame:
+                  filter_object: bool = False,
+                  filter_object_attr: str = 'name') -> pd.DataFrame:
         self.data = loaded_data if loaded_data is not None else self._load_data(source)
         self._map_time_cols(time_cols_mapping)
         self._map_data_cols(data_cols_mapping)
-        if filter_product:
-            filter_product_name = getattr(self.product, filter_product_attr)
-            self.data = self.data[self.data[DataColumn.PRODUCT_NAME] == filter_product_name]
+        if filter_object:
+            filter_object_name = getattr(self.object, filter_object_attr)
+            self.data = self.data[self.data[DataColumn.PRODUCT_NAME] == filter_object_name]
         self._set_time_index(time_index)
         return self.data
     
@@ -380,7 +374,7 @@ class DataMeta(UniqueObject):
         
         from Products import Futures
 
-        if not isinstance(self.product, Futures):
+        if not isinstance(self.object, Futures):
             return self.get_data(copy)
         if not isinstance(cols, list):
             cols = [cols]
