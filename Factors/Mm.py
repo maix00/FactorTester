@@ -22,7 +22,7 @@ class Mm(FactorFamily): # Day Momentum
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
-            df = product.MIN1.get_data(factor_family=self)
+            df = product.MIN1.get_data(self)
             
             _TD = DataFreq.DAY1.name
             _TM = DataFreq.MIN1.name

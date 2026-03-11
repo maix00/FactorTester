@@ -326,7 +326,7 @@ class DataMeta(UniqueObject):
     if TYPE_CHECKING:
         from Factor import FactorFamily
     
-    def get_data(self, copy: bool = True, factor_family: Optional[FactorFamily] = None, **kwargs) -> pd.DataFrame:
+    def get_data(self, factor_family: Optional[FactorFamily] = None, copy: bool = True, **kwargs) -> pd.DataFrame:
         if self.data.empty:
             self.load_data()
         data = self.data.copy() if copy else self.data
@@ -386,10 +386,10 @@ class DataMeta(UniqueObject):
         from Products import Futures
 
         if not isinstance(self.object, Futures):
-            return self.get_data(copy)
+            return self.get_data(copy=copy)
         if not isinstance(cols, list):
             cols = [cols]
-        df = self.get_data(copy)
+        df = self.get_data(copy=copy)
         cols = list(set(cols))
         adjust_cols = [col if self._check_is_adjusted(col) else self._get_adjusted_col_name(col) for col in cols]
         adjust_cols = [col for col in adjust_cols if col not in df.columns]
