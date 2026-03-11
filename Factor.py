@@ -312,7 +312,7 @@ class FactorFamily(SerialObject):
             
     def add_params(self, **kwargs):
         self._check_in_space(**kwargs)
-        new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
+        new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
@@ -345,7 +345,7 @@ class FactorFamily(SerialObject):
     
     def get_factor(self, return_freq: Optional[Any] = None, start_cal_time: Optional[Any] = None, **kwargs):
         self._check_in_space(**kwargs)
-        new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
+        new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
         factor = Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)

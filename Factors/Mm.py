@@ -14,10 +14,10 @@ class Mm(FactorFamily): # Day Momentum
     params = [
         DataColumnParam('H'),
         DataColumnParam('L'),
-        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('15min'),
+        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('1day'),
     ]
 
-    def func(self, products: Sequence[Product], F: Any = '1d',
+    def func(self, products: Sequence[Product], F: Any = pd.Timedelta('1d'),
              H: DataColumn = DataColumn.HIGH,
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
@@ -27,7 +27,7 @@ class Mm(FactorFamily): # Day Momentum
             _TD = DataFreq.DAY1.name
             _TM = DataFreq.MIN1.name
 
-            if F == '1d':
+            if F == pd.Timedelta('1d'):
                 idx = _TD
             elif F == 'S':
                 _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True)
@@ -66,9 +66,7 @@ class Mm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = Mm()
-    # ff.add_params(return_freq = '6h')
-    # ff.change_default_return_freq('3h')
-    # ff.add_params(F = 'S')
-    # ff.add_params(F = '5h')
+    ff.add_params(F = '5min')
+    ff.add_params(F = '15min')
     fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'))
     # fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))
