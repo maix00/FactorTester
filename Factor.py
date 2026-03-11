@@ -54,20 +54,19 @@ class FactorFreqType(Enum):
     CONSTANT = 0
     AT_EVENT = 1
 
+ReturnFreqParam = get_return_freq_param(alias='$RF')
+StartCalcParam = get_start_calc_param(alias='$SC')
+
 class Factor(SerialObject):
     _instance_count: int = -1
     _serial_map = {}
-    _additional_params: List[Parameter] = [
-        get_return_freq_param(alias='$RF'),
-        get_start_calc_param(alias='$SC'),
-    ]
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         instance = super().__new__(cls, type_alias='F', alias=alias)
         return instance
     
     def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], 
-                 family: FactorFamily):
+                 family: Optional[FactorFamily], param_vals: Optional[Dict[Parameter, Any]] = None):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='F', alias=alias)
             self.func = func
@@ -75,17 +74,35 @@ class Factor(SerialObject):
             self.freq: Optional[pd.Timedelta] = None
             self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
             self.family = family
-            self.params: List[Parameter] = self.family.params
-            for param in self._additional_params:
-                if param not in self.params:
-                    self.params.append(param)
+            
+            if self.family is not None:
+                assert param_vals is None
+                self.params = self.family.params
+            else:
+                param_vals = param_vals if param_vals is not None else {}
+                self.params = list(param_vals.keys()) if param_vals is not None else []
+                for param in self.params:
+                    param.register(self, param_vals[param])
             self.params_dict = {param.alias: param for param in self.params}
+
             self.table: pd.DataFrame = pd.DataFrame()
             self.products: Set[Product] = set()
             self.returns: pd.DataFrame = pd.DataFrame()
             self.ic_series: pd.Series = pd.Series()
             self.ic_stats: pd.Series = pd.Series()
             self.report: pd.DataFrame = pd.DataFrame()
+
+    def get_current_return_freq(self) -> Any:
+        return ReturnFreqParam.get_value(self)
+    
+    def change_current_return_freq(self, return_freq: Any) -> None:
+        ReturnFreqParam.change_value(self, return_freq)
+
+    def get_current_start_cal_time(self) -> Any:
+        return StartCalcParam.get_value(self)
+    
+    def change_current_start_cal_time(self, start_cal_time: Any) -> None:
+        StartCalcParam.change_value(self, start_cal_time)
 
     def _set_products(self) -> Set[Product]:
         if not self.table.empty:
@@ -177,7 +194,7 @@ class Factor(SerialObject):
     def calc_returns(self, next_return: bool = True,
                      price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
         returns = {}
-        return_freq = self.params_dict['$RF'].get_value(self)
+        return_freq = self.get_current_return_freq()
         changeable_return_freq = return_freq is None and self.freq is None
         return_freq = return_freq or self.freq
         if not changeable_return_freq:
@@ -310,31 +327,34 @@ class FactorFamily(SerialObject):
         params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
-    def get_factors(self):
+    def get_factors(self, return_freq: Optional[Any] = None, 
+                    start_cal_time: Optional[Any] = None, **kwargs) -> List[Factor]:
         factors = []
         for params in self._params_list:
             factor_alias = self.get_alias(**params)
             factor_func = partial(self.func, **params)
             factor = Factor(alias=factor_alias, func=factor_func, family=self)
             for param_alias, value in params.items():
-                param = self.params_dict[param_alias]
-                param.register(factor, value)
+                self.params_dict[param_alias].register(factor, value)
+            if return_freq is not None:
+                factor.change_current_return_freq(return_freq)
+            if start_cal_time is not None:
+                factor.change_current_start_cal_time(start_cal_time)
             factors.append(factor)
         return factors
     
-    def get_factor(self, return_freq: Optional[Any] = None, **kwargs):
-        if return_freq is not None:
-            self._check_in_space(**{'$RF': return_freq})
+    def get_factor(self, return_freq: Optional[Any] = None, start_cal_time: Optional[Any] = None, **kwargs):
         self._check_in_space(**kwargs)
         new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
         new_params['$RF'] = return_freq
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
-        return Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
-    
-    # def get_common_start(self, products: Sequence[Product]):
-    #     for product in products:
-
+        factor = Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
+        if return_freq is not None:
+            factor.change_current_return_freq(return_freq)
+        if start_cal_time is not None:
+            factor.change_current_start_cal_time(start_cal_time)
+        return factor
     
     def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
             categories: Optional[str|List[str]] = None,

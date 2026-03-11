@@ -93,6 +93,10 @@ class Parameter(SerialObject):
         self.check_in_space(value)
         self._register[factor] = value
 
+    def change_value(self, factor: Factor, value: Any) -> None:
+        self.check_in_space(value)
+        self._register[factor] = value
+
     def get_value(self, factor: Factor) -> Any:
         return self._register.get(factor, self.default_value)
     
@@ -178,7 +182,9 @@ class TimeDeltaParam(Parameter):
             return str(value)
         
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
-    return FinRangeParam(alias, None, lambda _: 'N') + TimeDeltaParam(flag='pos')
+    param = FinRangeParam(alias, None, lambda _: 'N')
+    param += TimeDeltaParam(flag='pos')
+    return param
     
 if __name__ == '__main__':
     ReturnFreq = get_return_freq_param()
