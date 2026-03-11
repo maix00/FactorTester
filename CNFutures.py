@@ -139,7 +139,7 @@ class CNFutures(Futures):
 
 def get_all_products() -> List[CNFutures]:
 
-    from Products import DataSource, DataFreq
+    from Tools import DataSource, DataFreq
     LocalCNFuturesMIN1 = DataSource(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
@@ -161,7 +161,7 @@ def get_all_products() -> List[CNFutures]:
     LocalCNFuturesMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
     LocalCNFuturesDAY1.set_time_cols_mapping({'trading_day': '1day'})
 
-    from Products import DataSourceRegister
+    from Tools import DataSourceRegister
     DataSourceRegister().register(LocalCNFuturesMIN1)
     DataSourceRegister().register(LocalCNFuturesDAY1)
 
