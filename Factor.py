@@ -98,11 +98,11 @@ class Factor(SerialObject):
     def change_current_return_freq(self, return_freq: Any) -> None:
         ReturnFreqParam.change_value(self, return_freq)
 
-    def get_current_start_cal_time(self) -> Any:
+    def get_current_start_calc_time(self) -> Any:
         return StartCalcParam.get_value(self)
     
-    def change_current_start_cal_time(self, start_cal_time: Any) -> None:
-        StartCalcParam.change_value(self, start_cal_time)
+    def change_current_start_calc_time(self, start_calc_time: Any) -> None:
+        StartCalcParam.change_value(self, start_calc_time)
 
     def _set_products(self) -> Set[Product]:
         if not self.table.empty:
@@ -182,6 +182,9 @@ class Factor(SerialObject):
         if isinstance(products, Product):
             products = [products]
         products = list(products)
+        if self.family is not None:
+            start_calc_time = self.get_current_start_calc_time()
+            self.family.set_current_start_calc_time(start_calc_time)
         self.table = self.func(products).reset_index()
         self._set_time_index()
         for col in self.table.columns:
@@ -286,9 +289,10 @@ class FactorFamily(SerialObject):
             super().__init__(type_alias='FF', alias=alias)
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()
-    
+            self.current_start_calc_time: Any = None
+
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
-        raise NotImplementedError("请在子类中实现 `factor_func` 方法。")
+        raise NotImplementedError("请在子类中实现 `factor_func` 方法")
     
     def set_default_params(self):
         self._params_list = [{p.alias: p.default_value for p in self.params}]
@@ -298,10 +302,6 @@ class FactorFamily(SerialObject):
         for key, value in kwargs.items():
             self.params_dict[key].default_value = value
 
-    def change_default_return_freq(self, return_freq: Any):
-        self.change_param_default_value(**{'$RF': return_freq})
-        self.set_default_params()
-
     def clear_params(self):
         self._params_list = []
     
@@ -310,12 +310,9 @@ class FactorFamily(SerialObject):
             if not self.params_dict[key].check_in_space(kwargs[key]):
                 raise ValueError
             
-    def add_params(self, return_freq: Optional[Any] = None, **kwargs):
-        if return_freq is not None:
-            self._check_in_space(**{'$RF': return_freq})
+    def add_params(self, **kwargs):
         self._check_in_space(**kwargs)
         new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
-        new_params['$RF'] = return_freq
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
@@ -326,6 +323,9 @@ class FactorFamily(SerialObject):
     def get_alias(self, **params):
         params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
         return f"{self.alias}|{params_str}" if params_str else self.alias
+
+    def set_current_start_calc_time(self, start_cal_time: Optional[Any] = None):
+        self.current_start_calc_time = start_cal_time
 
     def get_factors(self, return_freq: Optional[Any] = None, 
                     start_cal_time: Optional[Any] = None, **kwargs) -> List[Factor]:
@@ -339,26 +339,26 @@ class FactorFamily(SerialObject):
             if return_freq is not None:
                 factor.change_current_return_freq(return_freq)
             if start_cal_time is not None:
-                factor.change_current_start_cal_time(start_cal_time)
+                factor.change_current_start_calc_time(start_cal_time)
             factors.append(factor)
         return factors
     
     def get_factor(self, return_freq: Optional[Any] = None, start_cal_time: Optional[Any] = None, **kwargs):
         self._check_in_space(**kwargs)
         new_params = {p.alias: kwargs[p.alias] if p.alias in kwargs else p.default_value for p in self.params}
-        new_params['$RF'] = return_freq
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
         factor = Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
         if start_cal_time is not None:
-            factor.change_current_start_cal_time(start_cal_time)
+            factor.change_current_start_calc_time(start_cal_time)
         return factor
     
-    def test(self, n_groups: int = 5, plot_n_group_list: Optional[List[int]] = None, 
-            categories: Optional[str|List[str]] = None,
-            sift_volume_ratio: float = sift_volume_ratio) -> FactorTester:
+    def test(self, categories: Optional[str|List[str]] = None,
+             return_freq: Optional[Any] = None, 
+             start_cal_time: Optional[Any] = None,
+             sift_volume_ratio: float = sift_volume_ratio, **kwargs) -> FactorTester:
         
         factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
         if not os.path.exists(factor_info_path):
@@ -372,17 +372,15 @@ class FactorFamily(SerialObject):
         tester.sift_product_by_category(categories=categories)
         price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
 
-        factors = self.get_factors()
+        factors = self.get_factors(return_freq=return_freq, start_cal_time=start_cal_time, **kwargs)
         tester.calc_factor(factors)
         tester.calc_ic(return_price_cols=price_cols)
         
         for factor in factors:
             
             _, _, report_df = tester.test_by_group(factor, return_price_cols=price_cols,
-                plot_flag=True, n_groups=n_groups, plot_n_group_list=plot_n_group_list,
-                time_range=(default_plot_test_start_date, default_plot_test_end_date),
-                plot_show=False, sift_volume_ratio=sift_volume_ratio,
-                plot_remark_str=','.join(categories) if categories else None,
+                plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
+                plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
                 )
             
             report_dict = {}

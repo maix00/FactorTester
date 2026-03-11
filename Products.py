@@ -12,24 +12,17 @@ from weakref import WeakValueDictionary
 
 mappings_path = '../data/rollover_adjustments.csv'
 
-class Product(SerialObject):
-    _instances = WeakValueDictionary()
-    _instance_count: int = -1
-    _serial_map = {}
+class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
     MIN1: DataMeta
     DAY1: DataMeta
 
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        return super().__new__(cls, type_alias='Pr', alias=alias)
-
-    def __init__(self, alias: Optional[str] = None,
+    def __init__(self, name: str,
                  point_value: Optional[int] = None,
                  currency: Optional[str] = None,
                  category_attr_name: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias=kwargs.pop('type_alias', 'Pr'), alias=alias, *args, **kwargs)
-            self.alias = alias
+            super().__init__(name=name, *args, **kwargs)
             self.point_value = point_value
             self.currency = currency
             self.category_attr_name = category_attr_name if category_attr_name \
@@ -146,30 +139,17 @@ class Product(SerialObject):
     
     def get_default_category(self) -> str:
         return str(self._get_attr_nested(self._default_category_attr_name))
-    
-class SessionProduct(Product):
-    _instances = WeakValueDictionary()
-    _override_family_root = True
-
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        return super().__new__(cls, type_alias='SPr', alias=alias)
-    
-    def __init__(self, product: Product, alias: Optional[str] = None, session_time_range: Any = None):
-        if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='SPr', alias=alias)
-            self.product = product
-            self.session_time_range = session_time_range
 
 class FuturesContract(Product):
-    def __init__(self, alias: Optional[str] = None, point_value: Optional[int] = None, currency: Optional[str] = None):
-        super().__init__(alias, point_value, currency)
+    def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None):
+        super().__init__(name, point_value, currency)
     
 class Futures(Product):
-    def __init__(self, alias: Optional[str] = None, point_value: Optional[int] = None, currency: Optional[str] = None,
+    def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  mappings_path: Optional[str] = None, data_path: Optional[str] = None,
                  FuturesContractClass: type = FuturesContract):
         if not hasattr(self, '_initialized'):
-            super().__init__(alias, point_value, currency)
+            super().__init__(name, point_value, currency)
             self.mappings_path = mappings_path
             self.mappings: Optional[pd.DataFrame] = None
             self.FuturesContractClass = FuturesContractClass

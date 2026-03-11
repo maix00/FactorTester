@@ -22,7 +22,7 @@ class Mm(FactorFamily): # Day Momentum
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
-            df = product.MIN1.get_data()
+            df = product.MIN1.get_data(factor_family=self)
             
             _TD = DataFreq.DAY1.name
             _TM = DataFreq.MIN1.name
@@ -64,4 +64,4 @@ if __name__ == '__main__':
     # ff.change_default_return_freq('3h')
     # ff.add_params(F = 'S')
     # ff.add_params(F = '5h')
-    fft = ff.test()
+    fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))

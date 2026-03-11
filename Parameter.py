@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 class Parameter(SerialObject):
     _instance_count: int = -1
     _serial_map = {}
-    _register = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
         return super().__new__(cls, type_alias='P', alias=alias)
@@ -18,10 +17,15 @@ class Parameter(SerialObject):
                  get_value_alias: Callable[[Any], str]):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='P', alias=alias)
+            self._register = {}
             self.whether_in_space = whether_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
+            self.default_value = self._rectify_value(self.default_value)
             self.get_value_alias = lambda x: get_value_alias(x) if self.check_in_space(x) else ''
+
+    def _rectify_value(self, value: Any) -> Any:
+        return value
 
     def check_in_space(self, value: Any, error: bool = True) -> bool:
         check = self.whether_in_space(value)
@@ -31,7 +35,7 @@ class Parameter(SerialObject):
 
     def change_default_value(self, value: Any) -> Parameter:
         self.check_in_space(value)
-        self.default_value = value
+        self.default_value = self._rectify_value(value)
         return self
     
     def __iadd__(self, other):
@@ -91,11 +95,11 @@ class Parameter(SerialObject):
     
     def register(self, factor: Factor, value: Any) -> None:
         self.check_in_space(value)
-        self._register[factor] = value
+        self._register[factor] = self._rectify_value(value)
 
     def change_value(self, factor: Factor, value: Any) -> None:
         self.check_in_space(value)
-        self._register[factor] = value
+        self._register[factor] = self._rectify_value(value)
 
     def get_value(self, factor: Factor) -> Any:
         return self._register.get(factor, self.default_value)
@@ -113,29 +117,39 @@ if __name__ == '__main__':
     print(minus_param.whether_in_space(12))    # False
     
 class FinRangeParam(Parameter):
-    def __init__(self, alias: Optional[str], value_space: List[Any]|Any, 
+    def __init__(self, alias: Optional[str], 
+                 value_space: List[Any]|Any, 
+                 default_value: Optional[Any] = None,
                  get_value_alias: Optional[Callable[[Any], str]] = None):
         if not hasattr(self, '_initialized'):
             if not isinstance(value_space, list):
                 value_space = [value_space]
             super().__init__(
                 alias = alias,
-                default_value = value_space[0],
+                default_value = default_value if default_value is not None else value_space[0],
                 whether_in_space = lambda x: x in value_space,
                 get_value_alias = get_value_alias if get_value_alias else lambda x: str(x)
             )
             self.value_space = value_space
 
 class DataColumnParam(FinRangeParam):
-    def __init__(self, alias: Optional[str]):
+    def __init__(self, alias: Optional[str], default_value: Optional[Any] = None):
+        if default_value is not None:
+            from Tools import _process_data_col
+            default_value = _process_data_col(default_value)
         if not hasattr(self, '_initialized'):
             super().__init__(
                 alias = alias,
                 value_space = [col for col in DataColumn],
+                default_value=default_value,
                 get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x))
             )
+        else:
+            self.default_value = default_value
     
-    def col(self, col: DataColumn):
+    def col(self, col: Any):
+        from Tools import _process_data_col
+        col = _process_data_col(col)
         return self.get_value_alias(col)
 
 if __name__ == '__main__':
@@ -182,7 +196,7 @@ class TimeDeltaParam(Parameter):
             return str(value)
         
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
-    param = FinRangeParam(alias, None, lambda _: 'N')
+    param = FinRangeParam(alias, None, get_value_alias=lambda _: 'N')
     param += TimeDeltaParam(flag='pos')
     return param
     
@@ -205,6 +219,12 @@ class ColumnTimeParam(Parameter):
                 whether_in_space = self._whether_in_space,
                 get_value_alias = self._get_value_alias
             )
+            self.default_value = self._rectify_value(self.default_value)
+
+    def _rectify_value(self, value: Any) -> Any:
+        if self.check_in_space(value):
+            from Tools import _process_data_freq
+            return (_process_data_freq(value[0]).name, pd.to_datetime(value[1]))
 
     def _whether_in_space(self, value: Any) -> bool:
         if not isinstance(value, (list, tuple)):

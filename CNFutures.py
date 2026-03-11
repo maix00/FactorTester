@@ -121,20 +121,20 @@ def get_categories_with_products() -> dict[str, list[CNFutures]]:
             exchange = get_exchange_code_by_code(code)
             if exchange is not None:
                 mapped_exchange = exchange_map.get(exchange, exchange)
-                products.append(CNFutures(alias = code + '.' + mapped_exchange))
+                products.append(CNFutures(name = code + '.' + mapped_exchange))
         categories_with_products[category] = products
     return categories_with_products
 
 class CNFuturesContract(FuturesContract):
-    def __init__(self, alias: Optional[str] = None, point_value: Optional[int] = None):
-        super().__init__(alias, point_value, 'CNY')
+    def __init__(self, name: str, point_value: Optional[int] = None):
+        super().__init__(name, point_value, 'CNY')
 
 class CNFutures(Futures):
-    def __init__(self, alias: Optional[str] = None, point_value: Optional[int] = None, 
+    def __init__(self, name: str, point_value: Optional[int] = None, 
                  mappings_path: Optional[str] = None, 
                  data_path: Optional[str] = None):
-        super().__init__(alias, point_value, 'CNY', mappings_path, data_path, CNFuturesContract)
-        self.category_sector_cn = get_category_by_code(alias.split('.')[0]) if alias else None
+        super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract)
+        self.category_sector_cn = get_category_by_code(name.split('.')[0]) if name else None
         self.category_attr_name = 'category_sector_cn'
 
 def get_all_products() -> List[CNFutures]:

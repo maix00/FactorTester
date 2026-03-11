@@ -323,10 +323,21 @@ class DataMeta(UniqueObject):
         self._set_time_index(time_index)
         return self.data
     
-    def get_data(self, copy: bool = True) -> pd.DataFrame:
+    if TYPE_CHECKING:
+        from Factor import FactorFamily
+    
+    def get_data(self, copy: bool = True, factor_family: Optional[FactorFamily] = None, **kwargs) -> pd.DataFrame:
         if self.data.empty:
             self.load_data()
-        return self.data.copy() if copy else self.data
+        data = self.data.copy() if copy else self.data
+        if factor_family is not None:
+            start_calc_time = factor_family.current_start_calc_time
+        else:
+            start_calc_time = kwargs.get('start_calc_time', None)
+        if start_calc_time is not None:
+            col, time = start_calc_time
+            data = data[data.index.get_level_values(col) >= time]
+        return data
     
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
