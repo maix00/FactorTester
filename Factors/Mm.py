@@ -12,9 +12,9 @@ from typing import List, Dict, Any, Sequence, Tuple
 class Mm(FactorFamily): # Day Momentum
 
     params = [
-        DataColumnParam('H').change_default_value(DataColumn.HIGH),
-        DataColumnParam('L').change_default_value(DataColumn.LOW),
-        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('1d'),
+        DataColumnParam('H'),
+        DataColumnParam('L'),
+        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('15min'),
     ]
 
     def func(self, products: Sequence[Product], F: Any = '1d',
@@ -34,12 +34,18 @@ class Mm(FactorFamily): # Day Momentum
                 _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True)
                 time_part = _TM_.dt.time
                 cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
-                end_session = _TD_ + pd.Timedelta('9 hours')
-                end_session[cond] = _TD_[cond] + pd.Timedelta('15 hours')
-                df.index = pd.MultiIndex.from_arrays([_TD_, end_session], names=[_TD, 'end_session'])
-                idx = [_TD, 'end_session']
+                signal_time = _TD_ + pd.Timedelta('9 hours')
+                signal_time[cond] = _TD_[cond] + pd.Timedelta('15 hours')
+                df.index = pd.MultiIndex.from_arrays([_TD_, signal_time], names=[_TD, 'signal_time'])
+                idx = [_TD, 'signal_time']
             else:
-                continue
+                _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True)
+                _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True)
+                assert isinstance(F, pd.Timedelta)
+                pF = int(F.total_seconds() / pd.Timedelta('1min').total_seconds())
+                signal_time = _TM_.where(_TM_.index % pF == pF - 1).bfill()
+                df.index = pd.MultiIndex.from_arrays([_TD_, signal_time], names=[_TD, 'signal_time'])
+                idx = [_TD, 'signal_time']
 
             day_high, day_low, idx_high, idx_low = (
                 df.groupby(idx)
@@ -64,4 +70,5 @@ if __name__ == '__main__':
     # ff.change_default_return_freq('3h')
     # ff.add_params(F = 'S')
     # ff.add_params(F = '5h')
-    fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))
+    fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'))
+    # fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))

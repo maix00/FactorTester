@@ -21,7 +21,8 @@ class Parameter(SerialObject):
             self.whether_in_space = whether_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
-            self.default_value = self._rectify_value(self.default_value)
+            self.rectify_value = self._rectify_value
+            self.default_value = self.rectify_value(self.default_value)
             self.get_value_alias = lambda x: get_value_alias(x) if self.check_in_space(x) else ''
 
     def _rectify_value(self, value: Any) -> Any:
@@ -35,7 +36,7 @@ class Parameter(SerialObject):
 
     def change_default_value(self, value: Any) -> Parameter:
         self.check_in_space(value)
-        self.default_value = self._rectify_value(value)
+        self.default_value = self.rectify_value(value)
         return self
     
     def __iadd__(self, other):
@@ -44,8 +45,11 @@ class Parameter(SerialObject):
             old_get_alias = self.get_value_alias
             other_whether = other.whether_in_space
             other_get_alias = other.get_value_alias
+            old_rectify = self.rectify_value
+            other_rectify = other.rectify_value
             self.whether_in_space = lambda x: old_whether(x) or other_whether(x)
             self.get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
+            self.rectify_value = lambda x: old_rectify(x) if old_whether(x) else other_rectify(x)
             return self
         return NotImplemented
     
@@ -55,12 +59,15 @@ class Parameter(SerialObject):
             old_get_alias = self.get_value_alias
             other_whether = other.whether_in_space
             other_get_alias = other.get_value_alias
+            old_rectify = self.rectify_value
+            other_rectify = other.rectify_value
             new_param = Parameter(
                 alias = self.alias,
                 default_value = self.default_value,
                 whether_in_space = lambda x: old_whether(x) or other_whether(x),
                 get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
             )
+            new_param.rectify_value = lambda x: old_rectify(x) if old_whether(x) else other_rectify(x)
             return new_param
         return NotImplemented
     
@@ -87,6 +94,7 @@ class Parameter(SerialObject):
                 whether_in_space = lambda x: old_whether(x) and not other_whether(x),
                 get_value_alias = lambda x: old_get_alias(x) if old_whether(x) and not other_whether(x) else (other_get_alias(x) if other_whether(x) and not old_whether(x) else '')
             )
+            new_param.rectify_value = self.rectify_value
             return new_param
         return NotImplemented
     
@@ -95,11 +103,11 @@ class Parameter(SerialObject):
     
     def register(self, factor: Factor, value: Any) -> None:
         self.check_in_space(value)
-        self._register[factor] = self._rectify_value(value)
+        self._register[factor] = self.rectify_value(value)
 
     def change_value(self, factor: Factor, value: Any) -> None:
         self.check_in_space(value)
-        self._register[factor] = self._rectify_value(value)
+        self._register[factor] = self.rectify_value(value)
 
     def get_value(self, factor: Factor) -> Any:
         return self._register.get(factor, self.default_value)
@@ -134,9 +142,16 @@ class FinRangeParam(Parameter):
 
 class DataColumnParam(FinRangeParam):
     def __init__(self, alias: Optional[str], default_value: Optional[Any] = None):
+        from Tools import _process_data_col
         if default_value is not None:
-            from Tools import _process_data_col
             default_value = _process_data_col(default_value)
+        else:
+            try:
+                from itertools import takewhile
+                result = ''.join(takewhile(str.isalpha, alias)) if alias else ''
+                default_value = _process_data_col(result.upper()) if alias else None
+            except:
+                pass
         if not hasattr(self, '_initialized'):
             super().__init__(
                 alias = alias,
@@ -169,6 +184,10 @@ class TimeDeltaParam(Parameter):
                 whether_in_space = self._whether_in_space,
                 get_value_alias = self._get_value_alias
             )
+
+    def _rectify_value(self, value: Any) -> Any:
+        if self.check_in_space(value):
+            return pd.Timedelta(value)
 
     def _whether_in_space(self, value: Any) -> bool:
         try:
@@ -219,7 +238,7 @@ class ColumnTimeParam(Parameter):
                 whether_in_space = self._whether_in_space,
                 get_value_alias = self._get_value_alias
             )
-            self.default_value = self._rectify_value(self.default_value)
+            self.default_value = self.rectify_value(self.default_value)
 
     def _rectify_value(self, value: Any) -> Any:
         if self.check_in_space(value):
