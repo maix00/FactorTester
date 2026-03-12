@@ -338,11 +338,13 @@ class DataMeta(UniqueObject):
 
     def get_data(self, factor_family: Optional[FactorFamily] = None, 
                  extra_time_col_freq: Optional[Any] = None,
+                 extra_time_col_freq_session: bool = False,
                  extra_time_col_bfill: bool = True,
                  extra_time_col_stem: str = '_SIGNAL',
                  copy: bool = True, **kwargs) -> pd.DataFrame:
         data, _ = self._get_data(factor_family=factor_family,
             extra_time_col_freq=extra_time_col_freq,
+            extra_time_col_freq_session=extra_time_col_freq_session,
             extra_time_col_bfill=extra_time_col_bfill,
             extra_time_col_stem=extra_time_col_stem,
             extra_time_col_group_by=False,
@@ -351,6 +353,7 @@ class DataMeta(UniqueObject):
     
     def _get_data(self, factor_family: Optional[FactorFamily] = None, 
                  extra_time_col_freq: Optional[Any] = None,
+                 extra_time_col_freq_session: bool = False,
                  extra_time_col_bfill: bool = True,
                  extra_time_col_stem: str = '_SIGNAL',
                  extra_time_col_groupby: bool = False,
@@ -370,10 +373,33 @@ class DataMeta(UniqueObject):
         if extra_time_col_groupby:
             assert extra_time_col_freq is not None
             extra_time_col_bfill = True
-        if extra_time_col_freq is not None:
-            extra_time_col_freq = _process_data_freq(extra_time_col_freq)
-            extra_time_col_name = extra_time_col_stem + '@' + extra_time_col_freq.name
+        if extra_time_col_freq is not None or extra_time_col_freq_session:
+            if extra_time_col_freq_session:
+                extra_time_col_freq = _process_data_freq('1d')
+                extra_time_col_name = extra_time_col_stem + '@SESSION'
+            else:
+                extra_time_col_freq = _process_data_freq(extra_time_col_freq)
+                extra_time_col_name = extra_time_col_stem + '@' + extra_time_col_freq.name
             if extra_time_col_name not in data.columns:
+                if extra_time_col_freq_session:
+                    if DataFreq.DAY1.name in data.index.names and DataFreq.MIN1.name in data.index.names:
+                        day1name = DataFreq.DAY1.name
+                        min1name = DataFreq.MIN1.name
+                        day1series = data.index.get_level_values(day1name).to_series().reset_index(drop=True)
+                        min1series = data.index.get_level_values(min1name).to_series().reset_index(drop=True)
+                        time_part = min1series.dt.time
+                        cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
+                        signal_time = day1series + pd.Timedelta('9 hours')
+                        signal_time[cond] = day1series[cond] + pd.Timedelta('15 hours')
+                        data.index = pd.MultiIndex.from_arrays([day1series, signal_time], names=[day1name, extra_time_col_name])
+                        info = {}
+                        if extra_time_col_groupby:
+                            groupby_index = [day1name, extra_time_col_name]
+                            info['groupby_index'] = groupby_index
+                            info['grouped'] = data.groupby(groupby_index)
+                        return data, info
+                    else:
+                        return data, {'success': False}
                 if extra_time_col_freq.name in data.index.names:
                     if extra_time_col_groupby:
                         data_grouped = data.groupby(extra_time_col_freq.name)

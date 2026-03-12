@@ -22,26 +22,17 @@ class Mm(FactorFamily): # Day Momentum
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:
         factors = {}
         for product in products:
-            _TD = DataFreq.DAY1.name
-            _TM = DataFreq.MIN1.name
 
             if F == 'S':
-                df = product.MIN1.get_data(self)
-                _TD_ = df.index.get_level_values(_TD).to_series().reset_index(drop=True)
-                _TM_ = df.index.get_level_values(_TM).to_series().reset_index(drop=True)
-                time_part = _TM_.dt.time
-                cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
-                signal_time = _TD_ + pd.Timedelta('9 hours')
-                signal_time[cond] = _TD_[cond] + pd.Timedelta('15 hours')
-                df.index = pd.MultiIndex.from_arrays([_TD_, signal_time], names=[_TD, 'signal_time'])
-                idx = [_TD, 'signal_time']
-                df_grouped = df.groupby(idx)
+                session = True
             else:
-                df, info = product.MIN1._get_data(self, 
-                    extra_time_col_freq=F, 
-                    extra_time_col_bfill=True,
-                    extra_time_col_groupby=True)
-                df_grouped = info['grouped']
+                session = False
+            _, info = product.MIN1._get_data(self, 
+                extra_time_col_freq=F, 
+                extra_time_col_freq_session=session,
+                extra_time_col_bfill=True,
+                extra_time_col_groupby=True)
+            df_grouped = info['grouped']
 
             day_high, day_low, idx_high, idx_low = (
                 df_grouped
@@ -63,10 +54,11 @@ class Mm(FactorFamily): # Day Momentum
 if __name__ == '__main__':
     ff = Mm()
     ff.add_params(F = '2d')
+    ff.add_params(F = 'S')
     ff.add_params(F = '2min')
     ff.add_params(F = '5min')
     ff.add_params(F = '10min')
     ff.add_params(F = '15min')
-    fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'), categories=['1'])
+    fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'), categories=['0'])
     print(fft.products)
     # fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))
