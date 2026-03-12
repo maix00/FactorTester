@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 import pandas as pd
 import os
 from Products import Futures, FuturesContract, DataColumn
@@ -61,7 +61,8 @@ variety_col_name = '合约标的'
 category_col_name = '类别'
 exchange_col_name = '交易所'
 exchange_code_col_name = '交易所代码'
-
+night_time = '夜盘时间'
+day_time = '日盘时间'
 
 def get_variety_by_code(code) -> str | None:
     """从代码返回品种"""
@@ -73,10 +74,22 @@ def get_exchange_code_by_code(code) -> str | None:
     result = _data[_data[code_col_name] == code][exchange_code_col_name]
     return result.values[0] if len(result) > 0 else None
 
-def get_category_by_code(code) -> str | None:
+def get_category_by_code(code, flag: int = 2) -> str | None:
     """从代码返回类别"""
-    result = _data[_data[code_col_name] == code][category_col_name]
-    return result.values[0] if len(result) > 0 else None
+    categories_with_codes = get_categories_with_codes(flag=flag)
+    for category, codes in categories_with_codes.items():
+        if code in codes:
+            return category
+    return None
+
+def get_day_night_time_category_by_code(code) -> Tuple[str, str]:
+    _series = _data[day_time] + ', ' + _data[night_time]
+    _data['day_night_time'] = _series
+    categories_list = list(_series.unique())
+    for i in range(len(categories_list)):
+        if _data[_data[code_col_name] == code]['day_night_time'].values[0] == categories_list[i]:
+            return f"{i}", categories_list[i]
+    return '', ''
 
 def get_codes_by_exchange_code(exchange_code) -> list[str]:
     """从交易所代码返回所有的代码"""
@@ -91,9 +104,28 @@ def get_codes_by_category(category) -> list[str]:
     """从类别返回所有的代码"""
     return _data[_data[category_col_name] == category][code_col_name].tolist()
 
-def get_categories_with_codes() -> dict[str, list[str]]:
-    """返回所有类别及其对应的代码的dict"""
-    return _data.groupby(category_col_name)[code_col_name].apply(list).to_dict()  # type: ignore
+def get_categories_with_codes(flag: int = 2) -> dict[str, list[str]]:
+    """返回所有类别及其对应的代码的dict，根据夜盘时间进一步分组"""
+    if flag == 1:
+        return _data.groupby(category_col_name)[code_col_name].apply(list).to_dict()  # type: ignore
+    elif flag == 2:
+        return get_categories_2_with_codes()
+    else:
+        raise ValueError("Invalid flag value. Use 1 for basic categories or 2 for categories further grouped by night trading time.")
+
+def get_categories_2_with_codes() -> dict[str, list[str]]:
+    result = {}
+    grouped = _data.groupby(category_col_name)
+    for category, group in grouped:
+        series = group[night_time].copy().fillna('0')
+        night_times = series.unique()
+        if len(night_times) == 1:
+            result[category] = group[code_col_name].tolist()
+        else:
+            for i, night_t in enumerate(night_times, 1):
+                key = f"{category}{i}"
+                result[key] = group[series == night_t][code_col_name].tolist()
+    return result
 
 def check_data_files():
     """检查数据文件是否与代码表中的品种匹配"""
@@ -111,10 +143,10 @@ def check_data_files():
         if extra_in_data:
             print(f'Codes in data files ({string}) but not in table:', extra_in_data)
 
-def get_categories_with_products() -> dict[str, list[CNFutures]]:
+def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
     """返回所有类别及其对应的品种的dict"""
     categories_with_products = {}
-    categories_with_codes = get_categories_with_codes()
+    categories_with_codes = get_categories_with_codes(flag=flag)
     for category, codes in categories_with_codes.items():
         products = []
         for code in codes:
@@ -134,8 +166,11 @@ class CNFutures(Futures):
                  mappings_path: Optional[str] = None, 
                  data_path: Optional[str] = None):
         super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract)
-        self.category_sector_cn = get_category_by_code(name.split('.')[0]) if name else None
-        self.category_attr_name = 'category_sector_cn'
+        self.category_sector_cn = get_category_by_code(name.split('.')[0], flag = 1) if name else None
+        self.category_sector_cn_night_time = get_category_by_code(name.split('.')[0], flag = 2) if name else None
+        self.category_day_night_time, self.category_day_night_time_desc = \
+            get_day_night_time_category_by_code(name.split('.')[0]) if name else ('', '')
+        self.category_attr_name = 'category_day_night_time'
 
 def get_all_products() -> List[CNFutures]:
 
@@ -173,13 +208,14 @@ def get_all_products() -> List[CNFutures]:
     return cnfutures_list
 
 if __name__ == '__main__':
-    check_data_files()
-    categories_with_products = get_categories_with_products()
-    for category, products in categories_with_products.items():
-        print(f"Category: {category}")
-        print(f"  Products: {products}")
+    # check_data_files()
+    # categories_with_products = get_categories_with_products()
+    # for category, products in categories_with_products.items():
+    #     print(f"Category: {category}")
+    #     print(f"  Products: {products}")
 
     all_cn_futures = get_all_products()
-    print(all_cn_futures[0].get_some_data())
+    # print(all_cn_futures[0].get_some_data())
 
-
+    product = all_cn_futures[0]
+    get_day_night_time_category_by_code(product.name.split('.')[0])

@@ -119,7 +119,17 @@ class SerialObject(UniqueObject):
 
 class DataFreq(Enum):
     MIN1 = pd.Timedelta('1min')
+    MIN2 = pd.Timedelta('2min')
+    MIN5 = pd.Timedelta('5min')
+    MIN10 = pd.Timedelta('10min')
+    MIN15 = pd.Timedelta('15min')
+    MIN20 = pd.Timedelta('20min')
+    MIN30 = pd.Timedelta('30min')
+    HOUR1 = pd.Timedelta('1h')
+    HOUR2 = pd.Timedelta('2h')
     DAY1 = pd.Timedelta('1day')
+    DAY2 = pd.Timedelta('2day')
+    WEEK1 = pd.Timedelta('7day')
 
 def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
     if isinstance(data_freq, DataFreq):
@@ -325,8 +335,27 @@ class DataMeta(UniqueObject):
     
     if TYPE_CHECKING:
         from Factor import FactorFamily
+
+    def get_data(self, factor_family: Optional[FactorFamily] = None, 
+                 extra_time_col_freq: Optional[Any] = None,
+                 extra_time_col_bfill: bool = True,
+                 extra_time_col_stem: str = '_SIGNAL',
+                 copy: bool = True, **kwargs) -> pd.DataFrame:
+        data, _ = self._get_data(factor_family=factor_family,
+            extra_time_col_freq=extra_time_col_freq,
+            extra_time_col_bfill=extra_time_col_bfill,
+            extra_time_col_stem=extra_time_col_stem,
+            extra_time_col_group_by=False,
+            copy=copy, **kwargs)
+        return data
     
-    def get_data(self, factor_family: Optional[FactorFamily] = None, copy: bool = True, **kwargs) -> pd.DataFrame:
+    def _get_data(self, factor_family: Optional[FactorFamily] = None, 
+                 extra_time_col_freq: Optional[Any] = None,
+                 extra_time_col_bfill: bool = True,
+                 extra_time_col_stem: str = '_SIGNAL',
+                 extra_time_col_groupby: bool = False,
+                 copy: bool = True, **kwargs) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        
         if self.data.empty:
             self.load_data()
         data = self.data.copy() if copy else self.data
@@ -337,7 +366,73 @@ class DataMeta(UniqueObject):
         if start_calc_time is not None:
             col, time = start_calc_time
             data = data[data.index.get_level_values(col) >= time]
-        return data
+
+        if extra_time_col_groupby:
+            assert extra_time_col_freq is not None
+            extra_time_col_bfill = True
+        if extra_time_col_freq is not None:
+            extra_time_col_freq = _process_data_freq(extra_time_col_freq)
+            extra_time_col_name = extra_time_col_stem + '@' + extra_time_col_freq.name
+            if extra_time_col_name not in data.columns:
+                if extra_time_col_freq.name in data.index.names:
+                    if extra_time_col_groupby:
+                        data_grouped = data.groupby(extra_time_col_freq.name)
+                        return data, {'grouped': data_grouped, 'groupby_index': [extra_time_col_freq.name]}
+                    return data, {}
+                elif extra_time_col_freq.value > pd.Timedelta('1day') \
+                    and extra_time_col_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0 \
+                    and DataFreq.DAY1.name in data.index.names:
+                    day1series = data.index.get_level_values(DataFreq.DAY1.name).to_series().reset_index(drop=True)
+                    period = int(extra_time_col_freq.value.total_seconds() / pd.Timedelta('1d').total_seconds())
+                    pos = day1series != day1series.shift(-1)
+                    pos = pos[pos==True][period-1::period]
+                    series = day1series.where(pos)
+                    series = series.bfill() if extra_time_col_bfill else series
+                    data[extra_time_col_name] = series.values
+                    if DataFreq.MIN1.name in data.index.names:
+                        index_names = [extra_time_col_name, DataFreq.DAY1.name, DataFreq.MIN1.name]
+                    else:
+                        index_names = [extra_time_col_name, DataFreq.DAY1.name]
+                    if extra_time_col_groupby:
+                        data_grouped = data.groupby([extra_time_col_name])
+                        return data, {'grouped': data_grouped, 'groupby_index': [extra_time_col_name]}
+                    else:
+                        return data.reset_index().set_index(index_names), {}
+                elif extra_time_col_freq.value < pd.Timedelta('1day') \
+                    and extra_time_col_freq.value.total_seconds() % pd.Timedelta('1min').total_seconds() == 0 \
+                    and DataFreq.MIN1.name in data.index.names:
+                    min1series = data.index.get_level_values(DataFreq.MIN1.name).to_series().reset_index(drop=True)
+                    period = int(extra_time_col_freq.value.total_seconds() / pd.Timedelta('1min').total_seconds())
+                    pos = min1series.index % period == period - 1
+                    series = min1series.where(pos)
+                    series = series.bfill() if extra_time_col_bfill else series
+                    data[extra_time_col_name] = series.values
+                    data = data.reset_index().set_index([extra_time_col_name] + data.index.names)
+                    info = {}
+                    if DataFreq.DAY1.name in data.index.names:
+                        extra_time_col_name_day1 = extra_time_col_stem + '@' + DataFreq.DAY1.name
+                        info['extra_time_col_name_day1'] = extra_time_col_name_day1
+                        day1series = data.index.get_level_values(DataFreq.DAY1.name).to_series().reset_index(drop=True)
+                        day1series = day1series.where(pos)
+                        day1series = day1series.bfill() if extra_time_col_bfill else day1series
+                        data[extra_time_col_name_day1] = day1series.values
+                        groupby_index = [extra_time_col_name_day1, extra_time_col_name]
+                        index_names = [DataFreq.DAY1.name, extra_time_col_name_day1, extra_time_col_name, DataFreq.MIN1.name] 
+                    else:
+                        groupby_index = [extra_time_col_name]
+                        index_names = [extra_time_col_name, DataFreq.MIN1.name] 
+                    if extra_time_col_groupby:
+                        info['groupby_index'] = groupby_index
+                        info['grouped'] = data.groupby(groupby_index)
+                        return data, info
+                    else:
+                        return data.reset_index().set_index(index_names), info
+                else:
+                    raise ValueError(f"Cannot generate extra time column with frequency {extra_time_col_freq} from existing data")
+            else:
+                raise ValueError(f"Extra time column name {extra_time_col_name} already exists in data")
+        else:  
+            return data, {}
     
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
