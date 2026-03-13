@@ -129,6 +129,9 @@ class DataFreq(Enum):
     HOUR2 = pd.Timedelta('2h')
     DAY1 = pd.Timedelta('1day')
     DAY2 = pd.Timedelta('2day')
+    DAY3 = pd.Timedelta('3day')
+    DAY5 = pd.Timedelta('5day')
+    DAY10 = pd.Timedelta('10day')
     WEEK1 = pd.Timedelta('7day')
 
 def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:

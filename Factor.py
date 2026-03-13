@@ -595,8 +595,7 @@ class FactorTester:
                 
                 # Split contracts into n_groups groups
                 if n == 0:
-                    for i in range(n_groups):
-                        products[i][dt] = []
+                    continue
                 else:
                     n_split = n_groups
                     last_dt_has_product_now_at_market = set(range(n_groups))
