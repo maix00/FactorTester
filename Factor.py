@@ -871,58 +871,60 @@ class TimeRangeModule:
                 var default_cn_futures_night_start = "{default_cn_futures_night_start}";
                 var default_cn_futures_night_end = "{default_cn_futures_night_end}";
 
-                function toggleCnFuturesDayNight() {{
-                var is_day = document.getElementById('is_cn_futures_day').checked;
-                var is_night = document.getElementById('is_cn_futures_night').checked;
-                var trading_day_elem = document.getElementById('is_trading_day');
-                // 选择日盘或夜盘时，取消勾选交易日
-                if (is_day || is_night) {{
-                    trading_day_elem.checked = false;
-                }}
-                // 选择日盘时，取消夜盘
-                if (is_day) {{
-                    document.getElementById('is_cn_futures_night').checked = false;
-                    document.getElementById('is_cn_futures_day').checked = true;
-                }}
-                // 选择夜盘时，取消日盘
-                if (is_night) {{
-                    document.getElementById('is_cn_futures_day').checked = false;
-                    document.getElementById('is_cn_futures_night').checked = true;
-                }}
-                is_day = document.getElementById('is_cn_futures_day').checked;
-                is_night = document.getElementById('is_cn_futures_night').checked;
-                if (is_day && !is_night) {{
-                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_day_start.split(':')[0]));
-                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_day_start.split(':')[1]));
-                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_day_end.split(':')[0]));
-                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_day_end.split(':')[1]));
-                    setTimeInputsDisabled(true);
-                }} else if (!is_day && is_night) {{
-                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_night_start.split(':')[0]));
-                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_night_start.split(':')[1]));
-                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_night_end.split(':')[0]));
-                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_night_end.split(':')[1]));
-                    setTimeInputsDisabled(true);
-                }} else if (is_day && is_night) {{
-                    // 默认夜盘优先
-                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_night_start.split(':')[0]));
-                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_night_start.split(':')[1]));
-                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_night_end.split(':')[0]));
-                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_night_end.split(':')[1]));
-                    setTimeInputsDisabled(true);
-                }} else {{
-                    setTimeInputsDisabled(false);
-                    document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
-                    document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
-                    document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
-                    document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
-                }}
-                updateCurrentSettings();
+                function toggleCnFuturesDayNight(event) {{
+                    var target = event.target;
+                    var dayCheckbox = document.getElementById('is_cn_futures_day');
+                    var nightCheckbox = document.getElementById('is_cn_futures_night');
+                    var tradingDayElem = document.getElementById('is_trading_day');
+
+                    // 如果点击的是日盘，并且日盘被勾选，则强制取消夜盘
+                    if (target === dayCheckbox && dayCheckbox.checked) {{
+                        nightCheckbox.checked = false;
+                    }}
+                    // 如果点击的是夜盘，并且夜盘被勾选，则强制取消日盘
+                    else if (target === nightCheckbox && nightCheckbox.checked) {{
+                        dayCheckbox.checked = false;
+                    }}
+                    // 如果点击的是同一个复选框并取消勾选，则两个都未选中（允许都不选）
+                    // 无需额外操作
+
+                    // 更新交易日复选框状态（如果日盘或夜盘选中，则取消交易日）
+                    if (dayCheckbox.checked || nightCheckbox.checked) {{
+                        tradingDayElem.checked = false;
+                    }}
+
+                    // 重新获取当前状态
+                    var is_day = dayCheckbox.checked;
+                    var is_night = nightCheckbox.checked;
+
+                    // 根据最终状态设置时间输入框
+                    if (is_day && !is_night) {{
+                        document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_day_start.split(':')[0]));
+                        document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_day_start.split(':')[1]));
+                        document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_day_end.split(':')[0]));
+                        document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_day_end.split(':')[1]));
+                        setTimeInputsDisabled(true);
+                    }} else if (!is_day && is_night) {{
+                        document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_night_start.split(':')[0]));
+                        document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_night_start.split(':')[1]));
+                        document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_night_end.split(':')[0]));
+                        document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_night_end.split(':')[1]));
+                        setTimeInputsDisabled(true);
+                    }} else {{
+                        // 两个都未选中时，恢复默认时间并可编辑
+                        setTimeInputsDisabled(false);
+                        document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                        document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                        document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                        document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                    }}
+
+                    updateCurrentSettings();
                 }}
 
                 document.addEventListener('DOMContentLoaded', function() {{
-                document.getElementById('is_cn_futures_day').addEventListener('change', toggleCnFuturesDayNight);
-                document.getElementById('is_cn_futures_night').addEventListener('change', toggleCnFuturesDayNight);
+                    document.getElementById('is_cn_futures_day').addEventListener('change', toggleCnFuturesDayNight);
+                    document.getElementById('is_cn_futures_night').addEventListener('change', toggleCnFuturesDayNight);
                 }});
             </script>
             <div style="margin-top:8px;color:#888;">
@@ -936,203 +938,203 @@ class TimeRangeModule:
                 var default_day_end_time = "{default_day_end_time}";
 
                 function pad(n) {{
-                n = parseInt(n);
-                return n < 10 ? '0' + n : n.toString();
+                    n = parseInt(n);
+                    return n < 10 ? '0' + n : n.toString();
                 }}
 
                 function getMaxDay(year, month) {{
-                year = parseInt(year);
-                month = parseInt(month);
-                if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return 31;
-                return new Date(year, month, 0).getDate();
+                    year = parseInt(year);
+                    month = parseInt(month);
+                    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return 31;
+                    return new Date(year, month, 0).getDate();
                 }}
 
                 function validateInputOnBlur(input, min, max, isDay, yearId, monthId) {{
-                var value = input.value;
-                if (value === "") {{
-                    input.value = pad(min);
-                }} else {{
-                    var num = parseInt(value);
-                    if (isNaN(num)) {{
-                    input.value = pad(min);
-                    }} else if (num < min) {{
-                    input.value = pad(min);
-                    }} else if (num > max) {{
-                    input.value = pad(max);
+                    var value = input.value;
+                    if (value === "") {{
+                        input.value = pad(min);
                     }} else {{
-                    input.value = pad(num);
+                        var num = parseInt(value);
+                        if (isNaN(num)) {{
+                            input.value = pad(min);
+                        }} else if (num < min) {{
+                            input.value = pad(min);
+                        }} else if (num > max) {{
+                            input.value = pad(max);
+                        }} else {{
+                            input.value = pad(num);
+                        }}
                     }}
-                }}
-                if (isDay) {{
-                    var year = document.getElementById(yearId).value;
-                    var month = document.getElementById(monthId).value;
-                    var maxDay = getMaxDay(year, month);
-                    if (parseInt(input.value) > maxDay) {{
-                    input.value = pad(maxDay);
+                    if (isDay) {{
+                        var year = document.getElementById(yearId).value;
+                        var month = document.getElementById(monthId).value;
+                        var maxDay = getMaxDay(year, month);
+                        if (parseInt(input.value) > maxDay) {{
+                        input.value = pad(maxDay);
+                        }}
                     }}
-                }}
-                updateCurrentSettings();
+                    updateCurrentSettings();
                 }}
 
                 function validateInputOnEnter(e, input, min, max, isDay, yearId, monthId) {{
-                if (e.key === "Enter") {{
-                    validateInputOnBlur(input, min, max, isDay, yearId, monthId);
-                }}
+                    if (e.key === "Enter") {{
+                        validateInputOnBlur(input, min, max, isDay, yearId, monthId);
+                    }}
                 }}
 
                 function adjustDayIfNeeded(dayId, yearId, monthId) {{
-                var year = document.getElementById(yearId).value;
-                var month = document.getElementById(monthId).value;
-                var dayElem = document.getElementById(dayId);
-                var maxDay = getMaxDay(year, month);
-                var dayVal = parseInt(dayElem.value);
-                if (isNaN(dayVal) || dayVal < 1) {{
-                    dayElem.value = pad(1);
-                }} else if (dayVal > maxDay) {{
-                    dayElem.value = pad(maxDay);
-                }}
+                    var year = document.getElementById(yearId).value;
+                    var month = document.getElementById(monthId).value;
+                    var dayElem = document.getElementById(dayId);
+                    var maxDay = getMaxDay(year, month);
+                    var dayVal = parseInt(dayElem.value);
+                    if (isNaN(dayVal) || dayVal < 1) {{
+                        dayElem.value = pad(1);
+                    }} else if (dayVal > maxDay) {{
+                        dayElem.value = pad(maxDay);
+                    }}
                 }}
 
                 function getStartEndDateTime() {{
-                var start_year = document.getElementById('start_year').value;
-                var start_month = pad(document.getElementById('start_month').value);
-                var start_day = pad(document.getElementById('start_day').value);
-                var start_hour = pad(document.getElementById('start_hour').value);
-                var start_minute = pad(document.getElementById('start_minute').value);
+                    var start_year = document.getElementById('start_year').value;
+                    var start_month = pad(document.getElementById('start_month').value);
+                    var start_day = pad(document.getElementById('start_day').value);
+                    var start_hour = pad(document.getElementById('start_hour').value);
+                    var start_minute = pad(document.getElementById('start_minute').value);
 
-                var end_year = document.getElementById('end_year').value;
-                var end_month = pad(document.getElementById('end_month').value);
-                var end_day = pad(document.getElementById('end_day').value);
-                var end_hour = pad(document.getElementById('end_hour').value);
-                var end_minute = pad(document.getElementById('end_minute').value);
+                    var end_year = document.getElementById('end_year').value;
+                    var end_month = pad(document.getElementById('end_month').value);
+                    var end_day = pad(document.getElementById('end_day').value);
+                    var end_hour = pad(document.getElementById('end_hour').value);
+                    var end_minute = pad(document.getElementById('end_minute').value);
 
-                var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
-                var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
-                return [start_str, end_str];
+                    var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
+                    var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
+                    return [start_str, end_str];
                 }}
 
                 function updateCurrentSettings() {{
-                var start_year = document.getElementById('start_year').value;
-                var start_month = pad(document.getElementById('start_month').value);
-                var start_day = pad(document.getElementById('start_day').value);
-                var start_hour = pad(document.getElementById('start_hour').value);
-                var start_minute = pad(document.getElementById('start_minute').value);
+                    var start_year = document.getElementById('start_year').value;
+                    var start_month = pad(document.getElementById('start_month').value);
+                    var start_day = pad(document.getElementById('start_day').value);
+                    var start_hour = pad(document.getElementById('start_hour').value);
+                    var start_minute = pad(document.getElementById('start_minute').value);
 
-                var end_year = document.getElementById('end_year').value;
-                var end_month = pad(document.getElementById('end_month').value);
-                var end_day = pad(document.getElementById('end_day').value);
-                var end_hour = pad(document.getElementById('end_hour').value);
-                var end_minute = pad(document.getElementById('end_minute').value);
+                    var end_year = document.getElementById('end_year').value;
+                    var end_month = pad(document.getElementById('end_month').value);
+                    var end_day = pad(document.getElementById('end_day').value);
+                    var end_hour = pad(document.getElementById('end_hour').value);
+                    var end_minute = pad(document.getElementById('end_minute').value);
 
-                var is_trading_day = document.getElementById('is_trading_day').checked;
-                var txt = "起始时间: " + start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute 
-                    + ", 终末时间: " + end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute + (is_trading_day ? " (交易日)" : "");
-                document.getElementById('current_settings').innerText = txt;
+                    var is_trading_day = document.getElementById('is_trading_day').checked;
+                    var txt = "起始时间: " + start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute 
+                        + ", 终末时间: " + end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute + (is_trading_day ? " (交易日)" : "");
+                    document.getElementById('current_settings').innerText = txt;
 
-                // 判断起始时间是否小于等于终末时间，控制下一个模块显示
-                var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
-                var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
-                var start_dt = new Date(start_str.replace(/-/g, '/'));
-                var end_dt = new Date(end_str.replace(/-/g, '/'));
-                if (!isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt) {{
-                    openModule('{CategoryFilterModule.html_id}');
-                }} else {{
-                    closeModule('{CategoryFilterModule.html_id}');
-                }}
+                    // 判断起始时间是否小于等于终末时间，控制下一个模块显示
+                    var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
+                    var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
+                    var start_dt = new Date(start_str.replace(/-/g, '/'));
+                    var end_dt = new Date(end_str.replace(/-/g, '/'));
+                    if (!isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt) {{
+                        openModule('{CategoryFilterModule.html_id}');
+                    }} else {{
+                        closeModule('{CategoryFilterModule.html_id}');
+                    }}
                 }}
 
                 function setTimeInputsDisabled(disabled) {{
-                var timeIds = ['start_hour', 'start_minute', 'end_hour', 'end_minute'];
-                timeIds.forEach(function(id) {{
-                    var elem = document.getElementById(id);
-                    elem.disabled = disabled;
-                    elem.style.background = disabled ? '#ccc' : '#eee';
-                    elem.style.color = disabled ? '#888' : '';
-                }});
+                    var timeIds = ['start_hour', 'start_minute', 'end_hour', 'end_minute'];
+                    timeIds.forEach(function(id) {{
+                        var elem = document.getElementById(id);
+                        elem.disabled = disabled;
+                        elem.style.background = disabled ? '#ccc' : '#eee';
+                        elem.style.color = disabled ? '#888' : '';
+                    }});
                 }}
 
                 function toggleTradingDay() {{
-                var is_trading_day = document.getElementById('is_trading_day').checked;
-                // 选择交易日时，取消日盘和夜盘
-                if(is_trading_day) {{
-                    document.getElementById('is_cn_futures_day').checked = false;
-                    document.getElementById('is_cn_futures_night').checked = false;
-                    document.getElementById('start_hour').value = "00";
-                    document.getElementById('start_minute').value = "00";
-                    document.getElementById('end_hour').value = "00";
-                    document.getElementById('end_minute').value = "00";
-                    setTimeInputsDisabled(true);
-                }} else {{
-                    document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
-                    document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
-                    document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
-                    document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
-                    setTimeInputsDisabled(false);
-                }}
-                updateCurrentSettings();
+                    var is_trading_day = document.getElementById('is_trading_day').checked;
+                    // 选择交易日时，取消日盘和夜盘
+                    if(is_trading_day) {{
+                        document.getElementById('is_cn_futures_day').checked = false;
+                        document.getElementById('is_cn_futures_night').checked = false;
+                        document.getElementById('start_hour').value = "00";
+                        document.getElementById('start_minute').value = "00";
+                        document.getElementById('end_hour').value = "00";
+                        document.getElementById('end_minute').value = "00";
+                        setTimeInputsDisabled(true);
+                    }} else {{
+                        document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                        document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                        document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                        document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                        setTimeInputsDisabled(false);
+                    }}
+                    updateCurrentSettings();
                 }}
 
                 document.addEventListener('DOMContentLoaded', function() {{
-                document.getElementById('start_year').value = default_start_date.slice(0,4);
-                document.getElementById('start_month').value = pad(default_start_date.slice(5,7));
-                document.getElementById('start_day').value = pad(default_start_date.slice(8,10));
-                document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
-                document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
-                document.getElementById('end_year').value = default_end_date.slice(0,4);
-                document.getElementById('end_month').value = pad(default_end_date.slice(5,7));
-                document.getElementById('end_day').value = pad(default_end_date.slice(8,10));
-                document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
-                document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
-                document.getElementById('is_trading_day').addEventListener('change', toggleTradingDay);
+                    document.getElementById('start_year').value = default_start_date.slice(0,4);
+                    document.getElementById('start_month').value = pad(default_start_date.slice(5,7));
+                    document.getElementById('start_day').value = pad(default_start_date.slice(8,10));
+                    document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                    document.getElementById('end_year').value = default_end_date.slice(0,4);
+                    document.getElementById('end_month').value = pad(default_end_date.slice(5,7));
+                    document.getElementById('end_day').value = pad(default_end_date.slice(8,10));
+                    document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                    document.getElementById('is_trading_day').addEventListener('change', toggleTradingDay);
 
-                var inputs = [
-                    ['start_year', 1900, 2100, false, '', ''],
-                    ['start_month', 1, 12, false, '', ''],
-                    ['start_day', 1, 31, true, 'start_year', 'start_month'],
-                    ['start_hour', 0, 23, false, '', ''],
-                    ['start_minute', 0, 59, false, '', ''],
-                    ['end_year', 1900, 2100, false, '', ''],
-                    ['end_month', 1, 12, false, '', ''],
-                    ['end_day', 1, 31, true, 'end_year', 'end_month'],
-                    ['end_hour', 0, 23, false, '', ''],
-                    ['end_minute', 0, 59, false, '', '']
-                ];
-                inputs.forEach(function(arr) {{
-                    var id = arr[0], min = arr[1], max = arr[2], isDay = arr[3], yearId = arr[4], monthId = arr[5];
-                    var elem = document.getElementById(id);
-                    elem.addEventListener('blur', function() {{
-                    validateInputOnBlur(elem, min, max, isDay, yearId, monthId);
-                    if (id === 'start_year' || id === 'start_month') {{
-                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
-                    }}
-                    if (id === 'end_year' || id === 'end_month') {{
-                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
-                    }}
+                    var inputs = [
+                        ['start_year', 1900, 2100, false, '', ''],
+                        ['start_month', 1, 12, false, '', ''],
+                        ['start_day', 1, 31, true, 'start_year', 'start_month'],
+                        ['start_hour', 0, 23, false, '', ''],
+                        ['start_minute', 0, 59, false, '', ''],
+                        ['end_year', 1900, 2100, false, '', ''],
+                        ['end_month', 1, 12, false, '', ''],
+                        ['end_day', 1, 31, true, 'end_year', 'end_month'],
+                        ['end_hour', 0, 23, false, '', ''],
+                        ['end_minute', 0, 59, false, '', '']
+                    ];
+                    inputs.forEach(function(arr) {{
+                        var id = arr[0], min = arr[1], max = arr[2], isDay = arr[3], yearId = arr[4], monthId = arr[5];
+                        var elem = document.getElementById(id);
+                        elem.addEventListener('blur', function() {{
+                            validateInputOnBlur(elem, min, max, isDay, yearId, monthId);
+                            if (id === 'start_year' || id === 'start_month') {{
+                                adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                            }}
+                            if (id === 'end_year' || id === 'end_month') {{
+                                adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                            }}
+                        }});
+                        elem.addEventListener('keydown', function(e) {{
+                            validateInputOnEnter(e, elem, min, max, isDay, yearId, monthId);
+                            if (e.key === "Enter") {{
+                                if (id === 'start_year' || id === 'start_month') {{
+                                adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                                }}
+                                if (id === 'end_year' || id === 'end_month') {{
+                                adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                                }}
+                            }}
+                        }});
+                        elem.addEventListener('input', function() {{
+                            updateCurrentSettings();
+                            if (id === 'start_year' || id === 'start_month') {{
+                                adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                            }}
+                            if (id === 'end_year' || id === 'end_month') {{
+                                adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                            }}
+                        }});
                     }});
-                    elem.addEventListener('keydown', function(e) {{
-                    validateInputOnEnter(e, elem, min, max, isDay, yearId, monthId);
-                    if (e.key === "Enter") {{
-                        if (id === 'start_year' || id === 'start_month') {{
-                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
-                        }}
-                        if (id === 'end_year' || id === 'end_month') {{
-                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
-                        }}
-                    }}
-                    }});
-                    elem.addEventListener('input', function() {{
+                    toggleTradingDay();
                     updateCurrentSettings();
-                    if (id === 'start_year' || id === 'start_month') {{
-                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
-                    }}
-                    if (id === 'end_year' || id === 'end_month') {{
-                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
-                    }}
-                    }});
-                }});
-                toggleTradingDay();
-                updateCurrentSettings();
-                {show_next}
+                    {show_next}
                 }});
             </script>
             </div>
