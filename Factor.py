@@ -44,6 +44,15 @@ class ReturnPriceCols(Enum):
     THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
 
 import inspect
+import sys
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QComboBox, QFileDialog, QTextEdit
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import threading
+import os
+import webbrowser
+import json
+import calendar
+from datetime import datetime
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     products = get_all_products()
@@ -369,6 +378,11 @@ class FactorFamily(SerialObject):
             factor_table = pd.DataFrame()
         
         tester = get_factor_tester(time_range=(default_test_start_date, default_test_end_date))
+
+        # from FactorTesterGUI import set_objects, start_gui
+        # set_objects(self, tester)
+        # start_gui(threaded=False, debug=True)
+        
         tester.sift_product_by_category(categories=categories)
         price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
 
@@ -719,3 +733,681 @@ class FactorTester:
                     plt.show()
 
         return products, returns, report_df
+    
+
+# factor_server.py
+
+import importlib.util
+
+default_test_start_date = '2025-01-02'
+default_test_end_date = '2025-05-31'
+default_day_start_time = '00:00'
+default_day_end_time = '00:00'
+default_cn_futures_day_start = '09:00'
+default_cn_futures_day_end = '15:00'
+default_cn_futures_night_start = '21:00'
+default_cn_futures_night_end = '15:00'
+
+current_time_settings = {
+    "start_date": default_test_start_date,
+    "end_date": default_test_end_date,
+    "start_time": default_day_start_time,
+    "end_time": default_day_end_time,
+    "session_type": "normal"
+}
+
+def get_factor_groups(factors_dir):
+    factor_files = [f for f in os.listdir(factors_dir) if f.endswith(".py")]
+    factor_names = [os.path.splitext(f)[0] for f in factor_files]
+
+    def get_group(name):
+        group = ""
+        upper_count = 0
+        for i, c in enumerate(name):
+            if c.isupper():
+                upper_count += 1
+                if upper_count == 1:
+                    group += c
+                elif upper_count == 2:
+                    break
+            else:
+                if upper_count == 1:
+                    group += c
+        return group if group else name
+
+    groups = {}
+    for name in factor_names:
+        group = get_group(name)
+        groups.setdefault(group, []).append(name)
+    return groups, factor_names
+
+def build_group_html(groups):
+    group_html = ""
+    for group, names in sorted(groups.items()):
+        group_html += f'<div style="margin-bottom:16px;"><b style="font-size:20px;color:#0078d4;">{group}</b>'
+        group_html += '<ul style="max-height:180px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:0;margin-top:8px;">'
+        for name in sorted(names):
+            group_html += f'<li style="padding:8px;border-bottom:1px solid #eee;"><a href="?factor={name}" style="text-decoration:none;color:#333;font-size:18px;">{name}</a></li>'
+        group_html += '</ul></div>'
+    return group_html
+
+class TimeRangeModule:
+    html_id = "time_range_module"
+    parent_id = None
+    title = "1. 起始/终末时间设置"
+    is_open = True
+
+    @classmethod
+    def html(cls):
+        def pad(n):
+            return f"{int(n):02d}"
+        # 判断初始是否显示下一个模块
+        start_dt = f"{default_test_start_date} {default_day_start_time}"
+        end_dt = f"{default_test_end_date} {default_day_end_time}"
+        show_next = ""
+        try:
+            sdt = datetime.strptime(start_dt, "%Y-%m-%d %H:%M")
+            edt = datetime.strptime(end_dt, "%Y-%m-%d %H:%M")
+            if sdt <= edt:
+                show_next = f"openModule('{CategoryFilterModule.html_id}');"
+            else:
+                show_next = f"closeModule('{CategoryFilterModule.html_id}');"
+        except Exception:
+            show_next = f"closeModule('{CategoryFilterModule.html_id}');"
+        return f"""
+            <div class="module" id="{cls.html_id}" style="margin-top:32px;">
+            <div class="section-title">{cls.title}</div>
+            <div style="display:flex;align-items:center;gap:24px;">
+                <span style="font-size:13px;">
+                起始日期: 
+                <input type="number" min="1900" max="2100" id="start_year" value="{default_test_start_date[:4]}" style="width:60px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+                <span style="font-size:16px;">-</span>
+                <input type="number" min="1" max="12" id="start_month" value="{pad(default_test_start_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                <span style="font-size:16px;">-</span>
+                <input type="number" min="1" max="31" id="start_day" value="{pad(default_test_start_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                </span>
+                <span style="font-size:13px;">
+                起始时间: 
+                <input type="number" min="0" max="23" id="start_hour" value="{pad(default_day_start_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+                <span style="font-size:16px;">:</span>
+                <input type="number" min="0" max="59" id="start_minute" value="{pad(default_day_start_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:24px;margin-top:12px;">
+                <span style="font-size:13px;">
+                终末日期: 
+                <input type="number" min="1900" max="2100" id="end_year" value="{default_test_end_date[:4]}" style="width:60px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+                <span style="font-size:16px;">-</span>
+                <input type="number" min="1" max="12" id="end_month" value="{pad(default_test_end_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                <span style="font-size:16px;">-</span>
+                <input type="number" min="1" max="31" id="end_day" value="{pad(default_test_end_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                </span>
+                <span style="font-size:13px;">
+                终末时间: 
+                <input type="number" min="0" max="23" id="end_hour" value="{pad(default_day_end_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+                <span style="font-size:16px;">:</span>
+                <input type="number" min="0" max="59" id="end_minute" value="{pad(default_day_end_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+                </span>
+            </div>
+            <div style="margin-top:16px;">
+                <label style="font-size:13px;">
+                <input type="checkbox" id="is_trading_day" style="width:16px;height:16px;vertical-align:middle;margin-right:8px;">
+                <span style="font-size:13px;vertical-align:middle;">交易日</span>
+                </label>
+            </div>
+            <div style="margin-top:5px;">
+                <label style="font-size:13px;">
+                <input type="checkbox" id="is_cn_futures_day" style="width:16px;height:16px;vertical-align:middle;margin-right:8px;">
+                <span style="font-size:13px;vertical-align:middle;">中国期货日盘 (09:00-15:00)</span>
+                </label>
+                <label style="font-size:13px;margin-left:24px;">
+                <input type="checkbox" id="is_cn_futures_night" style="width:16px;height:16px;vertical-align:middle;margin-right:8px;">
+                <span style="font-size:13px;vertical-align:middle;">中国期货夜盘 (21:00-15:00)</span>
+                </label>
+            </div>
+            <script>
+                var default_cn_futures_day_start = "{default_cn_futures_day_start}";
+                var default_cn_futures_day_end = "{default_cn_futures_day_end}";
+                var default_cn_futures_night_start = "{default_cn_futures_night_start}";
+                var default_cn_futures_night_end = "{default_cn_futures_night_end}";
+
+                function toggleCnFuturesDayNight() {{
+                var is_day = document.getElementById('is_cn_futures_day').checked;
+                var is_night = document.getElementById('is_cn_futures_night').checked;
+                var trading_day_elem = document.getElementById('is_trading_day');
+                // 选择日盘或夜盘时，取消勾选交易日
+                if (is_day || is_night) {{
+                    trading_day_elem.checked = false;
+                }}
+                // 选择日盘时，取消夜盘
+                if (is_day) {{
+                    document.getElementById('is_cn_futures_night').checked = false;
+                    document.getElementById('is_cn_futures_day').checked = true;
+                }}
+                // 选择夜盘时，取消日盘
+                if (is_night) {{
+                    document.getElementById('is_cn_futures_day').checked = false;
+                    document.getElementById('is_cn_futures_night').checked = true;
+                }}
+                is_day = document.getElementById('is_cn_futures_day').checked;
+                is_night = document.getElementById('is_cn_futures_night').checked;
+                if (is_day && !is_night) {{
+                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_day_start.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_day_start.split(':')[1]));
+                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_day_end.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_day_end.split(':')[1]));
+                    setTimeInputsDisabled(true);
+                }} else if (!is_day && is_night) {{
+                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_night_start.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_night_start.split(':')[1]));
+                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_night_end.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_night_end.split(':')[1]));
+                    setTimeInputsDisabled(true);
+                }} else if (is_day && is_night) {{
+                    // 默认夜盘优先
+                    document.getElementById('start_hour').value = pad(parseInt(default_cn_futures_night_start.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_cn_futures_night_start.split(':')[1]));
+                    document.getElementById('end_hour').value = pad(parseInt(default_cn_futures_night_end.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_cn_futures_night_end.split(':')[1]));
+                    setTimeInputsDisabled(true);
+                }} else {{
+                    setTimeInputsDisabled(false);
+                    document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                    document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                }}
+                updateCurrentSettings();
+                }}
+
+                document.addEventListener('DOMContentLoaded', function() {{
+                document.getElementById('is_cn_futures_day').addEventListener('change', toggleCnFuturesDayNight);
+                document.getElementById('is_cn_futures_night').addEventListener('change', toggleCnFuturesDayNight);
+                }});
+            </script>
+            <div style="margin-top:8px;color:#888;">
+                <span>当前设置：</span>
+                <span id="current_settings"></span>
+            </div>
+            <script>
+                var default_start_date = "{default_test_start_date}";
+                var default_end_date = "{default_test_end_date}";
+                var default_day_start_time = "{default_day_start_time}";
+                var default_day_end_time = "{default_day_end_time}";
+
+                function pad(n) {{
+                n = parseInt(n);
+                return n < 10 ? '0' + n : n.toString();
+                }}
+
+                function getMaxDay(year, month) {{
+                year = parseInt(year);
+                month = parseInt(month);
+                if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return 31;
+                return new Date(year, month, 0).getDate();
+                }}
+
+                function validateInputOnBlur(input, min, max, isDay, yearId, monthId) {{
+                var value = input.value;
+                if (value === "") {{
+                    input.value = pad(min);
+                }} else {{
+                    var num = parseInt(value);
+                    if (isNaN(num)) {{
+                    input.value = pad(min);
+                    }} else if (num < min) {{
+                    input.value = pad(min);
+                    }} else if (num > max) {{
+                    input.value = pad(max);
+                    }} else {{
+                    input.value = pad(num);
+                    }}
+                }}
+                if (isDay) {{
+                    var year = document.getElementById(yearId).value;
+                    var month = document.getElementById(monthId).value;
+                    var maxDay = getMaxDay(year, month);
+                    if (parseInt(input.value) > maxDay) {{
+                    input.value = pad(maxDay);
+                    }}
+                }}
+                updateCurrentSettings();
+                }}
+
+                function validateInputOnEnter(e, input, min, max, isDay, yearId, monthId) {{
+                if (e.key === "Enter") {{
+                    validateInputOnBlur(input, min, max, isDay, yearId, monthId);
+                }}
+                }}
+
+                function adjustDayIfNeeded(dayId, yearId, monthId) {{
+                var year = document.getElementById(yearId).value;
+                var month = document.getElementById(monthId).value;
+                var dayElem = document.getElementById(dayId);
+                var maxDay = getMaxDay(year, month);
+                var dayVal = parseInt(dayElem.value);
+                if (isNaN(dayVal) || dayVal < 1) {{
+                    dayElem.value = pad(1);
+                }} else if (dayVal > maxDay) {{
+                    dayElem.value = pad(maxDay);
+                }}
+                }}
+
+                function getStartEndDateTime() {{
+                var start_year = document.getElementById('start_year').value;
+                var start_month = pad(document.getElementById('start_month').value);
+                var start_day = pad(document.getElementById('start_day').value);
+                var start_hour = pad(document.getElementById('start_hour').value);
+                var start_minute = pad(document.getElementById('start_minute').value);
+
+                var end_year = document.getElementById('end_year').value;
+                var end_month = pad(document.getElementById('end_month').value);
+                var end_day = pad(document.getElementById('end_day').value);
+                var end_hour = pad(document.getElementById('end_hour').value);
+                var end_minute = pad(document.getElementById('end_minute').value);
+
+                var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
+                var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
+                return [start_str, end_str];
+                }}
+
+                function updateCurrentSettings() {{
+                var start_year = document.getElementById('start_year').value;
+                var start_month = pad(document.getElementById('start_month').value);
+                var start_day = pad(document.getElementById('start_day').value);
+                var start_hour = pad(document.getElementById('start_hour').value);
+                var start_minute = pad(document.getElementById('start_minute').value);
+
+                var end_year = document.getElementById('end_year').value;
+                var end_month = pad(document.getElementById('end_month').value);
+                var end_day = pad(document.getElementById('end_day').value);
+                var end_hour = pad(document.getElementById('end_hour').value);
+                var end_minute = pad(document.getElementById('end_minute').value);
+
+                var is_trading_day = document.getElementById('is_trading_day').checked;
+                var txt = "起始时间: " + start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute 
+                    + ", 终末时间: " + end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute + (is_trading_day ? " (交易日)" : "");
+                document.getElementById('current_settings').innerText = txt;
+
+                // 判断起始时间是否小于等于终末时间，控制下一个模块显示
+                var start_str = start_year + "-" + start_month + "-" + start_day + " " + start_hour + ":" + start_minute;
+                var end_str = end_year + "-" + end_month + "-" + end_day + " " + end_hour + ":" + end_minute;
+                var start_dt = new Date(start_str.replace(/-/g, '/'));
+                var end_dt = new Date(end_str.replace(/-/g, '/'));
+                if (!isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt) {{
+                    openModule('{CategoryFilterModule.html_id}');
+                }} else {{
+                    closeModule('{CategoryFilterModule.html_id}');
+                }}
+                }}
+
+                function setTimeInputsDisabled(disabled) {{
+                var timeIds = ['start_hour', 'start_minute', 'end_hour', 'end_minute'];
+                timeIds.forEach(function(id) {{
+                    var elem = document.getElementById(id);
+                    elem.disabled = disabled;
+                    elem.style.background = disabled ? '#ccc' : '#eee';
+                    elem.style.color = disabled ? '#888' : '';
+                }});
+                }}
+
+                function toggleTradingDay() {{
+                var is_trading_day = document.getElementById('is_trading_day').checked;
+                // 选择交易日时，取消日盘和夜盘
+                if(is_trading_day) {{
+                    document.getElementById('is_cn_futures_day').checked = false;
+                    document.getElementById('is_cn_futures_night').checked = false;
+                    document.getElementById('start_hour').value = "00";
+                    document.getElementById('start_minute').value = "00";
+                    document.getElementById('end_hour').value = "00";
+                    document.getElementById('end_minute').value = "00";
+                    setTimeInputsDisabled(true);
+                }} else {{
+                    document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                    document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                    document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                    document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                    setTimeInputsDisabled(false);
+                }}
+                updateCurrentSettings();
+                }}
+
+                document.addEventListener('DOMContentLoaded', function() {{
+                document.getElementById('start_year').value = default_start_date.slice(0,4);
+                document.getElementById('start_month').value = pad(default_start_date.slice(5,7));
+                document.getElementById('start_day').value = pad(default_start_date.slice(8,10));
+                document.getElementById('start_hour').value = pad(parseInt(default_day_start_time.split(':')[0]));
+                document.getElementById('start_minute').value = pad(parseInt(default_day_start_time.split(':')[1]));
+                document.getElementById('end_year').value = default_end_date.slice(0,4);
+                document.getElementById('end_month').value = pad(default_end_date.slice(5,7));
+                document.getElementById('end_day').value = pad(default_end_date.slice(8,10));
+                document.getElementById('end_hour').value = pad(parseInt(default_day_end_time.split(':')[0]));
+                document.getElementById('end_minute').value = pad(parseInt(default_day_end_time.split(':')[1]));
+                document.getElementById('is_trading_day').addEventListener('change', toggleTradingDay);
+
+                var inputs = [
+                    ['start_year', 1900, 2100, false, '', ''],
+                    ['start_month', 1, 12, false, '', ''],
+                    ['start_day', 1, 31, true, 'start_year', 'start_month'],
+                    ['start_hour', 0, 23, false, '', ''],
+                    ['start_minute', 0, 59, false, '', ''],
+                    ['end_year', 1900, 2100, false, '', ''],
+                    ['end_month', 1, 12, false, '', ''],
+                    ['end_day', 1, 31, true, 'end_year', 'end_month'],
+                    ['end_hour', 0, 23, false, '', ''],
+                    ['end_minute', 0, 59, false, '', '']
+                ];
+                inputs.forEach(function(arr) {{
+                    var id = arr[0], min = arr[1], max = arr[2], isDay = arr[3], yearId = arr[4], monthId = arr[5];
+                    var elem = document.getElementById(id);
+                    elem.addEventListener('blur', function() {{
+                    validateInputOnBlur(elem, min, max, isDay, yearId, monthId);
+                    if (id === 'start_year' || id === 'start_month') {{
+                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                    }}
+                    if (id === 'end_year' || id === 'end_month') {{
+                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                    }}
+                    }});
+                    elem.addEventListener('keydown', function(e) {{
+                    validateInputOnEnter(e, elem, min, max, isDay, yearId, monthId);
+                    if (e.key === "Enter") {{
+                        if (id === 'start_year' || id === 'start_month') {{
+                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                        }}
+                        if (id === 'end_year' || id === 'end_month') {{
+                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                        }}
+                    }}
+                    }});
+                    elem.addEventListener('input', function() {{
+                    updateCurrentSettings();
+                    if (id === 'start_year' || id === 'start_month') {{
+                        adjustDayIfNeeded('start_day', 'start_year', 'start_month');
+                    }}
+                    if (id === 'end_year' || id === 'end_month') {{
+                        adjustDayIfNeeded('end_day', 'end_year', 'end_month');
+                    }}
+                    }});
+                }});
+                toggleTradingDay();
+                updateCurrentSettings();
+                {show_next}
+                }});
+            </script>
+            </div>
+        """
+
+class CategoryFilterModule:
+    html_id = "category_filter_module"
+    parent_id = TimeRangeModule.html_id
+    title = "2. 产品类别筛选"
+    is_open = False
+
+    @classmethod
+    def html(cls):
+        return f"""
+        <div class="module" id="{cls.html_id}" style="margin-top:32px;display:none;">
+            <div class="section-title">{cls.title}</div>
+            <div style="color:#aaa;">（功能开发中）</div>
+        </div>
+        """
+
+class IcTestModule:
+    html_id = "ic_test_module"
+    parent_id = CategoryFilterModule.html_id
+    title = "3. IC测试"
+    is_open = False
+
+    @classmethod
+    def html(cls):
+        return f"""
+        <div class="module" id="{cls.html_id}" style="margin-top:32px;display:none;">
+            <div class="section-title">{cls.title}</div>
+            <button disabled style="background:#ccc;">运行IC测试</button>
+            <div style="color:#aaa;">（功能开发中）</div>
+        </div>
+        """
+
+class GroupTestModule:
+    html_id = "group_test_module"
+    parent_id = IcTestModule.html_id
+    title = "4. 分组测试"
+    is_open = False
+
+    @classmethod
+    def html(cls):
+        return f"""
+        <div class="module" id="{cls.html_id}" style="margin-top:32px;display:none;">
+            <div class="section-title">{cls.title}</div>
+            <button disabled style="background:#ccc;">运行分组测试</button>
+            <div style="color:#aaa;">（功能开发中）</div>
+        </div>
+        """
+
+def html_factor_main_section(selected_name):
+    return f"""
+        <div class="section">
+            <div class="section-title">当前因子: <b style="color:#0078d4;">{selected_name}</b></div>
+            <div style="margin-top:16px;color:#888;">功能开发中，仅展示页面框架。</div>
+            {TimeRangeModule.html()}
+            {CategoryFilterModule.html()}
+            {IcTestModule.html()}
+            {GroupTestModule.html()}
+        </div>
+        <script>
+            // 控制模块显示/隐藏
+            function openModule(moduleId) {{
+                document.getElementById(moduleId).style.display = '';
+            }}
+            function closeModule(moduleId) {{
+                document.getElementById(moduleId).style.display = 'none';
+            }}
+            function checkModules() {{
+                // 只有父模块完成后才打开下一个模块
+                var modules = [
+                    '{TimeRangeModule.html_id}',
+                    '{CategoryFilterModule.html_id}',
+                    '{IcTestModule.html_id}',
+                    '{GroupTestModule.html_id}'
+                ];
+                // 默认第一个模块打开
+                openModule(modules[0]);
+                for (var i = 1; i < modules.length; i++) {{
+                    closeModule(modules[i]);
+                }}
+                // 你可以在这里加条件，比如父模块完成后再打开下一个模块
+                // 这里只是演示，实际需要根据状态判断
+                // 例如：如果时间设置完成，则打开类别筛选模块
+                // 可以通过事件监听和状态管理实现
+            }}
+            document.addEventListener('DOMContentLoaded', checkModules);
+        </script>
+    """
+
+class FactorFileHandler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        directory = self.directory
+        factors_dir = os.path.join(directory, "Factors")
+        if not os.path.exists(factors_dir):
+            os.makedirs(factors_dir)
+        groups, factor_names = get_factor_groups(factors_dir)
+
+        search_query = ""
+        if "search=" in self.path:
+            search_query = self.path.split("search=")[-1].split("&")[0]
+            factor_names_filtered = [name for name in factor_names if search_query.lower() in name.lower()]
+            filtered_groups = {}
+            for group, names in groups.items():
+                filtered = [n for n in names if search_query.lower() in n.lower()]
+                if filtered:
+                    filtered_groups[group] = filtered
+            groups = filtered_groups
+        else:
+            factor_names_filtered = factor_names
+
+        selected_name = self.path.split("?factor=")[-1] if "?factor=" in self.path else ""
+        group_html = build_group_html(groups)
+
+        if selected_name and selected_name in factor_names:
+            html_content = f"""
+            <html>
+            <head>
+                <title>单因子测试</title>
+                <style>
+                    body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; }}
+                    .container {{ display: flex; max-width: 1200px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ddd; padding: 32px; position: relative; min-height: 700px; }}
+                    .sidebar {{ width: 320px; border-right: 1px solid #eee; padding-right: 24px; }}
+                    .main {{ flex: 1; padding-left: 32px; }}
+                    h2 {{ color: #222; }}
+                    input[type="text"] {{ width: 100%; padding: 8px; margin-bottom: 16px; border-radius: 4px; border: 1px solid #ccc; font-size: 16px; }}
+                    ul {{ list-style: none; padding: 0; margin: 0; }}
+                    li:hover {{ background: #e6f7ff; }}
+                    button {{ margin-top: 24px; padding: 8px 16px; border-radius: 4px; border: none; background: #0078d4; color: #fff; font-size: 16px; cursor: pointer; }}
+                    .group-title {{ font-size:20px;color:#0078d4;margin-bottom:8px; }}
+                    .shutdown-btn-topright {{
+                        position: absolute;
+                        top: 16px;
+                        right: 16px;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border: none;
+                        background: #d40000;
+                        color: #fff;
+                        font-size: 16px;
+                        cursor: pointer;
+                        z-index: 10;
+                    }}
+                    .section {{ margin-bottom: 32px; }}
+                    .section-title {{ font-size:18px;color:#0078d4;margin-bottom:8px; }}
+                    .module {{ border: 1px solid #eee; border-radius: 6px; background: #fafbfc; margin-bottom: 16px; padding: 16px; }}
+                </style>
+                <script>
+                    function searchFactors() {{
+                        var query = document.getElementById('search').value;
+                        window.location.href = '?search=' + encodeURIComponent(query);
+                    }}
+                    function shutdownServer() {{
+                        if (confirm('确定要关闭服务器吗？')) {{
+                            fetch('/shutdown', {{method: 'POST'}}).then(function() {{
+                                // 关闭页面
+                                window.close();
+                            }});
+                        }}
+                    }}
+                    document.addEventListener('DOMContentLoaded', function() {{
+                        document.getElementById('search').addEventListener('keyup', function(e) {{
+                            if (e.key === 'Enter') searchFactors();
+                        }});
+                    }});
+                </script>
+            </head>
+            <body>
+                <button class="shutdown-btn-topright" onclick="shutdownServer()">关闭服务器</button>
+                <div class="container">
+                    <div class="sidebar">
+                        <h2>单因子测试 (./Factors)</h2>
+                        <input type="text" id="search" placeholder="搜索因子名称..." value="{search_query}">
+                        {group_html if groups else '<div style="color:#888;">无匹配因子</div>'}
+                        <button onclick="shutdownServer()">关闭服务器</button>
+                    </div>
+                    <div class="main">
+                        {html_factor_main_section(selected_name)}
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+        else:
+            html_content = f"""
+            <html>
+            <head>
+                <title>单因子测试</title>
+                <style>
+                    body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; }}
+                    .container {{ max-width: 700px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ddd; padding: 32px; position: relative; }}
+                    h2 {{ color: #222; }}
+                    input[type="text"] {{ width: 100%; padding: 8px; margin-bottom: 16px; border-radius: 4px; border: 1px solid #ccc; font-size: 16px; }}
+                    ul {{ list-style: none; padding: 0; margin: 0; }}
+                    li:hover {{ background: #e6f7ff; }}
+                    button {{ margin-top: 24px; padding: 8px 16px; border-radius: 4px; border: none; background: #0078d4; color: #fff; font-size: 16px; cursor: pointer; }}
+                    .group-title {{ font-size:20px;color:#0078d4;margin-bottom:8px; }}
+                    .shutdown-btn-topright {{
+                        position: absolute;
+                        top: 16px;
+                        right: 16px;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border: none;
+                        background: #d40000;
+                        color: #fff;
+                        font-size: 16px;
+                        cursor: pointer;
+                        z-index: 10;
+                    }}
+                </style>
+                <script>
+                    function searchFactors() {{
+                        var query = document.getElementById('search').value;
+                        window.location.href = '?search=' + encodeURIComponent(query);
+                    }}
+                    function shutdownServer() {{
+                        if (confirm('确定要关闭服务器吗？')) {{
+                            fetch('/shutdown', {{method: 'POST'}}).then(function() {{
+                                // 关闭页面
+                                window.close();
+                            }});
+                        }}
+                    }}
+                    document.addEventListener('DOMContentLoaded', function() {{
+                        document.getElementById('search').addEventListener('keyup', function(e) {{
+                            if (e.key === 'Enter') searchFactors();
+                        }});
+                    }});
+                </script>
+            </head>
+            <body>
+                <div class="container">
+                    <button class="shutdown-btn-topright" onclick="shutdownServer()">关闭服务器</button>
+                    <h2>单因子测试 (./Factors)</h2>
+                    <input type="text" id="search" placeholder="搜索因子名称..." value="{search_query}">
+                    {group_html if groups else '<div style="color:#888;">无匹配因子</div>'}
+                    <button onclick="shutdownServer()">关闭服务器</button>
+                </div>
+            </body>
+            </html>
+            """
+
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(html_content.encode("utf-8"))
+
+    def do_POST(self):
+        if self.path == '/shutdown':
+            self.send_response(200)
+            self.end_headers()
+            threading.Thread(target=self.server.shutdown).start()
+            sys.exit(0)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_local_http_server(port=8000, directory='.'):
+    os.chdir(directory)
+    class CustomHTTPServer(HTTPServer):
+        def __init__(self, server_address, RequestHandlerClass, directory):
+            super().__init__(server_address, RequestHandlerClass)
+            self.directory = directory
+
+    server = CustomHTTPServer(('localhost', port), FactorFileHandler, directory)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://localhost:{port}/"
+    print(f"Serving HTTP on {url} from {os.path.abspath(directory)}")
+    webbrowser.open(url)
+    thread.join()
+    print("服务器已关闭。")
+
+if __name__ == '__main__':
+    run_local_http_server(port=8000, directory='.')
