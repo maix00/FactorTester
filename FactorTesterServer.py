@@ -756,51 +756,144 @@ def get_time_range_module_html(factor_family_alias):
 
 def get_category_filter_module_html():
     tree = get_cat_tree().tree
+    to_str = lambda x: str(x) if not isinstance(x, type) else x.__name__
 
-    # 递归生成HTML（默认展开到第一次没有$SUBCLASS$的层，剩下的层默认隐藏）
     def render_tree(tree, path=None, level=0, expand=True):
         if path is None:
             path = []
         html = ''
+        # 遍历树的其他节点
         for key, value in tree.items():
             if key == '$OBJECTS$':
-                obj_path = '_'.join(str(p) for p in path)
-                html += f'<div class="tree-level-{level+1}" style="margin-left:{level*4}px;margin-bottom:2px;">'
-                html += f'<input type="checkbox" class="select-all" data-level="{level+1}" data-path="{obj_path}" onclick="selectAllObjects(this)" style="width:13px;height:13px;">'
-                html += f'<button type="button" onclick="toggleCollapse(\'{obj_path}_collapse\')" style="margin-left:4px;font-size:12px;padding:1px 6px;height:22px;">折叠/展开</button>'
-                html += f'<button type="button" onclick="loadProducts(\'{obj_path}_collapse\', \'{obj_path}\')" style="margin-left:4px;font-size:12px;padding:1px 6px;height:22px;">查看产品</button>'
-                html += f'<div id="{obj_path}_collapse" style="display:none;"></div>'
-                html += '</div>'
+                continue
             elif key == '$SUBCLASS$':
-                # 如果有$SUBCLASS$，默认展开，否则默认隐藏
                 html += render_tree(value, path, level, expand)
             else:
-                new_path = path + [str(key)]
-                # 判断是否有$SUBCLASS$，决定是否展开
+                new_path = path + [to_str(key)]
                 has_subclass = '$SUBCLASS$' in value
-                display = '' if expand else 'none'
-                html += f'<div class="tree-level-{level+1}" style="margin-left:{level*4}px;margin-bottom:2px;display:{display};" id="tree_{("_".join(new_path))}_div">'
-                html += f'<span style="color:#0078d4;font-size:13px;">{str(key)}</span>'
-                html += render_tree(value, new_path, level+1, expand=has_subclass)
-                html += '</div>'
+                display_of_subclass = '' #if has_subclass else 'none'
+                display = '' # if expand else 'none'
+                # 生成当前节点行
+                html += f'''<div class="tree-node" style="display:flex; flex-wrap:wrap; align-items:baseline; margin-bottom:2px; display:{display};" id="tree_{"_".join(new_path)}_div">'''
+                html += f'''<div class="tree-line" style="width:{level*20}px; min-width:{level*20}px; position:relative;">'''
+                if '$OBJECTS$' in value:
+                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:0px; width:2px; height:38px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
+                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:36px; width:12px; height:2px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
+                    html += '''</div>'''
+                    html += f'''<div id="tree_{"_".join(new_path)}_circle" class="tree-circle" style="width:18px; height:18px; background:#0078d4; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-right:6px;">'''
+                    html += f'''<span style="color:#fff; font-size:12px;">{level+1}</span>'''
+                else:
+                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:9px; width:2px; height:23px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
+                    html += '''</div>'''
+                    html += f'''<div id="tree_{"_".join(new_path)}_circle" class="tree-circle" style="width:18px; height:18px; background:#ff9800; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-right:6px;">'''
+                    html += f'''<span style="color:#fff; font-size:12px;"></span>'''
+                html += f'''</div>'''
+                html += f'''<span style="color:#0078d4; font-size:13px;">{to_str(key)}</span>'''
+                html += f'''<button type="button" onclick="toggleCollapse('{"_".join(new_path)}_collapse')" style="margin-left:4px; font-size:12px; padding:1px 6px; height:auto;">折叠/展开</button>'''
+                if '$OBJECTS$' in value:
+                    obj_path = '_'.join(to_str(key) for key in new_path)
+                    html += f'''
+                        &nbsp;<span style="color:#888; font-size:13px;">勾选全部此类产品</span>
+                        <input type="checkbox" class="select-all" data-level="{level+2}" data-path="{obj_path}" onclick="selectAllObjects(this)" style="width:10px; height:auto; margin-left:6px; align-items:top;">
+                        <button type="button" onclick="loadProducts('{obj_path}_collapse', '{obj_path}')" style="margin-left:4px; font-size:12px; padding:1px 6px; height:auto;">查看产品</button>
+                    '''
+                    new_level = level + 1
+                else:
+                    new_level = level
+                html += f'''
+                    <div id="{"_".join(new_path)}_collapse" style="display:{display_of_subclass}; width:100%; margin-left:0;">
+                        {render_tree(value, new_path, new_level, expand=has_subclass)}
+                    </div>
+                '''
+                html += '''</div>'''
         return html
 
-    html = '<div class="module" id="category_filter_module" style="margin-top:24px;">'
-    html += '<div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>'
-    html += '<div style="margin-bottom:8px;color:#888;font-size:12px;">可折叠树状结构，勾选后提交</div>'
-    html += '<form id="product_filter_form">'
+    html = '''
+    <div class="module" id="category_filter_module" style="margin-top:24px;">
+        <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
+        <div style="margin-bottom:8px;color:#888;font-size:12px;">可折叠树状结构，勾选后提交</div>
+        <form id="product_filter_form">
+    '''
     html += render_tree(tree)
-    html += '<button type="button" onclick="submitSelectedProducts()" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>'
-    html += '</form>'
-    html += '<div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>'
-    html += '</div>'
+    html += '''
+        <button type="button" onclick="submitSelectedProducts()" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+        </form>
+        <div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>
+    </div>
+    <style>
+    .tree-node:hover .tree-circle { box-shadow: 0 0 0 2px #0078d4; }
+    </style>
+    '''
     
     # 前端JS
     js = """
     <script>
     function toggleCollapse(id) {
-        var el = document.getElementById(id);
-        if (el) el.style.display = (el.style.display === 'none' ? '' : 'none');
+        var contentEl = document.getElementById(id); // 折叠内容容器（如 "..._collapse"）
+        if (!contentEl) return;
+
+        var isCollapsed = (contentEl.style.display === 'none');
+        // 切换显示状态
+        contentEl.style.display = isCollapsed ? '' : 'none';
+
+        // 获取对应的竖线元素（假设 ID 规则为 id.replace('_collapse', '_line')）
+        var lineId = id.replace('_collapse', '_line');
+        var lineEl = document.getElementById(lineId);
+        if (!lineEl) return;
+
+        if (isCollapsed) {
+            // 展开：根据圆圈和最后一个子元素的位置调整竖线高度
+            // 获取圆圈元素（假设 ID 规则为 id.replace('_collapse', '_circle')）
+            var circleId = id.replace('_collapse', '_circle');
+            var circleEl = document.getElementById(circleId);
+            if (!circleEl) return;
+
+            // 确保内容容器可见，以便获取子元素位置
+            contentEl.style.display = ''; // 可能已经在上面的切换中设为可见了
+
+            // 获取最后一个子元素
+            var lastChild = contentEl.lastElementChild;
+            if (!lastChild) {
+                // 如果没有子节点，竖线高度设为0或隐藏
+                lineEl.style.height = '0';
+                return;
+            }
+
+            // 计算位置
+            var circleRect = circleEl.getBoundingClientRect();
+            var lastChildRect = lastChild.getBoundingClientRect();
+            var lineTop = circleRect.bottom; // 圆圈底部作为竖线起点
+            var lineBottom = lastChildRect.bottom; // 最后一个子元素底部作为终点
+
+            // 计算高度（绝对值）
+            var height = lineBottom - lineTop;
+
+            // 设置竖线的 top 和 height（需要考虑父容器的定位上下文）
+            // 因为竖线是绝对定位，其 top 值是基于最近的定位祖先（relative/absolute）计算的，
+            // 而 getBoundingClientRect 返回的是相对于视口的值，所以需要转换。
+            // 简便方法：获取竖线父容器的位置，然后计算相对偏移。
+            var lineParent = lineEl.offsetParent; // 最近的定位祖先
+            if (lineParent) {
+                var parentRect = lineParent.getBoundingClientRect();
+                var relativeTop = lineTop - parentRect.top;
+                var relativeBottom = lineBottom - parentRect.top;
+                lineEl.style.top = relativeTop + 'px';
+                lineEl.style.height = (relativeBottom - relativeTop) + 'px';
+            } else {
+                // 如果没有定位祖先，直接使用视口坐标（不建议）
+                lineEl.style.top = lineTop + 'px';
+                lineEl.style.height = height + 'px';
+            }
+
+            // 可选：如果竖线原本有固定的初始 top，你可能需要根据圆圈位置动态调整，
+            // 但更简单的方式是让竖线的 top 始终跟随圆圈底部。
+        } else {
+            // 折叠：竖线恢复为单行高度（例如 24px），同时可能需要重置 top 到原始位置
+            // 这里假设原始 top 是固定的（例如 9px 或 0px），你可以从数据属性中读取，或直接设置固定值
+            lineEl.style.height = '24px';
+            // 如果之前修改过 top，记得重置
+            // lineEl.style.top = originalTop; // 你需要保存原始 top
+        }
     }
     function loadProducts(divId, objPath) {
         var div = document.getElementById(divId);
