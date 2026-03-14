@@ -199,15 +199,20 @@ def get_parameter_module_html(selected_name):
                 </tr>
             """
 
+        total_width = 120 + sum(get_col_min_width(p) for p in sorted_params) + 80
+
         table_html = f"""
             <div style="overflow-x:auto;max-width:800px;" id="param_table_scroll">
-                <table style="border-collapse:collapse;width:100%;background:#fff;min-width:{120 + sum(get_col_min_width(p) for p in sorted_params) + 80}px;">
+                <table style="border-collapse:collapse;width:100%;background:#fff;min-width:{total_width}px;">
                     <thead style="background:#f6f8fa;">{header_html}</thead>
                     <tbody id="factor_table_body">{input_row_html}{factor_rows_html}</tbody>
                 </table>
             </div>
+            <div style="margin-top:8px;">
+                <input type="range" id="param_table_slider" min="0" max="0" value="0" style="width:100%;"/>
+            </div>
             <div style="margin-top:8px;color:#888;font-size:15px;text-align:left;">
-                如果表格宽度过大，可以用鼠标滚轮左右浏览
+                如果表格宽度过大，可以用下方滑块左右浏览
             </div>
         """
 
@@ -217,11 +222,28 @@ def get_parameter_module_html(selected_name):
             <script>
                 document.addEventListener('DOMContentLoaded', function() {{
                     var scrollDiv = document.getElementById('param_table_scroll');
-                    if(scrollDiv) {{
-                        scrollDiv.addEventListener('wheel', function(e) {{
-                            if (e.deltaY !== 0) {{ scrollDiv.scrollLeft += e.deltaY; e.preventDefault(); }}
-                        }});
+                    var slider = document.getElementById('param_table_slider');
+                    function updateSlider() {{
+                        if(scrollDiv && slider) {{
+                            var scrollWidth = scrollDiv.scrollWidth;
+                            var clientWidth = scrollDiv.clientWidth;
+                            var maxScroll = scrollWidth - clientWidth;
+                            slider.max = maxScroll > 0 ? maxScroll : 0;
+                            slider.value = scrollDiv.scrollLeft;
+                            slider.style.display = maxScroll > 0 ? '' : 'none';
+                        }}
                     }}
+                    if(scrollDiv && slider) {{
+                        updateSlider();
+                        scrollDiv.addEventListener('scroll', function() {{
+                            slider.value = scrollDiv.scrollLeft;
+                        }});
+                        slider.addEventListener('input', function() {{
+                            scrollDiv.scrollLeft = slider.value;
+                        }});
+                        window.addEventListener('resize', updateSlider);
+                    }}
+
                     function reloadParamTable() {{
                         fetch(window.location.pathname + '?factor={selected_name}')
                             .then(r => r.text())
@@ -230,12 +252,35 @@ def get_parameter_module_html(selected_name):
                                 var doc = parser.parseFromString(html, 'text/html');
                                 var newTable = doc.getElementById('param_table_scroll');
                                 var oldTable = document.getElementById('param_table_scroll');
+                                var newSlider = doc.getElementById('param_table_slider');
+                                var oldSlider = document.getElementById('param_table_slider');
                                 if(newTable && oldTable) oldTable.parentNode.replaceChild(newTable, oldTable);
+                                if(newSlider && oldSlider) oldSlider.parentNode.replaceChild(newSlider, oldSlider);
                                 bindParamTableEvents();
                             }});
                     }}
                     function bindParamTableEvents() {{
                         var addBtn = document.getElementById('add_factor_btn');
+                        var scrollDiv = document.getElementById('param_table_scroll');
+                        var slider = document.getElementById('param_table_slider');
+                        if(scrollDiv && slider) {{
+                            function updateSlider() {{
+                                var scrollWidth = scrollDiv.scrollWidth;
+                                var clientWidth = scrollDiv.clientWidth;
+                                var maxScroll = scrollWidth - clientWidth;
+                                slider.max = maxScroll > 0 ? maxScroll : 0;
+                                slider.value = scrollDiv.scrollLeft;
+                                slider.style.display = maxScroll > 0 ? '' : 'none';
+                            }}
+                            updateSlider();
+                            scrollDiv.addEventListener('scroll', function() {{
+                                slider.value = scrollDiv.scrollLeft;
+                            }});
+                            slider.addEventListener('input', function() {{
+                                scrollDiv.scrollLeft = slider.value;
+                            }});
+                            window.addEventListener('resize', updateSlider);
+                        }}
                         if(addBtn) {{
                             addBtn.addEventListener('click', function() {{
                                 var paramValues = {{}};
@@ -330,7 +375,7 @@ def get_parameter_module_html(selected_name):
         """
     except Exception as e:
         return f"<div style='color:#d40000;'>参数模块加载失败: {e}</div>"
-
+    
 def get_time_range_module_html():
     from datetime import datetime as _dt
 
