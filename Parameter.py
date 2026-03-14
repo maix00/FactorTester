@@ -159,8 +159,17 @@ class DataColumnParam(FinRangeParam):
                 default_value=default_value,
                 get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x))
             )
+            self.whether_in_space = self._whether_in_space
         else:
             self.default_value = default_value
+
+    def _whether_in_space(self, value: Any) -> bool:
+        from Tools import _process_data_col
+        try:
+            col = _process_data_col(value)
+            return col in self.value_space
+        except Exception:
+            return False
     
     def col(self, col: Any):
         from Tools import _process_data_col

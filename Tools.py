@@ -179,8 +179,11 @@ def _process_data_col(col: Optional[Any] = None) -> DataColumn:
     if isinstance(col, str):
         try:
             return DataColumn(col)
-        except ValueError:
-            pass
+        except:
+            try:
+                return DataColumn[col]
+            except:
+                pass
     raise ValueError("Invalid data column")
 
 class DataSourceRegister(UniqueObject):
