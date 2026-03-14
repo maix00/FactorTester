@@ -60,6 +60,7 @@ class UniqueObject(ABC):
             setattr(self, attr_name, value)
     
 class SerialObject(UniqueObject):
+    _single_use_count = -1
     _instance_count_dict: Dict[str, int] = {}
     _serial_map: Dict[int, SerialObject] = {}
     _type_alias_owners: Dict[str, type] = {}
@@ -75,7 +76,7 @@ class SerialObject(UniqueObject):
                 break
         return SerialObject
 
-    def __new__(cls, type_alias: str, alias: Optional[str] = None, search: bool = False, *args, **kwargs):
+    def __new__(cls, type_alias: str, alias: Optional[str] = None, search: bool = False, single_use: bool = False, *args, **kwargs):
 
         if type_alias in cls._type_alias_owners:
             owner = cls._type_alias_owners[type_alias]
@@ -90,23 +91,31 @@ class SerialObject(UniqueObject):
                     assert isinstance(instance, cls)
                     return instance
         
-        if type_alias in cls._instance_count_dict:
-            cls._instance_count_dict[type_alias] += 1
+        if single_use:
+            cls._single_use_count += 1
+            name = f"{type_alias}@SU@{cls._single_use_count}"
         else:
-            cls._instance_count_dict[type_alias] = 0
-        name = f"{type_alias}@{cls._instance_count_dict[type_alias]}"
-        name = name if alias is None else f"{name}:{alias}"
+            if type_alias in cls._instance_count_dict:
+                cls._instance_count_dict[type_alias] += 1
+            else:
+                cls._instance_count_dict[type_alias] = 0
+            name = f"{type_alias}@{cls._instance_count_dict[type_alias]}"
+            name = name if alias is None else f"{name}:{alias}"
         instance = super().__new__(cls, name=name)
         return instance
 
-    def __init__(self, type_alias: str, alias: Optional[str] = None, search: bool = False, *args, **kwargs):
+    def __init__(self, type_alias: str, alias: Optional[str] = None, single_use: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            self.serial_number = self._instance_count_dict[type_alias]
-            name = f"{type_alias}@{self.serial_number}"
+            if single_use:
+                name = f"{type_alias}@SU@{self._single_use_count}"
+            else:
+                self.serial_number = self._instance_count_dict[type_alias]
+                name = f"{type_alias}@{self.serial_number}"
             self.alias = alias or name
             name = name if alias is None else f"{name}:{alias}"
             super().__init__(name=name)
-            self._set_serial_map(self.serial_number, self)
+            if not single_use:
+                self._set_serial_map(self.serial_number, self)
 
     @classmethod
     def _set_serial_map(cls, serial_number: int, instance: SerialObject):

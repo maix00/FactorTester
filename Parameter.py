@@ -9,13 +9,13 @@ class Parameter(SerialObject):
     _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
-        return super().__new__(cls, type_alias='P', alias=alias)
+        return super().__new__(cls, type_alias='P', alias=alias, **kwargs)
 
     def __init__(self, alias: Optional[str], default_value: Any,
                  whether_in_space: Callable[[Any], bool],
-                 get_value_alias: Callable[[Any], str]):
+                 get_value_alias: Callable[[Any], str], *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='P', alias=alias)
+            super().__init__(type_alias='P', alias=alias, *args, **kwargs)
             self._register = {}
             self.whether_in_space = whether_in_space
             self.default_value = default_value
@@ -131,7 +131,7 @@ class FinRangeParam(Parameter):
     def __init__(self, alias: Optional[str], 
                  value_space: List[Any]|Any, 
                  default_value: Optional[Any] = None,
-                 get_value_alias: Optional[Callable[[Any], str]] = None):
+                 get_value_alias: Optional[Callable[[Any], str]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             if not isinstance(value_space, list):
                 value_space = [value_space]
@@ -139,12 +139,13 @@ class FinRangeParam(Parameter):
                 alias = alias,
                 default_value = default_value if default_value is not None else value_space[0],
                 whether_in_space = lambda x: x in value_space,
-                get_value_alias = get_value_alias if get_value_alias else lambda x: str(x)
+                get_value_alias = get_value_alias if get_value_alias else lambda x: str(x),
+                *args, **kwargs
             )
             self.value_space = value_space
 
 class DataColumnParam(FinRangeParam):
-    def __init__(self, alias: Optional[str], default_value: Optional[Any] = None):
+    def __init__(self, alias: Optional[str], default_value: Optional[Any] = None, *args, **kwargs):
         from Tools import _process_data_col
         if default_value is not None:
             default_value = _process_data_col(default_value)
@@ -160,7 +161,8 @@ class DataColumnParam(FinRangeParam):
                 alias = alias,
                 value_space = [col for col in DataColumn],
                 default_value=default_value,
-                get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x))
+                get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x)),
+                *args, **kwargs
             )
             self.whether_in_space = self._whether_in_space
         else:
@@ -192,7 +194,7 @@ if __name__ == '__main__':
 
 class TimeDeltaParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None,
-                 flag: Optional[Literal['pos', 'neg', 'nonneg', 'nonpos']] = None):
+                 flag: Optional[Literal['pos', 'neg', 'nonneg', 'nonpos']] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             if default_value is None:
                 default_value = pd.Timedelta('1d')
@@ -201,7 +203,8 @@ class TimeDeltaParam(Parameter):
                 alias = alias,
                 default_value = default_value,
                 whether_in_space = self._whether_in_space,
-                get_value_alias = self._get_value_alias
+                get_value_alias = self._get_value_alias,
+                *args, **kwargs
             )
 
     def _rectify_value(self, value: Any) -> Any:
@@ -235,12 +238,12 @@ class TimeDeltaParam(Parameter):
         
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
     param = FinRangeParam(alias, None, get_value_alias=lambda _: 'N')
-    param += TimeDeltaParam(flag='pos')
+    param += TimeDeltaParam(flag='pos', single_use=True)
     return param
 
 def get_factor_freq_param(alias: Optional[str] = 'F') -> Parameter:
     param = TimeDeltaParam(alias=alias, default_value='1d', flag='pos')
-    param += FinRangeParam(alias=None, value_space='S')
+    param += FinRangeParam(alias=None, value_space='S', single_use=True)
     return param
     
 if __name__ == '__main__':
@@ -249,7 +252,7 @@ if __name__ == '__main__':
 
 class ColumnTimeParam(Parameter):
 
-    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None):
+    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
 
         from Tools import DataFreq
 
@@ -260,7 +263,8 @@ class ColumnTimeParam(Parameter):
                 alias = alias,
                 default_value = default_value,
                 whether_in_space = self._whether_in_space,
-                get_value_alias = self._get_value_alias
+                get_value_alias = self._get_value_alias,
+                *args, **kwargs
             )
             self.default_value = self.rectify_value(self.default_value)
 

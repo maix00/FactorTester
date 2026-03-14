@@ -608,7 +608,7 @@ def get_time_range_module_html(factor_family_alias):
                 .then(response => response.json())
                 .then(data => {{
                     if (data.success) {{
-                        document.getElementById('confirm_time_status').innerText = '✓ 已保存，各因子起始计算时间已更新为唯一值: ' + data.start_calc_param_val.join('; ');
+                        document.getElementById('confirm_time_status').innerText = '✓ 已保存，各因子起始计算时间已更新为唯一值: ' + data.start_calc_param_val;
                     if (data.show_next) {{
                         openModule('category_filter_module');
                     }}
@@ -823,7 +823,7 @@ def set_time_range():
         factors = ff.get_factors(start_calc_time=start_calc_param_val)
         start_calc_param_val = list(set([StartCalcParam.get_value(factor) for factor in factors]))
         assert len(start_calc_param_val) == 1
-        start_calc_param_val = start_calc_param_val[0]
+        start_calc_param_val = f"{StartCalcParam.name} = {start_calc_param_val[0]}"
 
         # 可以根据是否是交易日等设置调整默认的时间范围
         show_next = (start_date <= end_date)

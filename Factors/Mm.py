@@ -19,10 +19,10 @@ class Mm(FactorFamily): # Day Momentum
     math_expr = '''
         \\begin{aligned}
             PH_t &:= \\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
-            h_t &:= \\arg\\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
+            h_t  &:= \\arg\\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
             PL_t &:= \\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
-            l_t &:= \\arg\\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
-            X_t &:= 
+            l_t  &:= \\arg\\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
+            X_t  &:= 
             \\begin{cases}
                 \\frac{PH_t - PL_t}{PH_t}, & h_t < l_t, \\\\
                 \\frac{PL_t - PH_t}{PL_t}, & l_t < h_t, \\\\
