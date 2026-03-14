@@ -43,17 +43,6 @@ class ReturnPriceCols(Enum):
     THIS_CLOSE_TO_CLOSE = (('last', DataColumn.CLOSE), ('last', DataColumn.CLOSE))
     THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
 
-import inspect
-import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QComboBox, QFileDialog, QTextEdit
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-import threading
-import os
-import webbrowser
-import json
-import calendar
-from datetime import datetime
-
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     products = get_all_products()
     tester = FactorTester(products=products, time_range=time_range)

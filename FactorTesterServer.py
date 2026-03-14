@@ -59,7 +59,6 @@ def get_factor_groups(factors_dir):
         groups.setdefault(group, []).append(name)
     return groups, factor_names
 
-
 def build_group_html(groups):
     group_html = ""
     for group, names in sorted(groups.items()):
@@ -69,7 +68,6 @@ def build_group_html(groups):
             group_html += f'<li style="padding:8px;border-bottom:1px solid #eee;"><a href="?factor={name}" style="text-decoration:none;color:#333;font-size:18px;">{name}</a></li>'
         group_html += '</ul></div>'
     return group_html
-
 
 BASE_TEMPLATE = """
 <!DOCTYPE html>
@@ -124,6 +122,24 @@ BASE_TEMPLATE = """
 </body>
 </html>
 """
+
+def get_latex_module_html(selected_name):
+    try:
+        ff = get_factor_family_instance(selected_name)
+        math_expr = getattr(ff, 'math_expr', '')
+        latex_html = f"""
+            <div class="module" id="math_expr_module" style="margin-top:32px;">
+                <div class="section-title">因子表达式 (LaTeX)</div>
+                <div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;">
+                    $$ {math_expr} $$
+                </div>
+            </div>
+            <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        """ if math_expr else ""
+    except Exception as e:
+        latex_html = f"<div style='color:#888;'>表达式加载失败: {e}</div>"
+    return latex_html
+
 def get_parameter_module_html(selected_name):
     try:
         ff = get_factor_family_instance(selected_name)
@@ -189,6 +205,9 @@ def get_parameter_module_html(selected_name):
                     <thead style="background:#f6f8fa;">{header_html}</thead>
                     <tbody id="factor_table_body">{input_row_html}{factor_rows_html}</tbody>
                 </table>
+            </div>
+            <div style="margin-top:8px;color:#888;font-size:15px;text-align:left;">
+                如果表格宽度过大，可以用鼠标滚轮左右浏览
             </div>
         """
 
@@ -311,7 +330,6 @@ def get_parameter_module_html(selected_name):
         """
     except Exception as e:
         return f"<div style='color:#d40000;'>参数模块加载失败: {e}</div>"
-
 
 def get_time_range_module_html():
     from datetime import datetime as _dt
@@ -535,7 +553,6 @@ def get_time_range_module_html():
         </div>
     """
 
-
 def get_category_filter_module_html():
     return """
         <div class="module" id="category_filter_module" style="margin-top:32px;display:none;">
@@ -543,7 +560,6 @@ def get_category_filter_module_html():
             <div style="color:#aaa;">（功能开发中）</div>
         </div>
     """
-
 
 def get_ic_test_module_html():
     return """
@@ -553,7 +569,6 @@ def get_ic_test_module_html():
             <div style="color:#aaa;">（功能开发中）</div>
         </div>
     """
-
 
 def get_group_test_module_html():
     return """
@@ -565,27 +580,18 @@ def get_group_test_module_html():
     """
 
 def get_factor_main_section_html(selected_name):
-    module_ids = ['parameter_module', 'time_range_module', 'category_filter_module', 'ic_test_module', 'group_test_module']
-    try:
-        ff = get_factor_family_instance(selected_name)
-        math_expr = getattr(ff, 'math_expr', '')
-        latex_html = f"""
-            <div class="module" id="math_expr_module" style="margin-top:32px;">
-                <div class="section-title">因子表达式 (LaTeX)</div>
-                <div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;">
-                    $$ {math_expr} $$
-                </div>
-            </div>
-            <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-        """ if math_expr else ""
-    except Exception as e:
-        latex_html = f"<div style='color:#d40000;'>表达式加载失败: {e}</div>"
-
+    module_ids = [
+        'latex_module',
+        'parameter_module',
+        'time_range_module',
+        'category_filter_module',
+        'ic_test_module',
+        'group_test_module']
     return f"""
         <div class="section">
             <div class="section-title">当前因子: <b style="color:#0078d4;">{selected_name}</b></div>
             <div style="margin-top:16px;color:#888;">功能开发中，仅展示页面框架。</div>
-            {latex_html}
+            {get_latex_module_html(selected_name)}
             {get_parameter_module_html(selected_name)}
             {get_time_range_module_html()}
             {get_category_filter_module_html()}
@@ -598,6 +604,7 @@ def get_factor_main_section_html(selected_name):
             document.addEventListener('DOMContentLoaded', function() {{
                 openModule('{module_ids[0]}');
                 openModule('{module_ids[1]}');
+                openModule('{module_ids[2]}');
                 {'; '.join([f"closeModule('{mid}')" for mid in module_ids[2:]])}
             }});
         </script>
