@@ -75,7 +75,7 @@ class SerialObject(UniqueObject):
                 break
         return SerialObject
 
-    def __new__(cls, type_alias: str, alias: Optional[str] = None, *args, **kwargs):
+    def __new__(cls, type_alias: str, alias: Optional[str] = None, search: bool = False, *args, **kwargs):
 
         if type_alias in cls._type_alias_owners:
             owner = cls._type_alias_owners[type_alias]
@@ -84,13 +84,19 @@ class SerialObject(UniqueObject):
         else:
             cls._type_alias_owners[type_alias] = cls._get_family_root()
 
+        if search:
+            for instance in cls._serial_map.values():
+                if instance.alias == alias and instance.__class__ is cls:
+                    assert isinstance(instance, cls)
+                    return instance
+                
         cls._instance_count += 1
         name = f"{type_alias}@{cls._instance_count}"
         name = name if alias is None else f"{name}:{alias}"
         instance = super().__new__(cls, name=name)
         return instance
 
-    def __init__(self, type_alias: str, alias: Optional[str] = None, *args, **kwargs):
+    def __init__(self, type_alias: str, alias: Optional[str] = None, search: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             self.serial_number = self._instance_count
             name = f"{type_alias}@{self.serial_number}"
@@ -111,6 +117,7 @@ class SerialObject(UniqueObject):
         if isinstance(key, int):
             item = cls._get_by_serial(key)
             if item is not None:
+                assert isinstance(item, cls)
                 return item
             else:
                 raise KeyError(f"No instance with serial number {key} found in {cls.__name__} family")
@@ -203,9 +210,16 @@ class DataSourceRegister(UniqueObject):
         if isinstance(name, DataSource):
             return name
         elif isinstance(name, str):
-            return DataSource(name)
+            try:
+                return DataSource(name)
+            except:
+                pass
         else:
-            raise ValueError
+            try:
+                return DataSource.__class_getitem__(name)
+            except:
+                pass
+        raise ValueError
     
     def register(self, source: Any) -> DataSource:
         source = self._process_source(source)

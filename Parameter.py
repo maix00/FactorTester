@@ -105,6 +105,10 @@ class Parameter(SerialObject):
         self.check_in_space(value)
         self._register[factor] = self.rectify_value(value)
 
+    def unregister(self, factor: Factor) -> None:
+        if factor in self._register:
+            del self._register[factor]
+
     def change_value(self, factor: Factor, value: Any) -> None:
         self.check_in_space(value)
         self._register[factor] = self.rectify_value(value)
@@ -170,6 +174,13 @@ class DataColumnParam(FinRangeParam):
             return col in self.value_space
         except Exception:
             return False
+        
+    def _rectify_value(self, value: Any) -> Any:
+        from Tools import _process_data_col
+        try:
+            return _process_data_col(value)
+        except:
+            return value
     
     def col(self, col: Any):
         from Tools import _process_data_col

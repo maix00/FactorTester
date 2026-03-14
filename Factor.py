@@ -71,7 +71,7 @@ class Factor(SerialObject):
     _serial_map = {}
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        instance = super().__new__(cls, type_alias='F', alias=alias)
+        instance = super().__new__(cls, type_alias='F', alias=alias, search=True)
         return instance
     
     def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], 
