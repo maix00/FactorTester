@@ -296,7 +296,12 @@ def get_parameter_module_html(factor_family_alias):
                                     headers: {{'Content-Type': 'application/json'}},
                                     body: JSON.stringify({{factor_family_alias: '{factor_family_alias}', params: paramValues}})
                                 }}).then(r => r.json()).then(data => {{
-                                    if(data.success) {{ reloadParamTable(); }}
+                                    if(data.success) {{
+                                        reloadParamTable();
+                                        var statusSpan = document.getElementById('confirm_time_status');
+                                        statusSpan.innerText = '⚠️ 点击确定按钮更新因子计算的时间范围';
+                                        statusSpan.style.color = '#d40000';
+                                    }}
                                     else alert('添加失败: ' + data.error);
                                 }});
                             }});
@@ -398,34 +403,32 @@ def get_time_range_module_html(factor_family_alias):
         <div class="section-title">1. 起始/终末时间设置</div>
         <div style="display:flex;align-items:center;gap:24px;">
             <span style="font-size:13px;">
-            起始日期:
+            起始时间:
             <input type="number" min="1900" max="2100" id="start_year" value="{default_test_start_date[:4]}" style="width:60px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
             <span style="font-size:16px;">-</span>
-            <input type="number" min="1" max="12" id="start_month" value="{pad(default_test_start_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="0" max="13" id="start_month" value="{pad(default_test_start_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             <span style="font-size:16px;">-</span>
-            <input type="number" min="1" max="31" id="start_day" value="{pad(default_test_start_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="0" max="32" id="start_day" value="{pad(default_test_start_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             </span>
             <span style="font-size:13px;">
-            起始时间:
-            <input type="number" min="0" max="23" id="start_hour" value="{pad(default_day_start_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+            <input type="number" min="-1" max="24" id="start_hour" value="{pad(default_day_start_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
             <span style="font-size:16px;">:</span>
-            <input type="number" min="0" max="59" id="start_minute" value="{pad(default_day_start_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="-1" max="60" id="start_minute" value="{pad(default_day_start_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             </span>
         </div>
         <div style="display:flex;align-items:center;gap:24px;margin-top:12px;">
             <span style="font-size:13px;">
-            终末日期:
+            终末时间:
             <input type="number" min="1900" max="2100" id="end_year" value="{default_test_end_date[:4]}" style="width:60px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
             <span style="font-size:16px;">-</span>
-            <input type="number" min="1" max="12" id="end_month" value="{pad(default_test_end_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="0" max="13" id="end_month" value="{pad(default_test_end_date[5:7])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             <span style="font-size:16px;">-</span>
-            <input type="number" min="1" max="31" id="end_day" value="{pad(default_test_end_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="0" max="32" id="end_day" value="{pad(default_test_end_date[8:10])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             </span>
             <span style="font-size:13px;">
-            终末时间:
-            <input type="number" min="0" max="23" id="end_hour" value="{pad(default_day_end_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
+            <input type="number" min="-1" max="24" id="end_hour" value="{pad(default_day_end_time[:2])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;margin-left:8px;">
             <span style="font-size:16px;">:</span>
-            <input type="number" min="0" max="59" id="end_minute" value="{pad(default_day_end_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
+            <input type="number" min="-1" max="60" id="end_minute" value="{pad(default_day_end_time[3:5])}" style="width:40px;background:#eee;border:none;border-radius:4px;font-size:16px;">
             </span>
         </div>
         <div style="margin-top:16px;">
@@ -449,7 +452,7 @@ def get_time_range_module_html(factor_family_alias):
             <span id="current_settings" style="font-size:13px;"></span>
         </div>
         <div style="margin-top:-15px; display: flex; align-items: baseline;">
-            <button id="confirm_time_btn" type="button" style="background:#0078d4; color:#fff; border:none; border-radius:4px; padding:6px 18px; font-size:14px;">确定</button>
+            <button id="confirm_time_btn" type="button" style="background:#0078d4; color:#fff; border:none; border-radius:4px; padding:6px 18px; font-size:14px;" disabled>确定</button>
             <span id="confirm_time_status" style="margin-left:12px; color:#0078d4; font-size:13px;"></span>
         </div>
         <script>
@@ -491,9 +494,16 @@ def get_time_range_module_html(factor_family_alias):
                 var start_dt = new Date((sy+'-'+sm+'-'+sd+' '+sh+':'+smin).replace(/-/g,'/'));
                 var end_dt = new Date((ey+'-'+em+'-'+ed+' '+eh+':'+emin).replace(/-/g,'/'));
                 var isValid = !isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt;
+                var confirmBtn = document.getElementById('confirm_time_btn');
                 if (isValid) {{
+                    confirmBtn.disabled = false;
+                    confirmBtn.style.background = '#0078d4';
+                    confirmBtn.style.cursor = 'pointer';
                     openModule('category_filter_module');
                 }} else {{
+                    confirmBtn.disabled = true;
+                    confirmBtn.style.background = '#ccc';
+                    confirmBtn.style.cursor = 'not-allowed';
                     closeModule('category_filter_module');
                 }}
                 var statusSpan = document.getElementById('confirm_time_status');
@@ -505,23 +515,103 @@ def get_time_range_module_html(factor_family_alias):
                     statusSpan.style.color = '#888';
                 }}
             }}
-            function validateInputOnBlur(input, min, max, isDay, yearId, monthId) {{
-                var num = parseInt(input.value);
-                if (isNaN(num) || num < min) input.value = pad(min);
-                else if (num > max) input.value = pad(max);
-                else input.value = pad(num);
-                if (isDay) {{
-                    var maxDay = getMaxDay(document.getElementById(yearId).value, document.getElementById(monthId).value);
-                    if (parseInt(input.value) > maxDay) input.value = pad(maxDay);
+            function carryOver(thisId, thisMin, thisMax, lastId, prefix) {{
+                var thisElem = document.getElementById(thisId);
+                var lastElem = document.getElementById(lastId);
+                var thisNum = parseInt(thisElem.value);
+                var lastNum = parseInt(lastElem.value);
+
+                if (isNaN(thisNum)) {{
+                    thisElem.value = pad(thisMin);
+                    return;
                 }}
-                updateCurrentSettings();
+                else if (isNaN(lastNum)) {{
+                    lastElem.value = pad(thisMin);
+                    if (thisNum < thisMin) thisElem.value = pad(thisMin);
+                    else if (thisNum > thisMax) thisElem.value = pad(thisMax);
+                    else thisElem.value = pad(thisNum);
+                    return;
+                }}
+                else if (thisNum === thisMin - 1) {{
+                    lastElem.value = lastNum - 1;
+                    if (thisId.endsWith('day')) {{
+                        thisElem.value = pad(1);
+                        adjustTime(lastId, prefix);
+                        var newMonth = parseInt(document.getElementById(prefix + '_month').value);
+                        var newYear = parseInt(document.getElementById(prefix + '_year').value);
+                        var maxDay = getMaxDay(newYear, newMonth);
+                        thisElem.value = pad(maxDay);
+                    }} else thisElem.value = pad(thisMax);
+                    adjustTime(lastId, prefix);
+                    lastElem.value = pad(parseInt(lastElem.value))
+                    return;
+                }}
+                else if (thisNum === thisMax + 1) {{
+                    lastElem.value = pad(lastNum + 1);
+                    thisElem.value = pad(thisMin);
+                    adjustTime(lastId, prefix);
+                    return;
+                }} else if (thisNum > thisMax + 1) {{
+                    thisElem.value = pad(thisMax);
+                    return;
+                }} else if (thisNum < thisMin - 1) {{
+                    thisElem.value = pad(thisMin);
+                    return;
+                }} else {{
+                    thisElem.value = pad(thisNum);
+                    return;
+                }}
             }}
-            function adjustDayIfNeeded(dayId, yearId, monthId) {{
+            function adjustTime(id, prefix) {{
+            
+                var minuteId = prefix + '_minute'
+                var hourId = prefix + '_hour'
+                var dayId = prefix + '_day'
+                var yearId = prefix + '_year'
+                var monthId = prefix + '_month'
+
+                var minuteElem = document.getElementById(minuteId);
+                var minuteVal = parseInt(minuteElem.value);
+                if (isNaN(minuteVal) || minuteVal > 59 || minuteVal < 0) {{
+                    carryOver(minuteId, 0, 59, hourId, prefix);
+                    return;
+                }} else minuteElem.value = pad(minuteVal);
+
+                var hourElem = document.getElementById(hourId);
+                var hourVal = parseInt(hourElem.value);
+                if (isNaN(hourVal) || hourVal > 23 || hourVal < 0) {{
+                    carryOver(hourId, 0, 23, dayId, prefix);
+                    return;
+                }} else hourElem.value = pad(hourVal);
+                
                 var dayElem = document.getElementById(dayId);
-                var maxDay = getMaxDay(document.getElementById(yearId).value, document.getElementById(monthId).value);
+                var yearElem = document.getElementById(yearId);
+                var monthElem = document.getElementById(monthId);
+
+                var year = parseInt(yearElem.value);
+                var month = parseInt(monthElem.value);
                 var dayVal = parseInt(dayElem.value);
-                if (isNaN(dayVal) || dayVal < 1) dayElem.value = pad(1);
-                else if (dayVal > maxDay) dayElem.value = pad(maxDay);
+                var maxDay = getMaxDay(year, month);
+
+                if (id.endsWith('month') && dayVal > maxDay) {{
+                    dayElem.value = pad(maxDay);
+                }}
+
+                if (isNaN(dayVal) || dayVal > maxDay || dayVal < 1) {{
+                    carryOver(dayId, 1, maxDay, monthId, prefix);
+                    return;
+                }} else dayElem.value = pad(dayVal);
+
+                if (isNaN(month) || month > 12 || month < 1) {{
+                    carryOver(monthId, 1, 12, yearId, prefix);
+                    return;
+                }} else monthElem.value = pad(month);
+
+                if (isNaN(year) || year < 1900 || year > 2100) {{
+                    if (year < 1900) yearElem.value = '1900';
+                    else yearElem.value = '2100';
+                    return;
+                }} else yearElem.value = pad(year);
             }}
             function toggleTradingDay() {{
                 var is_trading_day = document.getElementById('is_trading_day').checked;
@@ -637,21 +727,21 @@ def get_time_range_module_html(factor_family_alias):
                     var id=arr[0],min=arr[1],max=arr[2],isDay=arr[3],yearId=arr[4],monthId=arr[5];
                     var elem = document.getElementById(id);
                     elem.addEventListener('blur', function() {{
-                        validateInputOnBlur(elem,min,max,isDay,yearId,monthId);
-                        if(id==='start_year'||id==='start_month') adjustDayIfNeeded('start_day','start_year','start_month');
-                        if(id==='end_year'||id==='end_month') adjustDayIfNeeded('end_day','end_year','end_month');
+                        if (id.startsWith('start')) adjustTime(id, 'start');
+                        if (id.startsWith('end')) adjustTime(id, 'end');
+                        updateCurrentSettings();
                     }});
                     elem.addEventListener('keydown', function(e) {{
                         if(e.key==='Enter') {{
-                            validateInputOnBlur(elem,min,max,isDay,yearId,monthId);
-                            if(id==='start_year'||id==='start_month') adjustDayIfNeeded('start_day','start_year','start_month');
-                            if(id==='end_year'||id==='end_month') adjustDayIfNeeded('end_day','end_year','end_month');
+                            if (id.startsWith('start')) adjustTime(id, 'start');
+                            if (id.startsWith('end')) adjustTime(id, 'end');
+                            updateCurrentSettings();
                         }}
                     }});
                     elem.addEventListener('input', function() {{
+                        if (id.startsWith('start')) adjustTime(id, 'start');
+                        if (id.startsWith('end')) adjustTime(id, 'end');
                         updateCurrentSettings();
-                        if(id==='start_year'||id==='start_month') adjustDayIfNeeded('start_day','start_year','start_month');
-                        if(id==='end_year'||id==='end_month') adjustDayIfNeeded('end_day','end_year','end_month');
                     }});
                 }});
                 toggleTradingDay();
