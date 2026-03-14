@@ -174,8 +174,61 @@ class Category(FinRangeParam):
                 if self.whether_is_in_category(catname, obj):
                     catname_alias = self.get_value_alias(catname)
                     tree.setdefault(catname_alias, {}).setdefault(word, []).append(obj)
-                    
         Tree = CategoryTree({self.type: {self.alias: tree, word: all_objects}})
+        list = [self.type, self.alias]
+        if ancester is not None:
+            for parent_cls in self.type.__mro__[1:]:
+                list = [parent_cls, subclass_word] + list
+                if parent_cls == ancester:
+                    break
+        return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
+    
+    def get_tree_with_parents_without_products(self, word: str = object_word,
+                              ancester: Optional[Type[UniqueObject]] = None) -> CategoryTree:
+        res, _ = self._get_tree_with_parents_without_products(word=word, ancester=ancester)
+        return res
+
+    def _get_tree_with_parents_without_products(self, word: str = object_word,
+                              ancester: Optional[Type[UniqueObject]] = None) -> Tuple[CategoryTree, List[Any]]:
+        if not self.parent_categories:
+            res, list = self._get_tree_without_products(word=word, ancester=ancester)
+            return res, [list]
+        assert self.parent_categories, "This method should only be called for categories with parent categories."
+        assert len(self.parent_categories) == 2, "This method currently only supports categories with exactly two parent categories."
+        assert isinstance(self.parent_categories[0], Category) and isinstance(self.parent_categories[1], Category), "Parent categories should be instances of Category."
+        Tree1, list1 = self.parent_categories[0]._get_tree_with_parents_without_products(word=word, ancester=ancester)
+        Tree2, list2 = self.parent_categories[1]._get_tree_with_parents_without_products(word=word, ancester=ancester)
+        Tree = combine_trees(Tree1, Tree2, word)
+        list1parent = [self.parent_categories[1]] * len(list1)
+        list2parent = [self.parent_categories[0]] * len(list2)
+        list = []
+        for thislist, parent in zip(list1 + list2, list1parent + list2parent):
+            tree = Tree.tree
+            for item in thislist:
+                tree = tree[item]
+            for key in tree.keys():
+                assert key != word, f"The tree should not contain the key '{word}' for categories."
+                assert word in tree[key], f"The tree should contain the key '{word}' for objects."
+                subTree, sublist = parent._get_tree_without_products(word=word)
+                subtree = subTree.tree
+                for item in sublist:
+                    subtree = subtree[item]
+                tree[key][parent.alias] = subtree
+                list.append(thislist + [parent.alias])
+        return Tree if ancester is None else _climb_to_ancester(Tree, ancester, word), list
+    
+    def get_tree_without_products(self, word: str = object_word,
+            ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> CategoryTree:
+        res, _ = self._get_tree_without_products(word=word, ancester=ancester, *args, **kwargs)
+        return res
+    
+    def _get_tree_without_products(self, word: str = object_word,
+            ancester: Optional[Type[UniqueObject]] = None, *args, **kwargs) -> Tuple[CategoryTree, List[Any]]:
+        tree = {}
+        for catname in self.categories:
+            catname_alias = self.get_value_alias(catname)
+            tree.setdefault(catname_alias, {}).setdefault(word, [])
+        Tree = CategoryTree({self.type: {self.alias: tree, word: []}})
         list = [self.type, self.alias]
         if ancester is not None:
             for parent_cls in self.type.__mro__[1:]:

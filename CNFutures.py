@@ -316,4 +316,4 @@ if __name__ == '__main__':
     # print(combine_trees(tree1, tree2).tree)
 
     print(CNFuturesSectorNightTimeCategory.get_tree().tree)
-    print(CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product).tree)
+    print(CNFuturesSectorNightTimeCategory.get_tree_with_parents_without_products(ancester=Product).tree)
