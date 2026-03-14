@@ -442,9 +442,13 @@ def get_time_range_module_html():
             <span style="font-size:13px;vertical-align:middle;">中国期货夜盘 (21:00-15:00)</span>
             </label>
         </div>
-        <div style="margin-top:8px;color:#888;">
+        <div style="margin-top:8px; color:#888;">
             <span>当前设置：</span>
-            <span id="current_settings"></span>
+            <span id="current_settings" style="font-size:13px;"></span>
+        </div>
+        <div style="margin-top:0px; display: flex; align-items: baseline;">
+            <button id="confirm_time_btn" type="button" style="background:#0078d4; color:#fff; border:none; border-radius:4px; padding:6px 18px; font-size:14px;">确定</button>
+            <span id="confirm_time_status" style="margin-left:12px; color:#0078d4; font-size:13px;"></span>
         </div>
         <script>
             var default_start_date = "{default_test_start_date}";
@@ -484,10 +488,19 @@ def get_time_range_module_html():
                     (is_trading_day ? ' (交易日)' : '');
                 var start_dt = new Date((sy+'-'+sm+'-'+sd+' '+sh+':'+smin).replace(/-/g,'/'));
                 var end_dt = new Date((ey+'-'+em+'-'+ed+' '+eh+':'+emin).replace(/-/g,'/'));
-                if (!isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt) {{
+                var isValid = !isNaN(start_dt.getTime()) && !isNaN(end_dt.getTime()) && start_dt <= end_dt;
+                if (isValid) {{
                     openModule('category_filter_module');
                 }} else {{
                     closeModule('category_filter_module');
+                }}
+                var statusSpan = document.getElementById('confirm_time_status');
+                if (!isValid) {{
+                    statusSpan.innerText = '⚠️ 起始时间必须 ≤ 终末时间';
+                    statusSpan.style.color = '#d40000';
+                }} else {{
+                    statusSpan.innerText = '点击确定按钮更新因子计算的时间范围';
+                    statusSpan.style.color = '#888';
                 }}
             }}
             function validateInputOnBlur(input, min, max, isDay, yearId, monthId) {{
@@ -557,6 +570,54 @@ def get_time_range_module_html():
                 }}
                 updateCurrentSettings();
             }}
+            function confirmTimeRange() {{
+                var startYear = document.getElementById('start_year').value;
+                var startMonth = document.getElementById('start_month').value;
+                var startDay = document.getElementById('start_day').value;
+                var startHour = document.getElementById('start_hour').value;
+                var startMinute = document.getElementById('start_minute').value;
+                var endYear = document.getElementById('end_year').value;
+                var endMonth = document.getElementById('end_month').value;
+                var endDay = document.getElementById('end_day').value;
+                var endHour = document.getElementById('end_hour').value;
+                var endMinute = document.getElementById('end_minute').value;
+                var isTradingDay = document.getElementById('is_trading_day').checked;
+                var isDay = document.getElementById('is_cn_futures_day').checked;
+                var isNight = document.getElementById('is_cn_futures_night').checked;
+
+                var timeData = {{
+                    start_date: startYear + '-' + startMonth + '-' + startDay,
+                    start_time: startHour + ':' + startMinute,
+                    end_date: endYear + '-' + endMonth + '-' + endDay,
+                    end_time: endHour + ':' + endMinute,
+                    is_trading_day: isTradingDay,
+                    is_cn_futures_day: isDay,
+                    is_cn_futures_night: isNight
+                }};
+
+                document.getElementById('confirm_time_status').innerText = '保存中...';
+
+                fetch('/set_time_range', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(timeData)
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.success) {{
+                    document.getElementById('confirm_time_status').innerText = '✓ 已保存';
+                    if (data.show_next) {{
+                        openModule('category_filter_module');
+                    }}
+                    }} else {{
+                    document.getElementById('confirm_time_status').innerText = '保存失败: ' + (data.error || '未知错误');
+                    }}
+                }})
+                .catch(err => {{
+                    console.error('请求出错', err);
+                    document.getElementById('confirm_time_status').innerText = '网络错误';
+                }});
+            }}
             document.addEventListener('DOMContentLoaded', function() {{
                 document.getElementById('is_trading_day').addEventListener('change', toggleTradingDay);
                 document.getElementById('is_cn_futures_day').addEventListener('change', toggleCnFuturesDayNight);
@@ -593,10 +654,11 @@ def get_time_range_module_html():
                 toggleTradingDay();
                 updateCurrentSettings();
                 {show_next}
+                document.getElementById('confirm_time_btn').addEventListener('click', confirmTimeRange);
             }});
         </script>
         </div>
-    """
+        """
 
 def get_category_filter_module_html():
     return """
@@ -647,10 +709,7 @@ def get_factor_main_section_html(selected_name):
             function openModule(moduleId) {{ document.getElementById(moduleId).style.display = ''; }}
             function closeModule(moduleId) {{ document.getElementById(moduleId).style.display = 'none'; }}
             document.addEventListener('DOMContentLoaded', function() {{
-                openModule('{module_ids[0]}');
-                openModule('{module_ids[1]}');
-                openModule('{module_ids[2]}');
-                {'; '.join([f"closeModule('{mid}')" for mid in module_ids[2:]])}
+                {'; '.join([f"openModule('{mid}')" for mid in module_ids])}
             }});
         </script>
     """
@@ -730,6 +789,33 @@ def reorder_params():
             param = ff._params_list.pop(from_idx)
             ff._params_list.insert(to_idx, param)
         return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/set_time_range', methods=['POST'])
+def set_time_range():
+    data = request.get_json()
+    print(data)
+    try:
+        start_date = data['start_date']
+        start_time = data['start_time']
+        end_date = data['end_date']
+        end_time = data['end_time']
+        is_trading_day = data.get('is_trading_day', False)
+        is_cn_futures_day = data.get('is_cn_futures_day', False)
+        is_cn_futures_night = data.get('is_cn_futures_night', False)
+
+        # 这里可以添加对时间格式的验证
+        global default_test_start_date, default_test_end_date, default_day_start_time, default_day_end_time
+        default_test_start_date = start_date
+        default_test_end_date = end_date
+        default_day_start_time = start_time
+        default_day_end_time = end_time
+
+        # 可以根据是否是交易日等设置调整默认的时间范围
+        show_next = (start_date <= end_date) if not is_trading_day else False
+
+        return jsonify({'success': True, 'show_next': show_next})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
