@@ -16,6 +16,21 @@ class Mm(FactorFamily): # Day Momentum
         DataColumnParam('L'),
     ]
 
+    math_expr = '''
+        \\begin{aligned}
+            PH_t &:= \\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
+            h_t &:= \\arg\\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
+            PL_t &:= \\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
+            l_t &:= \\arg\\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
+            X_t &:= 
+            \\begin{cases}
+                \\frac{PH_t - PL_t}{PH_t}, & h_t < l_t, \\\\
+                \\frac{PL_t - PH_t}{PL_t}, & l_t < h_t, \\\\
+                0, & h_t = l_t.
+            \\end{cases}
+        \\end{aligned}
+    '''
+
     def func(self, products: Sequence[Product], F: Any = pd.Timedelta('1d'),
              H: DataColumn = DataColumn.HIGH,
              L: DataColumn = DataColumn.LOW, **kwargs) -> pd.DataFrame:

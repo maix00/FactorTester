@@ -285,7 +285,7 @@ class Factor(SerialObject):
 
 class FactorFamily(SerialObject):
     _instances = WeakValueDictionary()
-    _instance_count: int = -1
+    math_expr: str = ""
     _serial_map = {}
     params: List[Parameter] = []
 

@@ -564,13 +564,28 @@ def get_group_test_module_html():
         </div>
     """
 
-
 def get_factor_main_section_html(selected_name):
     module_ids = ['parameter_module', 'time_range_module', 'category_filter_module', 'ic_test_module', 'group_test_module']
+    try:
+        ff = get_factor_family_instance(selected_name)
+        math_expr = getattr(ff, 'math_expr', '')
+        latex_html = f"""
+            <div class="module" id="math_expr_module" style="margin-top:32px;">
+                <div class="section-title">因子表达式 (LaTeX)</div>
+                <div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;">
+                    $$ {math_expr} $$
+                </div>
+            </div>
+            <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        """ if math_expr else ""
+    except Exception as e:
+        latex_html = f"<div style='color:#d40000;'>表达式加载失败: {e}</div>"
+
     return f"""
         <div class="section">
             <div class="section-title">当前因子: <b style="color:#0078d4;">{selected_name}</b></div>
             <div style="margin-top:16px;color:#888;">功能开发中，仅展示页面框架。</div>
+            {latex_html}
             {get_parameter_module_html(selected_name)}
             {get_time_range_module_html()}
             {get_category_filter_module_html()}
