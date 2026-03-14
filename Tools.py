@@ -60,7 +60,7 @@ class UniqueObject(ABC):
             setattr(self, attr_name, value)
     
 class SerialObject(UniqueObject):
-    _instance_count: int = -1
+    _instance_count_dict: Dict[str, int] = {}
     _serial_map: Dict[int, SerialObject] = {}
     _type_alias_owners: Dict[str, type] = {}
 
@@ -89,16 +89,19 @@ class SerialObject(UniqueObject):
                 if instance.alias == alias and instance.__class__ is cls:
                     assert isinstance(instance, cls)
                     return instance
-                
-        cls._instance_count += 1
-        name = f"{type_alias}@{cls._instance_count}"
+        
+        if type_alias in cls._instance_count_dict:
+            cls._instance_count_dict[type_alias] += 1
+        else:
+            cls._instance_count_dict[type_alias] = 0
+        name = f"{type_alias}@{cls._instance_count_dict[type_alias]}"
         name = name if alias is None else f"{name}:{alias}"
         instance = super().__new__(cls, name=name)
         return instance
 
     def __init__(self, type_alias: str, alias: Optional[str] = None, search: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            self.serial_number = self._instance_count
+            self.serial_number = self._instance_count_dict[type_alias]
             name = f"{type_alias}@{self.serial_number}"
             self.alias = alias or name
             name = name if alias is None else f"{name}:{alias}"

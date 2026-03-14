@@ -14,7 +14,6 @@ class Mm(FactorFamily): # Day Momentum
     params = [
         DataColumnParam('H'),
         DataColumnParam('L'),
-        (FinRangeParam('F', 'S') + TimeDeltaParam(flag='pos')).change_default_value('1d'),
     ]
 
     def func(self, products: Sequence[Product], F: Any = pd.Timedelta('1d'),

@@ -6,7 +6,6 @@ from Products import DataColumn
 from typing import TYPE_CHECKING
 
 class Parameter(SerialObject):
-    _instance_count: int = -1
     _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
@@ -237,6 +236,11 @@ class TimeDeltaParam(Parameter):
 def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
     param = FinRangeParam(alias, None, get_value_alias=lambda _: 'N')
     param += TimeDeltaParam(flag='pos')
+    return param
+
+def get_factor_freq_param(alias: Optional[str] = 'F') -> Parameter:
+    param = TimeDeltaParam(alias=alias, default_value='1d', flag='pos')
+    param += FinRangeParam(alias=None, value_space='S')
     return param
     
 if __name__ == '__main__':
