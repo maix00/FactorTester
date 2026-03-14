@@ -754,207 +754,235 @@ def get_time_range_module_html(factor_family_alias):
         </div>
         """
 
-def get_category_filter_module_html():
+def convert_to_fancytree(tree_dict):
+    """
+    将原始分类树转换为 Fancytree 格式
+    :param tree_dict: 原始树字典（如 get_cat_tree().tree）
+    :return: Fancytree 节点列表
+    """
+    def create_node(key, value, path):
+        """为单个分类键创建节点，并递归构建其子节点"""
+        # 获取安全的字符串键名
+        key_str = str(key) if not isinstance(key, type) else key.__name__
+        current_path = f"{path}/{key_str}" if path else key_str
+
+        # 收集子分类节点
+        child_nodes = []
+
+        # 处理 $SUBCLASS$ 中的内容
+        if isinstance(value, dict) and "$SUBCLASS$" in value:
+            sub_dict = value["$SUBCLASS$"]
+            if isinstance(sub_dict, dict):
+                for subkey, subval in sub_dict.items():
+                    if subkey not in ("$SUBCLASS$", "$OBJECTS$"):
+                        child_nodes.append(create_node(subkey, subval, current_path))
+
+        # 处理其他直接键（排除 $SUBCLASS$ 和 $OBJECTS$）
+        # 为了避免重复，可以收集已处理过的键
+        processed_keys = set()
+        if isinstance(value, dict) and "$SUBCLASS$" in value and isinstance(value["$SUBCLASS$"], dict):
+            processed_keys.update(value["$SUBCLASS$"].keys())
+
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k in ("$SUBCLASS$", "$OBJECTS$") or k in processed_keys:
+                    continue
+                child_nodes.append(create_node(k, v, current_path))
+
+        # 检查是否有产品
+        has_objects = isinstance(value, dict) and "$OBJECTS$" in value and bool(value["$OBJECTS$"])
+
+        # 构建当前节点
+        node = {
+            "title": key_str,
+            "key": current_path,
+            "checkbox": True,
+        }
+
+        if child_nodes:
+            # 有子分类：文件夹，静态加载
+            node["folder"] = True
+            node["lazy"] = False
+            node["children"] = child_nodes
+            # 如果同时有产品，添加一个“产品列表”子文件夹（懒加载）
+            if has_objects:
+                product_folder = {
+                    "title": "产品列表",
+                    "key": current_path + "/_products",
+                    "folder": True,
+                    "lazy": True,
+                    "checkbox": False,   # 产品文件夹本身不可勾选
+                }
+                node["children"].append(product_folder)
+        elif has_objects:
+            # 没有子分类但有产品：节点本身懒加载产品
+            node["folder"] = True
+            node["lazy"] = True
+        else:
+            # 既无子分类也无产品：叶子节点
+            node["folder"] = False
+            node["lazy"] = False
+
+        return node
+
+    # 处理顶层节点（排除特殊键）
+    top_nodes = []
+    for key, value in tree_dict.items():
+        if key not in ("$SUBCLASS$", "$OBJECTS$"):
+            top_nodes.append(create_node(key, value, ""))
+    return top_nodes
+
+# 新增 API 端点
+@app.route('/api/tree-data')
+def get_tree_data():
     tree = get_cat_tree().tree
-    to_str = lambda x: str(x) if not isinstance(x, type) else x.__name__
+    fancytree_data = convert_to_fancytree(tree)
+    return jsonify(fancytree_data)
 
-    def render_tree(tree, path=None, level=0, expand=True):
-        if path is None:
-            path = []
-        html = ''
-        # 遍历树的其他节点
-        for key, value in tree.items():
-            if key == '$OBJECTS$':
-                continue
-            elif key == '$SUBCLASS$':
-                html += render_tree(value, path, level, expand)
-            else:
-                new_path = path + [to_str(key)]
-                has_subclass = '$SUBCLASS$' in value
-                display_of_subclass = '' #if has_subclass else 'none'
-                display = '' # if expand else 'none'
-                # 生成当前节点行
-                html += f'''<div class="tree-node" style="display:flex; flex-wrap:wrap; align-items:baseline; margin-bottom:2px; display:{display};" id="tree_{"_".join(new_path)}_div">'''
-                html += f'''<div class="tree-line" style="width:{level*20}px; min-width:{level*20}px; position:relative;">'''
-                if '$OBJECTS$' in value:
-                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:0px; width:2px; height:38px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
-                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:36px; width:12px; height:2px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
-                    html += '''</div>'''
-                    html += f'''<div id="tree_{"_".join(new_path)}_circle" class="tree-circle" style="width:18px; height:18px; background:#0078d4; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-right:6px;">'''
-                    html += f'''<span style="color:#fff; font-size:12px;">{level+1}</span>'''
+def find_node_by_path(tree_dict, path_parts):
+    """
+    在树字典中根据路径部分查找节点。
+    :param tree_dict: 当前层级的字典（可以是根或子节点）
+    :param path_parts: 路径部分列表，例如 ['Products', 'Product', 'Futures', 'CNFutures', '日夜盘', '夜盘1']
+    :return: 找到的节点字典，若未找到返回 None
+    """
+    current = tree_dict
+    for part in path_parts:
+        found = None
+        # 先在当前节点的直接键中查找
+        for key, value in current.items():
+            key_str = str(key) if not isinstance(key, type) else key.__name__
+            if key_str == part:
+                if isinstance(value, dict):
+                    current = value
+                    found = True
+                    break
                 else:
-                    html += f'''<div style="position:absolute; left:{level*20+8}px; top:9px; width:2px; height:23px; background:#0078d4; border-radius:2px; display:{display_of_subclass}; z-index:0;"></div>'''
-                    html += '''</div>'''
-                    html += f'''<div id="tree_{"_".join(new_path)}_circle" class="tree-circle" style="width:18px; height:18px; background:#ff9800; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-right:6px;">'''
-                    html += f'''<span style="color:#fff; font-size:12px;"></span>'''
-                html += f'''</div>'''
-                html += f'''<span style="color:#0078d4; font-size:13px;">{to_str(key)}</span>'''
-                html += f'''<button type="button" onclick="toggleCollapse('{"_".join(new_path)}_collapse')" style="margin-left:4px; font-size:12px; padding:1px 6px; height:auto;">折叠/展开</button>'''
-                if '$OBJECTS$' in value:
-                    obj_path = '_'.join(to_str(key) for key in new_path)
-                    html += f'''
-                        &nbsp;<span style="color:#888; font-size:13px;">勾选全部此类产品</span>
-                        <input type="checkbox" class="select-all" data-level="{level+2}" data-path="{obj_path}" onclick="selectAllObjects(this)" style="width:10px; height:auto; margin-left:6px; align-items:top;">
-                        <button type="button" onclick="loadProducts('{obj_path}_collapse', '{obj_path}')" style="margin-left:4px; font-size:12px; padding:1px 6px; height:auto;">查看产品</button>
-                    '''
-                    new_level = level + 1
-                else:
-                    new_level = level
-                html += f'''
-                    <div id="{"_".join(new_path)}_collapse" style="display:{display_of_subclass}; width:100%; margin-left:0;">
-                        {render_tree(value, new_path, new_level, expand=has_subclass)}
-                    </div>
-                '''
-                html += '''</div>'''
-        return html
+                    # 路径指向非字典，无法继续
+                    return None
+        if found:
+            continue
 
-    html = '''
-    <div class="module" id="category_filter_module" style="margin-top:24px;">
-        <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
-        <div style="margin-bottom:8px;color:#888;font-size:12px;">可折叠树状结构，勾选后提交</div>
-        <form id="product_filter_form">
-    '''
-    html += render_tree(tree)
-    html += '''
-        <button type="button" onclick="submitSelectedProducts()" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
-        </form>
-        <div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>
-    </div>
-    <style>
-    .tree-node:hover .tree-circle { box-shadow: 0 0 0 2px #0078d4; }
-    </style>
+        # 如果直接键中没找到，检查 $SUBCLASS$ 内部
+        if '$SUBCLASS$' in current and isinstance(current['$SUBCLASS$'], dict):
+            subclass_dict = current['$SUBCLASS$']
+            for key, value in subclass_dict.items():
+                key_str = str(key) if not isinstance(key, type) else key.__name__
+                if key_str == part:
+                    if isinstance(value, dict):
+                        current = value
+                        found = True
+                        break
+                    else:
+                        return None
+        if not found:
+            return None
+    return current
+
+@app.route('/get_products')
+def get_products():
+    original_path = request.args.get('path')  # 例如 "Products/Product/Futures/CNFutures/日夜盘/夜盘1/_products"
+    if not original_path:
+        return jsonify([])
+
+    # 判断是否为产品文件夹请求（路径以 /_products 结尾）
+    if original_path.endswith('/_products'):
+        node_path = original_path[:-10]  # 去掉 /_products，得到分类路径
+    else:
+        node_path = original_path
+
+    # 从 Settings 获取树
+    from Settings import get_cat_tree
+    tree = get_cat_tree().tree  # 假设返回的是根字典
+
+    parts = node_path.split('/')
+    node = find_node_by_path(tree, parts)
+    if node is None:
+        return jsonify([])  # 节点不存在
+
+    # 获取产品列表
+    objects = node.get('$OBJECTS$', []) if isinstance(node, dict) else []
+
+    # 转换为 Fancytree 子节点格式
+    child_nodes = []
+    for prod in objects:
+        # 假设 prod 对象有 id 和 name 属性，如果没有则适当处理
+        prod_id = getattr(prod, 'id', str(prod))
+        prod_name = getattr(prod, 'name', str(prod))
+        child_nodes.append({
+            "title": prod_name,
+            "key": f"{original_path}/{prod_id}",  # 使用原始路径保证唯一性
+            "checkbox": True,
+            "folder": False,
+            "lazy": False,
+            "extraClasses": "product-node",  # 可选样式
+        })
+    return jsonify(child_nodes)
+
+def get_category_filter_module_html():
+    resources = '''
+    <!-- Fancytree 资源 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
     '''
     
-    # 前端JS
-    js = """
+    html = resources + '''
+    <div class="module" id="category_filter_module" style="margin-top:24px;">
+        <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
+        <div style="margin-bottom:8px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
+        <div id="tree-container"></div>
+        <button type="button" id="submit-selected" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+        <div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>
+    </div>
+    '''
+    
+    js = '''
     <script>
-    function toggleCollapse(id) {
-        var contentEl = document.getElementById(id); // 折叠内容容器（如 "..._collapse"）
-        if (!contentEl) return;
-
-        var isCollapsed = (contentEl.style.display === 'none');
-        // 切换显示状态
-        contentEl.style.display = isCollapsed ? '' : 'none';
-
-        // 获取对应的竖线元素（假设 ID 规则为 id.replace('_collapse', '_line')）
-        var lineId = id.replace('_collapse', '_line');
-        var lineEl = document.getElementById(lineId);
-        if (!lineEl) return;
-
-        if (isCollapsed) {
-            // 展开：根据圆圈和最后一个子元素的位置调整竖线高度
-            // 获取圆圈元素（假设 ID 规则为 id.replace('_collapse', '_circle')）
-            var circleId = id.replace('_collapse', '_circle');
-            var circleEl = document.getElementById(circleId);
-            if (!circleEl) return;
-
-            // 确保内容容器可见，以便获取子元素位置
-            contentEl.style.display = ''; // 可能已经在上面的切换中设为可见了
-
-            // 获取最后一个子元素
-            var lastChild = contentEl.lastElementChild;
-            if (!lastChild) {
-                // 如果没有子节点，竖线高度设为0或隐藏
-                lineEl.style.height = '0';
-                return;
+    $(function() {
+        $("#tree-container").fancytree({
+            source: {
+                url: "/api/tree-data"
+            },
+            checkbox: true,
+            selectMode: 3,
+            lazyLoad: function(event, data) {
+                var node = data.node;
+                data.result = {
+                    url: "/get_products",
+                    data: { path: node.key }
+                };
             }
+        });
 
-            // 计算位置
-            var circleRect = circleEl.getBoundingClientRect();
-            var lastChildRect = lastChild.getBoundingClientRect();
-            var lineTop = circleRect.bottom; // 圆圈底部作为竖线起点
-            var lineBottom = lastChildRect.bottom; // 最后一个子元素底部作为终点
+        $("#submit-selected").click(function() {
+            var tree = $("#tree-container").fancytree("getTree");
+            var selectedNodes = tree.getSelectedNodes();
+            var selectedKeys = selectedNodes.map(function(node) {
+                return node.key;
+            });
+            var productKeys = selectedKeys.filter(function(key) {
+                return key.split('/').length >= 3;
+            });
 
-            // 计算高度（绝对值）
-            var height = lineBottom - lineTop;
-
-            // 设置竖线的 top 和 height（需要考虑父容器的定位上下文）
-            // 因为竖线是绝对定位，其 top 值是基于最近的定位祖先（relative/absolute）计算的，
-            // 而 getBoundingClientRect 返回的是相对于视口的值，所以需要转换。
-            // 简便方法：获取竖线父容器的位置，然后计算相对偏移。
-            var lineParent = lineEl.offsetParent; // 最近的定位祖先
-            if (lineParent) {
-                var parentRect = lineParent.getBoundingClientRect();
-                var relativeTop = lineTop - parentRect.top;
-                var relativeBottom = lineBottom - parentRect.top;
-                lineEl.style.top = relativeTop + 'px';
-                lineEl.style.height = (relativeBottom - relativeTop) + 'px';
-            } else {
-                // 如果没有定位祖先，直接使用视口坐标（不建议）
-                lineEl.style.top = lineTop + 'px';
-                lineEl.style.height = height + 'px';
-            }
-
-            // 可选：如果竖线原本有固定的初始 top，你可能需要根据圆圈位置动态调整，
-            // 但更简单的方式是让竖线的 top 始终跟随圆圈底部。
-        } else {
-            // 折叠：竖线恢复为单行高度（例如 24px），同时可能需要重置 top 到原始位置
-            // 这里假设原始 top 是固定的（例如 9px 或 0px），你可以从数据属性中读取，或直接设置固定值
-            lineEl.style.height = '24px';
-            // 如果之前修改过 top，记得重置
-            // lineEl.style.top = originalTop; // 你需要保存原始 top
-        }
-    }
-    function loadProducts(divId, objPath) {
-        var div = document.getElementById(divId);
-        if (!div) return;
-        if (div.getAttribute('data-loaded') === '1') {
-            div.style.display = '';
-            return;
-        }
-        div.innerHTML = '<div style="color:#888;font-size:12px;margin-left:6px;">加载中...</div>';
-        fetch('/get_products?path=' + encodeURIComponent(objPath))
+            fetch('/submit_selected_products', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({selected_products: productKeys})
+            })
             .then(r => r.json())
             .then(data => {
+                var status = document.getElementById('submit_status');
                 if (data.success) {
-                    var html = '';
-                    data.products.forEach(function(prod) {
-                        var prod_id = objPath + '_' + prod.id;
-                        html += '<div class="tree-level-product" style="margin-left:6px;margin-bottom:2px;">';
-                        html += '<input type="checkbox" name="selected_products" value="' + prod_id + '" class="product-checkbox" style="width:13px;height:13px;">';
-                        html += '<span style="color:#888;font-size:12px;">' + prod.name + '</span>';
-                        html += '</div>';
-                    });
-                    div.innerHTML = html;
-                    div.setAttribute('data-loaded', '1');
-                    div.style.display = '';
+                    status.innerText = '✓ 已提交，选中产品数量: ' + data.count;
                 } else {
-                    div.innerHTML = '<div style="color:#d40000;font-size:12px;">加载失败: ' + (data.error || '未知错误') + '</div>';
+                    status.innerText = '提交失败: ' + (data.error || '未知错误');
                 }
             });
-    }
-    function selectAllObjects(checkbox) {
-        var path = checkbox.getAttribute('data-path');
-        var form = document.getElementById('product_filter_form');
-        var checked = checkbox.checked;
-        var prodBoxes = form.querySelectorAll('input.product-checkbox');
-        prodBoxes.forEach(function(b) {
-            if (b.value.startsWith(path + '_')) b.checked = checked;
-        });
-    }
-    function submitSelectedProducts() {
-        var form = document.getElementById('product_filter_form');
-        var checked = Array.from(form.querySelectorAll('input.product-checkbox:checked')).map(function(b) { return b.value; });
-        fetch('/submit_selected_products', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({selected_products: checked})
-        }).then(r => r.json()).then(data => {
-            var status = document.getElementById('submit_status');
-            if (data.success) status.innerText = '✓ 已提交，选中产品数量: ' + data.count;
-            else status.innerText = '提交失败: ' + (data.error || '未知错误');
-        });
-    }
-    // 默认展开到第一次没有$SUBCLASS$的层
-    document.addEventListener('DOMContentLoaded', function() {
-        var divs = document.querySelectorAll('[id^="tree_"]');
-        divs.forEach(function(div) {
-            if (div.style.display === 'none') div.style.display = '';
         });
     });
     </script>
-    """
-
+    '''
     return html + js
 
 def get_ic_test_module_html():

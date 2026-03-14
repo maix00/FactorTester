@@ -19,4 +19,7 @@ from Category import CategoryTree, combine_trees
 def get_cat_tree() -> CategoryTree:
     from Products import Product
     from CNFutures import CNFuturesSectorNightTimeCategory
-    return CNFuturesSectorNightTimeCategory.get_tree_with_parents_without_products(ancester=Product)
+    return combine_trees(
+        CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product),
+        CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
+    )
