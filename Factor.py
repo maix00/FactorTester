@@ -290,6 +290,7 @@ class FactorFamily(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()
             self.current_start_calc_time: Any = None
+            self.factors: List[Factor] = []
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法")
@@ -333,7 +334,7 @@ class FactorFamily(SerialObject):
         self.current_start_calc_time = start_cal_time
 
     def get_factors(self, return_freq: Optional[Any] = None, 
-                    start_cal_time: Optional[Any] = None, **kwargs) -> List[Factor]:
+                    start_calc_time: Optional[Any] = None, **kwargs) -> List[Factor]:
         factors = []
         for params in self._params_list:
             factor_alias = self.get_alias(**params)
@@ -343,9 +344,10 @@ class FactorFamily(SerialObject):
                 self.params_dict[param_alias].register(factor, value)
             if return_freq is not None:
                 factor.change_current_return_freq(return_freq)
-            if start_cal_time is not None:
-                factor.change_current_start_calc_time(start_cal_time)
+            if start_calc_time is not None:
+                factor.change_current_start_calc_time(start_calc_time)
             factors.append(factor)
+        self.factors = factors
         return factors
     
     def get_factor(self, return_freq: Optional[Any] = None, start_cal_time: Optional[Any] = None, **kwargs):

@@ -10,6 +10,7 @@ import webbrowser
 
 from flask import Flask, request, jsonify, render_template_string
 from Settings import *
+from Factor import FactorFamily, Factor, StartCalcParam
 
 app = Flask(__name__)
 
@@ -29,6 +30,7 @@ def get_factor_family_instance(module_name):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         ff = getattr(module, module_name)()
+        assert isinstance(ff, FactorFamily)
         _factor_family_cache[module_name] = ff
         return ff
     else:
@@ -140,9 +142,9 @@ def get_latex_module_html(selected_name):
         latex_html = f"<div style='color:#888;'>表达式加载失败: {e}</div>"
     return latex_html
 
-def get_parameter_module_html(selected_name):
+def get_parameter_module_html(factor_family_alias):
     try:
-        ff = get_factor_family_instance(selected_name)
+        ff = get_factor_family_instance(factor_family_alias)
         params = ff.params
 
         sorted_params = sorted(params, key=lambda p: getattr(p, 'serial_number', 0))
@@ -245,7 +247,7 @@ def get_parameter_module_html(selected_name):
                     }}
 
                     function reloadParamTable() {{
-                        fetch(window.location.pathname + '?factor={selected_name}')
+                        fetch(window.location.pathname + '?factor={factor_family_alias}')
                             .then(r => r.text())
                             .then(html => {{
                                 var parser = new DOMParser();
@@ -292,7 +294,7 @@ def get_parameter_module_html(selected_name):
                                 fetch('/add_params', {{
                                     method: 'POST',
                                     headers: {{'Content-Type': 'application/json'}},
-                                    body: JSON.stringify({{factor_family_name: '{selected_name}', params: paramValues}})
+                                    body: JSON.stringify({{factor_family_alias: '{factor_family_alias}', params: paramValues}})
                                 }}).then(r => r.json()).then(data => {{
                                     if(data.success) {{ reloadParamTable(); }}
                                     else alert('添加失败: ' + data.error);
@@ -305,7 +307,7 @@ def get_parameter_module_html(selected_name):
                                 fetch('/delete_params', {{
                                     method: 'POST',
                                     headers: {{'Content-Type': 'application/json'}},
-                                    body: JSON.stringify({{factor_family_name: '{selected_name}', factor_idx: idx}})
+                                    body: JSON.stringify({{factor_family_alias: '{factor_family_alias}', factor_idx: idx}})
                                 }}).then(r => r.json()).then(data => {{
                                     if(data.success) reloadParamTable();
                                     else alert('删除失败: ' + data.error);
@@ -349,7 +351,7 @@ def get_parameter_module_html(selected_name):
                                         method: 'POST',
                                         headers: {{'Content-Type': 'application/json'}},
                                         body: JSON.stringify({{
-                                            factor_family_name: '{selected_name}',
+                                            factor_family_alias: '{factor_family_alias}',
                                             from_idx: dragStartIdx,
                                             to_idx: dragOverIdx
                                         }})
@@ -376,7 +378,7 @@ def get_parameter_module_html(selected_name):
     except Exception as e:
         return f"<div style='color:#d40000;'>参数模块加载失败: {e}</div>"
     
-def get_time_range_module_html():
+def get_time_range_module_html(factor_family_alias):
     from datetime import datetime as _dt
 
     def pad(n):
@@ -443,10 +445,10 @@ def get_time_range_module_html():
             </label>
         </div>
         <div style="margin-top:8px; color:#888;">
-            <span>当前设置：</span>
+            <span style="font-size:13px;">当前设置：</span>
             <span id="current_settings" style="font-size:13px;"></span>
         </div>
-        <div style="margin-top:0px; display: flex; align-items: baseline;">
+        <div style="margin-top:-15px; display: flex; align-items: baseline;">
             <button id="confirm_time_btn" type="button" style="background:#0078d4; color:#fff; border:none; border-radius:4px; padding:6px 18px; font-size:14px;">确定</button>
             <span id="confirm_time_status" style="margin-left:12px; color:#0078d4; font-size:13px;"></span>
         </div>
@@ -586,6 +588,7 @@ def get_time_range_module_html():
                 var isNight = document.getElementById('is_cn_futures_night').checked;
 
                 var timeData = {{
+                    factor_family_alias: '{factor_family_alias}',
                     start_date: startYear + '-' + startMonth + '-' + startDay,
                     start_time: startHour + ':' + startMinute,
                     end_date: endYear + '-' + endMonth + '-' + endDay,
@@ -605,7 +608,7 @@ def get_time_range_module_html():
                 .then(response => response.json())
                 .then(data => {{
                     if (data.success) {{
-                    document.getElementById('confirm_time_status').innerText = '✓ 已保存';
+                        document.getElementById('confirm_time_status').innerText = '✓ 已保存，各因子起始计算时间已更新为唯一值: ' + data.start_calc_param_val.join('; ');
                     if (data.show_next) {{
                         openModule('category_filter_module');
                     }}
@@ -686,7 +689,7 @@ def get_group_test_module_html():
         </div>
     """
 
-def get_factor_main_section_html(selected_name):
+def get_factor_main_section_html(factor_family_alias):
     module_ids = [
         'latex_module',
         'parameter_module',
@@ -696,11 +699,11 @@ def get_factor_main_section_html(selected_name):
         'group_test_module']
     return f"""
         <div class="section">
-            <div class="section-title">当前因子: <b style="color:#0078d4;">{selected_name}</b></div>
-            <div style="margin-top:16px;color:#888;">功能开发中，仅展示页面框架。</div>
-            {get_latex_module_html(selected_name)}
-            {get_parameter_module_html(selected_name)}
-            {get_time_range_module_html()}
+            <div class="section-title">当前因子: <b style="color:#0078d4;">{factor_family_alias}</b></div>
+            <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
+            {get_latex_module_html(factor_family_alias)}
+            {get_parameter_module_html(factor_family_alias)}
+            {get_time_range_module_html(factor_family_alias)}
             {get_category_filter_module_html()}
             {get_ic_test_module_html()}
             {get_group_test_module_html()}
@@ -755,10 +758,10 @@ def index():
 @app.route('/add_params', methods=['POST'])
 def add_params():
     data = request.get_json()
-    factor_family_name = data.get('factor_family_name')
+    factor_family_alias = data.get('factor_family_alias')
     params = data.get('params', {})
     try:
-        ff = get_factor_family_instance(factor_family_name)
+        ff = get_factor_family_instance(factor_family_alias)
         ff.add_params(**params)
         return jsonify({'success': True})
     except Exception as e:
@@ -767,10 +770,10 @@ def add_params():
 @app.route('/delete_params', methods=['POST'])
 def delete_params():
     data = request.get_json()
-    factor_family_name = data.get('factor_family_name')
+    factor_family_alias = data.get('factor_family_alias')
     factor_idx = int(data.get('factor_idx', -1))
     try:
-        ff = get_factor_family_instance(factor_family_name)
+        ff = get_factor_family_instance(factor_family_alias)
         if 0 <= factor_idx < len(ff._params_list):
             ff._params_list.pop(factor_idx)
         return jsonify({'success': True})
@@ -780,11 +783,11 @@ def delete_params():
 @app.route('/reorder_params', methods=['POST'])
 def reorder_params():
     data = request.get_json()
-    factor_family_name = data.get('factor_family_name')
+    factor_family_alias = data.get('factor_family_alias')
     from_idx = int(data.get('from_idx', -1))
     to_idx = int(data.get('to_idx', -1))
     try:
-        ff = get_factor_family_instance(factor_family_name)
+        ff = get_factor_family_instance(factor_family_alias)
         if 0 <= from_idx < len(ff._params_list) and 0 <= to_idx < len(ff._params_list):
             param = ff._params_list.pop(from_idx)
             ff._params_list.insert(to_idx, param)
@@ -795,8 +798,9 @@ def reorder_params():
 @app.route('/set_time_range', methods=['POST'])
 def set_time_range():
     data = request.get_json()
-    print(data)
     try:
+        factor_family_alias = data['factor_family_alias']
+        ff = get_factor_family_instance(factor_family_alias)
         start_date = data['start_date']
         start_time = data['start_time']
         end_date = data['end_date']
@@ -812,10 +816,19 @@ def set_time_range():
         default_day_start_time = start_time
         default_day_end_time = end_time
 
-        # 可以根据是否是交易日等设置调整默认的时间范围
-        show_next = (start_date <= end_date) if not is_trading_day else False
+        if is_trading_day:
+            start_calc_param_val = ('1d', start_date)
+        else:
+            start_calc_param_val = ('1min', f"{start_date} {start_time}")
+        factors = ff.get_factors(start_calc_time=start_calc_param_val)
+        start_calc_param_val = list(set([StartCalcParam.get_value(factor) for factor in factors]))
+        assert len(start_calc_param_val) == 1
+        start_calc_param_val = start_calc_param_val[0]
 
-        return jsonify({'success': True, 'show_next': show_next})
+        # 可以根据是否是交易日等设置调整默认的时间范围
+        show_next = (start_date <= end_date)
+
+        return jsonify({'success': True, 'show_next': show_next, 'start_calc_param_val': start_calc_param_val})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
