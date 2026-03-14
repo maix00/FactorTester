@@ -124,7 +124,6 @@ BASE_TEMPLATE = """
 </body>
 </html>
 """
-
 def get_parameter_module_html(selected_name):
     try:
         ff = get_factor_family_instance(selected_name)
@@ -170,7 +169,7 @@ def get_parameter_module_html(selected_name):
         factor_rows_html = ""
         for idx, factor in enumerate(ff.get_factors()):
             factor_rows_html += f"""
-                <tr>
+                <tr draggable="true" data-factor-idx="{idx}">
                     <td style='min-width:120px;text-align:center;vertical-align:middle;'>{factor.name}</td>
                     {''.join([
                         f"<td style='min-width:{get_col_min_width(p)}px;text-align:center;vertical-align:middle;'>{factor.params_dict[p.alias].get_value(factor)}</td>"
@@ -188,7 +187,7 @@ def get_parameter_module_html(selected_name):
             <div style="overflow-x:auto;max-width:800px;" id="param_table_scroll">
                 <table style="border-collapse:collapse;width:100%;background:#fff;min-width:{120 + sum(get_col_min_width(p) for p in sorted_params) + 80}px;">
                     <thead style="background:#f6f8fa;">{header_html}</thead>
-                    <tbody>{input_row_html}{factor_rows_html}</tbody>
+                    <tbody id="factor_table_body">{input_row_html}{factor_rows_html}</tbody>
                 </table>
             </div>
         """
@@ -247,6 +246,54 @@ def get_parameter_module_html(selected_name):
                                     if(data.success) reloadParamTable();
                                     else alert('删除失败: ' + data.error);
                                 }});
+                            }});
+                        }});
+
+                        // 拖拽排序功能
+                        var tbody = document.getElementById('factor_table_body');
+                        var draggingRow = null;
+                        var dragStartIdx = null;
+                        var dragOverIdx = null;
+
+                        Array.from(tbody.querySelectorAll('tr[draggable="true"]')).forEach(function(row) {{
+                            row.addEventListener('dragstart', function(e) {{
+                                draggingRow = row;
+                                dragStartIdx = parseInt(row.getAttribute('data-factor-idx'));
+                                row.style.opacity = '0.5';
+                                e.dataTransfer.effectAllowed = 'move';
+                            }});
+                            row.addEventListener('dragend', function(e) {{
+                                row.style.opacity = '';
+                                draggingRow = null;
+                                dragStartIdx = null;
+                                dragOverIdx = null;
+                            }});
+                            row.addEventListener('dragover', function(e) {{
+                                e.preventDefault();
+                                dragOverIdx = parseInt(row.getAttribute('data-factor-idx'));
+                                row.style.background = '#e6f7ff';
+                            }});
+                            row.addEventListener('dragleave', function(e) {{
+                                row.style.background = '';
+                            }});
+                            row.addEventListener('drop', function(e) {{
+                                e.preventDefault();
+                                row.style.background = '';
+                                dragOverIdx = parseInt(row.getAttribute('data-factor-idx'));
+                                if(dragStartIdx !== null && dragOverIdx !== null && dragStartIdx !== dragOverIdx) {{
+                                    fetch('/reorder_params', {{
+                                        method: 'POST',
+                                        headers: {{'Content-Type': 'application/json'}},
+                                        body: JSON.stringify({{
+                                            factor_family_name: '{selected_name}',
+                                            from_idx: dragStartIdx,
+                                            to_idx: dragOverIdx
+                                        }})
+                                    }}).then(r => r.json()).then(data => {{
+                                        if(data.success) reloadParamTable();
+                                        else alert('排序失败: ' + data.error);
+                                    }});
+                                }}
                             }});
                         }});
                     }}
@@ -600,6 +647,21 @@ def delete_params():
         ff = get_factor_family_instance(factor_family_name)
         if 0 <= factor_idx < len(ff._params_list):
             ff._params_list.pop(factor_idx)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/reorder_params', methods=['POST'])
+def reorder_params():
+    data = request.get_json()
+    factor_family_name = data.get('factor_family_name')
+    from_idx = int(data.get('from_idx', -1))
+    to_idx = int(data.get('to_idx', -1))
+    try:
+        ff = get_factor_family_instance(factor_family_name)
+        if 0 <= from_idx < len(ff._params_list) and 0 <= to_idx < len(ff._params_list):
+            param = ff._params_list.pop(from_idx)
+            ff._params_list.insert(to_idx, param)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
