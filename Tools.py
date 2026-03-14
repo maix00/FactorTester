@@ -58,11 +58,28 @@ class UniqueObject(ABC):
     def set(self, **kwargs) -> None:
         for attr_name, value in kwargs.items():
             setattr(self, attr_name, value)
+
+    def _get_attr_nested(self, attr_str: str):
+        attr_list = attr_str.split('.')
+        attr_value = self
+        for attr in attr_list:
+            attr_value = getattr(attr_value, attr)
+        return attr_value
+    
+    def _has_attr_nested(self, attr_str: str) -> bool:
+        attr_list = attr_str.split('.')
+        attr_value = self
+        for attr in attr_list:
+            if hasattr(attr_value, attr):
+                attr_value = getattr(attr_value, attr)
+            else:
+                return False
+        return True
     
 class SerialObject(UniqueObject):
     _single_use_count = -1
     _instance_count_dict: Dict[str, int] = {}
-    _serial_map: Dict[int, SerialObject] = {}
+    _serial_map: Dict[int, 'SerialObject'] = {}
     _type_alias_owners: Dict[str, type] = {}
 
     @classmethod
@@ -118,11 +135,11 @@ class SerialObject(UniqueObject):
                 self._set_serial_map(self.serial_number, self)
 
     @classmethod
-    def _set_serial_map(cls, serial_number: int, instance: SerialObject):
+    def _set_serial_map(cls, serial_number: int, instance: 'SerialObject'):
         cls._serial_map[serial_number] = instance
     
     @classmethod
-    def _get_by_serial(cls, serial_number: int) -> Optional[SerialObject]:
+    def _get_by_serial(cls, serial_number: int) -> Optional['SerialObject']:
         return cls._serial_map.get(serial_number)
     
     def __class_getitem__(cls, key):

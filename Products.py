@@ -14,6 +14,7 @@ mappings_path = '../data/rollover_adjustments.csv'
 
 class Product(UniqueObject):
     _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+    desc: str
     MIN1: DataMeta
     DAY1: DataMeta
 
@@ -126,13 +127,6 @@ class Product(UniqueObject):
         
     def set_category_attr_name_as_default(self):
         self.category_attr_name = self._default_category_attr_name
-
-    def _get_attr_nested(self, attr_str: str):
-        attr_list = attr_str.split('.')
-        attr_value = self
-        for attr in attr_list:
-            attr_value = getattr(attr_value, attr)
-        return attr_value
 
     def get_category(self) -> str:
         return str(self._get_attr_nested(self.category_attr_name))

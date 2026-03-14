@@ -384,6 +384,7 @@ def get_parameter_module_html(factor_family_alias):
         return f"<div style='color:#d40000;'>参数模块加载失败: {e}</div>"
     
 def get_time_range_module_html(factor_family_alias):
+
     from datetime import datetime as _dt
 
     def pad(n):
@@ -754,12 +755,114 @@ def get_time_range_module_html(factor_family_alias):
         """
 
 def get_category_filter_module_html():
-    return """
-        <div class="module" id="category_filter_module" style="margin-top:32px;display:none;">
-            <div class="section-title">2. 产品类别筛选</div>
-            <div style="color:#aaa;">（功能开发中）</div>
-        </div>
+    tree = get_cat_tree().tree
+
+    # 递归生成HTML（默认展开到第一次没有$SUBCLASS$的层，剩下的层默认隐藏）
+    def render_tree(tree, path=None, level=0, expand=True):
+        if path is None:
+            path = []
+        html = ''
+        for key, value in tree.items():
+            if key == '$OBJECTS$':
+                obj_path = '_'.join(str(p) for p in path)
+                html += f'<div class="tree-level-{level+1}" style="margin-left:{level*4}px;margin-bottom:2px;">'
+                html += f'<input type="checkbox" class="select-all" data-level="{level+1}" data-path="{obj_path}" onclick="selectAllObjects(this)" style="width:13px;height:13px;">'
+                html += f'<button type="button" onclick="toggleCollapse(\'{obj_path}_collapse\')" style="margin-left:4px;font-size:12px;padding:1px 6px;height:22px;">折叠/展开</button>'
+                html += f'<button type="button" onclick="loadProducts(\'{obj_path}_collapse\', \'{obj_path}\')" style="margin-left:4px;font-size:12px;padding:1px 6px;height:22px;">查看产品</button>'
+                html += f'<div id="{obj_path}_collapse" style="display:none;"></div>'
+                html += '</div>'
+            elif key == '$SUBCLASS$':
+                # 如果有$SUBCLASS$，默认展开，否则默认隐藏
+                html += render_tree(value, path, level, expand)
+            else:
+                new_path = path + [str(key)]
+                # 判断是否有$SUBCLASS$，决定是否展开
+                has_subclass = '$SUBCLASS$' in value
+                display = '' if expand else 'none'
+                html += f'<div class="tree-level-{level+1}" style="margin-left:{level*4}px;margin-bottom:2px;display:{display};" id="tree_{("_".join(new_path))}_div">'
+                html += f'<span style="color:#0078d4;font-size:13px;">{str(key)}</span>'
+                html += render_tree(value, new_path, level+1, expand=has_subclass)
+                html += '</div>'
+        return html
+
+    html = '<div class="module" id="category_filter_module" style="margin-top:24px;">'
+    html += '<div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>'
+    html += '<div style="margin-bottom:8px;color:#888;font-size:12px;">可折叠树状结构，勾选后提交</div>'
+    html += '<form id="product_filter_form">'
+    html += render_tree(tree)
+    html += '<button type="button" onclick="submitSelectedProducts()" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>'
+    html += '</form>'
+    html += '<div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>'
+    html += '</div>'
+    
+    # 前端JS
+    js = """
+    <script>
+    function toggleCollapse(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = (el.style.display === 'none' ? '' : 'none');
+    }
+    function loadProducts(divId, objPath) {
+        var div = document.getElementById(divId);
+        if (!div) return;
+        if (div.getAttribute('data-loaded') === '1') {
+            div.style.display = '';
+            return;
+        }
+        div.innerHTML = '<div style="color:#888;font-size:12px;margin-left:6px;">加载中...</div>';
+        fetch('/get_products?path=' + encodeURIComponent(objPath))
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    var html = '';
+                    data.products.forEach(function(prod) {
+                        var prod_id = objPath + '_' + prod.id;
+                        html += '<div class="tree-level-product" style="margin-left:6px;margin-bottom:2px;">';
+                        html += '<input type="checkbox" name="selected_products" value="' + prod_id + '" class="product-checkbox" style="width:13px;height:13px;">';
+                        html += '<span style="color:#888;font-size:12px;">' + prod.name + '</span>';
+                        html += '</div>';
+                    });
+                    div.innerHTML = html;
+                    div.setAttribute('data-loaded', '1');
+                    div.style.display = '';
+                } else {
+                    div.innerHTML = '<div style="color:#d40000;font-size:12px;">加载失败: ' + (data.error || '未知错误') + '</div>';
+                }
+            });
+    }
+    function selectAllObjects(checkbox) {
+        var path = checkbox.getAttribute('data-path');
+        var form = document.getElementById('product_filter_form');
+        var checked = checkbox.checked;
+        var prodBoxes = form.querySelectorAll('input.product-checkbox');
+        prodBoxes.forEach(function(b) {
+            if (b.value.startsWith(path + '_')) b.checked = checked;
+        });
+    }
+    function submitSelectedProducts() {
+        var form = document.getElementById('product_filter_form');
+        var checked = Array.from(form.querySelectorAll('input.product-checkbox:checked')).map(function(b) { return b.value; });
+        fetch('/submit_selected_products', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({selected_products: checked})
+        }).then(r => r.json()).then(data => {
+            var status = document.getElementById('submit_status');
+            if (data.success) status.innerText = '✓ 已提交，选中产品数量: ' + data.count;
+            else status.innerText = '提交失败: ' + (data.error || '未知错误');
+        });
+    }
+    // 默认展开到第一次没有$SUBCLASS$的层
+    document.addEventListener('DOMContentLoaded', function() {
+        var divs = document.querySelectorAll('[id^="tree_"]');
+        divs.forEach(function(div) {
+            if (div.style.display === 'none') div.style.display = '';
+        });
+    });
+    </script>
     """
+
+    return html + js
 
 def get_ic_test_module_html():
     return """
@@ -919,6 +1022,17 @@ def set_time_range():
         show_next = (start_date <= end_date)
 
         return jsonify({'success': True, 'show_next': show_next, 'start_calc_param_val': start_calc_param_val})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/submit_selected_products', methods=['POST'])
+def submit_selected_products():
+    data = request.get_json()
+    selected_products = data.get('selected_products', [])
+    try:
+        # 这里可以保存选中的产品到session或文件等
+        # 这里只返回数量
+        return jsonify({'success': True, 'count': len(selected_products)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

@@ -9,13 +9,15 @@ class Parameter(SerialObject):
     _serial_map = {}
 
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
-        return super().__new__(cls, type_alias='P', alias=alias, **kwargs)
+        type_alias = kwargs.pop('type_alias', 'P')
+        return super().__new__(cls, type_alias=type_alias, alias=alias, **kwargs)
 
     def __init__(self, alias: Optional[str], default_value: Any,
                  whether_in_space: Callable[[Any], bool],
                  get_value_alias: Callable[[Any], str], *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='P', alias=alias, *args, **kwargs)
+            type_alias = kwargs.pop('type_alias', 'P')
+            super().__init__(type_alias=type_alias, alias=alias, *args, **kwargs)
             self._register = {}
             self.whether_in_space = whether_in_space
             self.default_value = default_value
@@ -251,7 +253,6 @@ if __name__ == '__main__':
     print(ReturnFreq.get_value_alias('2h45m10s11ms'))
 
 class ColumnTimeParam(Parameter):
-
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
 
         from Tools import DataFreq

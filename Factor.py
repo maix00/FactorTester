@@ -12,7 +12,7 @@ import os
 from Tools import SerialObject
 from Products import DataColumn, Futures, Product, DataFreq
 from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_start_calc_param, get_factor_freq_param
-from CNFutures import get_all_products  # TODO: Verify this function exists in CNFutures module
+from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
 import logging
 
 from tqdm import tqdm
@@ -44,7 +44,7 @@ class ReturnPriceCols(Enum):
     THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
-    products = get_all_products()
+    products = get_all_futures()
     tester = FactorTester(products=products, time_range=time_range)
     return tester
 
