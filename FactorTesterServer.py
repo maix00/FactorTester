@@ -834,7 +834,7 @@ def set_time_range():
 def convert_to_fancytree(tree_dict):
     """
     将原始分类树转换为 Fancytree 格式
-    :param tree_dict: 原始树字典（如 get_cat_tree().tree）
+    :param tree_dict: 原始树字典（如 get\\_cat\\_tree().tree）
     :return: Fancytree 节点列表
     """
     def create_node(key, value, path):
@@ -911,10 +911,11 @@ def convert_to_fancytree(tree_dict):
             top_nodes.append(create_node(key, value, ""))
     return top_nodes
 
+tree = get_cat_tree().tree
+
 # 新增 API 端点
 @app.route('/api/tree-data')
 def get_tree_data():
-    tree = get_cat_tree().tree
     fancytree_data = convert_to_fancytree(tree)
     return jsonify(fancytree_data)
 
@@ -925,6 +926,13 @@ def find_node_by_path(tree_dict, path_parts):
     :param path_parts: 路径部分列表，例如 ['Products', 'Product', 'Futures', 'CNFutures', '日夜盘', '夜盘1']
     :return: 找到的节点字典，若未找到返回 None
     """
+
+    flag = False
+    original_path_parts = path_parts.copy()
+    if len(path_parts) >= 2 and path_parts[-2] == '_products':
+        path_parts = path_parts[:-2]
+        flag = True
+
     current = tree_dict
     for part in path_parts:
         found = None
@@ -956,6 +964,15 @@ def find_node_by_path(tree_dict, path_parts):
                         return None
         if not found:
             return None
+        
+    if flag:
+        assert '$OBJECTS$' in current and isinstance(current['$OBJECTS$'], list), f"路径 {original_path_parts} 指向的节点没有 $OBJECTS$ 列表"
+        current = current['$OBJECTS$']
+        for obj in current:
+            if obj.name == original_path_parts[-1]:
+                return obj
+        return None
+
     return current
 
 @app.route('/get_products')
@@ -969,10 +986,6 @@ def get_products():
         node_path = original_path[:-10]  # 去掉 /_products，得到分类路径
     else:
         node_path = original_path
-
-    # 从 Settings 获取树
-    from Settings import get_cat_tree
-    tree = get_cat_tree().tree  # 假设返回的是根字典
 
     parts = node_path.split('/')
     node = find_node_by_path(tree, parts)
@@ -1000,14 +1013,47 @@ def get_products():
         })
     return jsonify(child_nodes)
 
+def get_minimal_paths(paths):
+    """
+    从路径列表中返回最小集合，使得没有路径是另一个路径的前缀。
+    同时，过滤掉以 '/_products' 结尾的路径（视为中间文件夹）。
+    """
+    # 第一步：过滤掉以 '/_products' 结尾的路径
+    filtered = [p for p in paths if not p.endswith('/_products')]
+    # 第二步：按长度排序，短的在前
+    filtered.sort(key=len)
+    result = []
+    for p in filtered:
+        # 检查 p 是否被 result 中某个路径作为前缀
+        if not any(p.startswith(r + '/') or p == r for r in result):
+            result.append(p)
+    return result
+
+selected_products = []  # 全局变量，存储当前选中的产品列表
+
 @app.route('/submit_selected_products', methods=['POST'])
 def submit_selected_products():
     data = request.get_json()
-    selected_products = data.get('selected_products', [])
+    selected_paths = data.get('selected_products', [])
     try:
-        # 这里可以保存选中的产品到session或文件等
-        # 这里只返回数量
-        return jsonify({'success': True, 'count': len(selected_products)})
+        global selected_products
+        selected_products = []
+        selected_paths = get_minimal_paths(selected_paths)
+        for path in selected_paths:
+            parts = path.split('/')
+            node = find_node_by_path(tree, parts)
+            if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
+                selected_products.extend(node['$OBJECTS$'])
+            else:
+                selected_products.append(node)
+        selected_products = sorted(list(set(selected_products)))
+        return jsonify({
+            'success': True, 
+            'count': len(selected_products), 
+            'count_paths': len(selected_paths), 
+            'selected_products': [str(p) for p in selected_products], 
+            'selected_paths': selected_paths
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1077,7 +1123,7 @@ def get_category_filter_module_html():
             .then(data => {
                 var status = document.getElementById('submit_status');
                 if (data.success) {
-                    status.innerText = '✓ 已提交，选中产品数量: ' + data.count;
+                    status.innerText = '✓ 已提交，选中产品数量: ' + data.count + ', 实际路径数量: ' + data.count_paths;
                 } else {
                     status.innerText = '提交失败: ' + (data.error || '未知错误');
                 }
