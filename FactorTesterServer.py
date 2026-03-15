@@ -1529,10 +1529,78 @@ def get_ic_test_module_html(factor_family_alias):
             <!-- 选项卡和面板将由 JavaScript 动态生成 -->
         </div>
     </div>
+
+    <style>
+        .ic-card {{
+            margin-top: 14px;
+            border: 1px solid #e8edf3;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+            padding: 12px;
+        }}
+        .ic-status {{
+            margin-left: 12px;
+            font-size: 13px;
+        }}
+        .ic-table-wrap {{
+            margin-top: 12px;
+            border: 1px solid #e8edf3;
+            border-radius: 10px;
+            overflow: auto;
+            max-height: 420px;
+            background: #fff;
+        }}
+        .ic-table {{
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
+            color: #1f2937;
+        }}
+        .ic-table thead th {{
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f7fbff;
+            color: #0f4c81;
+            font-weight: 600;
+            border-bottom: 1px solid #dbe7f3;
+            padding: 10px 12px;
+            white-space: nowrap;
+        }}
+        .ic-table tbody td {{
+            border-bottom: 1px solid #eef2f7;
+            padding: 8px 12px;
+            white-space: nowrap;
+        }}
+        .ic-table tbody tr:nth-child(even) {{
+            background: #fcfdff;
+        }}
+        .ic-table tbody tr:hover {{
+            background: #eef7ff;
+        }}
+        .ic-table .idx-col {{
+            position: sticky;
+            left: 0;
+            background: inherit;
+            z-index: 1;
+            font-weight: 600;
+            color: #334155;
+        }}
+        .ic-empty {{
+            margin-top: 12px;
+            color: #888;
+            padding: 10px;
+            border: 1px dashed #d3dbe6;
+            border-radius: 8px;
+            background: #fafcff;
+        }}
+    </style>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highstock.min.js"></script>
     <script>
     (function() {{
-        // 检查 Bootstrap CSS 是否已加载
         function isBootstrapCSSLoaded() {{
             var links = document.querySelectorAll('link[rel="stylesheet"]');
             for (var i = 0; i < links.length; i++) {{
@@ -1540,25 +1608,50 @@ def get_ic_test_module_html(factor_family_alias):
             }}
             return false;
         }}
-        // 检查 Bootstrap JS 是否已加载（通过检查全局 bootstrap 对象）
         function isBootstrapJSLoaded() {{
             return typeof window.bootstrap !== 'undefined';
         }}
-        // 如果未加载 CSS，则动态添加
         if (!isBootstrapCSSLoaded()) {{
             var link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css';
             document.head.appendChild(link);
         }}
-        // 如果未加载 JS，则动态添加（注意：JS 依赖 jQuery，需确保顺序）
         if (!isBootstrapJSLoaded()) {{
             var script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js';
             document.body.appendChild(script);
         }}
     }})();
-    // 根据 submissions 渲染 IC 测试选项卡
+
+    function fmtCell(v) {{
+        if (v === null || v === undefined || v === '') return '—';
+        if (typeof v === 'number') return Number.isInteger(v) ? v : v.toFixed(6);
+        return String(v);
+    }}
+
+    function buildPrettyTable(data) {{
+        if (!data || !data.columns || !data.rows || !data.columns.length) {{
+            return '<div class="ic-empty">无可展示结果</div>';
+        }}
+        var html = '<div class="ic-table-wrap"><table class="ic-table"><thead><tr>';
+        data.columns.forEach(function(col, i) {{
+            html += '<th class="' + (i === 0 ? 'idx-col' : '') + '">' + col + '</th>';
+        }});
+        html += '</tr></thead><tbody>';
+
+        data.rows.forEach(function(row) {{
+            html += '<tr>';
+            data.columns.forEach(function(col, i) {{
+                html += '<td class="' + (i === 0 ? 'idx-col' : '') + '">' + fmtCell(row[col]) + '</td>';
+            }});
+            html += '</tr>';
+        }});
+
+        html += '</tbody></table></div>';
+        return html;
+    }}
+
     window.renderICTabs = function(submissions) {{
         var container = document.getElementById('ic-tab-container');
         if (!container) return;
@@ -1566,39 +1659,43 @@ def get_ic_test_module_html(factor_family_alias):
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">暂无测试器，请先添加测试器。</div>';
             return;
         }}
+
         var tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         var panelsHtml = '<div class="tab-content" id="icTabContent">';
+
         submissions.forEach(function(sub, idx) {{
             var activeClass = idx === 0 ? 'active' : '';
             var showClass = idx === 0 ? 'show active' : '';
             var tabId = 'ic-tab-' + sub.id;
             var panelId = 'ic-panel-' + sub.id;
+
             tabsHtml += `
                 <li class="nav-item" role="presentation">
                     <button style="font-size:12px;" class="nav-link ${{activeClass}}" id="${{tabId}}" data-bs-toggle="tab" data-bs-target="#${{panelId}}" type="button" role="tab" aria-controls="${{panelId}}" aria-selected="${{idx === 0}}">
-                        ${{sub.factor_tester_serial || '测试器' + (idx+1)}}
+                        ${{sub.factor_tester_serial || ('测试器' + (idx + 1))}}
                     </button>
                 </li>
             `;
+
             panelsHtml += `
                 <div class="tab-pane fade ${{showClass}}" id="${{panelId}}" role="tabpanel" aria-labelledby="${{tabId}}">
-                    <div style="margin-top:16px;">
-                        <button class="btn btn-primary" id="run-ic-btn-${{sub.id}}" onclick="runIC('${{sub.id}}')">运行IC测试</button>
-                        <span id="ic-status-${{sub.id}}" style="margin-left:12px;color:#0078d4;"></span>
+                    <div class="ic-card">
+                        <button class="btn btn-primary btn-sm" id="run-ic-btn-${{sub.id}}" onclick="runIC('${{sub.id}}')">运行IC测试</button>
+                        <span id="ic-status-${{sub.id}}" class="ic-status" style="color:#0078d4;"></span>
+                        <div id="ic-result-${{sub.id}}"></div>
+                        <div id="chart-container-${{sub.id}}" style="width:100%; height:460px; margin-top:14px;"></div>
                     </div>
-                    <div id="ic-result-${{sub.id}}" style="margin-top:16px;"></div>
                 </div>
-                <div id="chart-container-${{sub.id}}" style="width:100%; height:500px;"></div>
             `;
         }});
+
         tabsHtml += '</ul>';
         panelsHtml += '</div>';
         container.innerHTML = tabsHtml + panelsHtml;
 
-        // 重新初始化 Bootstrap 选项卡（如果使用了 Bootstrap）
         if (typeof bootstrap !== 'undefined') {{
-            var triggerTabList = [].slice.call(document.querySelectorAll('#icTab button[data-bs-toggle="tab"]'))
-            triggerTabList.forEach(function (triggerEl) {{
+            var triggerTabList = [].slice.call(document.querySelectorAll('#icTab button[data-bs-toggle="tab"]'));
+            triggerTabList.forEach(function(triggerEl) {{
                 var tabTrigger = new bootstrap.Tab(triggerEl);
                 triggerEl.addEventListener('click', function(event) {{
                     event.preventDefault();
@@ -1608,21 +1705,23 @@ def get_ic_test_module_html(factor_family_alias):
         }}
     }};
 
-    // 运行 IC 测试的函数
     window.runIC = function(subId) {{
         var btn = document.getElementById('run-ic-btn-' + subId);
         var status = document.getElementById('ic-status-' + subId);
         var resultDiv = document.getElementById('ic-result-' + subId);
+        if (!btn || !status || !resultDiv) return;
+
         btn.disabled = true;
         status.innerText = 'IC测试运行中...';
         resultDiv.innerHTML = '';
-        // 查找对应的 submission
+
         var submission = submissions.find(s => s.id == subId);
         if (!submission) {{
             status.innerText = '错误：未找到提交';
             btn.disabled = false;
             return;
         }}
+
         fetch('/run_ic_test', {{
             method: 'POST',
             headers: {{'Content-Type': 'application/json'}},
@@ -1635,82 +1734,51 @@ def get_ic_test_module_html(factor_family_alias):
         .then(r => r.json())
         .then(data => {{
             btn.disabled = false;
-            if(data.success) {{
-                status.innerText = '✓ IC测试完成' + (data.paths_hash ? (' (产品路径哈希: ' + data.paths_hash + ')') : '');
-                // 显示表格
-                var table = '<table class="table table-bordered table-sm"><thead><tr>';
-                for(var col of data.columns) table += '<th>' + col + '</th>';
-                table += '</tr></thead><tbody>';
-                for(var row of data.rows) {{
-                    table += '<tr>';
-                    for(var col of data.columns) table += '<td>' + row[col] + '</td>';
-                    table += '</tr>';
-                }}
-                table += '</tbody></table>';
-                resultDiv.innerHTML = table;
-                
-                // 将数据转换为 Highcharts 所需的 [时间戳, 值] 格式
-                const seriesData = data.ic_series_dates.map((date, index) => [
-                    new Date(date).getTime(), // 转换为时间戳
-                    data.ic_series_values[index]
-                ]);
-
-                // 获取该 submission 的图表容器
-                var chartContainer = document.getElementById('chart-container-' + subId);
-                if (!chartContainer) {{
-                    console.error('图表容器不存在');
-                    return;
-                }}
-
-                // 确保 Highcharts 已加载
-                if (typeof Highcharts === 'undefined') {{
-                    status.innerText = '错误：Highcharts 库未加载';
-                    btn.disabled = false;
-                    return;
-                }}
-
-                // 初始化图表
-                Highcharts.stockChart(chartContainer, {{ // 使用 stockChart 以获得导航器
-                    rangeSelector: {{
-                        selected: 1 // 默认选择范围，如 1个月
-                    }},
-                    title: {{ text: 'IC 序列' }},
-                    xAxis: {{
-                        type: 'datetime',
-                        crosshair: {{ // 开启十字准线 [citation:6]
-                            width: 1,
-                            color: '#0078d4',
-                            dashStyle: 'dash'
-                        }}
-                    }},
-                    yAxis: {{
-                        title: {{ text: 'IC 值' }},
-                        crosshair: {{ // 开启 Y 轴十字线
-                            width: 1,
-                            color: '#0078d4',
-                            dashStyle: 'dash'
-                        }}
-                    }},
-                    tooltip: {{
-                        shared: true, // 共享工具提示，显示当前点的日期和值
-                        valueDecimals: 4 // 数值保留小数位数
-                    }},
-                    series: [{{
-                        name: 'IC',
-                        data: seriesData,
-                        tooltip: {{ valueDecimals: 4 }}
-                    }}],
-                    navigator: {{ enabled: true }}, // 启用导航器用于缩放
-                    scrollbar: {{ enabled: true }}   // 启用滚动条
-                }});
-
-            }} else {{
+            if (!data.success) {{
                 status.innerText = '✗ IC测试失败: ' + data.error;
+                status.style.color = '#d40000';
+                return;
             }}
+
+            status.innerText = '✓ IC测试完成' + (data.paths_hash ? (' (路径哈希: ' + data.paths_hash + ')') : '');
+            status.style.color = '#28a745';
+            resultDiv.innerHTML = buildPrettyTable(data);
+
+            var chartContainer = document.getElementById('chart-container-' + subId);
+            if (!chartContainer) return;
+            if (typeof Highcharts === 'undefined') {{
+                status.innerText = '错误：Highcharts 未加载';
+                status.style.color = '#d40000';
+                return;
+            }}
+
+            var dates = data.ic_series_dates || [];
+            var values = data.ic_series_values || [];
+            var seriesData = dates.map(function(date, index) {{
+                return [new Date(date).getTime(), values[index]];
+            }});
+
+            Highcharts.stockChart(chartContainer, {{
+                rangeSelector: {{ selected: 1 }},
+                title: {{ text: 'IC 序列' }},
+                xAxis: {{
+                    type: 'datetime',
+                    crosshair: {{ width: 1, color: '#0078d4', dashStyle: 'dash' }}
+                }},
+                yAxis: {{
+                    title: {{ text: 'IC 值' }},
+                    crosshair: {{ width: 1, color: '#0078d4', dashStyle: 'dash' }}
+                }},
+                tooltip: {{ shared: true, valueDecimals: 4 }},
+                series: [{{ name: 'IC', data: seriesData, tooltip: {{ valueDecimals: 4 }} }}],
+                navigator: {{ enabled: true }},
+                scrollbar: {{ enabled: true }}
+            }});
         }})
         .catch(err => {{
             btn.disabled = false;
             status.innerText = '前端错误: ' + err.message;
+            status.style.color = '#d40000';
         }});
     }};
     </script>
