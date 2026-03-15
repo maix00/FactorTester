@@ -1033,8 +1033,6 @@ def get_minimal_paths(paths):
             result.append(p)
     return result
 
-selected_products = []  # 全局变量，存储当前选中的产品列表
-
 @app.route('/submit_selected_products', methods=['POST'])
 def submit_selected_products():
     data = request.get_json()
@@ -1042,7 +1040,7 @@ def submit_selected_products():
     id_time = data.get('id_time', None)  # 可选的时间戳参数，用于记录提交时间
     id_time = str(id_time) if id_time is not None else None
     try:
-        global selected_products, factor_testers
+        global factor_testers
         selected_products = []
         selected_paths = get_minimal_paths(selected_paths)
         for path in selected_paths:
@@ -1090,6 +1088,30 @@ def delete_submission():
         len_before = len(factor_testers)
         factor_testers = [tester for tester in factor_testers if tester.alias != str(id_time)]
         assert len(factor_testers) == len_before - 1, "No submission deleted"
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/delete_path_of_submission', methods=['POST'])
+def delete_path_of_submission():
+    data = request.get_json()
+    id_time = data.get('id_time', None)
+    new_paths = data.get('new_paths', None)
+    try:
+        global factor_testers
+        tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
+        assert tester is not None, "Submission not found"
+        selected_products = []
+        selected_paths = get_minimal_paths(new_paths)
+        for path in selected_paths:
+            parts = path.split('/')
+            node = find_node_by_path(tree, parts)
+            if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
+                selected_products.extend(node['$OBJECTS$'])
+            else:
+                selected_products.append(node)
+        selected_products = sorted(list(set(selected_products)))
+        tester.products = selected_products
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -1330,15 +1352,57 @@ def get_category_filter_module_html():
 
             // 绑定删除路径按钮
             $('.delete-path').click(function() {
-                var subIndex = $(this).data('sub-index');
-                var pathIndex = $(this).data('path-index');
-                submissions[subIndex].paths.splice(pathIndex, 1);
-                // 如果该提交没有路径了，删除整个提交
-                if (submissions[subIndex].paths.length === 0) {
-                    submissions.splice(subIndex, 1);
-                }
-                // 清理展开状态（可简化：重新渲染会丢失展开，但这里重新渲染）
-                renderHistory();  // 重新渲染
+                fetch('/delete_path_of_submission', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        id_time: submissions[$(this).data('sub-index')].id,
+                        new_paths: submissions[$(this).data('sub-index')].paths.filter((_, idx) => idx !== $(this).data('path-index'))
+                    })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    var statusElem = document.getElementById('submission_change_status');
+                    if (data.success) {
+                        statusElem.innerText = '✓ 路径已删除';
+                        statusElem.style.color = '#28a745';
+                        // 本地更新提交记录
+                        var subIndex = $(this).data('sub-index');
+                        var pathIndex = $(this).data('path-index');
+                        submissions[subIndex].paths.splice(pathIndex, 1);
+                        setTimeout(function() {
+                            statusElem.innerText = '';
+                        }, 3000);
+                        // 如果该提交没有路径了，删除整个提交
+                        if (submissions[subIndex].paths.length === 0) {
+                            fetch('/delete_submission', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ id_time: submissions[subIndex].id })
+                            })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.success) {
+                                    statusElem.innerText = '✓ 路径和提交已删除';
+                                    statusElem.style.color = '#28a745';
+                                    submissions.splice(subIndex, 1);
+                                    setTimeout(function() {
+                                        statusElem.innerText = '';
+                                    }, 5000);
+                                    renderHistory();  // 重新渲染
+                                } else {
+                                    statusElem.innerText = '✗ 路径已删除，但提交删除失败: ' + data.error;
+                                    statusElem.style.color = '#d40000';
+                                }
+                            });
+                        }
+                        // 清理展开状态（可简化：重新渲染会丢失展开，但这里重新渲染）
+                        renderHistory();  // 重新渲染
+                    } else {
+                        statusElem.innerText = '✗ 删除路径失败: ' + data.error;
+                        statusElem.style.color = '#d40000';
+                    }
+                });
             });
 
             // 绑定删除整个提交按钮
