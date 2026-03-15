@@ -892,6 +892,8 @@ def convert_to_fancytree(tree_dict):
                     "checkbox": False,   # 产品文件夹本身不可勾选
                 }
                 node["children"].insert(0, product_folder)
+            else:
+                node['checkbox'] = False
         elif has_objects:
             # 没有子分类但有产品：节点本身懒加载产品
             node["folder"] = True
