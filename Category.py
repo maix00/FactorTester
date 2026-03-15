@@ -20,7 +20,6 @@ class CategoryTree:
 
 class Category(FinRangeParam):
     _instances = WeakValueDictionary()
-    _instance_count_dict: Dict[str, int] = {}
     _override_family_root = True
 
     def __new__(cls, alias: str, *args, **kwargs):

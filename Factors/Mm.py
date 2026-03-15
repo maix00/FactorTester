@@ -67,12 +67,12 @@ class Mm(FactorFamily): # Day Momentum
 
 if __name__ == '__main__':
     ff = Mm()
-    ff.add_params(F = '2d')
-    ff.add_params(F = 'S')
-    ff.add_params(F = '2min')
-    ff.add_params(F = '5min')
-    ff.add_params(F = '10min')
-    ff.add_params(F = '15min')
+    # ff.add_params(F = '2d')
+    # ff.add_params(F = 'S')
+    # ff.add_params(F = '2min')
+    # ff.add_params(F = '5min')
+    # ff.add_params(F = '10min')
+    # ff.add_params(F = '15min')
     fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'), categories=['0'])
     print(fft.products)
     # fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))

@@ -6,8 +6,6 @@ from Products import DataColumn
 from typing import TYPE_CHECKING
 
 class Parameter(SerialObject):
-    _serial_map = {}
-
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
         type_alias = kwargs.pop('type_alias', 'P')
         return super().__new__(cls, type_alias=type_alias, alias=alias, **kwargs)

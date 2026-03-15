@@ -79,8 +79,9 @@ class UniqueObject(ABC):
 class SerialObject(UniqueObject):
     _single_use_count = -1
     _instance_count_dict: Dict[str, int] = {}
-    _serial_map: Dict[int, 'SerialObject'] = {}
+    _serial_map_dict: Dict[str, Dict[int, 'SerialObject']] = {}
     _type_alias_owners: Dict[str, type] = {}
+    _type_alias: str = 'SO'
 
     @classmethod
     def _get_family_root(cls):
@@ -101,9 +102,11 @@ class SerialObject(UniqueObject):
                 raise ValueError(f"type_alias '{type_alias}' is already used by {owner.__name__} family")
         else:
             cls._type_alias_owners[type_alias] = cls._get_family_root()
+        
+        cls._type_alias = type_alias
 
-        if search:
-            for instance in cls._serial_map.values():
+        if search and type_alias in cls._serial_map_dict:
+            for instance in cls._serial_map_dict[type_alias].values():
                 if instance.alias == alias and instance.__class__ is cls:
                     assert isinstance(instance, cls)
                     return instance
@@ -132,19 +135,23 @@ class SerialObject(UniqueObject):
             name = name if alias is None else f"{name}:{alias}"
             super().__init__(name=name)
             if not single_use:
-                self._set_serial_map(self.serial_number, self)
+                self._set_serial_map_dict(type_alias, self.serial_number, self)
 
     @classmethod
-    def _set_serial_map(cls, serial_number: int, instance: 'SerialObject'):
-        cls._serial_map[serial_number] = instance
+    def _set_serial_map_dict(cls, type_alias: str, serial_number: int, instance: 'SerialObject'):
+        if type_alias not in cls._serial_map_dict:
+            cls._serial_map_dict[type_alias] = {}
+        cls._serial_map_dict[type_alias][serial_number] = instance
     
     @classmethod
-    def _get_by_serial(cls, serial_number: int) -> Optional['SerialObject']:
-        return cls._serial_map.get(serial_number)
+    def _get_by_serial(cls, type_alias: str, serial_number: int) -> Optional['SerialObject']:
+        if type_alias in cls._serial_map_dict and serial_number in cls._serial_map_dict[type_alias]:
+            return cls._serial_map_dict[type_alias][serial_number]
+        return None
     
     def __class_getitem__(cls, key):
         if isinstance(key, int):
-            item = cls._get_by_serial(key)
+            item = cls._get_by_serial(cls._type_alias, key)
             if item is not None:
                 assert isinstance(item, cls)
                 return item

@@ -58,7 +58,6 @@ FactorFreqParam = get_factor_freq_param(alias='F')
 
 class Factor(SerialObject):
     _instance_count: int = -1
-    _serial_map = {}
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         instance = super().__new__(cls, type_alias='F', alias=alias, search=True)
@@ -419,7 +418,13 @@ class FactorFamily(SerialObject):
 
         return tester
 
-class FactorTester:
+class FactorTester(SerialObject):
+    _instances = WeakValueDictionary()
+
+    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
+        alias=alias if alias else cls.__name__
+        return super().__new__(cls, type_alias='FT', alias=alias)
+    
     def __init__(self, products: Sequence[Product],
                  time_range: Optional[Tuple] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
