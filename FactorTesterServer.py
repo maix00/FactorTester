@@ -740,7 +740,15 @@ def get_time_range_module_html(factor_family_alias):
                 .then(response => response.json())
                 .then(data => {{
                     if (data.success) {{
-                        document.getElementById('confirm_time_status').innerText = '✓ 已保存，各因子起始计算时间已更新为唯一值: ' + data.start_calc_param_val;
+                        var statusSpan = document.getElementById('confirm_time_status');
+                        if (data.change_factor_tester) {{
+                            statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val + '，正在更新因子测试中...';
+                            setTimeout(function() {{
+                                statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val + '，因子测试已更新';
+                            }}, 2000);
+                        }} else {{
+                            statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val;
+                        }}
                     if (data.show_next) {{
                         openModule('category_filter_module');
                     }}
@@ -825,10 +833,21 @@ def set_time_range():
         assert len(start_calc_param_val) == 1
         start_calc_param_val = f"{StartCalcParam.name} = {start_calc_param_val[0]}"
 
+        if factor_testers:
+            from Factor import FactorTester
+            for tester in factor_testers:
+                assert isinstance(tester, FactorTester)
+                tester.update_time_range((f"{start_date} {start_time}", f"{end_date} {end_time}"))
+
         # 可以根据是否是交易日等设置调整默认的时间范围
         show_next = (start_date <= end_date)
 
-        return jsonify({'success': True, 'show_next': show_next, 'start_calc_param_val': start_calc_param_val})
+        return jsonify({
+            'success': True, 
+            'show_next': show_next, 
+            'start_calc_param_val': start_calc_param_val, 
+            'change_factor_tester': bool(factor_testers)
+            })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

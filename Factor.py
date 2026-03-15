@@ -457,10 +457,18 @@ class FactorTester(SerialObject):
             self.all_products = set(products)
             self.sift_product_by_empty_data_bool = False
             self.factors = []
-            self.start_date = pd.to_datetime(time_range[0]) if time_range is not None else None
-            self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
+            if time_range is not None:
+                self.update_time_range(time_range)
+            else:
+                self.start_date = None
+                self.end_date = None
             self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
+    def update_time_range(self, time_range: Tuple):
+        self.start_date = pd.to_datetime(time_range[0])
+        self.end_date = pd.to_datetime(time_range[1])
+        self.logger.info(f"Time range updated to {self.start_date} - {self.end_date}")
+
     def sift_product(self, sift_func: Callable[[Product], bool]):
         new_products = set()
         for product in self.products:
