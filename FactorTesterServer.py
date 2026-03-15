@@ -493,7 +493,7 @@ def get_time_range_module_html(factor_family_alias):
             <span style="font-size:13px;">当前设置：</span>
             <span id="current_settings" style="font-size:13px;"></span>
         </div>
-        <div style="margin-top:-15px; display: flex; align-items: baseline;">
+        <div style="margin-top:8px; display: flex; align-items: baseline;">
             <button id="confirm_time_btn" type="button" style="background:#0078d4; color:#fff; border:none; border-radius:4px; padding:6px 18px; font-size:14px;" disabled>确定</button>
             <span id="confirm_time_status" style="margin-left:12px; color:#0078d4; font-size:13px;"></span>
         </div>
@@ -1059,6 +1059,7 @@ def submit_selected_products():
     id_time = data.get('id_time', None)  # 可选的时间戳参数，用于记录提交时间
     id_time = str(id_time) if id_time is not None else None
     try:
+        assert selected_paths, "未选择任何产品路径"
         global factor_testers
         selected_products = []
         selected_paths = get_minimal_paths(selected_paths)
@@ -1080,6 +1081,7 @@ def submit_selected_products():
             'selected_products': [str(p) for p in selected_products], 
             'selected_paths': selected_paths,
             'factor_tester_name': factor_tester.name,
+            'factor_tester_serial': 'FT@' + str(factor_tester.serial_number)
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -1170,9 +1172,12 @@ def get_category_filter_module_html():
             <!-- 右侧历史提交记录 -->
             <div style="width: 400px; border-left: 1px solid #ddd; padding-left: 16px;">
                 <div style="font-size:14px; font-weight:bold; margin-bottom:10px;">已提交的路径列表</div>
-                <div style="margin-bottom:8px; color:#888; font-size:12px;">拖动提交记录可调整顺序</div>
+                <div style="display: flex; align-items: baseline; margin-bottom: 8px; font-size:12px;">
+                    <div style="color:#888;">拖动提交记录可调整顺序</div>
+                    &nbsp;&nbsp;
+                    <div id="submission_change_status"></div>
+                </div>
                 <div id="submission-history" style="max-height: 600px; overflow-y: auto;"></div>
-                <div id="submission_change_status" style="margin-top: 4px; color:#888; font-size:12px;"></div>
             </div>
         </div>
     </div>
@@ -1289,8 +1294,12 @@ def get_category_filter_module_html():
                 var msg;
                 if (data.success) {
                     msg = '✓ 已提交，产品数量: ' + data.count + ', 路径数量: ' + data.count_paths;
+                    status1.style.color = '#28a745';
+                    status2.style.color = '#28a745';
                 } else {
                     msg = '提交失败: ' + (data.error || '未知错误');
+                    status1.style.color = '#d40000';
+                    status2.style.color = '#d40000';
                 }
                 if (status1) status1.innerText = msg;
                 if (status2) status2.innerText = msg;
@@ -1301,6 +1310,7 @@ def get_category_filter_module_html():
                         id: id_time,  // 简单唯一ID
                         paths: data.selected_paths.slice(),  // 深拷贝
                         factor_tester_name: data.factor_tester_name,
+                        factor_tester_serial: data.factor_tester_serial,
                         timestamp: timeStr,
                     };
                     submissions.push(newSubmission);
@@ -1541,8 +1551,8 @@ def get_ic_test_module_html():
             var panelId = 'ic-panel-' + sub.id;
             tabsHtml += `
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab" aria-controls="${panelId}" aria-selected="${idx === 0}">
-                        ${sub.factor_tester_name || '测试器' + (idx+1)}
+                    <button style="font-size:12px;" class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab" aria-controls="${panelId}" aria-selected="${idx === 0}">
+                        ${sub.factor_tester_serial || '测试器' + (idx+1)}
                     </button>
                 </li>
             `;
