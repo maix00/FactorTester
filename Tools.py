@@ -19,7 +19,7 @@ class UniqueObject(ABC):
         cls._instances[key] = instance
         return instance
     
-    def __init__(self, name: str):
+    def __init__(self, name: str, *args, **kwargs):
         # Only initialize if this is a new instance (not already initialized)
         if not hasattr(self, '_initialized'):
             self.name = name
@@ -137,6 +137,9 @@ class SerialObject(UniqueObject):
             if not single_use:
                 self._set_serial_map_dict(type_alias, self.serial_number, self)
 
+    def __reduce__(self):
+        return (self.__class__, (self.alias,))
+    
     @classmethod
     def _set_serial_map_dict(cls, type_alias: str, serial_number: int, instance: 'SerialObject'):
         if type_alias not in cls._serial_map_dict:

@@ -63,8 +63,8 @@ class Factor(SerialObject):
         instance = super().__new__(cls, type_alias='F', alias=alias, search=True)
         return instance
     
-    def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame], 
-                 family: Optional[FactorFamily], param_vals: Optional[Dict[Parameter, Any]] = None):
+    def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame] = lambda _: pd.DataFrame(), 
+                 family: Optional[FactorFamily] = None, param_vals: Optional[Dict[Parameter, Any]] = None):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='F', alias=alias)
             self.func = func
@@ -180,15 +180,22 @@ class Factor(SerialObject):
         if isinstance(products, Product):
             products = [products]
         products = list(products)
+        if not products:
+            return pd.DataFrame()
         if self.family is not None:
             start_calc_time = self.get_current_start_calc_time()
             self.family.set_current_start_calc_time(start_calc_time)
-        self.table = self.func(products).reset_index()
+        self.table = self.func(products)
+        if self.table.empty:
+            return pd.DataFrame()
+        self.table = self.table.reset_index()
         self._set_time_index()
         for col in self.table.columns:
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
         self._set_products()
+        if self.table.empty:
+            return pd.DataFrame()
         self.freq_type, self.freq = self._calc_freq()
         return self.table
     
@@ -196,6 +203,9 @@ class Factor(SerialObject):
                      price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
         returns = {}
         return_freq = self.get_current_return_freq()
+        if self.freq is None:
+            self._set_products()
+            self.freq_type, self.freq = self._calc_freq()
         changeable_return_freq = return_freq is None and self.freq is None
         return_freq = return_freq or self.freq
         if not changeable_return_freq:
@@ -520,7 +530,7 @@ class FactorTester(SerialObject):
             factors = [factors]
         self.factors = factors
         self.sift_product_by_empty_data()
-        for factor in tqdm(factors, desc='Calculate for factors'):
+        for factor in tqdm(self.factors, desc=f'Calculate factors for {len(self.products)} products'):
             factor.calc(self.products)
     
     def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:

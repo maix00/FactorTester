@@ -1627,6 +1627,7 @@ def get_ic_test_module_html(factor_family_alias):
             body: JSON.stringify({{
                 submission_id: subId,
                 factor_family_alias: '{factor_family_alias}',
+                paths: submission.paths,
             }})
         }})
         .then(r => r.json())
@@ -1659,31 +1660,106 @@ def get_ic_test_module_html(factor_family_alias):
 
 @app.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
+    import pickle
+    import hashlib
+    from pathlib import Path
+
     data = request.get_json()
     submission_id = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
+    paths = data.get('paths', [])
+    return_freq = data.get('return_freq', 'N')
+    start_calc_time = data.get('start_calc_time', f"{default_test_start_date} {default_day_start_time}")
+    re_calc = data.get('re_calc', False)
     try:
-        # 在服务器端找到对应的 FactorTester 实例
+
+        import pandas as pd
+
         global factor_testers
         tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         assert tester is not None, "未找到对应的测试器实例"
         from Factor import FactorTester
         assert isinstance(tester, FactorTester), "找到的实例类型不正确"
-        # 这里调用测试器的 calc_ic 方法，假设它返回一个 DataFrame 或类似结构
         factor_family = get_factor_family_instance(factor_family_alias)
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
         factors = factor_family.get_factors()  # 获取因子列表
-        tester.calc_factor(factors=factors)  # 确保测试器已经计算了因子值
-        ic_series, ic_stats = tester.calc_ic(factors=factors)  # 需要在 FactorTester 中实现这个方法
-        # 将结果转换为前端表格需要的格式
-        ic_stats.rename(columns=lambda x: str(x), inplace=True)  # 确保列名是字符串
-        columns = ic_stats.columns.tolist()  # 列名列表
-        rows = ic_stats.to_dict(orient='records')  # 每行作为一个字典的列表
-        indices = ic_stats.index.tolist()  # 获取索引列表
+
+        cache_dir_ic = Path("../data/factor_tester_ic_cache")
+        cache_dir_factor = Path("../data/factor_tester_factor_cache")
+        cache_dir_ic.mkdir(parents=True, exist_ok=True)
+        cache_dir_factor.mkdir(parents=True, exist_ok=True)
+
+        sorted_paths = sorted(paths)
+        paths_hash = hashlib.md5(str(sorted_paths).encode()).hexdigest()
+        start_calc_time_str = start_calc_time.replace(':', '-').replace(' ', '_') if start_calc_time else 'latest'
+
+        start_date_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
+        end_date_str = str(tester.end_date).replace(':', '-').replace(' ', '_')
+        original_products = tester.products
+
+        for factor in factors:
+
+            re_calc = False
+            re_calc_ic = False
+            tester.products = original_products
+
+            factor_series_cache_file = cache_dir_factor / f"{factor.alias}_{start_calc_time_str}.pkl"
+            factor_ic_cache_file = cache_dir_ic / f"{factor.alias}_{return_freq}_{paths_hash}_{start_date_str}_{end_date_str}.pkl"
+            
+            if not re_calc and factor_series_cache_file.exists():
+                with open(factor_series_cache_file, "rb") as f:
+                    factor.table, start_calc_time_cache = pickle.load(f)
+                if start_calc_time != start_calc_time_cache:
+                    re_calc = True
+                else:
+                    products = []
+                    for product in tester.products:
+                        if product not in factor.table.columns:
+                            products.append(product)
+                    if products:
+                        re_calc = True
+                        tester.products = set(products)
+            else:
+                re_calc = True
+            if re_calc:
+                original_table = factor.table.copy()
+                tester.calc_factor(factors=factor)
+                if factor.table is None or factor.table.empty or len(original_table.columns) == len(factor.table.columns):
+                    re_calc = False
+                    factor.table = original_table
+                else:
+                    factor.table = pd.concat([original_table, factor.table], axis=1) if original_table is not None else factor.table
+                if re_calc:
+                    with open(factor_series_cache_file, "wb") as f:
+                        pickle.dump((factor.table, start_calc_time), f)
+
+            tester.products = original_products
+            if not re_calc_ic and factor_ic_cache_file.exists():
+                with open(factor_ic_cache_file, "rb") as f:
+                    _, factor.ic_series, factor.ic_stats, products_cache, return_freq_cache, start_date_cache, end_date_cache = pickle.load(f)
+                if products_cache != tester.products or return_freq_cache != return_freq \
+                    or start_date_cache != tester.start_date or end_date_cache != tester.end_date:
+                    re_calc_ic = True
+            else:
+                re_calc_ic = True
+            if re_calc_ic:
+                factor.returns = pd.DataFrame()
+                ic_series_df, ic_stats_df = tester.calc_ic(factors=factor)
+                factor.ic_series = ic_series_df.iloc[:, 0]
+                factor.ic_stats = ic_stats_df.iloc[:, 0]
+                with open(factor_ic_cache_file, "wb") as f:
+                    pickle.dump((factor, factor.ic_series, factor.ic_stats, tester.products, return_freq, tester.start_date, tester.end_date), f)
+        
+        ic_stats = pd.concat([factor.ic_stats for factor in factors], axis=1)
+        ic_stats.rename(columns=lambda x: str(x), inplace=True)
+        columns = ic_stats.columns.tolist()
+        rows = ic_stats.to_dict(orient='records')
+        indices = ic_stats.index.tolist()
         for i, row in enumerate(rows):
-            row['index'] = indices[i]  # 将索引添加到每行数据中，列名为 'index'
-        columns = ['index'] + columns  # 将 'index' 列添加到列名列表的开头
-        return jsonify({'success': True, 'columns': columns, 'rows': rows})
+            row['index'] = indices[i]
+        columns = ['index'] + columns
+
+        return jsonify({'success': True, 'columns': columns, 'rows': rows,})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
