@@ -1636,7 +1636,7 @@ def get_ic_test_module_html(factor_family_alias):
         .then(data => {{
             btn.disabled = false;
             if(data.success) {{
-                status.innerText = '✓ IC测试完成';
+                status.innerText = '✓ IC测试完成' + (data.paths_hash ? (' (产品路径哈希: ' + data.paths_hash + ')') : '');
                 // 显示表格
                 var table = '<table class="table table-bordered table-sm"><thead><tr>';
                 for(var col of data.columns) table += '<th>' + col + '</th>';
@@ -1835,14 +1835,37 @@ def run_ic_test():
                 ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime('%Y-%m-%d').tolist()
             ic_series_values = factor.ic_series.values.tolist()
 
-        return jsonify({
-            'success': True, 
+        response = {
+            'success': True,
+            'paths_hash': paths_hash,
+            'ic_stats': {},
+            'factors': [],
             'columns': columns, 
             'rows': rows,
-            'paths_hash': paths_hash,
             'ic_series_dates': ic_series_dates,
             'ic_series_values': ic_series_values,
-        })
+        }
+        
+        from Products import Product
+        for factor in factors:
+            ic_series_dates = None
+            ic_series_values = None
+            if isinstance(factor.ic_series.index, pd.MultiIndex):
+                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d').tolist()
+            else:
+                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime('%Y-%m-%d').tolist()
+            ic_series_values = factor.ic_series.values.tolist()
+            response['factors'].append({
+                'name': factor.name,
+                'alias': factor.alias,
+                'ic_series': {
+                    'dates': ic_series_dates,
+                    'values': ic_series_values,
+                },
+                'products': [product.name for product in factor.table.columns if product in tester.products and isinstance(product, Product)] if factor.table is not None else [],
+            })
+
+        return jsonify(response)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
