@@ -1176,7 +1176,7 @@ def get_category_filter_module_html():
                     <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
                 </div>
-                <div id="tree-container" style="max-height: 600px; overflow-y: auto;"></div>
+                <div id="tree-container" style="max-height: 300px; overflow-y: auto;"></div>
                 <div style="display: flex; align-items: baseline; margin-top: 8px;">
                     <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
@@ -1190,7 +1190,7 @@ def get_category_filter_module_html():
                     &nbsp;&nbsp;
                     <div id="submission_change_status"></div>
                 </div>
-                <div id="submission-history" style="max-height: 600px; overflow-y: auto;"></div>
+                <div id="submission-history" style="max-height: 300px; overflow-y: auto;"></div>
             </div>
         </div>
     </div>
@@ -1529,6 +1529,7 @@ def get_ic_test_module_html(factor_family_alias):
             <!-- 选项卡和面板将由 JavaScript 动态生成 -->
         </div>
     </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highstock.min.js"></script>
     <script>
     (function() {{
         // 检查 Bootstrap CSS 是否已加载
@@ -1587,6 +1588,7 @@ def get_ic_test_module_html(factor_family_alias):
                     </div>
                     <div id="ic-result-${{sub.id}}" style="margin-top:16px;"></div>
                 </div>
+                <div id="chart-container-${{sub.id}}" style="width:100%; height:500px;"></div>
             `;
         }});
         tabsHtml += '</ul>';
@@ -1646,13 +1648,69 @@ def get_ic_test_module_html(factor_family_alias):
                 }}
                 table += '</tbody></table>';
                 resultDiv.innerHTML = table;
+                
+                // 将数据转换为 Highcharts 所需的 [时间戳, 值] 格式
+                const seriesData = data.ic_series_dates.map((date, index) => [
+                    new Date(date).getTime(), // 转换为时间戳
+                    data.ic_series_values[index]
+                ]);
+
+                // 获取该 submission 的图表容器
+                var chartContainer = document.getElementById('chart-container-' + subId);
+                if (!chartContainer) {{
+                    console.error('图表容器不存在');
+                    return;
+                }}
+
+                // 确保 Highcharts 已加载
+                if (typeof Highcharts === 'undefined') {{
+                    status.innerText = '错误：Highcharts 库未加载';
+                    btn.disabled = false;
+                    return;
+                }}
+
+                // 初始化图表
+                Highcharts.stockChart(chartContainer, {{ // 使用 stockChart 以获得导航器
+                    rangeSelector: {{
+                        selected: 1 // 默认选择范围，如 1个月
+                    }},
+                    title: {{ text: 'IC 序列' }},
+                    xAxis: {{
+                        type: 'datetime',
+                        crosshair: {{ // 开启十字准线 [citation:6]
+                            width: 1,
+                            color: '#0078d4',
+                            dashStyle: 'dash'
+                        }}
+                    }},
+                    yAxis: {{
+                        title: {{ text: 'IC 值' }},
+                        crosshair: {{ // 开启 Y 轴十字线
+                            width: 1,
+                            color: '#0078d4',
+                            dashStyle: 'dash'
+                        }}
+                    }},
+                    tooltip: {{
+                        shared: true, // 共享工具提示，显示当前点的日期和值
+                        valueDecimals: 4 // 数值保留小数位数
+                    }},
+                    series: [{{
+                        name: 'IC',
+                        data: seriesData,
+                        tooltip: {{ valueDecimals: 4 }}
+                    }}],
+                    navigator: {{ enabled: true }}, // 启用导航器用于缩放
+                    scrollbar: {{ enabled: true }}   // 启用滚动条
+                }});
+
             }} else {{
                 status.innerText = '✗ IC测试失败: ' + data.error;
             }}
         }})
         .catch(err => {{
             btn.disabled = false;
-            status.innerText = '网络错误';
+            status.innerText = '前端错误: ' + err.message;
         }});
     }};
     </script>
@@ -1767,7 +1825,24 @@ def run_ic_test():
             row['index'] = indices[i]
         columns = ['index'] + columns
 
-        return jsonify({'success': True, 'columns': columns, 'rows': rows,})
+        factor = factors[0]
+        ic_series_dates = None
+        ic_series_values = None
+        if factor.ic_series is not None:
+            if isinstance(factor.ic_series.index, pd.MultiIndex):
+                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d').tolist()
+            else:
+                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime('%Y-%m-%d').tolist()
+            ic_series_values = factor.ic_series.values.tolist()
+
+        return jsonify({
+            'success': True, 
+            'columns': columns, 
+            'rows': rows,
+            'paths_hash': paths_hash,
+            'ic_series_dates': ic_series_dates,
+            'ic_series_values': ic_series_values,
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
