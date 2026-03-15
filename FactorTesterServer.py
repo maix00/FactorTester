@@ -1061,8 +1061,36 @@ def submit_selected_products():
             'count': len(selected_products), 
             'count_paths': len(selected_paths), 
             'selected_products': [str(p) for p in selected_products], 
-            'selected_paths': selected_paths
+            'selected_paths': selected_paths,
+            'factor_tester_name': factor_tester.name,
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/reorder_submissions', methods=['POST'])
+def reorder_submissions():
+    data = request.get_json()
+    new_order = data.get('new_order', [])
+    try:
+        global factor_testers
+        len_factor_testers = len(factor_testers)
+        id_to_tester = {int(tester.alias): tester for tester in factor_testers}
+        factor_testers = [id_to_tester[id_time] for id_time in new_order if id_time in id_to_tester]
+        assert len(factor_testers) == len_factor_testers, "Reordered list length mismatch"
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/delete_submission', methods=['POST'])
+def delete_submission():
+    data = request.get_json()
+    id_time = data.get('id_time', None)
+    try:
+        global factor_testers
+        len_before = len(factor_testers)
+        factor_testers = [tester for tester in factor_testers if tester.alias != str(id_time)]
+        assert len(factor_testers) == len_before - 1, "No submission deleted"
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1098,7 +1126,9 @@ def get_category_filter_module_html():
             <!-- 右侧历史提交记录 -->
             <div style="width: 400px; border-left: 1px solid #ddd; padding-left: 16px;">
                 <div style="font-size:14px; font-weight:bold; margin-bottom:10px;">已提交的路径列表</div>
+                <div style="margin-bottom:8px; color:#888; font-size:12px;">拖动提交记录可调整顺序</div>
                 <div id="submission-history" style="max-height: 600px; overflow-y: auto;"></div>
+                <div id="submission_change_status" style="margin-top: 4px; color:#888; font-size:12px;"></div>
             </div>
         </div>
     </div>
@@ -1149,16 +1179,38 @@ def get_category_filter_module_html():
             animation: 150,
             handle: '.submission-header',  // 通过头部拖动
             onEnd: function(evt) {
-                // 拖动结束后，重新排序 submissions 数组
-                var oldIndex = evt.oldIndex;
-                var newIndex = evt.newIndex;
-                if (oldIndex !== newIndex) {
-                    // 移动数组元素
-                    var movedItem = submissions.splice(oldIndex, 1)[0];
-                    submissions.splice(newIndex, 0, movedItem);
-                    // 重新渲染右侧历史
-                    renderHistory();
-                }
+                fetch('/reorder_submissions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ new_order: submissions.map(sub => sub.id) })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    var statusElem = document.getElementById('submission_change_status');
+                    if (data.success) {
+                        statusElem.innerText = '✓ 顺序已更新';
+                        statusElem.style.color = '#28a745';
+
+                        // 拖动结束后，重新排序 submissions 数组
+                        var oldIndex = evt.oldIndex;
+                        var newIndex = evt.newIndex;
+                        if (oldIndex !== newIndex) {
+                            // 移动数组元素
+                            var movedItem = submissions.splice(oldIndex, 1)[0];
+                            submissions.splice(newIndex, 0, movedItem);
+                            // 重新渲染右侧历史
+                            renderHistory();
+                        }
+
+                        setTimeout(function() {
+                            statusElem.innerText = '';
+                        }, 3000);
+                        
+                    } else {
+                        statusElem.innerText = '✗ 重新排序提交失败: ' + data.error;
+                        statusElem.style.color = '#d40000';
+                    }
+                });
             }
         });
 
@@ -1172,7 +1224,10 @@ def get_category_filter_module_html():
             var selectedPaths = selectedNodes.map(function(node) {
                 return node.key;
             });
-            var id_time = new Date().getTime();
+
+            var timestamp = new Date()
+            var id_time = timestamp.getTime();
+            var timeStr = timestamp.toLocaleTimeString();
 
             fetch('/submit_selected_products', {
                 method: 'POST',
@@ -1200,7 +1255,8 @@ def get_category_filter_module_html():
                     var newSubmission = {
                         id: id_time,  // 简单唯一ID
                         paths: data.selected_paths.slice(),  // 深拷贝
-                        timestamp: new Date().toLocaleTimeString()
+                        factor_tester_name: data.factor_tester_name,
+                        timestamp: timeStr,
                     };
                     submissions.push(newSubmission);
                     renderHistory();
@@ -1215,7 +1271,7 @@ def get_category_filter_module_html():
                 var isExpanded = expandedState[index] || {};  // 当前提交的展开状态对象
                 html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #ccc; border-radius:4px; margin-bottom:12px; background:#f9f9f9;">';
                 html += '  <div class="submission-header" style="background:#e9e9e9; padding:5px 10px; cursor:move; display:flex; justify-content:space-between; font-size:13px;">';
-                html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>提交 ' + (index+1) + ' - ' + sub.timestamp + '</span>';
+                html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>序号 ' + (index+1) + ' : ' + sub.factor_tester_name + ' (' + sub.timestamp + ')</span>';
                 html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; margin-top:0; padding:0 0; margin-right:0px; margin-left:auto"><i class="fas fa-trash"></i></button>';
                 html += '  </div>';
                 html += '  <div style="padding:2px;">';
@@ -1287,9 +1343,32 @@ def get_category_filter_module_html():
 
             // 绑定删除整个提交按钮
             $('.delete-submission').click(function() {
-                var index = $(this).data('index');
-                submissions.splice(index, 1);
-                renderHistory();
+
+                fetch('/delete_submission', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id_time: submissions[$(this).data('index')].id })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    var statusElem = document.getElementById('submission_change_status');
+                    if (data.success) {
+                        statusElem.innerText = '✓ 提交已删除';
+                        statusElem.style.color = '#28a745';
+
+                        var index = $(this).data('index');
+                        submissions.splice(index, 1);
+                        renderHistory();
+
+                        setTimeout(function() {
+                            statusElem.innerText = '';
+                        }, 3000); 
+                    } else {
+                        statusElem.innerText = '✗ 删除提交失败: ' + data.error;
+                        statusElem.style.color = '#d40000';
+                    }
+                });
+            
             });
         }
 
