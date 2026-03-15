@@ -730,7 +730,9 @@ def get_time_range_module_html(factor_family_alias):
                     is_cn_futures_night: isNight
                 }};
 
-                document.getElementById('confirm_time_status').innerText = '保存中...';
+                var statusSpan = document.getElementById('confirm_time_status');
+                statusSpan.innerText = '保存中...';
+                statusSpan.style.color = '#0078d4';
 
                 fetch('/set_time_range', {{
                     method: 'POST',
@@ -743,22 +745,28 @@ def get_time_range_module_html(factor_family_alias):
                         var statusSpan = document.getElementById('confirm_time_status');
                         if (data.change_factor_tester) {{
                             statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val + '，正在更新因子测试中...';
+                            statusSpan.style.color = '#0078d4';
                             setTimeout(function() {{
                                 statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val + '，因子测试已更新';
+                                statusSpan.style.color = '#0078d4';
+
                             }}, 2000);
                         }} else {{
                             statusSpan.innerText = '✓ 已保存，因子起始计算时间更新为: ' + data.start_calc_param_val;
+                            statusSpan.style.color = '#0078d4';
                         }}
                     if (data.show_next) {{
                         openModule('category_filter_module');
                     }}
                     }} else {{
-                    document.getElementById('confirm_time_status').innerText = '保存失败: ' + (data.error || '未知错误');
+                    statusSpan.innerText = '保存失败: ' + (data.error || '未知错误');
+                    statusSpan.style.color = '#d40000';
                     }}
                 }})
                 .catch(err => {{
                     console.error('请求出错', err);
-                    document.getElementById('confirm_time_status').innerText = '网络错误';
+                    statusSpan.innerText = '网络错误';
+                    statusSpan.style.color = '#d40000';
                 }});
             }}
             document.addEventListener('DOMContentLoaded', function() {{
@@ -907,7 +915,7 @@ def convert_to_fancytree(tree_dict):
                 node["expanded"] = True
             # 如果同时有产品，添加一个“产品列表”子文件夹（懒加载）
             if has_objects:
-                node["desc"] = f"包含 {len(value['$OBJECTS$'])} 个产品"
+                node["desc"] = f"{len(value['$OBJECTS$'])} 个产品"
                 product_folder = {
                     "title": "Product Lists",
                     "key": current_path + "/_products",
@@ -922,7 +930,7 @@ def convert_to_fancytree(tree_dict):
             # 没有子分类但有产品：节点本身懒加载产品
             node["folder"] = True
             node["lazy"] = True
-            node["desc"] = f"包含 {len(value['$OBJECTS$'])} 个产品"
+            node["desc"] = f"{len(value['$OBJECTS$'])} 个产品"
         else:
             # 既无子分类也无产品：叶子节点
             node["folder"] = False
@@ -1085,7 +1093,8 @@ def submit_selected_products():
             'selected_products': [str(p) for p in selected_products], 
             'selected_paths': selected_paths,
             'factor_tester_name': factor_tester.name,
-            'factor_tester_serial': 'FT@' + str(factor_tester.serial_number)
+            'factor_tester_serial': 'FT@' + str(factor_tester.serial_number),
+            'count_desc': f"{len(selected_products)} 个产品"
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -1167,7 +1176,7 @@ def get_category_filter_module_html():
                     <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
                 </div>
-                <div id="tree-container"></div>
+                <div id="tree-container" style="max-height: 600px; overflow-y: auto;"></div>
                 <div style="display: flex; align-items: baseline; margin-top: 8px;">
                     <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
@@ -1278,6 +1287,10 @@ def get_category_filter_module_html():
             var selectedPaths = selectedNodes.map(function(node) {
                 return node.key;
             });
+            var pathToDescMap = {};
+            selectedNodes.forEach(function(node) {
+                pathToDescMap[node.key] = node.data.desc || "";
+            });
 
             var timestamp = new Date()
             var id_time = timestamp.getTime();
@@ -1317,8 +1330,10 @@ def get_category_filter_module_html():
                     var newSubmission = {
                         id: id_time,  // 简单唯一ID
                         paths: data.selected_paths.slice(),  // 深拷贝
+                        pathsDescMap: pathToDescMap,  // 路径到描述的映射
                         factor_tester_name: data.factor_tester_name,
                         factor_tester_serial: data.factor_tester_serial,
+                        count_desc: data.count_desc,
                         timestamp: timeStr,
                     };
                     submissions.push(newSubmission);
@@ -1335,7 +1350,7 @@ def get_category_filter_module_html():
                 var isExpanded = expandedState[index] || {};  // 当前提交的展开状态对象
                 html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #ccc; border-radius:4px; margin-bottom:12px; background:#f9f9f9;">';
                 html += '  <div class="submission-header" style="background:#e9e9e9; padding:5px 10px; cursor:move; display:flex; justify-content:space-between; font-size:13px;">';
-                html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>序号 ' + (index+1) + ' : ' + sub.factor_tester_name + ' (' + sub.timestamp + ')</span>';
+                html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>序号 ' + (index+1) + ' : ' + sub.factor_tester_serial + ' (' + sub.timestamp + ')' + (sub.count_desc ? ' <span style="color:#d00;font-size:12px;">' + sub.count_desc + '</span>' : '') + '</span>';
                 html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; margin-top:0; padding:0 0; margin-right:0px; margin-left:auto"><i class="fas fa-trash"></i></button>';
                 html += '  </div>';
                 html += '  <div style="padding:2px;">';
@@ -1346,7 +1361,7 @@ def get_category_filter_module_html():
                     html += '      <tr class="path-row" data-path="' + path + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
                     html += '        <td style="padding:0 0; border-bottom:1px solid #eee;">';
                     html += '          <div style="display:flex;align-items:center;">';
-                    html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px">' + path + '</span>';
+                    html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px">' + path + (sub.pathsDescMap[path] ? ' <span style="color:#888;font-size:12px;">' + sub.pathsDescMap[path] + '</span>' : '') + '</span>';
                     html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="margin-left:auto;background:transparent; border:none; color:#d00; cursor:pointer; margin-top:auto; padding:0 0; margin-right:10px; "><i class="fas fa-times"></i></button>';
                     html += '          </div>';
                     html += '        </td>';
