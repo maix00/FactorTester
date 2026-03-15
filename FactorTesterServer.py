@@ -1157,12 +1157,12 @@ def get_category_filter_module_html():
             <div style="flex: 1; min-width: 0;">
                 <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
                 <div style="margin-bottom:0px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
-                <div style="display: flex; align-items: baseline; margin-top: -12px; margin-bottom: 8px;">
+                <div style="display: flex; align-items: baseline; margin-top: 8px; margin-bottom: 8px;">
                     <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
                 </div>
                 <div id="tree-container"></div>
-                <div style="display: flex; align-items: baseline; margin-top: -12px;">
+                <div style="display: flex; align-items: baseline; margin-top: 8px;">
                     <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
                     <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
                 </div>
@@ -1497,6 +1497,33 @@ def get_ic_test_module_html():
         </div>
     </div>
     <script>
+    (function() {
+        // 检查 Bootstrap CSS 是否已加载
+        function isBootstrapCSSLoaded() {
+            var links = document.querySelectorAll('link[rel="stylesheet"]');
+            for (var i = 0; i < links.length; i++) {
+                if (links[i].href.includes('bootstrap.min.css')) return true;
+            }
+            return false;
+        }
+        // 检查 Bootstrap JS 是否已加载（通过检查全局 bootstrap 对象）
+        function isBootstrapJSLoaded() {
+            return typeof window.bootstrap !== 'undefined';
+        }
+        // 如果未加载 CSS，则动态添加
+        if (!isBootstrapCSSLoaded()) {
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css';
+            document.head.appendChild(link);
+        }
+        // 如果未加载 JS，则动态添加（注意：JS 依赖 jQuery，需确保顺序）
+        if (!isBootstrapJSLoaded()) {
+            var script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js';
+            document.body.appendChild(script);
+        }
+    })();
     // 根据 submissions 渲染 IC 测试选项卡
     window.renderICTabs = function(submissions) {
         var container = document.getElementById('ic-tab-container');
