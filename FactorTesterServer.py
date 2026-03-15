@@ -1569,6 +1569,13 @@ def get_ic_test_module_html(factor_family_alias):
             padding: 10px 12px;
             white-space: nowrap;
         }}
+        .ic-table thead th:not(.idx-col) {{
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }}
+        .ic-table thead th:not(.idx-col):hover {{
+            background-color: #d9e9ff;
+        }}
         .ic-table tbody td {{
             border-bottom: 1px solid #eef2f7;
             padding: 8px 12px;
@@ -1599,6 +1606,7 @@ def get_ic_test_module_html(factor_family_alias):
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/highstock.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.4.8/modules/accessibility.min.js"></script>
     <script>
     (function() {{
         function isBootstrapCSSLoaded() {{
@@ -1744,41 +1752,215 @@ def get_ic_test_module_html(factor_family_alias):
             status.style.color = '#28a745';
             resultDiv.innerHTML = buildPrettyTable(data);
 
-            var chartContainer = document.getElementById('chart-container-' + subId);
-            if (!chartContainer) return;
-            if (typeof Highcharts === 'undefined') {{
-                status.innerText = '错误：Highcharts 未加载';
-                status.style.color = '#d40000';
-                return;
+            // 创建次级选项卡容器（如果不存在）
+            var factorTabsId = 'factor-tabs-' + subId;
+            var existingTabs = document.getElementById(factorTabsId);
+            if (existingTabs) existingTabs.remove();
+            var tabsContainer = document.createElement('div');
+            tabsContainer.id = factorTabsId;
+            tabsContainer.className = 'factor-tabs-container';
+            tabsContainer.style.marginTop = '20px';
+            resultDiv.appendChild(tabsContainer);
+
+            // 渲染次级因子选项卡
+            renderFactorTabs(subId, data.factors);
+
+            // 为统计表格的每个因子列头添加点击事件
+            var table = resultDiv.querySelector('.ic-table');
+            if (table) {{
+                var headers = table.querySelectorAll('thead th:not(.idx-col)'); // 跳过第一列索引列
+                headers.forEach(function(th, index) {{
+                    var factorName = th.textContent.trim();
+                    th.style.cursor = 'pointer';
+                    th.title = '点击切换到对应因子';
+                    th.addEventListener('click', function() {{
+                        var tabId = 'factor-tab-' + subId + '-' + index;
+                        var tabTrigger = document.querySelector('#' + tabId);
+                        if (tabTrigger) {{
+                            var tab = new bootstrap.Tab(tabTrigger);
+                            tab.show();
+                        }}
+                    }});
+                }});
             }}
 
-            var dates = data.ic_series_dates || [];
-            var values = data.ic_series_values || [];
-            var seriesData = dates.map(function(date, index) {{
-                return [new Date(date).getTime(), values[index]];
-            }});
-
-            Highcharts.stockChart(chartContainer, {{
-                rangeSelector: {{ selected: 1 }},
-                title: {{ text: 'IC 序列' }},
-                xAxis: {{
-                    type: 'datetime',
-                    crosshair: {{ width: 1, color: '#0078d4', dashStyle: 'dash' }}
-                }},
-                yAxis: {{
-                    title: {{ text: 'IC 值' }},
-                    crosshair: {{ width: 1, color: '#0078d4', dashStyle: 'dash' }}
-                }},
-                tooltip: {{ shared: true, valueDecimals: 4 }},
-                series: [{{ name: 'IC', data: seriesData, tooltip: {{ valueDecimals: 4 }} }}],
-                navigator: {{ enabled: true }},
-                scrollbar: {{ enabled: true }}
-            }});
+            // 原有的 Highcharts IC 图表绘制（可能不再需要，因为次级选项卡中已包含 IC 图表）
+            // 如果仍想保留主图表，可以注释掉或保留，但建议统一用次级选项卡展示
+            var chartContainer = document.getElementById('chart-container-' + subId);
+            if (chartContainer) {{
+                // 可以选择隐藏或移除这个容器，因为图表已移到次级选项卡内
+                chartContainer.style.display = 'none';
+            }}
         }})
         .catch(err => {{
             btn.disabled = false;
             status.innerText = '前端错误: ' + err.message;
             status.style.color = '#d40000';
+        }});
+    }};
+
+    function renderFactorTabs(subId, factors) {{
+        var container = document.getElementById('factor-tabs-' + subId);
+        if (!container || !factors || factors.length === 0) {{
+            container.innerHTML = '<div class="ic-empty">暂无因子数据</div>';
+            return;
+        }}
+
+        var tabsHtml = '<ul class="nav nav-tabs" id="factor-tab-' + subId + '" role="tablist">';
+        var panesHtml = '<div class="tab-content" id="factor-tab-content-' + subId + '">';
+
+        factors.forEach((factor, idx) => {{
+            var activeClass = idx === 0 ? 'active' : '';
+            var showClass = idx === 0 ? 'show active' : '';
+            var tabId = `factor-tab-${{subId}}-${{idx}}`;
+            var paneId = `factor-pane-${{subId}}-${{idx}}`;
+
+            tabsHtml += `
+                <li class="nav-item" role="presentation">
+                    <button style="font-size:12px;" class="nav-link ${{activeClass}}" id="${{tabId}}" data-bs-toggle="tab" data-bs-target="#${{paneId}}" type="button" role="tab" aria-controls="${{paneId}}" aria-selected="${{idx === 0}}">
+                        ${{factor.alias || factor.name}}
+                    </button>
+                </li>
+            `;
+
+            // 产品下拉框选项
+            var productOptions = '';
+            if (factor.products && factor.products.length > 0) {{
+                productOptions = factor.products.map(p => `<option value="${{p}}">${{p}}</option>`).join('');
+            }} else {{
+                productOptions = '<option value="">无可用产品</option>';
+            }}
+
+            panesHtml += `
+                <div class="tab-pane fade ${{showClass}}" id="${{paneId}}" role="tabpanel" aria-labelledby="${{tabId}}">
+                    <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
+                        <div style="width:100%;">
+                            <h6 style="font-size:13px; margin:0;">IC 序列</h6>
+                            <div id="ic-chart-${{subId}}-${{idx}}" style="width:100%; height:350px;"></div>
+                        </div>
+                    </div>
+                    <div style="margin-top:16px;">
+                        <label style="font-size:13px;">选择产品：</label>
+                        <select id="product-select-${{subId}}-${{idx}}" class="form-select" style="width:200px; display:inline-block; margin-left:8px; font-size:12px;">
+                            ${{productOptions}}
+                        </select>
+                        <button class="btn btn-sm btn-outline-primary" id="load-btn-${{subId}}-${{idx}}" style="margin-left:8px; font-size:12px;" onclick="loadFactorAndReturn('${{subId}}', ${{idx}}, '${{factor.name}}')">加载因子和收益</button>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
+                        <div style="width:100%;">
+                            <h6 style="font-size:13px; margin:0;">因子值序列</h6>
+                            <div id="factor-chart-${{subId}}-${{idx}}" style="width:100%; height:350px;">
+                                <div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div>
+                            </div>
+                        </div>
+                        <div style="width:100%;">
+                            <h6 style="font-size:13px; margin:0;">收益率序列</h6>
+                            <div id="return-chart-${{subId}}-${{idx}}" style="width:100%; height:350px;">
+                                <div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }});
+
+        tabsHtml += '</ul>';
+        panesHtml += '</div>';
+        container.innerHTML = tabsHtml + panesHtml;
+
+        // 初始化 Bootstrap 选项卡
+        if (typeof bootstrap !== 'undefined') {{
+            var triggerTabList = [].slice.call(document.querySelectorAll('#factor-tab-' + subId + ' button[data-bs-toggle="tab"]'));
+            triggerTabList.forEach(function (triggerEl) {{
+                var tabTrigger = new bootstrap.Tab(triggerEl);
+                triggerEl.addEventListener('click', function(event) {{
+                    event.preventDefault();
+                    tabTrigger.show();
+                }});
+            }});
+        }}
+
+        // 绘制每个因子的 IC 图表（数据已存在）
+        factors.forEach((factor, idx) => {{
+            if (factor.ic_series && factor.ic_series.dates && factor.ic_series.values) {{
+                drawChart(`ic-chart-${{subId}}-${{idx}}`, factor.ic_series, 'IC');
+            }}
+        }});
+    }};
+
+    function drawChart(containerId, seriesData, seriesName) {{
+        if (typeof Highcharts === 'undefined') {{
+            console.error('Highcharts not loaded');
+            return;
+        }}
+        var container = document.getElementById(containerId);
+        if (!container || !seriesData || !seriesData.dates || !seriesData.values) return;
+
+        var chartData = seriesData.dates.map((date, i) => [new Date(date).getTime(), seriesData.values[i]]);
+
+        Highcharts.stockChart(container, {{
+            accessibility: {{ enabled: false }}, // 👈 禁用可访问性
+            rangeSelector: {{ selected: 1 }},
+            title: {{ text: null }},
+            xAxis: {{ type: 'datetime', crosshair: true }},
+            yAxis: {{ title: {{ text: seriesName }}, crosshair: true }},
+            tooltip: {{ shared: true, valueDecimals: 4 }},
+            series: [{{ name: seriesName, data: chartData }}],
+            navigator: {{ enabled: true }},
+            scrollbar: {{ enabled: true }},
+        }});
+    }}
+
+    window.loadFactorAndReturn = function(subId, factorIdx, factorName) {{
+        var select = document.getElementById(`product-select-${{subId}}-${{factorIdx}}`);
+        var product = select ? select.value : null;
+        if (!product || product === '') {{
+            alert('请选择一个产品');
+            return;
+        }}
+
+        var factorChartDiv = document.getElementById(`factor-chart-${{subId}}-${{factorIdx}}`);
+        var returnChartDiv = document.getElementById(`return-chart-${{subId}}-${{factorIdx}}`);
+
+        factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载因子值...</div>';
+        returnChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载收益率...</div>';
+
+        Promise.all([
+            fetch('/get_factor_series', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{
+                    submission_id: subId,
+                    factor_name: factorName,
+                    product: product
+                }})
+            }}).then(r => r.json()),
+            fetch('/get_return_series', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{
+                    submission_id: subId,
+                    factor_name: factorName,
+                    product: product
+                }})
+            }}).then(r => r.json())
+        ])
+        .then(([factorData, returnData]) => {{
+            if (factorData.dates && factorData.values) {{
+                drawChart(`factor-chart-${{subId}}-${{factorIdx}}`, factorData, '因子值');
+            }} else {{
+                factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">加载因子值失败</div>';
+            }}
+            if (returnData.dates && returnData.values) {{
+                drawChart(`return-chart-${{subId}}-${{factorIdx}}`, returnData, '收益率');
+            }} else {{
+                returnChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">加载收益率失败</div>';
+            }}
+        }})
+        .catch(err => {{
+            factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">请求失败</div>';
+            returnChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">请求失败</div>';
+            console.error('加载错误:', err);
         }});
     }};
     </script>
