@@ -1086,6 +1086,9 @@ def delete_submission():
     try:
         global factor_testers
         len_before = len(factor_testers)
+        factor_tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
+        assert factor_tester is not None, "Submission not found"
+        factor_tester.delete()  # 调用实例的删除方法以释放资源
         factor_testers = [tester for tester in factor_testers if tester.alias != str(id_time)]
         assert len(factor_testers) == len_before - 1, "No submission deleted"
         return jsonify({'success': True})

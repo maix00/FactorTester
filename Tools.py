@@ -159,6 +159,14 @@ class SerialObject(UniqueObject):
                 raise KeyError(f"No instance with serial number {key} found in {cls.__name__} family")
         raise TypeError(f"Invalid key type: {type(key).__name__}. Expected int for serial number lookup.")
 
+    def delete(self):
+        type_alias = self._type_alias
+        serial_number = getattr(self, 'serial_number', None)
+        if serial_number is not None and type_alias in self._serial_map_dict and serial_number in self._serial_map_dict[type_alias]:
+            del self._serial_map_dict[type_alias][serial_number]
+        key = (self.name, self.__class__.__name__)
+        if key in self._instances:
+            del self._instances[key]
 
 class DataFreq(Enum):
     MIN1 = pd.Timedelta('1min')
