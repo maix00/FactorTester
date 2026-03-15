@@ -1034,7 +1034,7 @@ selected_products = []  # 全局变量，存储当前选中的产品列表
 @app.route('/submit_selected_products', methods=['POST'])
 def submit_selected_products():
     data = request.get_json()
-    selected_paths = data.get('selected_products', [])
+    selected_paths = data.get('selected_paths', [])
     try:
         global selected_products
         selected_products = []
@@ -1061,6 +1061,10 @@ def get_category_filter_module_html():
     resources = '''
     <!-- Fancytree 资源 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+    <!-- Font Awesome 用于图标（可选） -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- SortableJS 用于拖动排序 -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
     '''
@@ -1073,23 +1077,42 @@ def get_category_filter_module_html():
             <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
             <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
         </div>
-        <div id="tree-container"></div>
-        <div style="display: flex; align-items: baseline; margin-top: -12px;">
-            <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
-            <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
+        <div style="display: flex; gap: 20px;">
+            <!-- 左侧树 -->
+            <div style="flex: 1; min-width: 0;">
+                <div id="tree-container"></div>
+                <div style="display: flex; align-items: baseline; margin-top: -12px;">
+                    <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+                    <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
+                </div>
+            </div>
+            <!-- 右侧历史提交记录 -->
+            <div style="width: 400px; border-left: 1px solid #ddd; padding-left: 16px;">
+                <div style="font-size:14px; font-weight:bold; margin-bottom:10px;">已提交的路径列表</div>
+                <div id="submission-history" style="max-height: 600px; overflow-y: auto;"></div>
+            </div>
         </div>
     </div>
     '''
     
     js = '''
     <script>
+    var submissions = [];        // 存储所有提交记录
+    var expandedState = {};      // 记录每个提交中路径的展开状态
+    var treeInstance = null;     // 用于存储树实例（可选方式）
+
     $(function() {
+        // 初始化 Fancytree
         $("#tree-container").fancytree({
             source: {
                 url: "/api/tree-data"
             },
             checkbox: true,
             selectMode: 3,
+            // 在初始化完成后触发
+            init: function(event, data) {
+                treeInstance = data.tree; // ✅ 这才是真正的 Fancytree 实例
+            },
             lazyLoad: function(event, data) {
                 var node = data.node;
                 data.result = {
@@ -1099,7 +1122,7 @@ def get_category_filter_module_html():
             },
             renderNode: function(event, data) {
                 var node = data.node;
-                var desc = node.data.desc; // 获取描述文本
+                var desc = node.data.desc;
                 if (desc) {
                     var $title = $(node.span).find('.fancytree-title');
                     $title.siblings('.node-description').remove();
@@ -1108,20 +1131,46 @@ def get_category_filter_module_html():
             }
         });
 
+        $("#submit-selected").click(submitSelectedProducts);
+        $("#submit-selected2").click(submitSelectedProducts);
+
+        // 初始化 SortableJS 实现拖动排序
+        var historyContainer = document.getElementById('submission-history');
+        new Sortable(historyContainer, {
+            animation: 150,
+            handle: '.submission-header',  // 通过头部拖动
+            onEnd: function(evt) {
+                // 拖动结束后，重新排序 submissions 数组
+                var oldIndex = evt.oldIndex;
+                var newIndex = evt.newIndex;
+                if (oldIndex !== newIndex) {
+                    // 移动数组元素
+                    var movedItem = submissions.splice(oldIndex, 1)[0];
+                    submissions.splice(newIndex, 0, movedItem);
+                    // 重新渲染右侧历史
+                    renderHistory();
+                }
+            }
+        });
+
+        // 提交按钮点击事件
         function submitSelectedProducts() {
-            var tree = $("#tree-container").fancytree("getTree");
-            var selectedNodes = tree.getSelectedNodes();
+            if (!treeInstance) {
+                console.error("树尚未初始化完成");
+                return;
+            }
+            var selectedNodes = treeInstance.getSelectedNodes(); // 现在可以正常使用
             var selectedKeys = selectedNodes.map(function(node) {
                 return node.key;
             });
-            var productKeys = selectedKeys.filter(function(key) {
+            var selectedPaths = selectedKeys.filter(function(key) {
                 return key.split('/').length >= 3;
             });
 
             fetch('/submit_selected_products', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({selected_products: productKeys})
+                body: JSON.stringify({selected_paths: selectedPaths})
             })
             .then(r => r.json())
             .then(data => {
@@ -1135,15 +1184,123 @@ def get_category_filter_module_html():
                 }
                 if (status1) status1.innerText = msg;
                 if (status2) status2.innerText = msg;
+
+                // 将本次提交添加到历史记录
+                if (data.selected_paths && data.selected_paths.length > 0) {
+                    var newSubmission = {
+                        id: Date.now(),  // 简单唯一ID
+                        paths: data.selected_paths.slice(),  // 深拷贝
+                        timestamp: new Date().toLocaleTimeString()
+                    };
+                    submissions.push(newSubmission);
+                    renderHistory();
+                }
             });
         }
 
-        $("#submit-selected").click(function() {
-            submitSelectedProducts();
-        });
-        $("#submit-selected2").click(function() {
-            submitSelectedProducts();
-        });
+        // 渲染右侧历史区域
+        function renderHistory() {
+            var html = '';
+            submissions.forEach(function(sub, index) {
+                var isExpanded = expandedState[index] || {};  // 当前提交的展开状态对象
+                html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #ccc; border-radius:4px; margin-bottom:12px; background:#f9f9f9;">';
+                html += '  <div class="submission-header" style="background:#e9e9e9; padding:5px 10px; cursor:move; display:flex; justify-content:space-between;">';
+                html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>提交 ' + (index+1) + ' - ' + sub.timestamp + '</span>';
+                html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer;"><i class="fas fa-trash"></i></button>';
+                html += '  </div>';
+                html += '  <div style="padding:8px;">';
+                html += '    <table style="width:100%; border-collapse:collapse;">';
+                sub.paths.forEach(function(path, pathIdx) {
+                    var rowId = 'path-' + index + '-' + pathIdx;
+                    var expanded = isExpanded[path] || false;  // 该路径是否展开
+                    html += '      <tr class="path-row" data-path="' + path + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
+                    html += '        <td style="padding:4px 0; border-bottom:1px solid #eee;">';
+                    html += '          <span class="path-text" style="cursor:pointer;font-size:13px;">' + path + '</span>';
+                    html += '          <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="float:right; background:transparent; border:none; color:#d00; cursor:pointer;"><i class="fas fa-times"></i></button>';
+                    html += '        </td>';
+                    html += '      </tr>';
+                    if (expanded) {
+                        // 如果展开，添加产品详情行（内容稍后通过 AJAX 加载）
+                        html += '      <tr class="product-detail-row" id="detail-' + index + '-' + pathIdx + '">';
+                        html += '        <td style="padding:8px 0 8px 20px; background:#f0f0f0;">';
+                        html += '          <div class="loading-products" style="font-size:13px;">加载中...</div>';
+                        html += '        </td>';
+                        html += '      </tr>';
+                    }
+                });
+                html += '    </table>';
+                html += '  </div>';
+                html += '</div>';
+            });
+            $('#submission-history').html(html);
+
+            // 绑定事件：点击路径展开/折叠
+            $('.path-text').click(function() {
+                var $row = $(this).closest('tr.path-row');
+                var subIndex = $row.data('sub-index');
+                var path = $row.data('path');
+                var pathIndex = $row.data('path-index');
+                var expanded = expandedState[subIndex] || {};
+                if (expanded[path]) {
+                    // 折叠：移除详情行
+                    $('#detail-' + subIndex + '-' + pathIndex).remove();
+                    delete expanded[path];
+                } else {
+                    // 展开：加载产品详情
+                    expanded[path] = true;
+                    // 在行后插入详情行（使用 after）
+                    var detailHtml = '<tr class="product-detail-row" id="detail-' + subIndex + '-' + pathIndex + '">' +
+                                        '<td style="padding:8px 0 8px 20px; background:#f0f0f0;">' +
+                                        '<div class="loading-products" style="font-size:13px;">加载中...</div>' +
+                                        '</td></tr>';
+                    $row.after(detailHtml);
+                    // 加载产品数据
+                    loadProductsForPath(path, subIndex, pathIndex);
+                }
+                expandedState[subIndex] = expanded;
+            });
+
+            // 绑定删除路径按钮
+            $('.delete-path').click(function() {
+                var subIndex = $(this).data('sub-index');
+                var pathIndex = $(this).data('path-index');
+                submissions[subIndex].paths.splice(pathIndex, 1);
+                // 如果该提交没有路径了，删除整个提交
+                if (submissions[subIndex].paths.length === 0) {
+                    submissions.splice(subIndex, 1);
+                }
+                // 清理展开状态（可简化：重新渲染会丢失展开，但这里重新渲染）
+                renderHistory();  // 重新渲染
+            });
+
+            // 绑定删除整个提交按钮
+            $('.delete-submission').click(function() {
+                var index = $(this).data('index');
+                submissions.splice(index, 1);
+                renderHistory();
+            });
+        }
+
+        // 加载指定路径的产品详情
+        function loadProductsForPath(path, subIndex, pathIndex) {
+            var $detailCell = $('#detail-' + subIndex + '-' + pathIndex + ' td');
+            $.get('/get_products', { path: path })
+                .done(function(data) {
+                    if (data && data.length) {
+                        var html = '<div style="font-size:13px;">';
+                        data.forEach(function(prod) {
+                            html += '<div>' + prod.title + '</div>';
+                        });
+                        html += '</div>';
+                        $detailCell.html(html);
+                    } else {
+                        $detailCell.html('<span style="color:#888;font-size:13px;">无产品</span>');
+                    }
+                })
+                .fail(function() {
+                    $detailCell.html('<span style="color:#d00;font-size:13px;">加载失败</span>');
+                });
+        }
     });
     </script>
     '''
