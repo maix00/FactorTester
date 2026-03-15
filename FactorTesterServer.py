@@ -1244,6 +1244,7 @@ def get_category_filter_module_html():
                             submissions.splice(newIndex, 0, movedItem);
                             // 重新渲染右侧历史
                             renderHistory();
+                            renderICTabs(submissions);  // 新增
                         }
 
                         setTimeout(function() {
@@ -1304,6 +1305,7 @@ def get_category_filter_module_html():
                     };
                     submissions.push(newSubmission);
                     renderHistory();
+                    renderICTabs(submissions);  // 新增
                 }
             });
         }
@@ -1412,6 +1414,7 @@ def get_category_filter_module_html():
                                         statusElem.innerText = '';
                                     }, 5000);
                                     renderHistory();  // 重新渲染
+                                    renderICTabs(submissions);  // 新增
                                 } else {
                                     statusElem.innerText = '✗ 路径已删除，但提交删除失败: ' + data.error;
                                     statusElem.style.color = '#d40000';
@@ -1420,6 +1423,7 @@ def get_category_filter_module_html():
                         }
                         // 清理展开状态（可简化：重新渲染会丢失展开，但这里重新渲染）
                         renderHistory();  // 重新渲染
+                        renderICTabs(submissions);  // 新增
                     } else {
                         statusElem.innerText = '✗ 删除路径失败: ' + data.error;
                         statusElem.style.color = '#d40000';
@@ -1445,6 +1449,7 @@ def get_category_filter_module_html():
                         var index = $(this).data('index');
                         submissions.splice(index, 1);
                         renderHistory();
+                        renderICTabs(submissions);  // 新增
 
                         setTimeout(function() {
                             statusElem.innerText = '';
@@ -1484,13 +1489,110 @@ def get_category_filter_module_html():
     return html + js
 
 def get_ic_test_module_html():
-    return """
-        <div class="module" id="ic_test_module" style="margin-top:32px;display:none;">
-            <div class="section-title">3. IC测试</div>
-            <button disabled style="background:#ccc;">运行IC测试</button>
-            <div style="color:#aaa;">（功能开发中）</div>
+    return '''
+    <div class="module" id="ic_test_module" style="margin-top:32px;">
+        <div class="section-title">3. IC测试</div>
+        <div id="ic-tab-container">
+            <!-- 选项卡和面板将由 JavaScript 动态生成 -->
         </div>
-    """
+    </div>
+    <script>
+    // 根据 submissions 渲染 IC 测试选项卡
+    window.renderICTabs = function(submissions) {
+        var container = document.getElementById('ic-tab-container');
+        if (!container) return;
+        if (!submissions || submissions.length === 0) {
+            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">暂无测试器，请先添加测试器。</div>';
+            return;
+        }
+        var tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
+        var panelsHtml = '<div class="tab-content" id="icTabContent">';
+        submissions.forEach(function(sub, idx) {
+            var activeClass = idx === 0 ? 'active' : '';
+            var showClass = idx === 0 ? 'show active' : '';
+            var tabId = 'ic-tab-' + sub.id;
+            var panelId = 'ic-panel-' + sub.id;
+            tabsHtml += `
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab" aria-controls="${panelId}" aria-selected="${idx === 0}">
+                        ${sub.factor_tester_name || '测试器' + (idx+1)}
+                    </button>
+                </li>
+            `;
+            panelsHtml += `
+                <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel" aria-labelledby="${tabId}">
+                    <div style="margin-top:16px;">
+                        <button class="btn btn-primary" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
+                        <span id="ic-status-${sub.id}" style="margin-left:12px;color:#0078d4;"></span>
+                    </div>
+                    <div id="ic-result-${sub.id}" style="margin-top:16px;"></div>
+                </div>
+            `;
+        });
+        tabsHtml += '</ul>';
+        panelsHtml += '</div>';
+        container.innerHTML = tabsHtml + panelsHtml;
+
+        // 重新初始化 Bootstrap 选项卡（如果使用了 Bootstrap）
+        if (typeof bootstrap !== 'undefined') {
+            var triggerTabList = [].slice.call(document.querySelectorAll('#icTab button[data-bs-toggle="tab"]'))
+            triggerTabList.forEach(function (triggerEl) {
+                var tabTrigger = new bootstrap.Tab(triggerEl);
+                triggerEl.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    tabTrigger.show();
+                });
+            });
+        }
+    };
+
+    // 运行 IC 测试的函数
+    window.runIC = function(subId) {
+        var btn = document.getElementById('run-ic-btn-' + subId);
+        var status = document.getElementById('ic-status-' + subId);
+        var resultDiv = document.getElementById('ic-result-' + subId);
+        btn.disabled = true;
+        status.innerText = 'IC测试运行中...';
+        resultDiv.innerHTML = '';
+        // 查找对应的 submission
+        var submission = submissions.find(s => s.id == subId);
+        if (!submission) {
+            status.innerText = '错误：未找到提交';
+            btn.disabled = false;
+            return;
+        }
+        fetch('/run_ic_test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ submission_id: subId, paths: submission.paths })
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            if(data.success) {
+                status.innerText = '✓ IC测试完成';
+                // 显示表格
+                var table = '<table class="table table-bordered table-sm"><thead><tr>';
+                for(var col of data.columns) table += '<th>' + col + '</th>';
+                table += '</tr></thead><tbody>';
+                for(var row of data.rows) {
+                    table += '<tr>';
+                    for(var col of data.columns) table += '<td>' + row[col] + '</td>';
+                    table += '</tr>';
+                }
+                table += '</tbody></table>';
+                resultDiv.innerHTML = table;
+            } else {
+                status.innerText = '✗ IC测试失败: ' + data.error;
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            status.innerText = '网络错误';
+        });
+    };
+    </script>
+    '''
 
 def get_group_test_module_html():
     return """
