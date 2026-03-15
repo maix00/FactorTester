@@ -806,8 +806,9 @@ def convert_to_fancytree(tree_dict):
             node["children"] = child_nodes
             # 如果同时有产品，添加一个“产品列表”子文件夹（懒加载）
             if has_objects:
+                node["desc"] = f"包含 {len(value['$OBJECTS$'])} 个产品"
                 product_folder = {
-                    "title": "产品列表",
+                    "title": "Product Lists",
                     "key": current_path + "/_products",
                     "folder": True,
                     "lazy": True,
@@ -818,6 +819,7 @@ def convert_to_fancytree(tree_dict):
             # 没有子分类但有产品：节点本身懒加载产品
             node["folder"] = True
             node["lazy"] = True
+            node["desc"] = f"包含 {len(value['$OBJECTS$'])} 个产品"
         else:
             # 既无子分类也无产品：叶子节点
             node["folder"] = False
@@ -909,6 +911,7 @@ def get_products():
         # 假设 prod 对象有 id 和 name 属性，如果没有则适当处理
         prod_id = getattr(prod, 'id', str(prod))
         prod_name = getattr(prod, 'name', str(prod))
+        prod_desc = getattr(prod, 'desc', '')  # 获取描述
         child_nodes.append({
             "title": prod_name,
             "key": f"{original_path}/{prod_id}",  # 使用原始路径保证唯一性
@@ -916,6 +919,7 @@ def get_products():
             "folder": False,
             "lazy": False,
             "extraClasses": "product-node",  # 可选样式
+            "desc": prod_desc,  # 将描述添加到节点数据中
         })
     return jsonify(child_nodes)
 
@@ -952,6 +956,17 @@ def get_category_filter_module_html():
                     url: "/get_products",
                     data: { path: node.key }
                 };
+            },
+            renderNode: function(event, data) {
+                var node = data.node;
+                var desc = node.data.desc; // 获取描述文本
+                if (desc) {
+                    var $title = $(node.span).find('.fancytree-title');
+                    // 移除之前可能存在的描述元素（例如通过类名识别）
+                    $title.siblings('.node-description').remove();
+                    // 添加新的描述元素
+                    $title.after('<span class="node-description" style="color:#888; margin-left:8px; font-size:12px;">' + desc + '</span>');
+                }
             }
         });
 

@@ -180,6 +180,8 @@ class CNFutures(Futures):
         self.category_day_night_time, self.category_day_night_time_desc = \
             get_day_night_time_category_by_code(name.split('.')[0]) if name else ('', '')
         self.category_attr_name = 'category_day_night_time'
+        variety = get_variety_by_code(name.split('.')[0])
+        self.desc = variety if variety else name
 
 from Products import Product
 
