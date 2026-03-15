@@ -90,6 +90,14 @@ class Factor(SerialObject):
             self.ic_stats: pd.Series = pd.Series()
             self.report: pd.DataFrame = pd.DataFrame()
 
+    def clear(self):
+        self.table = pd.DataFrame()
+        self.products = set()
+        self.returns = pd.DataFrame()
+        self.ic_series = pd.Series()
+        self.ic_stats = pd.Series()
+        self.report = pd.DataFrame()
+
     def get_current_return_freq(self) -> Any:
         return ReturnFreqParam.get_value(self)
     

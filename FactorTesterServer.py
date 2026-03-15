@@ -1670,7 +1670,7 @@ def run_ic_test():
     paths = data.get('paths', [])
     return_freq = data.get('return_freq', 'N')
     start_calc_time = data.get('start_calc_time', f"{default_test_start_date} {default_day_start_time}")
-    re_calc = data.get('re_calc', False)
+    re_calc = data.get('re_calc', False)  # 是否强制重新计算，默认为 False
     try:
 
         import pandas as pd
@@ -1695,61 +1695,69 @@ def run_ic_test():
 
         start_date_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
         end_date_str = str(tester.end_date).replace(':', '-').replace(' ', '_')
-        original_products = tester.products
+        original_products = tester.products.copy()
 
         for factor in factors:
 
-            re_calc = False
-            re_calc_ic = False
-            tester.products = original_products
+            tester.products = original_products.copy()
+            factor.clear()
 
             factor_series_cache_file = cache_dir_factor / f"{factor.alias}_{start_calc_time_str}.pkl"
             factor_ic_cache_file = cache_dir_ic / f"{factor.alias}_{return_freq}_{paths_hash}_{start_date_str}_{end_date_str}.pkl"
             
+            table = None
             if not re_calc and factor_series_cache_file.exists():
                 with open(factor_series_cache_file, "rb") as f:
-                    factor.table, start_calc_time_cache = pickle.load(f)
-                if start_calc_time != start_calc_time_cache:
-                    re_calc = True
-                else:
-                    products = []
-                    for product in tester.products:
-                        if product not in factor.table.columns:
-                            products.append(product)
-                    if products:
-                        re_calc = True
-                        tester.products = set(products)
-            else:
-                re_calc = True
-            if re_calc:
-                original_table = factor.table.copy()
-                tester.calc_factor(factors=factor)
-                if factor.table is None or factor.table.empty or len(original_table.columns) == len(factor.table.columns):
-                    re_calc = False
-                    factor.table = original_table
-                else:
-                    factor.table = pd.concat([original_table, factor.table], axis=1) if original_table is not None else factor.table
-                if re_calc:
-                    with open(factor_series_cache_file, "wb") as f:
-                        pickle.dump((factor.table, start_calc_time), f)
+                    table, start_calc_time_cache = pickle.load(f)
+                if start_calc_time == start_calc_time_cache:
+                    tester.products = set([p for p in tester.products if p not in table.columns])
+            if tester.products:
+                try:
+                    tester.calc_factor(factors=factor)
+                except:
+                    pass
+                finally:
+                    if factor.table is None or factor.table.empty:
+                        tester.products = set()
+            if table is None and (factor.table is None or factor.table.empty):
+                raise ValueError("/run_ic_test: 无法计算因子数据，且缓存中无数据可用")
+            if table is not None:
+                if factor.table is None or factor.table.empty:
+                    factor.table = table
+                else: # factor.table is not None and table is not None
+                    for col in table.columns:
+                        assert col not in factor.table.columns, f"/run_ic_test: 列名冲突: {col} 已存在于 factor.table 中"
+                    factor.table = pd.concat([table, factor.table], axis=1)
+            else: # table is None
+                pass # factor.table is not None or empty, otherwise an error would have been raised above
+            if tester.products:
+                with open(factor_series_cache_file, "wb") as f:
+                    pickle.dump((factor.table, start_calc_time), f)
+            tester.products = original_products.copy()
 
-            tester.products = original_products
-            if not re_calc_ic and factor_ic_cache_file.exists():
+            ic_series = None
+            ic_stats = None
+            if not re_calc and factor_ic_cache_file.exists():
                 with open(factor_ic_cache_file, "rb") as f:
-                    _, factor.ic_series, factor.ic_stats, products_cache, return_freq_cache, start_date_cache, end_date_cache = pickle.load(f)
-                if products_cache != tester.products or return_freq_cache != return_freq \
-                    or start_date_cache != tester.start_date or end_date_cache != tester.end_date:
-                    re_calc_ic = True
-            else:
-                re_calc_ic = True
-            if re_calc_ic:
-                factor.returns = pd.DataFrame()
-                ic_series_df, ic_stats_df = tester.calc_ic(factors=factor)
-                factor.ic_series = ic_series_df.iloc[:, 0]
-                factor.ic_stats = ic_stats_df.iloc[:, 0]
+                    ic_series, ic_stats, products_cache, return_freq_cache, start_date_cache, end_date_cache = pickle.load(f)
+                if products_cache == tester.products and return_freq_cache != return_freq \
+                    and start_date_cache == tester.start_date and end_date_cache == tester.end_date:
+                    tester.products = set()
+            if tester.products:
+                try:
+                    ic_series_df, ic_stats_df = tester.calc_ic(factors=factor)
+                    ic_series = ic_series_df.iloc[:, 0]
+                    ic_stats = ic_stats_df.iloc[:, 0]
+                except:
+                    pass
+            assert ic_series is not None and ic_stats is not None, "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
+            factor.ic_series = ic_series
+            factor.ic_stats = ic_stats
+            if tester.products:
                 with open(factor_ic_cache_file, "wb") as f:
-                    pickle.dump((factor, factor.ic_series, factor.ic_stats, tester.products, return_freq, tester.start_date, tester.end_date), f)
+                    pickle.dump((factor.ic_series, factor.ic_stats, tester.products, return_freq, tester.start_date, tester.end_date), f)
         
+        tester.products = original_products.copy()
         ic_stats = pd.concat([factor.ic_stats for factor in factors], axis=1)
         ic_stats.rename(columns=lambda x: str(x), inplace=True)
         columns = ic_stats.columns.tolist()
