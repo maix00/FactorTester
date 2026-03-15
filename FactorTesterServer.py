@@ -870,7 +870,7 @@ def convert_to_fancytree(tree_dict):
         if isinstance(value, dict) and "$SUBCLASS$" in value:
             sub_dict = value["$SUBCLASS$"]
             if isinstance(sub_dict, dict):
-                for subkey, subval in sub_dict.items():
+                for subkey, subval in sorted(sub_dict.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
                     if subkey not in ("$SUBCLASS$", "$OBJECTS$"):
                         child_nodes.append(create_node(subkey, subval, current_path))
 
@@ -881,7 +881,7 @@ def convert_to_fancytree(tree_dict):
             processed_keys.update(value["$SUBCLASS$"].keys())
 
         if isinstance(value, dict):
-            for k, v in value.items():
+            for k, v in sorted(value.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
                 if k in ("$SUBCLASS$", "$OBJECTS$") or k in processed_keys:
                     continue
                 child_nodes.append(create_node(k, v, current_path))
@@ -932,7 +932,7 @@ def convert_to_fancytree(tree_dict):
 
     # 处理顶层节点（排除特殊键）
     top_nodes = []
-    for key, value in tree_dict.items():
+    for key, value in sorted(tree_dict.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
         if key not in ("$SUBCLASS$", "$OBJECTS$"):
             top_nodes.append(create_node(key, value, ""))
     return top_nodes
@@ -1300,6 +1300,10 @@ def get_category_filter_module_html():
                     msg = '✓ 已提交，产品数量: ' + data.count + ', 路径数量: ' + data.count_paths;
                     status1.style.color = '#28a745';
                     status2.style.color = '#28a745';
+                    // 取消所有节点的勾选：通过取消根节点选中，联动清除所有子节点选中状态
+                    treeInstance.getRootNode().children.forEach(function(topNode) {
+                        topNode.setSelected(false);
+                    });
                 } else {
                     msg = '提交失败: ' + (data.error || '未知错误');
                     status1.style.color = '#d40000';
