@@ -1498,8 +1498,8 @@ def get_category_filter_module_html():
     '''
     return html + js
 
-def get_ic_test_module_html():
-    return '''
+def get_ic_test_module_html(factor_family_alias):
+    return f'''
     <div class="module" id="ic_test_module" style="margin-top:32px;">
         <div class="section-title">3. IC测试</div>
         <div id="ic-tab-container">
@@ -1507,84 +1507,84 @@ def get_ic_test_module_html():
         </div>
     </div>
     <script>
-    (function() {
+    (function() {{
         // 检查 Bootstrap CSS 是否已加载
-        function isBootstrapCSSLoaded() {
+        function isBootstrapCSSLoaded() {{
             var links = document.querySelectorAll('link[rel="stylesheet"]');
-            for (var i = 0; i < links.length; i++) {
+            for (var i = 0; i < links.length; i++) {{
                 if (links[i].href.includes('bootstrap.min.css')) return true;
-            }
+            }}
             return false;
-        }
+        }}
         // 检查 Bootstrap JS 是否已加载（通过检查全局 bootstrap 对象）
-        function isBootstrapJSLoaded() {
+        function isBootstrapJSLoaded() {{
             return typeof window.bootstrap !== 'undefined';
-        }
+        }}
         // 如果未加载 CSS，则动态添加
-        if (!isBootstrapCSSLoaded()) {
+        if (!isBootstrapCSSLoaded()) {{
             var link = document.createElement('link');
             link.rel = 'stylesheet';
             link.href = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css';
             document.head.appendChild(link);
-        }
+        }}
         // 如果未加载 JS，则动态添加（注意：JS 依赖 jQuery，需确保顺序）
-        if (!isBootstrapJSLoaded()) {
+        if (!isBootstrapJSLoaded()) {{
             var script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js';
             document.body.appendChild(script);
-        }
-    })();
+        }}
+    }})();
     // 根据 submissions 渲染 IC 测试选项卡
-    window.renderICTabs = function(submissions) {
+    window.renderICTabs = function(submissions) {{
         var container = document.getElementById('ic-tab-container');
         if (!container) return;
-        if (!submissions || submissions.length === 0) {
+        if (!submissions || submissions.length === 0) {{
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">暂无测试器，请先添加测试器。</div>';
             return;
-        }
+        }}
         var tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         var panelsHtml = '<div class="tab-content" id="icTabContent">';
-        submissions.forEach(function(sub, idx) {
+        submissions.forEach(function(sub, idx) {{
             var activeClass = idx === 0 ? 'active' : '';
             var showClass = idx === 0 ? 'show active' : '';
             var tabId = 'ic-tab-' + sub.id;
             var panelId = 'ic-panel-' + sub.id;
             tabsHtml += `
                 <li class="nav-item" role="presentation">
-                    <button style="font-size:12px;" class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab" aria-controls="${panelId}" aria-selected="${idx === 0}">
-                        ${sub.factor_tester_serial || '测试器' + (idx+1)}
+                    <button style="font-size:12px;" class="nav-link ${{activeClass}}" id="${{tabId}}" data-bs-toggle="tab" data-bs-target="#${{panelId}}" type="button" role="tab" aria-controls="${{panelId}}" aria-selected="${{idx === 0}}">
+                        ${{sub.factor_tester_serial || '测试器' + (idx+1)}}
                     </button>
                 </li>
             `;
             panelsHtml += `
-                <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel" aria-labelledby="${tabId}">
+                <div class="tab-pane fade ${{showClass}}" id="${{panelId}}" role="tabpanel" aria-labelledby="${{tabId}}">
                     <div style="margin-top:16px;">
-                        <button class="btn btn-primary" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
-                        <span id="ic-status-${sub.id}" style="margin-left:12px;color:#0078d4;"></span>
+                        <button class="btn btn-primary" id="run-ic-btn-${{sub.id}}" onclick="runIC('${{sub.id}}')">运行IC测试</button>
+                        <span id="ic-status-${{sub.id}}" style="margin-left:12px;color:#0078d4;"></span>
                     </div>
-                    <div id="ic-result-${sub.id}" style="margin-top:16px;"></div>
+                    <div id="ic-result-${{sub.id}}" style="margin-top:16px;"></div>
                 </div>
             `;
-        });
+        }});
         tabsHtml += '</ul>';
         panelsHtml += '</div>';
         container.innerHTML = tabsHtml + panelsHtml;
 
         // 重新初始化 Bootstrap 选项卡（如果使用了 Bootstrap）
-        if (typeof bootstrap !== 'undefined') {
+        if (typeof bootstrap !== 'undefined') {{
             var triggerTabList = [].slice.call(document.querySelectorAll('#icTab button[data-bs-toggle="tab"]'))
-            triggerTabList.forEach(function (triggerEl) {
+            triggerTabList.forEach(function (triggerEl) {{
                 var tabTrigger = new bootstrap.Tab(triggerEl);
-                triggerEl.addEventListener('click', function(event) {
+                triggerEl.addEventListener('click', function(event) {{
                     event.preventDefault();
                     tabTrigger.show();
-                });
-            });
-        }
-    };
+                }});
+            }});
+        }}
+    }};
 
     // 运行 IC 测试的函数
-    window.runIC = function(subId) {
+    window.runIC = function(subId) {{
         var btn = document.getElementById('run-ic-btn-' + subId);
         var status = document.getElementById('ic-status-' + subId);
         var resultDiv = document.getElementById('ic-result-' + subId);
@@ -1593,43 +1593,76 @@ def get_ic_test_module_html():
         resultDiv.innerHTML = '';
         // 查找对应的 submission
         var submission = submissions.find(s => s.id == subId);
-        if (!submission) {
+        if (!submission) {{
             status.innerText = '错误：未找到提交';
             btn.disabled = false;
             return;
-        }
-        fetch('/run_ic_test', {
+        }}
+        fetch('/run_ic_test', {{
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ submission_id: subId, paths: submission.paths })
-        })
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                submission_id: subId,
+                factor_family_alias: '{factor_family_alias}',
+            }})
+        }})
         .then(r => r.json())
-        .then(data => {
+        .then(data => {{
             btn.disabled = false;
-            if(data.success) {
+            if(data.success) {{
                 status.innerText = '✓ IC测试完成';
                 // 显示表格
                 var table = '<table class="table table-bordered table-sm"><thead><tr>';
                 for(var col of data.columns) table += '<th>' + col + '</th>';
                 table += '</tr></thead><tbody>';
-                for(var row of data.rows) {
+                for(var row of data.rows) {{
                     table += '<tr>';
                     for(var col of data.columns) table += '<td>' + row[col] + '</td>';
                     table += '</tr>';
-                }
+                }}
                 table += '</tbody></table>';
                 resultDiv.innerHTML = table;
-            } else {
+            }} else {{
                 status.innerText = '✗ IC测试失败: ' + data.error;
-            }
-        })
-        .catch(err => {
+            }}
+        }})
+        .catch(err => {{
             btn.disabled = false;
             status.innerText = '网络错误';
-        });
-    };
+        }});
+    }};
     </script>
     '''
+
+@app.route('/run_ic_test', methods=['POST'])
+def run_ic_test():
+    data = request.get_json()
+    submission_id = data.get('submission_id')
+    factor_family_alias = data.get('factor_family_alias')
+    try:
+        # 在服务器端找到对应的 FactorTester 实例
+        global factor_testers
+        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        assert tester is not None, "未找到对应的测试器实例"
+        from Factor import FactorTester
+        assert isinstance(tester, FactorTester), "找到的实例类型不正确"
+        # 这里调用测试器的 calc_ic 方法，假设它返回一个 DataFrame 或类似结构
+        factor_family = get_factor_family_instance(factor_family_alias)
+        assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
+        factors = factor_family.get_factors()  # 获取因子列表
+        tester.calc_factor(factors=factors)  # 确保测试器已经计算了因子值
+        ic_series, ic_stats = tester.calc_ic(factors=factors)  # 需要在 FactorTester 中实现这个方法
+        # 将结果转换为前端表格需要的格式
+        ic_stats.rename(columns=lambda x: str(x), inplace=True)  # 确保列名是字符串
+        columns = ic_stats.columns.tolist()  # 列名列表
+        rows = ic_stats.to_dict(orient='records')  # 每行作为一个字典的列表
+        indices = ic_stats.index.tolist()  # 获取索引列表
+        for i, row in enumerate(rows):
+            row['index'] = indices[i]  # 将索引添加到每行数据中，列名为 'index'
+        columns = ['index'] + columns  # 将 'index' 列添加到列名列表的开头
+        return jsonify({'success': True, 'columns': columns, 'rows': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 def get_group_test_module_html():
     return """
@@ -1646,7 +1679,7 @@ def get_factor_main_section_html(factor_family_alias):
         ('parameter_module', get_parameter_module_html, factor_family_alias),
         ('time_range_module', get_time_range_module_html, factor_family_alias),
         ('category_filter_module', get_category_filter_module_html),
-        ('ic_test_module', get_ic_test_module_html),
+        ('ic_test_module', get_ic_test_module_html, factor_family_alias),
         ('group_test_module', get_group_test_module_html),
     ]
     modules_html = ""

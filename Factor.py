@@ -561,12 +561,12 @@ class FactorTester(SerialObject):
                 else:
                     ic.append(np.nan)
             factor.ic_series = pd.Series(ic, index=dt_index)
-            ic_series[factor.alias] = factor.ic_series
+            ic_series[factor] = factor.ic_series
             avg_coverage = np.mean(coverage)
-            stats_df = self.ic_stats(ic_series[factor.alias])
+            stats_df = self.ic_stats(ic_series[factor])
             stats_df['avg_coverage'] = avg_coverage
             factor.ic_stats = stats_df
-            ic_stats[factor.alias] = stats_df
+            ic_stats[factor] = stats_df
         return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
