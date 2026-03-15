@@ -1071,15 +1071,15 @@ def get_category_filter_module_html():
     
     html = resources + '''
     <div class="module" id="category_filter_module" style="margin-top:24px;">
-        <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
-        <div style="margin-bottom:0px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
-        <div style="display: flex; align-items: baseline; margin-top: -12px; margin-bottom: 8px;">
-            <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
-            <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
-        </div>
         <div style="display: flex; gap: 20px;">
             <!-- 左侧树 -->
             <div style="flex: 1; min-width: 0;">
+                <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
+                <div style="margin-bottom:0px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
+                <div style="display: flex; align-items: baseline; margin-top: -12px; margin-bottom: 8px;">
+                    <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+                    <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
+                </div>
                 <div id="tree-container"></div>
                 <div style="display: flex; align-items: baseline; margin-top: -12px;">
                     <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
@@ -1160,11 +1160,8 @@ def get_category_filter_module_html():
                 return;
             }
             var selectedNodes = treeInstance.getSelectedNodes(); // 现在可以正常使用
-            var selectedKeys = selectedNodes.map(function(node) {
+            var selectedPaths = selectedNodes.map(function(node) {
                 return node.key;
-            });
-            var selectedPaths = selectedKeys.filter(function(key) {
-                return key.split('/').length >= 3;
             });
 
             fetch('/submit_selected_products', {
@@ -1204,19 +1201,21 @@ def get_category_filter_module_html():
             submissions.forEach(function(sub, index) {
                 var isExpanded = expandedState[index] || {};  // 当前提交的展开状态对象
                 html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #ccc; border-radius:4px; margin-bottom:12px; background:#f9f9f9;">';
-                html += '  <div class="submission-header" style="background:#e9e9e9; padding:5px 10px; cursor:move; display:flex; justify-content:space-between;">';
+                html += '  <div class="submission-header" style="background:#e9e9e9; padding:5px 10px; cursor:move; display:flex; justify-content:space-between; font-size:13px;">';
                 html += '    <span><i class="fas fa-grip-vertical" style="margin-right:5px;"></i>提交 ' + (index+1) + ' - ' + sub.timestamp + '</span>';
-                html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer;"><i class="fas fa-trash"></i></button>';
+                html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; margin-top:0; padding:0 0; margin-right:0px; margin-left:auto"><i class="fas fa-trash"></i></button>';
                 html += '  </div>';
-                html += '  <div style="padding:8px;">';
+                html += '  <div style="padding:2px;">';
                 html += '    <table style="width:100%; border-collapse:collapse;">';
                 sub.paths.forEach(function(path, pathIdx) {
                     var rowId = 'path-' + index + '-' + pathIdx;
                     var expanded = isExpanded[path] || false;  // 该路径是否展开
                     html += '      <tr class="path-row" data-path="' + path + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
-                    html += '        <td style="padding:4px 0; border-bottom:1px solid #eee;">';
-                    html += '          <span class="path-text" style="cursor:pointer;font-size:13px;">' + path + '</span>';
-                    html += '          <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="float:right; background:transparent; border:none; color:#d00; cursor:pointer;"><i class="fas fa-times"></i></button>';
+                    html += '        <td style="padding:0 0; border-bottom:1px solid #eee;">';
+                    html += '          <div style="display:flex;align-items:center;">';
+                    html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px">' + path + '</span>';
+                    html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="margin-left:auto;background:transparent; border:none; color:#d00; cursor:pointer; margin-top:auto; padding:0 0; margin-right:10px; "><i class="fas fa-times"></i></button>';
+                    html += '          </div>';
                     html += '        </td>';
                     html += '      </tr>';
                     if (expanded) {
@@ -1325,27 +1324,36 @@ def get_group_test_module_html():
     """
 
 def get_factor_main_section_html(factor_family_alias):
-    module_ids = [
-        'latex_module',
-        'parameter_module',
-        'time_range_module',
-        'category_filter_module',
-        'ic_test_module',
-        'group_test_module']
+    module_infos = [
+        ('latex_module', get_latex_module_html, factor_family_alias),
+        ('parameter_module', get_parameter_module_html, factor_family_alias),
+        ('time_range_module', get_time_range_module_html, factor_family_alias),
+        ('category_filter_module', get_category_filter_module_html),
+        ('ic_test_module', get_ic_test_module_html),
+        ('group_test_module', get_group_test_module_html),
+    ]
+    modules_html = ""
+    module_ids = []
+    for info in module_infos:
+        mid, func, *args = info
+        modules_html += func(*args) if args else func()
+        module_ids.append(mid)
+
     return f"""
         <div class="section">
             <div class="section-title">当前因子: <b style="color:#0078d4;">{factor_family_alias}</b></div>
             <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
-            {get_latex_module_html(factor_family_alias)}
-            {get_parameter_module_html(factor_family_alias)}
-            {get_time_range_module_html(factor_family_alias)}
-            {get_category_filter_module_html()}
-            {get_ic_test_module_html()}
-            {get_group_test_module_html()}
+            {modules_html}
         </div>
         <script>
-            function openModule(moduleId) {{ document.getElementById(moduleId).style.display = ''; }}
-            function closeModule(moduleId) {{ document.getElementById(moduleId).style.display = 'none'; }}
+            function openModule(moduleId) {{
+                var el = document.getElementById(moduleId);
+                if (el) el.style.display = '';
+            }}
+            function closeModule(moduleId) {{
+                var el = document.getElementById(moduleId);
+                if (el) el.style.display = 'none';
+            }}
             document.addEventListener('DOMContentLoaded', function() {{
                 {'; '.join([f"openModule('{mid}')" for mid in module_ids])}
             }});
