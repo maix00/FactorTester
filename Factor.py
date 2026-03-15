@@ -426,36 +426,40 @@ class FactorTester(SerialObject):
         return super().__new__(cls, type_alias='FT', alias=alias)
     
     def __init__(self, products: Sequence[Product],
+                 alias: Optional[str] = None,
                  time_range: Optional[Tuple] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
         
-        self.logger = logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
+        if not hasattr(self, '_initialized'):
+            super().__init__(type_alias='FT', alias=alias)
 
-            self.logger.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            self.logger = logging.getLogger(self.__class__.__name__)
+            if not self.logger.handlers:
 
-            if logger_console:
-                console_handler = logging.StreamHandler()
-                console_handler.setFormatter(formatter)
-                self.logger.addHandler(console_handler)
+                self.logger.setLevel(logging.INFO)
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-            if logger_file:
-                if not os.path.exists(logger_dir_path):
-                    os.makedirs(logger_dir_path)
-                logger_file_path = os.path.join(logger_dir_path, "factor_tester_{}.log".format(datetime.now().strftime("%Y%m%d")))
-                file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
-                file_handler.setFormatter(formatter)
-                self.logger.addHandler(file_handler)
-        
-        self.products = set(products)
-        self.all_products = set(products)
-        self.sift_product_by_empty_data_bool = False
-        self.factors = []
-        self.start_date = pd.to_datetime(time_range[0]) if time_range is not None else None
-        self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
-        self.logger.info(f"FactorTester initialized with {len(self.products)} products")
+                if logger_console:
+                    console_handler = logging.StreamHandler()
+                    console_handler.setFormatter(formatter)
+                    self.logger.addHandler(console_handler)
+
+                if logger_file:
+                    if not os.path.exists(logger_dir_path):
+                        os.makedirs(logger_dir_path)
+                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{self.serial_number}_{datetime.now().strftime('%Y%m%d')}.log")
+                    file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
+                    file_handler.setFormatter(formatter)
+                    self.logger.addHandler(file_handler)
+            
+            self.products = set(products)
+            self.all_products = set(products)
+            self.sift_product_by_empty_data_bool = False
+            self.factors = []
+            self.start_date = pd.to_datetime(time_range[0]) if time_range is not None else None
+            self.end_date = pd.to_datetime(time_range[1]) if time_range is not None else None
+            self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
     def sift_product(self, sift_func: Callable[[Product], bool]):
         new_products = set()

@@ -19,6 +19,7 @@ _server = None
 
 # --- FactorFamily singleton cache ---
 _factor_family_cache = {}
+factor_testers = []
 
 def get_factor_family_instance(module_name):
     if module_name in _factor_family_cache:
@@ -1038,8 +1039,10 @@ selected_products = []  # 全局变量，存储当前选中的产品列表
 def submit_selected_products():
     data = request.get_json()
     selected_paths = data.get('selected_paths', [])
+    id_time = data.get('id_time', None)  # 可选的时间戳参数，用于记录提交时间
+    id_time = str(id_time) if id_time is not None else None
     try:
-        global selected_products
+        global selected_products, factor_testers
         selected_products = []
         selected_paths = get_minimal_paths(selected_paths)
         for path in selected_paths:
@@ -1050,6 +1053,9 @@ def submit_selected_products():
             else:
                 selected_products.append(node)
         selected_products = sorted(list(set(selected_products)))
+        from Factor import FactorTester
+        factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(default_test_start_date, default_test_end_date))
+        factor_testers.append(factor_tester)
         return jsonify({
             'success': True, 
             'count': len(selected_products), 
@@ -1166,11 +1172,15 @@ def get_category_filter_module_html():
             var selectedPaths = selectedNodes.map(function(node) {
                 return node.key;
             });
+            var id_time = new Date().getTime();
 
             fetch('/submit_selected_products', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({selected_paths: selectedPaths})
+                body: JSON.stringify({
+                    selected_paths: selectedPaths,
+                    id_time: id_time
+                })
             })
             .then(r => r.json())
             .then(data => {
@@ -1188,7 +1198,7 @@ def get_category_filter_module_html():
                 // 将本次提交添加到历史记录
                 if (data.selected_paths && data.selected_paths.length > 0) {
                     var newSubmission = {
-                        id: Date.now(),  // 简单唯一ID
+                        id: id_time,  // 简单唯一ID
                         paths: data.selected_paths.slice(),  // 深拷贝
                         timestamp: new Date().toLocaleTimeString()
                     };
