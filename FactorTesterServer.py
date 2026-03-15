@@ -888,6 +888,7 @@ def convert_to_fancytree(tree_dict):
 
         # 检查是否有产品
         has_objects = isinstance(value, dict) and "$OBJECTS$" in value and bool(value["$OBJECTS$"])
+        has_subclass = isinstance(value, dict) and "$SUBCLASS$" in value and bool(value["$SUBCLASS$"])
 
         # 构建当前节点
         node = {
@@ -901,6 +902,9 @@ def convert_to_fancytree(tree_dict):
             node["folder"] = True
             node["lazy"] = False
             node["children"] = child_nodes
+            # 判断是否应默认展开：有子分类且没有产品
+            if not has_objects or has_subclass:
+                node["expanded"] = True
             # 如果同时有产品，添加一个“产品列表”子文件夹（懒加载）
             if has_objects:
                 node["desc"] = f"包含 {len(value['$OBJECTS$'])} 个产品"
