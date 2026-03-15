@@ -1068,7 +1068,11 @@ def get_category_filter_module_html():
     html = resources + '''
     <div class="module" id="category_filter_module" style="margin-top:24px;">
         <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
-        <div style="margin-bottom:8px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
+        <div style="margin-bottom:0px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
+        <div style="display: flex; align-items: baseline; margin-top: -12px; margin-bottom: 8px;">
+            <button type="button" id="submit-selected2" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+            <div id="submit_status2" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
+        </div>
         <div id="tree-container"></div>
         <div style="display: flex; align-items: baseline; margin-top: -12px;">
             <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
@@ -1098,15 +1102,13 @@ def get_category_filter_module_html():
                 var desc = node.data.desc; // 获取描述文本
                 if (desc) {
                     var $title = $(node.span).find('.fancytree-title');
-                    // 移除之前可能存在的描述元素（例如通过类名识别）
                     $title.siblings('.node-description').remove();
-                    // 添加新的描述元素
                     $title.after('<span class="node-description" style="color:#888; margin-left:8px; font-size:12px;">' + desc + '</span>');
                 }
             }
         });
 
-        $("#submit-selected").click(function() {
+        function submitSelectedProducts() {
             var tree = $("#tree-container").fancytree("getTree");
             var selectedNodes = tree.getSelectedNodes();
             var selectedKeys = selectedNodes.map(function(node) {
@@ -1123,13 +1125,24 @@ def get_category_filter_module_html():
             })
             .then(r => r.json())
             .then(data => {
-                var status = document.getElementById('submit_status');
+                var status1 = document.getElementById('submit_status');
+                var status2 = document.getElementById('submit_status2');
+                var msg;
                 if (data.success) {
-                    status.innerText = '✓ 已提交，选中产品数量: ' + data.count + ', 实际路径数量: ' + data.count_paths;
+                    msg = '✓ 已提交，选中产品数量: ' + data.count + ', 实际路径数量: ' + data.count_paths;
                 } else {
-                    status.innerText = '提交失败: ' + (data.error || '未知错误');
+                    msg = '提交失败: ' + (data.error || '未知错误');
                 }
+                if (status1) status1.innerText = msg;
+                if (status2) status2.innerText = msg;
             });
+        }
+
+        $("#submit-selected").click(function() {
+            submitSelectedProducts();
+        });
+        $("#submit-selected2").click(function() {
+            submitSelectedProducts();
         });
     });
     </script>
