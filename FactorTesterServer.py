@@ -1070,8 +1070,10 @@ def get_category_filter_module_html():
         <div class="section-title" style="font-size:15px;">2. 产品类别筛选</div>
         <div style="margin-bottom:8px;color:#888;font-size:12px;">树状结构，勾选后提交</div>
         <div id="tree-container"></div>
-        <button type="button" id="submit-selected" style="margin-top:12px;background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
-        <div id="submit_status" style="margin-top:6px;color:#0078d4;font-size:12px;"></div>
+        <div style="display: flex; align-items: baseline; margin-top: -12px;">
+            <button type="button" id="submit-selected" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:13px;height:24px;">提交选中产品</button>
+            <div id="submit_status" style="margin-left: 10px; color:#0078d4; font-size:12px;"></div>
+        </div>
     </div>
     '''
     
