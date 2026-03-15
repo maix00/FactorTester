@@ -995,7 +995,8 @@ def get_products():
         return jsonify([])  # 节点不存在
 
     # 获取产品列表
-    objects = node.get('$OBJECTS$', []) if isinstance(node, dict) else []
+    objects = node.get('$OBJECTS$', []) if isinstance(node, dict) else [node]
+    objects = sorted(objects, key=lambda x: getattr(x, 'name', str(x)))  # 按 name 属性排序，如果没有则按字符串表示排序
 
     # 转换为 Fancytree 子节点格式
     child_nodes = []
@@ -1177,7 +1178,7 @@ def get_category_filter_module_html():
                 var status2 = document.getElementById('submit_status2');
                 var msg;
                 if (data.success) {
-                    msg = '✓ 已提交，选中产品数量: ' + data.count + ', 实际路径数量: ' + data.count_paths;
+                    msg = '✓ 已提交，产品数量: ' + data.count + ', 路径数量: ' + data.count_paths;
                 } else {
                     msg = '提交失败: ' + (data.error || '未知错误');
                 }
@@ -1290,7 +1291,7 @@ def get_category_filter_module_html():
                     if (data && data.length) {
                         var html = '<div style="font-size:13px;">';
                         data.forEach(function(prod) {
-                            html += '<div>' + prod.title + '</div>';
+                            html += `<div>${prod.title} <span style="color:#888;">${prod.desc}</span></div>`;
                         });
                         html += '</div>';
                         $detailCell.html(html);
