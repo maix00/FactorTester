@@ -211,6 +211,7 @@ class DataColumn(Enum):
     OPEN_INTEREST = 'OI'
     TIME_COL_DAY = 'TD'
     TIME_COL_MIN = 'TM'
+    TIMESTAMP = 'T'
     TWAP = 'TW'
     VWAP = 'VW'
     SETTLEMENT_PRICE = 'SP'
@@ -223,7 +224,6 @@ class DataColumn(Enum):
     HIGH_ADJUSTED = 'HA'
     LOW_ADJUSTED = 'LA'
     CLOSE_ADJUSTED = 'CA'
-    TIME_COL = 'T'
     ADJUST_SUFFIX = 'ADJ'
     PRODUCT_NAME = 'PN'
 
@@ -310,12 +310,21 @@ class DataSource(SerialObject):
             self.data_cols_mapping: Dict[Any, str] = {}
             self._is_object_in_source_func = if_object_is_in_source
             self._get_object_path_func = get_object_path
+            self.timezone: str = ''
 
     def if_object_is_in_source(self, object: UniqueObject) -> bool:
+        if hasattr(object, 'timezone') \
+            and getattr(object, 'timezone') is not None:
+            if self.timezone and getattr(object, 'timezone') \
+                and getattr(object, 'timezone') != self.timezone:
+                return False
         return self._is_object_in_source_func(object)
 
     def get_object_path(self, object: UniqueObject) -> Any:
         return self._get_object_path_func(object)
+    
+    def set_timezone(self, timezone: str) -> None:
+        self.timezone = timezone
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         self.time_cols_mapping = {k: _process_data_freq(v).name for k, v in mapping.items()}
@@ -332,7 +341,7 @@ if __name__ == '__main__':
 class DataMeta(UniqueObject):
     _instances = WeakValueDictionary()
 
-    def __init__(self, name: str, object: UniqueObject, data_freq: DataFreq):
+    def __init__(self, name: str, object: UniqueObject, data_freq: DataFreq, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(name=name)
             self.object = object
@@ -342,6 +351,7 @@ class DataMeta(UniqueObject):
             self.path: Any
             self.start_date: pd.Timestamp
             self.end_date: pd.Timestamp
+            self.timezone: str = kwargs.get('timezone', '')
 
     def list_available_sources(self) -> List[DataSource]:
         lst = []

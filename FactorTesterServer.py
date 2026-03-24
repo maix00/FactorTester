@@ -3,6 +3,7 @@
 
 import importlib.util
 import importlib
+import math
 import os
 import sys
 import threading
@@ -1639,18 +1640,18 @@ def get_ic_test_module_html(factor_family_alias):
     }}
 
     function buildPrettyTable(data) {{
-        if (!data || !data.columns || !data.rows || !data.columns.length) {{
+        if (!data || !data.ic_stats || !data.ic_stats.columns || !data.ic_stats.rows || !data.ic_stats.columns.length) {{
             return '<div class="ic-empty">无可展示结果</div>';
         }}
         var html = '<div class="ic-table-wrap"><table class="ic-table"><thead><tr>';
-        data.columns.forEach(function(col, i) {{
+        data.ic_stats.columns.forEach(function(col, i) {{
             html += '<th class="' + (i === 0 ? 'idx-col' : '') + '">' + col + '</th>';
         }});
         html += '</tr></thead><tbody>';
 
-        data.rows.forEach(function(row) {{
+        data.ic_stats.rows.forEach(function(row) {{
             html += '<tr>';
-            data.columns.forEach(function(col, i) {{
+            data.ic_stats.columns.forEach(function(col, i) {{
                 html += '<td class="' + (i === 0 ? 'idx-col' : '') + '">' + fmtCell(row[col]) + '</td>';
             }});
             html += '</tr>';
@@ -1889,27 +1890,45 @@ def get_ic_test_module_html(factor_family_alias):
     }};
 
     function drawChart(containerId, seriesData, seriesName) {{
-        if (typeof Highcharts === 'undefined') {{
-            console.error('Highcharts not loaded');
-            return;
-        }}
+        if (typeof Highcharts === 'undefined') return;
         var container = document.getElementById(containerId);
         if (!container || !seriesData || !seriesData.dates || !seriesData.values) return;
 
-        var chartData = seriesData.dates.map((date, i) => [new Date(date).getTime(), seriesData.values[i]]);
+        var chartData = [];
+        for (var i = 0; i < seriesData.dates.length; i++) {{
+            var timestamp = Date.parse(seriesData.dates[i]); // 使用 Date.parse 确保一致性
+            if (isNaN(timestamp)) {{
+                console.warn('Invalid date:', seriesData.dates[i]);
+                continue;
+            }}
+            chartData.push([timestamp, seriesData.values[i]]);
+        }}
 
         Highcharts.stockChart(container, {{
             accessibility: {{ enabled: false }}, // 👈 禁用可访问性
-            rangeSelector: {{ selected: 1 }},
+            rangeSelector: {{ selected: 0 }},
             title: {{ text: null }},
-            xAxis: {{ type: 'datetime', crosshair: true }},
+            xAxis: {{
+                type: 'datetime',
+                crosshair: true,
+                ordinal: true,
+                dateTimeLabelFormats: {{ minute: '%Y-%m-%d %H:%M' }} // 轴标签格式
+            }},
             yAxis: {{ title: {{ text: seriesName }}, crosshair: true }},
-            tooltip: {{ shared: true, valueDecimals: 4 }},
-            series: [{{ name: seriesName, data: chartData }}],
+            tooltip: {{
+                shared: true,
+                valueDecimals: 4,
+                xDateFormat: '%Y-%m-%d %H:%M' // tooltip 显示到分钟
+            }},
+            series: [{{
+                name: seriesName,
+                data: chartData,
+                dataGrouping: {{ enabled: true }} // 自动数据分组
+            }}],
             navigator: {{ enabled: true }},
             scrollbar: {{ enabled: true }},
         }});
-    }}
+    }};
 
     window.loadFactorAndReturn = function(subId, factorIdx, factorName) {{
         var select = document.getElementById(`product-select-${{subId}}-${{factorIdx}}`);
@@ -2075,25 +2094,14 @@ def run_ic_test():
             row['index'] = indices[i]
         columns = ['index'] + columns
 
-        factor = factors[0]
-        ic_series_dates = None
-        ic_series_values = None
-        if factor.ic_series is not None:
-            if isinstance(factor.ic_series.index, pd.MultiIndex):
-                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d').tolist()
-            else:
-                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime('%Y-%m-%d').tolist()
-            ic_series_values = factor.ic_series.values.tolist()
-
         response = {
             'success': True,
             'paths_hash': paths_hash,
-            'ic_stats': {},
+            'ic_stats': {
+                'columns': columns,
+                'rows': rows,
+            },
             'factors': [],
-            'columns': columns, 
-            'rows': rows,
-            'ic_series_dates': ic_series_dates,
-            'ic_series_values': ic_series_values,
         }
         
         from Products import Product
@@ -2101,10 +2109,12 @@ def run_ic_test():
             ic_series_dates = None
             ic_series_values = None
             if isinstance(factor.ic_series.index, pd.MultiIndex):
-                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d').tolist()
+                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d %H:%M:%S').tolist()
             else:
-                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime('%Y-%m-%d').tolist()
+                time_str = '%Y-%m-%d %H:%M:%S' if str(factor.ic_series.index.name).startswith('MIN') else '%Y-%m-%d'
+                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime(time_str).tolist()
             ic_series_values = factor.ic_series.values.tolist()
+            ic_series_values = [None if (isinstance(v, float) and (pd.isna(v) or pd.isnull(v))) else v for v in ic_series_values]
             response['factors'].append({
                 'name': factor.name,
                 'alias': factor.alias,

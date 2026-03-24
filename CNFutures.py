@@ -28,7 +28,7 @@ DataColumnMapping = {
     DataColumn.OPEN_INTEREST: 'open_interest',
     DataColumn.TIME_COL_DAY: 'trading_day',
     DataColumn.TIME_COL_MIN: 'trade_time',
-    DataColumn.TIME_COL: 'trade_time',
+    DataColumn.TIMESTAMP: 'trade_timestamp',
     DataColumn.TWAP: 'twap',
     DataColumn.VWAP: 'vwap',
     DataColumn.SETTLEMENT_PRICE: 'settlement_price',
@@ -169,6 +169,7 @@ def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
 class CNFuturesContract(FuturesContract):
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY')
+        self.timezone = 'Asia/Beijing'
 
 class CNFutures(Futures):
     def __init__(self, name: str, point_value: Optional[int] = None, 
@@ -182,6 +183,7 @@ class CNFutures(Futures):
         self.category_attr_name = 'category_day_night_time'
         variety = get_variety_by_code(name.split('.')[0])
         self.desc = variety if variety else name
+        self.timezone = 'Asia/Shanghai'
 
 from Products import Product
 
@@ -199,6 +201,7 @@ def get_all_futures_contract() -> List[Product]:
     )
     LocalCNFuturesContractMIN1.set_data_cols_mapping(datacolumn_map_reversed)
     LocalCNFuturesContractMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
+    LocalCNFuturesContractMIN1.set_timezone('Asia/Shanghai')
     from Tools import DataSourceRegister
     DataSourceRegister().register(LocalCNFuturesContractMIN1)
 
@@ -233,6 +236,9 @@ def get_all_futures() -> List[Product]:
 
     LocalCNFuturesMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
     LocalCNFuturesDAY1.set_time_cols_mapping({'trading_day': '1day'})
+
+    LocalCNFuturesDAY1.set_timezone('Asia/Shanghai')
+    LocalCNFuturesMIN1.set_timezone('Asia/Shanghai')
 
     from Tools import DataSourceRegister
     DataSourceRegister().register(LocalCNFuturesMIN1)

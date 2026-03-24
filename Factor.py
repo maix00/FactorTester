@@ -89,6 +89,7 @@ class Factor(SerialObject):
             self.ic_series: pd.Series = pd.Series()
             self.ic_stats: pd.Series = pd.Series()
             self.report: pd.DataFrame = pd.DataFrame()
+            self.timezone = ''
 
     def clear(self):
         self.table = pd.DataFrame()
@@ -97,6 +98,7 @@ class Factor(SerialObject):
         self.ic_series = pd.Series()
         self.ic_stats = pd.Series()
         self.report = pd.DataFrame()
+        self.timezone = ''
 
     def get_current_return_freq(self) -> Any:
         return ReturnFreqParam.get_value(self)
@@ -205,6 +207,10 @@ class Factor(SerialObject):
         if self.table.empty:
             return pd.DataFrame()
         self.freq_type, self.freq = self._calc_freq()
+        timezone_list = [product.timezone for product in self.products if hasattr(product, 'timezone') and product.timezone]
+        timezone_list = list(set(timezone_list))
+        assert len(timezone_list) <= 1, f"Multiple timezones found in products: {timezone_list}"
+        self.timezone = timezone_list[0] if timezone_list else ''
         return self.table
     
     def calc_returns(self, next_return: bool = True,
