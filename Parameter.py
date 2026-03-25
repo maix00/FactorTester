@@ -24,7 +24,7 @@ class Parameter(SerialObject):
             self.default_value = self.rectify_value(self.default_value)
             self.get_value_alias = lambda x: get_value_alias(x) if self.check_in_space(x) else ''
 
-    def _rectify_value(self, value: Any) -> Any:
+    def _rectify_value(self, value: Any, **kwargs) -> Any:
         return value
 
     def check_in_space(self, value: Any, error: bool = True) -> bool:
@@ -33,9 +33,9 @@ class Parameter(SerialObject):
             raise ValueError(f"{value} is not in the value space")
         return check
 
-    def change_default_value(self, value: Any) -> Parameter:
+    def change_default_value(self, value: Any, **kwargs) -> Parameter:
         self.check_in_space(value)
-        self.default_value = self.rectify_value(value)
+        self.default_value = self.rectify_value(value, **kwargs)
         return self
     
     def __iadd__(self, other):
@@ -48,7 +48,7 @@ class Parameter(SerialObject):
             other_rectify = other.rectify_value
             self.whether_in_space = lambda x: old_whether(x) or other_whether(x)
             self.get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
-            self.rectify_value = lambda x: old_rectify(x) if old_whether(x) else other_rectify(x)
+            self.rectify_value = lambda x, **kwargs: old_rectify(x, **kwargs) if old_whether(x) else other_rectify(x, **kwargs)
             return self
         return NotImplemented
     
@@ -66,7 +66,7 @@ class Parameter(SerialObject):
                 whether_in_space = lambda x: old_whether(x) or other_whether(x),
                 get_value_alias = lambda x: old_get_alias(x) if old_whether(x) else other_get_alias(x)
             )
-            new_param.rectify_value = lambda x: old_rectify(x) if old_whether(x) else other_rectify(x)
+            new_param.rectify_value = lambda x, **kwargs: old_rectify(x, **kwargs) if old_whether(x) else other_rectify(x, **kwargs)
             return new_param
         return NotImplemented
     
@@ -93,24 +93,24 @@ class Parameter(SerialObject):
                 whether_in_space = lambda x: old_whether(x) and not other_whether(x),
                 get_value_alias = lambda x: old_get_alias(x) if old_whether(x) and not other_whether(x) else (other_get_alias(x) if other_whether(x) and not old_whether(x) else '')
             )
-            new_param.rectify_value = self.rectify_value
+            new_param.rectify_value = lambda x, **kwargs: self.rectify_value(x, **kwargs)
             return new_param
         return NotImplemented
     
     if TYPE_CHECKING:
         from Factor import Factor
     
-    def register(self, factor: Factor, value: Any) -> None:
+    def register(self, factor: Factor, value: Any, **kwargs) -> None:
         self.check_in_space(value)
-        self._register[factor] = self.rectify_value(value)
+        self._register[factor] = self.rectify_value(value, **kwargs)
 
     def unregister(self, factor: Factor) -> None:
         if factor in self._register:
             del self._register[factor]
 
-    def change_value(self, factor: Factor, value: Any) -> None:
+    def change_value(self, factor: Factor, value: Any, **kwargs) -> None:
         self.check_in_space(value)
-        self._register[factor] = self.rectify_value(value)
+        self._register[factor] = self.rectify_value(value, **kwargs)
 
     def get_value(self, factor: Factor) -> Any:
         return self._register.get(factor, self.default_value)
@@ -176,7 +176,7 @@ class DataColumnParam(FinRangeParam):
         except Exception:
             return False
         
-    def _rectify_value(self, value: Any) -> Any:
+    def _rectify_value(self, value: Any, **kwargs) -> Any:
         from Tools import _process_data_col
         try:
             return _process_data_col(value)
@@ -207,7 +207,7 @@ class TimeDeltaParam(Parameter):
                 *args, **kwargs
             )
 
-    def _rectify_value(self, value: Any) -> Any:
+    def _rectify_value(self, value: Any, **kwargs) -> Any:
         if self.check_in_space(value):
             return pd.Timedelta(value)
 
@@ -250,6 +250,73 @@ if __name__ == '__main__':
     ReturnFreq = get_return_freq_param()
     print(ReturnFreq.get_value_alias('2h45m10s11ms'))
 
+class DateOrTimeParam(Parameter):
+    def __init__(self, alias: Optional[str] = None,
+                 default_value: Optional[Any] = None, *args, **kwargs):
+        if not hasattr(self, '_initialized'):
+            if default_value is None:
+                default_value = pd.Timestamp('2024-01-01').date()
+            super().__init__(
+                alias = alias,
+                default_value = default_value,
+                whether_in_space = self._whether_in_space,
+                get_value_alias = self._get_value_alias,
+                *args, **kwargs
+            )
+
+    def _rectify_value(self, value: Any, **kwargs) -> Any:
+        if self.check_in_space(value):
+            timezone = kwargs.get('timezone', None)
+            value = pd.Timestamp(value, tz=timezone)
+            isDate = kwargs.get('isDate', None)
+            isDatetime = kwargs.get('isDatetime', None)
+            if isDate is not None and isDatetime is not None and isDate and isDatetime:
+                raise ValueError(f"DateOrTimeParam {self.name}: Cannot specify both isDate and isDatetime for {value}")
+            if isDate is not None and isDate:
+                return value.date()
+            return value
+    
+    def _whether_in_space(self, value: Any) -> bool:
+        try:
+            pd.Timestamp(value)
+            return True
+        except Exception:
+            return False
+        
+    def _get_value_alias(self, value: Any, **kwargs) -> str:
+        return str(self.rectify_value(value, **kwargs))
+    
+    if TYPE_CHECKING:
+        from Factor import Factor
+    
+    def is_date(self, factor: Optional[Factor] = None, value: Optional[Any] = None, **kwargs) -> bool:
+        value = self.get_value(factor) if factor is not None else self.rectify_value(value, **kwargs)
+        assert value is not None, "Either factor or value must be provided"
+        import datetime
+        return type(value) is datetime.date
+    
+    def is_time(self, factor: Optional[Factor] = None, value: Optional[Any] = None, **kwargs) -> bool:
+        value = self.get_value(factor) if factor is not None else self.rectify_value(value, **kwargs)
+        assert value is not None, "Either factor or value must be provided"
+        import datetime
+        return not type(value) is datetime.date
+
+def get_StartCalcPointParam(alias: Optional[str] = '$SCP') -> DateOrTimeParam:
+    return DateOrTimeParam(alias)
+
+if __name__ == '__main__':
+    StartCalcPoint = get_StartCalcPointParam()
+    print(StartCalcPoint)
+    print(StartCalcPoint.get_value_alias('2024-01-02'))
+    print(StartCalcPoint.get_value_alias('2024-01-02 09:30:00'))
+    print(StartCalcPoint.check_in_space('2024-01-02 09:90:00', error=False))
+    print(StartCalcPoint.is_date(value='2024-01-02'))
+    print(StartCalcPoint.is_date(value='2024-01-02', isDate=True))
+    print(StartCalcPoint.is_time(value='2024-01-02 09:30:00'))
+    print(StartCalcPoint.is_time(value='2024-01-02 09:30:00', isDatetime=True))
+    print(StartCalcPoint.is_time(value='2024-01-02', isDate=True))
+    print(StartCalcPoint.is_time(value='2024-01-02'))
+
 class ColumnTimeParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
 
@@ -267,7 +334,7 @@ class ColumnTimeParam(Parameter):
             )
             self.default_value = self.rectify_value(self.default_value)
 
-    def _rectify_value(self, value: Any) -> Any:
+    def _rectify_value(self, value: Any, **kwargs) -> Any:
         if self.check_in_space(value):
             from Tools import _process_data_freq
             return (_process_data_freq(value[0]).name, pd.to_datetime(value[1]))
