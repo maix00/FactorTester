@@ -102,7 +102,9 @@ class SerialObject(UniqueObject):
                 raise ValueError(f"type_alias '{type_alias}' is already used by {owner.__name__} family")
         else:
             cls._type_alias_owners[type_alias] = cls._get_family_root()
+            owner = cls
         
+        owner._type_alias = type_alias
         cls._type_alias = type_alias
 
         if search and type_alias in cls._serial_map_dict:
@@ -297,7 +299,7 @@ class DataSource(SerialObject):
 
     def __init__(self, alias: str, data_freq: DataFreq,
                  if_object_is_in_source: Callable[[UniqueObject], bool],
-                 get_object_path: Callable[[UniqueObject], Any]):
+                 get_object_path: Callable[[UniqueObject], Any], *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='DS', alias=alias)
             self._register = DataSourceRegister() # Weak Value
@@ -310,26 +312,33 @@ class DataSource(SerialObject):
             self.data_cols_mapping: Dict[Any, str] = {}
             self._is_object_in_source_func = if_object_is_in_source
             self._get_object_path_func = get_object_path
-            self.timezone: str = ''
+            self.timezone: str = kwargs.get('timezone', '')
+            self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
+            self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
     def if_object_is_in_source(self, object: UniqueObject) -> bool:
-        if hasattr(object, 'timezone') \
-            and getattr(object, 'timezone') is not None:
+        # This method checks if the object is in the source by first checking the timezone compatibility, 
+        # and then calling the provided function to check if the object is in the source. 
+        if hasattr(object, 'timezone') and getattr(object, 'timezone') is not None:
             if self.timezone and getattr(object, 'timezone') \
                 and getattr(object, 'timezone') != self.timezone:
+                # if object and souce both have timezone attribute and they are different, then return False
+                # regardless of the result of _is_object_in_source_func, 
+                #  since the timezone mismatch already indicates that the source is not suitable for the object
                 return False
         return self._is_object_in_source_func(object)
 
     def get_object_path(self, object: UniqueObject) -> Any:
         return self._get_object_path_func(object)
     
-    def set_timezone(self, timezone: str) -> None:
-        self.timezone = timezone
-    
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
+        if not mapping or mapping is None:
+            return
         self.time_cols_mapping = {k: _process_data_freq(v).name for k, v in mapping.items()}
 
     def set_data_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
+        if not mapping or mapping is None:
+            return
         self.data_cols_mapping = {k: _process_data_col(v).name for k, v in mapping.items()}
 
 if __name__ == '__main__':
@@ -436,9 +445,12 @@ class DataMeta(UniqueObject):
                  extra_time_col_groupby: bool = False,
                  copy: bool = True, **kwargs) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         
-        if self.data.empty:
-            self.load_data()
-        data = self.data.copy() if copy else self.data
+        if 'data' in kwargs:
+            data = kwargs['data'].copy()
+        else:
+            if self.data.empty:
+                self.load_data()
+            data = self.data.copy() if copy else self.data
         if factor_family is not None:
             start_calc_time = factor_family.current_start_calc_time
         else:
@@ -457,6 +469,8 @@ class DataMeta(UniqueObject):
             else:
                 extra_time_col_freq = _process_data_freq(extra_time_col_freq)
                 extra_time_col_name = extra_time_col_stem + '@' + extra_time_col_freq.name
+            info = {}
+            info['extra_time_col_name'] = extra_time_col_name
             if extra_time_col_name not in data.columns:
                 if extra_time_col_freq_session:
                     if DataFreq.DAY1.name in data.index.names and DataFreq.MIN1.name in data.index.names:
@@ -469,7 +483,6 @@ class DataMeta(UniqueObject):
                         signal_time = day1series + pd.Timedelta('9 hours')
                         signal_time[cond] = day1series[cond] + pd.Timedelta('15 hours')
                         data.index = pd.MultiIndex.from_arrays([day1series, signal_time], names=[day1name, extra_time_col_name])
-                        info = {}
                         if extra_time_col_groupby:
                             groupby_index = [day1name, extra_time_col_name]
                             info['groupby_index'] = groupby_index
@@ -496,9 +509,11 @@ class DataMeta(UniqueObject):
                         index_names = [extra_time_col_name, DataFreq.DAY1.name, DataFreq.MIN1.name]
                     else:
                         index_names = [extra_time_col_name, DataFreq.DAY1.name]
+                    info['groupby_index'] = [extra_time_col_name]
                     if extra_time_col_groupby:
                         data_grouped = data.groupby([extra_time_col_name])
-                        return data, {'grouped': data_grouped, 'groupby_index': [extra_time_col_name]}
+                        info['grouped'] = data_grouped
+                        return data, info
                     else:
                         return data.reset_index().set_index(index_names), {}
                 elif extra_time_col_freq.value < pd.Timedelta('1day') \
@@ -511,7 +526,6 @@ class DataMeta(UniqueObject):
                     series = series.bfill() if extra_time_col_bfill else series
                     data[extra_time_col_name] = series.values
                     data = data.reset_index().set_index([extra_time_col_name] + data.index.names)
-                    info = {}
                     if DataFreq.DAY1.name in data.index.names:
                         extra_time_col_name_day1 = extra_time_col_stem + '@' + DataFreq.DAY1.name
                         info['extra_time_col_name_day1'] = extra_time_col_name_day1
@@ -524,8 +538,8 @@ class DataMeta(UniqueObject):
                     else:
                         groupby_index = [extra_time_col_name]
                         index_names = [extra_time_col_name, DataFreq.MIN1.name] 
+                    info['groupby_index'] = groupby_index
                     if extra_time_col_groupby:
-                        info['groupby_index'] = groupby_index
                         info['grouped'] = data.groupby(groupby_index)
                         return data, info
                     else:

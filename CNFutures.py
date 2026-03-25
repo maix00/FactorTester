@@ -169,7 +169,7 @@ def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
 class CNFuturesContract(FuturesContract):
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY')
-        self.timezone = 'Asia/Beijing'
+        self.timezone = 'Asia/Shanghai'
 
 class CNFutures(Futures):
     def __init__(self, name: str, point_value: Optional[int] = None, 
@@ -197,11 +197,12 @@ def get_all_futures_contract() -> List[Product]:
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
             os.path.isfile(os.path.join(data_dir_min, object.alias + '.' + data_type)),
-        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type)
+        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type),
+        timezone = 'Asia/Shanghai',
     )
     LocalCNFuturesContractMIN1.set_data_cols_mapping(datacolumn_map_reversed)
     LocalCNFuturesContractMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
-    LocalCNFuturesContractMIN1.set_timezone('Asia/Shanghai')
+    
     from Tools import DataSourceRegister
     DataSourceRegister().register(LocalCNFuturesContractMIN1)
 
@@ -221,28 +222,21 @@ def get_all_futures() -> List[Product]:
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
             os.path.isfile(os.path.join(data_dir_min, object.alias + '.' + data_type)),
-        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type)
+        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type),
+        timezone = 'Asia/Shanghai',
+        time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
+        data_cols_mapping=datacolumn_map_reversed
     )
     LocalCNFuturesDAY1 = DataSource(
         alias = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
         if_object_is_in_source=lambda object: 
             os.path.isfile(os.path.join(data_dir_day, object.alias + '.' + data_type)),
-        get_object_path=lambda object: os.path.join(data_dir_day, object.alias + '.' + data_type)
+        get_object_path=lambda object: os.path.join(data_dir_day, object.alias + '.' + data_type),
+        timezone = 'Asia/Shanghai',
+        time_cols_mapping={'trading_day': '1day'},
+        data_cols_mapping=datacolumn_map_reversed
     )
-
-    LocalCNFuturesMIN1.set_data_cols_mapping(datacolumn_map_reversed)
-    LocalCNFuturesDAY1.set_data_cols_mapping(datacolumn_map_reversed)
-
-    LocalCNFuturesMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
-    LocalCNFuturesDAY1.set_time_cols_mapping({'trading_day': '1day'})
-
-    LocalCNFuturesDAY1.set_timezone('Asia/Shanghai')
-    LocalCNFuturesMIN1.set_timezone('Asia/Shanghai')
-
-    from Tools import DataSourceRegister
-    DataSourceRegister().register(LocalCNFuturesMIN1)
-    DataSourceRegister().register(LocalCNFuturesDAY1)
 
     categories_with_products = get_categories_with_products()
     cnfutures_list = []
