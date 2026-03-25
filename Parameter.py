@@ -1,7 +1,7 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
 
-from Tools import SerialObject, _process_data_freq
+from Tools import SerialObject, UniqueObject, _process_data_freq
 from Products import DataColumn
 from typing import TYPE_CHECKING
 
@@ -98,22 +98,18 @@ class Parameter(SerialObject):
         return NotImplemented
     
     if TYPE_CHECKING:
-        from Factor import Factor
+        from Tools import UniqueObject
     
-    def register(self, factor: Factor, value: Any, **kwargs) -> None:
+    def register(self, object: UniqueObject, value: Any, **kwargs) -> None:
         self.check_in_space(value)
-        self._register[factor] = self.rectify_value(value, **kwargs)
+        self._register[(object, type(object).__name__)] = self.rectify_value(value, **kwargs)
 
-    def unregister(self, factor: Factor) -> None:
-        if factor in self._register:
-            del self._register[factor]
+    def unregister(self, object: UniqueObject) -> None:
+        if (object, type(object).__name__) in self._register:
+            del self._register[(object, type(object).__name__)]
 
-    def change_value(self, factor: Factor, value: Any, **kwargs) -> None:
-        self.check_in_space(value)
-        self._register[factor] = self.rectify_value(value, **kwargs)
-
-    def get_value(self, factor: Factor) -> Any:
-        return self._register.get(factor, self.default_value)
+    def get_value(self, object: UniqueObject) -> Any:
+        return self._register.get((object, type(object).__name__), self.default_value)
     
 if __name__ == '__main__':
     param1 = Parameter(alias='P1', default_value=1, whether_in_space=lambda x: isinstance(x, int) and 0 <= x <= 10, get_value_alias=lambda x: f"{x}")
@@ -255,7 +251,7 @@ class DateOrTimeParam(Parameter):
                  default_value: Optional[Any] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             if default_value is None:
-                default_value = pd.Timestamp('2024-01-01').date()
+                default_value = pd.Timestamp('2000-01-01').date()
             super().__init__(
                 alias = alias,
                 default_value = default_value,
@@ -263,13 +259,15 @@ class DateOrTimeParam(Parameter):
                 get_value_alias = self._get_value_alias,
                 *args, **kwargs
             )
+            self.default_value = self.rectify_value(self.default_value, **kwargs)
 
     def _rectify_value(self, value: Any, **kwargs) -> Any:
         if self.check_in_space(value):
+            import datetime
+            isDate = kwargs.get('isDate', None) or type(value) is datetime.date
+            isDatetime = kwargs.get('isDatetime', None)
             timezone = kwargs.get('timezone', None)
             value = pd.Timestamp(value, tz=timezone)
-            isDate = kwargs.get('isDate', None)
-            isDatetime = kwargs.get('isDatetime', None)
             if isDate is not None and isDatetime is not None and isDate and isDatetime:
                 raise ValueError(f"DateOrTimeParam {self.name}: Cannot specify both isDate and isDatetime for {value}")
             if isDate is not None and isDate:
@@ -287,22 +285,22 @@ class DateOrTimeParam(Parameter):
         return str(self.rectify_value(value, **kwargs))
     
     if TYPE_CHECKING:
-        from Factor import Factor
+        from Tools import UniqueObject
     
-    def is_date(self, factor: Optional[Factor] = None, value: Optional[Any] = None, **kwargs) -> bool:
-        value = self.get_value(factor) if factor is not None else self.rectify_value(value, **kwargs)
-        assert value is not None, "Either factor or value must be provided"
+    def is_date(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
+        value = self.get_value(object) if object is not None else self.rectify_value(value, **kwargs)
+        assert value is not None, "Either object or value must be provided"
         import datetime
         return type(value) is datetime.date
     
-    def is_time(self, factor: Optional[Factor] = None, value: Optional[Any] = None, **kwargs) -> bool:
-        value = self.get_value(factor) if factor is not None else self.rectify_value(value, **kwargs)
-        assert value is not None, "Either factor or value must be provided"
+    def is_time(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
+        value = self.get_value(object) if object is not None else self.rectify_value(value, **kwargs)
+        assert value is not None, "Either object or value must be provided"
         import datetime
         return not type(value) is datetime.date
 
-def get_StartCalcPointParam(alias: Optional[str] = '$SCP') -> DateOrTimeParam:
-    return DateOrTimeParam(alias)
+def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DateOrTimeParam:
+    return DateOrTimeParam(alias, default_value=default_value, **kwargs)
 
 if __name__ == '__main__':
     StartCalcPoint = get_StartCalcPointParam()
@@ -316,56 +314,3 @@ if __name__ == '__main__':
     print(StartCalcPoint.is_time(value='2024-01-02 09:30:00', isDatetime=True))
     print(StartCalcPoint.is_time(value='2024-01-02', isDate=True))
     print(StartCalcPoint.is_time(value='2024-01-02'))
-
-class ColumnTimeParam(Parameter):
-    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
-
-        from Tools import DataFreq
-
-        if not hasattr(self, '_initialized'):
-            if default_value is None:
-                default_value = (DataFreq.MIN1.name, '2024-01-02 09:00:00')
-            super().__init__(
-                alias = alias,
-                default_value = default_value,
-                whether_in_space = self._whether_in_space,
-                get_value_alias = self._get_value_alias,
-                *args, **kwargs
-            )
-            self.default_value = self.rectify_value(self.default_value)
-
-    def _rectify_value(self, value: Any, **kwargs) -> Any:
-        if self.check_in_space(value):
-            from Tools import _process_data_freq
-            return (_process_data_freq(value[0]).name, pd.to_datetime(value[1]))
-
-    def _whether_in_space(self, value: Any) -> bool:
-        if not isinstance(value, (list, tuple)):
-            return False
-        try:
-            from Tools import DataFreq, _process_data_freq
-            freq = _process_data_freq(value[0])
-            time = pd.Timestamp(value[1])  # Check if the second element can be converted to a timestamp
-            check = True
-            if freq == DataFreq.DAY1 and time.time() != pd.Timestamp('00:00:00').time():
-                    check = False
-            return check
-        except Exception:
-            return False
-        
-    def _get_value_alias(self, value: Any) -> str:
-        try:
-            from Tools import _process_data_freq
-            freq = _process_data_freq(value[0])
-            time = pd.Timestamp(value[1])  # Check if the second element can be converted to a timestamp
-            return f"{freq.name}: {time}"
-        except Exception:
-            return str(value)
-
-def get_start_calc_param(alias: Optional[str] = '$SC') -> Parameter:
-    return ColumnTimeParam(alias)
-
-if __name__ == '__main__':
-    StartCalc = get_start_calc_param()
-    print(StartCalc.get_value_alias(('1d', '2024-01-02')))
-    print(StartCalc.get_value_alias(StartCalc.default_value))

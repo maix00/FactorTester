@@ -73,6 +73,6 @@ if __name__ == '__main__':
     # ff.add_params(F = '5min')
     # ff.add_params(F = '10min')
     # ff.add_params(F = '15min')
-    fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'), categories=['0'])
+    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai', categories=['0'])
     print(fft.products)
-    # fft = ff.test(return_freq='6h', start_cal_time=('1min', '2024-01-03 09:00:00'))
+    # fft = ff.test(return_freq='6h', start_calc_point='2024-01-03 09:00:00')

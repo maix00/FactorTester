@@ -168,14 +168,13 @@ def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
 
 class CNFuturesContract(FuturesContract):
     def __init__(self, name: str, point_value: Optional[int] = None):
-        super().__init__(name, point_value, 'CNY')
-        self.timezone = 'Asia/Shanghai'
+        super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
 
 class CNFutures(Futures):
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  mappings_path: Optional[str] = None, 
                  data_path: Optional[str] = None):
-        super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract)
+        super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract, timezone='Asia/Shanghai')
         self.category_sector_cn = get_category_by_code(name.split('.')[0], flag = 1) if name else None
         self.category_sector_cn_night_time = get_category_by_code(name.split('.')[0], flag = 2) if name else None
         self.category_day_night_time, self.category_day_night_time_desc = \
@@ -183,7 +182,6 @@ class CNFutures(Futures):
         self.category_attr_name = 'category_day_night_time'
         variety = get_variety_by_code(name.split('.')[0])
         self.desc = variety if variety else name
-        self.timezone = 'Asia/Shanghai'
 
 from Products import Product
 

@@ -414,6 +414,11 @@ class DataMeta(UniqueObject):
     if TYPE_CHECKING:
         from Factor import FactorFamily
 
+    def _get_index(self, factor_family: Optional[FactorFamily] = None,
+                   freq: Optional[Any] = None, flag_freq_session: bool = False,
+                   index_name_stem: str = '_SIGNAL', flag_copy: bool = True, **kwargs):
+        return
+
     def get_data(self, factor_family: Optional[FactorFamily] = None, 
                  extra_time_col_freq: Optional[Any] = None,
                  extra_time_col_freq_session: bool = False,
@@ -429,7 +434,7 @@ class DataMeta(UniqueObject):
             copy=copy, **kwargs)
         return data
     
-    def _get_data(self, factor_family: Optional[FactorFamily] = None, 
+    def _get_data(self, object: Optional[FactorFamily] = None, 
                  extra_time_col_freq: Optional[Any] = None,
                  extra_time_col_freq_session: bool = False,
                  extra_time_col_bfill: bool = True,
@@ -443,13 +448,31 @@ class DataMeta(UniqueObject):
             if self.data.empty:
                 self.load_data()
             data = self.data.copy() if copy else self.data
-        if factor_family is not None:
-            start_calc_time = factor_family.current_start_calc_time
+
+        from Parameter import DateOrTimeParam
+        if object is not None and callable(get_param := getattr(object, 'get_StartCalcPointParam', None)):
+            StartCalcPointParam = get_param()
+            assert isinstance(StartCalcPointParam, DateOrTimeParam)
+            time = StartCalcPointParam.get_value(object)
+            time_is_date = StartCalcPointParam.is_date(object)
         else:
-            start_calc_time = kwargs.get('start_calc_time', None)
-        if start_calc_time is not None:
-            col, time = start_calc_time
-            data = data[data.index.get_level_values(col) >= time]
+            StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
+            if StartCalcPointParam is not None:
+                assert isinstance(StartCalcPointParam, DateOrTimeParam)
+                time = StartCalcPointParam.default_value
+                time_is_date = StartCalcPointParam.is_date(value=time)
+            else:
+                time = None
+                time_is_date = None
+        if StartCalcPointParam is not None and time is not None and time_is_date is not None:
+            if self.freq.value >= pd.Timedelta('1day') and time_is_date:
+                col = self.freq.name
+            else:
+                col = DataFreq.DAY1.name if time_is_date else self.freq.name
+            index = data.index.get_level_values(col)
+            assert isinstance(index, pd.DatetimeIndex)
+            index = index.tz_localize(self.timezone) if self.timezone else index
+            data = data[index >= pd.Timestamp(time)]
 
         if extra_time_col_groupby:
             assert extra_time_col_freq is not None

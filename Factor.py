@@ -6,12 +6,12 @@ from functools import partial
 from weakref import WeakValueDictionary
 import pandas as pd
 import numpy as np
-from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
+from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import os
 
 from Tools import SerialObject
 from Products import DataColumn, Futures, Product, DataFreq
-from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_start_calc_param, get_factor_freq_param
+from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
 from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
 import logging
 
@@ -53,7 +53,7 @@ class FactorFreqType(Enum):
     AT_EVENT = 1
 
 ReturnFreqParam = get_return_freq_param(alias='$RF')
-StartCalcParam = get_start_calc_param(alias='$SC')
+StartCalcPointParam = get_StartCalcPointParam(alias='$SCP', default_value=default_test_start_date, isDate=True)
 FactorFreqParam = get_factor_freq_param(alias='F')
 
 class Factor(SerialObject):
@@ -104,13 +104,19 @@ class Factor(SerialObject):
         return ReturnFreqParam.get_value(self)
     
     def change_current_return_freq(self, return_freq: Any) -> None:
-        ReturnFreqParam.change_value(self, return_freq)
+        ReturnFreqParam.register(self, return_freq)
 
-    def get_current_start_calc_time(self) -> Any:
-        return StartCalcParam.get_value(self)
+    def get_current_start_calc_point(self) -> Any:
+        return StartCalcPointParam.get_value(self)
     
-    def change_current_start_calc_time(self, start_calc_time: Any) -> None:
-        StartCalcParam.change_value(self, start_calc_time)
+    if TYPE_CHECKING:
+        from Parameter import DateOrTimeParam
+        
+    def get_StartCalcPointParam(self) -> DateOrTimeParam:
+        return StartCalcPointParam
+    
+    def change_current_start_calc_point(self, start_calc_point: Any, **kwargs) -> None:
+        StartCalcPointParam.register(self, start_calc_point, **kwargs)
 
     def _set_products(self) -> Set[Product]:
         if not self.table.empty:
@@ -193,8 +199,7 @@ class Factor(SerialObject):
         if not products:
             return pd.DataFrame()
         if self.family is not None:
-            start_calc_time = self.get_current_start_calc_time()
-            self.family.set_current_start_calc_time(start_calc_time)
+            self.family.set_current_start_calc_point(self.get_current_start_calc_point())
         self.table = self.func(products)
         if self.table.empty:
             return pd.DataFrame()
@@ -312,7 +317,6 @@ class FactorFamily(SerialObject):
             self.params.append(FactorFreqParam)
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()
-            self.current_start_calc_time: Any = None
             self.factors: List[Factor] = []
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
@@ -346,18 +350,28 @@ class FactorFamily(SerialObject):
         self._params_list = [params for params in self._params_list if params != del_params]
 
     def set_all_params(self):
-        all_combinations = list(itertools.product(*[p.value_space if isinstance(p, FinRangeParam) else [p.default_value] for p in self.params]))
-        self._params_list = [dict(zip([p.alias for p in self.params], combination)) for combination in all_combinations]
+        # all_combinations = list(itertools.product(*[p.value_space if isinstance(p, FinRangeParam) else [p.default_value] for p in self.params]))
+        # self._params_list = [dict(zip([p.alias for p in self.params], combination)) for combination in all_combinations]
+        return NotImplementedError("请在子类中实现 `set_all_params` 方法")
 
     def get_alias(self, **params):
         params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
-    def set_current_start_calc_time(self, start_cal_time: Optional[Any] = None):
-        self.current_start_calc_time = start_cal_time
+    def set_current_start_calc_point(self, start_calc_point: Optional[Any] = None):
+        StartCalcPointParam.register(self, start_calc_point)
+
+    def get_current_start_calc_point(self) -> Any:
+        return StartCalcPointParam.get_value(self)
+    
+    if TYPE_CHECKING:
+        from Parameter import DateOrTimeParam
+        
+    def get_StartCalcPointParam(self) -> DateOrTimeParam:
+        return StartCalcPointParam
 
     def get_factors(self, return_freq: Optional[Any] = None, 
-                    start_calc_time: Optional[Any] = None, **kwargs) -> List[Factor]:
+                    start_calc_point: Optional[Any] = None, **kwargs) -> List[Factor]:
         factors = []
         for params in self._params_list:
             factor_alias = self.get_alias(**params)
@@ -367,13 +381,13 @@ class FactorFamily(SerialObject):
                 self.params_dict[param_alias].register(factor, value)
             if return_freq is not None:
                 factor.change_current_return_freq(return_freq)
-            if start_calc_time is not None:
-                factor.change_current_start_calc_time(start_calc_time)
+            if start_calc_point is not None:
+                factor.change_current_start_calc_point(start_calc_point, **kwargs)
             factors.append(factor)
         self.factors = factors
         return factors
     
-    def get_factor(self, return_freq: Optional[Any] = None, start_cal_time: Optional[Any] = None, **kwargs):
+    def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs):
         self._check_in_space(**kwargs)
         new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         factor_alias = self.get_alias(**new_params)
@@ -381,13 +395,13 @@ class FactorFamily(SerialObject):
         factor = Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
-        if start_cal_time is not None:
-            factor.change_current_start_calc_time(start_cal_time)
+        if start_calc_point is not None:
+            factor.change_current_start_calc_point(start_calc_point, **kwargs)
         return factor
     
     def test(self, categories: Optional[str|List[str]] = None,
              return_freq: Optional[Any] = None, 
-             start_cal_time: Optional[Any] = None,
+             start_calc_point: Optional[Any] = None,
              sift_volume_ratio: float = sift_volume_ratio, **kwargs) -> FactorTester:
         
         factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
@@ -407,7 +421,7 @@ class FactorFamily(SerialObject):
         tester.sift_product_by_category(categories=categories)
         price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
 
-        factors = self.get_factors(return_freq=return_freq, start_cal_time=start_cal_time, **kwargs)
+        factors = self.get_factors(return_freq=return_freq, start_calc_point=start_calc_point, **kwargs)
         tester.calc_factor(factors)
         tester.calc_ic(return_price_cols=price_cols)
         
@@ -612,7 +626,7 @@ class FactorTester(SerialObject):
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       plot_n_group_list: Optional[List[int]] = None,
-                      sift_volume_ratio: Optional[float] = None) -> Tuple[Any, Any, pd.DataFrame]:
+                      sift_volume_ratio: Optional[float] = None, **kwargs) -> Tuple[Any, Any, pd.DataFrame]:
 
         factors = [factors] if isinstance(factors, Factor) else \
             (factors if factors is not None else self.factors)

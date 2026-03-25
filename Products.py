@@ -136,15 +136,15 @@ class Product(UniqueObject):
         return str(self._get_attr_nested(self._default_category_attr_name))
 
 class FuturesContract(Product):
-    def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None):
-        super().__init__(name, point_value, currency)
+    def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
+        super().__init__(name, point_value, currency, *args, **kwargs)
     
 class Futures(Product):
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  mappings_path: Optional[str] = None, data_path: Optional[str] = None,
-                 FuturesContractClass: type = FuturesContract):
+                 FuturesContractClass: type = FuturesContract, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(name, point_value, currency)
+            super().__init__(name, point_value, currency, *args, **kwargs)
             self.mappings_path = mappings_path
             self.mappings: Optional[pd.DataFrame] = None
             self.FuturesContractClass = FuturesContractClass
