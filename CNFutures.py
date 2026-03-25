@@ -220,8 +220,6 @@ def get_all_futures() -> List[Product]:
     LocalCNFuturesMIN1 = DataSource(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
-        if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_min, object.alias + '.' + data_type)),
         get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
@@ -230,8 +228,6 @@ def get_all_futures() -> List[Product]:
     LocalCNFuturesDAY1 = DataSource(
         alias = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
-        if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_day, object.alias + '.' + data_type)),
         get_object_path=lambda object: os.path.join(data_dir_day, object.alias + '.' + data_type),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trading_day': '1day'},

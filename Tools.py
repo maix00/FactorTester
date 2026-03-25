@@ -298,8 +298,8 @@ class DataSource(SerialObject):
         return super().__new__(cls, type_alias='DS', alias=alias)
 
     def __init__(self, alias: str, data_freq: DataFreq,
-                 if_object_is_in_source: Callable[[UniqueObject], bool],
-                 get_object_path: Callable[[UniqueObject], Any], *args, **kwargs):
+                 get_object_path: Callable[[UniqueObject], Any],
+                 if_object_is_in_source: Optional[Callable[[UniqueObject], bool]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(type_alias='DS', alias=alias)
             self._register = DataSourceRegister() # Weak Value
@@ -308,37 +308,29 @@ class DataSource(SerialObject):
                 self._register.set_default_source(self)
             self.alias = alias
             self.freq = data_freq
-            self.time_cols_mapping: Dict[Any, str] = {}
-            self.data_cols_mapping: Dict[Any, str] = {}
-            self._is_object_in_source_func = if_object_is_in_source
             self._get_object_path_func = get_object_path
+            if if_object_is_in_source is None:
+                import os
+                self._is_object_in_source_func = lambda object: os.path.isfile(get_object_path(object))
+            else:
+                self._is_object_in_source_func = if_object_is_in_source
             self.timezone: str = kwargs.get('timezone', '')
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
     def if_object_is_in_source(self, object: UniqueObject) -> bool:
-        # This method checks if the object is in the source by first checking the timezone compatibility, 
-        # and then calling the provided function to check if the object is in the source. 
-        if hasattr(object, 'timezone') and getattr(object, 'timezone') is not None:
-            if self.timezone and getattr(object, 'timezone') \
-                and getattr(object, 'timezone') != self.timezone:
-                # if object and souce both have timezone attribute and they are different, then return False
-                # regardless of the result of _is_object_in_source_func, 
-                #  since the timezone mismatch already indicates that the source is not suitable for the object
-                return False
+        if hasattr(object, 'timezone') and getattr(object, 'timezone') is not None and getattr(object, 'timezone')\
+            and self.timezone and getattr(object, 'timezone') != self.timezone:
+            return False
         return self._is_object_in_source_func(object)
 
     def get_object_path(self, object: UniqueObject) -> Any:
         return self._get_object_path_func(object)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
-        if not mapping or mapping is None:
-            return
         self.time_cols_mapping = {k: _process_data_freq(v).name for k, v in mapping.items()}
 
     def set_data_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
-        if not mapping or mapping is None:
-            return
         self.data_cols_mapping = {k: _process_data_col(v).name for k, v in mapping.items()}
 
 if __name__ == '__main__':
