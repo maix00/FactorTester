@@ -476,17 +476,13 @@ class DataMeta(UniqueObject):
         return data
 
     def _get_signal_index(self, object: Optional[UniqueObject] = None,
-                   freq: Optional[Any] = None, flag_end_of_session: bool = False, flag_end_of_day: bool = False,
-                   day_multiple_signal_time: Optional[Any] = None, # E.g. '15:00:00', '13:00:00', etc.
-                   index_name_stem: str = '_SIGNAL', copy: bool = True, **kwargs) -> Dict[str, Any]:
-        
-        if freq is None:
-            assert flag_end_of_session, "Either freq or flag_end_of_session must be provided"
-            return {}
+                          freq: Optional[Any] = None,  bfill: Optional[int] = None,
+                          end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
+                          index_name_stem: str = '_SIGNAL', copy: bool = False, **kwargs) -> Dict[str, Any]:
 
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
-        data = self.get_data(copy=False, data=kwargs.pop('data', None), **kwargs)
+        data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
         index_data_freq = [_process_data_freq(level) for level in data.index.names]
         
@@ -499,7 +495,13 @@ class DataMeta(UniqueObject):
         first_true_series = self._get_level_index(data, first_true_freq.name).to_series().reset_index(drop=True)
         first_true_change_map = first_true_series != first_true_series.shift(-1)
         first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
-        signal_map_within_first_true_change_pos = first_true_change_pos % multiple == multiple - 1
+        
+        if end_session_skip:
+            last_col_series = self._get_level_index(data, index_data_freq[-1].name).to_series().reset_index(drop=True)
+            end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
+            signal_map_within_first_true_change_pos = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
+        else:
+            signal_map_within_first_true_change_pos = first_true_change_pos % multiple == multiple - 1
 
         signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_pos]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
@@ -528,7 +530,8 @@ class DataMeta(UniqueObject):
         
         signal_index, _, index_names = _get_extended_index()
         signal_index = self._get_level_index(signal_index, index_names)
-        extended_index, index_names_for_groupby, index_names = _get_extended_index(bfill=last_col_multiple-1)
+        bfill = bfill if bfill is not None else last_col_multiple - 1
+        extended_index, index_names_for_groupby, index_names = _get_extended_index(bfill=bfill)
 
         return {
             'data': data,
@@ -540,11 +543,10 @@ class DataMeta(UniqueObject):
     
     def groupby(self, object: Optional[UniqueObject] = None,
                  freq: Optional[Any] = None,
-                 freq_session: bool = False,
-                 bfill_window: int = 1,
+                 bfill: Optional[int] = None,
                  stem: str = '_SIGNAL',
                  copy: bool = True, **kwargs) -> GroupedOperator:
-        results = self._get_signal_index(object=object, freq=freq, flag_end_of_session=freq_session, index_name_stem=stem, copy=copy, **kwargs)
+        results = self._get_signal_index(object=object, freq=freq, bfill=bfill, index_name_stem=stem, copy=copy, **kwargs)
         data = results['data']
         data.index = results['extended_index']
         return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'])

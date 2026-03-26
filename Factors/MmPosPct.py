@@ -44,11 +44,6 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
             if index.nlevels == pos_ratio.index.nlevels:
                 map = pos_ratio.index.isin(index)
                 pos_ratio = pos_ratio[map]
-            elif index.nlevels < pos_ratio.index.nlevels:
-                remained_levels = [l for l in pos_ratio.index.names if l in index.names]
-                deleted_levels = [l for l in pos_ratio.index.names if l not in index.names]
-                map = pos_ratio.index.droplevel(deleted_levels).isin(index)
-                pos_ratio = pos_ratio[map].groupby(level=remained_levels).last()
             else:
                 raise ValueError(f"Index levels of pos_ratio ({pos_ratio.index.nlevels}) cannot be matched with signal index ({index.nlevels}).")
             pos_ratio.index = index
@@ -68,7 +63,7 @@ if __name__ == '__main__':
     # ff.add_params(F='15m', RF='5m', WF='15m')
     # ff.add_params(F='30m', RF='5m', WF='30m')
     # ff.add_params(F='1d', RF='1d', WF='1d')
-    ff.add_params(F='1d', RF='5min', WF='1d')
+    ff.add_params(F='1d', RF='10min', WF='1d')
     # ff.add_params(F='2d', RF='1d', WF='2d')
 
     fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai', categories=['0'])
