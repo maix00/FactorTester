@@ -19,33 +19,41 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
              WF: Any = pd.Timedelta('2h'),
              RF: Any = pd.Timedelta('1d'),
              P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.DataFrame:
-        """
-        计算每个产品在过去 F 时间窗口内，按 RF 频率采样得到的正收益占比
-        """
+        
         factors = {}
-        # 滚动窗口周期数 = F 包含的 RF 个数（向下取整，至少为1）
-        window = max(1, int(WF / RF))
 
         for product in products:
-            # 因子频率为 F, 按 F 得到最终的时序点，但在计算过程中按 RF 频率采样得到价格序列
-            seq, info = product.MIN1._get_data(self, extra_time_col_freq=F)
-            res_idx = seq.index.droplevel([l for l in seq.index.names if l not in info['groupby_index']]).unique()
 
-            # 按 RF 重采样，得到每个采样点的收盘价
-            _, info = product.MIN1._get_data(
-                self,
-                extra_time_col_freq=RF,
-                extra_time_col_bfill=True,
-                extra_time_col_groupby=True
-            )
-            df_grouped = info['grouped']
-            close_series = df_grouped.last()[P.name]
-            # 计算收益率
-            ret_series = close_series.pct_change(1)
-            # 滚动窗口内正收益占比
-            pos_ratio = ret_series.rolling(window=window, min_periods=window).apply(
-                lambda x: (x > 0).sum() / len(x)
-            )
+            ret_series = product.MIN1.groupby(self, freq=RF).last()[P.name].pct_change(1)
+
+            original_index = ret_series.index
+            original_index_right = original_index.get_level_values(-1)
+            pos_ratio = (ret_series > 0).reset_index(drop=True).to_frame().set_index(original_index_right).rolling(window=WF).mean()
+            pos_ratio.index = original_index
+            pos_ratio = product.MIN1.groupby(self, data=pos_ratio, freq=F).last()
+
+            if WF.total_seconds() >= pd.Timedelta('1d').total_seconds() \
+                and RF.total_seconds() < pd.Timedelta('1d').total_seconds():
+                assert WF.total_seconds() % pd.Timedelta('1d').total_seconds() == 0, "WF should be a multiple of 1 day when WF > 1 day."
+                pos_ratio = product.MIN1.groupby(self, data=(ret_series > 0), freq=WF).mean().squeeze()
+            else:
+                window = max(1, int(WF / RF))
+                pos_ratio = (ret_series > 0).rolling(window=window, min_periods=window).mean()
+            
+            index = product.MIN1._get_signal_index(self, freq=F)['signal_index']
+            if index.nlevels == pos_ratio.index.nlevels:
+                map = pos_ratio.index.isin(index)
+                pos_ratio = pos_ratio[map]
+            elif index.nlevels < pos_ratio.index.nlevels:
+                remained_levels = [l for l in pos_ratio.index.names if l in index.names]
+                deleted_levels = [l for l in pos_ratio.index.names if l not in index.names]
+                map = pos_ratio.index.droplevel(deleted_levels).isin(index)
+                pos_ratio = pos_ratio[map].groupby(level=remained_levels).last()
+            else:
+                raise ValueError(f"Index levels of pos_ratio ({pos_ratio.index.nlevels}) cannot be matched with signal index ({index.nlevels}).")
+            pos_ratio.index = index
+            pos_ratio.rename(product.name, inplace=True)
+
             factors[product] = pos_ratio
 
         return pd.DataFrame(factors)
@@ -53,17 +61,15 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
 
 if __name__ == '__main__':
     ff = MmPosPct()
-    # ff.add_params(F='10d', RF='1d')
-    # ff.add_params(F='5d', RF='1d')
-    # ff.add_params(F='3d', RF='1d')
-    # ff.add_params(F='2d', RF='1d')
-    # # 示例：10小时窗口，每小时采样一次
-    # ff.add_params(F='10h', RF='1h')
 
-    from Parameter import Parameter
-    print(Parameter[0])
     ff.clear_params()
-    ff.add_params(F='5m', RF='1m', WF='5m')
+    # ff.add_params(F='5m', RF='1m', WF='5m')
+    # ff.add_params(F='15m', RF='1m', WF='15m')
+    # ff.add_params(F='15m', RF='5m', WF='15m')
+    # ff.add_params(F='30m', RF='5m', WF='30m')
+    # ff.add_params(F='1d', RF='1d', WF='1d')
+    ff.add_params(F='1d', RF='5min', WF='1d')
+    # ff.add_params(F='2d', RF='1d', WF='2d')
 
-    fft = ff.test(start_cal_time=('1min', '2024-01-03 09:00:00'))
+    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai', categories=['0'])
     print(fft.products)

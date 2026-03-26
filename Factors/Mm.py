@@ -37,19 +37,8 @@ class Mm(FactorFamily): # Day Momentum
         factors = {}
         for product in products:
 
-            if F == 'S':
-                session = True
-            else:
-                session = False
-            _, info = product.MIN1._get_data(self, 
-                extra_time_col_freq=F, 
-                extra_time_col_freq_session=session,
-                extra_time_col_bfill=True,
-                extra_time_col_groupby=True)
-            df_grouped = info['grouped']
-
             day_high, day_low, idx_high, idx_low = (
-                df_grouped
+                product.MIN1.groupby(self, freq=F)
                 .agg({H.name: ['max', 'idxmax'], L.name: ['min', 'idxmin']})
                 .pipe(lambda x: (x[(H.name,'max')], x[(L.name,'min')], x[(H.name,'idxmax')], x[(L.name,'idxmin')]))
             )
@@ -74,7 +63,7 @@ if __name__ == '__main__':
     # ff.add_params(F = '10min')
     # ff.add_params(F = '15min')
     ff.clear_params()
-    ff.add_params(F = '5min')
+    ff.add_params(F = '1d')
     fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai', categories=['0'])
     print(fft.products)
     # fft = ff.test(return_freq='6h', start_calc_point='2024-01-03 09:00:00')

@@ -2,6 +2,7 @@ from abc import ABC
 from weakref import WeakValueDictionary
 from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
+from pandas.core.groupby import DataFrameGroupBy
 from enum import Enum
 
 class UniqueObject(ABC):
@@ -194,6 +195,7 @@ def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
     if isinstance(data_freq, DataFreq):
         return data_freq
     if isinstance(data_freq, str):
+        data_freq = data_freq.split('@')[-1].upper()
         try:
             return DataFreq[data_freq]
         except KeyError:
@@ -411,11 +413,11 @@ class DataMeta(UniqueObject):
         self._set_time_index(time_index)
         return self.data
     
-    def _load_data_or_kwargs(self, copy: bool = False, **kwargs) -> pd.DataFrame:
-        if 'data' in kwargs:
+    def get_data(self, copy: bool = False, **kwargs) -> pd.DataFrame:
+        if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
         else:
-            if self.data.empty:
+            if self.data.empty or 'source' in kwargs:
                 self.load_data(**kwargs)
             data = self.data
         return data.copy() if copy else data
@@ -428,8 +430,14 @@ class DataMeta(UniqueObject):
         else:
             raise NotImplementedError("DataMeta: Index type not supported for timezone localization")
     
-    def _get_level_index(self, data: pd.DataFrame,level: Any) -> pd.DatetimeIndex:
-        return self._set_index_timezone(data.index.get_level_values(level))
+    def _get_level_index(self, index: Any, level: Any) -> pd.Index:
+        if not isinstance(index, pd.Index):
+            index = index.index
+        assert isinstance(index, pd.Index)
+        if isinstance(level, list):
+            return pd.MultiIndex.from_arrays([index.get_level_values(lvl) for lvl in level], names=level)
+        else:
+            return self._set_index_timezone(index.get_level_values(level))
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
         from Parameter import DateOrTimeParam
@@ -456,10 +464,12 @@ class DataMeta(UniqueObject):
             time, time_is_date = self._process_start_calc_point(object=object, **kwargs)
         if time is not None and time_is_date is not None:
             if time_col is None:
+                data_day_col = [str(level) for level in data.index.names if _process_data_freq(str(level).split('@')[-1]).value >= pd.Timedelta('1day')][-1]
+                data_min_col = [str(level) for level in data.index.names if _process_data_freq(str(level).split('@')[-1]).value >= pd.Timedelta('1min')][-1]
                 if self.freq.value >= pd.Timedelta('1day') and time_is_date:
-                    time_col = DataFreq.DAY1.name
+                    time_col = data_day_col
                 else:
-                    time_col = DataFreq.DAY1.name if time_is_date else DataFreq.MIN1.name
+                    time_col = data_day_col if time_is_date else data_min_col
             data = data[self._get_level_index(data, time_col) >= pd.Timestamp(time)]
         if copy:
             data = data.copy()
@@ -468,15 +478,15 @@ class DataMeta(UniqueObject):
     def _get_signal_index(self, object: Optional[UniqueObject] = None,
                    freq: Optional[Any] = None, flag_end_of_session: bool = False, flag_end_of_day: bool = False,
                    day_multiple_signal_time: Optional[Any] = None, # E.g. '15:00:00', '13:00:00', etc.
-                   index_name_stem: str = '_SIGNAL', copy: bool = True, **kwargs):
+                   index_name_stem: str = '_SIGNAL', copy: bool = True, **kwargs) -> Dict[str, Any]:
         
         if freq is None:
             assert flag_end_of_session, "Either freq or flag_end_of_session must be provided"
-            return
+            return {}
 
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
-        data = self._load_data_or_kwargs(copy=False, **kwargs)
+        data = self.get_data(copy=False, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
         index_data_freq = [_process_data_freq(level) for level in data.index.names]
         
@@ -485,6 +495,7 @@ class DataMeta(UniqueObject):
         assert first_true_idx is not None, f"Frequency {freq} is not a multiple of any existing index frequency"
         first_true_freq = index_data_freq[first_true_idx]
         multiple = int(freq.value.total_seconds() / first_true_freq.value.total_seconds())
+        last_col_multiple = int(freq.value.total_seconds() / index_data_freq[-1].value.total_seconds())
         first_true_series = self._get_level_index(data, first_true_freq.name).to_series().reset_index(drop=True)
         first_true_change_map = first_true_series != first_true_series.shift(-1)
         first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
@@ -492,158 +503,51 @@ class DataMeta(UniqueObject):
 
         signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_pos]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
-
-        signal_series = first_true_series[signal_pos_within_first_true_series]
         signal_series_within_first_true_series = first_true_series.where(signal_map_within_first_true_series)
 
-        if first_true_idx > 0:
-            left_indices = data.index.names[:first_true_idx]
-            left_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True)[signal_pos_within_first_true_series].reset_index(drop=True) 
-                                for idx in left_indices}
-            index_arrays = [left_series_dict[idx].dt.tz_localize(None).values if hasattr(left_series_dict[idx], 'dt') else left_series_dict[idx].values for idx in left_indices] \
-                + [signal_series.dt.tz_localize(None).values if hasattr(signal_series, 'dt') else signal_series.values]
-            index_names = [index_name_stem + '@' + str(idx) for idx in left_indices] + [index_name_stem + '@' + freq.name]
-            signal_index = pd.MultiIndex.from_arrays(index_arrays, names=index_names)
-
-            right_indices = data.index.names[first_true_idx:]
-            left_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True).where(signal_map_within_first_true_series)
-                                for idx in left_indices}
-            right_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True) for idx in right_indices}
-            index_arrays = [left_series_dict[idx].bfill(limit=multiple-2).dt.tz_localize(None).values if hasattr(left_series_dict[idx], 'dt') else left_series_dict[idx].values for idx in left_indices] \
-                + [signal_series_within_first_true_series.bfill(limit=multiple-2).dt.tz_localize(None).values if hasattr(signal_series, 'dt') else signal_series.values] \
-                + [right_series_dict[idx].dt.tz_localize(None).values if hasattr(right_series_dict[idx], 'dt') else right_series_dict[idx].values for idx in right_indices]
-            signal_index_extended = pd.MultiIndex.from_arrays(index_arrays, names=index_names + right_indices)
-        else:
-            signal_index = pd.Index(signal_series.dt.tz_localize(None).values if hasattr(signal_series, 'dt') else signal_series.values, name=index_name_stem + '@' + freq.name)
-
-            right_indices = data.index.names[first_true_idx:]
-            right_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True) for idx in right_indices}
-            index_arrays = [signal_series_within_first_true_series.bfill(limit=multiple-2).dt.tz_localize(None).values if hasattr(signal_series_within_first_true_series, 'dt') else signal_series_within_first_true_series.values] \
-                + [right_series_dict[idx].dt.tz_localize(None).values if hasattr(right_series_dict[idx], 'dt') else right_series_dict[idx].values for idx in right_indices]
-            signal_index_extended = pd.MultiIndex.from_arrays(index_arrays, names=[index_name_stem + '@' + freq.name] + right_indices)
-
-        return
-
-    def get_data(self, object: Optional[UniqueObject] = None, 
-                 extra_time_col_freq: Optional[Any] = None,
-                 extra_time_col_freq_session: bool = False,
-                 extra_time_col_bfill: bool = True,
-                 extra_time_col_stem: str = '_SIGNAL',
-                 copy: bool = True, **kwargs) -> pd.DataFrame:
-        data, _ = self._get_data(object=object,
-            extra_time_col_freq=extra_time_col_freq,
-            extra_time_col_freq_session=extra_time_col_freq_session,
-            extra_time_col_bfill=extra_time_col_bfill,
-            extra_time_col_stem=extra_time_col_stem,
-            extra_time_col_group_by=False,
-            copy=copy, **kwargs)
-        return data
-    
-    def _get_data(self, object: Optional[UniqueObject] = None, 
-                 extra_time_col_freq: Optional[Any] = None,
-                 extra_time_col_freq_session: bool = False,
-                 extra_time_col_bfill: bool = True,
-                 extra_time_col_stem: str = '_SIGNAL',
-                 extra_time_col_groupby: bool = False,
-                 copy: bool = True, **kwargs) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        def _get_values(obj, bfill: Optional[int] = None):
+            if bfill is not None:
+                obj = obj.bfill(limit=bfill)
+            return obj.dt.tz_localize(None).values if hasattr(obj, 'dt') else obj.values
         
-        data = self._load_data_or_kwargs(copy=copy, **kwargs)
-        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        def _get_extended_index(bfill: Optional[int] = None):
+            left_indices = data.index.names[:first_true_idx]
+            right_indices = data.index.names[first_true_idx:]
+            left_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True).where(signal_map_within_first_true_series) for idx in left_indices}
+            right_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True) for idx in right_indices}
+            index_arrays = [_get_values(left_series_dict[idx], bfill=bfill) for idx in left_indices] \
+                            + [_get_values(signal_series_within_first_true_series, bfill=bfill)] \
+                            + [_get_values(right_series_dict[idx]) for idx in right_indices]
+            index_name = index_name_stem + '@' + freq.name
+            left_indices = [str(idx).split('@')[-1] for idx in left_indices]
+            right_indices = [str(idx).split('@')[-1] for idx in right_indices]
+            index_names_for_groupby = left_indices + [index_name]
+            index_names = index_names_for_groupby + right_indices[1:]
+            extended_index = pd.MultiIndex.from_arrays(index_arrays, names=index_names_for_groupby + right_indices).dropna()
+            return extended_index, index_names_for_groupby, index_names
+        
+        signal_index, _, index_names = _get_extended_index()
+        signal_index = self._get_level_index(signal_index, index_names)
+        extended_index, index_names_for_groupby, index_names = _get_extended_index(bfill=last_col_multiple-1)
 
-        if extra_time_col_freq is not None:
-            self._get_signal_index(object=object, freq=extra_time_col_freq, **kwargs)
-
-        if extra_time_col_groupby:
-            assert extra_time_col_freq is not None
-            extra_time_col_bfill = True
-        if extra_time_col_freq is not None or extra_time_col_freq_session:
-            if extra_time_col_freq_session:
-                extra_time_col_freq = _process_data_freq('1d')
-                extra_time_col_name = extra_time_col_stem + '@SESSION'
-            else:
-                extra_time_col_freq = _process_data_freq(extra_time_col_freq)
-                extra_time_col_name = extra_time_col_stem + '@' + extra_time_col_freq.name
-            info = {}
-            info['extra_time_col_name'] = extra_time_col_name
-            if extra_time_col_name not in data.columns:
-                if extra_time_col_freq_session:
-                    if DataFreq.DAY1.name in data.index.names and DataFreq.MIN1.name in data.index.names:
-                        day1name = DataFreq.DAY1.name
-                        min1name = DataFreq.MIN1.name
-                        day1series = data.index.get_level_values(day1name).to_series().reset_index(drop=True)
-                        min1series = data.index.get_level_values(min1name).to_series().reset_index(drop=True)
-                        time_part = min1series.dt.time
-                        cond = (time_part >= pd.Timestamp('09:00').time()) & (time_part <= pd.Timestamp('15:00').time())
-                        signal_time = day1series + pd.Timedelta('9 hours')
-                        signal_time[cond] = day1series[cond] + pd.Timedelta('15 hours')
-                        data.index = pd.MultiIndex.from_arrays([day1series, signal_time], names=[day1name, extra_time_col_name])
-                        if extra_time_col_groupby:
-                            groupby_index = [day1name, extra_time_col_name]
-                            info['groupby_index'] = groupby_index
-                            info['grouped'] = data.groupby(groupby_index)
-                        return data, info
-                    else:
-                        return data, {'success': False}
-                if extra_time_col_freq.name in data.index.names:
-                    if extra_time_col_groupby:
-                        data_grouped = data.groupby(extra_time_col_freq.name)
-                        return data, {'grouped': data_grouped, 'groupby_index': [extra_time_col_freq.name]}
-                    return data, {}
-                elif extra_time_col_freq.value > pd.Timedelta('1day') \
-                    and extra_time_col_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0 \
-                    and DataFreq.DAY1.name in data.index.names:
-                    day1series = data.index.get_level_values(DataFreq.DAY1.name).to_series().reset_index(drop=True)
-                    period = int(extra_time_col_freq.value.total_seconds() / pd.Timedelta('1d').total_seconds())
-                    pos = day1series != day1series.shift(-1)
-                    pos = pos[pos==True][period-1::period]
-                    series = day1series.where(pos)
-                    series = series.bfill() if extra_time_col_bfill else series
-                    data[extra_time_col_name] = series.values
-                    if DataFreq.MIN1.name in data.index.names:
-                        index_names = [extra_time_col_name, DataFreq.DAY1.name, DataFreq.MIN1.name]
-                    else:
-                        index_names = [extra_time_col_name, DataFreq.DAY1.name]
-                    info['groupby_index'] = [extra_time_col_name]
-                    if extra_time_col_groupby:
-                        data_grouped = data.groupby([extra_time_col_name])
-                        info['grouped'] = data_grouped
-                        return data, info
-                    else:
-                        return data.reset_index().set_index(index_names), {}
-                elif extra_time_col_freq.value < pd.Timedelta('1day') \
-                    and extra_time_col_freq.value.total_seconds() % pd.Timedelta('1min').total_seconds() == 0 \
-                    and DataFreq.MIN1.name in data.index.names:
-                    min1series = data.index.get_level_values(DataFreq.MIN1.name).to_series().reset_index(drop=True)
-                    period = int(extra_time_col_freq.value.total_seconds() / pd.Timedelta('1min').total_seconds())
-                    pos = min1series.index % period == period - 1
-                    series = min1series.where(pos)
-                    series = series.bfill() if extra_time_col_bfill else series
-                    data[extra_time_col_name] = series.values
-                    data = data.reset_index().set_index([extra_time_col_name] + data.index.names)
-                    if DataFreq.DAY1.name in data.index.names:
-                        extra_time_col_name_day1 = extra_time_col_stem + '@' + DataFreq.DAY1.name
-                        info['extra_time_col_name_day1'] = extra_time_col_name_day1
-                        day1series = data.index.get_level_values(DataFreq.DAY1.name).to_series().reset_index(drop=True)
-                        day1series = day1series.where(pos)
-                        day1series = day1series.bfill() if extra_time_col_bfill else day1series
-                        data[extra_time_col_name_day1] = day1series.values
-                        groupby_index = [extra_time_col_name_day1, extra_time_col_name]
-                        index_names = [DataFreq.DAY1.name, extra_time_col_name_day1, extra_time_col_name, DataFreq.MIN1.name] 
-                    else:
-                        groupby_index = [extra_time_col_name]
-                        index_names = [extra_time_col_name, DataFreq.MIN1.name] 
-                    info['groupby_index'] = groupby_index
-                    if extra_time_col_groupby:
-                        info['grouped'] = data.groupby(groupby_index)
-                        return data, info
-                    else:
-                        return data.reset_index().set_index(index_names), info
-                else:
-                    raise ValueError(f"Cannot generate extra time column with frequency {extra_time_col_freq} from existing data")
-            else:
-                raise ValueError(f"Extra time column name {extra_time_col_name} already exists in data")
-        else:  
-            return data, {}
+        return {
+            'data': data,
+            'signal_index': signal_index,
+            'extended_index': extended_index,
+            'index_names_for_groupby': index_names_for_groupby,
+            'index_names': index_names
+        }
+    
+    def groupby(self, object: Optional[UniqueObject] = None,
+                 freq: Optional[Any] = None,
+                 freq_session: bool = False,
+                 bfill_window: int = 1,
+                 stem: str = '_SIGNAL',
+                 copy: bool = True, **kwargs) -> GroupedOperator:
+        results = self._get_signal_index(object=object, freq=freq, flag_end_of_session=freq_session, index_name_stem=stem, copy=copy, **kwargs)
+        data = results['data']
+        data.index = results['extended_index']
+        return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'])
     
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
@@ -707,3 +611,62 @@ class DataMeta(UniqueObject):
                 df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
                     + df[DataColumn.ADJUSTMENT_ADD.name]
         return df
+
+class GroupedOperator:
+    def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None):
+        self.data = data
+        self.original_index_names = original_index_names if original_index_names is not None else data.index.names
+        self.groupby_index_names = groupby_index_names
+        self.grouped = data.groupby(self.groupby_index_names)
+
+    def _restore_index(self, result: Any) -> pd.DataFrame:
+        if isinstance(result, pd.Series):
+            result = result.to_frame()
+        final_index = self.data.reset_index().groupby(self.groupby_index_names).last().reset_index().set_index(self.original_index_names).index
+        result.index = final_index
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        # 从 grouped 对象获取同名方法
+        try:
+            method = getattr(self.grouped, name)
+        except AttributeError:
+            raise AttributeError(f"GroupedOperator has no attribute '{name}'")
+        # 包装方法，自动恢复索引，支持可选的 column 参数
+        def wrapper(*args, **kwargs):
+            column = kwargs.pop('column', None)
+            if column is not None:
+                target = getattr(self.grouped[column], name)
+                result = target(*args, **kwargs)
+            else:
+                result = method(*args, **kwargs)
+            return self._restore_index(result)
+        return wrapper
+
+    def __dir__(self) -> List[str]:
+        return sorted(set(super().__dir__()) | set(dir(self.grouped)))
+
+    def __getitem__(self, key):
+        """支持 operator['column'] 语法"""
+        return _ColumnSelector(self, key)
+
+class _ColumnSelector:
+    def __init__(self, parent: GroupedOperator, key):
+        self.parent = parent
+        self.key = key
+
+    def __getattr__(self, name: str) -> Any:
+        # 尝试从 parent.grouped 的列选择子对象获取方法
+        try:
+            method = getattr(self.parent.grouped[self.key], name)
+        except AttributeError:
+            raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
+        # 包装方法，自动恢复索引
+        def wrapper(*args, **kwargs):
+            result = method(*args, **kwargs)
+            return self.parent._restore_index(result)
+        return wrapper
+
+    def __dir__(self) -> List[str]:
+        # 提供该列选择器可用的方法
+        return sorted(set(super().__dir__()) | set(dir(self.parent.grouped[self.key])))
