@@ -349,7 +349,7 @@ class DataMeta(UniqueObject):
             super().__init__(name=name)
             self.object = object
             self.freq = data_freq
-            self.data: pd.DataFrame = pd.DataFrame()
+            self.data: pd.DataFrame = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
             self.current_source: DataSource
             self.path: Any
             self.start_date: pd.Timestamp
@@ -430,13 +430,18 @@ class DataMeta(UniqueObject):
         else:
             raise NotImplementedError("DataMeta: Index type not supported for timezone localization")
     
+    def get_level_index(self, level: Any, **kwargs) -> pd.Index:
+        return self._get_level_index(self.get_data(**kwargs), level)
+
     def _get_level_index(self, index: Any, level: Any) -> pd.Index:
         if not isinstance(index, pd.Index):
             index = index.index
         assert isinstance(index, pd.Index)
         if isinstance(level, list):
+            level = [next((lvl for lvl in index.names if str(lvl).split('@')[-1] == _process_data_freq(lvl_freq).name), None) for lvl_freq in level]
             return pd.MultiIndex.from_arrays([index.get_level_values(lvl) for lvl in level], names=level)
         else:
+            level = next((lvl for lvl in index.names if str(lvl).split('@')[-1] == _process_data_freq(level).name), None)
             return self._set_index_timezone(index.get_level_values(level))
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
@@ -492,12 +497,12 @@ class DataMeta(UniqueObject):
         first_true_freq = index_data_freq[first_true_idx]
         multiple = int(freq.value.total_seconds() / first_true_freq.value.total_seconds())
         last_col_multiple = int(freq.value.total_seconds() / index_data_freq[-1].value.total_seconds())
-        first_true_series = self._get_level_index(data, first_true_freq.name).to_series().reset_index(drop=True)
+        first_true_series = self._get_level_index(data, data.index.names[first_true_idx]).to_series().reset_index(drop=True)
         first_true_change_map = first_true_series != first_true_series.shift(-1)
         first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
         
-        if end_session_skip:
-            last_col_series = self._get_level_index(data, index_data_freq[-1].name).to_series().reset_index(drop=True)
+        if end_session_skip and freq.value < pd.Timedelta('1day'):
+            last_col_series = self._get_level_index(data, data.index.names[-1]).to_series().reset_index(drop=True)
             end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
             signal_map_within_first_true_change_pos = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
         else:
@@ -507,12 +512,12 @@ class DataMeta(UniqueObject):
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
         signal_series_within_first_true_series = first_true_series.where(signal_map_within_first_true_series)
 
-        def _get_values(obj, bfill: Optional[int] = None):
+        def _get_values(obj, bfill: Optional[int] = None) -> pd.Series:
             if bfill is not None:
                 obj = obj.bfill(limit=bfill)
             return obj.dt.tz_localize(None).values if hasattr(obj, 'dt') else obj.values
         
-        def _get_extended_index(bfill: Optional[int] = None):
+        def _get_extended_index(bfill: Optional[int] = None) -> Tuple[pd.MultiIndex, List[str], List[str]]:
             left_indices = data.index.names[:first_true_idx]
             right_indices = data.index.names[first_true_idx:]
             left_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True).where(signal_map_within_first_true_series) for idx in left_indices}
@@ -525,13 +530,17 @@ class DataMeta(UniqueObject):
             right_indices = [str(idx).split('@')[-1] for idx in right_indices]
             index_names_for_groupby = left_indices + [index_name]
             index_names = index_names_for_groupby + right_indices[1:]
-            extended_index = pd.MultiIndex.from_arrays(index_arrays, names=index_names_for_groupby + right_indices).dropna()
+            extended_index = pd.MultiIndex.from_arrays(index_arrays, names=index_names_for_groupby + right_indices)
             return extended_index, index_names_for_groupby, index_names
         
         signal_index, _, index_names = _get_extended_index()
-        signal_index = self._get_level_index(signal_index, index_names)
+        signal_index = self._get_level_index(signal_index.dropna(), index_names)
         bfill = bfill if bfill is not None else last_col_multiple - 1
         extended_index, index_names_for_groupby, index_names = _get_extended_index(bfill=bfill)
+
+        mask = ~extended_index.to_frame().isna().any(axis=1)
+        extended_index = extended_index[mask]
+        data = data[mask.values]
 
         return {
             'data': data,
@@ -551,6 +560,73 @@ class DataMeta(UniqueObject):
         data.index = results['extended_index']
         return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'])
     
+    def sync_signal(self, object: UniqueObject, signal: Any, freq: Optional[Any] = None,
+                    end_session_skip: bool = True, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.DataFrame:
+        if isinstance(signal, pd.DataFrame):
+            assert len(signal.columns) == 1, "Signal must have only one column"
+            signal = signal.squeeze()
+        index = self._get_signal_index(object=object, freq=freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, copy=True, **kwargs)['signal_index']
+        assert index.nlevels == signal.index.nlevels, "Index levels do not match between signal index and signal index"
+        map = signal.index.isin(index)
+        signal = signal[map]
+        signal.index = index
+        signal.rename(self.name, inplace=True)
+        return signal
+    
+    def rolling(self, object: UniqueObject, window: int|str|pd.Timedelta, copy: bool = False, **kwargs) -> RollingOperator|GroupedOperator:
+        data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
+        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        data_freq = _process_data_freq(data.index.names[-1])
+        if isinstance(window, int):
+            return RollingOperator(data, window=window, min_periods=window, **kwargs)
+        else:
+            window_freq = _process_data_freq(window)
+            if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
+                and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                return self.groupby(object=object, freq=window_freq, copy=copy, data=data, **kwargs)
+            elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
+                window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
+                return RollingOperator(data, window=window_size, min_periods=window_size, **kwargs)
+            else:
+                raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
+
+    def pct_change(self, object: UniqueObject, window: int|str|pd.Timedelta = 1, col: Optional[Any] = None, copy: bool = False, **kwargs) -> pd.Series:
+        data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
+        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        data_freq = _process_data_freq(data.index.names[-1])
+        if col is not None:
+            if col not in data.columns:
+                raise ValueError(f"Column {col} not found in data")
+            col = _process_data_col(col).name
+            data = data[col]
+        else:
+            if isinstance(data, pd.Series):
+                pass
+            else:
+                col = data.columns[0]
+                data = data[col]
+        if isinstance(window, int):
+            return data.pct_change(periods=window)
+        else:
+            window_freq = _process_data_freq(window)
+            if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
+                and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                groupby_freq = window_freq
+                grouped = self.groupby(object=object, freq=groupby_freq, copy=copy, **kwargs)
+                return grouped.last().pct_change()
+            elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
+                window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
+                return data.pct_change(periods=window_size)
+            else:
+                raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
+
+    def __getitem__(self, key):
+        col = _process_data_col(key).name
+        data = self.get_data(copy=True)
+        if col not in data.columns:
+            raise ValueError(f"Column {col} not found in data")
+        return DataMeta(name=f"{self.name}_{col}", object=self, data=data[col], data_freq=self.freq, timezone=self.timezone)
+
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
         ds = self.get_current_source()
@@ -614,12 +690,61 @@ class DataMeta(UniqueObject):
                     + df[DataColumn.ADJUSTMENT_ADD.name]
         return df
 
+class RollingOperator:
+    def __init__(self, data: pd.DataFrame, window: int|str|pd.Timedelta, min_periods: Optional[int] = None, **kwargs):
+        self.data = data
+        self.window = window
+        self.min_periods = min_periods
+        self.rolling = data.rolling(window=window, min_periods=min_periods, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # 从 rolling 对象获取同名方法
+        try:
+            method = getattr(self.rolling, name)
+        except AttributeError:
+            raise AttributeError(f"RollingOperator has no attribute '{name}'")
+        # 包装方法，自动恢复索引
+        def wrapper(*args, **kwargs):
+            result = method(*args, **kwargs)
+            result.index = self.data.index
+            return result
+        return wrapper
+
+    def __dir__(self) -> List[str]:
+        return sorted(set(super().__dir__()) | set(dir(self.rolling)))
+    
+    def __getitem__(self, key):
+        """支持 operator['column'] 语法"""
+        return RollingOperator._ColumnSelector(self, key)
+    
+    class _ColumnSelector:
+        def __init__(self, parent: Any, key):
+            self.parent = parent
+            self.key = key
+
+        def __getattr__(self, name: str) -> Any:
+            # 尝试从 parent.rolling 的列选择子对象获取方法
+            try:
+                method = getattr(self.parent.rolling[self.key], name)
+            except AttributeError:
+                raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
+            # 包装方法，自动恢复索引
+            def wrapper(*args, **kwargs):
+                result = method(*args, **kwargs)
+                result.index = self.parent.data.index
+                return result
+            return wrapper
+
+        def __dir__(self) -> List[str]:
+            # 提供该列选择器可用的方法
+            return sorted(set(super().__dir__()) | set(dir(self.parent.rolling[self.key])))
+    
 class GroupedOperator:
-    def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None):
+    def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None, **kwargs):
         self.data = data
         self.original_index_names = original_index_names if original_index_names is not None else data.index.names
         self.groupby_index_names = groupby_index_names
-        self.grouped = data.groupby(self.groupby_index_names)
+        self.grouped = data.groupby(self.groupby_index_names, **kwargs)
 
     def _restore_index(self, result: Any) -> pd.DataFrame:
         if isinstance(result, pd.Series):
@@ -634,11 +759,11 @@ class GroupedOperator:
             method = getattr(self.grouped, name)
         except AttributeError:
             raise AttributeError(f"GroupedOperator has no attribute '{name}'")
-        # 包装方法，自动恢复索引，支持可选的 column 参数
+        # 包装方法，自动恢复索引，支持可选的 col 参数
         def wrapper(*args, **kwargs):
-            column = kwargs.pop('column', None)
-            if column is not None:
-                target = getattr(self.grouped[column], name)
+            col = kwargs.pop('col', None)
+            if col is not None:
+                target = getattr(self.grouped[col], name)
                 result = target(*args, **kwargs)
             else:
                 result = method(*args, **kwargs)
@@ -650,25 +775,25 @@ class GroupedOperator:
 
     def __getitem__(self, key):
         """支持 operator['column'] 语法"""
-        return _ColumnSelector(self, key)
+        return GroupedOperator._ColumnSelector(self, key)
 
-class _ColumnSelector:
-    def __init__(self, parent: GroupedOperator, key):
-        self.parent = parent
-        self.key = key
+    class _ColumnSelector:
+        def __init__(self, parent: Any, key):
+            self.parent = parent
+            self.key = key
 
-    def __getattr__(self, name: str) -> Any:
-        # 尝试从 parent.grouped 的列选择子对象获取方法
-        try:
-            method = getattr(self.parent.grouped[self.key], name)
-        except AttributeError:
-            raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
-        # 包装方法，自动恢复索引
-        def wrapper(*args, **kwargs):
-            result = method(*args, **kwargs)
-            return self.parent._restore_index(result)
-        return wrapper
+        def __getattr__(self, name: str) -> Any:
+            # 尝试从 parent.grouped 的列选择子对象获取方法
+            try:
+                method = getattr(self.parent.grouped[self.key], name)
+            except AttributeError:
+                raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
+            # 包装方法，自动恢复索引
+            def wrapper(*args, **kwargs):
+                result = method(*args, **kwargs)
+                return self.parent._restore_index(result)
+            return wrapper
 
-    def __dir__(self) -> List[str]:
-        # 提供该列选择器可用的方法
-        return sorted(set(super().__dir__()) | set(dir(self.parent.grouped[self.key])))
+        def __dir__(self) -> List[str]:
+            # 提供该列选择器可用的方法
+            return sorted(set(super().__dir__()) | set(dir(self.parent.grouped[self.key])))
