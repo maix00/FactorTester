@@ -60,8 +60,7 @@ class Factor(SerialObject):
     _instance_count: int = -1
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        instance = super().__new__(cls, type_alias='F', alias=alias, search=True)
-        return instance
+        return super().__new__(cls, type_alias='F', alias=alias, search=True)
     
     def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame] = lambda _: pd.DataFrame(), 
                  family: Optional[FactorFamily] = None, param_vals: Optional[Dict[Parameter, Any]] = None):

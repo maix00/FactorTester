@@ -30,7 +30,7 @@ class Product(UniqueObject):
                 else self._default_category_attr_name
             self.timezone = kwargs.get('timezone', '')
             for key, val in DataFreq.__members__.items():
-                setattr(self, key, DataMeta(name=f"{self.name}_{key}", object=self, data_freq=val, timezone=self.timezone))
+                setattr(self, key, DataMeta(alias=f"{key}", object=self, data_freq=val, timezone=self.timezone))
         
     def list_available_freqs(self) -> List[DataFreq]:
         return [freq for freq in DataFreq if getattr(self, freq.name).is_available()]

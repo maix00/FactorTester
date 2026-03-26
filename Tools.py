@@ -341,12 +341,16 @@ if __name__ == '__main__':
     ds = DataSourceRegister().get_default_source()
     print(ds)
 
-class DataMeta(UniqueObject):
+class DataMeta(SerialObject):
     _instances = WeakValueDictionary()
 
-    def __init__(self, name: str, object: UniqueObject, data_freq: DataFreq, *args, **kwargs):
+    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
+        return super().__new__(cls, type_alias='DM', alias=alias)
+
+    def __init__(self, object: UniqueObject, data_freq: DataFreq, alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(name=name)
+            alias = '(' + object.alias + ')' + ('_' + alias if alias else '')
+            super().__init__(type_alias='DM', alias=alias)
             self.object = object
             self.freq = data_freq
             self.data: pd.DataFrame = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
@@ -625,7 +629,7 @@ class DataMeta(UniqueObject):
         data = self.get_data(copy=True)
         if col not in data.columns:
             raise ValueError(f"Column {col} not found in data")
-        return DataMeta(name=f"{self.name}_{col}", object=self, data=data[col], data_freq=self.freq, timezone=self.timezone)
+        return DataMeta(alias=f"{col}", object=self, data=data[col], data_freq=self.freq, timezone=self.timezone)
 
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
