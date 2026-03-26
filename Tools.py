@@ -562,7 +562,7 @@ class DataMeta(SerialObject):
         results = self._get_signal_index(object=object, freq=freq, bfill=bfill, index_name_stem=stem, copy=copy, **kwargs)
         data = results['data']
         data.index = results['extended_index']
-        return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'])
+        return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'], object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
     
     def sync_signal(self, object: UniqueObject, signal: Any, freq: Optional[Any] = None,
                     end_session_skip: bool = True, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.DataFrame:
@@ -582,19 +582,20 @@ class DataMeta(SerialObject):
         data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
         data_freq = _process_data_freq(data.index.names[-1])
         if isinstance(window, int):
-            return RollingOperator(data, window=window, min_periods=window, **kwargs)
+            return RollingOperator(data=data, window=window, min_periods=window, alias=f"ROLLING_{window}", object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
         else:
             window_freq = _process_data_freq(window)
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
-                return self.groupby(object=object, freq=window_freq, copy=copy, data=data, **kwargs)
+                return self.groupby(object=object, freq=window_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", data=data, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
-                return RollingOperator(data, window=window_size, min_periods=window_size, **kwargs)
+                return RollingOperator(data=data, window=window_size, min_periods=window_size, alias=f"ROLLING_{window_size}", object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
-    def pct_change(self, object: UniqueObject, window: int|str|pd.Timedelta = 1, col: Optional[Any] = None, copy: bool = False, **kwargs) -> pd.Series:
+    def pct_change(self, object: UniqueObject, window: int|str|pd.Timedelta = 1, 
+                   col: Optional[Any] = None, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
         data_freq = _process_data_freq(data.index.names[-1])
@@ -609,27 +610,100 @@ class DataMeta(SerialObject):
             else:
                 col = data.columns[0]
                 data = data[col]
+        alias = f"{col}_PCT_CHANGE" if col is not None else "PCT_CHANGE"
         if isinstance(window, int):
-            return data.pct_change(periods=window)
+            return self._wrap(data.pct_change(periods=window), alias=alias + '_' + str(window))
         else:
             window_freq = _process_data_freq(window)
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
                 groupby_freq = window_freq
-                grouped = self.groupby(object=object, freq=groupby_freq, copy=copy, **kwargs)
+                grouped = self.groupby(object=object, freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}_LAST_PCT_CHANGE", **kwargs)
                 return grouped.last().pct_change()
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
-                return data.pct_change(periods=window_size)
+                return self._wrap(data.pct_change(periods=window_size), alias=alias + '_' + str(window_size))
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
-    def __getitem__(self, key):
-        col = _process_data_col(key).name
-        data = self.get_data(copy=True)
-        if col not in data.columns:
-            raise ValueError(f"Column {col} not found in data")
-        return DataMeta(alias=f"{col}", object=self, data=data[col], data_freq=self.freq, timezone=self.timezone)
+    def __getattr__(self, name: str) -> Any:
+            try:
+                method = self.__dict__.get(name)
+                if method is not None:
+                    return method
+            except AttributeError:
+                pass
+            data = self.__dict__.get('data')
+            if data is None:
+                raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
+            try:
+                method = getattr(data, name)
+            except AttributeError:
+                raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
+            def wrapper(*args, **kwargs):
+                result = method(*args, **kwargs)
+                return self._wrap(result, alias=f"{method.__name__.upper()}")
+            return wrapper
+    
+    def _wrap(self, result: Any, alias: str) -> Any:
+        if isinstance(result, pd.DataFrame) or isinstance(result, pd.Series):
+            return DataMeta(data=result, object=self, alias=alias, data_freq=self.freq, timezone=self.timezone)
+        else:
+            return result
+
+    def __dir__(self):
+        own_attrs = set(super().__dir__())
+        data_attrs = set(dir(self.data))
+        return sorted(own_attrs | data_attrs)
+    
+    @staticmethod
+    def _get_alias(other: Any) -> str:
+        if hasattr(other, 'alias'):
+            return other.alias
+        elif isinstance(other, str):
+            return other
+        else:
+            return str(other)
+    
+    def __add__(self, other): return self._wrap(self.data + other, alias=f"ADD_{self._get_alias(other)}")
+    def __sub__(self, other): return self._wrap(self.data - other, alias=f"SUB_{self._get_alias(other)}")
+    def __mul__(self, other): return self._wrap(self.data * other, alias=f"MUL_{self._get_alias(other)}")
+    def __truediv__(self, other): return self._wrap(self.data / other, alias=f"DIV_{self._get_alias(other)}")
+    def __floordiv__(self, other): return self._wrap(self.data // other, alias=f"FLOORDIV_{self._get_alias(other)}")
+    def __mod__(self, other): return self._wrap(self.data % other, alias=f"MOD_{self._get_alias(other)}")
+    def __pow__(self, other): return self._wrap(self.data ** other, alias=f"POW_{self._get_alias(other)}")
+    def __gt__(self, other): return self._wrap(self.data > other, alias=f"GT_{self._get_alias(other)}")
+    def __lt__(self, other): return self._wrap(self.data < other, alias=f"LT_{self._get_alias(other)}")
+    def __ge__(self, other): return self._wrap(self.data >= other, alias=f"GE_{self._get_alias(other)}")
+    def __le__(self, other): return self._wrap(self.data <= other, alias=f"LE_{self._get_alias(other)}")
+    def __eq__(self, other): return self._wrap(self.data == other, alias=f"EQ_{self._get_alias(other)}")
+    def __ne__(self, other): return self._wrap(self.data != other, alias=f"NE_{self._get_alias(other)}")
+    def __and__(self, other): return self._wrap(self.data & other, alias=f"AND_{self._get_alias(other)}")
+    def __or__(self, other): return self._wrap(self.data | other, alias=f"OR_{self._get_alias(other)}")
+    def __xor__(self, other): return self._wrap(self.data ^ other, alias=f"XOR_{self._get_alias(other)}")
+    def __neg__(self): return self._wrap(-self.data, alias=f"NEG")
+    def __pos__(self): return self._wrap(+self.data, alias=f"POS")
+    def __abs__(self): return self._wrap(abs(self.data), alias=f"ABS")
+    def __invert__(self): return self._wrap(~self.data, alias=f"INVERT")
+    def __getitem__(self, key): return self._wrap(self.data[(col := _process_data_col(key).name)], alias=col)
+    def __setitem__(self, key, value): self.data[_process_data_col(key).name] = value
+    def __delitem__(self, key): del self.data[_process_data_col(key).name]
+
+    # 反向运算符（支持 scalar + meta）
+    def __radd__(self, other): return self._wrap(other + self.data, alias=f"RADD_{self._get_alias(other)}")
+    def __rsub__(self, other): return self._wrap(other - self.data, alias=f"RSUB_{self._get_alias(other)}")
+    def __rmul__(self, other): return self._wrap(other * self.data, alias=f"RMUL_{self._get_alias(other)}")
+    def __rtruediv__(self, other): return self._wrap(other / self.data, alias=f"RDIV_{self._get_alias(other)}")
+    def __rfloordiv__(self, other): return self._wrap(other // self.data, alias=f"RFLOORDIV_{self._get_alias(other)}")
+    def __rmod__(self, other): return self._wrap(other % self.data, alias=f"RMOD_{self._get_alias(other)}")
+    def __rpow__(self, other): return self._wrap(other ** self.data, alias=f"RPOW_{self._get_alias(other)}")
+    def __rand__(self, other): return self._wrap(other & self.data, alias=f"RAND_{self._get_alias(other)}")
+    def __ror__(self, other): return self._wrap(other | self.data, alias=f"ROR_{self._get_alias(other)}")
+    def __rxor__(self, other): return self._wrap(other ^ self.data, alias=f"RXOR_{self._get_alias(other)}")
+
+    # 可选：支持 len() 和 bool()
+    def __len__(self): return len(self.data)
+    def __bool__(self): return bool(self.data) if self.data.size else False
 
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
@@ -694,9 +768,9 @@ class DataMeta(SerialObject):
                     + df[DataColumn.ADJUSTMENT_ADD.name]
         return df
 
-class RollingOperator:
+class RollingOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, window: int|str|pd.Timedelta, min_periods: Optional[int] = None, **kwargs):
-        self.data = data
+        super().__init__(data=data, alias=kwargs.pop('alias', f"ROLLING_{window}"), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
         self.window = window
         self.min_periods = min_periods
         self.rolling = data.rolling(window=window, min_periods=min_periods, **kwargs)
@@ -711,7 +785,7 @@ class RollingOperator:
         def wrapper(*args, **kwargs):
             result = method(*args, **kwargs)
             result.index = self.data.index
-            return result
+            return self._wrap(result, alias=f"{method.__name__.upper()}")
         return wrapper
 
     def __dir__(self) -> List[str]:
@@ -736,16 +810,16 @@ class RollingOperator:
             def wrapper(*args, **kwargs):
                 result = method(*args, **kwargs)
                 result.index = self.parent.data.index
-                return result
+                return self.parent._wrap(result, alias=f"{method.__name__.upper()}_{self.key}")
             return wrapper
 
         def __dir__(self) -> List[str]:
             # 提供该列选择器可用的方法
             return sorted(set(super().__dir__()) | set(dir(self.parent.rolling[self.key])))
     
-class GroupedOperator:
+class GroupedOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None, **kwargs):
-        self.data = data
+        super().__init__(data=data, alias=kwargs.pop('alias', 'GROUPBY'), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
         self.original_index_names = original_index_names if original_index_names is not None else data.index.names
         self.groupby_index_names = groupby_index_names
         self.grouped = data.groupby(self.groupby_index_names, **kwargs)
@@ -771,7 +845,7 @@ class GroupedOperator:
                 result = target(*args, **kwargs)
             else:
                 result = method(*args, **kwargs)
-            return self._restore_index(result)
+            return self._wrap(self.parent._restore_index(result), alias=f"{method.__name__.upper()}")
         return wrapper
 
     def __dir__(self) -> List[str]:
@@ -795,7 +869,7 @@ class GroupedOperator:
             # 包装方法，自动恢复索引
             def wrapper(*args, **kwargs):
                 result = method(*args, **kwargs)
-                return self.parent._restore_index(result)
+                return self.parent._wrap(self.parent._restore_index(result), alias=f"{method.__name__.upper()}_{self.key}")
             return wrapper
 
         def __dir__(self) -> List[str]:

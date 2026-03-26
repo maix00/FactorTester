@@ -23,8 +23,8 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         factors = {}
         for product in products:
             ret = product.MIN1[P].pct_change(self, RF)
-            pos_ratio = product.MIN1.rolling(self, WF, data=(ret > 0)).mean()
-            factors[product] = product.MIN1.sync_signal(self, pos_ratio, F)
+            pos_ratio = (ret > 0).rolling(self, WF).mean()
+            factors[product] = product.MIN1.sync_signal(self, pos_ratio.data, F)
         return pd.DataFrame(factors)
 
 
