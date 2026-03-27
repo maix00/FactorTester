@@ -15,17 +15,12 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         TimeDeltaParam('RF', flag='pos', default_value='5m'),      # 计算频率（Return Frequency）
     ]
 
-    def func(self, products: Sequence[Product], F: Any = pd.Timedelta('5m'),
-             WF: Any = pd.Timedelta('2h'),
-             RF: Any = pd.Timedelta('1d'),
-             P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.DataFrame:
-        
-        factors = {}
-        for product in products:
-            ret = product.MIN1[P].pct_change(RF)
-            pos_ratio = (ret > 0).rolling(WF).mean()
-            factors[product] = product.MIN1.sync_signal(pos_ratio, F)
-        return pd.DataFrame(factors)
+    def func_timeseries(self, product: Product, F: Any = pd.Timedelta('5m'),
+                        WF: Any = pd.Timedelta('2h'), RF: Any = pd.Timedelta('1d'),
+                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.DataFrame:
+        ret = product.MIN1[P].pct_change(RF)
+        pos_ratio = (ret > 0).rolling(WF).mean()
+        return product.MIN1.sync_signal(pos_ratio, F)
 
 if __name__ == '__main__':
     ff = MmPosPct()

@@ -320,8 +320,23 @@ class FactorFamily(SerialObject):
             self.set_default_params()
             self.factors: List[Factor] = []
 
-    def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
+    def func2(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         raise NotImplementedError("请在子类中实现 `factor_func` 方法")
+
+    def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
+        try:
+            factors = {}
+            for product in products:
+                factors[product] = self.func_timeseries(product, *args, **kwargs)
+            return pd.DataFrame(factors)
+        except NotImplementedError:
+            return self.func_crosssection(products, *args, **kwargs)
+    
+    def func_timeseries(self, product: Product, *args, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError("请在子类中实现 `factor_func_timeseries` 方法")
+
+    def func_crosssection(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError("请在子类中实现 `factor_func_crosssection` 方法")
     
     def set_default_params(self):
         self._params_list = [{p.alias: p.default_value for p in self.params}]
