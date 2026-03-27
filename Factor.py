@@ -9,7 +9,7 @@ import numpy as np
 from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import os
 
-from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject
+from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject, _process_data_freq
 from Products import DataColumn, Futures, Product, DataFreq
 from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
 from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
@@ -319,17 +319,108 @@ class FactorFamily(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()
             self.factors: List[Factor] = []
+            self.common_signal_freq: DataFreq
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         try:
             return self.func_crosssection(products, *args, **kwargs)
         except NotImplementedError:
-            factors = {}
+            all_series = {}
+            rerun_products = []
+            synced_products = []
+            all_indices = {}
+            sync_index: Optional[pd.Index] = None
+            common_signal_freq = None
+            
             for product in products:
-                factors[product] = self.func_timeseries(product, *args, **kwargs)
-            return pd.DataFrame(factors)
+                series = self.func_timeseries(product, *args, **kwargs)
+                signal_index = next((str(name) for name in series.index.names if name and str(name).startswith('_SIGNAL')), None)
+                assert signal_index is not None, "func_timeseries返回的Series必须包含一个以'_SIGNAL'开头的时间列作为index"
+                index = series.index.droplevel([lvl for lvl in series.index.names if lvl != signal_index])
+                assert isinstance(index, pd.DatetimeIndex)
+                all_indices[product] = index
+                signal_freq = _process_data_freq(signal_index)
+                if common_signal_freq is None:
+                    common_signal_freq = signal_freq
+                else:
+                    assert signal_freq == common_signal_freq, f"所有产品的func_timeseries返回的Series必须具有相同频率的时间索引，现在发现{product}的频率为{signal_freq}，与之前的{common_signal_freq}不一致"
+                first_index = index[0].tz_localize(None)
+                start_calc_point = self.get_current_start_calc_point().tz_localize(None)
+                if signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                    data = product.get_some_data(copy=False)
+                    assert 'DAY1' in data.index.names
+                    offsetdays = int(signal_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds()) - 1
+                    day1series = data.index.get_level_values('DAY1')
+                    day1map = (day1series != day1series.to_series().shift(1)) & (day1series >= pd.Timestamp(start_calc_point.date()))
+                    targetpos = pd.Series(day1map)[day1map].index[offsetdays]
+                    boolean = data.index.get_level_values('DAY1')[targetpos] < first_index
+                    if sync_index is not None:
+                        boolean = boolean and not series.index.isin(sync_index).all()
+                else:
+                    boolean = start_calc_point + signal_freq.value < first_index
+                if boolean:
+                    rerun_products.append(product)
+                    continue
+                else:
+                    if sync_index is None:
+                        sync_index = series.index
+                        synced_products.append(product)
+                    else:
+                        if len(sync_index) < len(series.index):
+                            if not sync_index.isin(series.index).all():
+                                rerun_products.extend(synced_products)
+                                synced_products = [product]
+                                continue
+                            synced_products.append(product)
+                        else:
+                            if not series.index.isin(sync_index).all():
+                                rerun_products.append(product)
+                                continue
+                            synced_products.append(product)
+                all_series[product] = series
+            
+            for product in rerun_products:
+                index = all_indices[product]
+                signal_freq = _process_data_freq(index.name)
+                assert sync_index is not None
+                sync_index_signal_col = sync_index.get_level_values(index.name)
+                next_point = sync_index_signal_col[sync_index_signal_col.searchsorted(index[0], side='right')]
+                assert isinstance(next_point, pd.Timestamp), "同步索引必须包含时间戳类型的信号列"
+                if signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                    data = product.get_some_data(copy=False)
+                    assert 'DAY1' in data.index.names
+                    offsetdays = int(signal_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds()) - 1
+                    day1series = data.index.get_level_values('DAY1')
+                    day1map = (day1series != day1series.to_series().shift(1)) & (day1series <= next_point)
+                    targetpos = pd.Series(day1map)[day1map].index[-offsetdays-1]
+                    new_start_calc_point = data.index.get_level_values(-1)[targetpos]
+                else:
+                    tiny_offset = pd.Timedelta('1s')
+                    new_start_calc_point = next_point - signal_freq.value + tiny_offset
+                new_start_calc_point = new_start_calc_point.tz_localize(product.timezone)
+                product.get_StartCalcPointParam().register(product, new_start_calc_point)
+                series = self.func_timeseries(product, *args, **kwargs)
+                all_series[product] = series
+                synced_products.append(product)
+            
+            assert len(synced_products) == len(products), "无法同步所有产品的信号，请检查func_timeseries的输出和起始计算点设置"
+            assert sync_index is not None, "同步索引未设置，无法对齐数据"
+            assert isinstance(common_signal_freq, DataFreq), "common_signal_freq 必须是 DataFreq 类型"
+            self.common_signal_freq = common_signal_freq
+            if common_signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                common_signal_col = '_SIGNAL@' + common_signal_freq.name
+                other_cols = [str(col) for col in sync_index.names if str(col) != common_signal_col]
+                for product in synced_products:
+                    all_series[product] = all_series[product].reset_index().set_index(common_signal_col)
+                dict = {col: pd.DataFrame({product: all_series[product][col] for product in synced_products}).max(axis=1) for col in other_cols}
+                for product in synced_products:
+                    for col in other_cols:
+                        all_series[product][col] = dict[col]
+                    all_series[product] = all_series[product].reset_index().set_index(sync_index.names).squeeze()
+
+            return pd.DataFrame(all_series)
     
-    def func_timeseries(self, product: Product, *args, **kwargs) -> pd.DataFrame:
+    def func_timeseries(self, product: Product, *args, **kwargs) -> pd.Series:
         raise NotImplementedError("请在子类中实现 `factor_func_timeseries` 方法")
 
     def func_crosssection(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:

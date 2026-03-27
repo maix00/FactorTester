@@ -189,6 +189,7 @@ class DataFreq(Enum):
     DAY3 = pd.Timedelta('3day')
     DAY5 = pd.Timedelta('5day')
     DAY10 = pd.Timedelta('10day')
+    DAY20 = pd.Timedelta('20day')
     WEEK1 = pd.Timedelta('7day')
 
 def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
@@ -316,7 +317,7 @@ class DataSource(SerialObject):
                 self._is_object_in_source_func = lambda object: os.path.isfile(get_object_path(object))
             else:
                 self._is_object_in_source_func = if_object_is_in_source
-            self.timezone: str = kwargs.get('timezone', '')
+            self.timezone = kwargs.get('timezone', None)
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
@@ -359,7 +360,7 @@ class DataMeta(SerialObject):
             self.data: pd.DataFrame = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
             self.current_source: DataSource
             self.path: Any
-            self.timezone: str = kwargs.get('timezone', '')
+            self.timezone = kwargs.get('timezone', None)
 
     def list_available_sources(self) -> List[DataSource]:
         lst = []
@@ -428,11 +429,9 @@ class DataMeta(SerialObject):
         return data.copy() if copy else data
     
     def _set_index_timezone(self, index: Any) -> pd.DatetimeIndex:
-        if isinstance(index, pd.DatetimeIndex):
-            if self.timezone:
-                index = index.tz_localize(self.timezone)
-            return index
-        else:
+        try:
+            return index.tz_localize(self.timezone)
+        except:
             raise NotImplementedError("DataMeta: Index type not supported for timezone localization")
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -488,8 +487,9 @@ class DataMeta(SerialObject):
 
     def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
-                          index_name_stem: str = '_SIGNAL', copy: bool = False, **kwargs) -> Dict[str, Any]:
+                          copy: bool = False, **kwargs) -> Dict[str, Any]:
 
+        index_name_stem: str = '_SIGNAL'
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
@@ -505,13 +505,13 @@ class DataMeta(SerialObject):
         first_true_series = self._get_level_index(data, data.index.names[first_true_idx]).to_series().reset_index(drop=True)
         first_true_change_map = first_true_series != first_true_series.shift(-1)
         first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
-        
+
         if end_session_skip and freq.value < pd.Timedelta('1day'):
             last_col_series = self._get_level_index(data, data.index.names[-1]).to_series().reset_index(drop=True)
             end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
             signal_map_within_first_true_change_pos = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
         else:
-            signal_map_within_first_true_change_pos = first_true_change_pos % multiple == multiple - 1
+            signal_map_within_first_true_change_pos = first_true_change_pos.to_series().reset_index(drop=True).index % multiple == multiple - 1
 
         signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_pos]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
@@ -580,14 +580,16 @@ class DataMeta(SerialObject):
         assert index.nlevels == signal.index.nlevels, "Index levels do not match between signal index and signal index"
         map = signal.index.isin(index)
         signal = signal[map]
-        signal.index = index
+        signal.index.names = index.names
         signal.rename(self.object.alias, inplace=True)
         return signal_datameta._wrap(signal, alias=f"SYNCED_SIGNAL_{_process_data_freq(freq).name}")
     
     def sync_signal(self, signal: Any, freq: Any,
                     end_session_skip: bool = True, 
-                    end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.DataFrame:
-        return self._sync_signal(signal, freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, **kwargs).data
+                    end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.Series:
+        series = self._sync_signal(signal, freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, **kwargs).data
+        assert isinstance(series, pd.Series), "Synced signal must be a Series"
+        return series
     
     def rolling(self, window: int|str|pd.Timedelta, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)

@@ -28,7 +28,7 @@ class Product(UniqueObject):
             self.currency = currency
             self.category_attr_name = category_attr_name if category_attr_name \
                 else self._default_category_attr_name
-            self.timezone = kwargs.get('timezone', '')
+            self.timezone = kwargs.get('timezone', None)
             for key, val in DataFreq.__members__.items():
                 setattr(self, key, DataMeta(alias=f"{key}", object=self, data_freq=val, timezone=self.timezone))
             if TYPE_CHECKING:
