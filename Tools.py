@@ -975,18 +975,18 @@ class _RollingInDays(DataMeta):
                              object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
                              data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
             self.list_of_data = list_of_data
-            self.list_of_grouby = [
+            self.list_of_groupby = [
                 self._wrap(target_type=GroupedOperator, data=data, 
                            alias=f"ROLLING_INDAYS_GROUPBY_OFFSET_{i}",
                            groupby_index_names=groupby_index_names, 
                            original_index_names=original_index_names) 
                 for i, data in enumerate(list_of_data)
             ]
-            self.list_of_grouped = [groupby.grouped for groupby in self.list_of_grouby]
+            self.list_of_grouped = [groupby.grouped for groupby in self.list_of_groupby]
 
     def _restore_index_and_concat(self, list_of_result: Any) -> pd.DataFrame:
         restored_results = []
-        for groupby, res in zip(self.list_of_grouby, list_of_result):
+        for groupby, res in zip(self.list_of_groupby, list_of_result):
             restored_res = groupby._restore_index(res)
             restored_results.append(restored_res)
         return pd.concat(restored_results, axis=0).sort_index()
