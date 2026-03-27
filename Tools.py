@@ -487,7 +487,7 @@ class DataMeta(SerialObject):
 
     def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
-                          copy: bool = False, **kwargs) -> Dict[str, Any]:
+                          copy: bool = False, _offset: int = 0, **kwargs) -> Dict[str, Any]:
 
         index_name_stem: str = '_SIGNAL'
         assert freq is not None, "Frequency must be provided"
@@ -511,7 +511,8 @@ class DataMeta(SerialObject):
             end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
             signal_map_within_first_true_change_pos = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
         else:
-            signal_map_within_first_true_change_pos = first_true_change_pos.to_series().reset_index(drop=True).index % multiple == multiple - 1
+            assert 0 <= _offset < multiple, f"Offset must be between 0 and {multiple - 1}"
+            signal_map_within_first_true_change_pos = first_true_change_pos.to_series().reset_index(drop=True).index % multiple == multiple - 1 - _offset
 
         signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_pos]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
@@ -555,11 +556,9 @@ class DataMeta(SerialObject):
             'index_names': index_names
         }
     
-    def groupby(self, freq: Optional[Any] = None,
-                 bfill: Optional[int] = None,
-                 stem: str = '_SIGNAL',
+    def groupby(self, freq: Optional[Any] = None, bfill: Optional[int] = None,
                  copy: bool = True, **kwargs) -> DataMeta:
-        results = self._get_signal_index(freq=freq, bfill=bfill, index_name_stem=stem, copy=copy, **kwargs)
+        results = self._get_signal_index(freq=freq, bfill=bfill, copy=copy, **kwargs)
         data = results['data']
         data.index = results['extended_index']
         kwargs.pop('data', None)
@@ -567,6 +566,31 @@ class DataMeta(SerialObject):
                           groupby_index_names=results['index_names_for_groupby'],
                           original_index_names=results['index_names'],
                           alias=kwargs.pop('alias', None), **kwargs)
+    
+    def _rolling_indays(self, freq: Any, **kwargs) -> DataMeta:
+        assert freq is not None, "Frequency must be provided"
+        freq = _process_data_freq(freq)
+        assert freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0, "Frequency must be a multiple of 1 day for rolling in days"
+        multiple = int(freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
+        list_of_data = []
+        groupby_index_names = None
+        original_index_names = None
+        for _offset in range(multiple):
+            results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, **kwargs)
+            data = results['data']
+            data.index = results['extended_index']
+            list_of_data.append(data)
+            if groupby_index_names is None:
+                groupby_index_names = results['index_names_for_groupby']
+            else:
+                assert groupby_index_names == results['index_names_for_groupby'], "Groupby index names do not match across offsets"
+            if original_index_names is None:
+                original_index_names = results['index_names']
+            else:
+                assert original_index_names == results['index_names'], "Original index names do not match across offsets"
+        return self._wrap(target_type=_RollingInDays, list_of_data=list_of_data,
+                          groupby_index_names=groupby_index_names,
+                          original_index_names=original_index_names, **kwargs)
     
     def _sync_signal(self, signal_datameta: DataMeta, freq: Any,
                     end_session_skip: bool = True, 
@@ -591,20 +615,25 @@ class DataMeta(SerialObject):
         assert isinstance(series, pd.Series), "Synced signal must be a Series"
         return series
     
-    def rolling(self, window: int|str|pd.Timedelta, copy: bool = False, **kwargs) -> DataMeta:
+    def rolling(self, window: int|str|pd.Timedelta|DataFreq, 
+                min_periods: Optional[int|str|pd.Timedelta|DataFreq] = None, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, **kwargs)
         data_freq = _process_data_freq(data.index.names[-1])
         if isinstance(window, int):
-            return self._wrap(target_type=RollingOperator, data=data, window=window, min_periods=window, alias=f"ROLLING_{window}", **kwargs)
+            assert min_periods is None or isinstance(min_periods, int), "min_periods must be an integer when window is an integer"
+            min_periods = min_periods if min_periods is not None else window
+            return self._wrap(target_type=RollingOperator, data=data, window=window, min_periods=min_periods, alias=f"ROLLING_{window}", **kwargs)
         else:
             window_freq = _process_data_freq(window)
+            min_periods = _process_data_freq(min_periods) if min_periods is not None else window_freq
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
-                return self.groupby(freq=window_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", data=data, **kwargs)
+                return self._rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", data=data, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
-                return self._wrap(target_type=RollingOperator, data=data, window=window_size, min_periods=window_size, alias=f"ROLLING_{window_size}", **kwargs)
+                min_periods_size = int(min_periods.value.total_seconds() / data_freq.value.total_seconds())
+                return self._wrap(target_type=RollingOperator, data=data, window=window_size, min_periods=min_periods_size, alias=f"ROLLING_{window_size}", **kwargs)
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
@@ -914,3 +943,80 @@ class GroupedOperator(DataMeta):
         def __dir__(self) -> List[str]:
             # 提供该列选择器可用的方法
             return sorted(set(super().__dir__()) | set(dir(self.parent.grouped[self.key])))
+        
+class _RollingInDays(DataMeta):
+    def __init__(self, list_of_data: List[pd.DataFrame], 
+                 groupby_index_names: List[str], original_index_names: List[str], **kwargs):
+        if not hasattr(self, '_initialized'):
+            super().__init__(data=kwargs.pop('data', None), alias=kwargs.pop('alias', 'ROLLING_INDAYS'),
+                             object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
+                             data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
+            self.list_of_data = list_of_data
+            self.list_of_grouby = [
+                self._wrap(target_type=GroupedOperator, data=data, 
+                           alias=f"ROLLING_INDAYS_GROUPBY_OFFSET_{i}",
+                           groupby_index_names=groupby_index_names, 
+                           original_index_names=original_index_names) 
+                for i, data in enumerate(list_of_data)
+            ]
+            self.list_of_grouped = [groupby.grouped for groupby in self.list_of_grouby]
+
+    def _restore_index_and_concat(self, list_of_result: Any) -> pd.DataFrame:
+        restored_results = []
+        for groupby, res in zip(self.list_of_grouby, list_of_result):
+            restored_res = groupby._restore_index(res)
+            restored_results.append(restored_res)
+        return pd.concat(restored_results, axis=0).sort_index()
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            method = self.__dict__.get(name)
+            if method is not None:
+                return method
+        except AttributeError:
+            pass
+        list_of_grouped = self.__dict__.get('list_of_grouped')
+        if list_of_grouped is None or len(list_of_grouped) == 0:
+            raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
+        try:
+            method = getattr(list_of_grouped[0], name)
+        except AttributeError:
+            raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
+        def wrapper(*args, **kwargs):
+            col = kwargs.pop('col', None)
+            if col is not None:
+                list_of_target = [getattr(grouped[col], name) for grouped in self.list_of_grouped]
+                list_of_result = [target(*args, **kwargs) for target in list_of_target]
+            else:
+                list_of_target = [getattr(grouped, name) for grouped in self.list_of_grouped]
+                list_of_result = [target(*args, **kwargs) for target in list_of_target]
+            self._wrap
+            return self._wrap(self._restore_index_and_concat(list_of_result), alias=f"{method.__name__.upper()}")
+        return wrapper
+    
+    def __dir__(self) -> List[str]:
+        return sorted(set(super().__dir__()) | set(dir(self.list_of_grouped[0])) if self.list_of_grouped else set())
+    
+    @override
+    def __getitem__(self, key): # type: ignore[override]
+        """支持 operator['column'] 语法"""
+        return _RollingInDays._ColumnSelector(self, key)
+    
+    class _ColumnSelector:
+        def __init__(self, parent: Any, key):
+            self.parent = parent
+            self.key = key
+
+        def __getattr__(self, name: str) -> Any:
+            try:
+                method = getattr(self.parent.list_of_grouped[0][self.key], name)
+            except AttributeError:
+                raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
+            def wrapper(*args, **kwargs):
+                list_of_target = [getattr(grouped[self.key], name) for grouped in self.parent.list_of_grouped]
+                list_of_result = [target(*args, **kwargs) for target in list_of_target]
+                return self.parent._wrap(self.parent._restore_index_and_concat(list_of_result), alias=f"{method.__name__.upper()}_{self.key}")
+            return wrapper
+
+        def __dir__(self) -> List[str]:
+            return sorted(set(super().__dir__()) | set(dir(self.parent.list_of_grouped[0][self.key])))
