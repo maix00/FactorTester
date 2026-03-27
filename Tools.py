@@ -347,31 +347,19 @@ class DataMeta(SerialObject):
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         return super().__new__(cls, type_alias='DM', alias=alias)
 
-    def __init__(self, object: UniqueObject, data_freq: DataFreq, alias: Optional[str] = None, *args, **kwargs):
+    def __init__(self, object: UniqueObject, data_freq: DataFreq, 
+                 original_object: Optional[UniqueObject] = None,
+                 alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             alias = '(' + object.alias + ')' + ('_' + alias if alias else '')
             super().__init__(type_alias='DM', alias=alias)
             self.object = object
+            self.original_object = object if original_object is None else original_object
             self.freq = data_freq
             self.data: pd.DataFrame = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
             self.current_source: DataSource
             self.path: Any
             self.timezone: str = kwargs.get('timezone', '')
-            if TYPE_CHECKING:
-                from Parameter import DateOrTimeParam
-            self._StartCalcPointParam: Optional[DateOrTimeParam] = kwargs.get('StartCalcPointParam', None)
-
-    def __hash__(self):
-        return hash(self.name)
-
-    if TYPE_CHECKING:
-        from Parameter import DateOrTimeParam
-    def set_StartCalcPointParam(self, param: DateOrTimeParam, value: Optional[Any] = None):
-        self._StartCalcPointParam = param
-        param.register(self, value if value is not None else param.default_value)
-
-    def get_StartCalcPointParam(self) -> Optional[DateOrTimeParam]:
-        return self._StartCalcPointParam
 
     def list_available_sources(self) -> List[DataSource]:
         lst = []
@@ -463,11 +451,12 @@ class DataMeta(SerialObject):
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
         from Parameter import DateOrTimeParam
-        if object is not None and callable(get_param := getattr(object, 'get_StartCalcPointParam', None)):
+        if object is not None and isinstance(object, DataMeta) \
+            and callable(get_param := getattr(object.original_object, 'get_StartCalcPointParam', None)):
             StartCalcPointParam = get_param()
             assert isinstance(StartCalcPointParam, DateOrTimeParam)
-            time = StartCalcPointParam.get_value(object)
-            time_is_date = StartCalcPointParam.is_date(object)
+            time = StartCalcPointParam.get_value(object.original_object)
+            time_is_date = StartCalcPointParam.is_date(object.original_object)
         else:
             StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
             if StartCalcPointParam is not None:
@@ -672,11 +661,8 @@ class DataMeta(SerialObject):
     def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None, **kwargs) -> DataMeta:
         if isinstance(data, pd.DataFrame) or isinstance(data, pd.Series):
             target_type = target_type if target_type is not None else DataMeta
-            object = target_type(data=data, object=self, alias=alias, data_freq=self.freq, timezone=self.timezone, **kwargs)
-            _StartCalcPointParam = self.get_StartCalcPointParam()
-            if _StartCalcPointParam is not None:  
-                object.set_StartCalcPointParam(_StartCalcPointParam, value=_StartCalcPointParam.get_value(self))
-            return object
+            return target_type(data=data, object=self, original_object=self.original_object,
+                               alias=alias, data_freq=self.freq, timezone=self.timezone, **kwargs)
         else:
             raise NotImplementedError(f"Result type {type(data).__name__} is not supported for wrapping in DataMeta")
 
@@ -800,7 +786,9 @@ class DataMeta(SerialObject):
 class RollingOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, window: int|str|pd.Timedelta, min_periods: Optional[int] = None, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(data=data, alias=kwargs.pop('alias', f"ROLLING_{window}"), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
+            super().__init__(data=data, alias=kwargs.pop('alias', f"ROLLING_{window}"), 
+                             object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
+                             data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
             self.window = window
             self.min_periods = min_periods
             self.rolling = data.rolling(window=window, min_periods=min_periods, **kwargs)
@@ -858,7 +846,9 @@ class RollingOperator(DataMeta):
 class GroupedOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(data=data, alias=kwargs.pop('alias', 'GROUPBY'), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
+            super().__init__(data=data, alias=kwargs.pop('alias', 'GROUPBY'),
+                             object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
+                             data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
             self.original_index_names = original_index_names if original_index_names is not None else data.index.names
             self.groupby_index_names = groupby_index_names
             self.grouped = data.groupby(self.groupby_index_names, **kwargs)
