@@ -485,13 +485,14 @@ class DataMeta(SerialObject):
             data = data.copy()
         return data
 
-    def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None,
+    def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None, min_periods: Optional[Any] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
                           copy: bool = False, _offset: int = 0, **kwargs) -> Dict[str, Any]:
 
         index_name_stem: str = '_SIGNAL'
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
+        copy = True if _offset != 0 else copy
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, **kwargs)
         index_data_freq = [_process_data_freq(level) for level in data.index.names]
@@ -501,20 +502,38 @@ class DataMeta(SerialObject):
         assert first_true_idx is not None, f"Frequency {freq} is not a multiple of any existing index frequency"
         first_true_freq = index_data_freq[first_true_idx]
         multiple = int(freq.value.total_seconds() / first_true_freq.value.total_seconds())
-        last_col_multiple = int(freq.value.total_seconds() / index_data_freq[-1].value.total_seconds())
+        
+        min_periods_freq = _process_data_freq(min_periods) if min_periods is not None else None
+        min_multiple = int(min_periods_freq.value.total_seconds() / first_true_freq.value.total_seconds()) if min_periods_freq is not None else None
+        
+        signal_index_name = next((str(level) for level in data.index.names if str(level).startswith(index_name_stem)), None)
+        data_freq = _process_data_freq(signal_index_name) if signal_index_name is not None else index_data_freq[-1]
+        data_multiple = int(freq.value.total_seconds() / data_freq.value.total_seconds())
+        
         first_true_series = self._get_level_index(data, data.index.names[first_true_idx]).to_series().reset_index(drop=True)
-        first_true_change_map = first_true_series != first_true_series.shift(-1)
+        first_true_change_map = (first_true_series != first_true_series.shift(-1))
         first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
 
         if end_session_skip and freq.value < pd.Timedelta('1day'):
             last_col_series = self._get_level_index(data, data.index.names[-1]).to_series().reset_index(drop=True)
             end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
-            signal_map_within_first_true_change_pos = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
+            signal_map_within_first_true_change_mask = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
         else:
             assert 0 <= _offset < multiple, f"Offset must be between 0 and {multiple - 1}"
-            signal_map_within_first_true_change_pos = first_true_change_pos.to_series().reset_index(drop=True).index % multiple == multiple - 1 - _offset
+            index = first_true_change_pos.to_series().reset_index(drop=True).index
+            signal_map_within_first_true_change_mask = (index % multiple == multiple - 1 - _offset)
+            min_multiple_nan_mask = signal_map_within_first_true_change_mask \
+                & (index < min_multiple - 1 if min_multiple is not None else False)
+            nan_pos_within_first_true_series = first_true_change_pos[min_multiple_nan_mask]
+            assert len(nan_pos_within_first_true_series) <= 1
+            if len(nan_pos_within_first_true_series) == 1:
+                idx = int(nan_pos_within_first_true_series[0])
+                # data = data.convert_dtypes()
+                data = data.astype(float)
+                import numpy as np
+                data.iloc[:idx+1] = np.nan
 
-        signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_pos]
+        signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_mask]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
         signal_series_within_first_true_series = first_true_series.where(signal_map_within_first_true_series)
 
@@ -541,7 +560,7 @@ class DataMeta(SerialObject):
         
         signal_index, _, index_names = _get_extended_index()
         signal_index = self._get_level_index(signal_index.dropna(), index_names)
-        bfill = bfill if bfill is not None else last_col_multiple - 1
+        bfill = bfill if bfill is not None else data_multiple - 1
         extended_index, index_names_for_groupby, index_names = _get_extended_index(bfill=bfill)
 
         mask = ~extended_index.to_frame().isna().any(axis=1)
@@ -567,16 +586,19 @@ class DataMeta(SerialObject):
                           original_index_names=results['index_names'],
                           alias=kwargs.pop('alias', None), **kwargs)
     
-    def _rolling_indays(self, freq: Any, **kwargs) -> DataMeta:
+    def _rolling_indays(self, freq: Any, min_periods: Optional[Any] = None, **kwargs) -> DataMeta:
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
+        min_periods = _process_data_freq(min_periods) if min_periods is not None else freq
+        assert min_periods is not None, "min_periods must be provided for rolling in days"
+        assert min_periods.value <= freq.value, "min_periods must be less than or equal to freq for rolling in days"
         assert freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0, "Frequency must be a multiple of 1 day for rolling in days"
         multiple = int(freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
         list_of_data = []
         groupby_index_names = None
         original_index_names = None
         for _offset in range(multiple):
-            results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, **kwargs)
+            results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, min_periods=min_periods, **kwargs)
             data = results['data']
             data.index = results['extended_index']
             list_of_data.append(data)
@@ -629,7 +651,8 @@ class DataMeta(SerialObject):
             min_periods = _process_data_freq(min_periods) if min_periods is not None else window_freq
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
-                return self._rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", data=data, **kwargs)
+                return self._rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", 
+                                            data=data, min_periods=min_periods, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
                 min_periods_size = int(min_periods.value.total_seconds() / data_freq.value.total_seconds())
