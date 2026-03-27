@@ -22,23 +22,22 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         
         factors = {}
         for product in products:
-            ret = product.MIN1[P].pct_change(self, RF)
-            pos_ratio = (ret > 0).rolling(self, WF).mean()
-            factors[product] = product.MIN1.sync_signal(self, pos_ratio.data, F)
+            ret = product.MIN1[P].pct_change(RF)
+            pos_ratio = (ret > 0).rolling(WF).mean()
+            factors[product] = product.MIN1.sync_signal(pos_ratio, F)
         return pd.DataFrame(factors)
-
 
 if __name__ == '__main__':
     ff = MmPosPct()
 
     ff.clear_params()
-    ff.add_params(F='5m', RF='1m', WF='5m')
+    # ff.add_params(F='5m', RF='1m', WF='5m')
     # ff.add_params(F='15m', RF='1m', WF='15m')
     # ff.add_params(F='15m', RF='5m', WF='15m')
     # ff.add_params(F='30m', RF='5m', WF='30m')
     # ff.add_params(F='1d', RF='1d', WF='1d')
     # ff.add_params(F='1d', RF='10min', WF='1d')
-    # ff.add_params(F='2d', RF='1d', WF='2d')
+    ff.add_params(F='2d', RF='1d', WF='2d')
 
     fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai', categories=['0'])
     print(fft.products)

@@ -1,6 +1,6 @@
 from abc import ABC
 from weakref import WeakValueDictionary
-from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
+from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal, override
 import pandas as pd
 from pandas.core.groupby import DataFrameGroupBy
 from enum import Enum
@@ -356,9 +356,22 @@ class DataMeta(SerialObject):
             self.data: pd.DataFrame = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
             self.current_source: DataSource
             self.path: Any
-            self.start_date: pd.Timestamp
-            self.end_date: pd.Timestamp
             self.timezone: str = kwargs.get('timezone', '')
+            if TYPE_CHECKING:
+                from Parameter import DateOrTimeParam
+            self._StartCalcPointParam: Optional[DateOrTimeParam] = kwargs.get('StartCalcPointParam', None)
+
+    def __hash__(self):
+        return hash(self.name)
+
+    if TYPE_CHECKING:
+        from Parameter import DateOrTimeParam
+    def set_StartCalcPointParam(self, param: DateOrTimeParam, value: Optional[Any] = None):
+        self._StartCalcPointParam = param
+        param.register(self, value if value is not None else param.default_value)
+
+    def get_StartCalcPointParam(self) -> Optional[DateOrTimeParam]:
+        return self._StartCalcPointParam
 
     def list_available_sources(self) -> List[DataSource]:
         lst = []
@@ -468,9 +481,9 @@ class DataMeta(SerialObject):
     
     def _filter_data_by_start_calc_point(self, data: pd.DataFrame, time_col: Optional[str] = None,
                                         time: Optional[Any] = None, time_is_date: Optional[bool] = None,
-                                        copy: bool = False, object: Optional[UniqueObject] = None, **kwargs) -> pd.DataFrame:
+                                        copy: bool = False, **kwargs) -> pd.DataFrame:
         if time is None or time_is_date is None:
-            time, time_is_date = self._process_start_calc_point(object=object, **kwargs)
+            time, time_is_date = self._process_start_calc_point(object=self, **kwargs)
         if time is not None and time_is_date is not None:
             if time_col is None:
                 data_day_col = [str(level) for level in data.index.names if _process_data_freq(str(level).split('@')[-1]).value >= pd.Timedelta('1day')][-1]
@@ -484,15 +497,14 @@ class DataMeta(SerialObject):
             data = data.copy()
         return data
 
-    def _get_signal_index(self, object: Optional[UniqueObject] = None,
-                          freq: Optional[Any] = None,  bfill: Optional[int] = None,
+    def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
                           index_name_stem: str = '_SIGNAL', copy: bool = False, **kwargs) -> Dict[str, Any]:
 
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
-        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        data = self._filter_data_by_start_calc_point(data, **kwargs)
         index_data_freq = [_process_data_freq(level) for level in data.index.names]
         
         index_map_of_multiple = [freq.value.total_seconds() % idx_freq.value.total_seconds() == 0 for idx_freq in index_data_freq]
@@ -554,63 +566,75 @@ class DataMeta(SerialObject):
             'index_names': index_names
         }
     
-    def groupby(self, object: Optional[UniqueObject] = None,
-                 freq: Optional[Any] = None,
+    def groupby(self, freq: Optional[Any] = None,
                  bfill: Optional[int] = None,
                  stem: str = '_SIGNAL',
-                 copy: bool = True, **kwargs) -> GroupedOperator:
-        results = self._get_signal_index(object=object, freq=freq, bfill=bfill, index_name_stem=stem, copy=copy, **kwargs)
+                 copy: bool = True, **kwargs) -> DataMeta:
+        results = self._get_signal_index(freq=freq, bfill=bfill, index_name_stem=stem, copy=copy, **kwargs)
         data = results['data']
         data.index = results['extended_index']
-        return GroupedOperator(data, results['index_names_for_groupby'], results['index_names'], object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
+        kwargs.pop('data', None)
+        return self._wrap(target_type=GroupedOperator, data=data,
+                          groupby_index_names=results['index_names_for_groupby'],
+                          original_index_names=results['index_names'],
+                          alias=kwargs.pop('alias', None), **kwargs)
     
-    def sync_signal(self, object: UniqueObject, signal: Any, freq: Optional[Any] = None,
-                    end_session_skip: bool = True, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.DataFrame:
+    def _sync_signal(self, signal_datameta: DataMeta, freq: Any,
+                    end_session_skip: bool = True, 
+                    end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> DataMeta:
+        signal = signal_datameta.data
         if isinstance(signal, pd.DataFrame):
             assert len(signal.columns) == 1, "Signal must have only one column"
             signal = signal.squeeze()
-        index = self._get_signal_index(object=object, freq=freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, copy=True, **kwargs)['signal_index']
+        assert isinstance(signal, pd.Series), "Signal must be a Series after squeezing"
+        index = self._get_signal_index(freq=freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, copy=True, **kwargs)['signal_index']
         assert index.nlevels == signal.index.nlevels, "Index levels do not match between signal index and signal index"
         map = signal.index.isin(index)
         signal = signal[map]
         signal.index = index
-        signal.rename(self.name, inplace=True)
-        return signal
+        signal.rename(self.object.alias, inplace=True)
+        return signal_datameta._wrap(signal, alias=f"SYNCED_SIGNAL_{_process_data_freq(freq).name}")
     
-    def rolling(self, object: UniqueObject, window: int|str|pd.Timedelta, copy: bool = False, **kwargs) -> RollingOperator|GroupedOperator:
+    def sync_signal(self, signal: Any, freq: Any,
+                    end_session_skip: bool = True, 
+                    end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.DataFrame:
+        return self._sync_signal(signal, freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, **kwargs).data
+    
+    def rolling(self, window: int|str|pd.Timedelta, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
-        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        data = self._filter_data_by_start_calc_point(data, **kwargs)
         data_freq = _process_data_freq(data.index.names[-1])
         if isinstance(window, int):
-            return RollingOperator(data=data, window=window, min_periods=window, alias=f"ROLLING_{window}", object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
+            return self._wrap(target_type=RollingOperator, data=data, window=window, min_periods=window, alias=f"ROLLING_{window}", **kwargs)
         else:
             window_freq = _process_data_freq(window)
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
-                return self.groupby(object=object, freq=window_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", data=data, **kwargs)
+                return self.groupby(freq=window_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", data=data, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
-                return RollingOperator(data=data, window=window_size, min_periods=window_size, alias=f"ROLLING_{window_size}", object=self, data_freq=self.freq, timezone=self.timezone, **kwargs)
+                return self._wrap(target_type=RollingOperator, data=data, window=window_size, min_periods=window_size, alias=f"ROLLING_{window_size}", **kwargs)
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
-    def pct_change(self, object: UniqueObject, window: int|str|pd.Timedelta = 1, 
+    def pct_change(self, window: int|str|pd.Timedelta = 1, 
                    col: Optional[Any] = None, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
-        data = self._filter_data_by_start_calc_point(data, object=object, **kwargs)
+        data = self._filter_data_by_start_calc_point(data, **kwargs)
         data_freq = _process_data_freq(data.index.names[-1])
         if col is not None:
+            alias = f"{col}_PCT_CHANGE"
             if col not in data.columns:
                 raise ValueError(f"Column {col} not found in data")
             col = _process_data_col(col).name
             data = data[col]
         else:
+            alias = "PCT_CHANGE"
             if isinstance(data, pd.Series):
                 pass
             else:
                 col = data.columns[0]
                 data = data[col]
-        alias = f"{col}_PCT_CHANGE" if col is not None else "PCT_CHANGE"
         if isinstance(window, int):
             return self._wrap(data.pct_change(periods=window), alias=alias + '_' + str(window))
         else:
@@ -618,7 +642,7 @@ class DataMeta(SerialObject):
             if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
                 and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
                 groupby_freq = window_freq
-                grouped = self.groupby(object=object, freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}_LAST_PCT_CHANGE", **kwargs)
+                grouped = self.groupby(freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", **kwargs)
                 return grouped.last().pct_change()
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
@@ -645,11 +669,16 @@ class DataMeta(SerialObject):
                 return self._wrap(result, alias=f"{method.__name__.upper()}")
             return wrapper
     
-    def _wrap(self, result: Any, alias: str) -> Any:
-        if isinstance(result, pd.DataFrame) or isinstance(result, pd.Series):
-            return DataMeta(data=result, object=self, alias=alias, data_freq=self.freq, timezone=self.timezone)
+    def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None, **kwargs) -> DataMeta:
+        if isinstance(data, pd.DataFrame) or isinstance(data, pd.Series):
+            target_type = target_type if target_type is not None else DataMeta
+            object = target_type(data=data, object=self, alias=alias, data_freq=self.freq, timezone=self.timezone, **kwargs)
+            _StartCalcPointParam = self.get_StartCalcPointParam()
+            if _StartCalcPointParam is not None:  
+                object.set_StartCalcPointParam(_StartCalcPointParam, value=_StartCalcPointParam.get_value(self))
+            return object
         else:
-            return result
+            raise NotImplementedError(f"Result type {type(data).__name__} is not supported for wrapping in DataMeta")
 
     def __dir__(self):
         own_attrs = set(super().__dir__())
@@ -677,7 +706,7 @@ class DataMeta(SerialObject):
     def __ge__(self, other): return self._wrap(self.data >= other, alias=f"GE_{self._get_alias(other)}")
     def __le__(self, other): return self._wrap(self.data <= other, alias=f"LE_{self._get_alias(other)}")
     def __eq__(self, other): return self._wrap(self.data == other, alias=f"EQ_{self._get_alias(other)}")
-    def __ne__(self, other): return self._wrap(self.data != other, alias=f"NE_{self._get_alias(other)}")
+    # def __ne__(self, other): return self._wrap(self.data != other, alias=f"NE_{self._get_alias(other)}")
     def __and__(self, other): return self._wrap(self.data & other, alias=f"AND_{self._get_alias(other)}")
     def __or__(self, other): return self._wrap(self.data | other, alias=f"OR_{self._get_alias(other)}")
     def __xor__(self, other): return self._wrap(self.data ^ other, alias=f"XOR_{self._get_alias(other)}")
@@ -770,18 +799,26 @@ class DataMeta(SerialObject):
 
 class RollingOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, window: int|str|pd.Timedelta, min_periods: Optional[int] = None, **kwargs):
-        super().__init__(data=data, alias=kwargs.pop('alias', f"ROLLING_{window}"), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
-        self.window = window
-        self.min_periods = min_periods
-        self.rolling = data.rolling(window=window, min_periods=min_periods, **kwargs)
+        if not hasattr(self, '_initialized'):
+            super().__init__(data=data, alias=kwargs.pop('alias', f"ROLLING_{window}"), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
+            self.window = window
+            self.min_periods = min_periods
+            self.rolling = data.rolling(window=window, min_periods=min_periods, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
-        # 从 rolling 对象获取同名方法
         try:
-            method = getattr(self.rolling, name)
+            method = self.__dict__.get(name)
+            if method is not None:
+                return method
         except AttributeError:
-            raise AttributeError(f"RollingOperator has no attribute '{name}'")
-        # 包装方法，自动恢复索引
+            pass
+        rolling = self.__dict__.get('rolling')
+        if rolling is None:
+            raise AttributeError(f"'RollingOperator' object has no attribute '{name}'")
+        try:
+            method = getattr(rolling, name)
+        except AttributeError:
+            raise AttributeError(f"'RollingOperator' object has no attribute '{name}'")
         def wrapper(*args, **kwargs):
             result = method(*args, **kwargs)
             result.index = self.data.index
@@ -791,7 +828,8 @@ class RollingOperator(DataMeta):
     def __dir__(self) -> List[str]:
         return sorted(set(super().__dir__()) | set(dir(self.rolling)))
     
-    def __getitem__(self, key):
+    @override
+    def __getitem__(self, key): # type: ignore[override]
         """支持 operator['column'] 语法"""
         return RollingOperator._ColumnSelector(self, key)
     
@@ -819,10 +857,11 @@ class RollingOperator(DataMeta):
     
 class GroupedOperator(DataMeta):
     def __init__(self, data: pd.DataFrame, groupby_index_names: List[str], original_index_names: Optional[List[str]] = None, **kwargs):
-        super().__init__(data=data, alias=kwargs.pop('alias', 'GROUPBY'), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
-        self.original_index_names = original_index_names if original_index_names is not None else data.index.names
-        self.groupby_index_names = groupby_index_names
-        self.grouped = data.groupby(self.groupby_index_names, **kwargs)
+        if not hasattr(self, '_initialized'):
+            super().__init__(data=data, alias=kwargs.pop('alias', 'GROUPBY'), object=kwargs.pop('object'), data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
+            self.original_index_names = original_index_names if original_index_names is not None else data.index.names
+            self.groupby_index_names = groupby_index_names
+            self.grouped = data.groupby(self.groupby_index_names, **kwargs)
 
     def _restore_index(self, result: Any) -> pd.DataFrame:
         if isinstance(result, pd.Series):
@@ -832,12 +871,19 @@ class GroupedOperator(DataMeta):
         return result
 
     def __getattr__(self, name: str) -> Any:
-        # 从 grouped 对象获取同名方法
         try:
-            method = getattr(self.grouped, name)
+            method = self.__dict__.get(name)
+            if method is not None:
+                return method
         except AttributeError:
-            raise AttributeError(f"GroupedOperator has no attribute '{name}'")
-        # 包装方法，自动恢复索引，支持可选的 col 参数
+            pass
+        grouped = self.__dict__.get('grouped')
+        if grouped is None:
+            raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
+        try:
+            method = getattr(grouped, name)
+        except AttributeError:
+            raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
         def wrapper(*args, **kwargs):
             col = kwargs.pop('col', None)
             if col is not None:
@@ -845,13 +891,14 @@ class GroupedOperator(DataMeta):
                 result = target(*args, **kwargs)
             else:
                 result = method(*args, **kwargs)
-            return self._wrap(self.parent._restore_index(result), alias=f"{method.__name__.upper()}")
+            return self._wrap(self._restore_index(result), alias=f"{method.__name__.upper()}")
         return wrapper
 
     def __dir__(self) -> List[str]:
         return sorted(set(super().__dir__()) | set(dir(self.grouped)))
 
-    def __getitem__(self, key):
+    @override
+    def __getitem__(self, key): # type: ignore[override]
         """支持 operator['column'] 语法"""
         return GroupedOperator._ColumnSelector(self, key)
 

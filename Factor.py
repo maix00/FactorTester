@@ -9,7 +9,7 @@ import numpy as np
 from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import os
 
-from Tools import SerialObject
+from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject
 from Products import DataColumn, Futures, Product, DataFreq
 from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
 from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
@@ -191,7 +191,7 @@ class Factor(SerialObject):
             return FactorFreqType.AT_EVENT, None
         return FactorFreqType.CONSTANT, minimum
 
-    def calc(self, products: Any) -> pd.DataFrame:
+    def calc(self, products: Product|List[Product]|Set[Product]) -> pd.DataFrame:
         if isinstance(products, Product):
             products = [products]
         products = list(products)
@@ -199,6 +199,8 @@ class Factor(SerialObject):
             return pd.DataFrame()
         if self.family is not None:
             self.family.set_current_start_calc_point(self.get_current_start_calc_point())
+        for product in products:
+            product.set_StartCalcPointParam(StartCalcPointParam, StartCalcPointParam.get_value(self))
         self.table = self.func(products)
         if self.table.empty:
             return pd.DataFrame()

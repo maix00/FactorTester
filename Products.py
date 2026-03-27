@@ -4,7 +4,7 @@ import sys
 from typing import Any, Callable, List, Optional, Dict, Tuple
 import pandas as pd
 from datetime import datetime
-from Tools import UniqueObject, SerialObject, DataColumn, DataMeta, DataFreq
+from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject
 from Tools import _process_data_col, _process_data_freq
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from tqdm import tqdm
@@ -31,6 +31,18 @@ class Product(UniqueObject):
             self.timezone = kwargs.get('timezone', '')
             for key, val in DataFreq.__members__.items():
                 setattr(self, key, DataMeta(alias=f"{key}", object=self, data_freq=val, timezone=self.timezone))
+            from Parameter import DateOrTimeParam
+            self._StartCalcPointParam : DateOrTimeParam
+
+    from Parameter import DateOrTimeParam
+    def set_StartCalcPointParam(self, param: DateOrTimeParam, default_value: Optional[Any] = None):
+        self._StartCalcPointParam = param
+        default_value = default_value if default_value is not None else param.default_value
+        for key in DataFreq.__members__.keys():
+            getattr(self, key).set_StartCalcPointParam(param, default_value)
+
+    def get_StartCalcPointParam(self) -> DateOrTimeParam:
+        return self._StartCalcPointParam
         
     def list_available_freqs(self) -> List[DataFreq]:
         return [freq for freq in DataFreq if getattr(self, freq.name).is_available()]

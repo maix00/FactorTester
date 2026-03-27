@@ -1,7 +1,7 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
 
-from Tools import SerialObject, UniqueObject, _process_data_freq
+from Tools import UniqueObject, _process_data_freq, SerialObject
 from Products import DataColumn
 from typing import TYPE_CHECKING
 

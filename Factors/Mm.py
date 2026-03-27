@@ -38,7 +38,7 @@ class Mm(FactorFamily): # Day Momentum
         for product in products:
 
             day_high, day_low, idx_high, idx_low = (
-                product.MIN1.groupby(self, freq=F)
+                product.MIN1.groupby(freq=F)
                 .agg({H.name: ['max', 'idxmax'], L.name: ['min', 'idxmin']})
                 .pipe(lambda x: (x[(H.name,'max')], x[(L.name,'min')], x[(H.name,'idxmax')], x[(L.name,'idxmin')]))
             )
