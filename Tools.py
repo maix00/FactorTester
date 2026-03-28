@@ -192,6 +192,9 @@ class DataFreq(Enum):
     DAY20 = pd.Timedelta('20day')
     WEEK1 = pd.Timedelta('7day')
 
+    def is_day_multiple(self) -> bool:
+        return self.value >= pd.Timedelta('1day') and self.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0
+
 def _process_data_freq(data_freq: Optional[Any] = None) -> DataFreq:
     if isinstance(data_freq, DataFreq):
         return data_freq
@@ -322,8 +325,7 @@ class DataSource(SerialObject):
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
     def if_object_is_in_source(self, object: UniqueObject) -> bool:
-        if hasattr(object, 'timezone') and getattr(object, 'timezone') is not None and getattr(object, 'timezone')\
-            and self.timezone and getattr(object, 'timezone') != self.timezone:
+        if hasattr(object, 'timezone') and getattr(object, 'timezone') != self.timezone:
             return False
         return self._is_object_in_source_func(object)
 
@@ -428,12 +430,6 @@ class DataMeta(SerialObject):
             data = self.data
         return data.copy() if copy else data
     
-    def _set_index_timezone(self, index: Any) -> pd.DatetimeIndex:
-        try:
-            return index.tz_localize(self.timezone)
-        except:
-            raise NotImplementedError("DataMeta: Index type not supported for timezone localization")
-    
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
         return self._get_level_index(self.get_data(**kwargs), level)
 
@@ -446,7 +442,7 @@ class DataMeta(SerialObject):
             return pd.MultiIndex.from_arrays([index.get_level_values(lvl) for lvl in level], names=level)
         else:
             level = next((lvl for lvl in index.names if str(lvl).split('@')[-1] == _process_data_freq(level).name), None)
-            return self._set_index_timezone(index.get_level_values(level))
+            return index.get_level_values(level)
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
         from Parameter import DateOrTimeParam
@@ -537,19 +533,17 @@ class DataMeta(SerialObject):
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
         signal_series_within_first_true_series = first_true_series.where(signal_map_within_first_true_series)
 
-        def _get_values(obj, bfill: Optional[int] = None) -> pd.Series:
-            if bfill is not None:
-                obj = obj.bfill(limit=bfill)
-            return obj.dt.tz_localize(None).values if hasattr(obj, 'dt') else obj.values
+        def _bfill(obj, bfill: Optional[int] = None) -> pd.Series:
+            return obj if bfill is None else obj.bfill(limit=bfill)
         
         def _get_extended_index(bfill: Optional[int] = None) -> Tuple[pd.MultiIndex, List[str], List[str]]:
             left_indices = data.index.names[:first_true_idx]
             right_indices = data.index.names[first_true_idx:]
-            left_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True).where(signal_map_within_first_true_series) for idx in left_indices}
-            right_series_dict = {idx: self._get_level_index(data, idx).to_series().reset_index(drop=True) for idx in right_indices}
-            index_arrays = [_get_values(left_series_dict[idx], bfill=bfill) for idx in left_indices] \
-                            + [_get_values(signal_series_within_first_true_series, bfill=bfill)] \
-                            + [_get_values(right_series_dict[idx]) for idx in right_indices]
+            left_series_dict = {idx: self._get_level_index(data, idx).where(signal_map_within_first_true_series) for idx in left_indices}
+            right_series_dict = {idx: self._get_level_index(data, idx) for idx in right_indices}
+            index_arrays = [_bfill(left_series_dict[idx], bfill=bfill) for idx in left_indices] \
+                            + [_bfill(signal_series_within_first_true_series, bfill=bfill)] \
+                            + [_bfill(right_series_dict[idx], bfill=None) for idx in right_indices]
             index_name = index_name_stem + '@' + freq.name
             left_indices = [str(idx).split('@')[-1] for idx in left_indices]
             right_indices = [str(idx).split('@')[-1] for idx in right_indices]
@@ -792,16 +786,32 @@ class DataMeta(SerialObject):
         self.data.rename(columns=ds.time_cols_mapping, inplace=True)
         return self.data
 
-    def _set_time_index(self, index: Optional[Any] = None) -> pd.DataFrame:
+    def _set_time_index(self, index_names: Optional[Any] = None) -> pd.DataFrame:
         assert not self.data.empty
-        if index is None:
+        if index_names is None:
             ds = self.get_current_source()
-            index = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq[x].value, reverse=True)
-        for col in index:
+            index_names = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq[x].value, reverse=True)
+        for col in index_names:
             if col not in self.data.columns:
                 raise ValueError(f"Column {col} not found in data")
             self.data[col] = pd.to_datetime(self.data[col])
-        self.data.set_index(index, inplace=True)
+        self.data.set_index(index_names, inplace=True)
+        index = self.data.index
+        index_tzaware_list = []
+        for col in index.names:
+            col = str(col)
+            level_index = self.data.index.get_level_values(col)
+            assert isinstance(level_index, pd.DatetimeIndex)
+            if _process_data_freq(col).is_day_multiple():
+                if level_index.tz is not None:
+                    level_index = level_index.tz_localize(None)
+            else:
+                if level_index.tz is None:
+                    level_index = level_index.tz_localize(self.timezone)
+                elif level_index.tz is not None and str(level_index.tz) != self.timezone:
+                    level_index = level_index.tz_convert(self.timezone)
+            index_tzaware_list.append(level_index)
+        self.data.index = pd.MultiIndex.from_arrays(index_tzaware_list, names=index.names)
         return self.data
     
     @staticmethod

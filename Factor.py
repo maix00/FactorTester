@@ -68,8 +68,7 @@ class Factor(SerialObject):
             super().__init__(type_alias='F', alias=alias)
             self.func = func
             self.min_gap: Optional[pd.Timedelta] = None
-            self.freq: Optional[pd.Timedelta] = None
-            self.freq_type: FactorFreqType = FactorFreqType.AT_EVENT
+            self.freq: Optional[DataFreq] = None
             self.family = family
             
             if self.family is not None:
@@ -88,7 +87,6 @@ class Factor(SerialObject):
             self.ic_series: pd.Series = pd.Series()
             self.ic_stats: pd.Series = pd.Series()
             self.report: pd.DataFrame = pd.DataFrame()
-            self.timezone = ''
 
     def clear(self):
         self.table = pd.DataFrame()
@@ -97,7 +95,6 @@ class Factor(SerialObject):
         self.ic_series = pd.Series()
         self.ic_stats = pd.Series()
         self.report = pd.DataFrame()
-        self.timezone = ''
 
     def get_current_return_freq(self) -> Any:
         return ReturnFreqParam.get_value(self)
@@ -122,184 +119,128 @@ class Factor(SerialObject):
             assert all(isinstance(col, Product) for col in self.table.columns)
             self.products = set([col for col in self.table.columns if isinstance(col, Product)])
         return self.products
-    
-    def _set_time_index(self):
-        if self.table.empty:
-            return
-        if isinstance(self.table.index, pd.RangeIndex):
-            time_cols = []
-            for col in self.table.columns:
-                if pd.api.types.is_datetime64_any_dtype(self.table[col]) or \
-                    (self.table[col].dtype == 'object' and pd.to_datetime(self.table[col], errors='coerce').notna().any()):
-                    time_cols.append(col)
-            if not time_cols:
-                raise ValueError("Cannot calculate frequency without time columns.")
-            else:
-                # Convert to datetime if needed
-                for col in time_cols:
-                    if not pd.api.types.is_datetime64_any_dtype(self.table[col]):
-                        self.table[col] = pd.to_datetime(self.table[col], errors='coerce')
-                # Sort time columns by precision (fewer non-zero time components = less precise = left side)
-                def get_time_precision(col):
-                    ls_comp = ['year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond', 'nanosecond']
-                    series = self.table[col]
-                    comp = (any(getattr(series.dt, c) != 0) for c in ls_comp)
-                    diffs = series.drop_duplicates().diff().dropna()
-                    minimum = diffs.min()
-                    mode = diffs.mode()[0]
-                    if mode == minimum:
-                        comp = list(comp) + [True, -mode]
-                    else:
-                        comp = list(comp) + [False, -minimum]
-                    return comp
-                time_cols_sorted = sorted(time_cols, key=lambda col: get_time_precision(col))
-                # Set as index
-                self.table.set_index(time_cols_sorted, inplace=True)
 
-    def _calc_freq(self) -> Tuple[FactorFreqType, Any]:
+    def get_freq(self, infer: bool = False) -> DataFreq:
         if self.table.empty:
-            raise ValueError("Cannot calculate frequency without table.")
-        if not self.products:
-            self._set_products()
-        if not self.products:
-            raise ValueError("Cannot calculate frequency without products.")
-        if not isinstance(self.table.index, pd.MultiIndex):
-            series = self.table.index.to_series()
-        else:
+            raise ValueError(f"{self}: 无法获取频率，因为表格为空")
+        signal_index = next((str(name) for name in self.table.index.names if name and str(name).startswith('_SIGNAL')), None)
+        if signal_index is None and infer:
             idx_lvls = len(self.table.index.names)
             series = self.table.index.get_level_values(idx_lvls-1).to_series()
-        series = pd.to_datetime(series, errors='coerce').sort_values()
-        assert series.notna().all(), "Unable to convert all values to datetime"
-        diffs = series.diff().dropna()
-        minimum = diffs.min()
-        self.min_gap = minimum
-        day_dividable = all(diff.total_seconds() % pd.Timedelta('1 day').total_seconds() == 0 for diff in diffs)
-        end_of_day = all(ts.hour == 0 and ts.minute == 0 and ts.second == 0 for ts in series.dropna())
-        if day_dividable and end_of_day:
-            return FactorFreqType.AT_EVENT, pd.Timedelta('1day')
-        end_of_session = True
-        for i in range(min(20, len(series))):
-            end = all(not product.if_time_is_in_data(list(series)[i] + product.get_current_freq().value) for product in self.products) 
-            start = all(not product.if_time_is_in_data(list(series)[i] - product.get_current_freq().value) for product in self.products)
-            if not (end or start):
-                end_of_session = False
-                break
-        if day_dividable or end_of_day or end_of_session:
-            return FactorFreqType.AT_EVENT, None
-        mode = diffs.mode()[0]
-        if mode != minimum:
-            return FactorFreqType.AT_EVENT, None
-        return FactorFreqType.CONSTANT, minimum
+            series = pd.to_datetime(series, errors='coerce').sort_values()
+            signal_index = series.diff().dropna().mode()[0]
+            try:
+                return _process_data_freq(signal_index)
+            except:
+                raise ValueError(f"{self}: 无法获取频率，推断得到的频率为{signal_index}，但无法处理为DataFreq")
+        elif signal_index is None:
+            raise ValueError(f"{self}: 无法获取频率，因为没有找到以'_SIGNAL'开头的索引列")
+        return _process_data_freq(signal_index)
 
     def calc(self, products: Product|List[Product]|Set[Product]) -> pd.DataFrame:
         if isinstance(products, Product):
             products = [products]
         products = list(products)
         if not products:
-            return pd.DataFrame()
+            raise ValueError(f"{self}: 无法计算，因为没有提供产品")
         if self.family is not None:
             self.family.set_current_start_calc_point(self.get_current_start_calc_point())
         for product in products:
             product.set_StartCalcPointParam(StartCalcPointParam, StartCalcPointParam.get_value(self))
         self.table = self.func(products)
         if self.table.empty:
-            return pd.DataFrame()
-        self.table = self.table.reset_index()
-        self._set_time_index()
+            raise ValueError(f"{self}: 计算结果为空，请检查func的实现")
         for col in self.table.columns:
             if max(self.table[col].dropna()) == min(self.table[col].dropna()):
                 self.table.drop(columns=col, inplace=True)
         self._set_products()
         if self.table.empty:
-            return pd.DataFrame()
-        self.freq_type, self.freq = self._calc_freq()
-        timezone_list = [product.timezone for product in self.products if hasattr(product, 'timezone') and product.timezone]
-        timezone_list = list(set(timezone_list))
-        assert len(timezone_list) <= 1, f"Multiple timezones found in products: {timezone_list}"
-        self.timezone = timezone_list[0] if timezone_list else ''
+            raise ValueError(f"{self}: 计算结果为空，请检查func的实现")
+        self.freq = self.get_freq()
         return self.table
     
     def calc_returns(self, next_return: bool = True,
                      price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
-        returns = {}
-        return_freq = self.get_current_return_freq()
-        if self.freq is None:
-            self._set_products()
-            self.freq_type, self.freq = self._calc_freq()
-        changeable_return_freq = return_freq is None and self.freq is None
-        return_freq = return_freq or self.freq
-        if not changeable_return_freq:
-            assert return_freq is not None
-            return_freq = pd.Timedelta(return_freq)
-            assert return_freq <= (self.freq if self.freq is not None else \
-                self.min_gap if self.min_gap is not None else return_freq)
-        if changeable_return_freq:
-            price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
-        for product in self.table.columns:
-            assert isinstance(product, Product)
-            PC = price_cols
-            if isinstance(product, Futures):
-                if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
-                    PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
-                elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
-                    PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
-            assert self.min_gap is not None
-            all_f = product.list_available_freqs()
-            assert len(all_f) > 0
-            data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
-                                and self.min_gap.total_seconds() % _f.value.total_seconds() == 0
-                                and (return_freq.total_seconds() % _f.value.total_seconds() == 0 
-                                    if return_freq is not None else True)
-                                and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
-                                    if self.freq is not None else True)], 
-                                key=lambda x: x.value)[-1]
-            # data_freq = DataFreq.MIN1
-            if not changeable_return_freq:
-                assert return_freq is not None
-                assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
-            df = getattr(product, data_freq.name).get_and_adjust_cols([col.name for _, col in PC.value])
-            notna_index = self.table.index[self.table[product].notna()]
-            target_series = pd.Series(index=notna_index, dtype=float)
-            if not changeable_return_freq:
-                assert return_freq is not None
-                time_cols = product.get_time_cols(data_freq)
-                index_time_col = [col for col in time_cols if
-                    self.min_gap.total_seconds() % DataFreq[col].value.total_seconds() == 0
-                    and (self.freq.total_seconds() % DataFreq[col].value.total_seconds() == 0 
-                        if self.freq is not None else True)]
-                index_time_col = sorted(index_time_col, key=lambda x: DataFreq[str(x)].value)[-1]
-                pos = df.index.get_level_values(index_time_col).searchsorted(
-                    notna_index.get_level_values(notna_index.nlevels-1), 
-                    side='right'
-                )
-                pos = pos - 1 if PC.value[0][0] == 'last' else pos
-                period = int(return_freq.total_seconds() / data_freq.value.total_seconds())
-                pos_end = pos + period
-                valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
-                if valid.any():
-                    indecies = notna_index[valid]
-                    start_indecies = df.index[pos[valid]]
-                    end_indecies = df.index[pos_end[valid]]
-                    start_series = df.loc[start_indecies, PC.value[0][1].name].reset_index(drop=True)
-                    end_series = df.loc[end_indecies, PC.value[1][1].name].reset_index(drop=True)
-                    return_series = (end_series - start_series) / start_series
-                    return_series = return_series if next_return else return_series.shift(1)
-                    target_series.loc[indecies] = return_series.values
-            else:
-                assert PC.value[0][0] == 'first'
-                pos = df.index.searchsorted(notna_index, side='right')
-                valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
-                if valid.any():
-                    target_col = PC.value[0][1].name
-                    indecies = notna_index[valid]
-                    start_indecies = df.index[pos[valid]]
-                    start_series = df.loc[start_indecies, target_col]
-                    offset = -1 if next_return else 0
-                    return_series = start_series.pct_change(periods=1).shift(offset)
-                    target_series.loc[indecies] = return_series.values
-            returns[product] = target_series
-        self.returns = pd.DataFrame(returns)
-        return self.returns
+        return pd.DataFrame()  # TODO: Implement this method to calculate returns based on the factor values and the specified return frequency and price columns
+    #     returns = {}
+    #     return_freq = self.get_current_return_freq()
+    #     if self.freq is None:
+    #         self._set_products()
+    #         self.freq = self.get_freq()
+    #     changeable_return_freq = return_freq is None and self.freq is None
+    #     return_freq = return_freq or self.freq
+    #     if not changeable_return_freq:
+    #         assert return_freq is not None
+    #         return_freq = pd.Timedelta(return_freq)
+    #         assert return_freq <= (self.freq if self.freq is not None else \
+    #             self.min_gap if self.min_gap is not None else return_freq)
+    #     if changeable_return_freq:
+    #         price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
+    #     for product in self.table.columns:
+    #         assert isinstance(product, Product)
+    #         PC = price_cols
+    #         if isinstance(product, Futures):
+    #             if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
+    #                 PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
+    #             elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
+    #                 PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
+    #         assert self.min_gap is not None
+    #         all_f = product.list_available_freqs()
+    #         assert len(all_f) > 0
+    #         data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
+    #                             and self.min_gap.total_seconds() % _f.value.total_seconds() == 0
+    #                             and (return_freq.total_seconds() % _f.value.total_seconds() == 0 
+    #                                 if return_freq is not None else True)
+    #                             and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
+    #                                 if self.freq is not None else True)], 
+    #                             key=lambda x: x.value)[-1]
+    #         # data_freq = DataFreq.MIN1
+    #         if not changeable_return_freq:
+    #             assert return_freq is not None
+    #             assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
+    #         df = getattr(product, data_freq.name).get_and_adjust_cols([col.name for _, col in PC.value])
+    #         notna_index = self.table.index[self.table[product].notna()]
+    #         target_series = pd.Series(index=notna_index, dtype=float)
+    #         if not changeable_return_freq:
+    #             assert return_freq is not None
+    #             time_cols = product.get_time_cols(data_freq)
+    #             index_time_col = [col for col in time_cols if
+    #                 self.min_gap.total_seconds() % DataFreq[col].value.total_seconds() == 0
+    #                 and (self.freq.total_seconds() % DataFreq[col].value.total_seconds() == 0 
+    #                     if self.freq is not None else True)]
+    #             index_time_col = sorted(index_time_col, key=lambda x: DataFreq[str(x)].value)[-1]
+    #             pos = df.index.get_level_values(index_time_col).searchsorted(
+    #                 notna_index.get_level_values(notna_index.nlevels-1), 
+    #                 side='right'
+    #             )
+    #             pos = pos - 1 if PC.value[0][0] == 'last' else pos
+    #             period = int(return_freq.total_seconds() / data_freq.value.total_seconds())
+    #             pos_end = pos + period
+    #             valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
+    #             if valid.any():
+    #                 indecies = notna_index[valid]
+    #                 start_indecies = df.index[pos[valid]]
+    #                 end_indecies = df.index[pos_end[valid]]
+    #                 start_series = df.loc[start_indecies, PC.value[0][1].name].reset_index(drop=True)
+    #                 end_series = df.loc[end_indecies, PC.value[1][1].name].reset_index(drop=True)
+    #                 return_series = (end_series - start_series) / start_series
+    #                 return_series = return_series if next_return else return_series.shift(1)
+    #                 target_series.loc[indecies] = return_series.values
+    #         else:
+    #             assert PC.value[0][0] == 'first'
+    #             pos = df.index.searchsorted(notna_index, side='right')
+    #             valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
+    #             if valid.any():
+    #                 target_col = PC.value[0][1].name
+    #                 indecies = notna_index[valid]
+    #                 start_indecies = df.index[pos[valid]]
+    #                 start_series = df.loc[start_indecies, target_col]
+    #                 offset = -1 if next_return else 0
+    #                 return_series = start_series.pct_change(periods=1).shift(offset)
+    #                 target_series.loc[indecies] = return_series.values
+    #         returns[product] = target_series
+    #     self.returns = pd.DataFrame(returns)
+    #     return self.returns
 
 class FactorFamily(SerialObject):
     _instances = WeakValueDictionary()
@@ -344,9 +285,9 @@ class FactorFamily(SerialObject):
                     common_signal_freq = signal_freq
                 else:
                     assert signal_freq == common_signal_freq, f"所有产品的func_timeseries返回的Series必须具有相同频率的时间索引，现在发现{product}的频率为{signal_freq}，与之前的{common_signal_freq}不一致"
-                first_index = index[0].tz_localize(None)
-                start_calc_point = self.get_current_start_calc_point().tz_localize(None)
-                if signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                first_index = index[0]
+                start_calc_point = self.get_current_start_calc_point()
+                if signal_freq.is_day_multiple():
                     data = product.get_some_data(copy=False)
                     assert 'DAY1' in data.index.names
                     offsetdays = int(signal_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds()) - 1
@@ -397,7 +338,7 @@ class FactorFamily(SerialObject):
                 else:
                     tiny_offset = pd.Timedelta('1s')
                     new_start_calc_point = next_point - signal_freq.value + tiny_offset
-                new_start_calc_point = new_start_calc_point.tz_localize(product.timezone)
+                # new_start_calc_point = new_start_calc_point.tz_localize(product.timezone)
                 product.get_StartCalcPointParam().register(product, new_start_calc_point)
                 series = self.func_timeseries(product, *args, **kwargs)
                 all_series[product] = series
