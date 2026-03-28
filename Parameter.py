@@ -122,10 +122,22 @@ if __name__ == '__main__':
     print(minus_param.whether_in_space(3))     # True
     print(minus_param.whether_in_space(8))     # False
     print(minus_param.whether_in_space(12))    # False
+
+class TypeParam(Parameter):
+    def __init__(self, alias: Optional[str] = None, default_value: Any = None, type_: Optional[type] = None, *args, **kwargs):
+        type_ = type_ if type_ is not None else type(default_value)
+        if not hasattr(self, '_initialized'):
+            super().__init__(
+                alias = alias,
+                default_value = default_value,
+                whether_in_space = kwargs.pop('whether_in_space', lambda x: isinstance(x, type_)),
+                get_value_alias = kwargs.pop('get_value_alias', lambda x: str(x)),
+                *args, **kwargs
+            )
     
 class FinRangeParam(Parameter):
-    def __init__(self, alias: Optional[str], 
-                 value_space: List[Any]|Any, 
+    def __init__(self, alias: Optional[str] = None, 
+                 value_space: List[Any]|Any = None, 
                  default_value: Optional[Any] = None,
                  get_value_alias: Optional[Callable[[Any], str]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
@@ -140,8 +152,8 @@ class FinRangeParam(Parameter):
             )
             self.value_space = value_space
 
-class DataColumnParam(FinRangeParam):
-    def __init__(self, alias: Optional[str], default_value: Optional[Any] = None, *args, **kwargs):
+class DataColumnParam(TypeParam):
+    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         from Tools import _process_data_col
         if default_value is not None:
             default_value = _process_data_col(default_value)
@@ -155,29 +167,25 @@ class DataColumnParam(FinRangeParam):
         if not hasattr(self, '_initialized'):
             super().__init__(
                 alias = alias,
-                value_space = [col for col in DataColumn],
                 default_value=default_value,
+                whether_in_space=self._whether_in_space,
                 get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x)),
                 *args, **kwargs
             )
-            self.whether_in_space = self._whether_in_space
         else:
             self.default_value = default_value
 
     def _whether_in_space(self, value: Any) -> bool:
         from Tools import _process_data_col
         try:
-            col = _process_data_col(value)
-            return col in self.value_space
+            _process_data_col(value)
+            return True
         except Exception:
             return False
         
     def _rectify_value(self, value: Any, **kwargs) -> Any:
         from Tools import _process_data_col
-        try:
-            return _process_data_col(value)
-        except:
-            return value
+        return _process_data_col(value)
     
     def col(self, col: Any):
         from Tools import _process_data_col
