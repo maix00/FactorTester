@@ -586,7 +586,7 @@ class DataMeta(SerialObject):
         min_periods = _process_data_freq(min_periods) if min_periods is not None else freq
         assert min_periods is not None, "min_periods must be provided for rolling in days"
         assert min_periods.value <= freq.value, "min_periods must be less than or equal to freq for rolling in days"
-        assert freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0, "Frequency must be a multiple of 1 day for rolling in days"
+        assert freq.is_day_multiple(), "Frequency must be a multiple of 1 day for rolling in days"
         multiple = int(freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
         list_of_data = []
         groupby_index_names = None
@@ -643,8 +643,7 @@ class DataMeta(SerialObject):
         else:
             window_freq = _process_data_freq(window)
             min_periods = _process_data_freq(min_periods) if min_periods is not None else window_freq
-            if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
-                and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+            if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
                 return self._rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", 
                                             data=data, min_periods=min_periods, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
@@ -676,8 +675,7 @@ class DataMeta(SerialObject):
             return self._wrap(data.pct_change(periods=window), alias=alias + '_' + str(window))
         else:
             window_freq = _process_data_freq(window)
-            if window_freq.value >= pd.Timedelta('1day') and data_freq.value < pd.Timedelta('1day')\
-                and window_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+            if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
                 groupby_freq = window_freq
                 grouped = self.groupby(freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", **kwargs)
                 return grouped.last().pct_change()

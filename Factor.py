@@ -338,7 +338,6 @@ class FactorFamily(SerialObject):
                 else:
                     tiny_offset = pd.Timedelta('1s')
                     new_start_calc_point = next_point - signal_freq.value + tiny_offset
-                # new_start_calc_point = new_start_calc_point.tz_localize(product.timezone)
                 product.get_StartCalcPointParam().register(product, new_start_calc_point)
                 series = self.func_timeseries(product, *args, **kwargs)
                 all_series[product] = series
