@@ -680,7 +680,7 @@ class DataMeta(SerialObject):
                 grouped = self.groupby(freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", **kwargs)
                 return grouped.last().pct_change()
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
-                window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
+                window_size = int(window_freq.value / data_freq.value)
                 return self._wrap(data.pct_change(periods=window_size), alias=alias + '_' + str(window_size))
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")

@@ -327,10 +327,10 @@ class FactorFamily(SerialObject):
                 sync_index_signal_col = sync_index.get_level_values(index.name)
                 next_point = sync_index_signal_col[sync_index_signal_col.searchsorted(index[0], side='right')]
                 assert isinstance(next_point, pd.Timestamp), "同步索引必须包含时间戳类型的信号列"
-                if signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+                if signal_freq.is_day_multiple():
                     data = product.get_some_data(copy=False)
                     assert 'DAY1' in data.index.names
-                    offsetdays = int(signal_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds()) - 1
+                    offsetdays = int(signal_freq.value / pd.Timedelta('1day')) - 1
                     day1series = data.index.get_level_values('DAY1')
                     day1map = (day1series != day1series.to_series().shift(1)) & (day1series <= next_point)
                     targetpos = pd.Series(day1map)[day1map].index[-offsetdays-1]
@@ -347,7 +347,7 @@ class FactorFamily(SerialObject):
             assert sync_index is not None, "同步索引未设置，无法对齐数据"
             assert isinstance(common_signal_freq, DataFreq), "common_signal_freq 必须是 DataFreq 类型"
             self.common_signal_freq = common_signal_freq
-            if common_signal_freq.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0:
+            if common_signal_freq.is_day_multiple():
                 common_signal_col = '_SIGNAL@' + common_signal_freq.name
                 other_cols = [str(col) for col in sync_index.names if str(col) != common_signal_col]
                 for product in synced_products:
