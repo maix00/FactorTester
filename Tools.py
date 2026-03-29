@@ -520,16 +520,6 @@ class DataMeta(SerialObject):
             assert 0 <= _offset < multiple, f"Offset must be between 0 and {multiple - 1}"
             index = first_true_change_pos.to_series().reset_index(drop=True).index
             signal_map_within_first_true_change_mask = (index % multiple == multiple - 1 - _offset)
-            min_multiple_nan_mask = signal_map_within_first_true_change_mask \
-                & (index < min_multiple - 1 if min_multiple is not None else False)
-            nan_pos_within_first_true_series = first_true_change_pos[min_multiple_nan_mask]
-            assert len(nan_pos_within_first_true_series) <= 1
-            if len(nan_pos_within_first_true_series) == 1:
-                idx = int(nan_pos_within_first_true_series[0])
-                # data = data.convert_dtypes()
-                data = data.astype(float)
-                import numpy as np
-                data.iloc[:idx+1] = np.nan
 
         signal_pos_within_first_true_series = first_true_change_pos[signal_map_within_first_true_change_mask]
         signal_map_within_first_true_series = first_true_series.index.isin(signal_pos_within_first_true_series)
@@ -568,7 +558,8 @@ class DataMeta(SerialObject):
             'signal_index': signal_index,
             'extended_index': extended_index,
             'index_names_for_groupby': index_names_for_groupby,
-            'index_names': index_names
+            'index_names': index_names,
+            'min_multiple': min_multiple
         }
     
     def groupby(self, freq: Optional[Any] = None, bfill: Optional[int] = None,
@@ -594,11 +585,16 @@ class DataMeta(SerialObject):
         groupby_index_names = None
         original_index_names = None
         grouped_index_method = kwargs.pop('grouped_index_method', 'last')
+        min_multiple = None
         for _offset in range(multiple):
             results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, min_periods=min_periods, 
                                              _copy_index_name=True, grouped_index_method=grouped_index_method, **kwargs)
             data = results['data']
             data.index = results['extended_index']
+            if min_multiple is None:
+                min_multiple = results['min_multiple']
+            else:
+                assert min_multiple == results['min_multiple'], "min_multiple does not match across offsets"
             list_of_data.append(data)
             if groupby_index_names is None:
                 groupby_index_names = results['index_names_for_groupby']
@@ -612,6 +608,7 @@ class DataMeta(SerialObject):
                           target_type=_RollingInDays, list_of_data=list_of_data,
                           groupby_index_names=groupby_index_names,
                           original_index_names=original_index_names,
+                          min_multiple=min_multiple,
                           alias=kwargs.pop('alias', f"ROLLING_INDAYS_{freq.name}"), **kwargs)
     
     def _sync_signal(self, signal_datameta: DataMeta, freq: Any,
@@ -766,47 +763,59 @@ class DataMeta(SerialObject):
     @staticmethod
     def _get_alias(other: Any) -> str:
         if hasattr(other, 'alias'):
-            return other.alias
+            return '(' + (other.alias if other.alias is not None else str(other)) + ')'
         elif isinstance(other, str):
             return other
         else:
             return str(other)
     
-    def __add__(self, other): return self._wrap(self.data + other, alias=f"ADD_{self._get_alias(other)}")
-    def __sub__(self, other): return self._wrap(self.data - other, alias=f"SUB_{self._get_alias(other)}")
-    def __mul__(self, other): return self._wrap(self.data * other, alias=f"MUL_{self._get_alias(other)}")
-    def __truediv__(self, other): return self._wrap(self.data / other, alias=f"DIV_{self._get_alias(other)}")
-    def __floordiv__(self, other): return self._wrap(self.data // other, alias=f"FLOORDIV_{self._get_alias(other)}")
-    def __mod__(self, other): return self._wrap(self.data % other, alias=f"MOD_{self._get_alias(other)}")
-    def __pow__(self, other): return self._wrap(self.data ** other, alias=f"POW_{self._get_alias(other)}")
-    def __gt__(self, other): return self._wrap(self.data > other, alias=f"GT_{self._get_alias(other)}")
-    def __lt__(self, other): return self._wrap(self.data < other, alias=f"LT_{self._get_alias(other)}")
-    def __ge__(self, other): return self._wrap(self.data >= other, alias=f"GE_{self._get_alias(other)}")
-    def __le__(self, other): return self._wrap(self.data <= other, alias=f"LE_{self._get_alias(other)}")
-    def __eq__(self, other): return self._wrap(self.data == other, alias=f"EQ_{self._get_alias(other)}")
-    # def __ne__(self, other): return self._wrap(self.data != other, alias=f"NE_{self._get_alias(other)}")
-    def __and__(self, other): return self._wrap(self.data & other, alias=f"AND_{self._get_alias(other)}")
-    def __or__(self, other): return self._wrap(self.data | other, alias=f"OR_{self._get_alias(other)}")
-    def __xor__(self, other): return self._wrap(self.data ^ other, alias=f"XOR_{self._get_alias(other)}")
-    def __neg__(self): return self._wrap(-self.data, alias=f"NEG")
-    def __pos__(self): return self._wrap(+self.data, alias=f"POS")
-    def __abs__(self): return self._wrap(abs(self.data), alias=f"ABS")
-    def __invert__(self): return self._wrap(~self.data, alias=f"INVERT")
+    @staticmethod
+    def _get_data(other: Any) -> Any:
+        if isinstance(other, DataMeta):
+            return other.data
+        else:
+            return other
+    
+    def __add__(self, other): return self._wrap((self.data + self._get_data(other)).where(self.data.notna()), alias=f"ADD_{self._get_alias(other)}")
+    def __sub__(self, other): return self._wrap((self.data - self._get_data(other)).where(self.data.notna()), alias=f"SUB_{self._get_alias(other)}")
+    def __mul__(self, other): return self._wrap((self.data * self._get_data(other)).where(self.data.notna()), alias=f"MUL_{self._get_alias(other)}")
+    def __truediv__(self, other): return self._wrap((self.data / self._get_data(other)).where(self.data.notna()), alias=f"DIV_{self._get_alias(other)}")
+    def __floordiv__(self, other): return self._wrap((self.data // self._get_data(other)).where(self.data.notna()), alias=f"FLOORDIV_{self._get_alias(other)}")
+    def __mod__(self, other): return self._wrap((self.data % self._get_data(other)).where(self.data.notna()), alias=f"MOD_{self._get_alias(other)}")
+    def __pow__(self, other): return self._wrap((self.data ** self._get_data(other)).where(self.data.notna()), alias=f"POW_{self._get_alias(other)}")
+    def __gt__(self, other): return self._wrap((self.data > self._get_data(other)).where(self.data.notna()), alias=f"GT_{self._get_alias(other)}")
+    def __lt__(self, other): return self._wrap((self.data < self._get_data(other)).where(self.data.notna()), alias=f"LT_{self._get_alias(other)}")
+    def __ge__(self, other): return self._wrap((self.data >= self._get_data(other)).where(self.data.notna()), alias=f"GE_{self._get_alias(other)}")
+    def __le__(self, other): return self._wrap((self.data <= self._get_data(other)).where(self.data.notna()), alias=f"LE_{self._get_alias(other)}")
+    def __eq__(self, other): return self._wrap((self.data == self._get_data(other)).where(self.data.notna()), alias=f"EQ_{self._get_alias(other)}")
+    @override
+    def __ne__(self, other): #type: ignore[override]
+        # if isinstance(other, DataMeta):
+        #     return self.alias != other.alias
+        return self._wrap((self.data != self._get_data(other)).where(self.data.notna()), alias=f"NE_{self._get_alias(other)}")
+    def __and__(self, other): return self._wrap((self.data & self._get_data(other)).where(self.data.notna()), alias=f"AND_{self._get_alias(other)}")
+    def __or__(self, other): return self._wrap((self.data | self._get_data(other)).where(self.data.notna()), alias=f"OR_{self._get_alias(other)}")
+    def __xor__(self, other): return self._wrap((self.data ^ self._get_data(other)).where(self.data.notna()), alias=f"XOR_{self._get_alias(other)}")
+    
+    def __neg__(self): return self._wrap((-self.data).where(self.data.notna()), alias=f"NEG")
+    def __pos__(self): return self._wrap((+self.data).where(self.data.notna()), alias=f"POS")
+    def __abs__(self): return self._wrap(abs(self.data).where(self.data.notna()), alias=f"ABS")
+    def __invert__(self): return self._wrap((~self.data).where(self.data.notna()), alias=f"INVERT")
     def __getitem__(self, key): return self._wrap(self.data[(col := _process_data_col(key).name)], alias=col)
     def __setitem__(self, key, value): self.data[_process_data_col(key).name] = value
     def __delitem__(self, key): del self.data[_process_data_col(key).name]
 
     # 反向运算符（支持 scalar + meta）
-    def __radd__(self, other): return self._wrap(other + self.data, alias=f"RADD_{self._get_alias(other)}")
-    def __rsub__(self, other): return self._wrap(other - self.data, alias=f"RSUB_{self._get_alias(other)}")
-    def __rmul__(self, other): return self._wrap(other * self.data, alias=f"RMUL_{self._get_alias(other)}")
-    def __rtruediv__(self, other): return self._wrap(other / self.data, alias=f"RDIV_{self._get_alias(other)}")
-    def __rfloordiv__(self, other): return self._wrap(other // self.data, alias=f"RFLOORDIV_{self._get_alias(other)}")
-    def __rmod__(self, other): return self._wrap(other % self.data, alias=f"RMOD_{self._get_alias(other)}")
-    def __rpow__(self, other): return self._wrap(other ** self.data, alias=f"RPOW_{self._get_alias(other)}")
-    def __rand__(self, other): return self._wrap(other & self.data, alias=f"RAND_{self._get_alias(other)}")
-    def __ror__(self, other): return self._wrap(other | self.data, alias=f"ROR_{self._get_alias(other)}")
-    def __rxor__(self, other): return self._wrap(other ^ self.data, alias=f"RXOR_{self._get_alias(other)}")
+    def __radd__(self, other): return self._wrap((self._get_data(other) + self.data).where(self.data.notna()), alias=f"RADD_{self._get_alias(other)}")
+    def __rsub__(self, other): return self._wrap((self._get_data(other) - self.data).where(self.data.notna()), alias=f"RSUB_{self._get_alias(other)}")
+    def __rmul__(self, other): return self._wrap((self._get_data(other) * self.data).where(self.data.notna()), alias=f"RMUL_{self._get_alias(other)}")
+    def __rtruediv__(self, other): return self._wrap((self._get_data(other) / self.data).where(self.data.notna()), alias=f"RDIV_{self._get_alias(other)}")
+    def __rfloordiv__(self, other): return self._wrap((self._get_data(other) // self.data).where(self.data.notna()), alias=f"RFLOORDIV_{self._get_alias(other)}")
+    def __rmod__(self, other): return self._wrap((self._get_data(other) % self.data).where(self.data.notna()), alias=f"RMOD_{self._get_alias(other)}")
+    def __rpow__(self, other): return self._wrap((self._get_data(other) ** self.data).where(self.data.notna()), alias=f"RPOW_{self._get_alias(other)}")
+    def __rand__(self, other): return self._wrap((self._get_data(other) & self.data).where(self.data.notna()), alias=f"RAND_{self._get_alias(other)}")
+    def __ror__(self, other): return self._wrap((self._get_data(other) | self.data).where(self.data.notna()), alias=f"ROR_{self._get_alias(other)}")
+    def __rxor__(self, other): return self._wrap((self._get_data(other) ^ self.data).where(self.data.notna()), alias=f"RXOR_{self._get_alias(other)}")
 
     # 可选：支持 len() 和 bool()
     def __len__(self): return len(self.data)
@@ -986,11 +995,8 @@ class GroupedOperator(DataMeta):
             raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
         def wrapper(*args, **kwargs):
             col = kwargs.pop('col', None)
-            if col is not None:
-                target = getattr(self.grouped[col], name)
-                result = target(*args, **kwargs)
-            else:
-                result = method(*args, **kwargs)
+            grouped = self.grouped if col is None else self.grouped[col]
+            result = getattr(grouped, name)(*args, **kwargs)
             param_str = _rectify_args_kwargs(*args, **kwargs)
             return self._wrap(self._restore_index(result), alias=f"{name.upper()}{param_str}")
         return wrapper
@@ -1029,6 +1035,7 @@ class _RollingInDays(DataMeta):
     def __init__(self, list_of_data: List[pd.DataFrame], 
                  groupby_index_names: List[str], original_index_names: List[str], **kwargs):
         if not hasattr(self, '_initialized'):
+            self.min_multiple = kwargs.pop('min_multiple', None)
             super().__init__(data=kwargs.pop('data', None), alias=kwargs.pop('alias', 'ROLLING_INDAYS'),
                              object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
                              data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
@@ -1065,12 +1072,11 @@ class _RollingInDays(DataMeta):
             raise AttributeError(f"'GroupedOperator' object has no attribute '{name}'")
         def wrapper(*args, **kwargs):
             col = kwargs.pop('col', None)
-            if col is not None:
-                list_of_target = [getattr(grouped[col], name) for grouped in self.list_of_grouped]
-                list_of_result = [target(*args, **kwargs) for target in list_of_target]
-            else:
-                list_of_target = [getattr(grouped, name) for grouped in self.list_of_grouped]
-                list_of_result = [target(*args, **kwargs) for target in list_of_target]
+            list_of_grouped = self.list_of_grouped if col is None else [grouped[col] for grouped in self.list_of_grouped]
+            list_of_target = [getattr(grouped, name) for grouped in list_of_grouped]
+            list_of_count_func = [getattr(grouped, 'count') for grouped in list_of_grouped]
+            import numpy as np
+            list_of_result = [target(*args, **kwargs).where(count_func() >= self.min_multiple, np.nan) for target, count_func in zip(list_of_target, list_of_count_func)]
             param_str = _rectify_args_kwargs(*args, **kwargs)
             return self._wrap(self._restore_index_and_concat(list_of_result), alias=f"{name.upper()}{param_str}")
         return wrapper
@@ -1090,12 +1096,14 @@ class _RollingInDays(DataMeta):
 
         def __getattr__(self, name: str) -> Any:
             try:
-                method = getattr(self.parent.list_of_grouped[0][self.key], name)
+                getattr(self.parent.list_of_grouped[0][self.key], name)
             except AttributeError:
                 raise AttributeError(f"'_ColumnSelector' object has no attribute '{name}'")
             def wrapper(*args, **kwargs):
                 list_of_target = [getattr(grouped[self.key], name) for grouped in self.parent.list_of_grouped]
-                list_of_result = [target(*args, **kwargs) for target in list_of_target]
+                list_of_count_func = [getattr(grouped[self.key], 'count') for grouped in self.parent.list_of_grouped]
+                import numpy as np
+                list_of_result = [target(*args, **kwargs).where(count_func() >= self.parent.min_multiple, np.nan) for target, count_func in zip(list_of_target, list_of_count_func)]
                 param_str = _rectify_args_kwargs(*args, **kwargs)
                 return self.parent._wrap(self.parent._restore_index_and_concat(list_of_result), alias=f"{name.upper()}_{self.key}{param_str}")
             return wrapper
