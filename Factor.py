@@ -11,7 +11,7 @@ import os
 
 from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject, _process_data_freq
 from Products import DataColumn, Futures, Product, DataFreq
-from Parameter import Parameter, FinRangeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
+from Parameter import DataColumnParam, Parameter, FinRangeParam, TimeDeltaParam, TypeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
 from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
 import logging
 
@@ -71,8 +71,8 @@ class Factor(SerialObject):
             self.freq: Optional[DataFreq] = None
             self.family = family
             
-            if self.family is not None:
-                assert param_vals is None
+            if param_vals is None:
+                assert self.family is not None, "如果没有提供param_vals参数，则必须提供family参数以从中获取默认参数值"
                 self.params = self.family.params
             else:
                 param_vals = param_vals if param_vals is not None else {}
@@ -161,6 +161,13 @@ class Factor(SerialObject):
     
     def calc_returns(self, next_return: bool = True,
                      price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+        assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
+        start_calc_point = self.get_current_start_calc_point()
+        StartCalcPointParam.register(ReturnsFamily, start_calc_point)
+        return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=price_cols.value[0][1], EC=price_cols.value[1][1], S=(1 if next_return else 0))
+        StartCalcPointParam.register(return_factor, start_calc_point)
+        return return_factor.calc(self.products)
+
         return pd.DataFrame()  # TODO: Implement this method to calculate returns based on the factor values and the specified return frequency and price columns
     #     returns = {}
     #     return_freq = self.get_current_return_freq()
@@ -275,6 +282,7 @@ class FactorFamily(SerialObject):
             
             for product in products:
                 series = self.func_timeseries(product, *args, **kwargs)
+                all_series[product] = series
                 signal_index = next((str(name) for name in series.index.names if name and str(name).startswith('_SIGNAL')), None)
                 assert signal_index is not None, "func_timeseries返回的Series必须包含一个以'_SIGNAL'开头的时间列作为index"
                 index = series.index.droplevel([lvl for lvl in series.index.names if lvl != signal_index])
@@ -318,7 +326,6 @@ class FactorFamily(SerialObject):
                                 rerun_products.append(product)
                                 continue
                             synced_products.append(product)
-                all_series[product] = series
             
             for product in rerun_products:
                 index = all_indices[product]
@@ -433,10 +440,11 @@ class FactorFamily(SerialObject):
     
     def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs):
         self._check_in_space(**kwargs)
-        new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
+        param_vals = {p: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
+        new_params = {p.alias: param_vals[p] for p in self.params}
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
-        factor = Factor(alias=factor_alias, func=factor_func, params=new_params, family=self)
+        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
         if start_calc_point is not None:
@@ -830,4 +838,24 @@ class FactorTester(SerialObject):
                     plt.show()
 
         return products, returns, report_df
-    
+
+class Returns(FactorFamily):
+
+    params = [
+        TimeDeltaParam('RF', flag='pos', default_value='1d'), # Return Frequency, e.g. '1d', '1h', '30min', etc.
+        DataColumnParam('SC', default_value=DataColumn.CLOSE), # Start Column for return calculation, e.g. DataColumn.CLOSE, DataColumn.OPEN, etc.
+        DataColumnParam('EC', default_value=DataColumn.CLOSE), # End Column for return calculation, e.g. DataColumn.CLOSE, DataColumn.OPEN, etc.
+        TypeParam('S', default_value=1), # Shift for return calculation, e.g. 1 for next return, 0 for current return, -1 for previous return, etc.
+    ]
+
+    def func_timeseries(self, product: Product, RF: pd.Timedelta, SC: DataColumn, EC: DataColumn, S: int, *args, **kwargs) -> pd.Series:
+        data_freq = product.get_current_freq()
+        data = product.get(data_freq.name)
+        assert isinstance(data, DataMeta)
+        if SC == EC:
+            ret = data[SC].pct_change(RF).shift(S)
+            return data.sync_signal(ret, RF)
+        else:
+            return pd.Series()  # TODO: Implement this method to calculate returns based on the specified return frequency and price columns
+
+ReturnsFamily = Returns()
