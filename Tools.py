@@ -483,7 +483,8 @@ class DataMeta(SerialObject):
 
     def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None, min_periods: Optional[Any] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
-                          copy: bool = False, _offset: int = 0, **kwargs) -> Dict[str, Any]:
+                          copy: bool = False, _offset: int = 0, _copy_index_name: bool = False, 
+                          grouped_index_method: str|Callable = 'last', **kwargs) -> Dict[str, Any]:
 
         index_name_stem: str = '_SIGNAL'
         assert freq is not None, "Frequency must be provided"
@@ -507,8 +508,9 @@ class DataMeta(SerialObject):
         data_multiple = int(freq.value.total_seconds() / data_freq.value.total_seconds())
         
         first_true_series = self._get_level_index(data, data.index.names[first_true_idx]).to_series().reset_index(drop=True)
-        first_true_change_map = (first_true_series != first_true_series.shift(-1))
-        first_true_change_pos = first_true_series.where(first_true_change_map).dropna().index
+        
+        method = (lambda x: getattr(x, grouped_index_method)()) if isinstance(grouped_index_method, str) else grouped_index_method
+        first_true_change_pos = method(first_true_series.reset_index().groupby(str(first_true_series.name))).reset_index().set_index('index').index
 
         if end_session_skip and freq.value < pd.Timedelta('1day'):
             last_col_series = self._get_level_index(data, data.index.names[-1]).to_series().reset_index(drop=True)
@@ -544,7 +546,7 @@ class DataMeta(SerialObject):
             index_arrays = [_bfill(left_series_dict[idx], bfill=bfill) for idx in left_indices] \
                             + [_bfill(signal_series_within_first_true_series, bfill=bfill)] \
                             + [_bfill(right_series_dict[idx], bfill=None) for idx in right_indices]
-            index_name = index_name_stem + '@' + freq.name
+            index_name = index_name_stem + '@' + (freq.name if not _copy_index_name else first_true_freq.name)
             left_indices = [str(idx).split('@')[-1] for idx in left_indices]
             right_indices = [str(idx).split('@')[-1] for idx in right_indices]
             index_names_for_groupby = left_indices + [index_name]
@@ -570,7 +572,7 @@ class DataMeta(SerialObject):
         }
     
     def groupby(self, freq: Optional[Any] = None, bfill: Optional[int] = None,
-                 copy: bool = True, **kwargs) -> DataMeta:
+                copy: bool = True, **kwargs) -> DataMeta:
         results = self._get_signal_index(freq=freq, bfill=bfill, copy=copy, **kwargs)
         data = results['data']
         data.index = results['extended_index']
@@ -580,7 +582,7 @@ class DataMeta(SerialObject):
                           original_index_names=results['index_names'],
                           alias=kwargs.pop('alias', None), **kwargs)
     
-    def _rolling_indays(self, freq: Any, min_periods: Optional[Any] = None, **kwargs) -> DataMeta:
+    def rolling_indays(self, freq: Any, min_periods: Optional[Any] = None, **kwargs) -> DataMeta:
         assert freq is not None, "Frequency must be provided"
         freq = _process_data_freq(freq)
         min_periods = _process_data_freq(min_periods) if min_periods is not None else freq
@@ -591,8 +593,10 @@ class DataMeta(SerialObject):
         list_of_data = []
         groupby_index_names = None
         original_index_names = None
+        grouped_index_method = kwargs.pop('grouped_index_method', 'last')
         for _offset in range(multiple):
-            results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, min_periods=min_periods, **kwargs)
+            results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, min_periods=min_periods, 
+                                             _copy_index_name=True, grouped_index_method=grouped_index_method, **kwargs)
             data = results['data']
             data.index = results['extended_index']
             list_of_data.append(data)
@@ -604,9 +608,11 @@ class DataMeta(SerialObject):
                 original_index_names = results['index_names']
             else:
                 assert original_index_names == results['index_names'], "Original index names do not match across offsets"
-        return self._wrap(target_type=_RollingInDays, list_of_data=list_of_data,
+        return self._wrap(data=kwargs.pop('data', self.data),
+                          target_type=_RollingInDays, list_of_data=list_of_data,
                           groupby_index_names=groupby_index_names,
-                          original_index_names=original_index_names, **kwargs)
+                          original_index_names=original_index_names,
+                          alias=kwargs.pop('alias', f"ROLLING_INDAYS_{freq.name}"), **kwargs)
     
     def _sync_signal(self, signal_datameta: DataMeta, freq: Any,
                     end_session_skip: bool = True, 
@@ -644,7 +650,7 @@ class DataMeta(SerialObject):
             window_freq = _process_data_freq(window)
             min_periods = _process_data_freq(min_periods) if min_periods is not None else window_freq
             if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
-                return self._rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", 
+                return self.rolling_indays(freq=window_freq, 
                                             data=data, min_periods=min_periods, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
@@ -654,6 +660,8 @@ class DataMeta(SerialObject):
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
     def pct_change(self, window: int|str|pd.Timedelta = 1, 
+                   grouped_method: str|Callable = 'last', # 'last', 'first', lambda x: x.nth(0)
+                   grouped_index_method: str|Callable = 'last',
                    col: Optional[Any] = None, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, **kwargs)
@@ -676,9 +684,47 @@ class DataMeta(SerialObject):
         else:
             window_freq = _process_data_freq(window)
             if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
-                groupby_freq = window_freq
-                grouped = self.groupby(freq=groupby_freq, copy=copy, alias=f"GROUPBY_{window_freq.name}", **kwargs)
-                return grouped.last().pct_change()
+                
+                # Check compatibility of grouped_method and grouped_index_method for rolling in days
+                if isinstance(grouped_index_method, str) and grouped_index_method == 'first':
+                    grouped_method = 'first'
+                elif callable(grouped_index_method):
+                    if isinstance(grouped_method, str) and grouped_method == 'last':
+                        grouped_method = grouped_index_method
+                    elif callable(grouped_method):
+                        error = None
+                        try:
+                            class _get_n_from_nth:
+                                def __init__(self):
+                                    self.nth = lambda x: x
+                            get_n_from_nth = _get_n_from_nth()
+                            n_grouped = grouped_method(get_n_from_nth)
+                            n_grouped_index = grouped_index_method(get_n_from_nth)
+                            if isinstance(n_grouped, int) and isinstance(n_grouped_index, int):
+                                if (n_grouped > n_grouped_index >= 0 or n_grouped_index < n_grouped < 0):
+                                    grouped_method = grouped_index_method
+                                elif n_grouped_index * n_grouped < 0:
+                                    error = ValueError("grouped_method and grouped_index_method must have the same direction for nth selection")
+                            else:
+                                error = ValueError("grouped_method and grouped_index_method must return an integer when called with an object that has a nth method")
+                        except:
+                            if error is not None:
+                                raise error
+
+                # tiny_window = '1min'
+                rolling_indays = self.rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", 
+                                 data=data, grouped_index_method=grouped_index_method, **kwargs)
+                
+                index_data_freq = [_process_data_freq(level) for level in data.index.names]
+                index_map_of_multiple = [window_freq.value.total_seconds() % idx_freq.value.total_seconds() == 0 for idx_freq in index_data_freq]
+                first_true_idx = next((i for i, is_multiple in enumerate(index_map_of_multiple) if is_multiple), None)
+                assert first_true_idx is not None, f"Frequency {window_freq} is not a multiple of any existing index frequency"
+                first_true_freq = index_data_freq[first_true_idx]
+                window_size = int(window_freq.value / first_true_freq.value)
+
+                method = (lambda x: getattr(x, grouped_method)()) if isinstance(grouped_method, str) else grouped_method
+                return method(rolling_indays).pct_change(window_size)
+            
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value / data_freq.value)
                 return self._wrap(data.pct_change(periods=window_size), alias=alias + '_' + str(window_size))
@@ -872,7 +918,8 @@ class RollingOperator(DataMeta):
         def wrapper(*args, **kwargs):
             result = method(*args, **kwargs)
             result.index = self.data.index
-            return self._wrap(result, alias=f"{method.__name__.upper()}")
+            param_str = _rectify_args_kwargs(*args, **kwargs)
+            return self._wrap(result, alias=f"{name.upper()}{param_str}")
         return wrapper
 
     def __dir__(self) -> List[str]:
@@ -898,7 +945,8 @@ class RollingOperator(DataMeta):
             def wrapper(*args, **kwargs):
                 result = method(*args, **kwargs)
                 result.index = self.parent.data.index
-                return self.parent._wrap(result, alias=f"{method.__name__.upper()}_{self.key}")
+                param_str = _rectify_args_kwargs(*args, **kwargs)
+                return self.parent._wrap(result, alias=f"{name.upper()}_{self.key}{param_str}")
             return wrapper
 
         def __dir__(self) -> List[str]:
@@ -943,7 +991,8 @@ class GroupedOperator(DataMeta):
                 result = target(*args, **kwargs)
             else:
                 result = method(*args, **kwargs)
-            return self._wrap(self._restore_index(result), alias=f"{method.__name__.upper()}")
+            param_str = _rectify_args_kwargs(*args, **kwargs)
+            return self._wrap(self._restore_index(result), alias=f"{name.upper()}{param_str}")
         return wrapper
 
     def __dir__(self) -> List[str]:
@@ -968,7 +1017,8 @@ class GroupedOperator(DataMeta):
             # 包装方法，自动恢复索引
             def wrapper(*args, **kwargs):
                 result = method(*args, **kwargs)
-                return self.parent._wrap(self.parent._restore_index(result), alias=f"{method.__name__.upper()}_{self.key}")
+                param_str = _rectify_args_kwargs(*args, **kwargs)
+                return self.parent._wrap(self.parent._restore_index(result), alias=f"{name.upper()}_{self.key}{param_str}")
             return wrapper
 
         def __dir__(self) -> List[str]:
@@ -987,7 +1037,7 @@ class _RollingInDays(DataMeta):
                 self._wrap(target_type=GroupedOperator, data=data, 
                            alias=f"ROLLING_INDAYS_GROUPBY_OFFSET_{i}",
                            groupby_index_names=groupby_index_names, 
-                           original_index_names=original_index_names) 
+                           original_index_names=original_index_names, **kwargs) 
                 for i, data in enumerate(list_of_data)
             ]
             self.list_of_grouped = [groupby.grouped for groupby in self.list_of_groupby]
@@ -1021,8 +1071,8 @@ class _RollingInDays(DataMeta):
             else:
                 list_of_target = [getattr(grouped, name) for grouped in self.list_of_grouped]
                 list_of_result = [target(*args, **kwargs) for target in list_of_target]
-            self._wrap
-            return self._wrap(self._restore_index_and_concat(list_of_result), alias=f"{method.__name__.upper()}")
+            param_str = _rectify_args_kwargs(*args, **kwargs)
+            return self._wrap(self._restore_index_and_concat(list_of_result), alias=f"{name.upper()}{param_str}")
         return wrapper
     
     def __dir__(self) -> List[str]:
@@ -1046,8 +1096,15 @@ class _RollingInDays(DataMeta):
             def wrapper(*args, **kwargs):
                 list_of_target = [getattr(grouped[self.key], name) for grouped in self.parent.list_of_grouped]
                 list_of_result = [target(*args, **kwargs) for target in list_of_target]
-                return self.parent._wrap(self.parent._restore_index_and_concat(list_of_result), alias=f"{method.__name__.upper()}_{self.key}")
+                param_str = _rectify_args_kwargs(*args, **kwargs)
+                return self.parent._wrap(self.parent._restore_index_and_concat(list_of_result), alias=f"{name.upper()}_{self.key}{param_str}")
             return wrapper
 
         def __dir__(self) -> List[str]:
             return sorted(set(super().__dir__()) | set(dir(self.parent.list_of_grouped[0][self.key])))
+        
+def _rectify_args_kwargs(*args, **kwargs) -> str:
+    def _rectify(s: str):
+        return (s if ' ' not in s else '(' + s + ')').upper()
+    string = "_".join([_rectify(str(arg)) for arg in args] + [f"{_rectify(str(k))}={_rectify(str(v))}" for k, v in kwargs.items()])
+    return '_' + string if string else ''
