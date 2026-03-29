@@ -37,11 +37,11 @@ if __name__ == '__main__':
     ri = ReturnType('1d', 'first', DataColumn.OPEN, 'last', DataColumn.CLOSE)
     print(ri)
 
-class ReturnPriceCols(Enum):
-    NEXT_OPEN_TO_OPEN = (('first', DataColumn.OPEN), ('first', DataColumn.OPEN))
-    NEXT_OPEN_TO_OPEN_ADJUSTED = (('first', DataColumn.OPEN_ADJUSTED), ('first', DataColumn.OPEN_ADJUSTED))
-    THIS_CLOSE_TO_CLOSE = (('last', DataColumn.CLOSE), ('last', DataColumn.CLOSE))
-    THIS_CLOSE_TO_CLOSE_ADJUSTED = (('last', DataColumn.CLOSE_ADJUSTED), ('last', DataColumn.CLOSE_ADJUSTED))
+class FactorNextPeriodReturns(Enum):
+    NEXT_OPEN_TO_OPEN = DataColumn.OPEN
+    NEXT_OPEN_TO_OPEN_ADJUSTED = DataColumn.OPEN_ADJUSTED
+    THIS_CLOSE_TO_CLOSE = DataColumn.CLOSE
+    THIS_CLOSE_TO_CLOSE_ADJUSTED = DataColumn.CLOSE_ADJUSTED
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     products = get_all_futures()
@@ -160,94 +160,14 @@ class Factor(SerialObject):
         return self.table
     
     def calc_returns(self, next_return: bool = True,
-                     price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+                     returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
         start_calc_point = self.get_current_start_calc_point()
         StartCalcPointParam.register(ReturnsFamily, start_calc_point)
-        return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=price_cols.value[0][1], EC=price_cols.value[1][1], S=(1 if next_return else 0))
+        shift = -2 if returns_col.value.name.startswith('OPEN') else -1
+        return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)
         return return_factor.calc(self.products)
-
-        return pd.DataFrame()  # TODO: Implement this method to calculate returns based on the factor values and the specified return frequency and price columns
-    #     returns = {}
-    #     return_freq = self.get_current_return_freq()
-    #     if self.freq is None:
-    #         self._set_products()
-    #         self.freq = self.get_freq()
-    #     changeable_return_freq = return_freq is None and self.freq is None
-    #     return_freq = return_freq or self.freq
-    #     if not changeable_return_freq:
-    #         assert return_freq is not None
-    #         return_freq = pd.Timedelta(return_freq)
-    #         assert return_freq <= (self.freq if self.freq is not None else \
-    #             self.min_gap if self.min_gap is not None else return_freq)
-    #     if changeable_return_freq:
-    #         price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
-    #     for product in self.table.columns:
-    #         assert isinstance(product, Product)
-    #         PC = price_cols
-    #         if isinstance(product, Futures):
-    #             if price_cols == ReturnPriceCols.NEXT_OPEN_TO_OPEN:
-    #                 PC = ReturnPriceCols.NEXT_OPEN_TO_OPEN_ADJUSTED
-    #             elif price_cols == ReturnPriceCols.THIS_CLOSE_TO_CLOSE:
-    #                 PC = ReturnPriceCols.THIS_CLOSE_TO_CLOSE_ADJUSTED
-    #         assert self.min_gap is not None
-    #         all_f = product.list_available_freqs()
-    #         assert len(all_f) > 0
-    #         data_freq = sorted([_f for _f in all_f if _f.value <= self.min_gap \
-    #                             and self.min_gap.total_seconds() % _f.value.total_seconds() == 0
-    #                             and (return_freq.total_seconds() % _f.value.total_seconds() == 0 
-    #                                 if return_freq is not None else True)
-    #                             and (self.freq.total_seconds() % _f.value.total_seconds() == 0 
-    #                                 if self.freq is not None else True)], 
-    #                             key=lambda x: x.value)[-1]
-    #         # data_freq = DataFreq.MIN1
-    #         if not changeable_return_freq:
-    #             assert return_freq is not None
-    #             assert return_freq.total_seconds() % data_freq.value.total_seconds() == 0, f"return_freq必须是数据频率{data_freq}的整数倍，现在为{return_freq}"
-    #         df = getattr(product, data_freq.name).get_and_adjust_cols([col.name for _, col in PC.value])
-    #         notna_index = self.table.index[self.table[product].notna()]
-    #         target_series = pd.Series(index=notna_index, dtype=float)
-    #         if not changeable_return_freq:
-    #             assert return_freq is not None
-    #             time_cols = product.get_time_cols(data_freq)
-    #             index_time_col = [col for col in time_cols if
-    #                 self.min_gap.total_seconds() % DataFreq[col].value.total_seconds() == 0
-    #                 and (self.freq.total_seconds() % DataFreq[col].value.total_seconds() == 0 
-    #                     if self.freq is not None else True)]
-    #             index_time_col = sorted(index_time_col, key=lambda x: DataFreq[str(x)].value)[-1]
-    #             pos = df.index.get_level_values(index_time_col).searchsorted(
-    #                 notna_index.get_level_values(notna_index.nlevels-1), 
-    #                 side='right'
-    #             )
-    #             pos = pos - 1 if PC.value[0][0] == 'last' else pos
-    #             period = int(return_freq.total_seconds() / data_freq.value.total_seconds())
-    #             pos_end = pos + period
-    #             valid = (pos_end < len(df.index)) & (pos >= 0) & (np.concatenate((pos[:-1] != pos[1:], [False])))
-    #             if valid.any():
-    #                 indecies = notna_index[valid]
-    #                 start_indecies = df.index[pos[valid]]
-    #                 end_indecies = df.index[pos_end[valid]]
-    #                 start_series = df.loc[start_indecies, PC.value[0][1].name].reset_index(drop=True)
-    #                 end_series = df.loc[end_indecies, PC.value[1][1].name].reset_index(drop=True)
-    #                 return_series = (end_series - start_series) / start_series
-    #                 return_series = return_series if next_return else return_series.shift(1)
-    #                 target_series.loc[indecies] = return_series.values
-    #         else:
-    #             assert PC.value[0][0] == 'first'
-    #             pos = df.index.searchsorted(notna_index, side='right')
-    #             valid = (pos < len(df.index)) & (np.concatenate((pos[:-1] != pos[1:], [False])))
-    #             if valid.any():
-    #                 target_col = PC.value[0][1].name
-    #                 indecies = notna_index[valid]
-    #                 start_indecies = df.index[pos[valid]]
-    #                 start_series = df.loc[start_indecies, target_col]
-    #                 offset = -1 if next_return else 0
-    #                 return_series = start_series.pct_change(periods=1).shift(offset)
-    #                 target_series.loc[indecies] = return_series.values
-    #         returns[product] = target_series
-    #     self.returns = pd.DataFrame(returns)
-    #     return self.returns
 
 class FactorFamily(SerialObject):
     _instances = WeakValueDictionary()
@@ -465,21 +385,17 @@ class FactorFamily(SerialObject):
             factor_table = pd.DataFrame()
         
         tester = get_factor_tester(time_range=(default_test_start_date, default_test_end_date))
-
-        # from FactorTesterGUI import set_objects, start_gui
-        # set_objects(self, tester)
-        # start_gui(threaded=False, debug=True)
         
         tester.sift_product_by_category(categories=categories)
-        price_cols = ReturnPriceCols.NEXT_OPEN_TO_OPEN
+        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN
 
         factors = self.get_factors(return_freq=return_freq, start_calc_point=start_calc_point, **kwargs)
         tester.calc_factor(factors)
-        tester.calc_ic(return_price_cols=price_cols)
+        tester.calc_ic(returns_col=returns_col)
         
         for factor in factors:
             
-            _, _, report_df = tester.test_by_group(factor, return_price_cols=price_cols,
+            _, _, report_df = tester.test_by_group(factor, returns_col=returns_col,
                 plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
                 plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
                 )
@@ -617,7 +533,7 @@ class FactorTester(SerialObject):
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
     
-    def calc_ic(self, return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
+    def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
                 factors: Optional[Factor|List[Factor]] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
@@ -631,7 +547,7 @@ class FactorTester(SerialObject):
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            return_df = factor.calc_returns(next_return=True, price_cols=return_price_cols) if factor.returns.empty else factor.returns
+            return_df = factor.calc_returns(next_return=True, returns_col=returns_col) if factor.returns.empty else factor.returns
             assert not return_df.empty
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
@@ -672,7 +588,7 @@ class FactorTester(SerialObject):
         return stats_df
 
     def test_by_group(self, factors: Optional[Factor|List[Factor]] = None,
-                      return_price_cols: ReturnPriceCols = ReturnPriceCols.NEXT_OPEN_TO_OPEN,
+                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
                       n_groups: int = 5, n_groups_name: Dict[int, str] = {},
                       time_range: Optional[Tuple] = None,
                       plot_remark_str: Optional[str] = None,
@@ -697,7 +613,7 @@ class FactorTester(SerialObject):
         for factor in factors:
 
             if factor.returns.empty:
-                factor.calc_returns(next_return=True, price_cols=return_price_cols)
+                factor.calc_returns(next_return=True, returns_col=returns_col)
             assert not factor.returns.empty
 
             last_dt, _ = next(factor.table.iterrows())
@@ -853,7 +769,12 @@ class Returns(FactorFamily):
         data = product.get(data_freq.name)
         assert isinstance(data, DataMeta)
         if SC == EC:
-            ret = data[SC].pct_change(RF).shift(S)
+            if SC == DataColumn.OPEN or SC == DataColumn.OPEN_ADJUSTED:
+                ret = data[SC].pct_change(RF, grouped_method='first').shift(S)
+            elif SC == DataColumn.CLOSE or SC == DataColumn.CLOSE_ADJUSTED:
+                ret = data[SC].pct_change(RF).shift(S)
+            else:
+                raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
             return data.sync_signal(ret, RF)
         else:
             return pd.Series()  # TODO: Implement this method to calculate returns based on the specified return frequency and price columns
