@@ -484,7 +484,8 @@ class DataMeta(SerialObject):
     def _get_signal_index(self, freq: Any,  bfill: Optional[int] = None, min_periods: Optional[Any] = None,
                           end_session_skip: bool = False, end_session_gap: pd.Timedelta = pd.Timedelta('3hour'),
                           copy: bool = False, _offset: int = 0, _copy_index_name: bool = False, 
-                          grouped_index_method: str|Callable = 'last', **kwargs) -> Dict[str, Any]:
+                          day_basepoint: str|Callable = 'last', # 'last', 'first', '09:01:00'
+                          **kwargs) -> Dict[str, Any]:
 
         index_name_stem: str = '_SIGNAL'
         assert freq is not None, "Frequency must be provided"
@@ -509,8 +510,27 @@ class DataMeta(SerialObject):
         
         first_true_series = self._get_level_index(data, data.index.names[first_true_idx]).to_series().reset_index(drop=True)
         
-        method = (lambda x: getattr(x, grouped_index_method)()) if isinstance(grouped_index_method, str) else grouped_index_method
-        first_true_change_pos = method(first_true_series.reset_index().groupby(str(first_true_series.name))).reset_index().set_index('index').index
+        if isinstance(day_basepoint, str):
+            day_basepoint = day_basepoint.lower()
+            if day_basepoint == 'last':
+                series = data.groupby(str(data.index.names[first_true_idx])).cumcount(ascending=False) == 0
+            elif day_basepoint == 'first':
+                series = data.groupby(str(data.index.names[first_true_idx])).cumcount() == 0
+            else:
+                try:
+                    base_time = pd.Timestamp(day_basepoint).time()
+                    series = data.groupby(str(data.index.names[first_true_idx])).transform(lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
+                except:
+                    raise ValueError("Invalid day_basepoint value. Must be 'last', 'first', or a valid time string like '09:01:00'")
+        else:
+            series = day_basepoint(data.groupby(str(data.index.names[first_true_idx])))
+        
+        if not any(series):
+            # If no True values are found, we can default to using the first position of each group as the base point
+            series = data.groupby(str(data.index.names[first_true_idx])).cumcount() == 0
+
+        assert isinstance(series, pd.Series) and series.dtype == bool, "day_basepoint function must return a boolean Series"
+        first_true_change_pos = series.reset_index(drop=True).index[series]
 
         if end_session_skip and freq.value < pd.Timedelta('1day'):
             last_col_series = self._get_level_index(data, data.index.names[-1]).to_series().reset_index(drop=True)
@@ -531,8 +551,8 @@ class DataMeta(SerialObject):
         def _get_extended_index(bfill: Optional[int] = None) -> Tuple[pd.MultiIndex, List[str], List[str]]:
             left_indices = data.index.names[:first_true_idx]
             right_indices = data.index.names[first_true_idx:]
-            left_series_dict = {idx: self._get_level_index(data, idx).where(signal_map_within_first_true_series) for idx in left_indices}
-            right_series_dict = {idx: self._get_level_index(data, idx) for idx in right_indices}
+            left_series_dict = {idx: self._get_level_index(data, idx).to_series().where(signal_map_within_first_true_series) for idx in left_indices}
+            right_series_dict = {idx: self._get_level_index(data, idx).to_series() for idx in right_indices}
             index_arrays = [_bfill(left_series_dict[idx], bfill=bfill) for idx in left_indices] \
                             + [_bfill(signal_series_within_first_true_series, bfill=bfill)] \
                             + [_bfill(right_series_dict[idx], bfill=None) for idx in right_indices]
@@ -559,7 +579,8 @@ class DataMeta(SerialObject):
             'extended_index': extended_index,
             'index_names_for_groupby': index_names_for_groupby,
             'index_names': index_names,
-            'min_multiple': min_multiple
+            'min_multiple': min_multiple,
+            'first_true_col': str(data.index.names[first_true_idx]).split('@')[-1],
         }
     
     def groupby(self, freq: Optional[Any] = None, bfill: Optional[int] = None,
@@ -584,17 +605,24 @@ class DataMeta(SerialObject):
         list_of_data = []
         groupby_index_names = None
         original_index_names = None
-        grouped_index_method = kwargs.pop('grouped_index_method', 'last')
+        day_basepoint = kwargs.pop('day_basepoint', 'last')
+        day_basepoint_str = (day_basepoint.upper() if day_basepoint.lower() in ['first', 'last'] \
+                             else f"{day_basepoint}_OR_FIRST") if isinstance(day_basepoint, str) \
+                                else f"({day_basepoint})".upper()
         min_multiple = None
+        first_true_col = None
         for _offset in range(multiple):
             results = self._get_signal_index(freq=freq, copy=True, _offset=_offset, min_periods=min_periods, 
-                                             _copy_index_name=True, grouped_index_method=grouped_index_method, **kwargs)
+                                             _copy_index_name=True, day_basepoint=day_basepoint, **kwargs)
             data = results['data']
             data.index = results['extended_index']
             if min_multiple is None:
                 min_multiple = results['min_multiple']
+                assert first_true_col is None
+                first_true_col = results['first_true_col']
             else:
                 assert min_multiple == results['min_multiple'], "min_multiple does not match across offsets"
+                assert first_true_col == results['first_true_col'], "First true column does not match across offsets"
             list_of_data.append(data)
             if groupby_index_names is None:
                 groupby_index_names = results['index_names_for_groupby']
@@ -608,29 +636,41 @@ class DataMeta(SerialObject):
                           target_type=_RollingInDays, list_of_data=list_of_data,
                           groupby_index_names=groupby_index_names,
                           original_index_names=original_index_names,
-                          min_multiple=min_multiple,
-                          alias=kwargs.pop('alias', f"ROLLING_INDAYS_{freq.name}"), **kwargs)
+                          min_multiple=min_multiple, first_true_col=first_true_col,
+                          alias=kwargs.pop('alias', f"ROLLING_INDAYS_{freq.name}_AT_{day_basepoint_str}"), **kwargs)
     
-    def _sync_signal(self, signal_datameta: DataMeta, freq: Any,
-                    end_session_skip: bool = True, 
-                    end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> DataMeta:
+    def _sync_signal(self, signal_datameta: DataMeta, freq: Any, replace: bool = False,
+                     day_basepoint: str|Callable = 'last',
+                     end_session_skip: bool = True, 
+                     end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> DataMeta:
         signal = signal_datameta.data
         if isinstance(signal, pd.DataFrame):
             assert len(signal.columns) == 1, "Signal must have only one column"
             signal = signal.squeeze()
         assert isinstance(signal, pd.Series), "Signal must be a Series after squeezing"
-        index = self._get_signal_index(freq=freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, copy=True, **kwargs)['signal_index']
+        index = self._get_signal_index(freq=freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, day_basepoint=day_basepoint, copy=True, **kwargs)['signal_index']
         assert index.nlevels == signal.index.nlevels, "Index levels do not match between signal index and signal index"
-        map = signal.index.isin(index)
-        signal = signal[map]
+        if not replace:
+            map = signal.index.isin(index)
+            signal = signal[map]
+        else:
+            signal_col_signal = next((name for name in signal.index.names if isinstance(name, str) and name.startswith('_SIGNAL@')), None)
+            assert signal_col_signal is not None, "Signal index must have a level that starts with '_SIGNAL@' when replace is True"
+            signal_col_index = next((name for name in index.names if isinstance(name, str) and name.startswith('_SIGNAL@')), None)
+            assert signal_col_index is not None, "Index must have a level that starts with '_SIGNAL@' when replace is True"
+            map = signal.index.get_level_values(signal_col_signal).isin(index.get_level_values(signal_col_index))
+            signal = signal[map]
+            signal.index = index
         signal.index.names = index.names
         signal.rename(self.object.alias, inplace=True)
         return signal_datameta._wrap(signal, alias=f"SYNCED_SIGNAL_{_process_data_freq(freq).name}")
     
-    def sync_signal(self, signal: Any, freq: Any,
+    def sync_signal(self, signal: Any, freq: Any, replace: bool = False,
+                    day_basepoint: str|Callable = 'last',
                     end_session_skip: bool = True, 
                     end_session_gap: pd.Timedelta = pd.Timedelta('3hour'), **kwargs) -> pd.Series:
-        series = self._sync_signal(signal, freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap, **kwargs).data
+        series = self._sync_signal(signal, freq, end_session_skip=end_session_skip, end_session_gap=end_session_gap,
+                                   day_basepoint=day_basepoint, replace=replace, **kwargs).data
         assert isinstance(series, pd.Series), "Synced signal must be a Series"
         return series
     
@@ -647,8 +687,7 @@ class DataMeta(SerialObject):
             window_freq = _process_data_freq(window)
             min_periods = _process_data_freq(min_periods) if min_periods is not None else window_freq
             if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
-                return self.rolling_indays(freq=window_freq, 
-                                            data=data, min_periods=min_periods, **kwargs)
+                return self.rolling_indays(freq=window_freq, data=data, min_periods=min_periods, **kwargs)
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value.total_seconds() / data_freq.value.total_seconds())
                 min_periods_size = int(min_periods.value.total_seconds() / data_freq.value.total_seconds())
@@ -657,8 +696,7 @@ class DataMeta(SerialObject):
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
     def pct_change(self, window: int|str|pd.Timedelta = 1, 
-                   grouped_method: str|Callable = 'last', # 'last', 'first', lambda x: x.nth(0)
-                   grouped_index_method: str|Callable = 'last',
+                   day_basepoint: str|Callable = 'last', # 'last', 'first', '09:01:00'
                    col: Optional[Any] = None, copy: bool = False, **kwargs) -> DataMeta:
         data = self.get_data(copy=copy, data=kwargs.pop('data', None), **kwargs)
         data = self._filter_data_by_start_calc_point(data, **kwargs)
@@ -677,41 +715,16 @@ class DataMeta(SerialObject):
                 col = data.columns[0]
                 data = data[col]
         if isinstance(window, int):
-            return self._wrap(data.pct_change(periods=window), alias=alias + '_' + str(window))
+            result = data.pct_change(periods=window)
+            result.index.names = result.index.names[:-1] + ['_SIGNAL@' + str(result.index.names[-1])]
+            return self._wrap(result, alias=alias + '_' + str(window))
         else:
             window_freq = _process_data_freq(window)
             if window_freq.is_day_multiple() and data_freq.value < pd.Timedelta('1day'):
-                
-                # Check compatibility of grouped_method and grouped_index_method for rolling in days
-                if isinstance(grouped_index_method, str) and grouped_index_method == 'first':
-                    grouped_method = 'first'
-                elif callable(grouped_index_method):
-                    if isinstance(grouped_method, str) and grouped_method == 'last':
-                        grouped_method = grouped_index_method
-                    elif callable(grouped_method):
-                        error = None
-                        try:
-                            class _get_n_from_nth:
-                                def __init__(self):
-                                    self.nth = lambda x: x
-                            get_n_from_nth = _get_n_from_nth()
-                            n_grouped = grouped_method(get_n_from_nth)
-                            n_grouped_index = grouped_index_method(get_n_from_nth)
-                            if isinstance(n_grouped, int) and isinstance(n_grouped_index, int):
-                                if (n_grouped > n_grouped_index >= 0 or n_grouped_index < n_grouped < 0):
-                                    grouped_method = grouped_index_method
-                                elif n_grouped_index * n_grouped < 0:
-                                    error = ValueError("grouped_method and grouped_index_method must have the same direction for nth selection")
-                            else:
-                                error = ValueError("grouped_method and grouped_index_method must return an integer when called with an object that has a nth method")
-                        except:
-                            if error is not None:
-                                raise error
 
-                # tiny_window = '1min'
-                rolling_indays = self.rolling_indays(freq=window_freq, alias=f"ROLLING_INDAYS_{window_freq.name}", 
-                                 data=data, grouped_index_method=grouped_index_method, **kwargs)
-                
+                tiny_window = '1min'
+                rolling_indays = self.rolling_indays(freq=window_freq, data=data, min_periods=tiny_window, day_basepoint=day_basepoint, **kwargs)
+                    
                 index_data_freq = [_process_data_freq(level) for level in data.index.names]
                 index_map_of_multiple = [window_freq.value.total_seconds() % idx_freq.value.total_seconds() == 0 for idx_freq in index_data_freq]
                 first_true_idx = next((i for i, is_multiple in enumerate(index_map_of_multiple) if is_multiple), None)
@@ -719,12 +732,13 @@ class DataMeta(SerialObject):
                 first_true_freq = index_data_freq[first_true_idx]
                 window_size = int(window_freq.value / first_true_freq.value)
 
-                method = (lambda x: getattr(x, grouped_method)()) if isinstance(grouped_method, str) else grouped_method
-                return method(rolling_indays).pct_change(window_size)
+                return rolling_indays.last().pct_change(window_size)
             
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value / data_freq.value)
-                return self._wrap(data.pct_change(periods=window_size), alias=alias + '_' + str(window_size))
+                result = data.pct_change(periods=window_size)
+                result.index.names = result.index.names[:-1] + ['_SIGNAL@' + str(result.index.names[-1])]
+                return self._wrap(result, alias=alias + '_' + str(window_size))
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
 
@@ -744,7 +758,8 @@ class DataMeta(SerialObject):
                 raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
             def wrapper(*args, **kwargs):
                 result = method(*args, **kwargs)
-                return self._wrap(result, alias=f"{method.__name__.upper()}")
+                param_str = _rectify_args_kwargs(*args, **kwargs)
+                return self._wrap(result, alias=f"{name.upper()}{param_str}")
             return wrapper
     
     def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None, **kwargs) -> DataMeta:
@@ -1036,6 +1051,9 @@ class _RollingInDays(DataMeta):
                  groupby_index_names: List[str], original_index_names: List[str], **kwargs):
         if not hasattr(self, '_initialized'):
             self.min_multiple = kwargs.pop('min_multiple', None)
+            self.first_true_col = kwargs.pop('first_true_col', None)
+            self.groupby_index_names = groupby_index_names
+            self.original_index_names = original_index_names
             super().__init__(data=kwargs.pop('data', None), alias=kwargs.pop('alias', 'ROLLING_INDAYS'),
                              object=kwargs.pop('object'), original_object=kwargs.pop('original_object', None), 
                              data_freq=kwargs.pop('data_freq'), timezone=kwargs.pop('timezone'), **kwargs)
@@ -1074,9 +1092,12 @@ class _RollingInDays(DataMeta):
             col = kwargs.pop('col', None)
             list_of_grouped = self.list_of_grouped if col is None else [grouped[col] for grouped in self.list_of_grouped]
             list_of_target = [getattr(grouped, name) for grouped in list_of_grouped]
-            list_of_count_func = [getattr(grouped, 'count') for grouped in list_of_grouped]
-            import numpy as np
-            list_of_result = [target(*args, **kwargs).where(count_func() >= self.min_multiple, np.nan) for target, count_func in zip(list_of_target, list_of_count_func)]
+            list_of_count = [data.reset_index()[self.groupby_index_names + [self.first_true_col]].drop_duplicates().groupby(self.groupby_index_names).count().squeeze() for data in self.list_of_data]
+            if self.min_multiple is not None:
+                import numpy as np
+                list_of_result = [target(*args, **kwargs).where(count >= self.min_multiple, np.nan) for target, count in zip(list_of_target, list_of_count)]
+            else:
+                list_of_result = [target(*args, **kwargs) for target in list_of_target]
             param_str = _rectify_args_kwargs(*args, **kwargs)
             return self._wrap(self._restore_index_and_concat(list_of_result), alias=f"{name.upper()}{param_str}")
         return wrapper
@@ -1103,7 +1124,10 @@ class _RollingInDays(DataMeta):
                 list_of_target = [getattr(grouped[self.key], name) for grouped in self.parent.list_of_grouped]
                 list_of_count_func = [getattr(grouped[self.key], 'count') for grouped in self.parent.list_of_grouped]
                 import numpy as np
-                list_of_result = [target(*args, **kwargs).where(count_func() >= self.parent.min_multiple, np.nan) for target, count_func in zip(list_of_target, list_of_count_func)]
+                if self.parent.min_multiple is not None:
+                    list_of_result = [target(*args, **kwargs).where(count_func() >= self.parent.min_multiple, np.nan) for target, count_func in zip(list_of_target, list_of_count_func)]
+                else:
+                    list_of_result = [target(*args, **kwargs) for target in list_of_target]
                 param_str = _rectify_args_kwargs(*args, **kwargs)
                 return self.parent._wrap(self.parent._restore_index_and_concat(list_of_result), alias=f"{name.upper()}_{self.key}{param_str}")
             return wrapper

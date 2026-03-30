@@ -164,7 +164,7 @@ class Factor(SerialObject):
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
         start_calc_point = self.get_current_start_calc_point()
         StartCalcPointParam.register(ReturnsFamily, start_calc_point)
-        shift = -2 if returns_col.value.name.startswith('OPEN') else -1
+        shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)
         return return_factor.calc(self.products)
@@ -768,15 +768,24 @@ class Returns(FactorFamily):
         data_freq = product.get_current_freq()
         data = product.get(data_freq.name)
         assert isinstance(data, DataMeta)
+        if _process_data_freq(RF).is_day_multiple():
+            multiple = int(RF / pd.Timedelta('1d'))
+        else:
+            multiple = int(RF / data_freq.value)
         if SC == EC:
+            day_basepoint = 'last'
             if SC == DataColumn.OPEN or SC == DataColumn.OPEN_ADJUSTED:
-                ret = data[SC].pct_change(RF, grouped_method='first').shift(S)
+                day_basepoint = 'first'
+                ret = data[SC].pct_change(RF, day_basepoint=day_basepoint).shift(-multiple+S)
             elif SC == DataColumn.CLOSE or SC == DataColumn.CLOSE_ADJUSTED:
-                ret = data[SC].pct_change(RF).shift(S)
+                ret = data[SC].pct_change(RF, day_basepoint=day_basepoint).shift(-multiple+S)
             else:
                 raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
-            return data.sync_signal(ret, RF)
+            return data.sync_signal(ret, RF, day_basepoint='last', replace=True)
         else:
-            return pd.Series()  # TODO: Implement this method to calculate returns based on the specified return frequency and price columns
+            start = data[SC].rolling(RF).first()
+            end = data[EC].rolling(RF).last()
+            ret = end / start - 1
+            return data.sync_signal(ret, RF)
 
 ReturnsFamily = Returns()
