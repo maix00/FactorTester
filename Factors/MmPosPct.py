@@ -15,6 +15,13 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         TimeDeltaParam('RF', flag='pos', default_value='5m'),      # 计算频率（Return Frequency）
     ]
 
+    math_expr = '''
+        \\begin{aligned}
+            r_t &:= \\frac{P_t - P_{t-RF}}{P_{t-RF}}, \\\\[5pt]
+            X_t &:= \\frac{1}{WF}\\sum_{t-WF \\leq s \\leq t} \\mathbf{1}_{r_s > 0}.
+        \\end{aligned}
+    '''
+
     def func_timeseries(self, product: Product, F: Any = pd.Timedelta('5m'),
                         WF: Any = pd.Timedelta('2h'), RF: Any = pd.Timedelta('1d'),
                         P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
