@@ -18,10 +18,10 @@ import logging
 from tqdm import tqdm
 
 sift_volume_ratio = 0.8
-default_test_start_date = '2025-01-01'
-default_test_end_date = '2025-05-31'
-default_plot_test_start_date = '2025-01-01'
-default_plot_test_end_date = '2025-12-31'
+default_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
+default_plot_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 logger_dir_path_default = '../data/factor_tester_log/'
 factor_info_path = '../data/Factors/'
 
@@ -47,6 +47,9 @@ def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     products = get_all_futures()
     tester = FactorTester(products=products, time_range=time_range)
     return tester
+
+def _signal_time(obj: Any):
+    return obj if not isinstance(obj, tuple) else obj[-1]
 
 class FactorFreqType(Enum):
     CONSTANT = 0
@@ -167,7 +170,8 @@ class Factor(SerialObject):
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)
-        return return_factor.calc(self.products)
+        self.returns = return_factor.calc(self.products)
+        return self.returns
 
 class FactorFamily(SerialObject):
     _instances = WeakValueDictionary()
@@ -374,6 +378,7 @@ class FactorFamily(SerialObject):
     def test(self, categories: Optional[str|List[str]] = None,
              return_freq: Optional[Any] = None, 
              start_calc_point: Optional[Any] = None,
+             ic_test_time_range: Optional[Tuple] = None,
              sift_volume_ratio: float = sift_volume_ratio, **kwargs) -> FactorTester:
         
         factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
@@ -383,8 +388,10 @@ class FactorFamily(SerialObject):
             factor_table = pd.read_csv(factor_cache_path)
         else:
             factor_table = pd.DataFrame()
-        
-        tester = get_factor_tester(time_range=(default_test_start_date, default_test_end_date))
+
+        start_date = ic_test_time_range[0] if ic_test_time_range is not None else default_test_start_date
+        end_date = ic_test_time_range[1] if ic_test_time_range is not None else default_test_end_date
+        tester = get_factor_tester(time_range=(start_date, end_date))
         
         tester.sift_product_by_category(categories=categories)
         returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN
@@ -552,9 +559,9 @@ class FactorTester(SerialObject):
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
             if start_date is not None:
-                dt_index = dt_index[[start_date <= (max(k) if not isinstance(k, pd.Timestamp) else k) for k in dt_index]]
+                dt_index = dt_index[[start_date <= _signal_time(k) for k in dt_index]]
             if end_date is not None:
-                dt_index = dt_index[[(min(k) if not isinstance(k, pd.Timestamp) else k) <= end_date for k in dt_index]]
+                dt_index = dt_index[[_signal_time(k) <= end_date for k in dt_index]]
             ic = []
             coverage = []
             for dt in dt_index:
@@ -563,7 +570,10 @@ class FactorTester(SerialObject):
                 valid = f.notna() & r.notna()
                 coverage.append(valid.sum())
                 if valid.sum() > 1:
-                    ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
+                    if f[valid].nunique() > 1 and r[valid].nunique() > 1:
+                        ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
+                    else:
+                        ic.append(np.nan)
                 else:
                     ic.append(np.nan)
             factor.ic_series = pd.Series(ic, index=dt_index)
@@ -618,7 +628,7 @@ class FactorTester(SerialObject):
 
             last_dt, _ = next(factor.table.iterrows())
             for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.alias):
-                sifted_products = self.products
+                sifted_products = factor.returns.columns
                 # sifted_products = self.sift_product_by_volumes(
                 #     ratio=sift_volume_ratio, 
                 #     time_range=(last_dt if dt != last_dt else None, dt)
@@ -660,10 +670,10 @@ class FactorTester(SerialObject):
             for idx in range(n_groups):
 
                 dates = list(returns[idx].keys()) if returns[idx] else []
-                test_dates = [date for date in dates if self.start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if self.start_date else dates
-                test_dates = [date for date in test_dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= self.end_date] if self.end_date else dates
-                dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
-                dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
+                test_dates = [date for date in dates if self.start_date <= _signal_time(date)] if self.start_date else dates
+                test_dates = [date for date in test_dates if _signal_time(date) <= self.end_date] if self.end_date else dates
+                dates = [date for date in dates if start_date <= _signal_time(date)] if start_date else dates
+                dates = [date for date in dates if _signal_time(date) <= end_date] if end_date else dates
                 
                 returns_list = [returns[idx][date] for date in dates]
                 returns_series = pd.Series(returns_list).dropna()
@@ -718,8 +728,8 @@ class FactorTester(SerialObject):
                     if plot_n_group_list is not None and idx not in plot_n_group_list:
                         continue
                     dates = list(returns[idx].keys()) if returns[idx] else []
-                    dates = [date for date in dates if start_date <= (max(date) if not isinstance(date, pd.Timestamp) else date)] if start_date else dates
-                    dates = [date for date in dates if (min(date) if not isinstance(date, pd.Timestamp) else date) <= end_date] if end_date else dates
+                    dates = [date for date in dates if start_date <= _signal_time(date)] if start_date else dates
+                    dates = [date for date in dates if _signal_time(date) <= end_date] if end_date else dates
                     returns_list = [returns[idx][date] for date in dates]
                     cumulative_returns = []
                     prev_value = 10000
