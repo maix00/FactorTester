@@ -716,7 +716,9 @@ class DataMeta(SerialObject):
                 data = data[col]
         if isinstance(window, int):
             result = data.pct_change(periods=window)
-            result.index.names = result.index.names[:-1] + ['_SIGNAL@' + str(result.index.names[-1])]
+            signal_col = next((name for name in data.index.names if isinstance(name, str) and name.startswith('_SIGNAL@')), None)
+            if signal_col is None:
+                result.index.names = [str(name).split('@')[-1] for name in result.index.names[:-1]] + ['_SIGNAL@' + str(result.index.names[-1]).split('@')[-1]]
             return self._wrap(result, alias=alias + '_' + str(window))
         else:
             window_freq = _process_data_freq(window)
@@ -737,7 +739,9 @@ class DataMeta(SerialObject):
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 window_size = int(window_freq.value / data_freq.value)
                 result = data.pct_change(periods=window_size)
-                result.index.names = result.index.names[:-1] + ['_SIGNAL@' + str(result.index.names[-1])]
+                signal_col = next((name for name in data.index.names if isinstance(name, str) and name.startswith('_SIGNAL@')), None)
+                if signal_col is None:
+                    result.index.names = [str(name).split('@')[-1] for name in result.index.names[:-1]] + ['_SIGNAL@' + str(result.index.names[-1]).split('@')[-1]]
                 return self._wrap(result, alias=alias + '_' + str(window_size))
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
@@ -1092,7 +1096,12 @@ class _RollingInDays(DataMeta):
             col = kwargs.pop('col', None)
             list_of_grouped = self.list_of_grouped if col is None else [grouped[col] for grouped in self.list_of_grouped]
             list_of_target = [getattr(grouped, name) for grouped in list_of_grouped]
-            list_of_count = [data.reset_index()[self.groupby_index_names + [self.first_true_col]].drop_duplicates().groupby(self.groupby_index_names).count().squeeze() for data in self.list_of_data]
+            list_of_count = [data.reset_index()[
+                self.groupby_index_names + (
+                    [data.name] if isinstance(data, pd.Series) else 
+                    list(data.columns) if isinstance(data, pd.DataFrame) else []
+                )].groupby(self.groupby_index_names).count().squeeze() 
+                for data in self.list_of_data]
             if self.min_multiple is not None:
                 import numpy as np
                 list_of_result = [target(*args, **kwargs).where(count >= self.min_multiple, np.nan) for target, count in zip(list_of_target, list_of_count)]
