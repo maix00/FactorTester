@@ -4,10 +4,9 @@ import os
 from Products import Futures, FuturesContract
 from Tools import DataColumn
 
-from utils.path_manager import get_data_file_path, get_data_dir
-_data = pd.read_csv(get_data_file_path('sectors.csv'))
-data_dir_min = get_data_dir('main_mink')
-data_dir_day = get_data_dir('main_dayk')
+_data = pd.read_csv('../data/sectors.csv')
+data_dir_min = '../data/main_mink'
+data_dir_day = '../data/main_dayk'
 data_type = 'parquet'
 file_list_min = [
     os.path.join(data_dir_min, f)
@@ -188,7 +187,7 @@ from Products import Product
 
 def get_all_futures_contract() -> List[Product]:
 
-    data_dir_min = get_data_dir('data_mink_product')
+    data_dir_min = '../data/data_mink_product'
 
     from Tools import DataSource, DataFreq
     LocalCNFuturesContractMIN1 = DataSource(

@@ -8,9 +8,8 @@ import threading
 import webbrowser
 from Factor import FactorFamily, StartCalcPointParam
 import Settings
-
-from utils.path_manager import get_factors_func_dir
-from utils.path_manager import get_ic_cache_dir, get_factor_cache_dir
+import time
+import traceback
 
 # 添加这段代码来适配打包环境
 if getattr(sys, 'frozen', False):
@@ -28,7 +27,7 @@ factor_testers = []
 def get_factor_family_instance(module_name):
     if module_name in _factor_family_cache:
         return _factor_family_cache[module_name]
-    factors_dir = get_factors_func_dir()
+    factors_dir = os.path.join(os.getcwd(), "Factors")
     module_path = os.path.join(factors_dir, f"{module_name}.py")
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is not None and spec.loader is not None:
@@ -127,7 +126,7 @@ def get_factor_main_section_html(factor_family_alias):
     
 @app.route('/', methods=['GET'])
 def index():
-    factors_dir = get_factors_func_dir()
+    factors_dir = os.path.join(os.getcwd(), "Factors")
     groups, factor_names = get_factor_groups(factors_dir)
 
     search_query = request.args.get('search', '')
@@ -153,7 +152,6 @@ def index():
             print("因子加载成功")  # 调试输出
         except Exception as e:
             print(f"因子加载失败: {e}")  # 调试输出
-            import traceback
             traceback.print_exc()  # 打印完整错误堆栈
             main_content = f"""
                 <div class="section">
@@ -590,8 +588,8 @@ def run_ic_test():
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
         factors = factor_family.get_factors()  # 获取因子列表
 
-        cache_dir_ic = Path(get_ic_cache_dir())
-        cache_dir_factor = Path(get_factor_cache_dir())
+        cache_dir_ic = Path('../data/cache/ic')
+        cache_dir_factor = Path('../data/cache/factor')
         cache_dir_ic.mkdir(parents=True, exist_ok=True)
         cache_dir_factor.mkdir(parents=True, exist_ok=True)
 
@@ -721,6 +719,14 @@ def run_flask_server(port=8000, directory='.'):
     os.chdir(directory)
     url = f"http://localhost:{port}/"
     print(f"Serving Flask on {url} from {os.path.abspath(directory)}")
+    
+    # 启动一个线程，延时1秒后打开浏览器（等待服务器完全启动）
+    def open_browser():
+        time.sleep(1)
+        webbrowser.open(url)
+    
+    threading.Thread(target=open_browser, daemon=True).start()
+    
     app.run(host='localhost', port=port, debug=False, use_reloader=False)
     print("服务器已关闭。")
 
