@@ -6,16 +6,19 @@ from pandas.core.groupby import DataFrameGroupBy
 from enum import Enum
 
 class UniqueObject(ABC):
+    '''
+        唯一对象基类：每个实例根据其 name 属性唯一标识，且同一类的实例之间 name 不重复。
+        子类：SerialObject, Product, CNFutures, Factor, Parameter, DataSource, DataMeta 等。
+    '''
+
     _instances = WeakValueDictionary()
 
+
     def __new__(cls, name: str, *args, **kwargs):
-        # Create a unique key that includes the class type
         key = (name, cls.__name__)
-        # Check if an instance with this name and class already exists
         if key in cls._instances:
             return cls._instances[key]
         
-        # Create a new instance if it doesn't exist
         instance = super().__new__(cls)
         cls._instances[key] = instance
         return instance
@@ -239,6 +242,7 @@ def _process_data_col(col: Optional[Any] = None) -> DataColumn:
     if isinstance(col, DataColumn):
         return col
     if isinstance(col, str):
+        col = col.removeprefix('DataColumn.').upper()
         try:
             return DataColumn(col)
         except:

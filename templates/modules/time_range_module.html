@@ -1,0 +1,118 @@
+<!-- 时间范围模块 - 完整版本 -->
+<div class="module" id="time_range_module">
+    <div class="section-title">起始/终末时间设置</div>
+    
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+        <div>
+            <span style="font-size:13px;">起始时间:</span>
+            <input type="date" id="start_date" value="{{ start_date }}" style="margin-left:8px;">
+            <input type="time" id="start_time" value="{{ start_time }}">
+        </div>
+        <div>
+            <span style="font-size:13px;">终末时间:</span>
+            <input type="date" id="end_date" value="{{ end_date }}" style="margin-left:8px;">
+            <input type="time" id="end_time" value="{{ end_time }}">
+        </div>
+        <div>
+            <label style="font-size:13px;">
+                <input type="checkbox" id="is_trading_day">
+                交易日
+            </label>
+        </div>
+    </div>
+    
+    <div style="margin-top:16px;">
+        <label style="font-size:13px;">时区:</label>
+        <select id="timezone_select" style="margin-left:8px;padding:4px;">
+            <option value="Asia/Shanghai" selected>Asia/Shanghai</option>
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="Europe/London">Europe/London</option>
+        </select>
+    </div>
+    
+    <div style="margin-top:16px;">
+        <button id="confirm_time_btn" type="button" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:6px 18px;">
+            确定
+        </button>
+        <span id="confirm_time_status" style="margin-left:12px;color:#888;font-size:13px;"></span>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const factorFamilyAlias = '{{ factor_family_alias }}';
+    const startDate = document.getElementById('start_date');
+    const startTime = document.getElementById('start_time');
+    const endDate = document.getElementById('end_date');
+    const endTime = document.getElementById('end_time');
+    const confirmBtn = document.getElementById('confirm_time_btn');
+    const statusSpan = document.getElementById('confirm_time_status');
+    
+    function updateStatus() {
+        if (startDate.value <= endDate.value) {
+            confirmBtn.disabled = false;
+            confirmBtn.style.background = '#0078d4';
+            statusSpan.innerText = '点击确定按钮更新因子计算的时间范围';
+            statusSpan.style.color = '#888';
+        } else {
+            confirmBtn.disabled = true;
+            confirmBtn.style.background = '#ccc';
+            statusSpan.innerText = '⚠️ 起始时间必须 ≤ 终末时间';
+            statusSpan.style.color = '#d40000';
+        }
+    }
+    
+    function confirmTimeRange() {
+        const data = {
+            factor_family_alias: factorFamilyAlias,
+            start_date: startDate.value,
+            start_time: startTime.value,
+            end_date: endDate.value,
+            end_time: endTime.value,
+            is_trading_day: document.getElementById('is_trading_day').checked,
+            timezone: document.getElementById('timezone_select').value
+        };
+        
+        statusSpan.innerText = '保存中...';
+        statusSpan.style.color = '#0078d4';
+        
+        fetch('/set_time_range', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusSpan.innerText = '✓ 已保存，时间范围已更新';
+                statusSpan.style.color = '#28a745';
+                setTimeout(() => {
+                    if (statusSpan.innerText === '✓ 已保存，时间范围已更新') {
+                        statusSpan.innerText = '';
+                    }
+                }, 3000);
+            } else {
+                statusSpan.innerText = '保存失败: ' + (data.error || '未知错误');
+                statusSpan.style.color = '#d40000';
+            }
+        })
+        .catch(err => {
+            statusSpan.innerText = '网络错误: ' + err.message;
+            statusSpan.style.color = '#d40000';
+        });
+    }
+    
+    startDate.addEventListener('change', updateStatus);
+    endDate.addEventListener('change', updateStatus);
+    confirmBtn.addEventListener('click', confirmTimeRange);
+    updateStatus();
+});
+</script>
+
+<script>
+window.timeRangeModuleConfig = {
+    alias: '{{ factor_family_alias }}'
+};
+</script>
+<script src="{{ url_for('static', filename='js/time_range_module.js') }}"></script>

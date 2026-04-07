@@ -1,0 +1,15 @@
+<div class="section" 
+     data-factor-alias="{{ factor_family_alias }}" 
+     data-param-aliases='{{ param_aliases|tojson }}'>
+    <div class="section-title">当前因子: <b style="color:#0078d4;">{{ factor_family_alias }}</b></div>
+    <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
+    
+    {% include 'modules/latex_module.html' %}
+    {% include 'modules/parameter_module.html' %}
+    {% include 'modules/time_range_module.html' %}
+    {% include 'modules/category_filter_module.html' %}
+    {% include 'modules/ic_test_module.html' %}
+    {% include 'modules/group_test_module.html' %}
+</div>
+
+<script src="{{ url_for('static', filename='js/factor_main.js') }}"></script>

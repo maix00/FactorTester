@@ -1,0 +1,60 @@
+<div class="module" id="parameter_module" 
+     data-factor-alias="{{ factor_family_alias }}" 
+     data-param-aliases='{{ param_aliases|tojson }}'>
+    <div class="section-title">参数设置</div>
+    
+    <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;min-width:600px;">
+            <thead style="background:#f6f8fa;">
+                <tr>
+                    <th style="padding:8px;text-align:center;">因子(家族)名</th>
+                    {% for param in params %}
+                        <th style="padding:8px;text-align:center;">{{ param.name }}</th>
+                    {% endfor %}
+                    <th style="padding:8px;text-align:center;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="factor_table_body">
+                <!-- 新增行 - 注意 button 的 class 是 add_factor_btn -->
+                <tr>
+                    <td style="padding:8px;text-align:center;">{{ factor_family_alias }}</td>
+                    {% for param in params %}
+                        <td style="padding:8px;text-align:center;">
+                            <input type="text" id="param_{{ param.alias }}" 
+                                   value="{{ param.default_value }}"
+                                   style="width:100px;padding:4px;border-radius:4px;border:1px solid #ccc;">
+                        </td>
+                    {% endfor %}
+                    <td style="padding:8px;text-align:center;">
+                        <button class="add_factor_btn" type="button" 
+                                style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:4px 12px;">
+                            新增
+                        </button>
+                    </td>
+                </tr>
+                <!-- 已有因子行 - 注意 button 的 class 是 delete_factor_btn -->
+                {% for factor in factors %}
+                <tr draggable="true" data-factor-idx="{{ loop.index0 }}">
+                    <td style="padding:8px;text-align:center;">{{ factor.name }}</td>
+                    {% for param in params %}
+                        <td style="padding:8px;text-align:center;">
+                            {{ factor.params_dict[param.alias].get_value(factor) }}
+                        </td>
+                    {% endfor %}
+                    <td style="padding:8px;text-align:center;">
+                        <button class="delete_factor_btn" data-factor-idx="{{ loop.index0 }}" type="button"
+                                style="background:#d40000;color:#fff;border:none;border-radius:4px;padding:4px 12px;">
+                            删除
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div style="margin-top:8px;color:#888;font-size:13px;">
+        提示：可以拖拽排序因子
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/parameter_module.js') }}"></script>
