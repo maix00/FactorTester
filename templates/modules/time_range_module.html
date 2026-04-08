@@ -1,118 +1,73 @@
-<!-- 时间范围模块 - 完整版本 -->
-<div class="module" id="time_range_module">
-    <div class="section-title">起始/终末时间设置</div>
+<div class="module" id="time_range_module" style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <div class="section-title" style="font-size:18px;font-weight:600;margin-bottom:20px;padding-bottom:8px;border-bottom:2px solid #e1e4e8;">⏱️ 时间范围设置</div>
     
-    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
-        <div>
-            <span style="font-size:13px;">起始时间:</span>
-            <input type="date" id="start_date" value="{{ start_date }}" style="margin-left:8px;">
-            <input type="time" id="start_time" value="{{ start_time }}">
+    <!-- 起始/终末时间并排 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
+        <!-- 起始时间卡片 -->
+        <div style="background:#f8f9fa;border-radius:10px;padding:16px;">
+            <div style="font-weight:600;margin-bottom:12px;color:#0078d4;display:flex;align-items:center;gap:6px;">
+                <span>🚀</span> 起始时间
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <input type="number" id="start_year" placeholder="年" style="width:70px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="start_month" placeholder="月" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="start_day" placeholder="日" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="margin-left:4px;"></span>
+                <input type="number" id="start_hour" placeholder="时" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">:</span>
+                <input type="number" id="start_minute" placeholder="分" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+            </div>
         </div>
-        <div>
-            <span style="font-size:13px;">终末时间:</span>
-            <input type="date" id="end_date" value="{{ end_date }}" style="margin-left:8px;">
-            <input type="time" id="end_time" value="{{ end_time }}">
-        </div>
-        <div>
-            <label style="font-size:13px;">
-                <input type="checkbox" id="is_trading_day">
-                交易日
-            </label>
+        
+        <!-- 终末时间卡片 -->
+        <div style="background:#f8f9fa;border-radius:10px;padding:16px;">
+            <div style="font-weight:600;margin-bottom:12px;color:#d40000;display:flex;align-items:center;gap:6px;">
+                <span>🏁</span> 终末时间
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <input type="number" id="end_year" placeholder="年" style="width:70px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="end_month" placeholder="月" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="end_day" placeholder="日" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="margin-left:4px;"></span>
+                <input type="number" id="end_hour" placeholder="时" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+                <span style="color:#999;">:</span>
+                <input type="number" id="end_minute" placeholder="分" style="width:55px;text-align:center;padding:8px;border:1px solid #ddd;border-radius:6px;">
+            </div>
         </div>
     </div>
     
-    <div style="margin-top:16px;">
-        <label style="font-size:13px;">时区:</label>
-        <select id="timezone_select" style="margin-left:8px;padding:4px;">
-            <option value="Asia/Shanghai" selected>Asia/Shanghai</option>
-            <option value="UTC">UTC</option>
-            <option value="America/New_York">America/New_York</option>
-            <option value="Europe/London">Europe/London</option>
-        </select>
+    <!-- 时区 + 选项 区域 -->
+    <div style="display:flex;align-items:flex-start;gap:20px;margin-bottom:12px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:bottom;gap:8px;">
+            <span style="font-weight:500;">🌐 时区:</span>
+            <input type="text" id="timezone_input" list="timezone_list" style="width:160px;padding:6px;border:1px solid #ddd;border-radius:6px;">
+            <datalist id="timezone_list">
+                <option>Asia/Shanghai</option><option>UTC</option><option>America/New_York</option>
+                <option>Europe/London</option><option>Asia/Tokyo</option><option>Australia/Sydney</option>
+            </datalist>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="is_trading_day"> 📅 交易日</label>
+            <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="is_cn_futures_day"> 📈 中国期货日盘 (09:00-15:00)</label>
+            <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="is_cn_futures_night"> 🌙 中国期货夜盘 (21:00-15:00)</label>
+        </div>
     </div>
     
-    <div style="margin-top:16px;">
-        <button id="confirm_time_btn" type="button" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:6px 18px;">
-            确定
-        </button>
-        <span id="confirm_time_status" style="margin-left:12px;color:#888;font-size:13px;"></span>
+    <!-- 当前设置预览 -->
+    <div style="background:#f1f3f5;border-radius:8px;padding:12px;margin-bottom:20px;font-size:14px;">
+        <span style="color:#586069;">📌 当前设置：</span>
+        <span id="current_settings" style="font-weight:500;color:#24292e;"></span>
+    </div>
+    
+    <!-- 操作按钮 -->
+    <div style="display:flex;align-items:center;gap:16px;">
+        <button id="confirm_time_btn" style="background:#0078d4;color:#fff;border:none;border-radius:6px;padding:8px 24px;font-size:14px;font-weight:500;cursor:pointer;transition:0.2s;" disabled>保存设置</button>
+        <span id="confirm_time_status" style="color:#586069;font-size:13px;"></span>
     </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const factorFamilyAlias = '{{ factor_family_alias }}';
-    const startDate = document.getElementById('start_date');
-    const startTime = document.getElementById('start_time');
-    const endDate = document.getElementById('end_date');
-    const endTime = document.getElementById('end_time');
-    const confirmBtn = document.getElementById('confirm_time_btn');
-    const statusSpan = document.getElementById('confirm_time_status');
-    
-    function updateStatus() {
-        if (startDate.value <= endDate.value) {
-            confirmBtn.disabled = false;
-            confirmBtn.style.background = '#0078d4';
-            statusSpan.innerText = '点击确定按钮更新因子计算的时间范围';
-            statusSpan.style.color = '#888';
-        } else {
-            confirmBtn.disabled = true;
-            confirmBtn.style.background = '#ccc';
-            statusSpan.innerText = '⚠️ 起始时间必须 ≤ 终末时间';
-            statusSpan.style.color = '#d40000';
-        }
-    }
-    
-    function confirmTimeRange() {
-        const data = {
-            factor_family_alias: factorFamilyAlias,
-            start_date: startDate.value,
-            start_time: startTime.value,
-            end_date: endDate.value,
-            end_time: endTime.value,
-            is_trading_day: document.getElementById('is_trading_day').checked,
-            timezone: document.getElementById('timezone_select').value
-        };
-        
-        statusSpan.innerText = '保存中...';
-        statusSpan.style.color = '#0078d4';
-        
-        fetch('/set_time_range', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                statusSpan.innerText = '✓ 已保存，时间范围已更新';
-                statusSpan.style.color = '#28a745';
-                setTimeout(() => {
-                    if (statusSpan.innerText === '✓ 已保存，时间范围已更新') {
-                        statusSpan.innerText = '';
-                    }
-                }, 3000);
-            } else {
-                statusSpan.innerText = '保存失败: ' + (data.error || '未知错误');
-                statusSpan.style.color = '#d40000';
-            }
-        })
-        .catch(err => {
-            statusSpan.innerText = '网络错误: ' + err.message;
-            statusSpan.style.color = '#d40000';
-        });
-    }
-    
-    startDate.addEventListener('change', updateStatus);
-    endDate.addEventListener('change', updateStatus);
-    confirmBtn.addEventListener('click', confirmTimeRange);
-    updateStatus();
-});
-</script>
-
-<script>
-window.timeRangeModuleConfig = {
-    alias: '{{ factor_family_alias }}'
-};
-</script>
 <script src="{{ url_for('static', filename='js/time_range_module.js') }}"></script>

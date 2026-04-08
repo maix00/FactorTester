@@ -162,13 +162,21 @@ class Factor(SerialObject):
         self.freq = self.get_freq()
         return self.table
     
-    def calc_returns(self, next_return: bool = True,
+    def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+        if return_freq is not None:
+            return_freq = _process_data_freq(return_freq)
+        else:
+            if self.freq is None:
+                self.freq = self.get_freq()
+            return_freq = self.freq
+        if self.products is None or not self.products:
+            self._set_products()
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
         start_calc_point = self.get_current_start_calc_point()
         StartCalcPointParam.register(ReturnsFamily, start_calc_point)
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
-        return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
+        return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)
         self.returns = return_factor.calc(self.products)
         return self.returns

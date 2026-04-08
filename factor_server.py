@@ -218,6 +218,20 @@ def reorder_params():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/default_time_range')
+def get_default_time_range():
+    from Settings import default_test_start_date, default_test_end_date, default_day_start_time, default_day_end_time
+    return jsonify({
+        'start_date': default_test_start_date,
+        'start_time': default_day_start_time,
+        'end_date': default_test_end_date,
+        'end_time': default_day_end_time,
+        'timezone': getattr(Settings, 'timezone', 'Asia/Shanghai'),
+        'cn_futures_day_start': getattr(Settings, 'default_cn_futures_day_start', '09:00'),
+        'cn_futures_day_end': getattr(Settings, 'default_cn_futures_day_end', '15:00'),
+        'cn_futures_night_start': getattr(Settings, 'default_cn_futures_night_start', '21:00'),
+        'cn_futures_night_end': getattr(Settings, 'default_cn_futures_night_end', '15:00'),
+    })
     
 @app.route('/set_time_range', methods=['POST'])
 def set_time_range():
@@ -562,7 +576,6 @@ def delete_path_of_submission():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-
 @app.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
     import pickle
@@ -607,8 +620,8 @@ def run_ic_test():
             factor.clear()
 
             factor_series_cache_file = cache_dir_factor / f"{factor.alias}_{start_calc_point_str}.pkl"
-            factor_ic_cache_file = cache_dir_ic / f"{factor.alias}_{return_freq}_{paths_hash}_{start_date_str}_{end_date_str}.pkl"
-            
+            factor_ic_cache_file = cache_dir_ic / f"{paths_hash}_{factor.alias}_{return_freq}_{start_date_str}_{end_date_str}.pkl"
+
             table = None
             if not re_calc and factor_series_cache_file.exists():
                 with open(factor_series_cache_file, "rb") as f:
@@ -643,23 +656,25 @@ def run_ic_test():
             ic_stats = None
             if not re_calc and factor_ic_cache_file.exists():
                 with open(factor_ic_cache_file, "rb") as f:
-                    ic_series, ic_stats, products_cache, return_freq_cache, start_date_cache, end_date_cache = pickle.load(f)
+                    ic_series, ic_stats, products_cache, return_freq_cache, _, start_date_cache, end_date_cache = pickle.load(f)
                 if products_cache == tester.products and return_freq_cache != return_freq \
                     and start_date_cache == tester.start_date and end_date_cache == tester.end_date:
                     tester.products = set()
+            returns_table = pd.DataFrame()  # 确保 returns_table 定义，以便后续检查，即使计算失败也不会导致未定义错误
             if tester.products:
                 try:
                     ic_series_df, ic_stats_df = tester.calc_ic(factors=factor)
+                    returns_table = factor.returns
                     ic_series = ic_series_df.iloc[:, 0]
                     ic_stats = ic_stats_df.iloc[:, 0]
                 except:
                     pass
-            assert ic_series is not None and ic_stats is not None, "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
+            assert ic_series is not None and ic_stats is not None and not returns_table.empty, "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
             factor.ic_series = ic_series
             factor.ic_stats = ic_stats
             if tester.products:
                 with open(factor_ic_cache_file, "wb") as f:
-                    pickle.dump((factor.ic_series, factor.ic_stats, tester.products, return_freq, tester.start_date, tester.end_date), f)
+                    pickle.dump((factor.ic_series, factor.ic_stats, tester.products, return_freq, returns_table, tester.start_date, tester.end_date), f)
         
         tester.products = original_products.copy()
         ic_stats = pd.concat([factor.ic_stats for factor in factors], axis=1)
@@ -685,12 +700,16 @@ def run_ic_test():
         for factor in factors:
             ic_series_dates = None
             ic_series_values = None
-            if isinstance(factor.ic_series.index, pd.MultiIndex):
-                ic_series_dates = pd.to_datetime(factor.ic_series.index.get_level_values(1)).strftime('%Y-%m-%d %H:%M:%S').tolist()
+            ic_series = factor.ic_series.dropna()
+            # 新代码：返回时间戳（毫秒）
+            import numpy as np
+            if isinstance(ic_series.index, pd.MultiIndex):
+                # 多级索引时取第二级（通常是时间）
+                timestamps = ic_series.index.get_level_values(-1).view(np.int64) // 10**6
             else:
-                time_str = '%Y-%m-%d %H:%M:%S' if str(factor.ic_series.index.name).startswith('MIN') else '%Y-%m-%d'
-                ic_series_dates = pd.to_datetime(factor.ic_series.index).strftime(time_str).tolist()
-            ic_series_values = factor.ic_series.values.tolist()
+                timestamps = ic_series.index.view(np.int64) // 10**6
+            ic_series_dates = timestamps.tolist()
+            ic_series_values = ic_series.values.tolist()
             ic_series_values = [None if (isinstance(v, float) and (pd.isna(v) or pd.isnull(v))) else v for v in ic_series_values]
             response['factors'].append({
                 'name': factor.name,
@@ -706,6 +725,186 @@ def run_ic_test():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/get_factor_series', methods=['POST'])
+def get_factor_series():
+    import pickle
+    from pathlib import Path
+    data = request.get_json()
+    submission_id = data.get('submission_id')
+    factor_family_alias = data.get('factor_family_alias')
+    factor_name = data.get('factor_name')
+    product_name = data.get('product')
+    re_calc = data.get('re_calc', False)
+
+    try:
+        global factor_testers
+        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        if not tester:
+            return jsonify({'error': '未找到测试器实例'}), 404
+
+        # 获取因子家族和具体因子
+        factor_family = get_factor_family_instance(factor_family_alias)
+        factors = factor_family.get_factors()
+        target_factor = next((f for f in factors if f.name == factor_name), None)
+        if not target_factor:
+            return jsonify({'error': '未找到因子'}), 404
+
+        product = next((p for p in tester.products if p.name == product_name), None)
+        if not product:
+            return jsonify({'error': '未找到产品'}), 404
+
+        # 缓存目录
+        cache_dir_factor = Path('../data/cache/factor')
+        cache_dir_factor.mkdir(parents=True, exist_ok=True)
+        start_calc_point_str = str(start_calc_point).replace(':', '-').replace(' ', '_') if start_calc_point else 'latest'
+        cache_file_1 = cache_dir_factor / f"{target_factor.alias}_{start_calc_point_str}.pkl"
+        cache_file_2 = cache_dir_factor / f"{target_factor.alias}_{product.alias}_{start_calc_point_str}.pkl"
+        cache_file_1_exists = cache_file_1.exists()
+        cache_file_2_exists = cache_file_2.exists()
+
+        series = None
+        if not re_calc and cache_file_1_exists:
+            with open(cache_file_1, 'rb') as f:
+                table, start_calc_point_cache = pickle.load(f)
+                if product in table.columns and start_calc_point_cache == start_calc_point:
+                    series = table[product].dropna()
+                else:
+                    re_calc = True
+        elif not re_calc and cache_file_2_exists:
+            with open(cache_file_2, 'rb') as f:
+                table, start_calc_point_cache = pickle.load(f)
+                if start_calc_point_cache == start_calc_point:
+                    if hasattr(table, 'columns') and product in table.columns:
+                        series = table[product].dropna()
+                    else:
+                        import pandas as pd
+                        assert isinstance(table, pd.Series), "缓存数据格式错误，预期为 DataFrame 或 Series"
+                        series = table.dropna()
+                else:
+                    re_calc = True
+        if re_calc or (not cache_file_1_exists and not cache_file_2_exists) or series is None:
+            # 计算因子序列（仅针对该产品）
+            original_products = tester.products.copy()
+            tester.products = [product]
+            target_factor.clear()
+            try:
+                tester.calc_factor(factors=target_factor)
+                if target_factor.table is None or target_factor.table.empty:
+                    raise ValueError("因子计算无结果")
+                series = target_factor.table[product].dropna()
+                # 缓存
+                with open(cache_file_2, 'wb') as f:
+                    pickle.dump((target_factor.table, start_calc_point), f)
+            finally:
+                tester.products = original_products
+
+        assert series is not None, "无法获取因子序列数据"
+        # 转换为时间戳（毫秒）
+        import numpy as np
+        import pandas as pd
+        if isinstance(series.index, pd.MultiIndex):
+            timestamps = series.index.get_level_values(-1).view(np.int64) // 10**6
+        else:
+            timestamps = series.index.view(np.int64) // 10**6
+        values = series.values.tolist()
+        # 处理 NaN
+        values = [None if (isinstance(v, float) and pd.isna(v)) else v for v in values]
+
+        return jsonify({'dates': timestamps.tolist(), 'values': values})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/get_return_series', methods=['POST'])
+def get_return_series():
+    import pickle, hashlib
+    from pathlib import Path
+    data = request.get_json()
+    submission_id = data.get('submission_id')
+    product_name = data.get('product')
+    factor_family_alias = data.get('factor_family_alias')
+    factor_name = data.get('factor_name')
+    return_freq = data.get('return_freq', 'N')
+    paths = data.get('paths', [])
+    re_calc = data.get('re_calc', False)
+
+    try:
+        global factor_testers
+        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        if not tester:
+            return jsonify({'error': '未找到测试器实例'}), 404
+        
+        # 获取因子家族和具体因子
+        factor_family = get_factor_family_instance(factor_family_alias)
+        factors = factor_family.get_factors()
+        factor = next((f for f in factors if f.name == factor_name), None)
+        if not factor:
+            return jsonify({'error': '未找到因子'}), 404
+
+        product = next((p for p in tester.products if p.name == product_name), None)
+        if not product:
+            return jsonify({'error': '未找到产品'}), 404
+
+        # 收益率缓存目录
+        cache_dir_ic = Path('../data/cache/ic')
+        cache_dir_return = Path('../data/cache/return')
+        cache_dir_return.mkdir(parents=True, exist_ok=True)
+
+        # 缓存键：产品 + 时间范围（开始/结束时间）
+        start_date_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
+        end_date_str = str(tester.end_date).replace(':', '-').replace(' ', '_')
+        
+        sorted_paths = sorted(paths)
+        paths_hash = hashlib.md5(str(sorted_paths).encode()).hexdigest()
+        cache_file_1 = cache_dir_ic / f"{paths_hash}_{factor.alias}_{return_freq}_{start_date_str}_{end_date_str}.pkl"
+        cache_file_2 = cache_dir_return / f"{product.alias}_{return_freq}_{start_date_str}_{end_date_str}.pkl"
+        cache_file_1_exists = cache_file_1.exists()
+        cache_file_2_exists = cache_file_2.exists()
+
+        series = None
+        if not re_calc and cache_file_1_exists:
+            with open(cache_file_1, 'rb') as f:
+                _, _, _, return_freq_cache, returns_table, start_date_cache, end_date_cache = pickle.load(f)
+                if return_freq_cache == return_freq \
+                    and start_date_cache == tester.start_date \
+                    and end_date_cache == tester.end_date:
+                    series = returns_table[product].dropna()
+                else:
+                    re_calc = True
+        elif not re_calc and cache_file_2_exists:
+            with open(cache_file_2, 'rb') as f:
+                returns_table, return_freq_cache, start_date_cache, end_date_cache = pickle.load(f)
+                if return_freq_cache == return_freq \
+                    and start_date_cache == tester.start_date \
+                    and end_date_cache == tester.end_date:
+                    if hasattr(returns_table, 'columns') and product in returns_table.columns:
+                        series = returns_table[product].dropna()
+                    else:
+                        import pandas as pd
+                        assert isinstance(returns_table, pd.Series), "缓存数据格式错误，预期为 DataFrame 或 Series"
+                        series = returns_table.dropna()
+                else:
+                    re_calc = True
+        if re_calc or (not cache_file_1_exists and not cache_file_2_exists) or series is None:
+            factor.clear()
+            factor.products = set([product])
+            series = factor.calc_returns(return_freq=(None if return_freq == 'N' else return_freq))
+            with open(cache_file_2, 'wb') as f:
+                pickle.dump((series, return_freq, tester.start_date, tester.end_date), f)
+
+        # 转换为时间戳和值
+        import numpy as np
+        import pandas as pd
+        if isinstance(series.index, pd.MultiIndex):
+            timestamps = series.index.get_level_values(-1).view(np.int64) // 10**6
+        else:
+            timestamps = series.index.view(np.int64) // 10**6
+        values = series.values.tolist()
+        values = [None if (isinstance(v, float) and pd.isna(v)) else v for v in values]
+
+        return jsonify({'dates': timestamps.tolist(), 'values': values})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     func = request.environ.get('werkzeug.server.shutdown')

@@ -2,58 +2,147 @@
      data-factor-alias="{{ factor_family_alias }}" 
      data-param-aliases='{{ param_aliases|tojson }}'>
     <div class="section-title">参数设置</div>
-    
-    <div style="overflow-x:auto;">
-        <table style="border-collapse:collapse;width:100%;min-width:600px;">
-            <thead style="background:#f6f8fa;">
+
+    <style>
+        .param-table-container {
+            overflow-x: auto;
+            max-width: 100%;
+            margin-bottom: 16px;
+            text-align: center;          /* 让内部表格居中 */
+            background: transparent;     /* 透明背景 */
+        }
+        .param-table {
+            border-collapse: collapse;
+            width: auto;
+            max-width: 100%;
+            margin: 0 auto;
+            font-size: 14px;
+            background: #fff;            /* 白色背景移到表格 */
+            border: 1px solid #e1e4e8;  /* 边框移到表格 */
+            border-radius: 6px;
+            overflow: hidden;            /* 保证圆角生效 */
+        }
+        .param-table th,
+        .param-table td {
+            padding: 8px 12px;
+            text-align: center;
+            border-bottom: 1px solid #e1e4e8;
+            white-space: normal;
+            word-break: break-word;
+            vertical-align: middle;
+            max-width: 150px;
+            min-width: 60px;
+        }
+        /* 表头样式 */
+        .param-table th {
+            background: #f6f8fa;
+            font-weight: 600;
+            color: #24292e;
+            border-bottom: 2px solid #e1e4e8;
+            min-width: 60px;            /* 给一个较小的最小宽度，避免过窄 */
+        }
+        /* 第一列（因子名）稍微加宽 */
+        .param-table td:first-child,
+        .param-table th:first-child {
+            min-width: 100px;
+        }
+        /* 输入框样式 */
+        .param-table input {
+            width: 100%;                /* 占满单元格宽度 */
+            min-width: 50px;           /* 最小宽度 */
+            max-width: 140px;          /* 最大宽度，与单元格max-width协调 */
+            padding: 4px 6px;          /* 适当减小内边距 */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .param-table td:not(:has(input)) {
+            word-break: break-word;
+            white-space: normal;
+        }
+        .param-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        /* 按钮样式 */
+        .param-btn {
+            background: #0078d4;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .param-btn:hover {
+            background: #005a9e;
+        }
+        .param-btn-danger {
+            background: #d40000;
+        }
+        .param-btn-danger:hover {
+            background: #a80000;
+        }
+        .param-hint {
+            margin-top: 4px;
+            color: #586069;
+            font-size: 13px;
+            text-align: left;           /* 提示文字左对齐 */
+        }
+        /* 拖拽样式 */
+        .param-table tr[draggable="true"]:active {
+            cursor: grabbing;
+        }
+        .param-table .drag-over {
+            background: #e6f7ff !important;
+        }
+    </style>
+
+    <div class="param-table-container" id="param_table_scroll">
+        <table class="param-table" id="param_table">
+            <thead>
                 <tr>
-                    <th style="padding:8px;text-align:center;">因子(家族)名</th>
+                    <th style="min-width: 100px;">因子(家族)名</th>
                     {% for param in params %}
-                        <th style="padding:8px;text-align:center;">{{ param.name }}</th>
+                        <th>{{ param.name }}</th>
                     {% endfor %}
-                    <th style="padding:8px;text-align:center;">操作</th>
+                    <th style="min-width: 80px;">操作</th>
                 </tr>
             </thead>
             <tbody id="factor_table_body">
-                <!-- 新增行 - 注意 button 的 class 是 add_factor_btn -->
-                <tr>
-                    <td style="padding:8px;text-align:center;">{{ factor_family_alias }}</td>
+                <tr id="add_row">
+                    <td>{{ factor_family_alias }}</td>
                     {% for param in params %}
-                        <td style="padding:8px;text-align:center;">
+                        <td>
                             <input type="text" id="param_{{ param.alias }}" 
-                                   value="{{ param.default_value }}"
-                                   style="width:100px;padding:4px;border-radius:4px;border:1px solid #ccc;">
+                                   value="{{ param.get_value_alias(param.default_value) }}">
                         </td>
                     {% endfor %}
-                    <td style="padding:8px;text-align:center;">
-                        <button class="add_factor_btn" type="button" 
-                                style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:4px 12px;">
-                            新增
-                        </button>
+                    <td>
+                        <button class="param-btn add_factor_btn">新增</button>
                     </td>
                 </tr>
-                <!-- 已有因子行 - 注意 button 的 class 是 delete_factor_btn -->
                 {% for factor in factors %}
                 <tr draggable="true" data-factor-idx="{{ loop.index0 }}">
-                    <td style="padding:8px;text-align:center;">{{ factor.name }}</td>
+                    <td>{{ factor.name }}</td>
                     {% for param in params %}
-                        <td style="padding:8px;text-align:center;">
-                            {{ factor.params_dict[param.alias].get_value(factor) }}
-                        </td>
+                        <td>{{ factor.params_dict[param.alias].get_value_alias(factor.params_dict[param.alias].get_value(factor)) }}</td>
                     {% endfor %}
-                    <td style="padding:8px;text-align:center;">
-                        <button class="delete_factor_btn" data-factor-idx="{{ loop.index0 }}" type="button"
-                                style="background:#d40000;color:#fff;border:none;border-radius:4px;padding:4px 12px;">
-                            删除
-                        </button>
+                    <td>
+                        <button class="param-btn param-btn-danger delete_factor_btn" 
+                                data-factor-idx="{{ loop.index0 }}">删除</button>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    <div style="margin-top:8px;color:#888;font-size:13px;">
-        提示：可以拖拽排序因子
+
+    <div class="param-hint">
+        💡 提示：可以拖拽排序因子；表格过宽时可横向滚动。
     </div>
 </div>
 
