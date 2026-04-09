@@ -68,6 +68,19 @@ class Product(UniqueObject):
             return getattr(self, data_freq.name).get_data(copy=copy)
         except:
             return pd.DataFrame()
+        
+    def get_price_data(self, start_date: str, end_date: str, adjusted: bool = False) -> pd.DataFrame:
+        data = self.get_some_data(self.get_current_freq(), copy=False)
+        time_cols = self.get_time_cols(self.get_current_freq())
+        if not time_cols:
+            return pd.DataFrame()
+        time_col = sorted(time_cols, key=lambda x: DataFreq[str(x)].value)[0]
+        mask = (data.index.get_level_values(time_col) >= pd.to_datetime(start_date).tz_localize(self.timezone)) & \
+               (data.index.get_level_values(time_col) <= pd.to_datetime(end_date).tz_localize(self.timezone))
+        if adjusted:
+            return data.loc[mask][['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']]
+        else:
+            return data.loc[mask][['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']]
 
     def get_time_cols(self, data_freq: Optional[Any] = None) -> List[str]:
         data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)

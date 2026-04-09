@@ -177,6 +177,27 @@
             });
     }
 
+    function getCurrentTimeRange() {
+        // 根据你的时间范围模块的输入框 ID 来读取
+        const startYear = document.getElementById('start_year').value;
+        const startMonth = document.getElementById('start_month').value.padStart(2, '0');
+        const startDay = document.getElementById('start_day').value.padStart(2, '0');
+        const startHour = document.getElementById('start_hour').value.padStart(2, '0');
+        const startMinute = document.getElementById('start_minute').value.padStart(2, '0');
+        const endYear = document.getElementById('end_year').value;
+        const endMonth = document.getElementById('end_month').value.padStart(2, '0');
+        const endDay = document.getElementById('end_day').value.padStart(2, '0');
+        const endHour = document.getElementById('end_hour').value.padStart(2, '0');
+        const endMinute = document.getElementById('end_minute').value.padStart(2, '0');
+
+        return {
+            start_date: `${startYear}-${startMonth}-${startDay}`,
+            start_time: `${startHour}:${startMinute}`,
+            end_date: `${endYear}-${endMonth}-${endDay}`,
+            end_time: `${endHour}:${endMinute}`
+        };
+    }
+
     // 提交选中的产品
     function submitSelectedProducts() {
         if (!treeInstance) {
@@ -214,6 +235,7 @@
                 });
                 // 添加到历史
                 if (data.selected_paths && data.selected_paths.length > 0) {
+                    var timeRange = getCurrentTimeRange();
                     var newSubmission = {
                         id: id_time,
                         paths: data.selected_paths.slice(),
@@ -222,9 +244,17 @@
                         factor_tester_serial: data.factor_tester_serial,
                         count_desc: data.count_desc,
                         timestamp: timeStr,
+                        start_date: timeRange.start_date,   // 新增
+                        end_date: timeRange.end_date,       // 新增
+                        start_time: timeRange.start_time,   // 可选
+                        end_time: timeRange.end_time        // 可选
                     };
                     submissions.push(newSubmission);
                     renderHistory();
+                    // 通知 IC 模块更新
+                    if (typeof window.renderICTabs === 'function') {
+                        window.renderICTabs(submissions);
+                    }
                 }
             } else {
                 statusSpan.html('提交失败: ' + (data.error || '未知错误')).css('color', '#d40000');

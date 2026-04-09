@@ -32,6 +32,58 @@
         }
     }
 
+    function drawComparisonChart(containerId, priceData, factorData, productName, factorName) {
+        if (typeof Highcharts === 'undefined') return;
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // 构建 OHLC 数据
+        const ohlcData = priceData.dates.map((ts, i) => [
+            ts,
+            priceData.open[i],
+            priceData.high[i],
+            priceData.low[i],
+            priceData.close[i]
+        ]);
+        const factorValues = factorData.dates.map((ts, i) => [ts, factorData.values[i]]);
+
+        Highcharts.stockChart(container, {
+            chart: { zoomType: 'xy' },
+            title: { text: `${productName} - 价格 vs ${factorName}` },
+            xAxis: { type: 'datetime' },
+            yAxis: [{
+                labels: { format: '{value:.2f}' },
+                title: { text: '价格' },
+                height: '60%',
+                resize: { enabled: true }
+            }, {
+                labels: { format: '{value:.4f}' },
+                title: { text: '因子值' },
+                top: '65%',
+                height: '35%',
+                opposite: true
+            }],
+            tooltip: { shared: true },
+            series: [{
+                name: `${productName} 价格`,
+                type: 'candlestick',
+                data: ohlcData,
+                yAxis: 0,
+                tooltip: { valueDecimals: 2 }
+            }, {
+                name: `因子值`,
+                type: 'line',
+                data: factorValues,
+                yAxis: 1,
+                color: '#FF5722',
+                tooltip: { valueDecimals: 4 }
+            }],
+            navigator: { enabled: true },
+            scrollbar: { enabled: true },
+            rangeSelector: { enabled: true }
+        });
+    }
+
     // 绘制 Highcharts 图表（保持原有功能）
     function drawChart(containerId, seriesData, seriesName) {
         if (typeof Highcharts === 'undefined') return;
@@ -101,7 +153,7 @@
                         <button class="btn btn-sm btn-outline-primary" data-sub="${subId}" data-idx="${idx}" data-factor-name="${factor.name}">加载因子和收益</button>
                     </div>
                     <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
-                        <div style="width:100%;"><h6>因子值序列</h6><div id="factor-chart-${subId}-${idx}" style="width:100%; height:350px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
+                        <div style="width:100%;"><h6>因子值序列</h6><div id="factor-chart-${subId}-${idx}" style="width:100%; height:600px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
                         <div style="width:100%;"><h6>收益率序列</h6><div id="return-chart-${subId}-${idx}" style="width:100%; height:350px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
                     </div>
                 </div>
@@ -139,27 +191,90 @@
         const select = document.getElementById(`product-select-${subId}-${factorIdx}`);
         const product = select ? select.value : null;
         if (!product || product === '') { alert('请选择一个产品'); return; }
+
         const factorChartDiv = document.getElementById(`factor-chart-${subId}-${factorIdx}`);
         const returnChartDiv = document.getElementById(`return-chart-${subId}-${factorIdx}`);
-        factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载因子值...</div>';
-        returnChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载收益率...</div>';
+        factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载价格与因子值...</div>';
+        returnChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">收益率曲线已折叠，点击展开</div>'; // 默认折叠状态
+
         const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
         if (!submission) { factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">未找到提交记录</div>'; return; }
+
+        // 获取因子频率
+        const factorInfo = factorList.find(f => f.name === factorName);
+        const freq = (factorInfo && factorInfo.freq !== 'N') ? factorInfo.freq : '1D'; // 默认日频
+
         try {
-            const [factorData, returnData] = await Promise.all([
+            // 并发获取因子值、收益率、价格数据
+            const [factorData, returnData, priceData] = await Promise.all([
                 fetch('/get_factor_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ submission_id: subId, factor_family_alias: factorFamilyAlias, factor_name: factorName, product: product })
+                    body: JSON.stringify({
+                        submission_id: subId,
+                        factor_family_alias: factorFamilyAlias,
+                        factor_name: factorName,
+                        product: product
+                    })
                 }).then(r => r.json()),
                 fetch('/get_return_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ submission_id: subId, factor_name: factorName, factor_family_alias: factorFamilyAlias, product: product, paths: submission.paths })
+                    body: JSON.stringify({
+                        submission_id: subId,
+                        factor_name: factorName,
+                        factor_family_alias: factorFamilyAlias,
+                        product: product,
+                        paths: submission.paths
+                    })
+                }).then(r => r.json()),
+                fetch('/get_price_series', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        submission_id: subId,
+                        product: product,
+                        factor_family_alias: factorFamilyAlias,
+                        factor_name: factorName,
+                        start_date: submission.start_date,   // 需要在 submission 中存储时间范围
+                        end_date: submission.end_date,
+                        freq: freq
+                    })
                 }).then(r => r.json())
             ]);
-            if (factorData.dates && factorData.values) drawChart(`factor-chart-${subId}-${factorIdx}`, factorData, '因子值');
-            else factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">加载因子值失败</div>';
-            if (returnData.dates && returnData.values) drawChart(`return-chart-${subId}-${factorIdx}`, returnData, '收益率');
-            else returnChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">加载收益率失败</div>';
+
+            // 绘制价格 vs 因子值双轴图表
+            if (priceData.dates && priceData.open && factorData.dates && factorData.values) {
+                drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, product, factorName);
+            } else {
+                factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格或因子数据无效</div>';
+            }
+
+            // 收益率曲线改为可折叠面板（默认折叠）
+            if (returnData.dates && returnData.values) {
+                const returnHtml = `
+                    <div class="return-collapsible" style="margin-top:16px; border:1px solid #e1e4e8; border-radius:8px;">
+                        <div class="return-header" style="padding:8px 12px; background:#f6f8fa; cursor:pointer; user-select:none; display:flex; justify-content:space-between;">
+                            <span>📈 收益率曲线 (频率: ${returnData.freq || '?'})</span>
+                            <span class="return-toggle-icon">▼</span>
+                        </div>
+                        <div class="return-content" style="display:none; padding:12px;">
+                            <div id="return-chart-inner-${subId}-${factorIdx}" style="width:100%; height:300px;"></div>
+                        </div>
+                    </div>
+                `;
+                returnChartDiv.innerHTML = returnHtml;
+                // 绘制收益率图表到内部容器
+                drawChart(`return-chart-inner-${subId}-${factorIdx}`, returnData, '收益率');
+                // 绑定折叠事件
+                const header = returnChartDiv.querySelector('.return-header');
+                const content = returnChartDiv.querySelector('.return-content');
+                const icon = header.querySelector('.return-toggle-icon');
+                header.addEventListener('click', () => {
+                    const isVisible = content.style.display === 'block';
+                    content.style.display = isVisible ? 'none' : 'block';
+                    icon.innerHTML = isVisible ? '▼' : '▲';
+                });
+            } else {
+                returnChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">收益率数据无效</div>';
+            }
         } catch (err) {
             factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">请求失败</div>';
             returnChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">请求失败</div>';

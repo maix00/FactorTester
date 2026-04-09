@@ -926,6 +926,83 @@ def get_return_series():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
+@app.route('/get_price_series', methods=['POST'])
+def get_price_series():
+    import pandas as pd
+    import numpy as np
+    from pathlib import Path
+    import pickle
+
+    data = request.get_json()
+    submission_id = data.get('submission_id')
+    product_name = data.get('product')
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    factor_family_alias = data.get('factor_family_alias')
+    factor_name = data.get('factor_name')
+    freq = data.get('freq', '1D')  # 例如 '5min', '1H', '1D'
+
+    # 参数校验
+    if not product_name or not start_date or not end_date:
+        return jsonify({'error': '缺少必要参数'}), 400
+
+    try:
+        global factor_testers
+        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        if not tester:
+            return jsonify({'error': '未找到测试器实例'}), 404
+        
+        # 获取因子家族和具体因子
+        factor_family = get_factor_family_instance(factor_family_alias)
+        factors = factor_family.get_factors()
+        factor = next((f for f in factors if f.name == factor_name), None)
+        if not factor:
+            return jsonify({'error': '未找到因子'}), 404
+        
+        # 获取产品对象
+        product = next((p for p in tester.products if p.name == product_name), None)
+        if not product:
+            return jsonify({'error': '未找到产品'}), 404
+
+        # 假设 product 有一个方法 get_price_data(start_date, end_date) 返回 DataFrame
+        # 索引为 datetime，列包含 'open', 'high', 'low', 'close', 'volume'
+        # 注意：start_date 和 end_date 是字符串格式 "YYYY-MM-DD"，可能需要加上时间部分
+        # 为了通用，我们假设 get_price_data 接受日期范围并返回包含时间戳的数据
+        raw_df = product.get_price_data(start_date, end_date)
+        if raw_df is None or raw_df.empty:
+            return jsonify({'error': '无价格数据'}), 404
+
+        # 确保索引是 datetime 类型
+        if not isinstance(raw_df.index, pd.DatetimeIndex):
+            raw_df.index = pd.to_datetime(raw_df.index.get_level_values(-1))
+
+        if freq is None:
+            if factor.freq is None:
+                factor.freq = factor.get_freq()
+            freq = factor.freq.value
+
+        raw_df.rename(columns={'OPEN': 'open', 'HIGH': 'high', 'LOW': 'low', 'CLOSE': 'close'}, inplace=True)
+
+        # 重采样到目标频率
+        ohlc = raw_df.resample(freq).agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last'
+        }).dropna()
+
+        # 转换为前端需要的格式
+        timestamps = ohlc.index.astype(np.int64) // 10**6  # 毫秒时间戳
+        return jsonify({
+            'dates': timestamps.tolist(),
+            'open': ohlc['open'].tolist(),
+            'high': ohlc['high'].tolist(),
+            'low': ohlc['low'].tolist(),
+            'close': ohlc['close'].tolist()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     func = request.environ.get('werkzeug.server.shutdown')
