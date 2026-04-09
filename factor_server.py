@@ -576,6 +576,19 @@ def delete_path_of_submission():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/factor_list')
+def factor_list():
+    factor_family_alias = request.args.get('factor_family_alias')
+    if not factor_family_alias:
+        return jsonify({'success': False, 'error': '缺少参数'})
+    try:
+        ff = get_factor_family_instance(factor_family_alias)
+        factors = ff.get_factors()
+        factor_data = [{'alias': f.alias, 'name': f.name, 'freq': getattr(f, 'freq', 'N')} for f in factors]
+        return jsonify({'success': True, 'factors': factor_data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
     import pickle
@@ -585,6 +598,7 @@ def run_ic_test():
     data = request.get_json()
     submission_id = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
+    factor_alias_return_freq = data.get('factors', [])
     paths = data.get('paths', [])
     return_freq = data.get('return_freq', 'N')
     re_calc = data.get('re_calc', False)  # 是否强制重新计算，默认为 False
@@ -600,6 +614,12 @@ def run_ic_test():
         factor_family = get_factor_family_instance(factor_family_alias)
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
         factors = factor_family.get_factors()  # 获取因子列表
+        factors = [next((f for f in factors if f.alias == item['alias'])) for item in factor_alias_return_freq]
+        return_freqs = {}
+        for factor, item in zip(factors, factor_alias_return_freq):
+            return_freq = item.get('return_freq', None)
+            return_freqs[factor] = (None if return_freq == 'N' else return_freq)
+        assert factors, "没有找到匹配的因子"
 
         cache_dir_ic = Path('../data/cache/ic')
         cache_dir_factor = Path('../data/cache/factor')
@@ -618,6 +638,7 @@ def run_ic_test():
 
             tester.products = original_products.copy()
             factor.clear()
+            return_freq = return_freqs.get(factor, None)
 
             factor_series_cache_file = cache_dir_factor / f"{factor.alias}_{start_calc_point_str}.pkl"
             factor_ic_cache_file = cache_dir_ic / f"{paths_hash}_{factor.alias}_{return_freq}_{start_date_str}_{end_date_str}.pkl"
@@ -663,7 +684,7 @@ def run_ic_test():
             returns_table = pd.DataFrame()  # 确保 returns_table 定义，以便后续检查，即使计算失败也不会导致未定义错误
             if tester.products:
                 try:
-                    ic_series_df, ic_stats_df = tester.calc_ic(factors=factor)
+                    ic_series_df, ic_stats_df = tester.calc_ic(factors=factor, return_freq=return_freq)
                     returns_table = factor.returns
                     ic_series = ic_series_df.iloc[:, 0]
                     ic_stats = ic_stats_df.iloc[:, 0]
@@ -823,7 +844,7 @@ def get_return_series():
     product_name = data.get('product')
     factor_family_alias = data.get('factor_family_alias')
     factor_name = data.get('factor_name')
-    return_freq = data.get('return_freq', 'N')
+    return_freq = data.get('return_freq', None)
     paths = data.get('paths', [])
     re_calc = data.get('re_calc', False)
 

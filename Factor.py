@@ -549,7 +549,7 @@ class FactorTester(SerialObject):
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
     
     def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
-                factors: Optional[Factor|List[Factor]] = None,
+                return_freq: Optional[Any] = None, factors: Optional[Factor|List[Factor]] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
         factors = [factors] if isinstance(factors, Factor) else \
@@ -562,7 +562,10 @@ class FactorTester(SerialObject):
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            return_df = factor.calc_returns(next_return=True, returns_col=returns_col) if factor.returns.empty else factor.returns
+            if factor.returns.empty or (not factor.returns.empty and _process_data_freq(factor.get_current_return_freq()) != _process_data_freq(return_freq)):
+                return_df = factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=return_freq)
+            else:
+                return_df = factor.returns
             assert not return_df.empty
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
