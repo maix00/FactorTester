@@ -974,9 +974,7 @@ def get_price_series():
         if raw_df is None or raw_df.empty:
             return jsonify({'error': '无价格数据'}), 404
 
-        # 统一列名为小写
-        raw_df.rename(columns=lambda x: x.lower(), inplace=True)
-        required = ['open', 'high', 'low', 'close'] if not adjusted else ['open_adjusted', 'high_adjusted', 'low_adjusted', 'close_adjusted']
+        required = ['OPEN', 'HIGH', 'LOW', 'CLOSE'] if not adjusted else ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED']
         for col in required:
             if col not in raw_df.columns:
                 return jsonify({'error': f'价格数据缺少列: {col}'}), 500
@@ -1016,10 +1014,10 @@ def get_price_series():
         # 分组聚合
         def agg_func(group):
             return pd.Series({
-                'open': group['open' if not adjusted else 'open_adjusted'].iloc[0],      # 区间内第一笔 open
-                'high': group['high' if not adjusted else 'high_adjusted'].max(),
-                'low': group['low' if not adjusted else 'low_adjusted'].min(),
-                'close': group['close' if not adjusted else 'close_adjusted'].iloc[-1]    # 区间内最后一笔 close
+                'OPEN': group[required[0]].iloc[0],      # 区间内第一笔 open
+                'HIGH': group[required[1]].max(),
+                'LOW': group[required[2]].min(),
+                'CLOSE': group[required[3]].iloc[-1]    # 区间内最后一笔 close
             })
         
         # 按 bin_indices 分组
@@ -1031,11 +1029,11 @@ def get_price_series():
         timestamps = ohlc.index.astype(np.int64) // 10**6
 
         return jsonify({
-            'dates': timestamps.tolist(),
-            'OPEN': ohlc['open'].tolist(),
-            'HIGH': ohlc['high'].tolist(),
-            'LOW': ohlc['low'].tolist(),
-            'CLOSE': ohlc['close'].tolist()
+            'dates': timestamps.tolist(),  # == factor_dates
+            'OPEN': ohlc['OPEN'].tolist(),
+            'HIGH': ohlc['HIGH'].tolist(),
+            'LOW': ohlc['LOW'].tolist(),
+            'CLOSE': ohlc['CLOSE'].tolist()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

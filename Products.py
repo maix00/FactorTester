@@ -69,14 +69,23 @@ class Product(UniqueObject):
         except:
             return pd.DataFrame()
         
-    def get_price_data(self, start_date: str, end_date: str, adjusted: bool = False) -> pd.DataFrame:
+    def get_price_data(self, start_date: Any, end_date: Any, adjusted: bool = False) -> pd.DataFrame:
         data = self.get_some_data(self.get_current_freq(), copy=False)
         time_cols = self.get_time_cols(self.get_current_freq())
         if not time_cols:
             return pd.DataFrame()
-        time_col = sorted(time_cols, key=lambda x: DataFreq[str(x)].value)[0]
-        mask = (data.index.get_level_values(time_col) >= pd.to_datetime(start_date).tz_localize(self.timezone)) & \
-               (data.index.get_level_values(time_col) <= pd.to_datetime(end_date).tz_localize(self.timezone))
+        if 'DAY1' in time_cols:
+            time_col = 'DAY1'
+        else:
+            time_col = sorted(time_cols, key=lambda x: DataFreq[str(x)].value)[0]
+        if getattr(data.index.get_level_values(time_col), 'tz', None) is not None and self.timezone is not None:
+            start_date = pd.to_datetime(start_date).tz_localize(self.timezone)
+            end_date = pd.to_datetime(end_date).tz_localize(self.timezone)
+        else:
+            start_date = pd.to_datetime(start_date)
+            end_date = pd.to_datetime(end_date)
+        mask = (data.index.get_level_values(time_col) >= start_date) & \
+               (data.index.get_level_values(time_col) <= end_date)
         if adjusted:
             list_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
             if any([col not in data.columns for col in list_cols]):

@@ -283,6 +283,8 @@ CNFuturesDayNightTimeCategory.objs = get_all_futures()
 def get_value_alias_for_day_night_time_category(x: str) -> str:
     if '15:15' in x:
         return '日盘2'
+    if '09:30' in x:
+        return '日盘3'
     if '21:00' not in x:
         return '日盘'
     if '23:00' in x:

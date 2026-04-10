@@ -824,7 +824,12 @@ class DataMeta(SerialObject):
     def __pos__(self): return self._wrap((+self.get_data()).where(self.get_data().notna()), alias=f"POS")
     def __abs__(self): return self._wrap(abs(self.get_data()).where(self.get_data().notna()), alias=f"ABS")
     def __invert__(self): return self._wrap((~self.get_data()).where(self.get_data().notna()), alias=f"INVERT")
-    def __getitem__(self, key): return self._wrap(self.get_data()[(col := _process_data_col(key).name)], alias=col)
+    def __getitem__(self, key):
+        col = _process_data_col(key).name
+        if col.endswith('_ADJUSTED') and col not in self.get_data().columns:
+            data = self.get_and_adjust_cols(col, copy=False)
+            return self._wrap(data[col], alias=col)
+        return self._wrap(self.get_data()[col], alias=col)
     def __setitem__(self, key, value): self.get_data()[_process_data_col(key).name] = value
     def __delitem__(self, key): del self.get_data()[_process_data_col(key).name]
 
