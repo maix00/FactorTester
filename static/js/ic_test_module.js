@@ -37,13 +37,12 @@
         const container = document.getElementById(containerId);
         if (!container) return;
 
-        // 构建 OHLC 数据
         const ohlcData = priceData.dates.map((ts, i) => [
             ts,
-            priceData.open[i],
-            priceData.high[i],
-            priceData.low[i],
-            priceData.close[i]
+            priceData.OPEN[i],
+            priceData.HIGH[i],
+            priceData.LOW[i],
+            priceData.CLOSE[i]
         ]);
         const factorValues = factorData.dates.map((ts, i) => [ts, factorData.values[i]]);
 
@@ -63,20 +62,38 @@
                 height: '35%',
                 opposite: true
             }],
-            tooltip: { shared: true },
+            tooltip: {
+                shared: true,
+                formatter: function() {
+                    const points = this.points;
+                    let result = '';
+                    points.forEach(point => {
+                        if (point.series.type === 'candlestick') {
+                            result += `<b>${point.series.name}</b><br/>
+                                    开盘: ${point.point.open.toFixed(2)}<br/>
+                                    最高: ${point.point.high.toFixed(2)}<br/>
+                                    最低: ${point.point.low.toFixed(2)}<br/>
+                                    收盘: ${point.point.close.toFixed(2)}<br/>`;
+                        } else {
+                            result += `<b>${point.series.name}</b><br/>
+                                    因子值: ${point.y.toFixed(4)}<br/>`;
+                        }
+                        result += `<span style="color:#666">时间: ${Highcharts.dateFormat('%Y-%m-%d %H:%M:%S', point.x)}</span><br/><br/>`;
+                    });
+                    return result;
+                }
+            },
             series: [{
                 name: `${productName} 价格`,
                 type: 'candlestick',
                 data: ohlcData,
-                yAxis: 0,
-                tooltip: { valueDecimals: 2 }
+                yAxis: 0
             }, {
                 name: `因子值`,
                 type: 'line',
                 data: factorValues,
                 yAxis: 1,
-                color: '#FF5722',
-                tooltip: { valueDecimals: 4 }
+                color: '#FF5722'
             }],
             navigator: { enabled: true },
             scrollbar: { enabled: true },
@@ -144,17 +161,23 @@
             const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p}">${p}</option>`).join('') : '<option value="">无可用产品</option>';
             panesHtml += `
                 <div class="tab-pane fade ${showClass}" id="${paneId}" role="tabpanel">
+                    <!-- IC 序列图 -->
                     <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
                         <div style="width:100%;"><h6>IC 序列</h6><div id="ic-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
                     </div>
+                    <!-- 产品选择、加载按钮和复权复选框 -->
                     <div style="margin-top:16px;">
                         <label>选择产品：</label>
                         <select id="product-select-${subId}-${idx}" class="form-select" style="width:200px; display:inline-block; margin-left:8px;">${productOptions}</select>
                         <button class="btn btn-sm btn-outline-primary" data-sub="${subId}" data-idx="${idx}" data-factor-name="${factor.name}">加载因子和收益</button>
+                        <label style="margin-left:12px;">
+                            <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
+                        </label>
                     </div>
+                    <!-- 因子值序列和收益率序列容器 -->
                     <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
-                        <div style="width:100%;"><h6>因子值序列</h6><div id="factor-chart-${subId}-${idx}" style="width:100%; height:600px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
-                        <div style="width:100%;"><h6>收益率序列</h6><div id="return-chart-${subId}-${idx}" style="width:100%; height:350px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
+                        <div style="width:100%;"><h6>因子值序列</h6><div id="factor-chart-${subId}-${idx}" style="width:100%; height:500px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
+                        <div style="width:100%;"><h6>收益率序列</h6><div id="return-chart-${subId}-${idx}" style="width:100%; height:500px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
                     </div>
                 </div>
             `;
@@ -205,8 +228,8 @@
         const freq = (factorInfo && factorInfo.freq !== 'N') ? factorInfo.freq : '1D'; // 默认日频
 
         try {
-            // 并发获取因子值、收益率、价格数据
-            const [factorData, returnData, priceData] = await Promise.all([
+            // 第一步：并发获取因子值和收益率
+            const [factorData, returnData] = await Promise.all([
                 fetch('/get_factor_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -225,23 +248,30 @@
                         product: product,
                         paths: submission.paths
                     })
-                }).then(r => r.json()),
-                fetch('/get_price_series', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        submission_id: subId,
-                        product: product,
-                        factor_family_alias: factorFamilyAlias,
-                        factor_name: factorName,
-                        start_date: submission.start_date,   // 需要在 submission 中存储时间范围
-                        end_date: submission.end_date,
-                        freq: freq
-                    })
                 }).then(r => r.json())
             ]);
 
+            // 第二步：使用因子时间戳请求价格数据
+            const factorDates = factorData.dates;  // 因子时间戳数组（毫秒）
+            const adjustCheckbox = document.getElementById(`adjust-price-${subId}-${factorIdx}`);
+            const adjusted = adjustCheckbox ? adjustCheckbox.checked : false;
+
+            const priceData = await fetch('/get_price_series', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    submission_id: subId,
+                    product: product,
+                    factor_family_alias: factorFamilyAlias,
+                    factor_name: factorName,
+                    factor_dates: factorDates,
+                    adjusted: adjusted,
+                    start_date: submission.start_date,
+                    end_date: submission.end_date
+                })
+            }).then(r => r.json());
+
             // 绘制价格 vs 因子值双轴图表
-            if (priceData.dates && priceData.open && factorData.dates && factorData.values) {
+            if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values) {
                 drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, product, factorName);
             } else {
                 factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格或因子数据无效</div>';
@@ -261,7 +291,6 @@
                     </div>
                 `;
                 returnChartDiv.innerHTML = returnHtml;
-                // 绘制收益率图表到内部容器
                 drawChart(`return-chart-inner-${subId}-${factorIdx}`, returnData, '收益率');
                 // 绑定折叠事件
                 const header = returnChartDiv.querySelector('.return-header');

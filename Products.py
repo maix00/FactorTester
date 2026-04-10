@@ -78,7 +78,11 @@ class Product(UniqueObject):
         mask = (data.index.get_level_values(time_col) >= pd.to_datetime(start_date).tz_localize(self.timezone)) & \
                (data.index.get_level_values(time_col) <= pd.to_datetime(end_date).tz_localize(self.timezone))
         if adjusted:
-            return data.loc[mask][['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']]
+            list_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
+            if any([col not in data.columns for col in list_cols]):
+                dataMeta = getattr(self, self.get_current_freq().name)
+                data = dataMeta.get_and_adjust_cols(list_cols)
+            return data.loc[mask][list_cols]
         else:
             return data.loc[mask][['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']]
 

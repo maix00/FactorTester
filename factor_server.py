@@ -936,69 +936,106 @@ def get_price_series():
     data = request.get_json()
     submission_id = data.get('submission_id')
     product_name = data.get('product')
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
+    factor_dates = data.get('factor_dates')          # 因子时间戳列表（毫秒）
+    adjusted = data.get('adjusted', False)          # 是否复权
     factor_family_alias = data.get('factor_family_alias')
     factor_name = data.get('factor_name')
-    freq = data.get('freq', '1D')  # 例如 '5min', '1H', '1D'
-
-    # 参数校验
-    if not product_name or not start_date or not end_date:
-        return jsonify({'error': '缺少必要参数'}), 400
+    # 兼容旧调用，保留 start_date/end_date，但优先使用 factor_dates 的范围
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
 
     try:
         global factor_testers
         tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
-        
-        # 获取因子家族和具体因子
+
+        # 获取因子对象
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors()
         factor = next((f for f in factors if f.name == factor_name), None)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
-        
+
         # 获取产品对象
         product = next((p for p in tester.products if p.name == product_name), None)
         if not product:
             return jsonify({'error': '未找到产品'}), 404
 
-        # 假设 product 有一个方法 get_price_data(start_date, end_date) 返回 DataFrame
-        # 索引为 datetime，列包含 'open', 'high', 'low', 'close', 'volume'
-        # 注意：start_date 和 end_date 是字符串格式 "YYYY-MM-DD"，可能需要加上时间部分
-        # 为了通用，我们假设 get_price_data 接受日期范围并返回包含时间戳的数据
-        raw_df = product.get_price_data(start_date, end_date)
+        # 根据因子时间戳确定价格数据的时间范围
+        assert factor_dates
+        factor_idx = pd.to_datetime(factor_dates, unit='ms')
+        start_date = factor_idx.min().strftime('%Y-%m-%d')
+        end_date = factor_idx.max().strftime('%Y-%m-%d')
+
+        # 获取价格数据（原始频率）
+        raw_df = product.get_price_data(start_date, end_date, adjusted=adjusted)
+
         if raw_df is None or raw_df.empty:
             return jsonify({'error': '无价格数据'}), 404
 
-        # 确保索引是 datetime 类型
+        # 统一列名为小写
+        raw_df.rename(columns=lambda x: x.lower(), inplace=True)
+        required = ['open', 'high', 'low', 'close'] if not adjusted else ['open_adjusted', 'high_adjusted', 'low_adjusted', 'close_adjusted']
+        for col in required:
+            if col not in raw_df.columns:
+                return jsonify({'error': f'价格数据缺少列: {col}'}), 500
+
+        # 确保索引为 DatetimeIndex
         if not isinstance(raw_df.index, pd.DatetimeIndex):
             raw_df.index = pd.to_datetime(raw_df.index.get_level_values(-1))
 
-        if freq is None:
-            if factor.freq is None:
-                factor.freq = factor.get_freq()
-            freq = factor.freq.value
+        # 对齐到因子时间点
+        # 构建因子时间序列
+        # 将因子时间戳转换为 pandas DatetimeIndex（假设为本地时区，无时区信息）
+        factor_idx = pd.to_datetime(factor_dates, unit='ms')
+        
+        # 确保 raw_df 索引为 DatetimeIndex（可能带时区），将其转换为无时区的本地时间，以便与 factor_idx 对齐
+        if raw_df.index.tz is not None:
+            # 转换为本地无时区时间（假设 raw_df 索引时区与系统本地一致）
+            raw_df.index = raw_df.index.tz_convert(None)
+        
+        # 构建区间：每个因子时间点作为右边界，左边界为上一个因子时间点（第一个左边界为数据开始）
+        bins = factor_idx.union([raw_df.index.min()])  # 添加数据开始时间
+        bins = bins.sort_values()
+        # 使用 cut 将价格数据分到对应的区间（右闭？需要仔细）
+        # 我们希望区间为 (left, right] 即包含右端点，左开右闭
+        # 使用 pd.cut 的 right=True 参数
+        labels = factor_idx  # 区间右端点作为标签
+        # 将 raw_df 索引分到区间
+        # 注意：pd.cut 要求 bins 严格递增，且 left 边界可能小于最小值，我们手动处理
+        # 先创建区间索引
+        intervals = pd.IntervalIndex.from_arrays(bins[:-1], bins[1:], closed='right')
+        # 为每个价格时间点找到所属区间
+        bin_indices = intervals.get_indexer(raw_df.index)
+        # 过滤出属于有效区间的点（-1表示不在任何区间）
+        mask = bin_indices >= 0
+        raw_filtered = raw_df[mask]
+        bin_indices = bin_indices[mask]
+        
+        # 分组聚合
+        def agg_func(group):
+            return pd.Series({
+                'open': group['open' if not adjusted else 'open_adjusted'].iloc[0],      # 区间内第一笔 open
+                'high': group['high' if not adjusted else 'high_adjusted'].max(),
+                'low': group['low' if not adjusted else 'low_adjusted'].min(),
+                'close': group['close' if not adjusted else 'close_adjusted'].iloc[-1]    # 区间内最后一笔 close
+            })
+        
+        # 按 bin_indices 分组
+        grouped = raw_filtered.groupby(bin_indices)
+        ohlc = grouped.apply(agg_func).reindex(range(len(factor_idx)))
+        ohlc = ohlc.replace({np.nan: None})
+        # 将索引替换为因子时间点
+        ohlc.index = factor_idx
+        timestamps = ohlc.index.astype(np.int64) // 10**6
 
-        raw_df.rename(columns={'OPEN': 'open', 'HIGH': 'high', 'LOW': 'low', 'CLOSE': 'close'}, inplace=True)
-
-        # 重采样到目标频率
-        ohlc = raw_df.resample(freq).agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last'
-        }).dropna()
-
-        # 转换为前端需要的格式
-        timestamps = ohlc.index.astype(np.int64) // 10**6  # 毫秒时间戳
         return jsonify({
             'dates': timestamps.tolist(),
-            'open': ohlc['open'].tolist(),
-            'high': ohlc['high'].tolist(),
-            'low': ohlc['low'].tolist(),
-            'close': ohlc['close'].tolist()
+            'OPEN': ohlc['open'].tolist(),
+            'HIGH': ohlc['high'].tolist(),
+            'LOW': ohlc['low'].tolist(),
+            'CLOSE': ohlc['close'].tolist()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
