@@ -60,15 +60,15 @@ StartCalcPointParam = get_StartCalcPointParam(alias='$SCP', default_value=defaul
 FactorFreqParam = get_factor_freq_param(alias='F')
 
 class Factor(SerialObject):
-    _instance_count: int = -1
 
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        return super().__new__(cls, type_alias='F', alias=alias, search=True)
+    def __new__(cls, alias: Optional[str] = None, single_use: bool = False, *args, **kwargs):
+        return super().__new__(cls, type_alias='F', alias=alias, search=True, single_use=single_use)
     
     def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame] = lambda _: pd.DataFrame(), 
-                 family: Optional[FactorFamily] = None, param_vals: Optional[Dict[Parameter, Any]] = None):
+                 family: Optional[FactorFamily] = None, param_vals: Optional[Dict[Parameter, Any]] = None,
+                 single_use: bool = False):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='F', alias=alias)
+            super().__init__(type_alias='F', alias=alias, single_use=single_use)
             self.func = func
             self.min_gap: Optional[pd.Timedelta] = None
             self.freq: Optional[DataFreq] = None
@@ -162,13 +162,21 @@ class Factor(SerialObject):
         self.freq = self.get_freq()
         return self.table
     
-    def calc_returns(self, next_return: bool = True,
+    def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+        if return_freq is not None:
+            return_freq = _process_data_freq(return_freq)
+        else:
+            if self.freq is None:
+                self.freq = self.get_freq()
+            return_freq = self.freq
+        if self.products is None or not self.products:
+            self._set_products()
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
         start_calc_point = self.get_current_start_calc_point()
         StartCalcPointParam.register(ReturnsFamily, start_calc_point)
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
-        return_factor = ReturnsFamily.get_factor(RF=self.freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
+        return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)
         self.returns = return_factor.calc(self.products)
         return self.returns
@@ -183,7 +191,7 @@ class FactorFamily(SerialObject):
         alias=alias if alias else cls.__name__
         return super().__new__(cls, type_alias='FF', alias=alias)
 
-    def __init__(self, alias: Optional[str] = None):
+    def __init__(self, alias: Optional[str] = None, factor_single_use: bool = False):
         if not hasattr(self, '_initialized'):
             alias=alias if alias else self.__class__.__name__
             super().__init__(type_alias='FF', alias=alias)
@@ -192,6 +200,7 @@ class FactorFamily(SerialObject):
             self.set_default_params()
             self.factors: List[Factor] = []
             self.common_signal_freq: DataFreq
+            self.factor_single_use = factor_single_use
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         try:
@@ -351,7 +360,7 @@ class FactorFamily(SerialObject):
         for params in self._params_list:
             factor_alias = self.get_alias(**params)
             factor_func = partial(self.func, **params)
-            factor = Factor(alias=factor_alias, func=factor_func, family=self)
+            factor = Factor(alias=factor_alias, func=factor_func, family=self, single_use=self.factor_single_use)
             for param_alias, value in params.items():
                 self.params_dict[param_alias].register(factor, value)
             if return_freq is not None:
@@ -368,7 +377,7 @@ class FactorFamily(SerialObject):
         new_params = {p.alias: param_vals[p] for p in self.params}
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
-        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self)
+        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self, single_use=self.factor_single_use)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
         if start_calc_point is not None:
@@ -541,7 +550,7 @@ class FactorTester(SerialObject):
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
     
     def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
-                factors: Optional[Factor|List[Factor]] = None,
+                return_freq: Optional[Any] = None, factors: Optional[Factor|List[Factor]] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
         factors = [factors] if isinstance(factors, Factor) else \
@@ -554,7 +563,10 @@ class FactorTester(SerialObject):
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            return_df = factor.calc_returns(next_return=True, returns_col=returns_col) if factor.returns.empty else factor.returns
+            if factor.returns.empty or (not factor.returns.empty and _process_data_freq(factor.get_current_return_freq()) != _process_data_freq(return_freq)):
+                return_df = factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=return_freq)
+            else:
+                return_df = factor.returns
             assert not return_df.empty
             return_rank = self.calc_rank(return_df)
             dt_index = factor_rank.index.intersection(return_rank.index)
@@ -798,4 +810,4 @@ class Returns(FactorFamily):
             ret = end / start - 1
             return data.sync_signal(ret, RF)
 
-ReturnsFamily = Returns()
+ReturnsFamily = Returns(factor_single_use=True)

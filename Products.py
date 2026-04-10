@@ -68,6 +68,32 @@ class Product(UniqueObject):
             return getattr(self, data_freq.name).get_data(copy=copy)
         except:
             return pd.DataFrame()
+        
+    def get_price_data(self, start_date: Any, end_date: Any, adjusted: bool = False) -> pd.DataFrame:
+        data = self.get_some_data(self.get_current_freq(), copy=False)
+        time_cols = self.get_time_cols(self.get_current_freq())
+        if not time_cols:
+            return pd.DataFrame()
+        if 'DAY1' in time_cols:
+            time_col = 'DAY1'
+        else:
+            time_col = sorted(time_cols, key=lambda x: DataFreq[str(x)].value)[0]
+        if getattr(data.index.get_level_values(time_col), 'tz', None) is not None and self.timezone is not None:
+            start_date = pd.to_datetime(start_date).tz_localize(self.timezone)
+            end_date = pd.to_datetime(end_date).tz_localize(self.timezone)
+        else:
+            start_date = pd.to_datetime(start_date)
+            end_date = pd.to_datetime(end_date)
+        mask = (data.index.get_level_values(time_col) >= start_date) & \
+               (data.index.get_level_values(time_col) <= end_date)
+        if adjusted:
+            list_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
+            if any([col not in data.columns for col in list_cols]):
+                dataMeta = getattr(self, self.get_current_freq().name)
+                data = dataMeta.get_and_adjust_cols(list_cols)
+            return data.loc[mask][list_cols]
+        else:
+            return data.loc[mask][['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']]
 
     def get_time_cols(self, data_freq: Optional[Any] = None) -> List[str]:
         data_freq = self.get_current_freq() if data_freq is None else _process_data_freq(data_freq)

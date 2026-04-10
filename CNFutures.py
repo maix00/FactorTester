@@ -5,8 +5,8 @@ from Products import Futures, FuturesContract
 from Tools import DataColumn
 
 _data = pd.read_csv('../data/sectors.csv')
-data_dir_min = '../data/main_mink/'
-data_dir_day = '../data/main_dayk/'
+data_dir_min = '../data/main_mink'
+data_dir_day = '../data/main_dayk'
 data_type = 'parquet'
 file_list_min = [
     os.path.join(data_dir_min, f)
@@ -187,7 +187,7 @@ from Products import Product
 
 def get_all_futures_contract() -> List[Product]:
 
-    data_dir_min = '../data/data_mink_product/'
+    data_dir_min = '../data/data_mink_product'
 
     from Tools import DataSource, DataFreq
     LocalCNFuturesContractMIN1 = DataSource(
@@ -283,6 +283,8 @@ CNFuturesDayNightTimeCategory.objs = get_all_futures()
 def get_value_alias_for_day_night_time_category(x: str) -> str:
     if '15:15' in x:
         return '日盘2'
+    if '09:30' in x:
+        return '日盘3'
     if '21:00' not in x:
         return '日盘'
     if '23:00' in x:

@@ -1,0 +1,40 @@
+<div class="module" id="category_filter_module" style="margin-top:24px;">
+    <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+        <!-- 左侧：产品树 -->
+        <div style="flex: 2; min-width: 260px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
+            <div class="section-title" style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">🌳 产品类别筛选</div>
+            <div style="margin-bottom: 12px; color: #586069; font-size: 13px;">
+                树状结构，勾选叶子节点或分类后提交
+            </div>
+            <div style="margin-bottom: 16px;">
+                <button type="button" id="submit-selected" style="background: #0078d4; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer; transition: 0.2s;">
+                    ✅ 提交选中产品
+                </button>
+                <span id="submit_status" style="margin-left: 12px; font-size: 13px; color: #28a745;"></span>
+            </div>
+            <!-- 容器内部不要有任何占位文字，Fancytree 会自动填充 -->
+            <div id="tree-container" style="max-height: 400px; overflow-y: auto; border: 1px solid #e1e4e8; border-radius: 8px; padding: 8px; background: #fff;"></div>
+        </div>
+
+        <!-- 右侧：已提交的路径列表 -->
+        <div style="flex: 1.5; min-width: 280px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+                <div style="font-size: 16px; font-weight: 600;">📋 已提交的路径列表</div>
+                <div id="submission_change_status" style="font-size: 12px; color: #28a745;"></div>
+            </div>
+            <div style="font-size: 12px; color: #586069; margin-bottom: 8px;">
+                💡 拖拽提交记录可调整顺序，点击路径可查看产品详情
+            </div>
+            <div id="submission-history" style="max-height: 400px; overflow-y: auto; padding-right: 4px;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 依赖资源 -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+
+<script src="{{ url_for('static', filename='js/category_filter_module.js') }}"></script>

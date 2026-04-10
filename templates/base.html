@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>单因子测试</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <button class="shutdown-btn-topright" onclick="shutdownServer()">关闭服务器</button>
+    <div class="container">
+        <div class="sidebar">
+            <h2>单因子测试 (./Factors)</h2>
+            <input type="text" id="search" placeholder="搜索因子名称..." value="{{ search_query }}" autocomplete="off">
+            <div id="factor-groups">
+                {{ group_html | safe }}
+            </div>
+            <button onclick="shutdownServer()">关闭服务器</button>
+        </div>
+        <div class="main">
+            {% if main_content %}
+                {{ main_content | safe }}
+            {% else %}
+                <div style="text-align:center; color:#888; margin-top:100px;">
+                    请从左侧选择一个因子
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/base.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

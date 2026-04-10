@@ -6,16 +6,19 @@ from pandas.core.groupby import DataFrameGroupBy
 from enum import Enum
 
 class UniqueObject(ABC):
+    '''
+        唯一对象基类：每个实例根据其 name 属性唯一标识，且同一类的实例之间 name 不重复。
+        子类：SerialObject, Product, CNFutures, Factor, Parameter, DataSource, DataMeta 等。
+    '''
+
     _instances = WeakValueDictionary()
 
+
     def __new__(cls, name: str, *args, **kwargs):
-        # Create a unique key that includes the class type
         key = (name, cls.__name__)
-        # Check if an instance with this name and class already exists
         if key in cls._instances:
             return cls._instances[key]
         
-        # Create a new instance if it doesn't exist
         instance = super().__new__(cls)
         cls._instances[key] = instance
         return instance
@@ -239,6 +242,7 @@ def _process_data_col(col: Optional[Any] = None) -> DataColumn:
     if isinstance(col, DataColumn):
         return col
     if isinstance(col, str):
+        col = col.removeprefix('DataColumn.').upper()
         try:
             return DataColumn(col)
         except:
@@ -795,50 +799,55 @@ class DataMeta(SerialObject):
         else:
             return other
     
-    def __add__(self, other): return self._wrap((self.data + self._get_data(other)).where(self.data.notna()), alias=f"ADD_{self._get_alias(other)}")
-    def __sub__(self, other): return self._wrap((self.data - self._get_data(other)).where(self.data.notna()), alias=f"SUB_{self._get_alias(other)}")
-    def __mul__(self, other): return self._wrap((self.data * self._get_data(other)).where(self.data.notna()), alias=f"MUL_{self._get_alias(other)}")
-    def __truediv__(self, other): return self._wrap((self.data / self._get_data(other)).where(self.data.notna()), alias=f"DIV_{self._get_alias(other)}")
-    def __floordiv__(self, other): return self._wrap((self.data // self._get_data(other)).where(self.data.notna()), alias=f"FLOORDIV_{self._get_alias(other)}")
-    def __mod__(self, other): return self._wrap((self.data % self._get_data(other)).where(self.data.notna()), alias=f"MOD_{self._get_alias(other)}")
-    def __pow__(self, other): return self._wrap((self.data ** self._get_data(other)).where(self.data.notna()), alias=f"POW_{self._get_alias(other)}")
-    def __gt__(self, other): return self._wrap((self.data > self._get_data(other)).where(self.data.notna()), alias=f"GT_{self._get_alias(other)}")
-    def __lt__(self, other): return self._wrap((self.data < self._get_data(other)).where(self.data.notna()), alias=f"LT_{self._get_alias(other)}")
-    def __ge__(self, other): return self._wrap((self.data >= self._get_data(other)).where(self.data.notna()), alias=f"GE_{self._get_alias(other)}")
-    def __le__(self, other): return self._wrap((self.data <= self._get_data(other)).where(self.data.notna()), alias=f"LE_{self._get_alias(other)}")
-    def __eq__(self, other): return self._wrap((self.data == self._get_data(other)).where(self.data.notna()), alias=f"EQ_{self._get_alias(other)}")
+    def __add__(self, other): return self._wrap((self.get_data() + self._get_data(other)).where(self.get_data().notna()), alias=f"ADD_{self._get_alias(other)}")
+    def __sub__(self, other): return self._wrap((self.get_data() - self._get_data(other)).where(self.get_data().notna()), alias=f"SUB_{self._get_alias(other)}")
+    def __mul__(self, other): return self._wrap((self.get_data() * self._get_data(other)).where(self.get_data().notna()), alias=f"MUL_{self._get_alias(other)}")
+    def __truediv__(self, other): return self._wrap((self.get_data() / self._get_data(other)).where(self.get_data().notna()), alias=f"DIV_{self._get_alias(other)}")
+    def __floordiv__(self, other): return self._wrap((self.get_data() // self._get_data(other)).where(self.get_data().notna()), alias=f"FLOORDIV_{self._get_alias(other)}")
+    def __mod__(self, other): return self._wrap((self.get_data() % self._get_data(other)).where(self.get_data().notna()), alias=f"MOD_{self._get_alias(other)}")
+    def __pow__(self, other): return self._wrap((self.get_data() ** self._get_data(other)).where(self.get_data().notna()), alias=f"POW_{self._get_alias(other)}")
+    def __gt__(self, other): return self._wrap((self.get_data() > self._get_data(other)).where(self.get_data().notna()), alias=f"GT_{self._get_alias(other)}")
+    def __lt__(self, other): return self._wrap((self.get_data() < self._get_data(other)).where(self.get_data().notna()), alias=f"LT_{self._get_alias(other)}")
+    def __ge__(self, other): return self._wrap((self.get_data() >= self._get_data(other)).where(self.get_data().notna()), alias=f"GE_{self._get_alias(other)}")
+    def __le__(self, other): return self._wrap((self.get_data() <= self._get_data(other)).where(self.get_data().notna()), alias=f"LE_{self._get_alias(other)}")
+    def __eq__(self, other): return self._wrap((self.get_data() == self._get_data(other)).where(self.get_data().notna()), alias=f"EQ_{self._get_alias(other)}")
     @override
     def __ne__(self, other): #type: ignore[override]
         # if isinstance(other, DataMeta):
         #     return self.alias != other.alias
-        return self._wrap((self.data != self._get_data(other)).where(self.data.notna()), alias=f"NE_{self._get_alias(other)}")
-    def __and__(self, other): return self._wrap((self.data & self._get_data(other)).where(self.data.notna()), alias=f"AND_{self._get_alias(other)}")
-    def __or__(self, other): return self._wrap((self.data | self._get_data(other)).where(self.data.notna()), alias=f"OR_{self._get_alias(other)}")
-    def __xor__(self, other): return self._wrap((self.data ^ self._get_data(other)).where(self.data.notna()), alias=f"XOR_{self._get_alias(other)}")
+        return self._wrap((self.get_data() != self._get_data(other)).where(self.get_data().notna()), alias=f"NE_{self._get_alias(other)}")
+    def __and__(self, other): return self._wrap((self.get_data() & self._get_data(other)).where(self.get_data().notna()), alias=f"AND_{self._get_alias(other)}")
+    def __or__(self, other): return self._wrap((self.get_data() | self._get_data(other)).where(self.get_data().notna()), alias=f"OR_{self._get_alias(other)}")
+    def __xor__(self, other): return self._wrap((self.get_data() ^ self._get_data(other)).where(self.get_data().notna()), alias=f"XOR_{self._get_alias(other)}")
     
-    def __neg__(self): return self._wrap((-self.data).where(self.data.notna()), alias=f"NEG")
-    def __pos__(self): return self._wrap((+self.data).where(self.data.notna()), alias=f"POS")
-    def __abs__(self): return self._wrap(abs(self.data).where(self.data.notna()), alias=f"ABS")
-    def __invert__(self): return self._wrap((~self.data).where(self.data.notna()), alias=f"INVERT")
-    def __getitem__(self, key): return self._wrap(self.data[(col := _process_data_col(key).name)], alias=col)
-    def __setitem__(self, key, value): self.data[_process_data_col(key).name] = value
-    def __delitem__(self, key): del self.data[_process_data_col(key).name]
+    def __neg__(self): return self._wrap((-self.get_data()).where(self.get_data().notna()), alias=f"NEG")
+    def __pos__(self): return self._wrap((+self.get_data()).where(self.get_data().notna()), alias=f"POS")
+    def __abs__(self): return self._wrap(abs(self.get_data()).where(self.get_data().notna()), alias=f"ABS")
+    def __invert__(self): return self._wrap((~self.get_data()).where(self.get_data().notna()), alias=f"INVERT")
+    def __getitem__(self, key):
+        col = _process_data_col(key).name
+        if col.endswith('_ADJUSTED') and col not in self.get_data().columns:
+            data = self.get_and_adjust_cols(col, copy=False)
+            return self._wrap(data[col], alias=col)
+        return self._wrap(self.get_data()[col], alias=col)
+    def __setitem__(self, key, value): self.get_data()[_process_data_col(key).name] = value
+    def __delitem__(self, key): del self.get_data()[_process_data_col(key).name]
 
     # 反向运算符（支持 scalar + meta）
-    def __radd__(self, other): return self._wrap((self._get_data(other) + self.data).where(self.data.notna()), alias=f"RADD_{self._get_alias(other)}")
-    def __rsub__(self, other): return self._wrap((self._get_data(other) - self.data).where(self.data.notna()), alias=f"RSUB_{self._get_alias(other)}")
-    def __rmul__(self, other): return self._wrap((self._get_data(other) * self.data).where(self.data.notna()), alias=f"RMUL_{self._get_alias(other)}")
-    def __rtruediv__(self, other): return self._wrap((self._get_data(other) / self.data).where(self.data.notna()), alias=f"RDIV_{self._get_alias(other)}")
-    def __rfloordiv__(self, other): return self._wrap((self._get_data(other) // self.data).where(self.data.notna()), alias=f"RFLOORDIV_{self._get_alias(other)}")
-    def __rmod__(self, other): return self._wrap((self._get_data(other) % self.data).where(self.data.notna()), alias=f"RMOD_{self._get_alias(other)}")
-    def __rpow__(self, other): return self._wrap((self._get_data(other) ** self.data).where(self.data.notna()), alias=f"RPOW_{self._get_alias(other)}")
-    def __rand__(self, other): return self._wrap((self._get_data(other) & self.data).where(self.data.notna()), alias=f"RAND_{self._get_alias(other)}")
-    def __ror__(self, other): return self._wrap((self._get_data(other) | self.data).where(self.data.notna()), alias=f"ROR_{self._get_alias(other)}")
-    def __rxor__(self, other): return self._wrap((self._get_data(other) ^ self.data).where(self.data.notna()), alias=f"RXOR_{self._get_alias(other)}")
+    def __radd__(self, other): return self._wrap((self._get_data(other) + self.get_data()).where(self.get_data().notna()), alias=f"RADD_{self._get_alias(other)}")
+    def __rsub__(self, other): return self._wrap((self._get_data(other) - self.get_data()).where(self.get_data().notna()), alias=f"RSUB_{self._get_alias(other)}")
+    def __rmul__(self, other): return self._wrap((self._get_data(other) * self.get_data()).where(self.get_data().notna()), alias=f"RMUL_{self._get_alias(other)}")
+    def __rtruediv__(self, other): return self._wrap((self._get_data(other) / self.get_data()).where(self.get_data().notna()), alias=f"RDIV_{self._get_alias(other)}")
+    def __rfloordiv__(self, other): return self._wrap((self._get_data(other) // self.get_data()).where(self.get_data().notna()), alias=f"RFLOORDIV_{self._get_alias(other)}")
+    def __rmod__(self, other): return self._wrap((self._get_data(other) % self.get_data()).where(self.get_data().notna()), alias=f"RMOD_{self._get_alias(other)}")
+    def __rpow__(self, other): return self._wrap((self._get_data(other) ** self.get_data()).where(self.get_data().notna()), alias=f"RPOW_{self._get_alias(other)}")
+    def __rand__(self, other): return self._wrap((self._get_data(other) & self.get_data()).where(self.get_data().notna()), alias=f"RAND_{self._get_alias(other)}")
+    def __ror__(self, other): return self._wrap((self._get_data(other) | self.get_data()).where(self.get_data().notna()), alias=f"ROR_{self._get_alias(other)}")
+    def __rxor__(self, other): return self._wrap((self._get_data(other) ^ self.get_data()).where(self.get_data().notna()), alias=f"RXOR_{self._get_alias(other)}")
 
     # 可选：支持 len() 和 bool()
-    def __len__(self): return len(self.data)
-    def __bool__(self): return bool(self.data) if self.data.size else False
+    def __len__(self): return len(self.get_data())
+    def __bool__(self): return bool(self.get_data()) if self.get_data().size else False
 
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty

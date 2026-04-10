@@ -1,0 +1,13 @@
+<div class="module" id="latex_module">
+    <div class="section-title">因子表达式 (LaTeX)</div>
+    <div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;">
+        {% if math_expr %}
+            $$ {{ math_expr }} $$
+        {% else %}
+            <span style="color:#888;">该因子未提供表达式</span>
+        {% endif %}
+    </div>
+    {% if math_expr %}
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    {% endif %}
+</div>
