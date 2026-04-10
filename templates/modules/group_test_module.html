@@ -1,6 +1,39 @@
-<div class="module" id="group_test_module">
-    <div class="section-title">分组测试</div>
-    <div style="color:#888;padding:20px;text-align:center;border:1px dashed #ccc;border-radius:8px;">
-        分组测试功能开发中
+<div class="module" id="group_test_module" style="margin-top:24px;">
+    <div class="section-title">4. 分组测试</div>
+    
+    <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px;">
+        <div>
+            <label>分组数量：</label>
+            <input type="number" id="group_count" value="5" min="2" max="10" step="1" style="width: 70px;">
+        </div>
+        <div>
+            <label>手续费率（%）：</label>
+            <input type="number" id="fee_rate" value="0.0" step="0.01" style="width: 80px;">
+            <span style="font-size:12px;">（预留）</span>
+        </div>
+        <div>
+            <label>时间范围：</label>
+            <input type="date" id="group_start_date">
+            <span> 至 </span>
+            <input type="date" id="group_end_date">
+            <button id="use_time_range_btn" style="margin-left:8px;">使用当前时间范围</button>
+        </div>
+        <div>
+            <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="background:#0078d4;color:#fff;border:none;border-radius:4px;padding:6px 16px;">运行分组测试</button>
+            <span id="group_test_status" style="margin-left:12px;font-size:13px;"></span>
+        </div>
+    </div>
+    
+    <!-- 分组累计收益曲线 -->
+    <div id="group_chart_container" style="width:100%; height:500px; margin-top:16px; display:none;"></div>
+    
+    <!-- 统计指标表格 -->
+    <div id="group_metrics_container" style="margin-top:16px; overflow-x:auto; display:none;">
+        <table class="group-metrics-table" style="border-collapse:collapse; width:100%; font-size:13px;">
+            <thead id="metrics_head"></thead>
+            <tbody id="metrics_body"></tbody>
+        </table>
     </div>
 </div>
+
+<script src="{{ url_for('static', filename='js/group_test_module.js') }}"></script>

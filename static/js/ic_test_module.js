@@ -21,6 +21,7 @@
             const data = await res.json();
             if (data.success) {
                 factorList = data.factors;
+                window.factorList = factorList;   // 暴露全局
                 return factorList;
             } else {
                 console.error('获取因子列表失败:', data.error);
@@ -504,5 +505,8 @@
         if (window.submissions && window.submissions.length) {
             await window.renderICTabs(window.submissions);
         }
+        window.factorList = factorList;
     };
+
+    window.factorList = factorList;
 })();
