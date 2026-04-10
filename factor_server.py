@@ -584,7 +584,20 @@ def factor_list():
     try:
         ff = get_factor_family_instance(factor_family_alias)
         factors = ff.get_factors()
-        factor_data = [{'alias': f.alias, 'name': f.name, 'freq': getattr(f, 'freq', 'N')} for f in factors]
+        factor_data = []
+        for f in factors:
+            # 将 freq 转换为字符串，假设它是枚举或具有 value 属性
+            freq_value = getattr(f, 'freq', None)
+            if hasattr(freq_value, 'value'):   # 如果是枚举
+                assert freq_value is not None
+                freq_str = str(freq_value.value)
+            else:
+                freq_str = str(freq_value) if freq_value is not None else 'N'
+            factor_data.append({
+                'alias': f.alias,
+                'name': f.name,
+                'freq': freq_str   # 确保是字符串
+            })
         return jsonify({'success': True, 'factors': factor_data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
