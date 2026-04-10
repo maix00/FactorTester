@@ -65,6 +65,9 @@
                     .then(data => {
                         if (data.success) {
                             reloadParamModule();
+                            if (typeof window.refreshICModule === 'function') {
+                                window.refreshICModule();
+                            }
                             const statusSpan = document.getElementById('confirm_time_status');
                             if (statusSpan) {
                                 statusSpan.innerText = '⚠️ 点击确定按钮更新因子计算的时间范围';
@@ -93,7 +96,11 @@
                     })
                     .then(res => res.json())
                     .then(data => {
-                        if (data.success) reloadParamModule();
+                        if (data.success)
+                            reloadParamModule();
+                            if (typeof window.refreshICModule === 'function') {
+                                window.refreshICModule();
+                            }
                         else alert('删除失败: ' + data.error);
                     });
                 });
@@ -149,7 +156,11 @@
                         })
                         .then(res => res.json())
                         .then(data => {
-                            if (data.success) reloadParamModule();
+                            if (data.success)
+                                reloadParamModule();
+                                if (typeof window.refreshICModule === 'function') {
+                                    window.refreshICModule();
+                                }
                             else alert('排序失败: ' + data.error);
                         });
                     }

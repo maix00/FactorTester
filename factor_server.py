@@ -268,7 +268,7 @@ def set_time_range():
             from Factor import FactorTester
             for tester in factor_testers:
                 assert isinstance(tester, FactorTester)
-                tester.update_time_range((f"{start_date} {start_time}", f"{end_date} {end_time}"))
+                tester.update_time_range((start_point, end_point))
 
         # 可以根据是否是交易日等设置调整默认的时间范围
         show_next = (start_date <= end_date)

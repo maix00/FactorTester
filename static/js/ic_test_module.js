@@ -316,6 +316,11 @@
         const statusSpan = document.getElementById(`ic-status-${subId}`);
         const resultDiv = document.getElementById(`ic-result-${subId}`);
         if (!btn || !statusSpan || !resultDiv) return;
+
+        // 获取强制重新计算复选框的状态
+        const recalcCheckbox = document.getElementById(`recalc-checkbox-${subId}`);
+        const re_calc = recalcCheckbox ? recalcCheckbox.checked : false;
+
         // 收集选中的因子及频率
         const selectedFactors = [];
         const checkboxes = document.querySelectorAll(`#factor-config-${subId} .factor-checkbox:checked`);
@@ -348,7 +353,8 @@
                     submission_id: subId,
                     factor_family_alias: factorFamilyAlias,
                     paths: submission.paths,
-                    factors: selectedFactors   // 发送因子列表
+                    factors: selectedFactors,  // 发送因子列表
+                    re_calc: re_calc   // 新增参数
                 })
             });
             const data = await response.json();
@@ -460,6 +466,9 @@
                     <div class="ic-card">
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
                             <button class="btn btn-primary btn-sm" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
+                            <label style="font-size: 13px;">
+                                <input type="checkbox" id="recalc-checkbox-${sub.id}"> 强制重新计算（忽略缓存）
+                            </label>
                             <span id="ic-status-${sub.id}" class="ic-status"></span>
                         </div>
                         ${buildFactorConfigPanel(sub.id, factorList)}
@@ -487,4 +496,13 @@
             await window.renderICTabs(window.submissions);
         }
     });
+
+    // 供参数模块调用，刷新因子列表和 IC 选项卡
+    window.refreshICModule = async function() {
+        console.log('刷新 IC 模块因子列表');
+        await fetchFactorList();  // 重新获取因子列表
+        if (window.submissions && window.submissions.length) {
+            await window.renderICTabs(window.submissions);
+        }
+    };
 })();
