@@ -645,11 +645,11 @@ def run_ic_test():
 
         start_date_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
         end_date_str = str(tester.end_date).replace(':', '-').replace(' ', '_')
-        original_products = tester.products.copy()
+        all_products = tester.products.copy()
 
         for factor in factors:
 
-            tester.products = original_products.copy()
+            run_products = all_products.copy()
             factor.clear()
             return_freq = return_freqs.get(factor, None)
 
@@ -661,15 +661,18 @@ def run_ic_test():
                 with open(factor_series_cache_file, "rb") as f:
                     table, start_calc_point_cache = pickle.load(f)
                 if start_calc_point == start_calc_point_cache:
-                    tester.products = set([p for p in tester.products if p not in table.columns])
-            if tester.products:
+                    run_products = set([p for p in tester.products if p not in table.columns])
+            if run_products:
                 try:
+                    tester.products = run_products.copy()
                     tester.calc_factor(factors=factor)
                 except:
+                    tester.products = all_products.copy()
                     pass
                 finally:
+                    tester.products = all_products.copy()
                     if factor.table is None or factor.table.empty:
-                        tester.products = set()
+                        run_products = set()
             if table is None and (factor.table is None or factor.table.empty):
                 raise ValueError("/run_ic_test: 无法计算因子数据，且缓存中无数据可用")
             if table is not None:
@@ -681,21 +684,21 @@ def run_ic_test():
                     factor.table = pd.concat([table, factor.table], axis=1)
             else: # table is None
                 pass # factor.table is not None or empty, otherwise an error would have been raised above
-            if tester.products:
+            if run_products:
                 with open(factor_series_cache_file, "wb") as f:
                     pickle.dump((factor.table, start_calc_point), f)
-            tester.products = original_products.copy()
+            run_products = all_products.copy()
 
             ic_series = None
             ic_stats = None
             if not re_calc and factor_ic_cache_file.exists():
                 with open(factor_ic_cache_file, "rb") as f:
                     ic_series, ic_stats, products_cache, return_freq_cache, _, start_date_cache, end_date_cache = pickle.load(f)
-                if products_cache == tester.products and return_freq_cache != return_freq \
+                if products_cache == run_products and return_freq_cache != return_freq \
                     and start_date_cache == tester.start_date and end_date_cache == tester.end_date:
-                    tester.products = set()
+                    run_products = set()
             returns_table = pd.DataFrame()  # 确保 returns_table 定义，以便后续检查，即使计算失败也不会导致未定义错误
-            if tester.products:
+            if run_products:
                 try:
                     ic_series_df, ic_stats_df = tester.calc_ic(factors=factor, return_freq=return_freq)
                     returns_table = factor.returns
@@ -706,11 +709,11 @@ def run_ic_test():
             assert ic_series is not None and ic_stats is not None and not returns_table.empty, "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
             factor.ic_series = ic_series
             factor.ic_stats = ic_stats
-            if tester.products:
+            if run_products:
                 with open(factor_ic_cache_file, "wb") as f:
-                    pickle.dump((factor.ic_series, factor.ic_stats, tester.products, return_freq, returns_table, tester.start_date, tester.end_date), f)
+                    pickle.dump((factor.ic_series, factor.ic_stats, all_products, return_freq, returns_table, tester.start_date, tester.end_date), f)
         
-        tester.products = original_products.copy()
+        tester.products = all_products.copy()
         ic_stats = pd.concat([factor.ic_stats for factor in factors], axis=1)
         ic_stats.rename(columns=lambda x: str(x), inplace=True)
         columns = ic_stats.columns.tolist()

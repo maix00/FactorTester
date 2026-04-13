@@ -163,7 +163,7 @@ class Factor(SerialObject):
         return self.table
     
     def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
-                     returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN) -> pd.DataFrame:
+                     returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED) -> pd.DataFrame:
         if return_freq is not None:
             return_freq = _process_data_freq(return_freq)
         else:
@@ -403,7 +403,7 @@ class FactorFamily(SerialObject):
         tester = get_factor_tester(time_range=(start_date, end_date))
         
         tester.sift_product_by_category(categories=categories)
-        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN
+        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
 
         factors = self.get_factors(return_freq=return_freq, start_calc_point=start_calc_point, **kwargs)
         tester.calc_factor(factors)
@@ -549,7 +549,7 @@ class FactorTester(SerialObject):
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
     
-    def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
+    def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                 return_freq: Optional[Any] = None, factors: Optional[Factor|List[Factor]] = None,
                 time_range: Optional[Tuple] = None,) -> tuple[pd.DataFrame, pd.DataFrame]:
                         
@@ -610,7 +610,7 @@ class FactorTester(SerialObject):
         return stats_df
 
     def test_by_group(self, factors: Optional[Factor|List[Factor]] = None,
-                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN,
+                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                       n_groups: int = 5, n_groups_name: Dict[int, str] = {},
                       time_range: Optional[Tuple] = None,
                       plot_remark_str: Optional[str] = None,

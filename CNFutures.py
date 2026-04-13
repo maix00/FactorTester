@@ -6,6 +6,7 @@ from Tools import DataColumn
 
 _data = pd.read_csv('../data/sectors.csv')
 data_dir_min = '../data/main_mink'
+data_path_day = '../data/main_series_adjusted.parquet'
 data_dir_day = '../data/main_dayk'
 data_type = 'parquet'
 file_list_min = [
