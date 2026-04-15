@@ -10,7 +10,7 @@ from tools.factors.Factor import Factor
 from tools.products.Product import Product
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools import SerialObject, DataFreq, DataMeta, DataColumn
-from tools.parameters import Parameter, TimeDeltaParam, DataColumnParam, TypeParam
+from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
 from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
@@ -33,27 +33,27 @@ class FactorFamily(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()
             self.factors: List[Factor] = []
+            self.products = set()
             self.common_signal_freq: DataFreq
             self.factor_single_use = factor_single_use
             self.current_factor_tester: Optional['FactorTester'] = None
             self.current_sync_signal_index: Optional[pd.Index] = None
+            self.current_sync_signal_index_replaced: Optional[pd.Index] = None
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         try:
             factors = {}
-            signal_freq = kwargs.pop('F')
             if len(products) <= 200:
                 for product in tqdm(products, desc=f"Calculating factor signals"):
-                    factors[product] = self.sync_signal(self.func_timeseries(product, *args, **kwargs), signal_freq)
+                    factors[product] = self.func_timeseries(product, *args, **kwargs)
             else:
                 from concurrent.futures import ThreadPoolExecutor, as_completed
-                def compute_factor(product, signal_freq, *args, **kwargs):
-                    return product, self.sync_signal(self.func_timeseries(product, *args, **kwargs), signal_freq)
+                def compute_factor(product, *args, **kwargs):
+                    return product, self.func_timeseries(product, *args, **kwargs)
                 with ThreadPoolExecutor(max_workers=8) as executor:
-                    futures = {executor.submit(compute_factor, product, signal_freq, *args, **kwargs): product for product in products}
+                    futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in products}
                     for future in tqdm(as_completed(futures), total=len(products), desc="Calculating factor signals"):
-                        product, factor = future.result()
-                        factors[product] = factor
+                        product, factor = future.result(); factors[product] = factor
             return pd.concat(factors, axis=1)
         except Exception as e:
             raise e
@@ -198,10 +198,12 @@ class FactorFamily(SerialObject):
     
     def _get_sync_signal_index(self, freq: Any, end_session_skip: bool = True, 
                     end_session_gap: pd.Timedelta = pd.Timedelta('3hours'),
-                    day_basepoint: str|Callable = 'last', # 'last', 'first', '09:01:00'
+                    basepoint: str|Callable = 'last', # 'last', 'first', '09:01:00'
                     **kwargs) -> pd.Index:
         if self.current_factor_tester is not None:
             products = self.current_factor_tester.products
+        elif self.products:
+            products = self.products
         else:
             raise ValueError("No current factor tester is set on this Factor instance - cannot sync signal without a FactorTester to pull products from.")
         data_dict = {product: product.get_some_data() for product in products}
@@ -228,26 +230,26 @@ class FactorFamily(SerialObject):
         
         first_true_series = data.index.get_level_values(str(data.index.names[first_true_idx])).to_series().reset_index(drop=True)
         
-        if isinstance(day_basepoint, str):
-            day_basepoint = day_basepoint.lower()
-            if day_basepoint == 'last':
+        if isinstance(basepoint, str):
+            basepoint = basepoint.lower()
+            if basepoint == 'last':
                 series = data.groupby(str(data.index.names[first_true_idx])).cumcount(ascending=False) == 0
-            elif day_basepoint == 'first':
+            elif basepoint == 'first':
                 series = data.groupby(str(data.index.names[first_true_idx])).cumcount() == 0
             else:
                 try:
-                    base_time = pd.Timestamp(day_basepoint).time()
+                    base_time = pd.Timestamp(basepoint).time()
                     series = data.groupby(str(data.index.names[first_true_idx])).transform(lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
                 except:
-                    raise ValueError("Invalid day_basepoint value. Must be 'last', 'first', or a valid time string like '09:01:00'")
+                    raise ValueError("Invalid basepoint value. Must be 'last', 'first', or a valid time string like '09:01:00'")
         else:
-            series = day_basepoint(data.groupby(str(data.index.names[first_true_idx])))
+            series = basepoint(data.groupby(str(data.index.names[first_true_idx])))
         
         if not any(series):
             # If no True values are found, we can default to using the last position of each group as the base point
             series = data.groupby(str(data.index.names[first_true_idx])).cumcount(ascending=False) == 0
 
-        assert isinstance(series, pd.Series) and series.dtype == bool, "day_basepoint function must return a boolean Series"
+        assert isinstance(series, pd.Series) and series.dtype == bool, "basepoint function must return a boolean Series"
         first_true_change_pos = series.reset_index(drop=True).index[series]
 
         if end_session_skip and freq.value < pd.Timedelta('1day'):
@@ -272,23 +274,31 @@ class FactorFamily(SerialObject):
         index_names = [str(idx).split('@')[-1] for idx in left_indices] \
                     + [index_name_stem + '@' + freq.name] \
                     + [str(idx).split('@')[-1] for idx in right_indices]
-        self.current_sync_signal_index = pd.MultiIndex.from_arrays(index_arrays, names=index_names).dropna()
-        return self.current_sync_signal_index
+        return pd.MultiIndex.from_arrays(index_arrays, names=index_names).dropna()
     
-    def sync_signal(self, data: Any, freq: Any, **kwargs) -> pd.DataFrame|pd.Series:
+    def sync_signal(self, data: Any, freq: Any, **kwargs) -> pd.Series:
         if self.current_sync_signal_index is None:
-            self._get_sync_signal_index(freq, **kwargs)
+            self.current_sync_signal_index = self._get_sync_signal_index(freq, **kwargs)
+        if 'replace_basepoint' in kwargs and self.current_sync_signal_index_replaced is None:
+            kwargs.pop('basepoint')
+            kwargs['basepoint'] = kwargs.pop('replace_basepoint')
+            self.current_sync_signal_index_replaced = self._get_sync_signal_index(freq, **kwargs)
         assert self.current_sync_signal_index is not None
         if isinstance(data, DataMeta):
             data = data.data
+        map = self.current_sync_signal_index.isin(data.index)
         data = data[data.index.isin(self.current_sync_signal_index)]
         data.index.names = self.current_sync_signal_index.names
+        if self.current_sync_signal_index_replaced is not None:
+            index_replaced = self.current_sync_signal_index_replaced
+            assert len(self.current_sync_signal_index) == len(index_replaced)
+            data.index = index_replaced[map]
         return data
     
 class Returns(FactorFamily):
 
     params = [
-        TimeDeltaParam('RF', flag='pos', default_value='1d'), # Return Frequency, e.g. '1d', '1h', '30min', etc.
+        WindowParam('RF'), # Return Frequency, e.g. '1d', '1h', '30min', etc.
         DataColumnParam('SC', default_value=DataColumn.CLOSE), # Start Column for return calculation, e.g. DataColumn.CLOSE, DataColumn.OPEN, etc.
         DataColumnParam('EC', default_value=DataColumn.CLOSE), # End Column for return calculation, e.g. DataColumn.CLOSE, DataColumn.OPEN, etc.
         TypeParam('S', default_value=1), # Shift for return calculation, e.g. 1 for next return, 0 for current return, -1 for previous return, etc.
@@ -298,24 +308,17 @@ class Returns(FactorFamily):
         data_freq = product.get_current_freq()
         data = getattr(product, data_freq.name)
         assert isinstance(data, DataMeta)
-        if DataFreq(RF).is_day_multiple():
-            multiple = int(RF / pd.Timedelta('1d'))
-        else:
-            multiple = int(RF / data_freq.value)
         if SC == EC:
             day_basepoint = 'last'
             if SC == DataColumn.OPEN or SC == DataColumn.OPEN_ADJUSTED:
                 day_basepoint = 'first'
-                ret = data[SC].pct_change(RF, day_basepoint=day_basepoint).shift(-multiple+S)
+                ret = data[SC].pct_change(RF).shift(RF*S)
             elif SC == DataColumn.CLOSE or SC == DataColumn.CLOSE_ADJUSTED:
-                ret = data[SC].pct_change(RF, day_basepoint=day_basepoint).shift(-multiple+S)
+                ret = data[SC].pct_change(RF).shift(RF*S)
             else:
                 raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
-            return data.sync_signal(ret, RF, day_basepoint='last', replace=True)
+            return self.sync_signal(ret, RF, basepoint=day_basepoint, replace_basepoint='last')
         else:
-            start = data[SC].rolling(RF).first()
-            end = data[EC].rolling(RF).last()
-            ret = end / start - 1
-            return data.sync_signal(ret, RF)
+            raise NotImplementedError("计算不同起止列的收益率尚未实现")
 
 ReturnsFamily = Returns(factor_single_use=True)

@@ -117,6 +117,7 @@ class Factor(SerialObject):
         start_calc_point = self.get_current_start_calc_point()
         from tools.factors.FactorFamily import ReturnsFamily
         StartCalcPointParam.register(ReturnsFamily, start_calc_point)
+        ReturnsFamily.products = self.products
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
         StartCalcPointParam.register(return_factor, start_calc_point)

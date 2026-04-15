@@ -57,7 +57,7 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
             raise ValueError("Invalid frequency format")
             
     def is_day_multiple(self) -> bool:
-        return self.value >= pd.Timedelta('1day') and self.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0
+        return abs(self.value) >= pd.Timedelta('1day') and self.value.total_seconds() % pd.Timedelta('1day').total_seconds() == 0
     
     def __class_getitem__(cls, key):
         return DataFreq(key)

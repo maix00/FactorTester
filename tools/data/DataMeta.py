@@ -172,12 +172,19 @@ class DataMeta(SerialObject):
             raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
         if (method := getattr(data, name, None)) is not None:
             def wrapper(*args, **kwargs):
+                def _rectify_window_arg(*args, arg_name: Optional[str] = None, **kwargs):
+                    if args:
+                        args = (self._get_window_k(args[0], **kwargs),) + args[1:] if args else args
+                    else:
+                        assert arg_name is not None
+                        kwargs = {arg_name: self._get_window_k(w, **kwargs), **kwargs} if (w := kwargs.pop(arg_name, None)) is not None else kwargs
+                    return args, kwargs
                 if name == 'rolling':
-                    args = (self._get_window_k(args[0], **kwargs),) + args[1:] if args else args
-                    kwargs = {'window': self._get_window_k(w, **kwargs), **kwargs} if (w := kwargs.pop('window', None)) is not None else kwargs
+                    args, kwargs = _rectify_window_arg(*args, arg_name='window', **kwargs)
                 elif name == 'pct_change':
-                    args = (self._get_window_k(args[0], **kwargs),) + args[1:] if args else args
-                    kwargs = {'periods': self._get_window_k(w, **kwargs), **kwargs} if (w := kwargs.pop('periods', None)) is not None else kwargs
+                    args, kwargs = _rectify_window_arg(*args, arg_name='periods', **kwargs)
+                elif name == 'shift':
+                    args, kwargs = _rectify_window_arg(*args, **kwargs)
                 return self._wrap(method(*args, **kwargs), alias=f"{name.upper()}{_rectify_args_kwargs(*args, **kwargs)}")
             return wrapper
         else:

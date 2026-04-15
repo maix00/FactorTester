@@ -16,9 +16,11 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         \\end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, WF: Any = pd.Timedelta('2h'), RF: Any = pd.Timedelta('1D'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs):
-        return (product.MIN1[P].pct_change(RF) > 0).rolling(WF).mean()
+    def func_timeseries(self, product: Product, F: Any = pd.Timedelta('1D'),
+                        WF: Any = 1, RF: Any = 1, P: DataColumn = DataColumn.CLOSE, **kwargs):
+        ret = product.MIN1[P].pct_change(RF)
+        pos_ratio = (ret > 0).rolling(WF).mean()
+        return self.sync_signal(pos_ratio, F)
     
 if __name__ == '__main__':
     ff = MmPosPct()
