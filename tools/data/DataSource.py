@@ -44,9 +44,9 @@ class DataSource(SerialObject, metaclass=DataSourceMeta):
                  get_object_path: Callable[[UniqueObject], Any],
                  if_object_is_in_source: Optional[Callable[[UniqueObject], bool]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            self.freq = DataFreq(data_freq)
-            alias =  self.freq.name + '@' + alias
             super().__init__(type_alias='DS', alias=alias)
+            self.alias = alias
+            self.freq = DataFreq(data_freq)
             if not DataSource.all():
                 DataSource.set_default_source(self)
             DataSource._register_source(self)

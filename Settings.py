@@ -15,6 +15,17 @@ current_time_settings = {
     "session_type": "normal"
 }
 
+import pandas as pd
+from typing import TYPE_CHECKING, List
+
+sift_volume_ratio = 0.8
+default_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
+default_plot_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
+logger_dir_path_default = '../data/factor_tester_log/'
+factor_info_path = '../data/Factors/'
+
 from tools.products.categories.Category import CategoryTree, combine_trees
 def get_cat_tree() -> CategoryTree:
     from tools.products.Product import Product
@@ -23,3 +34,9 @@ def get_cat_tree() -> CategoryTree:
         CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product),
         CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
     )
+
+if TYPE_CHECKING:
+    from tools.products.Product import Product
+def get_all_products() -> List[Product]:
+    from sources.LocalCNFutures.CNFutures import get_all_futures
+    return get_all_futures()

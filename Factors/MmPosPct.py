@@ -1,12 +1,11 @@
 import pandas as pd
-import os, sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from typing import Any
+import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.products.Product import Product
 from tools import DataColumn
-from tools.factors.Factor import FactorFamily
+from tools.products.Product import Product
+from tools.factors.FactorFamily import FactorFamily
 from tools.parameters.Parameter import DataColumnParam, TimeDeltaParam
-from typing import Sequence, Any
 
 class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
 
@@ -23,16 +22,10 @@ class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
         \\end{aligned}
     '''
 
-    def func(self, products: Sequence[Product], F: Any = pd.Timedelta('5m'),
-             WF: Any = pd.Timedelta('2h'), RF: Any = pd.Timedelta('1D'),
-             P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.DataFrame:
-        factors = {}
-        for product in products:
-            ret = product.MIN1[P].pct_change(RF)
-            pos_ratio = (ret > 0).rolling(WF).mean()
-            factors[product] = product.MIN1.sync_signal(pos_ratio, F)
-        return pd.concat(factors, axis=1)
-
+    def func_timeseries(self, product: Product, WF: Any = pd.Timedelta('2h'), RF: Any = pd.Timedelta('1D'),
+                        P: DataColumn = DataColumn.CLOSE, **kwargs):
+        return (product.MIN1[P].pct_change(RF) > 0).rolling(WF).mean()
+    
 if __name__ == '__main__':
     ff = MmPosPct()
 
@@ -49,5 +42,5 @@ if __name__ == '__main__':
     # ff.add_params(F='1d', RF='1d', WF='10d')
     ff.add_params(F='2d', RF='2d', WF='10d')
 
-    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai')
+    fft = ff.test(start_calc_point='2024-02-03 09:00:00', timezone='Asia/Shanghai')
     print(fft.products)

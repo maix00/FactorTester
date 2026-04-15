@@ -238,19 +238,7 @@ class TimeDeltaParam(Parameter):
         except Exception:
             return str(value)
         
-def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
-    param = FinRangeParam(alias, None, get_value_alias=lambda _: 'N')
-    param += TimeDeltaParam(flag='pos', single_use=True)
-    return param
 
-def get_factor_freq_param(alias: Optional[str] = 'F') -> Parameter:
-    param = TimeDeltaParam(alias=alias, default_value='1d', flag='pos')
-    param += FinRangeParam(alias=None, value_space='S', single_use=True)
-    return param
-    
-if __name__ == '__main__':
-    ReturnFreq = get_return_freq_param()
-    print(ReturnFreq.get_value_alias('2h45m10s11ms'))
 
 class DateOrTimeParam(Parameter):
     def __init__(self, alias: Optional[str] = None,
@@ -304,19 +292,3 @@ class DateOrTimeParam(Parameter):
         assert value is not None, "Either object or value must be provided"
         import datetime
         return not type(value) is datetime.date
-
-def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DateOrTimeParam:
-    return DateOrTimeParam(alias, default_value=default_value, **kwargs)
-
-if __name__ == '__main__':
-    StartCalcPoint = get_StartCalcPointParam()
-    print(StartCalcPoint)
-    print(StartCalcPoint.get_value_alias('2024-01-02'))
-    print(StartCalcPoint.get_value_alias('2024-01-02 09:30:00'))
-    print(StartCalcPoint.check_in_space('2024-01-02 09:90:00', error=False))
-    print(StartCalcPoint.is_date(value='2024-01-02'))
-    print(StartCalcPoint.is_date(value='2024-01-02', isDate=True))
-    print(StartCalcPoint.is_time(value='2024-01-02 09:30:00'))
-    print(StartCalcPoint.is_time(value='2024-01-02 09:30:00', isDatetime=True))
-    print(StartCalcPoint.is_time(value='2024-01-02', isDate=True))
-    print(StartCalcPoint.is_time(value='2024-01-02'))

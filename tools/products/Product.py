@@ -55,7 +55,7 @@ class Product(UniqueObject):
             self.current_freq = available_freqs[0]
         return getattr(self, 'current_freq')
     
-    def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = True) -> pd.DataFrame:
+    def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
         try:
             data_freq = self.get_current_freq() if data_freq is None else DataFreq(data_freq)
             return getattr(self, data_freq.name).get_data(copy=copy)

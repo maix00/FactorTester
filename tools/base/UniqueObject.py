@@ -47,4 +47,4 @@ class UniqueObject(ABC):
     
     def delete(self):
         key = (self.name, self.__class__.__name__)
-        del self._instances[key]
+        self._instances.pop(key, None)
