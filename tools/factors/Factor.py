@@ -59,7 +59,7 @@ class Factor(SerialObject):
         return StartCalcPointParam.get_value(self)
     
     if TYPE_CHECKING:
-        from tools.parameters.Parameter import DateOrTimeParam
+        from tools.parameters import DateOrTimeParam
         
     def get_StartCalcPointParam(self) -> DateOrTimeParam:
         return StartCalcPointParam

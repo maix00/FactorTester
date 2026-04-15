@@ -1,7 +1,8 @@
 from tools import UniqueObject
-from tools.parameters.Parameter import FinRangeParam
 from weakref import WeakValueDictionary
-from typing import Any, Dict, Optional, Tuple, Type, List, Callable
+from typing import Any, Dict, Optional, Tuple, Type, List
+
+from tools.parameters.Parameter import FinRangeParam
 
 object_word = '$OBJECTS$'
 subclass_word = '$SUBCLASS$'

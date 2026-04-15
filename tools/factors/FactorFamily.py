@@ -10,7 +10,7 @@ from tools.factors.Factor import Factor
 from tools.products.Product import Product
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools import SerialObject, DataFreq, DataMeta, DataColumn
-from tools.parameters.Parameter import Parameter, TimeDeltaParam, DataColumnParam, TypeParam
+from tools.parameters import Parameter, TimeDeltaParam, DataColumnParam, TypeParam
 from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
@@ -74,8 +74,8 @@ class FactorFamily(SerialObject):
     
     def _check_in_space(self, **kwargs):
         for key in kwargs:
-            if not self.params_dict[key].check_in_space(kwargs[key]):
-                raise ValueError
+            if kwargs[key] not in self.params_dict[key]:
+                raise ValueError(f"{kwargs[key]} is not in the value space of {key}")
             
     def add_params(self, **kwargs):
         self._check_in_space(**kwargs)
@@ -104,7 +104,7 @@ class FactorFamily(SerialObject):
         return StartCalcPointParam.get_value(self)
     
     if TYPE_CHECKING:
-        from tools.parameters.Parameter import DateOrTimeParam
+        from tools.parameters import DateOrTimeParam
         
     def get_StartCalcPointParam(self) -> DateOrTimeParam:
         return StartCalcPointParam

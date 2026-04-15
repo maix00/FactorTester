@@ -131,7 +131,7 @@ class DataMeta(SerialObject):
             return index.get_level_values(level)
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
-        from tools.parameters.Parameter import DateOrTimeParam
+        from tools.parameters import DateOrTimeParam
         if object is not None and isinstance(object, DataMeta) \
             and callable(get_param := getattr(object.original_object, 'get_StartCalcPointParam', None)):
             StartCalcPointParam = get_param()

@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Optional, Any
 
 from tools import DataColumn
-from tools.parameters.Parameter import Parameter, FinRangeParam, TimeDeltaParam, DateOrTimeParam
+from tools.parameters import Parameter, FinRangeParam, TimeDeltaParam, DateOrTimeParam
 
 from Settings import default_test_start_date
 

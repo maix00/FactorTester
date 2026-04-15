@@ -1,8 +1,7 @@
-from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
+from typing import TYPE_CHECKING, Callable, List, Optional, Any, Literal
 
-from tools import UniqueObject, SerialObject, DataColumn
-from typing import TYPE_CHECKING
+from tools import UniqueObject, SerialObject
 
 class Parameter(SerialObject):
     def __new__ (cls, alias: Optional[str] = None, *args, **kwargs):
@@ -15,7 +14,7 @@ class Parameter(SerialObject):
         if not hasattr(self, '_initialized'):
             type_alias = kwargs.pop('type_alias', 'P')
             super().__init__(type_alias=type_alias, alias=alias, *args, **kwargs)
-            self._register = {}
+            self._registry = {}
             self.whether_in_space = whether_in_space
             self.default_value = default_value
             self.check_in_space(self.default_value)
@@ -25,6 +24,9 @@ class Parameter(SerialObject):
 
     def _rectify_value(self, value: Any, **kwargs) -> Any:
         return value
+    
+    def __contains__(self, value: Any) -> bool:
+        return self.check_in_space(value, error=False)
 
     def check_in_space(self, value: Any, error: bool = True) -> bool:
         check = self.whether_in_space(value)
@@ -101,35 +103,25 @@ class Parameter(SerialObject):
     
     def register(self, object: UniqueObject, value: Any, **kwargs) -> None:
         self.check_in_space(value)
-        self._register[(object, type(object).__name__)] = self.rectify_value(value, **kwargs)
+        self._registry[(object, type(object).__name__)] = self.rectify_value(value, **kwargs)
 
     def unregister(self, object: UniqueObject) -> None:
-        if (object, type(object).__name__) in self._register:
-            del self._register[(object, type(object).__name__)]
+        if (object, type(object).__name__) in self._registry:
+            del self._registry[(object, type(object).__name__)]
 
     def get_value(self, object: UniqueObject) -> Any:
-        return self._register.get((object, type(object).__name__), self.default_value)
-    
-if __name__ == '__main__':
-    param1 = Parameter(alias='P1', default_value=1, whether_in_space=lambda x: isinstance(x, int) and 0 <= x <= 10, get_value_alias=lambda x: f"{x}")
-    param2 = Parameter(alias='P2', default_value=5, whether_in_space=lambda x: isinstance(x, int) and 5 <= x <= 15, get_value_alias=lambda x: f"{x}")
-    combined_param = param1 + param2
-    minus_param = param1 - param2
-    print(combined_param.whether_in_space(3))  # True
-    print(combined_param.whether_in_space(8))  # True
-    print(combined_param.whether_in_space(12)) # True
-    print(minus_param.whether_in_space(3))     # True
-    print(minus_param.whether_in_space(8))     # False
-    print(minus_param.whether_in_space(12))    # False
+        return self._registry.get((object, type(object).__name__), self.default_value)
 
 class TypeParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Any = None, type_: Optional[type] = None, *args, **kwargs):
         type_ = type_ if type_ is not None else type(default_value)
         if not hasattr(self, '_initialized'):
+            __whether_in_space = kwargs.pop('whether_in_space', None)
+            _whether_in_space = lambda x: isinstance(x, type_) and (__whether_in_space(x) if __whether_in_space else True)
             super().__init__(
                 alias = alias,
                 default_value = default_value,
-                whether_in_space = kwargs.pop('whether_in_space', lambda x: isinstance(x, type_)),
+                whether_in_space = _whether_in_space,
                 get_value_alias = kwargs.pop('get_value_alias', lambda x: str(x)),
                 *args, **kwargs
             )
@@ -150,49 +142,6 @@ class FinRangeParam(Parameter):
                 *args, **kwargs
             )
             self.value_space = value_space
-
-class DataColumnParam(TypeParam):
-    def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
-        if default_value is not None:
-            default_value = DataColumn(default_value)
-        else:
-            try:
-                from itertools import takewhile
-                result = ''.join(takewhile(str.isalpha, alias)) if alias else ''
-                default_value = DataColumn(result.upper()) if alias else None
-            except:
-                pass
-        if not hasattr(self, '_initialized'):
-            super().__init__(
-                alias = alias,
-                default_value=default_value,
-                whether_in_space=self._whether_in_space,
-                get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x)),
-                *args, **kwargs
-            )
-        else:
-            self.default_value = default_value
-
-    def _whether_in_space(self, value: Any) -> bool:
-        from tools import DataColumn
-        try:
-            DataColumn(value)
-            return True
-        except Exception:
-            return False
-        
-    def _rectify_value(self, value: Any, **kwargs) -> Any:
-        from tools import DataColumn
-        return DataColumn(value)
-    
-    def col(self, col: Any):
-        from tools import DataColumn
-        col = DataColumn(col)
-        return self.get_value_alias(col)
-
-if __name__ == '__main__':
-    C1 = DataColumnParam('C1')
-    print(C1.col(DataColumn.CLOSE))
 
 class TimeDeltaParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None,
@@ -237,58 +186,3 @@ class TimeDeltaParam(Parameter):
             return ''.join(f"{v}{units[k]}" for k, v in c._asdict().items() if v > 0) or '0'
         except Exception:
             return str(value)
-        
-
-
-class DateOrTimeParam(Parameter):
-    def __init__(self, alias: Optional[str] = None,
-                 default_value: Optional[Any] = None, *args, **kwargs):
-        if not hasattr(self, '_initialized'):
-            if default_value is None:
-                default_value = pd.Timestamp('2000-01-01').date()
-            super().__init__(
-                alias = alias,
-                default_value = default_value,
-                whether_in_space = self._whether_in_space,
-                get_value_alias = self._get_value_alias,
-                *args, **kwargs
-            )
-            self.default_value = self.rectify_value(self.default_value, **kwargs)
-
-    def _rectify_value(self, value: Any, **kwargs) -> Any:
-        if self.check_in_space(value):
-            import datetime
-            isDate = kwargs.get('isDate', None) or type(value) is datetime.date
-            isDatetime = kwargs.get('isDatetime', None)
-            timezone = kwargs.get('timezone', None)
-            value = pd.Timestamp(value, tz=timezone)
-            if isDate is not None and isDatetime is not None and isDate and isDatetime:
-                raise ValueError(f"DateOrTimeParam {self.name}: Cannot specify both isDate and isDatetime for {value}")
-            if isDate is not None and isDate:
-                return value.date()
-            return value
-    
-    def _whether_in_space(self, value: Any) -> bool:
-        try:
-            pd.Timestamp(value)
-            return True
-        except Exception:
-            return False
-        
-    def _get_value_alias(self, value: Any, **kwargs) -> str:
-        return str(self.rectify_value(value, **kwargs))
-    
-    if TYPE_CHECKING:
-        from tools import UniqueObject
-    
-    def is_date(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
-        value = self.get_value(object) if object is not None else self.rectify_value(value, **kwargs)
-        assert value is not None, "Either object or value must be provided"
-        import datetime
-        return type(value) is datetime.date
-    
-    def is_time(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
-        value = self.get_value(object) if object is not None else self.rectify_value(value, **kwargs)
-        assert value is not None, "Either object or value must be provided"
-        import datetime
-        return not type(value) is datetime.date

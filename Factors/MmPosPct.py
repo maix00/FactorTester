@@ -2,18 +2,12 @@ import pandas as pd
 from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn
-from tools.products.Product import Product
-from tools.factors.FactorFamily import FactorFamily
-from tools.parameters.Parameter import DataColumnParam, TimeDeltaParam
+from tools import DataColumn, Product, FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
 
 class MmPosPct(FactorFamily):  # 上涨天数占比（胜率）
 
-    params = [
-        DataColumnParam('P', DataColumn.CLOSE),
-        TimeDeltaParam('WF', flag='pos', default_value='2h'),      # 时间窗口长度
-        TimeDeltaParam('RF', flag='pos', default_value='5m'),      # 计算频率（Return Frequency）
-    ]
+    params = [DataColumnParam('P', DataColumn.CLOSE), WindowParam('WF'), WindowParam('RF')]
 
     math_expr = '''
         \\begin{aligned}
