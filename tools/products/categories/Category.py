@@ -1,5 +1,5 @@
-from Tools import UniqueObject
-from Parameter import FinRangeParam
+from tools import UniqueObject
+from tools.parameters.Parameter import FinRangeParam
 from weakref import WeakValueDictionary
 from typing import Any, Dict, Optional, Tuple, Type, List, Callable
 

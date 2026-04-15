@@ -6,8 +6,8 @@ import os
 import importlib.util
 import threading
 import webbrowser
-from Factor import FactorFamily, StartCalcPointParam
-import Settings
+from tools.factors.Factor import FactorFamily, StartCalcPointParam
+import sources.Settings as Settings
 import time
 import traceback
 
@@ -173,11 +173,6 @@ def index():
         initial_modules=[]
     )
 
-
-# 其他路由保持不变（/add_params, /delete_params, /reorder_params, /set_time_range 等）
-# 这些路由的代码保持不变，继续使用原来的实现
-
-
 @app.route('/add_params', methods=['POST'])
 def add_params():
     data = request.get_json()
@@ -220,7 +215,7 @@ def reorder_params():
 
 @app.route('/api/default_time_range')
 def get_default_time_range():
-    from Settings import default_test_start_date, default_test_end_date, default_day_start_time, default_day_end_time
+    from sources.Settings import default_test_start_date, default_test_end_date, default_day_start_time, default_day_end_time
     return jsonify({
         'start_date': default_test_start_date,
         'start_time': default_day_start_time,
@@ -265,7 +260,7 @@ def set_time_range():
         start_calc_param_val = f"{StartCalcPointParam.name} = {start_calc_param_val[0]}"
 
         if factor_testers:
-            from Factor import FactorTester
+            from tools.factors.Factor import FactorTester
             for tester in factor_testers:
                 assert isinstance(tester, FactorTester)
                 tester.update_time_range((start_point, end_point))
@@ -506,7 +501,7 @@ def submit_selected_products():
             else:
                 selected_products.append(node)
         selected_products = sorted(list(set(selected_products)))
-        from Factor import FactorTester
+        from tools.factors.Factor import FactorTester
         factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(start_point, end_point))
         factor_testers.append(factor_tester)
         return jsonify({
@@ -622,7 +617,7 @@ def run_ic_test():
         global factor_testers
         tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         assert tester is not None, "未找到对应的测试器实例"
-        from Factor import FactorTester
+        from tools.factors.Factor import FactorTester
         assert isinstance(tester, FactorTester), "找到的实例类型不正确"
         factor_family = get_factor_family_instance(factor_family_alias)
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
@@ -733,7 +728,7 @@ def run_ic_test():
             'factors': [],
         }
         
-        from Products import Product
+        from tools.products.Product import Product
         for factor in factors:
             ic_series_dates = None
             ic_series_values = None
@@ -1045,7 +1040,7 @@ def get_price_series():
         timestamps = ohlc.index.astype(np.int64) // 10**6
 
         return jsonify({
-            'dates': timestamps.tolist(),  # == factor_dates
+            'dates': factor_dates,  # timestamps.tolist()
             'OPEN': ohlc['OPEN'].tolist(),
             'HIGH': ohlc['HIGH'].tolist(),
             'LOW': ohlc['LOW'].tolist(),

@@ -2,9 +2,10 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Products import Product, DataColumn
-from Factor import FactorFamily
-from Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
+from tools.products.Product import Product
+from tools import DataColumn
+from tools.factors.Factor import FactorFamily
+from tools.parameters.Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
 from typing import List, Dict, Any, Sequence, Tuple
 
 class MmRet(FactorFamily): # Momentum of Return

@@ -1,14 +1,15 @@
 from typing import Any, List, Optional, Tuple
 import pandas as pd
 import os
-from Products import Futures, FuturesContract
-from Tools import DataColumn
+from tools.products.Futures import Futures, FuturesContract
+from tools import DataColumn
 
 _data = pd.read_csv('../data/sectors.csv')
 data_dir_min = '../data/main_mink'
 data_path_day = '../data/main_series_adjusted.parquet'
 data_dir_day = '../data/main_dayk'
 data_type = 'parquet'
+
 file_list_min = [
     os.path.join(data_dir_min, f)
     for f in os.listdir(data_dir_min)
@@ -184,13 +185,13 @@ class CNFutures(Futures):
         variety = get_variety_by_code(name.split('.')[0])
         self.desc = variety if variety else name
 
-from Products import Product
+from tools.products.Product import Product
 
 def get_all_futures_contract() -> List[Product]:
 
     data_dir_min = '../data/data_mink_product'
 
-    from Tools import DataSource, DataFreq
+    from tools import DataSource, DataFreq
     LocalCNFuturesContractMIN1 = DataSource(
         alias = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
@@ -201,9 +202,6 @@ def get_all_futures_contract() -> List[Product]:
     )
     LocalCNFuturesContractMIN1.set_data_cols_mapping(datacolumn_map_reversed)
     LocalCNFuturesContractMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
-    
-    from Tools import DataSourceRegister
-    DataSourceRegister().register(LocalCNFuturesContractMIN1)
 
     contract_list = []
     for file_path in os.listdir(data_dir_min):
@@ -215,7 +213,7 @@ def get_all_futures_contract() -> List[Product]:
 
 def get_all_futures() -> List[Product]:
 
-    from Tools import DataSource, DataFreq
+    from tools import DataSource, DataFreq
     LocalCNFuturesMIN1 = DataSource(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
@@ -263,7 +261,7 @@ def get_futures_cateogory_map():
 def get_futures_contract_category_map():
     return {}
 
-from Category import Category
+from tools.products.categories.Category import Category
 
 CNFuturesSectorCategory = Category(
     alias = '行业',

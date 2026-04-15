@@ -9,10 +9,10 @@ import numpy as np
 from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import os
 
-from Tools import SerialObject, DataColumn, DataMeta, DataFreq, UniqueObject, _process_data_freq
-from Products import DataColumn, Futures, Product, DataFreq
-from Parameter import DataColumnParam, Parameter, FinRangeParam, TimeDeltaParam, TypeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
-from CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
+from tools import SerialObject, DataColumn, DataMeta, DataFreq
+from tools.products.Product import Product
+from tools.parameters.Parameter import DataColumnParam, Parameter, FinRangeParam, TimeDeltaParam, TypeParam, get_return_freq_param, get_StartCalcPointParam, get_factor_freq_param
+from sources.LocalCNFutures.CNFutures import get_all_futures  # TODO: Verify this function exists in CNFutures module
 import logging
 
 from tqdm import tqdm
@@ -109,7 +109,7 @@ class Factor(SerialObject):
         return StartCalcPointParam.get_value(self)
     
     if TYPE_CHECKING:
-        from Parameter import DateOrTimeParam
+        from tools.parameters.Parameter import DateOrTimeParam
         
     def get_StartCalcPointParam(self) -> DateOrTimeParam:
         return StartCalcPointParam
@@ -133,12 +133,12 @@ class Factor(SerialObject):
             series = pd.to_datetime(series, errors='coerce').sort_values()
             signal_index = series.diff().dropna().mode()[0]
             try:
-                return _process_data_freq(signal_index)
+                return DataFreq(signal_index)
             except:
                 raise ValueError(f"{self}: 无法获取频率，推断得到的频率为{signal_index}，但无法处理为DataFreq")
         elif signal_index is None:
             raise ValueError(f"{self}: 无法获取频率，因为没有找到以'_SIGNAL'开头的索引列")
-        return _process_data_freq(signal_index)
+        return DataFreq(signal_index)
 
     def calc(self, products: Product|List[Product]|Set[Product]) -> pd.DataFrame:
         if isinstance(products, Product):
@@ -165,7 +165,7 @@ class Factor(SerialObject):
     def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED) -> pd.DataFrame:
         if return_freq is not None:
-            return_freq = _process_data_freq(return_freq)
+            return_freq = DataFreq(return_freq)
         else:
             if self.freq is None:
                 self.freq = self.get_freq()
@@ -203,108 +203,7 @@ class FactorFamily(SerialObject):
             self.factor_single_use = factor_single_use
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
-        try:
-            return self.func_crosssection(products, *args, **kwargs)
-        except NotImplementedError:
-            all_series = {}
-            rerun_products = []
-            synced_products = []
-            all_indices = {}
-            sync_index: Optional[pd.Index] = None
-            common_signal_freq = None
-            
-            for product in products:
-                series = self.func_timeseries(product, *args, **kwargs)
-                all_series[product] = series
-                signal_index = next((str(name) for name in series.index.names if name and str(name).startswith('_SIGNAL')), None)
-                assert signal_index is not None, "func_timeseries返回的Series必须包含一个以'_SIGNAL'开头的时间列作为index"
-                index = series.index.droplevel([lvl for lvl in series.index.names if lvl != signal_index])
-                assert isinstance(index, pd.DatetimeIndex)
-                all_indices[product] = index
-                signal_freq = _process_data_freq(signal_index)
-                if common_signal_freq is None:
-                    common_signal_freq = signal_freq
-                else:
-                    assert signal_freq == common_signal_freq, f"所有产品的func_timeseries返回的Series必须具有相同频率的时间索引，现在发现{product}的频率为{signal_freq}，与之前的{common_signal_freq}不一致"
-                first_index = index[0]
-                start_calc_point = self.get_current_start_calc_point()
-                if signal_freq.is_day_multiple():
-                    data = product.get_some_data(copy=False)
-                    assert 'DAY1' in data.index.names
-                    offsetdays = int(signal_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds()) - 1
-                    day1series = data.index.get_level_values('DAY1')
-                    day1map = (day1series != day1series.to_series().shift(1)) & (day1series >= pd.Timestamp(start_calc_point.date()))
-                    targetpos = pd.Series(day1map)[day1map].index[offsetdays]
-                    boolean = data.index.get_level_values('DAY1')[targetpos] < first_index
-                    if sync_index is not None:
-                        boolean = boolean and not series.index.isin(sync_index).all()
-                else:
-                    boolean = start_calc_point + signal_freq.value < first_index
-                if boolean:
-                    rerun_products.append(product)
-                    continue
-                else:
-                    if sync_index is None:
-                        sync_index = series.index
-                        synced_products.append(product)
-                    else:
-                        if len(sync_index) < len(series.index):
-                            if not sync_index.isin(series.index).all():
-                                rerun_products.extend(synced_products)
-                                synced_products = [product]
-                                continue
-                            synced_products.append(product)
-                        else:
-                            if not series.index.isin(sync_index).all():
-                                rerun_products.append(product)
-                                continue
-                            synced_products.append(product)
-            
-            for product in rerun_products:
-                index = all_indices[product]
-                signal_freq = _process_data_freq(index.name)
-                assert sync_index is not None
-                sync_index_signal_col = sync_index.get_level_values(index.name)
-                next_point = sync_index_signal_col[sync_index_signal_col.searchsorted(index[0], side='right')]
-                assert isinstance(next_point, pd.Timestamp), "同步索引必须包含时间戳类型的信号列"
-                if signal_freq.is_day_multiple():
-                    data = product.get_some_data(copy=False)
-                    assert 'DAY1' in data.index.names
-                    offsetdays = int(signal_freq.value / pd.Timedelta('1day')) - 1
-                    day1series = data.index.get_level_values('DAY1')
-                    day1map = (day1series != day1series.to_series().shift(1)) & (day1series <= next_point)
-                    targetpos = pd.Series(day1map)[day1map].index[-offsetdays-1]
-                    new_start_calc_point = data.index.get_level_values(-1)[targetpos]
-                else:
-                    tiny_offset = pd.Timedelta('1s')
-                    new_start_calc_point = next_point - signal_freq.value + tiny_offset
-                product.get_StartCalcPointParam().register(product, new_start_calc_point)
-                series = self.func_timeseries(product, *args, **kwargs)
-                all_series[product] = series
-                synced_products.append(product)
-            
-            assert len(synced_products) == len(products), "无法同步所有产品的信号，请检查func_timeseries的输出和起始计算点设置"
-            assert sync_index is not None, "同步索引未设置，无法对齐数据"
-            assert isinstance(common_signal_freq, DataFreq), "common_signal_freq 必须是 DataFreq 类型"
-            self.common_signal_freq = common_signal_freq
-            if common_signal_freq.is_day_multiple():
-                common_signal_col = '_SIGNAL@' + common_signal_freq.name
-                other_cols = [str(col) for col in sync_index.names if str(col) != common_signal_col]
-                for product in synced_products:
-                    all_series[product] = all_series[product].reset_index().set_index(common_signal_col)
-                dict = {col: pd.DataFrame({product: all_series[product][col] for product in synced_products}).max(axis=1) for col in other_cols}
-                for product in synced_products:
-                    for col in other_cols:
-                        all_series[product][col] = dict[col]
-                    all_series[product] = all_series[product].reset_index().set_index(sync_index.names).squeeze()
-
-            return pd.DataFrame(all_series)
-    
-    def func_timeseries(self, product: Product, *args, **kwargs) -> pd.Series:
-        raise NotImplementedError("请在子类中实现 `factor_func_timeseries` 方法")
-
-    def func_crosssection(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
-        raise NotImplementedError("请在子类中实现 `factor_func_crosssection` 方法")
+        raise NotImplementedError("请在子类中实现 `func` 方法")
     
     def set_default_params(self):
         self._params_list = [{p.alias: p.default_value for p in self.params}]
@@ -349,7 +248,7 @@ class FactorFamily(SerialObject):
         return StartCalcPointParam.get_value(self)
     
     if TYPE_CHECKING:
-        from Parameter import DateOrTimeParam
+        from tools.parameters.Parameter import DateOrTimeParam
         
     def get_StartCalcPointParam(self) -> DateOrTimeParam:
         return StartCalcPointParam
@@ -402,7 +301,7 @@ class FactorFamily(SerialObject):
         end_date = ic_test_time_range[1] if ic_test_time_range is not None else default_test_end_date
         tester = get_factor_tester(time_range=(start_date, end_date))
         
-        tester.sift_product_by_category(categories=categories)
+        # tester.sift_product_by_category(categories=categories)
         returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
 
         factors = self.get_factors(return_freq=return_freq, start_calc_point=start_calc_point, **kwargs)
@@ -498,18 +397,18 @@ class FactorTester(SerialObject):
                 new_products.add(product)
         self.products = new_products
 
-    def sift_product_by_category(self, categories: Optional[str|List[str]] = None):
-        if categories is None:
-            return
-        if isinstance(categories, str):
-            categories = [categories]
-        new_products = set()
-        for product in self.products:
-            for category in categories:
-                if product.get_category() == category:
-                    new_products.add(product)
-                    break
-        self.products = new_products
+    # def sift_product_by_category(self, categories: Optional[str|List[str]] = None):
+    #     if categories is None:
+    #         return
+    #     if isinstance(categories, str):
+    #         categories = [categories]
+    #     new_products = set()
+    #     for product in self.products:
+    #         for category in categories:
+    #             if product.get_category() == category:
+    #                 new_products.add(product)
+    #                 break
+    #     self.products = new_products
 
     def sift_product_by_empty_data(self):
         new_products = set()
@@ -563,7 +462,7 @@ class FactorTester(SerialObject):
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            if factor.returns.empty or (not factor.returns.empty and _process_data_freq(factor.get_current_return_freq()) != _process_data_freq(return_freq)):
+            if factor.returns.empty or (not factor.returns.empty and DataFreq(factor.get_current_return_freq()) != DataFreq(return_freq)):
                 return_df = factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=return_freq)
             else:
                 return_df = factor.returns
@@ -788,9 +687,9 @@ class Returns(FactorFamily):
 
     def func_timeseries(self, product: Product, RF: pd.Timedelta, SC: DataColumn, EC: DataColumn, S: int, *args, **kwargs) -> pd.Series:
         data_freq = product.get_current_freq()
-        data = product.get(data_freq.name)
+        data = getattr(product, data_freq.name)
         assert isinstance(data, DataMeta)
-        if _process_data_freq(RF).is_day_multiple():
+        if DataFreq(RF).is_day_multiple():
             multiple = int(RF / pd.Timedelta('1d'))
         else:
             multiple = int(RF / data_freq.value)

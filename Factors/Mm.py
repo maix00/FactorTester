@@ -3,10 +3,10 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from CNFutures import CNFutures
-from Products import Product, DataColumn, DataFreq
-from Factor import FactorFamily
-from Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
+from tools.factors.Factor import FactorFamily
+from tools import DataColumn
+from tools.products.Product import Product
+from tools.parameters.Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
 from typing import List, Dict, Any, Sequence, Tuple
 
 class Mm(FactorFamily): # Day Momentum

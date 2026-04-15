@@ -1,8 +1,7 @@
 from typing import Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal
 import pandas as pd
 
-from Tools import UniqueObject, _process_data_freq, SerialObject
-from Products import DataColumn
+from tools import UniqueObject, SerialObject, DataColumn
 from typing import TYPE_CHECKING
 
 class Parameter(SerialObject):
@@ -98,7 +97,7 @@ class Parameter(SerialObject):
         return NotImplemented
     
     if TYPE_CHECKING:
-        from Tools import UniqueObject
+        from tools import UniqueObject
     
     def register(self, object: UniqueObject, value: Any, **kwargs) -> None:
         self.check_in_space(value)
@@ -154,14 +153,13 @@ class FinRangeParam(Parameter):
 
 class DataColumnParam(TypeParam):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
-        from Tools import _process_data_col
         if default_value is not None:
-            default_value = _process_data_col(default_value)
+            default_value = DataColumn(default_value)
         else:
             try:
                 from itertools import takewhile
                 result = ''.join(takewhile(str.isalpha, alias)) if alias else ''
-                default_value = _process_data_col(result.upper()) if alias else None
+                default_value = DataColumn(result.upper()) if alias else None
             except:
                 pass
         if not hasattr(self, '_initialized'):
@@ -176,20 +174,20 @@ class DataColumnParam(TypeParam):
             self.default_value = default_value
 
     def _whether_in_space(self, value: Any) -> bool:
-        from Tools import _process_data_col
+        from tools import DataColumn
         try:
-            _process_data_col(value)
+            DataColumn(value)
             return True
         except Exception:
             return False
         
     def _rectify_value(self, value: Any, **kwargs) -> Any:
-        from Tools import _process_data_col
-        return _process_data_col(value)
+        from tools import DataColumn
+        return DataColumn(value)
     
     def col(self, col: Any):
-        from Tools import _process_data_col
-        col = _process_data_col(col)
+        from tools import DataColumn
+        col = DataColumn(col)
         return self.get_value_alias(col)
 
 if __name__ == '__main__':
@@ -293,7 +291,7 @@ class DateOrTimeParam(Parameter):
         return str(self.rectify_value(value, **kwargs))
     
     if TYPE_CHECKING:
-        from Tools import UniqueObject
+        from tools import UniqueObject
     
     def is_date(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
         value = self.get_value(object) if object is not None else self.rectify_value(value, **kwargs)

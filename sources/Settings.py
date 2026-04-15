@@ -15,10 +15,10 @@ current_time_settings = {
     "session_type": "normal"
 }
 
-from Category import CategoryTree, combine_trees
+from tools.products.categories.Category import CategoryTree, combine_trees
 def get_cat_tree() -> CategoryTree:
-    from Products import Product
-    from CNFutures import CNFuturesSectorNightTimeCategory
+    from tools.products.Product import Product
+    from sources.LocalCNFutures.CNFutures import CNFuturesSectorNightTimeCategory
     return combine_trees(
         CNFuturesSectorNightTimeCategory.get_tree_with_parents(ancester=Product),
         CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
