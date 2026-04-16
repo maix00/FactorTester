@@ -86,6 +86,7 @@ def get_category_by_code(code, flag: int = 2) -> str | None:
     return None
 
 def get_day_night_time_category_by_code(code) -> Tuple[str, str]:
+    """从品种代码返回日夜盘时段分类 (编号字符串, 时段描述)，如 ('2', '09:00-15:00, 21:00-02:30')。"""
     _series = _data[day_time] + ', ' + _data[night_time].fillna('None')
     _data['day_night_time'] = _series
     categories_list = list(_series.unique())
@@ -95,6 +96,7 @@ def get_day_night_time_category_by_code(code) -> Tuple[str, str]:
     return '', ''
 
 def get_all_day_night_time_categories() -> list[str]:
+    """返回所有不重复的日夜盘时段组合描述字符串列表。"""
     _series = _data[day_time] + ', ' + _data[night_time].fillna('None')
     return _series.dropna().unique().tolist()
 
@@ -125,6 +127,7 @@ def get_categories_with_codes(flag: int = 2) -> dict[str, list[str]]:
         raise ValueError("Invalid flag value. Use 1 for basic categories or 2 for categories further grouped by night trading time.")
 
 def get_categories_2_with_codes() -> dict[str, list[str]]:
+    """同一行业内若夜盘时间相同则合并，否则按夜盘时间拆分为 类别1、类别2 等子类。"""
     result = {}
     grouped = _data.groupby(category_col_name)
     for category, group in grouped:
@@ -169,10 +172,12 @@ def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
     return categories_with_products
 
 class CNFuturesContract(FuturesContract):
+    """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
 
 class CNFutures(Futures):
+    """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  mappings_path: Optional[str] = None, 
                  data_path: Optional[str] = None):
@@ -188,6 +193,7 @@ class CNFutures(Futures):
 from tools.products.Product import Product
 
 def get_all_futures_contract() -> List[Product]:
+    """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
 
     data_dir_min = '../data/data_mink_product'
 
@@ -212,6 +218,7 @@ def get_all_futures_contract() -> List[Product]:
     return contract_list
 
 def get_all_futures() -> List[Product]:
+    """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
     from tools import DataSource, DataFreq
     LocalCNFuturesMIN1 = DataSource(
@@ -239,19 +246,12 @@ def get_all_futures() -> List[Product]:
     return cnfutures_list
 
 if __name__ == '__main__':
-    # check_data_files()
-    # categories_with_products = get_categories_with_products()
-    # for category, products in categories_with_products.items():
-    #     print(f"Category: {category}")
-    #     print(f"  Products: {products}")
-
     all_cn_futures = get_all_futures()
-    # print(all_cn_futures[0].get_some_data())
-
     product = all_cn_futures[0]
     get_day_night_time_category_by_code(product.name.split('.')[0])
 
 def get_futures_cateogory_map():
+    """返回 CNFutures 属性名 → 父级属性名的分类层级映射，供 Category 系统使用。"""
     return {
         'category_sector_cn_night_time': 'category_sector_cn',
         'category_sector_cn': '__class__.__name__',
@@ -259,6 +259,7 @@ def get_futures_cateogory_map():
     }
 
 def get_futures_contract_category_map():
+    """返回 CNFuturesContract 的分类层级映射（当前为空，预留扩展）。"""
     return {}
 
 from tools.products.categories.Category import Category
@@ -280,6 +281,7 @@ CNFuturesDayNightTimeCategory._whether_is_in_category = lambda catname, obj: get
 CNFuturesDayNightTimeCategory.objs = get_all_futures()
 
 def get_value_alias_for_day_night_time_category(x: str) -> str:
+    """將日夜盘时段描述字符串转换为简短别名（如 '夜盘2'），用于分类显示。"""
     if '15:15' in x:
         return '日盘2'
     if '09:30' in x:

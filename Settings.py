@@ -1,33 +1,55 @@
-default_test_start_date = '2025-01-02'
-default_test_end_date = '2025-05-31'
-default_day_start_time = '00:00'
-default_day_end_time = '00:00'
-default_cn_futures_day_start = '09:00'
-default_cn_futures_day_end = '15:00'
-default_cn_futures_night_start = '21:00'
-default_cn_futures_night_end = '15:00'
-
-current_time_settings = {
-    "start_date": default_test_start_date,
-    "end_date": default_test_end_date,
-    "start_time": default_day_start_time,
-    "end_time": default_day_end_time,
-    "session_type": "normal"
-}
-
+# =============================================================================
+# Settings.py
+# 全局配置文件
+#
+# 定义系统级常量与工厂函数：
+#   - 因子测试的默认日期区间
+#   - 数据目录、日志目录路径
+#   - 按成交量筛选品种的默认比例
+#   - 交易时段默认时间
+#   - get_cat_tree()  : 构建品种分类树（板块 × 夜盘时段）
+#   - get_all_products(): 获取全量品种对象列表
+# =============================================================================
 import pandas as pd
-from typing import TYPE_CHECKING, List
 
+# 按成交量 top-k 筛选时保留的品种比例（0~1）
 sift_volume_ratio = 0.8
-default_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+
+# IC 测试的默认日期区间（带时区）
+default_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
-default_plot_test_start_date = pd.Timestamp('2025-01-01', tz='Asia/Shanghai')
+
+# 绘制净值曲线的默认日期区间（可与 IC 测试区间不同）
+default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
+
+# 日志文件存储目录（相对路径）
 logger_dir_path_default = '../data/factor_tester_log/'
+
+# 因子测试结果缓存目录（相对路径）
 factor_info_path = '../data/Factors/'
 
+# 默认交易日的开始/结束时间（用于判断场内/场外）
+default_day_start_time = '00:00'
+default_day_end_time = '00:00'
+
+# 中国期货日盘时段默认时间
+default_cn_futures_day_start = '09:00'
+default_cn_futures_day_end = '15:00'
+
+# 中国期货夜盘时段默认时间
+default_cn_futures_night_start = '21:00'
+default_cn_futures_night_end = '15:00'  # 夜盘跨零点，以次日 15:00 为结束
+
 from tools.products.categories.Category import CategoryTree, combine_trees
+
 def get_cat_tree() -> CategoryTree:
+    """
+    构建品种分类树，合并「板块+夜盘时段」两级分类。
+
+    返回：
+        CategoryTree，根节点为 Product，叶节点为各组合分类
+    """
     from tools.products.Product import Product
     from sources.LocalCNFutures.CNFutures import CNFuturesSectorNightTimeCategory
     return combine_trees(
@@ -35,8 +57,12 @@ def get_cat_tree() -> CategoryTree:
         CNFuturesSectorNightTimeCategory.get_tree(ancester=Product),
     )
 
-if TYPE_CHECKING:
-    from tools.products.Product import Product
-def get_all_products() -> List[Product]:
+def get_all_products():
+    """
+    获取本地 CN 期货数据源中所有品种对象列表。
+
+    返回：
+        List[CNFutures]，每个元素对应一个主力合约品种
+    """
     from sources.LocalCNFutures.CNFutures import get_all_futures
     return get_all_futures()

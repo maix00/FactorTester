@@ -1,14 +1,10 @@
-import sys
-
+import sys, os, importlib.util, threading, webbrowser, time, traceback
 from flask import Flask, request, jsonify, render_template  # 添加 render_template
-import os
-import importlib.util
-import threading
-import webbrowser
-from tools.factors.Factor import FactorFamily, StartCalcPointParam
+
+from tools.factors.FactorFamily import FactorFamily
+from tools.factors.Parameters import StartCalcPointParam
+
 import Settings as Settings
-import time
-import traceback
 
 # 添加这段代码来适配打包环境
 if getattr(sys, 'frozen', False):
@@ -95,9 +91,11 @@ def get_factor_main_section_html(factor_family_alias):
         factors = ff.get_factors()
         
         # 准备时间范围模块的数据
-        from datetime import datetime as _dt
+        import pandas as pd
         start_date = getattr(Settings, 'default_test_start_date', '2020-01-01')
+        start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else start_date
         end_date = getattr(Settings, 'default_test_end_date', '2024-12-31')
+        end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, pd.Timestamp) else end_date
         start_time = getattr(Settings, 'default_day_start_time', '09:30')
         end_time = getattr(Settings, 'default_day_end_time', '15:00')
         
@@ -215,12 +213,21 @@ def reorder_params():
 @app.route('/api/default_time_range')
 def get_default_time_range():
     from Settings import default_test_start_date, default_test_end_date, default_day_start_time, default_day_end_time
+    import pandas as pd
+    default_test_start_date = default_test_start_date.strftime('%Y-%m-%d') if isinstance(default_test_start_date, pd.Timestamp) else default_test_start_date
+    default_test_end_date = default_test_end_date.strftime('%Y-%m-%d') if isinstance(default_test_end_date, pd.Timestamp) else default_test_end_date
+    if hasattr(Settings, 'timezone'):
+        timezone = getattr(Settings, 'timezone', 'Asia/Shanghai')
+    elif isinstance(default_test_start_date, pd.Timestamp) and default_test_start_date.tz is not None:
+        timezone = str(default_test_start_date.tz)
+    else:
+        timezone = 'Asia/Shanghai'
     return jsonify({
         'start_date': default_test_start_date,
         'start_time': default_day_start_time,
         'end_date': default_test_end_date,
         'end_time': default_day_end_time,
-        'timezone': getattr(Settings, 'timezone', 'Asia/Shanghai'),
+        'timezone': timezone,
         'cn_futures_day_start': getattr(Settings, 'default_cn_futures_day_start', '09:00'),
         'cn_futures_day_end': getattr(Settings, 'default_cn_futures_day_end', '15:00'),
         'cn_futures_night_start': getattr(Settings, 'default_cn_futures_night_start', '21:00'),

@@ -1,13 +1,34 @@
+# =============================================================================
+# tools/products/categories/Category.py
+# 产品分类系统模块
+#
+# 提供两个核心类：
+#   CategoryTree - 描述分类体系树形结构（用于前端展示层级）
+#   Category     - 继承自 FinRangeParam，将产品划分到命名类别中；
+#                  支持 Cat1 * Cat2 创建笛卡尔积组合分类。
+#
+# 在因子测试中，Category 用于按行业、夜盘时段等维度对产品分组，
+# 分别在每个类别内计算 IC 或分组收益。
+# =============================================================================
 from tools import UniqueObject
 from weakref import WeakValueDictionary
 from typing import Any, Dict, Optional, Tuple, Type, List
 
 from tools.parameters.Parameter import FinRangeParam
 
-object_word = '$OBJECTS$'
-subclass_word = '$SUBCLASS$'
+# 类目树中的特殊关键字
+object_word = '$OBJECTS$'   # 叶节点的对象列表键
+subclass_word = '$SUBCLASS$'  # 子类节点键
 
 class CategoryTree:
+    """
+    分类树结构描述。
+
+    描述产品类别之间的层级关系（用于前端树形展示）。
+    tree 是一个嵌套字典，根节点类型为 type，其子项为各分类名。
+    示例：
+      tree = {Product: {'$OBJECTS$': [p1, p2], '行业1': {...}, ...}}
+    """
     def __init__(self, tree: Dict[Any, Any]):
         self.tree = tree
         assert len(tree) == 1, "The tree should have exactly one root type."
@@ -20,8 +41,20 @@ class CategoryTree:
             self.objs = None
 
 class Category(FinRangeParam):
+    """
+    产品分类参数。
+
+    基于 FinRangeParam，categories 列表即为合法的分类名称集合。
+    提供将产品划分到各类别的接口：
+      - is_in_category(catname, obj) : 判断某产品是否属于某类别
+      - get_obj_of_catname(...)       : 获取某类别下的所有产品
+      - get_catname_of_obj(...)       : 获取某产品所属的类别名
+      - Cat1 * Cat2                  : 生成两个分类的笛卡尔积组合分类
+
+    始终包含 'Others' 类别，不属于任何已知类别的产品归入此类。
+    """
     _instances = WeakValueDictionary()
-    _override_family_root = True
+    _override_family_root = True  # SerialObject 序列号计数独立于其他类族
 
     def __new__(cls, alias: str, *args, **kwargs):
         return super().__new__(cls, type_alias='C', alias=alias)

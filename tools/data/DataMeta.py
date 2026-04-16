@@ -1,6 +1,17 @@
-from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Sequence, Set, Tuple, Any, Literal, override
-from weakref import WeakValueDictionary
+# =============================================================================
+# tools/data/DataMeta.py
+# 数据元信息模块
+#
+# DataMeta 是围绕特定 Product + DataFreq 的 DataFrame 的薄封装层：
+#   - 管理数据加载、时间列处理、列名映射、时间索引构建
+#   - 透明转发 pandas 的大多数操作（rolling/pct_change/shift/+/-/... 等）
+#   - 计算结果（如 rolling().mean()）仍是 DataMeta，保留原始数据上下文
+#   - 支持按 StartCalcPointParam 过滤历史数据
+#   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
+# =============================================================================
 import pandas as pd
+from weakref import WeakValueDictionary
+from typing import List, Dict, Optional, Tuple, Any, override
 
 from tools.base.UniqueObject import UniqueObject
 from tools.base.SerialObject import SerialObject
@@ -9,6 +20,19 @@ from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
 
 class DataMeta(SerialObject):
+    """
+    数据元信息对象。
+
+    封装了一个 Product 在特定 DataFreq 下的 DataFrame，并提供：
+      - 懒加载（数据首次访问时才从文件读取）
+      - 列名映射（原始文件列名 → DataColumn 标准名称）
+      - 时间索引构建（将日期/时间列设为 MultiIndex）
+      - 透明的 pandas 运算代理（所有在 data 上的操作都转发并返回新的 DataMeta）
+      - StartCalcPoint 过滤（只返回计算起始点之后的数据）
+      - 复权价格计算
+
+    一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
+    """
     _instances = WeakValueDictionary()
 
     def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
@@ -21,16 +45,17 @@ class DataMeta(SerialObject):
         if not hasattr(self, '_initialized'):
             alias = '(' + object.alias + ')' + ('_' + alias if alias else '')
             super().__init__(type_alias='DM', alias=alias)
-            self.object = object
-            self.original_object = object if original_object is None else original_object
-            self.freq = data_freq
-            self.data: Any = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')
+            self.object = object                           # 关联的 Product 或上游 DataMeta
+            self.original_object = object if original_object is None else original_object  # 原始 Product（链式操作时保持）
+            self.freq = data_freq                          # 所属数据频率
+            self.data: Any = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')  # 实际数据（懒加载）
             self.current_source: DataSource
             self.path: Any
-            self.timezone = kwargs.get('timezone', None)
-            self.day_periods: int
+            self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
+            self.day_periods: int                         # 每日 bar 数量缓存，用于窗口换算
 
     def _get_freq(self, **kwargs) -> DataFreq:
+        """获取本对象的数据频率（若已知直接返回，否则从索引列名推断）。"""
         if hasattr(self, 'freq') and self.freq is not None:
             return self.freq
         data = self.get_data(copy=False, data=kwargs.pop('data', None), **kwargs)
@@ -38,6 +63,15 @@ class DataMeta(SerialObject):
         return self.freq
 
     def _get_window_k(self, window: Any, **kwargs) -> Any:
+        """
+        将时间窗口参数（Timedelta 或整数）转换为 bar 数量（整数 periods）。
+
+        规则：
+          - 整数：直接使用
+          - day-multiple 时间跨度（如 '5d'）：从数据推断每日 bar 数 × 天数
+          - 其他 Timedelta：要求整除当前数据频率，返回整数倍数
+        结果缓存在 self.day_periods 避免重复计算。
+        """
         if hasattr(self, 'day_periods') and self.day_periods is not None:
             return self.day_periods
         data_freq = self._get_freq(**kwargs)
@@ -107,6 +141,11 @@ class DataMeta(SerialObject):
         return self.data
     
     def get_data(self, copy: bool = False, **kwargs) -> pd.DataFrame:
+        """
+        获取 DataFrame，若为空或指定了 source 则先触发加载。
+        同时应用 StartCalcPointParam 过滤（只返回计算起始点之后的数据）。
+        copy=True 时返回副本，避免外部修改影响缓存。
+        """
         if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
         else:
@@ -166,6 +205,16 @@ class DataMeta(SerialObject):
         return data.copy() if copy else data
     
     def __getattr__(self, name: str) -> Any:
+        """
+        属性代理：将未显式定义的属性访问转发到内部 data（DataFrame/Series）。
+
+        特殊处理：
+          - rolling(window)  : 将 window 参数从 Timedelta 换算为 bar 数量
+          - pct_change(n)    : 同上
+          - shift(n)         : 同上
+          - 其他 DataFrame 方法：直接转发，结果包装为 DataMeta
+        这样可以直接写 product.MIN1.rolling('5d').mean() 而无需手动换算。
+        """
         if (target := self.__dict__.get(name, None)) is not None:
             return target
         if (data := self.__dict__.get('data', None)) is None:

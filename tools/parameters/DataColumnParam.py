@@ -1,9 +1,9 @@
 from typing import Optional, Any
 
 from tools import DataColumn
-from tools.parameters.Parameter import TypeParam
+from tools.parameters.Parameter import Parameter
 
-class DataColumnParam(TypeParam):
+class DataColumnParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
         if default_value is not None:
             default_value = DataColumn(default_value)

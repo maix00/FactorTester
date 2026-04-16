@@ -1,3 +1,13 @@
+# =============================================================================
+# tools/products/Product.py
+# 金融产品基类模块
+#
+# Product 是所有可交易产品的抽象基类，主要责责：
+#   - 持有各频率的 DataMeta（如 product.MIN1、product.DAY1）
+#   - 封装数据访问、频率选择、时间切片、价格获取等
+#   - 管理 StartCalcPointParam（各阶段计算起始时间）
+# 实际使用中一般会通过 CNFutures 等具体子类访问。
+# =============================================================================
 from typing import List, Optional, Any, TYPE_CHECKING
 import pandas as pd
 
@@ -8,10 +18,22 @@ from tools.data.DataFreq import DataFreq
 from tools.data.DataSource import DataSource
 
 class Product(UniqueObject):
-    # _default_category_attr_name = '__class__.__name__'  # Default attribute name for category
+    """
+    金融产品基类。
+
+    初始化时会为每个已知 DataFreq（全局实例）自动创建对应的 DataMeta，
+    并设置为同名属性（如 product.MIN1、product.DAY1）。
+
+    属性：
+        name        (str)       : 唯一识别名，如 'IF.CFE'
+        point_value (int|None)  : 每手合约价值点乘数
+        currency    (str|None)  : 计价货币
+        timezone    (str|None)  : 对应时区，与 DataSource 匹配用于判断可用性
+    """
+    # 全局类属性标注（实际属性由具体子类提供）
     desc: str
-    MIN1: DataMeta
-    DAY1: DataMeta
+    MIN1: DataMeta   # 1 分钟数据
+    DAY1: DataMeta   # 1 日数据
 
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
@@ -22,25 +44,30 @@ class Product(UniqueObject):
             self.point_value = point_value
             self.currency = currency
             self.timezone = kwargs.get('timezone', None)
+            # 为每个已知频率创建 DataMeta 对象，设为对应属性
             for freq in DataFreq:
                 setattr(self, freq.name, DataMeta(alias=f"{freq}", object=self, data_freq=freq, timezone=self.timezone))
             if TYPE_CHECKING:
-                from tools.parameters.Parameter import DateOrTimeParam
-            self._StartCalcPointParam : DateOrTimeParam
+                from tools.parameters import DateOrTimeParam
+            self._StartCalcPointParam : DateOrTimeParam  # 计算起始点参数属性
 
     if TYPE_CHECKING:
-        from tools.parameters.Parameter import DateOrTimeParam
-    def set_StartCalcPointParam(self, param: DateOrTimeParam, value: Optional[Any] = None):
+        from tools.parameters import DateOrTimeParam
+    def set_StartCalcPointParam(self, param: 'DateOrTimeParam', value: Optional[Any] = None):
+        """设置本产品的计算起始点参数并注册值。"""
         self._StartCalcPointParam = param
         param.register(self, value if value is not None else param.default_value)
 
-    def get_StartCalcPointParam(self) -> DateOrTimeParam:
+    def get_StartCalcPointParam(self) -> 'DateOrTimeParam':
+        """获取本产品已设置的计算起始点参数。"""
         return self._StartCalcPointParam
         
     def list_available_freqs(self) -> List[DataFreq]:
+        """列出本产品在所有已注册 DataSource 中可用的数据频率。"""
         return [source.freq for source in DataSource if source.if_object_is_in_source(self)]
     
     def set_current_freq(self, freq: Any) -> DataFreq:
+        """设置本产品当前默认数据频率，必须是可用频率。"""
         if freq in self.list_available_freqs():
             self.current_freq = freq
             return freq
@@ -48,6 +75,7 @@ class Product(UniqueObject):
             raise ValueError(f"Data frequency {freq} is not available for product {self.name}")
         
     def get_current_freq(self) -> DataFreq:
+        """获取当前默认频率，未设置时自动选择第一个可用频率。"""
         if not hasattr(self, 'current_freq'):
             available_freqs = self.list_available_freqs()
             if len(available_freqs) == 0:
@@ -56,6 +84,10 @@ class Product(UniqueObject):
         return getattr(self, 'current_freq')
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
+        """
+        获取一种频率下的数据。如果所请频率不可用则回退空 DataFrame。
+        data_freq=None 时使用当前默认频率。
+        """
         try:
             data_freq = self.get_current_freq() if data_freq is None else DataFreq(data_freq)
             return getattr(self, data_freq.name).get_data(copy=copy)

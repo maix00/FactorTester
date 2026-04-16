@@ -1,17 +1,35 @@
+# =============================================================================
+# tools/base/SerialObject.py
+# 序列号对象基类模块
+#
+# 在 UniqueObject 基础上增加「类型别名 + 序列号」机制：
+#   - 每个 type_alias（如 'F'、'FF'、'P'）维护独立计数器，产生形如 F@0、F@1 的唯一名称。
+#   - single_use 模式下使用全局递增计数器，不在 serial_map 中注册，适用于临时对象。
+#   - 支持通过 Cls[N] 下标语法按序列号快速检索实例。
+# =============================================================================
 from typing import Dict, Optional
 from weakref import WeakValueDictionary
 
 from tools.base.UniqueObject import UniqueObject
 
 class SerialObject(UniqueObject):
+    # 一次性（single_use）对象的全局计数器，从 -1 开始递增
     _single_use_count = -1
+    # 各 type_alias 的实例计数器，键为 type_alias，值为当前最大序列号
     _instance_count_dict: Dict[str, int] = {}
+    # 各 type_alias 的序列号→实例弱引用映射，支持 Cls[N] 快速查找
     _serial_map_dict: Dict[str, WeakValueDictionary] = {}
+    # 记录每个 type_alias 的注册来源类，防止跨类族重用同一别名
     _type_alias_owners: Dict[str, type] = {}
+    # 当前类的 type_alias（创建时动态写入）
     _type_alias: str = 'SO'
 
     @classmethod
     def _get_family_root(cls):
+        """
+        获取继承链中最近的「直接继承 SerialObject 的子类」，作为同族对象的注册根。
+        若子类设置了 _override_family_root = True，则以该子类自身为根。
+        """
         if getattr(cls, '_override_family_root', False):
             return cls
         for base in cls.__mro__:
