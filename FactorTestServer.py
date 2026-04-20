@@ -625,10 +625,14 @@ def run_ic_test():
         assert tester is not None, "未找到对应的测试器实例"
         from tools.factors.FactorTester import FactorTester
         assert isinstance(tester, FactorTester), "找到的实例类型不正确"
+
         factor_family = get_factor_family_instance(factor_family_alias)
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
+        factor_family.current_factor_tester = tester
+
         factors = factor_family.get_factors()  # 获取因子列表
         factors = [next((f for f in factors if f.alias == item['alias'])) for item in factor_alias_return_freq]
+        
         return_freqs = {}
         for factor, item in zip(factors, factor_alias_return_freq):
             return_freq = item.get('return_freq', None)
@@ -756,7 +760,7 @@ def run_ic_test():
                     'dates': ic_series_dates,
                     'values': ic_series_values,
                 },
-                'products': [product.name for product in factor.table.columns if product in tester.products and isinstance(product, Product)] if factor.table is not None else [],
+                'products': [{'name': product.name, 'desc': getattr(product, 'desc', product.name)} for product in factor.table.columns if product in tester.products and isinstance(product, Product)] if factor.table is not None else [],
             })
 
         return jsonify(response)

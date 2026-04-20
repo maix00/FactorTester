@@ -113,7 +113,13 @@ class FactorFamily(SerialObject):
                     futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in products}
                     for future in tqdm(as_completed(futures), total=len(products), desc="Calculating factor signals"):
                         product, factor = future.result(); factors[product] = factor
-            result = pd.concat(factors, axis=1)
+            # 假设所有 df 的 MultiIndex 具有相同的 level 名称和顺序
+            # 先取并集
+            all_index = factors[list(factors.keys())[0]].index
+            for df in list(factors.values())[1:]:
+                all_index = all_index.union(df.index)
+            # 然后 reindex 并 concat
+            result = pd.concat({k: df.reindex(all_index) for k, df in factors.items()}, axis=1)
             # 日度倍数信号：不同品种交易截止时间不同（如 15:00 vs 15:15），
             # concat 后同一日期会出现多行，需合并为单行
             # 数据列取第一个非 NaN，子日精度索引取最大值
@@ -572,7 +578,6 @@ class FactorFamily(SerialObject):
             index_replaced = self.current_sync_signal_index_replaced
             data.index = index_replaced[mask]
         return data
-
 
 class Returns(FactorFamily):
     """

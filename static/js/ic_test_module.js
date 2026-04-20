@@ -191,7 +191,7 @@
             const tabId = `factor-tab-${subId}-${idx}`;
             const paneId = `factor-pane-${subId}-${idx}`;
             tabsHtml += `<li class="nav-item" role="presentation"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${paneId}" type="button" role="tab">${factor.alias || factor.name}</button></li>`;
-            const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p}">${p}</option>`).join('') : '<option value="">无可用产品</option>';
+            const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p.name}">${p.name}${p.desc && p.desc !== p.name ? ' · ' + p.desc : ''}</option>`).join('') : '<option value="">无可用产品</option>';
             panesHtml += `
                 <div class="tab-pane fade ${showClass}" id="${paneId}" role="tabpanel">
                     <!-- IC 序列图 -->
