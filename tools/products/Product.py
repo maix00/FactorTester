@@ -37,8 +37,7 @@ class Product(UniqueObject):
 
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
-                 currency: Optional[str] = None,
-                 category_attr_name: Optional[str] = None, *args, **kwargs):
+                 currency: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(name=name, *args, **kwargs)
             self.point_value = point_value

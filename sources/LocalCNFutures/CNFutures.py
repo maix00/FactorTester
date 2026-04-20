@@ -64,112 +64,23 @@ variety_col_name = '合约标的'
 category_col_name = '类别'
 exchange_col_name = '交易所'
 exchange_code_col_name = '交易所代码'
-night_time = '夜盘时间'
-day_time = '日盘时间'
+night_time_col_name = '夜盘时间'
+day_time_col_name = '日盘时间'
+version_col_name = '版本'
+highest_version_col_name = '最高版本'
+enddate_col_name = '标准合约终止交易日'
 
-def get_variety_by_code(code) -> str | None:
-    """从代码返回品种"""
-    result = _data[_data[code_col_name] == code][variety_col_name]
-    return result.values[0] if len(result) > 0 else None
+name_code_version_dict = {}
 
-def get_exchange_code_by_code(code) -> str | None:
-    """从代码返回交易所代码"""
-    result = _data[_data[code_col_name] == code][exchange_code_col_name]
-    return result.values[0] if len(result) > 0 else None
-
-def get_category_by_code(code, flag: int = 2) -> str | None:
-    """从代码返回类别"""
-    categories_with_codes = get_categories_with_codes(flag=flag)
-    for category, codes in categories_with_codes.items():
-        if code in codes:
-            return category
-    return None
-
-def get_day_night_time_category_by_code(code) -> Tuple[str, str]:
-    """从品种代码返回日夜盘时段分类 (编号字符串, 时段描述)，如 ('2', '09:00-15:00, 21:00-02:30')。"""
-    _series = _data[day_time] + ', ' + _data[night_time].fillna('None')
-    _data['day_night_time'] = _series
-    categories_list = list(_series.unique())
-    for i in range(len(categories_list)):
-        if _data[_data[code_col_name] == code]['day_night_time'].values[0] == categories_list[i]:
-            return f"{i}", categories_list[i]
-    return '', ''
-
-def get_all_day_night_time_categories() -> list[str]:
-    """返回所有不重复的日夜盘时段组合描述字符串列表。"""
-    _series = _data[day_time] + ', ' + _data[night_time].fillna('None')
-    return _series.dropna().unique().tolist()
-
-def get_codes_by_exchange_code(exchange_code) -> list[str]:
-    """从交易所代码返回所有的代码"""
-    return _data[_data[exchange_code_col_name] == exchange_code][code_col_name].tolist()
-
-def get_exchange_by_exchange_code(exchange_code) -> str | None:
-    """从交易所代码返回对应的交易所"""
-    result = _data[_data[exchange_code_col_name] == exchange_code][exchange_col_name]
-    return result.values[0] if len(result) > 0 else None
-
-def get_codes_by_category(category) -> list[str]:
-    """从类别返回所有的代码"""
-    return _data[_data[category_col_name] == category][code_col_name].tolist()
-
-def get_all_categories() -> list[str]:
-    """返回所有的类别"""
-    return _data[category_col_name].unique().tolist()
-
-def get_categories_with_codes(flag: int = 2) -> dict[str, list[str]]:
-    """返回所有类别及其对应的代码的dict，根据夜盘时间进一步分组"""
-    if flag == 1:
-        return _data.groupby(category_col_name)[code_col_name].apply(list).to_dict()  # type: ignore
-    elif flag == 2:
-        return get_categories_2_with_codes()
-    else:
-        raise ValueError("Invalid flag value. Use 1 for basic categories or 2 for categories further grouped by night trading time.")
-
-def get_categories_2_with_codes() -> dict[str, list[str]]:
-    """同一行业内若夜盘时间相同则合并，否则按夜盘时间拆分为 类别1、类别2 等子类。"""
-    result = {}
-    grouped = _data.groupby(category_col_name)
-    for category, group in grouped:
-        series = group[night_time].copy().fillna('0')
-        night_times = series.unique()
-        if len(night_times) == 1:
-            result[category] = group[code_col_name].tolist()
-        else:
-            for i, night_t in enumerate(night_times, 1):
-                key = f"{category}{i}"
-                result[key] = group[series == night_t][code_col_name].tolist()
-    return result
-
-def check_data_files():
-    """检查数据文件是否与代码表中的品种匹配"""
-    for string in ['min', 'day']:
-        file_list = file_list_min if string == 'min' else file_list_day
-        codes_in_data = set()
-        for file_path in file_list:
-            code = file_path.split('/')[-1].split('.')[0]
-            codes_in_data.add(code)
-        codes_in_table = set(_data[code_col_name].tolist())
-        missing_in_data = codes_in_table - codes_in_data
-        extra_in_data = codes_in_data - codes_in_table
-        if missing_in_data:
-            print(f'Codes in table but missing in data files ({string}):', missing_in_data)
-        if extra_in_data:
-            print(f'Codes in data files ({string}) but not in table:', extra_in_data)
-
-def get_categories_with_products(flag: int = 2) -> dict[str, list[CNFutures]]:
-    """返回所有类别及其对应的品种的dict"""
-    categories_with_products = {}
-    categories_with_codes = get_categories_with_codes(flag=flag)
-    for category, codes in categories_with_codes.items():
-        products = []
-        for code in codes:
-            exchange = get_exchange_code_by_code(code)
-            if exchange is not None:
-                mapped_exchange = exchange_map.get(exchange, exchange)
-                products.append(CNFutures(name = code + '.' + mapped_exchange))
-        categories_with_products[category] = products
-    return categories_with_products
+def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str | None:
+    if version is None:
+        return None
+    if name not in name_code_version_dict:
+        name_code_version_dict[name] = {
+            (str(row[code_col_name]), str(row[version_col_name])): str(row[name])
+            for _, row in _data.iterrows()
+        }
+    return name_code_version_dict[name].get((code, version))
 
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
@@ -182,13 +93,10 @@ class CNFutures(Futures):
                  mappings_path: Optional[str] = None, 
                  data_path: Optional[str] = None):
         super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract, timezone='Asia/Shanghai')
-        self.category_sector_cn = get_category_by_code(name.split('.')[0], flag = 1) if name else None
-        self.category_sector_cn_night_time = get_category_by_code(name.split('.')[0], flag = 2) if name else None
-        self.category_day_night_time, self.category_day_night_time_desc = \
-            get_day_night_time_category_by_code(name.split('.')[0]) if name else ('', '')
-        self.category_attr_name = 'category_day_night_time'
-        variety = get_variety_by_code(name.split('.')[0])
-        self.desc = variety if variety else name
+        self.alias = name.split('@')[0]
+        self.code = self.alias.split('.')[0]
+        self.version = name.split('@')[1] if '@' in name else None
+        self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
 
 from tools.products.Product import Product
 
@@ -198,16 +106,16 @@ def get_all_futures_contract() -> List[Product]:
     data_dir_min = '../data/data_mink_product'
 
     from tools import DataSource, DataFreq
-    LocalCNFuturesContractMIN1 = DataSource(
+    futures_contract_ds_min1 = DataSource(
         alias = 'LocalCNFuturesContractMIN1',
         data_freq = DataFreq.MIN1,
         if_object_is_in_source=lambda object: 
-            os.path.isfile(os.path.join(data_dir_min, object.alias + '.' + data_type)),
-        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type),
+            os.path.isfile(os.path.join(data_dir_min, f"{object.alias}.{data_type}")),
+        get_object_path=lambda object: os.path.join(data_dir_min, f"{object.alias}.{data_type}"),
         timezone = 'Asia/Shanghai',
+        time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
+        data_cols_mapping=datacolumn_map_reversed,
     )
-    LocalCNFuturesContractMIN1.set_data_cols_mapping(datacolumn_map_reversed)
-    LocalCNFuturesContractMIN1.set_time_cols_mapping({'trade_time': '1min', 'trading_day': '1day'})
 
     contract_list = []
     for file_path in os.listdir(data_dir_min):
@@ -217,68 +125,102 @@ def get_all_futures_contract() -> List[Product]:
             contract_list.append(contract)
     return contract_list
 
-def get_all_futures() -> List[Product]:
+def get_object_path(object: Product, folder: str):
+    path = os.path.join(folder, f"{object.alias}.{data_type}")
+    
+    if not isinstance(object, CNFutures):
+        return path
+    else:
+        import pyarrow.parquet as pq
+        parquet_file = pq.ParquetFile(path)
+        target_col = 'trade_time'
+
+        # 1. 获取所有列名，找到目标列的索引
+        schema = parquet_file.schema_arrow
+        col_names = schema.names
+        if target_col not in col_names:
+            raise ValueError(f"列 '{target_col}' 不存在")
+        col_idx = col_names.index(target_col)
+
+        # 2. 遍历所有 Row Group，取出该列统计信息中的最小值
+        min_value = None
+        for i in range(parquet_file.num_row_groups):
+            rg_meta = parquet_file.metadata.row_group(i)
+            col_meta = rg_meta.column(col_idx)
+            stats = col_meta.statistics
+            
+            if stats is not None and stats.min is not None:
+                current_min = stats.min
+                if min_value is None or current_min < min_value:
+                    min_value = current_min
+
+        if min_value is None:
+            # 如果统计信息缺失，退化为读取整列数据（较慢）
+            table = pq.read_table(path, columns=[target_col])
+            min_value = table[target_col].min().as_py()
+
+        enddate = get_by_code_and_version(object.code, object.version, enddate_col_name)
+        if enddate is not None and pd.Timestamp(min_value) > pd.Timestamp(enddate):
+            return ''
+        return path
+
+def get_all_futures() -> List[CNFutures]:
     """注册 MIN1/DAY1 数据源并返回全量 CNFutures 主力品种列表。"""
 
     from tools import DataSource, DataFreq
-    LocalCNFuturesMIN1 = DataSource(
+    futures_ds_min1 = DataSource(
         alias = 'LocalCNFuturesMIN1',
         data_freq = DataFreq.MIN1,
-        get_object_path=lambda object: os.path.join(data_dir_min, object.alias + '.' + data_type),
+        get_object_path=lambda object: get_object_path(object, data_dir_min),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trade_time': '1min', 'trading_day': '1day'},
-        data_cols_mapping=datacolumn_map_reversed
+        data_cols_mapping=datacolumn_map_reversed,
     )
-    LocalCNFuturesDAY1 = DataSource(
+    futures_ds_day1 = DataSource(
         alias = 'LocalCNFuturesDAY1',
         data_freq = DataFreq.DAY1,
-        get_object_path=lambda object: os.path.join(data_dir_day, object.alias + '.' + data_type),
+        get_object_path=lambda object: get_object_path(object, data_dir_day),
         timezone = 'Asia/Shanghai',
         time_cols_mapping={'trading_day': '1day'},
-        data_cols_mapping=datacolumn_map_reversed
+        data_cols_mapping=datacolumn_map_reversed,
     )
 
-    categories_with_products = get_categories_with_products()
     cnfutures_list = []
-    for products in categories_with_products.values():
-        cnfutures_list.extend(products)
+    for _, row in _data.iterrows():
+        code = row[code_col_name]
+        exchange = row[exchange_code_col_name]
+        exchange = exchange_map.get(exchange, exchange)
+        version = str(row[version_col_name])
+        cnfutures_list.append(CNFutures(f"{code}.{exchange}@{version}"))
 
     return cnfutures_list
 
-if __name__ == '__main__':
-    all_cn_futures = get_all_futures()
-    product = all_cn_futures[0]
-    get_day_night_time_category_by_code(product.name.split('.')[0])
-
-def get_futures_cateogory_map():
-    """返回 CNFutures 属性名 → 父级属性名的分类层级映射，供 Category 系统使用。"""
-    return {
-        'category_sector_cn_night_time': 'category_sector_cn',
-        'category_sector_cn': '__class__.__name__',
-        'category_day_night_time': '__class__.__name__'
-    }
-
-def get_futures_contract_category_map():
-    """返回 CNFuturesContract 的分类层级映射（当前为空，预留扩展）。"""
-    return {}
+CNFUTURES = get_all_futures()
+CNFUTURES_CATEGORY_SECTOR = {}
+CNFUTURES_CATEGORY_DAYNIGHT = {}
+for product in CNFUTURES:
+    CNFUTURES_CATEGORY_SECTOR[product] = get_by_code_and_version(product.code, product.version, category_col_name)
+    day_time = get_by_code_and_version(product.code, product.version, day_time_col_name)
+    night_time = get_by_code_and_version(product.code, product.version, night_time_col_name)
+    CNFUTURES_CATEGORY_DAYNIGHT[product] = f"{day_time},{night_time}"
 
 from tools.products.categories.Category import Category
 
 CNFuturesSectorCategory = Category(
     alias = '行业',
     type = CNFutures,
-    categories = get_all_categories(),
+    categories = list(set(CNFUTURES_CATEGORY_SECTOR.values())),
 )
-CNFuturesSectorCategory._whether_is_in_category = lambda catname, obj: get_category_by_code(obj.name.split('.')[0], flag = 1) == catname
-CNFuturesSectorCategory.objs = get_all_futures()
+CNFuturesSectorCategory._whether_is_in_category = lambda catname, obj: catname == CNFUTURES_CATEGORY_SECTOR.get(obj)
+CNFuturesSectorCategory.objs = CNFUTURES
 
 CNFuturesDayNightTimeCategory = Category(
     alias = '日夜盘',
     type = CNFutures,
-    categories = get_all_day_night_time_categories(),
+    categories = list(set(CNFUTURES_CATEGORY_DAYNIGHT.values())),
 )
-CNFuturesDayNightTimeCategory._whether_is_in_category = lambda catname, obj: get_day_night_time_category_by_code(obj.name.split('.')[0])[1] == catname
-CNFuturesDayNightTimeCategory.objs = get_all_futures()
+CNFuturesDayNightTimeCategory._whether_is_in_category = lambda catname, obj: catname == CNFUTURES_CATEGORY_DAYNIGHT.get(obj)
+CNFuturesDayNightTimeCategory.objs = CNFUTURES
 
 def get_value_alias_for_day_night_time_category(x: str) -> str:
     """將日夜盘时段描述字符串转换为简短别名（如 '夜盘2'），用于分类显示。"""
@@ -286,33 +228,15 @@ def get_value_alias_for_day_night_time_category(x: str) -> str:
         return '日盘2'
     if '09:30' in x:
         return '日盘3'
-    if '21:00' not in x:
-        return '日盘'
     if '23:00' in x:
         return '夜盘1'
     if '01:00' in x:
         return '夜盘2'
     if '02:30' in x:
         return '夜盘3'
+    if '21:00' not in x:
+        return '日盘'
     return x
 CNFuturesDayNightTimeCategory.get_value_alias = get_value_alias_for_day_night_time_category
 
 CNFuturesSectorNightTimeCategory = CNFuturesSectorCategory * CNFuturesDayNightTimeCategory
-
-if __name__ == '__main__':
-    print(CNFuturesSectorCategory.categories)
-    print(CNFuturesDayNightTimeCategory.categories)
-
-    # print(CNFuturesSectorNightTimeCategory.categories)
-    # for catname in CNFuturesSectorNightTimeCategory.categories:
-    #     print(f"Category: {catname}, Value Alias: {CNFuturesSectorNightTimeCategory.get_value_alias(catname)}")
-    
-    tree1 = CNFuturesSectorCategory.get_tree()
-    tree2 = CNFuturesDayNightTimeCategory.get_tree(ancester=Product)
-    # print(tree1, tree2)
-    
-    # from Category import combine_trees
-    # print(combine_trees(tree1, tree2).tree)
-
-    print(CNFuturesSectorNightTimeCategory.get_tree().tree)
-    print(CNFuturesSectorNightTimeCategory.get_tree_with_parents_without_products(ancester=Product).tree)

@@ -255,6 +255,210 @@ class FactorTester(SerialObject):
         })
         return stats_df
 
+    def _test_by_group_single_factor(self, factor: 'Factor',
+                                     returns_col: FactorNextPeriodReturns,
+                                     n_groups: int, n_groups_name: Dict[int, str],
+                                     time_range: Optional[Tuple],
+                                     plot_remark_str: Optional[str],
+                                     plot_flag: bool, save_plot: bool, plot_show: bool,
+                                     plot_n_group_list: Optional[List[int]],
+                                     sift_volume_ratio: Optional[float] = None) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+        """单因子分组测试核心逻辑（已 numpy 加速），供多线程调用。"""
+        start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
+        end_date   = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
+
+        if factor.returns.empty:
+            factor.calc_returns(next_return=True, returns_col=returns_col)
+        assert not factor.returns.empty
+
+        # ---------- numpy 预计算 ----------
+        # 先按时间范围截取数据（兼容 tuple 多级索引）
+        table_src   = factor.table
+        returns_src = factor.returns
+        if start_date is not None:
+            mask = [_signal_time(k) >= start_date for k in table_src.index]
+            table_src   = table_src[mask]
+            mask = [_signal_time(k) >= start_date for k in returns_src.index]
+            returns_src = returns_src[mask]
+        if end_date is not None:
+            mask = [_signal_time(k) <= end_date for k in table_src.index]
+            table_src   = table_src[mask]
+            mask = [_signal_time(k) <= end_date for k in returns_src.index]
+            returns_src = returns_src[mask]
+
+        # 把 factor.table / factor.returns 转成 numpy 矩阵，列为品种
+        # 统一列顺序
+        all_cols = list(table_src.columns)
+        ret_cols  = list(factor.returns.columns)
+        # 只取交集（有 returns 的品种）
+        valid_cols = [c for c in all_cols if c in set(ret_cols)]
+
+        table_np  = factor.table[valid_cols].to_numpy(dtype=float)   # shape (T, P)
+        returns_np = factor.returns[valid_cols].to_numpy(dtype=float) # shape (T, P)
+        index_list = list(factor.table.index)                         # len T
+        T = len(index_list)
+
+        n_names = {i: n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)}
+
+        P = len(valid_cols)
+        membership_np = np.zeros((T, n_groups, P), dtype=bool)
+
+        # current_members: (n_groups, P) bool，在循环内原地更新
+        current_members = np.zeros((n_groups, P), dtype=bool)
+
+        for t in tqdm(range(T), desc='Testing by group for factor ' + factor.alias):
+            row     = table_np[t]       # (P,)
+            ret_row = returns_np[t]     # (P,)
+
+            # 一次性预计算 NaN 掩码，后续复用
+            isnan_ret = np.isnan(ret_row)   # (P,)
+            isnan_fac = np.isnan(row)       # (P,)
+
+            # carryover：上期持有 & 本期 returns=NaN 的品种继续保留
+            if t == 0:
+                carry_members = np.zeros((n_groups, P), dtype=bool)
+            else:
+                carry_members = current_members & isnan_ret[np.newaxis, :]  # (n_groups, P)
+
+            # active_groups：上期有持仓且本期 carryover < 上期持仓数的组，或全新组
+            prev_count  = current_members.sum(axis=1)   # (n_groups,)
+            carry_count = carry_members.sum(axis=1)     # (n_groups,)
+            active_mask = (carry_count < prev_count) | (prev_count == 0)
+            active_groups = np.where(active_mask)[0]
+
+            # 更新 current_members 为 carryover 状态
+            current_members = carry_members.copy()
+
+            # 可分配品种 = 因子值非 NaN & 未被 carryover 持有
+            held_mask      = carry_members.any(axis=0)          # (P,)
+            available_mask = (~isnan_fac) & (~held_mask)        # (P,)
+            available_idx  = np.where(available_mask)[0]
+
+            if len(available_idx) > 0 and len(active_groups) > 0:
+                # 按因子值降序排列可分配品种
+                new_idx    = available_idx[np.argsort(-row[available_idx])]
+                bucket_idx = np.floor(
+                    np.linspace(0, len(active_groups), len(new_idx), endpoint=False)
+                ).astype(int)
+                for slot, g in enumerate(active_groups):
+                    assigned = new_idx[bucket_idx == slot]
+                    current_members[g, assigned] = True
+
+            membership_np[t] = current_members
+
+        # ---------- 向量化计算各组各期收益 ----------
+        # products_dict 移出循环，从 membership_np 重建
+        products_dict = {
+            g: {index_list[t]: [valid_cols[i] for i in np.where(membership_np[t, g])[0]]
+                for t in range(T)}
+            for g in range(n_groups)
+        }
+
+        # ---------- 向量化计算各组各期收益 ----------
+        # returns_np_filled: NaN→0，shape (T, P)
+        returns_filled = np.where(np.isnan(returns_np), 0.0, returns_np)
+        # group_returns_np: (T, n_groups) — 等权平均
+        member_counts = membership_np.sum(axis=2).astype(float)          # (T, n_groups)
+        member_counts[member_counts == 0] = 1.0                           # 避免除零
+        group_returns_np = (membership_np * returns_filled[:, np.newaxis, :]).sum(axis=2) / member_counts  # (T, n_groups)
+
+        # 兼容原接口：构建 returns_dict[g][dt]
+        returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
+
+        # 预计算累积收益 (T, n_groups)，供调用方直接使用
+        cum_rets_filled = np.where(np.isnan(group_returns_np), 0.0, group_returns_np)
+        cumulative_returns_np = np.cumprod(1 + cum_rets_filled, axis=0)  # (T, n_groups)
+
+        # ---------- 汇总指标（向量化） ----------
+        # 构建时间戳数组，用于日期过滤
+        signal_times = np.array([_signal_time(d) for d in index_list])
+        mask_report = np.ones(T, dtype=bool)
+        if start_date is not None:
+            mask_report &= (signal_times >= start_date)
+        if end_date is not None:
+            mask_report &= (signal_times <= end_date)
+
+        report_groups = {}
+        for idx in range(n_groups):
+            r = group_returns_np[mask_report, idx]
+
+            def _metrics(arr: np.ndarray) -> dict:
+                s = pd.Series(arr).dropna()
+                cum = (1 + s).cumprod()
+                n = len(s)
+                total_ret  = (cum.iloc[-1] - 1) * 100 if n > 0 else 0
+                annual_ret = (cum.iloc[-1] ** (252 / n) - 1) * 100 if n > 1 else 0
+                vol        = s.std() * np.sqrt(252) * 100
+                sharpe     = (s.mean() * 252) / (s.std() * np.sqrt(252)) if s.std() != 0 else 0
+                dd         = ((cum.cummax() - cum) / cum.cummax()).max() * 100 if n > 0 else 0
+                calmar     = annual_ret / dd if dd != 0 else 0
+                win_rate   = (s > 0).sum() / n * 100 if n > 0 else 0
+                return dict(total_ret=total_ret, annual_ret=annual_ret, vol=vol,
+                            sharpe=sharpe, dd=dd, calmar=calmar, win_rate=win_rate,
+                            mean_ret=s.mean() * 100, skew=s.skew(), kurt=s.kurtosis())
+
+            m = _metrics(r)
+            report_groups[idx] = pd.Series({
+                'Total Return':  m['total_ret'],
+                'Annual Return': m['annual_ret'],
+                'Volatility':    m['vol'],
+                'Sharpe Ratio':  m['sharpe'],
+                'Max Drawdown':  m['dd'],
+                'Calmar Ratio':  m['calmar'],
+                'Win Rate':      m['win_rate'],
+                'Mean Return':   m['mean_ret'],
+                'Skewness':      m['skew'],
+                'Kurtosis':      m['kurt'],
+            })
+
+        report_df = pd.DataFrame(report_groups).T.sort_index()
+        if not plot_flag or (plot_flag and plot_show):
+            with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                print("Group Performance Summary:\n", report_df)
+
+        if plot_flag:
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(12, 6))
+            _start_date = start_date if start_date is not None else self.start_date
+            _end_date   = end_date   if end_date   is not None else self.end_date
+            plot_mask = np.ones(T, dtype=bool)
+            if _start_date is not None:
+                plot_mask &= (signal_times >= _start_date)
+            if _end_date is not None:
+                plot_mask &= (signal_times <= _end_date)
+            plot_index = [index_list[t] for t in range(T) if plot_mask[t]]
+            dates = plot_index
+            for idx in range(n_groups):
+                if plot_n_group_list is not None and idx not in plot_n_group_list:
+                    continue
+                rets = group_returns_np[plot_mask, idx]
+                cumulative_returns = np.cumprod(1 + np.where(np.isnan(rets), 0.0, rets)) * 10000
+                plt.plot(
+                    [str(d[-1].date()) if isinstance(d, tuple) else str(d.date()) for d in plot_index],
+                    cumulative_returns, label=n_names[idx]
+                )
+            plt.xlabel('日期')
+            plt.ylabel('平均收益')
+            plt.title(f'平均收益: {factor.alias}' + (f' - {plot_remark_str}' if plot_remark_str else ''))
+            plt.rcParams['font.sans-serif'] = ['Kaiti SC']
+            plt.legend()
+            n_ticks = 10
+            if dates:
+                tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
+                ticks = [str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices]
+                plt.xticks(ticks=ticks, rotation=45)
+            plt.tight_layout()
+            if save_plot:
+                factor_stem = factor.alias.split('|')[0]
+                figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
+                if not os.path.exists(figs_path):
+                    os.makedirs(figs_path)
+                plt.savefig(os.path.join(figs_path, f'{factor.alias}_{start_date}_{end_date}.png'))
+            if plot_show:
+                plt.show()
+
+        return products_dict, returns_dict, report_df, cumulative_returns_np, index_list
+
     def test_by_group(self, factors: 'Optional[Factor|List[Factor]]' = None,
                       returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                       n_groups: int = 5, n_groups_name: Dict[int, str] = {},
@@ -262,9 +466,9 @@ class FactorTester(SerialObject):
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       plot_n_group_list: Optional[List[int]] = None,
-                      sift_volume_ratio: Optional[float] = None, **kwargs) -> Tuple[Any, Any, pd.DataFrame]:
+                      sift_volume_ratio: Optional[float] = None, **kwargs) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
         """
-        按因子值分 N 组，逐期持有并统计各组收益指标。
+        按因子值分 N 组，逐期持有并统计各组收益指标。多因子时并行执行（ThreadPoolExecutor）。
 
         分组逻辑：
           - 每个信号时间点按因子值从高到低排序
@@ -290,6 +494,7 @@ class FactorTester(SerialObject):
               returns_dict  : {组号: {时间点: 平均收益}}
               report_df     : 各组绩效汇总 DataFrame
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         factors = [factors] if isinstance(factors, Factor) else \
             (factors if factors is not None else self.factors)
@@ -297,158 +502,35 @@ class FactorTester(SerialObject):
         if plot_flag and plot_n_group_list is not None:
             plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
 
-        products = {i: {} for i in range(n_groups)}
-        returns = {i: {} for i in range(n_groups)}
-        names = {i: n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)}
+        products_out: Any = {}
+        returns_out: Any = {}
+        report_df: pd.DataFrame = pd.DataFrame()
+        def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+            return self._test_by_group_single_factor(
+                f, returns_col=returns_col, n_groups=n_groups, n_groups_name=n_groups_name,
+                time_range=time_range, plot_remark_str=plot_remark_str,
+                plot_flag=plot_flag, save_plot=save_plot, plot_show=plot_show,
+                plot_n_group_list=plot_n_group_list,
+                sift_volume_ratio=sift_volume_ratio,
+            )
 
-        start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
-        end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
-        
-        report_df = pd.DataFrame()
-        for factor in factors:
+        cum_np_out: Optional[np.ndarray] = None
+        idx_list_out: Optional[list] = None
 
-            if factor.returns.empty:
-                factor.calc_returns(next_return=True, returns_col=returns_col)
-            assert not factor.returns.empty
+        if len(factors) == 1:
+            products_out, returns_out, report_df, cum_np_out, idx_list_out = _run(factors[0])
+        else:
+            max_workers = min(len(factors), 8)
+            results: Dict[int, Any] = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_idx = {executor.submit(_run, f): i for i, f in enumerate(factors)}
+                for future in as_completed(future_to_idx):
+                    results[future_to_idx[future]] = future.result()
+            last_idx = max(results.keys())
+            products_out, returns_out, report_df, cum_np_out, idx_list_out = results[last_idx]
 
-            last_dt, _ = next(factor.table.iterrows())
-            for dt, row in tqdm(factor.table.iterrows(), desc='Testing by group for factor ' + factor.alias):
-                sifted_products = factor.returns.columns
-                # sifted_products = self.sift_product_by_volumes(
-                #     ratio=sift_volume_ratio, 
-                #     time_range=(last_dt if dt != last_dt else None, dt)
-                # )
-                sorted_products = sorted(row.dropna().index, key=lambda x: (row[x], x.name), reverse=True)
-                sorted_products = [product for product in sorted_products if product in sifted_products]
-                n = len(sorted_products)
-                idx = list(sorted_products)
-                
-                # Split contracts into n_groups groups
-                if n == 0:
-                    continue
-                else:
-                    n_split = n_groups
-                    last_dt_has_product_now_at_market = set(range(n_groups))
-                    for i in range(n_groups):
-                        if not products[i]:
-                            products[i][dt] = []
-                        else:
-                            # products[i][dt] = []
-                            products[i][dt] = [product for product in products[i][last_dt]
-                                if np.isnan(factor.returns[product].loc[dt])]
-                            if products[i][dt] and len(products[i][dt]) == len(products[i][last_dt]):
-                                last_dt_has_product_now_at_market.remove(i)
-                            n_split = len(last_dt_has_product_now_at_market)
-                    bucket_idx = np.floor(np.linspace(0, n_split, len(idx), endpoint=False)).astype(int)
-                    split = [list(np.asarray(idx)[bucket_idx == i]) for i in range(n_split)]
-                    last_dt_has_product_now_at_market = sorted(list(last_dt_has_product_now_at_market))
-                    for i, group in enumerate(split):
-                        products[last_dt_has_product_now_at_market[i]][dt].extend(group)
-
-                for i in range(n_groups):
-                    series = factor.returns[products[i][dt]].loc[dt].fillna(0)
-                    returns[i][dt] = 0 if series.empty else np.mean(series.values)
-
-                last_dt, _ = dt, row
-
-            report_groups = {}
-            for idx in range(n_groups):
-
-                dates = list(returns[idx].keys()) if returns[idx] else []
-                test_dates = [date for date in dates if self.start_date <= _signal_time(date)] if self.start_date else dates
-                test_dates = [date for date in test_dates if _signal_time(date) <= self.end_date] if self.end_date else dates
-                dates = [date for date in dates if start_date <= _signal_time(date)] if start_date else dates
-                dates = [date for date in dates if _signal_time(date) <= end_date] if end_date else dates
-                
-                returns_list = [returns[idx][date] for date in dates]
-                returns_series = pd.Series(returns_list).dropna()
-                cumulative_returns = (1 + returns_series).cumprod()
-
-                test_returns = [returns[idx][date] for date in test_dates]
-                test_returns_series = pd.Series(test_returns).dropna()
-                test_cumulative_returns = (1 + test_returns_series).cumprod()
-
-                metrics = {
-
-                '(Test) Total Return': (test_cumulative_returns.iloc[-1] - 1) * 100 if len(test_cumulative_returns) > 0 else 0,
-                '(Test) Annual Return': ((test_cumulative_returns.iloc[-1]) ** (252 / len(test_cumulative_returns)) - 1) * 100 if len(test_cumulative_returns) > 1 else 0,
-                '(Test) Volatility': pd.Series(test_returns).std() * np.sqrt(252) * 100,
-                '(Test) Sharpe Ratio': (pd.Series(test_returns).mean() * 252) / (pd.Series(test_returns).std() * np.sqrt(252)) if pd.Series(test_returns).std() != 0 else 0,
-                '(Test) Max Drawdown': ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100 if len(test_cumulative_returns) > 0 else 0,
-                '(Test) Calmar Ratio': ((test_cumulative_returns.iloc[-1] ** (252 / len(test_cumulative_returns)) - 1) * 100) / (((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() * 100) if ((test_cumulative_returns.cummax() - test_cumulative_returns) / test_cumulative_returns.cummax()).max() != 0 else 0,
-                '(Test) Win Rate': (pd.Series(test_returns) > 0).sum() / len(pd.Series(test_returns)) * 100 if len(pd.Series(test_returns)) > 0 else 0,
-                '(Test) Mean Return': pd.Series(test_returns).mean() * 100,
-                '(Test) Skewness': pd.Series(test_returns).skew(),
-                '(Test) Kurtosis': pd.Series(test_returns).kurtosis(),
-
-                'Total Return': (cumulative_returns.iloc[-1] - 1) * 100 if len(cumulative_returns) > 0 else 0,
-                'Annual Return': ((cumulative_returns.iloc[-1]) ** (252 / len(cumulative_returns)) - 1) * 100 if len(cumulative_returns) > 1 else 0,
-                'Volatility': pd.Series(returns_list).std() * np.sqrt(252) * 100,
-                'Sharpe Ratio': (pd.Series(returns_list).mean() * 252) / (pd.Series(returns_list).std() * np.sqrt(252)) if pd.Series(returns_list).std() != 0 else 0,
-                'Max Drawdown': ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100 if len(cumulative_returns) > 0 else 0,
-                'Calmar Ratio': ((cumulative_returns.iloc[-1] ** (252 / len(cumulative_returns)) - 1) * 100) / (((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() * 100) if ((cumulative_returns.cummax() - cumulative_returns) / cumulative_returns.cummax()).max() != 0 else 0,
-                'Win Rate': (pd.Series(returns_list) > 0).sum() / len(pd.Series(returns_list)) * 100 if len(pd.Series(returns_list)) > 0 else 0,
-                'Mean Return': pd.Series(returns_list).mean() * 100,
-                'Skewness': pd.Series(returns_list).skew(),
-                'Kurtosis': pd.Series(returns_list).kurtosis(),
-
-                }
-
-                report_groups[idx] = pd.Series(metrics)
-            
-            report_df = pd.DataFrame(report_groups).T.sort_index()  # Convert to DataFrame, transpose, and sort by name
-            if not plot_flag or (plot_flag and plot_show):
-                with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-                    print("Group Performance Summary:\n", report_df)
-
-            if plot_flag:
-                import matplotlib.pyplot as plt
-                # Plot average open returns per group over time
-                plt.figure(figsize=(12, 6))
-                start_date = start_date if start_date is not None else self.start_date
-                end_date = end_date if end_date is not None else self.end_date
-                # print(start_date, end_date)
-                dates = []  # Initialize dates as an empty list
-                for idx in range(n_groups):
-                    if plot_n_group_list is not None and idx not in plot_n_group_list:
-                        continue
-                    dates = list(returns[idx].keys()) if returns[idx] else []
-                    dates = [date for date in dates if start_date <= _signal_time(date)] if start_date else dates
-                    dates = [date for date in dates if _signal_time(date) <= end_date] if end_date else dates
-                    returns_list = [returns[idx][date] for date in dates]
-                    cumulative_returns = []
-                    prev_value = 10000
-                    for ret in returns_list:
-                        if not np.isnan(ret):
-                            prev_value = prev_value * (1 + ret)
-                        cumulative_returns.append(prev_value)
-                    plt.plot([str(date[-1].date()) if isinstance(date, tuple) else str(date.date()) for date in dates], cumulative_returns, label=names[idx])
-                plt.xlabel('日期')
-                plt.ylabel('平均收益')
-                if plot_remark_str:
-                    plt.title(f'平均收益: {factor.alias} - {plot_remark_str}')
-                else:
-                    plt.title(f'平均收益: {factor.alias}')
-                plt.rcParams['font.sans-serif'] = ['Kaiti SC']
-                plt.legend()
-                # Only show every nth tick to reduce crowding
-                n_ticks = 10
-                assert len(dates) > 0, "No dates available for plotting."
-                tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
-                # plt.xticks(ticks=[str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices], rotation=45)
-                ticks = [str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices]
-                plt.xticks(ticks=ticks, rotation=45)
-                plt.tight_layout()
-                if save_plot:
-                    factor_stem = factor.alias.split('|')[0]
-                    figs_path = os.path.join(factor_info_path, factor_stem, 'figs')
-                    if not os.path.exists(figs_path):
-                        os.makedirs(figs_path)
-                    plt.savefig(os.path.join(figs_path, f'{factor.alias}_{start_date}_{end_date}.png'))
-                if plot_show:
-                    plt.show()
-
-        return products, returns, report_df
+        assert cum_np_out is not None and idx_list_out is not None
+        return products_out, returns_out, report_df, cum_np_out, idx_list_out
     
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     """

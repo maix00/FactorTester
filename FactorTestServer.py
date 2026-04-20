@@ -1062,6 +1062,7 @@ def get_price_series():
 @app.route('/run_group_test', methods=['POST'])
 def run_group_test():
     import pandas as pd
+    import math
     data = request.get_json()
     submission_id = data.get('submission_id')
     factor_alias = data.get('factor_alias')
@@ -1084,19 +1085,24 @@ def run_group_test():
         # 处理时间范围时区
         time_range = None
         if start_date and end_date:
-            # 获取 tester 时间的时区（如果存在）
-            tz = None
-            if hasattr(tester.start_date, 'tz') and tester.start_date.tz is not None:
-                tz = tester.start_date.tz
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            if tz:
-                start_dt = start_dt.tz_localize(tz)
-                end_dt = end_dt.tz_localize(tz)
-            time_range = (start_dt, end_dt)
+            try:
+                start_dt = pd.to_datetime(start_date)
+                end_dt   = pd.to_datetime(end_date)
+                tz = None
+                if hasattr(tester.start_date, 'tz') and tester.start_date.tz is not None:
+                    tz = tester.start_date.tz
+                if tz:
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.tz_localize(tz)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.tz_localize(tz)
+                time_range = (start_dt, end_dt)
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'时间范围格式错误: {e}'}), 400
         
         # 调用分组测试（不使用绘图）
-        _, returns_dict, report_df = tester.test_by_group(
+        from tools.factors.FactorTester import _signal_time
+        _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
             factors=factor,
             n_groups=n_groups,
             time_range=time_range,
@@ -1105,46 +1111,26 @@ def run_group_test():
             plot_show=False
         )
         
-        # 提取时间点的辅助函数（处理可能的元组索引）
-        def extract_time(key):
-            if isinstance(key, tuple):
-                # 假设时间在元组的最后一个位置
-                return key[-1]
-            return key
-        
-        # 收集所有唯一的时间点
-        all_keys = set()
-        for group_returns in returns_dict.values():
-            all_keys.update(group_returns.keys())
-        time_points = sorted(set(extract_time(k) for k in all_keys))
-        
-        # 构建每个分组的累积收益序列
+        # 直接用预计算的 cumulative_returns_np (T, n_groups) 和 index_list
         groups_data = []
         for group_idx in range(n_groups):
-            group_returns = returns_dict.get(group_idx, {})
-            # 建立时间到收益的映射
-            time_ret_map = {}
-            for key, ret in group_returns.items():
-                t = extract_time(key)
-                time_ret_map[t] = ret
-            cum_returns = []
-            timestamps = []
-            cum = 1.0
-            for t in time_points:
-                ret = time_ret_map.get(t, 0.0)
-                cum *= (1 + ret)
-                cum_returns.append(cum)
-                timestamps.append(int(t.timestamp() * 1000))  # 毫秒时间戳
+            timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+            cum_values = [round(float(v), 8) if not math.isnan(v) else None
+                          for v in cum_np[:, group_idx]]
             groups_data.append({
                 'name': f'Group {group_idx+1}',
                 'timestamps': timestamps,
-                'cumulative_returns': cum_returns
+                'cumulative_returns': cum_values
             })
         
         # 统计指标
         metrics = {}
         if not report_df.empty:
-            metrics = report_df.to_dict(orient='index')
+            metrics = {
+                int(k): {mk: (None if (mv is None or (isinstance(mv, float) and math.isnan(mv))) else float(mv))
+                         for mk, mv in v.items()}
+                for k, v in report_df.to_dict(orient='index').items()
+            }
         
         return jsonify({
             'success': True,

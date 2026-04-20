@@ -53,7 +53,9 @@
         const series = groups.map(group => ({
             name: group.name,
             type: 'line',
-            data: group.cumulative_returns.map((val, idx) => [group.timestamps[idx], val]),
+            data: group.cumulative_returns
+                .map((val, idx) => val !== null ? [group.timestamps[idx], val] : null)
+                .filter(pt => pt !== null),
             tooltip: { valueDecimals: 4 }
         }));
         
@@ -66,7 +68,17 @@
             series: series,
             navigator: { enabled: true },
             scrollbar: { enabled: true },
-            rangeSelector: { enabled: true }
+            rangeSelector: {
+                enabled: true,
+                selected: undefined,
+                buttons: [
+                    { type: 'month', count: 1, text: '1M' },
+                    { type: 'month', count: 3, text: '3M' },
+                    { type: 'month', count: 6, text: '6M' },
+                    { type: 'year', count: 1, text: '1Y' },
+                    { type: 'all', text: 'All' }
+                ]
+            }
         });
     }
 

@@ -322,7 +322,7 @@ class FactorFamily(SerialObject):
 
         for factor in factors:
 
-            _, _, report_df = tester.test_by_group(factor, returns_col=returns_col,
+            _, _, report_df, _, _ = tester.test_by_group(factor, returns_col=returns_col,
                 plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
                 plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
                 )
