@@ -174,9 +174,13 @@ class DataMeta(SerialObject):
         if object is not None and isinstance(object, DataMeta) \
             and callable(get_param := getattr(object.original_object, 'get_StartCalcPointParam', None)):
             StartCalcPointParam = get_param()
-            assert isinstance(StartCalcPointParam, DateOrTimeParam)
-            time = StartCalcPointParam.get_value(object.original_object)
-            time_is_date = StartCalcPointParam.is_date(object.original_object)
+            if StartCalcPointParam is None:
+                time = None
+                time_is_date = None
+            else:
+                assert isinstance(StartCalcPointParam, DateOrTimeParam)
+                time = StartCalcPointParam.get_value(object.original_object)
+                time_is_date = StartCalcPointParam.is_date(object.original_object)
         else:
             StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
             if StartCalcPointParam is not None:

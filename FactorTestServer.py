@@ -693,6 +693,12 @@ def run_ic_test():
                     factor.table = pd.concat([table, factor.table], axis=1)
             else: # table is None
                 pass # factor.table is not None or empty, otherwise an error would have been raised above
+            # 确保 factor.freq 和 factor.products 始终从 table 中正确初始化，
+            # 防止从缓存恢复时 calc_factor 未被调用导致 freq / products 为空
+            if factor.table is not None and not factor.table.empty:
+                if not hasattr(factor, 'freq') or factor.freq is None:
+                    factor.freq = factor.get_freq()
+                factor._set_products()
             if run_products:
                 with open(factor_series_cache_file, "wb") as f:
                     pickle.dump((factor.table, start_calc_point), f)
@@ -700,13 +706,16 @@ def run_ic_test():
 
             ic_series = None
             ic_stats = None
+            returns_table = pd.DataFrame()  # 确保 returns_table 定义，以便后续检查，即使计算失败也不会导致未定义错误
             if not re_calc and factor_ic_cache_file.exists():
                 with open(factor_ic_cache_file, "rb") as f:
-                    ic_series, ic_stats, products_cache, return_freq_cache, _, start_date_cache, end_date_cache = pickle.load(f)
-                if products_cache == run_products and return_freq_cache != return_freq \
+                    ic_series_cache, ic_stats_cache, products_cache, return_freq_cache, returns_table_cache, start_date_cache, end_date_cache = pickle.load(f)
+                if products_cache == run_products and return_freq_cache == return_freq \
                     and start_date_cache == tester.start_date and end_date_cache == tester.end_date:
+                    ic_series = ic_series_cache
+                    ic_stats = ic_stats_cache
+                    returns_table = returns_table_cache
                     run_products = set()
-            returns_table = pd.DataFrame()  # 确保 returns_table 定义，以便后续检查，即使计算失败也不会导致未定义错误
             if run_products:
                 try:
                     ic_series_df, ic_stats_df = tester.calc_ic(factors=factor, return_freq=return_freq)
@@ -1028,8 +1037,8 @@ def get_price_series():
         
         # 确保 raw_df 索引为 DatetimeIndex（可能带时区），将其转换为无时区的本地时间，以便与 factor_idx 对齐
         if raw_df.index.tz is not None:
-            # 转换为本地无时区时间（假设 raw_df 索引时区与系统本地一致）
-            raw_df.index = raw_df.index.tz_convert(None)
+            # 转换为 UTC 无时区时间，与 factor_dates（毫秒时间戳→UTC）保持一致
+            raw_df.index = raw_df.index.tz_convert('UTC').tz_localize(None)
         
         # 构建区间：每个因子时间点作为右边界，左边界为上一个因子时间点（第一个左边界为数据开始）
         bins = factor_idx.union([raw_df.index.min()])  # 添加数据开始时间

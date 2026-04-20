@@ -57,9 +57,9 @@ class Product(UniqueObject):
         self._StartCalcPointParam = param
         param.register(self, value if value is not None else param.default_value)
 
-    def get_StartCalcPointParam(self) -> 'DateOrTimeParam':
+    def get_StartCalcPointParam(self) -> 'Optional[DateOrTimeParam]':
         """获取本产品已设置的计算起始点参数。"""
-        return self._StartCalcPointParam
+        return getattr(self, '_StartCalcPointParam', None)
         
     def list_available_freqs(self) -> List[DataFreq]:
         """列出本产品在所有已注册 DataSource 中可用的数据频率。"""
@@ -102,14 +102,22 @@ class Product(UniqueObject):
             time_col = 'DAY1'
         else:
             time_col = sorted(time_cols, key=lambda x: DataFreq[str(x)].value)[0]
-        if getattr(data.index.get_level_values(time_col), 'tz', None) is not None and self.timezone is not None:
+        # Resolve time_index: MultiIndex → get_level_values; DatetimeIndex → use directly; else look in columns
+        if isinstance(data.index, pd.MultiIndex):
+            time_index = data.index.get_level_values(time_col)
+        elif isinstance(data.index, pd.DatetimeIndex):
+            time_index = data.index
+        elif time_col in data.columns:
+            time_index = pd.to_datetime(data[time_col])
+        else:
+            return pd.DataFrame()
+        if getattr(time_index, 'tz', None) is not None and self.timezone is not None:
             start_date = pd.to_datetime(start_date).tz_localize(self.timezone)
             end_date = pd.to_datetime(end_date).tz_localize(self.timezone)
         else:
             start_date = pd.to_datetime(start_date)
             end_date = pd.to_datetime(end_date)
-        mask = (data.index.get_level_values(time_col) >= start_date) & \
-               (data.index.get_level_values(time_col) <= end_date)
+        mask = (time_index >= start_date) & (time_index <= end_date)
         if adjusted:
             list_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
             if any([col not in data.columns for col in list_cols]):
