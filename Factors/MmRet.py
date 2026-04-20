@@ -10,11 +10,9 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.products.Product import Product
-from tools import DataColumn
-from tools.factors.Factor import FactorFamily
-from tools.parameters.Parameter import DataColumnParam, FinRangeParam, TimeDeltaParam
-from typing import List, Dict, Any, Sequence, Tuple
+from tools import DataColumn, Product, FactorFamily
+from tools.parameters import DataColumnParam, FinRangeParam, TimeDeltaParam
+from typing import Any
 
 class MmRet(FactorFamily):
     """
@@ -29,40 +27,34 @@ class MmRet(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),             # 价格列
-        TimeDeltaParam('F', flag='pos', default_value='1d'), # 信号/聚合频率
+        DataColumnParam('P', DataColumn.CLOSE),              # 价格列
     ]
 
-    def func(self, products: Sequence[Product], F: Any = pd.Timedelta('1d'),
-             P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.DataFrame:
+    def func_timeseries(self, product: Product, F: Any = pd.Timedelta('1d'),
+                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
         """
-        批量计算 MmRet 因子。
+        计算单品种收益率动量因子。
 
         流程：
-          1. 调用 _get_data 获取按频率 F 分组的数据
-          2. 取每组最后一根 bar 的 P 列值
-          3. 计算相邻组之间的 pct_change（即 1 期动量）
+          1. 取 P 列的分钟数据，每 F 周期取最后一根 bar 的收盘价（groupby last）
+          2. 计算相邻周期的 pct_change（1 期动量）
+          3. 对齐到信号时间点并返回
 
         参数：
-            products : 品种列表
-            F        : 聚合频率
-            P        : 价格列
+            product : 品种对象
+            F       : 聚合/信号频率
+            P       : 价格列
 
         返回：
-            DataFrame，列为 Product，索引为信号时间戳 MultiIndex
+            按频率 F 同步后的 pd.Series
         """
-        factors = {}
-        for product in products:
-            # _get_data 返回 (data, info)，info['grouped'] 为按 F 分组的 DataFrameGroupBy
-            _, info = product.MIN1._get_data(self,
-                extra_time_col_freq=F,
-                extra_time_col_bfill=True,
-                extra_time_col_groupby=True)
-            df_grouped = info['grouped']
-            # 取每组最后一根 bar 的收盘价，再计算 1 期 pct_change
-            factors[product] = df_grouped.last()[P.name].pct_change(1)
-
-        return pd.DataFrame(factors)
+        # 按 F 聚合，取每组最后一根 bar 的价格
+        grouped = product.MIN1[P].groupby(freq=F)
+        price = grouped.last()
+        # 计算 1 期收益率
+        ret = price.pct_change(1)
+        # 对齐到信号时间点
+        return self.sync_signal(ret, F)
 
 if __name__ == '__main__':
     ff = MmRet()

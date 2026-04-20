@@ -11,10 +11,8 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn
-from tools.products.Product import Product
-from tools.factors.Factor import FactorFamily
-from tools.parameters.Parameter import DataColumnParam, TimeDeltaParam
+from tools import DataColumn, Product, FactorFamily
+from tools.parameters import DataColumnParam, TimeDeltaParam
 from typing import Any
 
 class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio

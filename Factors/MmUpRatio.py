@@ -11,10 +11,8 @@ import pandas as pd
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.products.Product import Product
-from tools import DataColumn
-from tools.factors.Factor import FactorFamily
-from tools.parameters.Parameter import DataColumnParam, TimeDeltaParam
+from tools import DataColumn, Product, FactorFamily
+from tools.parameters import DataColumnParam, TimeDeltaParam, WindowParam
 from typing import Any
 
 class MmUpRatio(FactorFamily):
@@ -29,8 +27,8 @@ class MmUpRatio(FactorFamily):
 
     params = [
         DataColumnParam('P', DataColumn.CLOSE),          # 价格列
-        TimeDeltaParam('N', flag='pos', default_value='5d'),   # 窗口长度
-        TimeDeltaParam('RF', flag='pos', default_value='1d'),  # 收益率计算频率
+        WindowParam('N', default_value='5d'),             # 窗口长度
+        WindowParam('RF', default_value='1d'),            # 收益率计算频率
     ]
 
     math_expr = r'''
@@ -77,7 +75,7 @@ class MmUpRatio(FactorFamily):
         ratio = ratio.fillna(0.0)                      # 窗口内无数据时填充0
 
         # 3. 同步到目标频率并返回
-        return product.MIN1.sync_signal(ratio, F)
+        return self.sync_signal(ratio, F)
 
 
 if __name__ == '__main__':
