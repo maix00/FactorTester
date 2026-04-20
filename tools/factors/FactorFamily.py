@@ -620,11 +620,11 @@ class Returns(FactorFamily):
         assert isinstance(data, DataMeta)
         if SC == EC:
             day_basepoint = 'last'
-            if SC == DataColumn.OPEN or SC == DataColumn.OPEN_ADJUSTED:
+            if SC in [DataColumn.OPEN, DataColumn.OPEN_ADJUSTED]:
                 day_basepoint = 'first'
-                ret = data[SC].pct_change(RF).shift(RF*S)
-            elif SC == DataColumn.CLOSE or SC == DataColumn.CLOSE_ADJUSTED:
-                ret = data[SC].pct_change(RF).shift(RF*S)
+                ret = data[SC].pct_change(RF).shift(RF*(S-1))
+            elif SC in [DataColumn.CLOSE, DataColumn.CLOSE_ADJUSTED]:
+                ret = data[SC].pct_change(RF).shift(RF*(S-1))
             else:
                 raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
             return self.sync_signal(ret, RF, basepoint=day_basepoint, replace_basepoint='last')

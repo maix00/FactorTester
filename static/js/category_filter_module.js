@@ -205,9 +205,19 @@
             return;
         }
         var selectedNodes = treeInstance.getSelectedNodes();
-        var selectedPaths = selectedNodes.map(function(node) { return node.key; });
+        // 只保留「祖先节点中没有其他已选节点」的最小集合，避免发送海量叶子路径
+        var selectedKeySet = new Set(selectedNodes.map(function(n) { return n.key; }));
+        var minimalNodes = selectedNodes.filter(function(node) {
+            var p = node.parent;
+            while (p && p.key) {
+                if (selectedKeySet.has(p.key)) return false;
+                p = p.parent;
+            }
+            return true;
+        });
+        var selectedPaths = minimalNodes.map(function(node) { return node.key; });
         var pathToDescMap = {};
-        selectedNodes.forEach(function(node) {
+        minimalNodes.forEach(function(node) {
             pathToDescMap[node.key] = node.data.desc || "";
         });
 

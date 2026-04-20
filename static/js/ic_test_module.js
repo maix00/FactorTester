@@ -208,8 +208,8 @@
                         </label>
                     </div>
                     <!-- 因子值序列和收益率序列容器 -->
-                    <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
-                        <div style="width:100%;"><div id="factor-chart-${subId}-${idx}" style="width:100%; height:800px;"><div style="color:#888; text-align:center; padding:40px;">请选择产品并点击加载</div></div></div>
+                    <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:8px;">
+                        <div style="width:100%;"><div id="factor-chart-${subId}-${idx}" style="width:100%;"></div></div>
                     </div>
                 </div>
             `;
@@ -249,7 +249,8 @@
 
         const factorChartDiv = document.getElementById(`factor-chart-${subId}-${factorIdx}`);
         if (!factorChartDiv) return;
-        factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:40px;">加载价格与因子值...</div>';
+        factorChartDiv.style.height = 'auto';
+        factorChartDiv.innerHTML = '<div style="color:#888; text-align:center; padding:18px 0;">加载价格与因子值...</div>';
 
         const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
         if (!submission) { 
@@ -301,6 +302,7 @@
             }).then(r => r.json());
 
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
+                factorChartDiv.style.height = '800px';
                 drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName);
             } else {
                 factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格、因子或收益率数据无效</div>';
@@ -332,7 +334,12 @@
         }
         checkboxes.forEach(cb => {
             const alias = cb.getAttribute('data-factor-alias');
-            const freqSelect = document.querySelector(`#factor-config-${subId} .factor-freq-select[data-factor-alias="${alias}"]`);
+            const configRoot = document.getElementById(`factor-config-${subId}`);
+            let freqSelect = null;
+            if (configRoot) {
+                const allFreqSelects = configRoot.querySelectorAll('.factor-freq-select');
+                freqSelect = Array.from(allFreqSelects).find(sel => sel.getAttribute('data-factor-alias') === alias) || null;
+            }
             const return_freq = freqSelect ? freqSelect.value : 'N';
             selectedFactors.push({ alias, return_freq });
         });
@@ -435,10 +442,10 @@
                 </div>
             </div>
             <script>
-                document.getElementById('select-all-${subId}').onclick = () => { document.querySelectorAll('#factor-config-${subId} .factor-checkbox').forEach(cb => cb.checked = true); };
-                document.getElementById('deselect-all-${subId}').onclick = () => { document.querySelectorAll('#factor-config-${subId} .factor-checkbox').forEach(cb => cb.checked = false); };
-                document.getElementById('reset-freq-${subId}').onclick = () => {
-                    document.querySelectorAll('#factor-config-${subId} .factor-freq-select').forEach(sel => sel.value = 'N');
+                document.getElementById('select-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = true); };
+                document.getElementById('deselect-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = false); };
+                document.getElementById('reset-freq-' + '${subId}').onclick = () => {
+                    document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-freq-select').forEach(sel => sel.value = 'N');
                 };
             </script>
         `;

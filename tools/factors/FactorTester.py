@@ -286,16 +286,21 @@ class FactorTester(SerialObject):
             mask = [_signal_time(k) <= end_date for k in returns_src.index]
             returns_src = returns_src[mask]
 
+        # 对齐两个 DataFrame 的索引（factor.returns 因 shift 可能比 factor.table 少最后一行）
+        common_index = table_src.index.intersection(returns_src.index)
+        table_src    = table_src.loc[common_index]
+        returns_src  = returns_src.loc[common_index]
+
         # 把 factor.table / factor.returns 转成 numpy 矩阵，列为品种
         # 统一列顺序
         all_cols = list(table_src.columns)
-        ret_cols  = list(factor.returns.columns)
+        ret_cols  = list(returns_src.columns)
         # 只取交集（有 returns 的品种）
         valid_cols = [c for c in all_cols if c in set(ret_cols)]
 
-        table_np  = factor.table[valid_cols].to_numpy(dtype=float)   # shape (T, P)
-        returns_np = factor.returns[valid_cols].to_numpy(dtype=float) # shape (T, P)
-        index_list = list(factor.table.index)                         # len T
+        table_np  = table_src[valid_cols].to_numpy(dtype=float)   # shape (T, P)
+        returns_np = returns_src[valid_cols].to_numpy(dtype=float) # shape (T, P)
+        index_list = list(table_src.index)                         # len T
         T = len(index_list)
 
         n_names = {i: n_groups_name.get(i, 'group_' + str(i)) for i in range(n_groups)}

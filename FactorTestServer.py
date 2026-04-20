@@ -372,10 +372,14 @@ def convert_to_fancytree(tree_dict):
 tree = Settings.get_cat_tree().tree
 
 # 新增 API 端点
+_fancytree_cache = None  # 静态树结构只需转换一次
+
 @app.route('/api/tree-data')
 def get_tree_data():
-    fancytree_data = convert_to_fancytree(tree)
-    return jsonify(fancytree_data)
+    global _fancytree_cache
+    if _fancytree_cache is None:
+        _fancytree_cache = convert_to_fancytree(tree)
+    return jsonify(_fancytree_cache)
 
 def find_node_by_path(tree_dict, path_parts):
     """
@@ -763,6 +767,19 @@ def run_ic_test():
                 'products': [{'name': product.name, 'desc': getattr(product, 'desc', product.name)} for product in factor.table.columns if product in tester.products and isinstance(product, Product)] if factor.table is not None else [],
             })
 
+        # Merge newly tested factors into tester.factors without overwriting previously stored ones
+        existing_aliases = {f.alias for f in tester.factors}
+        for f in factors:
+            if f.alias not in existing_aliases:
+                tester.factors.append(f)
+                existing_aliases.add(f.alias)
+            else:
+                # Update the existing entry in-place so group test gets the latest factor object
+                for i, ef in enumerate(tester.factors):
+                    if ef.alias == f.alias:
+                        tester.factors[i] = f
+                        break
+
         return jsonify(response)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -1115,7 +1132,7 @@ def run_group_test():
         groups_data = []
         for group_idx in range(n_groups):
             timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
-            cum_values = [round(float(v), 8) if not math.isnan(v) else None
+            cum_values = [round(float(v), 8) if (not math.isnan(v) and not math.isinf(v)) else None
                           for v in cum_np[:, group_idx]]
             groups_data.append({
                 'name': f'Group {group_idx+1}',
@@ -1127,7 +1144,7 @@ def run_group_test():
         metrics = {}
         if not report_df.empty:
             metrics = {
-                int(k): {mk: (None if (mv is None or (isinstance(mv, float) and math.isnan(mv))) else float(mv))
+                int(k): {mk: (None if (mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv)))) else float(mv))
                          for mk, mv in v.items()}
                 for k, v in report_df.to_dict(orient='index').items()
             }
