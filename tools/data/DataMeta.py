@@ -72,8 +72,6 @@ class DataMeta(SerialObject):
           - 其他 Timedelta：要求整除当前数据频率，返回整数倍数
         结果缓存在 self.day_periods 避免重复计算。
         """
-        if hasattr(self, 'day_periods') and self.day_periods is not None:
-            return self.day_periods
         data_freq = self._get_freq(**kwargs)
         if isinstance(window, int):
             periods = window
@@ -81,14 +79,20 @@ class DataMeta(SerialObject):
             window_freq = DataFreq(window)
             if window_freq.is_day_multiple():
                 import numpy as np
-                day_periods = pd.Series(np.diff(np.where((dates := pd.Series(self.data.index.get_level_values(-1).date)) != dates.shift(1)))[0]).mode()[0] # type: ignore
-                periods = day_periods * int(window_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
+                # 缓存“每个交易日的 bar 数”，但不能缓存“本次窗口对应 periods”。
+                # 否则不同窗口（如 21d 和 252d）会被错误地复用为同一个 shift 长度。
+                if not hasattr(self, 'day_periods') or self.day_periods is None:
+                    self.day_periods = pd.Series(
+                        np.diff(np.where((dates := pd.Series(self.data.index.get_level_values(-1).date)) != dates.shift(1)))[0]
+                    ).mode()[0]  # type: ignore
+                day_periods = int(self.day_periods)
+                day_count = int(window_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
+                periods = day_periods * day_count
             elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
                 periods = int(window_freq.value / data_freq.value)
             else:
                 raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
-        self.day_periods = periods
-        return self.day_periods
+        return periods
 
     def list_available_sources(self) -> List[DataSource]:
         return [s for s in DataSource if s.if_object_is_in_source(self.object) and s.freq == self.freq]

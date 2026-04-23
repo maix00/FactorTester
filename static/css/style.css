@@ -166,7 +166,17 @@ th {
     display: block;
 }
 
+.factor-cn-name {
+    color: #888;
+    font-size: 13px;
+    margin-left: 4px;
+}
+
 .factor-list a:hover {
+    color: #0078d4;
+}
+
+.factor-list a:hover .factor-cn-name {
     color: #0078d4;
 }
 

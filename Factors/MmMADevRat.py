@@ -30,6 +30,30 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
         TimeDeltaParam('RF', flag='pos', default_value='1d'),
     ]
 
+    chinese_name = '均线偏离度'
+    description_sections = [
+        {
+            'title': '这是什么',
+            'body': 'MmMADevRat 是一个均线偏离度因子，用来衡量当前价格相对滚动均线的偏离程度。',
+        },
+        {
+            'title': '它在看什么',
+            'body': '当价格显著高于均线时，说明市场当前交易重心高于过去一段时间的平均水平；当价格显著低于均线时，则说明市场重心下移。归一化后的偏离度能帮助比较不同价格水平资产的相对强弱。',
+        },
+        {
+            'title': '为什么这个因子可能行得通',
+            'body': '均线常被看作局部均衡价格。价格持续偏离均线，通常意味着一侧资金在更主动地推动价格离开均衡位置。若市场处于趋势状态，这种偏离可能继续扩大；若市场处于均值回归状态，这种偏离也常提示回归压力。',
+        },
+        {
+            'title': '使用提醒',
+            'body': '这个因子单独使用时，容易混淆“强趋势中的合理偏离”和“短期过度拉伸”。如果要直接用于交易，最好配合趋势持续性或波动率环境来判断。',
+        },
+        {
+            'title': '反转信号',
+            'body': '均线偏离度类因子的反转逻辑最为直接：当价格相对均线偏离过大时，均值回归压力上升。反转在以下情况更有效：（1）偏离度处于历史高/低分位（如超过 1.5 倍历史标准差）；（2）宽基指数与个股或个品种偏离度同向极端——系统性失衡往往触发更强回归；（3）短周期 RF 对应的偏离比长周期 N 更容易回归，时效性更强。趋势市中，均线偏离可以持续堆积，单独用偏离度做反转时建议设置最大持有期或结合波动率环境过滤。',
+        },
+    ]
+
     math_expr = r'''
         \begin{aligned}
             MA_t(N) &:= \frac{1}{N}\sum_{i=0}^{N-1} P_{t-i} \\
@@ -37,8 +61,7 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
         \end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, F: Any = pd.Timedelta('1d'),
-                        N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
+    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
                         P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
         """
         计算均线偏离比值因子。
@@ -74,9 +97,7 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
         ratio = ratio.replace([float('inf'), -float('inf')], float('nan')).fillna(0.0)
 
         # 5. 同步到目标频率并返回
-        return product.MIN1.sync_signal(ratio, F)
-
-
+        return self.sync_signal(ratio)
 if __name__ == '__main__':
     ff = MmMADevRat()
 

@@ -31,6 +31,30 @@ class MmUpRatio(FactorFamily):
         WindowParam('RF', default_value='1d'),            # 收益率计算频率
     ]
 
+    chinese_name = '上涨贡献占比'
+    description_sections = [
+        {
+            'title': '这是什么',
+            'body': 'MmUpRatio 是上涨贡献占比因子，计算最近窗口里正收益之和占绝对收益总和的比例。',
+        },
+        {
+            'title': '它在看什么',
+            'body': '如果价格上涨主要来自许多正向波动，因子接近 1；如果下跌波动占主导，因子接近 0；若涨跌力量相对均衡，则因子处在中间区域。它比“上涨次数占比”更进一步，因为它同时考虑了涨跌的幅度。',
+        },
+        {
+            'title': '为什么这个因子可能行得通',
+            'body': '一个真正健康的趋势，通常不仅上涨次数多，而且上涨贡献在总波动里占据更大份额。这个因子因此可以描述行情的“方向质量”，区分平滑推进的走势和剧烈拉锯的走势。',
+        },
+        {
+            'title': '使用提醒',
+            'body': '若窗口内出现单次极端大波动，因子会被明显拉偏；因此它适合和稳健的波动率或去极值处理一起使用。',
+        },
+        {
+            'title': '反转信号',
+            'body': '上涨贡献占比在以下情况更容易出现反转：（1）因子值连续多期维持高位且成交量下降——动量质量表面强但缺乏增量力量；（2）单期出现极端大阳线把因子值推至高位，但之后样本重新分布，因子会快速回落；（3）与上涨次数占比（MmPosPct）产生背离时：上涨贡献高但上涨次数不多，说明行情由少数大波动驱动，可持续性存疑。反转在窗口较短、市场波动率高的环境中更为频繁；长周期因子因为平滑效果，反转更滞后但也更有意义。',
+        },
+    ]
+
     math_expr = r'''
         \begin{aligned}
             r_t &:= \frac{P_t - P_{t-RF}}{P_{t-RF}} \\[5pt]
@@ -38,8 +62,7 @@ class MmUpRatio(FactorFamily):
         \end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, F: Any = pd.Timedelta('1d'),
-                        N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
+    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
                         P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
         """
         计算涨幅占比因子。
@@ -75,9 +98,7 @@ class MmUpRatio(FactorFamily):
         ratio = ratio.fillna(0.0)                      # 窗口内无数据时填充0
 
         # 3. 同步到目标频率并返回
-        return self.sync_signal(ratio, F)
-
-
+        return self.sync_signal(ratio)
 if __name__ == '__main__':
     # 示例：创建因子实例并添加参数组合
     ff = MmUpRatio()

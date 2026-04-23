@@ -28,7 +28,7 @@ from tools.products.Product import Product
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools import SerialObject, DataFreq, DataMeta, DataColumn
 from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
-from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns
+from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns, ReverseParam
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
@@ -49,11 +49,14 @@ class FactorFamily(SerialObject):
       - 驱动完整的 IC + 分组收益测试流程（test）
 
     类属性：
-        math_expr  (str)         : 因子公式的 LaTeX 字符串，供前端展示
-        params     (list)        : 本族使用的参数对象列表（子类应覆盖）
+        math_expr            (str)  : 因子公式的 LaTeX 字符串，供前端展示
+        description_sections (list) : 因子结构化说明，供前端展示
+        params               (list) : 本族使用的参数对象列表（子类应覆盖）
     """
     _instances = WeakValueDictionary()
     math_expr: str = ""       # 子类可覆盖，填写 LaTeX 格式的数学表达式
+    chinese_name: str = ""    # 子类可覆盖，填写因子中文名称，供前端显示和搜索
+    description_sections: List[dict] = []
     _serial_map = {}
     params: List[Parameter] = []
 
@@ -73,7 +76,9 @@ class FactorFamily(SerialObject):
         if not hasattr(self, '_initialized'):
             alias=alias if alias else self.__class__.__name__
             super().__init__(type_alias='FF', alias=alias)
+            self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
             self.params.append(FactorFreqParam)   # 所有子类默认包含信号频率参数 F
+            self.params.append(ReverseParam)       # 所有子类默认包含反转参数 $Rev（1/True=-反向；0/False=正向）
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
@@ -97,6 +102,14 @@ class FactorFamily(SerialObject):
         返回：
             DataFrame，列为 Product，索引为 MultiIndex（信号层 + 精度层）
         """
+        # 运行时参数归一化：支持 F/Rev 与 $F/$Rev 混用输入
+        kwargs = self._normalize_param_kwargs(**kwargs)
+        # 多数因子方法签名使用 F，这里将 $F 映射为 F 供 func_timeseries 使用
+        if '$F' in kwargs and 'F' not in kwargs:
+            kwargs['F'] = kwargs['$F']
+        signal_freq = kwargs.get('F', pd.Timedelta('1d'))
+        # 提取反转参数，不转发给 func_timeseries（统一使用 $Rev）
+        is_reversed: bool = kwargs.pop('$Rev', False)
         try:
             # 过滤无数据品种（停牌、尚未上市等），避免 func_timeseries 里得到空索引
             valid_products = [p for p in products if not p.get_some_data(copy=False).empty]
@@ -118,10 +131,12 @@ class FactorFamily(SerialObject):
             try:
                 if len(valid_products) <= 200:
                     for product in tqdm(valid_products, desc=f"Calculating factor signals"):
+                        self._runtime_ctx.signal_freq = signal_freq
                         factors[product] = self.func_timeseries(product, *args, **kwargs)
                 else:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     def compute_factor(product, *args, **kwargs):
+                        self._runtime_ctx.signal_freq = signal_freq
                         return product, self.func_timeseries(product, *args, **kwargs)
                     with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in valid_products}
@@ -162,6 +177,8 @@ class FactorFamily(SerialObject):
                             names=[signal_level_name] + sub_day_names
                         )
                         result = merged
+            if is_reversed:
+                result = -result
             return result
         except Exception as e:
             raise e
@@ -183,8 +200,30 @@ class FactorFamily(SerialObject):
         """用各参数默认值初始化 _params_list（仅一组默认参数组合）。"""
         self._params_list = [{p.alias: p.default_value for p in self.params}]
 
+    def _normalize_param_kwargs(self, **kwargs) -> dict:
+        """
+        归一化参数别名：当输入键不存在时，尝试在带/不带 '$' 形式间互转。
+
+        例如：F -> $F，Rev -> $Rev。
+        """
+        normalized = {}
+        for key, value in kwargs.items():
+            target_key = key
+            if key == 'Rev':
+                target_key = '$Rev'
+            if key not in self.params_dict:
+                if key.startswith('$') and key[1:] in self.params_dict:
+                    target_key = key[1:]
+                elif not key.startswith('$') and f'${key}' in self.params_dict:
+                    target_key = f'${key}'
+            if target_key in normalized and normalized[target_key] != value:
+                raise ValueError(f"Conflicting values for parameter {target_key}")
+            normalized[target_key] = value
+        return normalized
+
     def change_param_default_value(self, **kwargs):
         """修改指定参数的默认值（同时校验值域）。"""
+        kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
         for key, value in kwargs.items():
             self.params_dict[key].default_value = value
@@ -195,6 +234,7 @@ class FactorFamily(SerialObject):
 
     def _check_in_space(self, **kwargs):
         """校验 kwargs 中每个参数值是否在对应参数的值域内，不在则抛出 ValueError。"""
+        kwargs = self._normalize_param_kwargs(**kwargs)
         for key in kwargs:
             if kwargs[key] not in self.params_dict[key]:
                 raise ValueError(f"{kwargs[key]} is not in the value space of {key}")
@@ -205,6 +245,7 @@ class FactorFamily(SerialObject):
 
         未指定的参数取其默认值，所有值均经 rectify_value 标准化。
         """
+        kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
         new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         if new_params not in self._params_list:
@@ -212,6 +253,7 @@ class FactorFamily(SerialObject):
 
     def del_params(self, **kwargs):
         """从 _params_list 中删除与 kwargs 匹配的参数组合。"""
+        kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
         del_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         self._params_list = [params for params in self._params_list if params != del_params]
@@ -225,9 +267,19 @@ class FactorFamily(SerialObject):
         根据参数值生成 Factor 的完整别名。
 
         格式：{家族别名}|{alias1}:{值别名}|{alias2}:{值别名}...
+        值别名为空字符串的参数会被跳过，不出现在名称中。
         若无参数则直接返回家族别名。
         """
-        params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
+        parts = []
+        for key, value in params.items():
+            val_alias = self.params_dict[key].get_value_alias(value)
+            if val_alias:
+                if key == '$Rev':
+                    if val_alias == '1':
+                        parts.append(key)
+                else:
+                    parts.append(f"{key}:{val_alias}")
+        params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
     def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
@@ -267,6 +319,7 @@ class FactorFamily(SerialObject):
         返回：
             Factor 实例
         """
+        kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
         param_vals = {p: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         new_params = {p.alias: param_vals[p] for p in self.params}
@@ -492,7 +545,7 @@ class FactorFamily(SerialObject):
             result = result.union(idx)
         return result
     
-    def sync_signal(self, data: Any, freq: Any,
+    def sync_signal(self, data: Any, freq: Any = None,
                     basepoint: 'str|Callable' = 'last',
                     replace_basepoint: 'Optional[str|Callable]' = None,
                     **kwargs) -> pd.Series:
@@ -518,6 +571,8 @@ class FactorFamily(SerialObject):
         返回：
             对齐后的 pd.DataFrame 或 pd.Series，索引层名已重命名为 _SIGNAL@{freq}
         """
+        if freq is None:
+            freq = getattr(self._runtime_ctx, 'signal_freq', pd.Timedelta('1d'))
         freq_dc = DataFreq(freq)
         if isinstance(data, DataMeta):
             data = data.data
@@ -607,6 +662,25 @@ class Returns(FactorFamily):
         DataColumnParam('SC', default_value=DataColumn.CLOSE),  # 收益起始列
         DataColumnParam('EC', default_value=DataColumn.CLOSE),  # 收益终止列
         TypeParam('S', default_value=1),  # 移位量：1=下期，0=当期，-1=上期
+    ]
+
+    description_sections = [
+        {
+            'title': '这是什么',
+            'body': 'Returns 是系统内置的收益率序列生成因子，用于构造下一期或当期收益，通常作为 IC、分组测试和其他因子评估的目标变量。',
+        },
+        {
+            'title': '它在看什么',
+            'body': '它本身不是一个用于预测的 alpha，而是定义“你到底在预测哪个收益口径”。不同的收益频率、收益起点和是否使用下一期收益，会直接改变测试结论。',
+        },
+        {
+            'title': '为什么这个因子可能行得通',
+            'body': '严格来说，它不是“为什么有效”的问题，而是“为什么定义准确很重要”。如果目标收益定义错了，再好的预测因子也会被错误地评估。',
+        },
+        {
+            'title': '使用提醒',
+            'body': '回测中应优先确认收益频率、对齐方式和是否前视，再比较不同 alpha 的优劣。',
+        }
     ]
 
     def func_timeseries(self, product: Product, RF: pd.Timedelta, SC: DataColumn, EC: DataColumn, S: int, *args, **kwargs) -> pd.Series:

@@ -1,4 +1,4 @@
-import sys, os, importlib.util, threading, webbrowser, time, traceback
+import sys, os, importlib.util, threading, webbrowser, time, traceback, uuid
 from flask import Flask, request, jsonify, render_template, session
 
 from tools.factors.FactorFamily import FactorFamily
@@ -33,20 +33,30 @@ import pandas as pd
 from tools import DataColumn
 
 # 服务端内存存储 params（单用户本地应用，无需 session cookie 序列化）
-_params_store: dict = {}  # key: ff_alias, value: list of param dicts
+_params_store: dict = {}  # key: (session_id, ff_alias), value: list of param dicts
 _params_store_lock = threading.Lock()
 
+def _get_session_id() -> str:
+    """获取当前用户会话 id；不存在时创建。"""
+    sid = session.get('_sid')
+    if sid is None:
+        sid = uuid.uuid4().hex
+        session['_sid'] = sid
+    return sid
+
 def _get_session_params(ff_alias: str, ff) -> list:
-    """获取对应 FactorFamily 的 _params_list 副本，首次访问时从 ff._params_list 初始化。"""
+    """获取当前用户对应 FactorFamily 的 _params_list 副本，首次访问时从 ff._params_list 初始化。"""
+    store_key = (_get_session_id(), ff_alias)
     with _params_store_lock:
-        if ff_alias not in _params_store:
-            _params_store[ff_alias] = list(ff._params_list)
-        return list(_params_store[ff_alias])
+        if store_key not in _params_store:
+            _params_store[store_key] = list(ff._params_list)
+        return list(_params_store[store_key])
 
 def _save_session_params(ff_alias: str, params_list: list):
-    """将更新后的 params_list 写回内存存储。"""
+    """将当前用户更新后的 params_list 写回内存存储。"""
+    store_key = (_get_session_id(), ff_alias)
     with _params_store_lock:
-        _params_store[ff_alias] = list(params_list)
+        _params_store[store_key] = list(params_list)
 
 def get_factor_family_instance(module_name):
     with _factor_family_cache_lock:
@@ -65,6 +75,29 @@ def get_factor_family_instance(module_name):
         return ff
     else:
         raise ImportError(f"Cannot load module '{module_name}' from '{module_path}'")
+
+def _load_chinese_names(factors_dir):
+    """Load chinese_name from each factor file via importlib, cached per process."""
+    result = {}
+    for fname in os.listdir(factors_dir):
+        if not fname.endswith('.py'):
+            continue
+        name = os.path.splitext(fname)[0]
+        try:
+            ff = get_factor_family_instance(name)
+            cn = getattr(ff, 'chinese_name', '') or ''
+            result[name] = cn
+        except Exception:
+            result[name] = ''
+    return result
+
+_chinese_names_cache: dict = {}
+
+def get_chinese_names(factors_dir):
+    global _chinese_names_cache
+    if not _chinese_names_cache:
+        _chinese_names_cache = _load_chinese_names(factors_dir)
+    return _chinese_names_cache
 
 def get_factor_groups(factors_dir):
     factor_files = [f for f in os.listdir(factors_dir) if f.endswith(".py")]
@@ -91,17 +124,20 @@ def get_factor_groups(factors_dir):
         groups.setdefault(group, []).append(name)
     return groups, factor_names
 
-def build_group_html(groups):
+def build_group_html(groups, chinese_names: dict | None = None):
     if not groups:
         return '<div style="color:#888;">无匹配因子</div>'
     
+    chinese_names = chinese_names or {}
     group_html = ""
     for group, names in sorted(groups.items()):
         group_html += f'<div class="factor-group">'
         group_html += f'<div class="factor-group-title">{group}</div>'
         group_html += '<ul class="factor-list">'
         for name in sorted(names):
-            group_html += f'<li><a href="?factor={name}">{name}</a></li>'
+            cn = chinese_names.get(name, '')
+            label = f'{name} <span class="factor-cn-name">{cn}</span>' if cn else name
+            group_html += f'<li><a href="?factor={name}">{label}</a></li>'
         group_html += '</ul>'
         group_html += '</div>'
     return group_html
@@ -115,6 +151,8 @@ def get_factor_main_section_html(factor_family_alias):
         
         # 准备 LaTeX 模块的数据
         math_expr = getattr(ff, 'math_expr', '')
+        chinese_name = getattr(ff, 'chinese_name', '') or ''
+        description_sections = getattr(ff, 'description_sections', [])
         
         # 准备参数模块的数据
         params = ff.params
@@ -134,7 +172,9 @@ def get_factor_main_section_html(factor_family_alias):
         return render_template(
             'factor_main.html',
             factor_family_alias=factor_family_alias,
+            chinese_name=chinese_name,
             math_expr=math_expr,
+            description_sections=description_sections,
             params=params,
             param_aliases=param_aliases,
             factors=factors,
@@ -160,16 +200,19 @@ def index():
     search_query = request.args.get('search', '')
     selected_name = request.args.get('factor', '')
 
+    chinese_names = get_chinese_names(factors_dir)
+
     if search_query:
+        q = search_query.lower()
         filtered_groups = {}
         for group, names in groups.items():
-            filtered = [n for n in names if search_query.lower() in n.lower()]
+            filtered = [n for n in names if q in n.lower() or q in chinese_names.get(n, '').lower()]
             if filtered:
                 filtered_groups[group] = filtered
         groups = filtered_groups
-        factor_names = [n for n in factor_names if search_query.lower() in n.lower()]
+        factor_names = [n for n in factor_names if q in n.lower() or q in chinese_names.get(n, '').lower()]
 
-    group_html = build_group_html(groups) if groups else '<div style="color:#888;">无匹配因子</div>'
+    group_html = build_group_html(groups, chinese_names) if groups else '<div style="color:#888;">无匹配因子</div>'
 
     main_content = ''
     
@@ -639,17 +682,17 @@ def factor_list():
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         factor_data = []
         for f in factors:
-            # 将 freq 转换为字符串，假设它是枚举或具有 value 属性
-            freq_value = getattr(f, 'freq', None)
-            if hasattr(freq_value, 'value'):   # 如果是枚举
-                assert freq_value is not None
-                freq_str = str(freq_value.value)
-            else:
-                freq_str = str(freq_value) if freq_value is not None else 'N'
+            factor_freq_param = f.params_dict.get('$F')
+            factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
+            factor_freq_str = (
+                factor_freq_param.get_value_alias(factor_freq_value)
+                if factor_freq_param is not None and factor_freq_value is not None
+                else ''
+            )
             factor_data.append({
                 'alias': f.alias,
                 'name': f.name,
-                'freq': freq_str   # 确保是字符串
+                'default_return_freq': factor_freq_str
             })
         return jsonify({'success': True, 'factors': factor_data})
     except Exception as e:
@@ -667,7 +710,6 @@ def run_ic_test():
     factor_family_alias = data.get('factor_family_alias')
     factor_alias_return_freq = data.get('factors', [])
     paths = data.get('paths', [])
-    return_freq = data.get('return_freq', 'N')
     re_calc = data.get('re_calc', False)  # 是否强制重新计算，默认为 False
     _token = None
     try:
@@ -694,7 +736,7 @@ def run_ic_test():
         return_freqs = {}
         for factor, item in zip(factors, factor_alias_return_freq):
             return_freq = item.get('return_freq', None)
-            return_freqs[factor] = (None if return_freq == 'N' else return_freq)
+            return_freqs[factor] = (None if return_freq in (None, '', 'N') else return_freq)
         assert factors, "没有找到匹配的因子"
 
         cache_dir_ic = Path('../data/cache/ic')

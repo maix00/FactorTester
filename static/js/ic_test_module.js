@@ -342,12 +342,12 @@
         checkboxes.forEach(cb => {
             const alias = cb.getAttribute('data-factor-alias');
             const configRoot = document.getElementById(`factor-config-${subId}`);
-            let freqSelect = null;
+            let freqInput = null;
             if (configRoot) {
-                const allFreqSelects = configRoot.querySelectorAll('.factor-freq-select');
-                freqSelect = Array.from(allFreqSelects).find(sel => sel.getAttribute('data-factor-alias') === alias) || null;
+                const allFreqInputs = configRoot.querySelectorAll('.factor-return-freq-input');
+                freqInput = Array.from(allFreqInputs).find(input => input.getAttribute('data-factor-alias') === alias) || null;
             }
-            const return_freq = freqSelect ? freqSelect.value : 'N';
+            const return_freq = freqInput ? freqInput.value.trim() : '';
             selectedFactors.push({ alias, return_freq });
         });
         const submission = window.submissions ? window.submissions.find(s => s.id == subId) : null;
@@ -421,13 +421,22 @@
         if (!factors || factors.length === 0) return '<div class="ic-empty">暂无因子数据，请先选择因子家族。</div>';
         let rows = '';
         factors.forEach(f => {
+            const defaultReturnFreq = f.default_return_freq || '';
+            const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
             rows += `<tr>
                 <td><label><input type="checkbox" class="factor-checkbox" data-factor-alias="${f.alias}" checked> ${f.name}</label></td>
-                <td><select class="factor-freq-select" data-factor-alias="${f.alias}" style="width:120px;">
-                    <option value="N">原生频率 (${f.freq || 'N'})</option>
-                    <option value="1min">1分钟</option><option value="5min">5分钟</option><option value="15min">15分钟</option>
-                    <option value="30min">30分钟</option><option value="1H">1小时</option><option value="1D">1天</option>
-                </select></td>
+                <td>
+                    <input
+                        type="text"
+                        class="factor-return-freq-input form-control form-control-sm"
+                        data-factor-alias="${f.alias}"
+                        value=""
+                        placeholder="留空则使用${defaultHint}"
+                        title="留空则使用${defaultHint}；也可手动填写如 5min、1H、1D"
+                        style="width:220px; display:inline-block;"
+                    >
+                    <div style="margin-top:4px; font-size:12px; color:#6b7280;">${defaultHint}</div>
+                </td>
             </tr>`;
         });
         return `
@@ -440,10 +449,10 @@
                     <div class="factor-config-actions">
                         <button class="btn btn-sm btn-outline-primary" id="select-all-${subId}">全选</button>
                         <button class="btn btn-sm btn-outline-primary" id="deselect-all-${subId}">全不选</button>
-                        <button class="btn btn-sm btn-outline-primary" id="reset-freq-${subId}">重置频率为原生</button>
+                        <button class="btn btn-sm btn-outline-primary" id="reset-freq-${subId}">清空收益率频率</button>
                     </div>
                     <table class="factor-config-table">
-                        <thead><tr><th>因子名称</th><th>收益率频率</th></tr></thead>
+                        <thead><tr><th>因子名称</th><th>收益率频率($RF，留空默认使用因子$F)</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
@@ -452,7 +461,7 @@
                 document.getElementById('select-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = true); };
                 document.getElementById('deselect-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = false); };
                 document.getElementById('reset-freq-' + '${subId}').onclick = () => {
-                    document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-freq-select').forEach(sel => sel.value = 'N');
+                    document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-return-freq-input').forEach(input => input.value = '');
                 };
             </script>
         `;

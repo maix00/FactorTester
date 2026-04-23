@@ -10,4 +10,20 @@
     {% if math_expr %}
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     {% endif %}
+
+    <div style="margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+        <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:12px;">因子说明</div>
+        {% if description_sections %}
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                {% for section in description_sections %}
+                    <div style="padding:12px 14px;background:#f8fafc;border-radius:8px;border-left:4px solid #2563eb;">
+                        <div style="font-size:15px;font-weight:600;color:#1f2937;margin-bottom:6px;">{{ section.title }}</div>
+                        <div style="font-size:14px;line-height:1.75;color:#374151;white-space:pre-line;">{{ section.body }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <span style="color:#888;">该因子暂未提供说明</span>
+        {% endif %}
+    </div>
 </div>
