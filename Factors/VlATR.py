@@ -11,7 +11,7 @@ import pandas as pd
 from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn, Product, FactorFamily
+from tools import DataColumn, Product, FactorFamily, max
 from tools.parameters import WindowParam
 
 
@@ -70,10 +70,7 @@ class VlATR(FactorFamily):
         tr1 = high - low
         tr2 = (high - prev_close).abs()
         tr3 = (low  - prev_close).abs()
-        # DataMeta 与 pandas where(cond, other) 在参数类型上可能不兼容，
-        # 用 max(a,b)=(a+b+|a-b|)/2 的等价形式避免 where。
-        tr12 = (tr1 + tr2 + (tr1 - tr2).abs()) * 0.5
-        tr = (tr12 + tr3 + (tr12 - tr3).abs()) * 0.5
+        tr = max(tr1, tr2, tr3)
         atr = tr.rolling(N).mean()
         factor = atr / close.replace(0, float('nan'))
         factor = factor.fillna(0.0)

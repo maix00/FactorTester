@@ -60,6 +60,34 @@ class FactorFamily(SerialObject):
     _serial_map = {}
     params: List[Parameter] = []
 
+    @staticmethod
+    def _series_max2(a: Any, b: Any) -> Any:
+        """逐元素两两最大值，兼容 DataMeta / Series / 标量。"""
+        return (a + b + (a - b).abs()) * 0.5
+
+    @staticmethod
+    def _series_min2(a: Any, b: Any) -> Any:
+        """逐元素两两最小值，兼容 DataMeta / Series / 标量。"""
+        return (a + b - (a - b).abs()) * 0.5
+
+    def series_max(self, *xs: Any) -> Any:
+        """逐元素最大值（可变参数版），至少传入一个序列。"""
+        if len(xs) == 0:
+            raise ValueError("series_max requires at least one argument")
+        res = xs[0]
+        for x in xs[1:]:
+            res = self._series_max2(res, x)
+        return res
+
+    def series_min(self, *xs: Any) -> Any:
+        """逐元素最小值（可变参数版），至少传入一个序列。"""
+        if len(xs) == 0:
+            raise ValueError("series_min requires at least one argument")
+        res = xs[0]
+        for x in xs[1:]:
+            res = self._series_min2(res, x)
+        return res
+
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         # 若未提供 alias，则使用类名作为默认别名
         alias=alias if alias else cls.__name__

@@ -9,6 +9,7 @@
 #   - 支持按 StartCalcPointParam 过滤历史数据
 #   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
 # =============================================================================
+import builtins as _py_builtins
 import pandas as pd
 from weakref import WeakValueDictionary
 from typing import List, Dict, Optional, Tuple, Any, override
@@ -18,6 +19,93 @@ from tools.base.SerialObject import SerialObject
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
+
+
+class _VariadicReducer:
+    """统一多元归并父类：子类定义 alias 前缀和聚合方向。"""
+
+    alias_prefix: str = "OP"
+
+    @staticmethod
+    def _agg(frame: pd.DataFrame) -> pd.Series:
+        raise NotImplementedError
+
+    @staticmethod
+    def _agg_scalars(values: tuple[Any, ...]) -> Any:
+        raise NotImplementedError
+
+    @staticmethod
+    def _to_series(value: Any, index: pd.Index) -> pd.Series:
+        if isinstance(value, pd.Series):
+            return value.reindex(index)
+        if isinstance(value, pd.DataFrame):
+            if value.shape[1] != 1:
+                raise ValueError("Variadic reducer only supports Series or single-column DataFrame values")
+            return value.iloc[:, 0].reindex(index)
+        return pd.Series(value, index=index)
+
+    def apply(self, *values: Any) -> Any:
+        if len(values) == 0:
+            raise ValueError(f"{self.alias_prefix.lower()} requires at least one value")
+
+        dm_values = [v for v in values if isinstance(v, DataMeta)]
+        if not dm_values:
+            return self._agg_scalars(values)
+
+        base_dm = dm_values[0]
+        raw_values = [DataMeta._get_data(v) for v in values]
+
+        pd_like = [v for v in raw_values if isinstance(v, (pd.Series, pd.DataFrame))]
+        if pd_like:
+            union_index = pd_like[0].index
+            for v in pd_like[1:]:
+                union_index = union_index.union(v.index)
+            aligned = [self._to_series(v, union_index) for v in raw_values]
+            result_raw = self._agg(pd.concat(aligned, axis=1))
+        else:
+            result_raw = self._agg_scalars(tuple(raw_values))
+
+        alias_parts = [DataMeta._get_alias(v) for v in values]
+        alias = f"{self.alias_prefix}_{'_'.join(alias_parts)}"
+        return base_dm._wrap(result_raw, alias=alias, preserve_alias=True)
+
+
+class _MaxReducer(_VariadicReducer):
+    alias_prefix = "MAX"
+
+    @staticmethod
+    def _agg(frame: pd.DataFrame) -> pd.Series:
+        return frame.max(axis=1, skipna=True)
+
+    @staticmethod
+    def _agg_scalars(values: tuple[Any, ...]) -> Any:
+        return _py_builtins.max(values)
+
+
+class _MinReducer(_VariadicReducer):
+    alias_prefix = "MIN"
+
+    @staticmethod
+    def _agg(frame: pd.DataFrame) -> pd.Series:
+        return frame.min(axis=1, skipna=True)
+
+    @staticmethod
+    def _agg_scalars(values: tuple[Any, ...]) -> Any:
+        return _py_builtins.min(values)
+
+
+_MAX_REDUCER = _MaxReducer()
+_MIN_REDUCER = _MinReducer()
+
+
+def max(*values: Any) -> Any:
+    """多元逐元素 max（DataMeta 兼容，alias 形如 MAX_(a)_(b)_(c)）。"""
+    return _MAX_REDUCER.apply(*values)
+
+
+def min(*values: Any) -> Any:
+    """多元逐元素 min（DataMeta 兼容，alias 形如 MIN_(a)_(b)_(c)）。"""
+    return _MIN_REDUCER.apply(*values)
 
 class DataMeta(SerialObject):
     """
@@ -36,14 +124,16 @@ class DataMeta(SerialObject):
     _instances = WeakValueDictionary()
 
     def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
-        alias = '(' + object.alias + ')' + ('_' + alias if alias else '')
+        preserve_alias = kwargs.pop('preserve_alias', False)
+        alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
         return super().__new__(cls, type_alias='DM', alias=alias)
 
     def __init__(self, object: UniqueObject, data_freq: DataFreq, 
                  original_object: Optional[UniqueObject] = None,
                  alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            alias = '(' + object.alias + ')' + ('_' + alias if alias else '')
+            preserve_alias = kwargs.pop('preserve_alias', False)
+            alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
             super().__init__(type_alias='DM', alias=alias)
             self.object = object                           # 关联的 Product 或上游 DataMeta
             self.original_object = object if original_object is None else original_object  # 原始 Product（链式操作时保持）
@@ -268,12 +358,14 @@ class DataMeta(SerialObject):
         else:
             raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
     
-    def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None, **kwargs) -> DataMeta:
+    def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None,
+              preserve_alias: bool = False, **kwargs) -> DataMeta:
         target_type = target_type if target_type is not None else DataMeta
         res = target_type(data=data, object=self, original_object=self.original_object,
-                            alias=alias, data_freq=self.freq, timezone=self.timezone, **kwargs)
+                            alias=alias, data_freq=self.freq, timezone=self.timezone,
+                            preserve_alias=preserve_alias, **kwargs)
         return res
-
+    
     def __dir__(self):
         own_attrs = set(super().__dir__())
         data_attrs = set(dir(self.data))
