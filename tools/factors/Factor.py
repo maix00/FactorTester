@@ -11,13 +11,14 @@
 # Factor 是不可变值对象：同一 alias 对应同一个实例（search=True 创建模式）。
 # 由 FactorFamily.get_factor() / get_factors() 创建，不应直接实例化。
 # =============================================================================
+import numpy as np
 import pandas as pd
 from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Set, Any
 
 from tools import SerialObject, DataFreq
 from tools.products.Product import Product
 from tools.parameters.Parameter import Parameter
-from tools.factors.Parameters import StartCalcPointParam, ReturnFreqParam, FactorNextPeriodReturns
+from tools.factors.Parameters import ReturnFreqParam, FactorNextPeriodReturns
 
 if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
@@ -64,13 +65,102 @@ class Factor(SerialObject):
                     param.register(self, param_vals[param])
             self.params_dict = {param.alias: param for param in self.params}
 
-            # 计算结果占位符（均为空，compute 后填充）
-            self.table: pd.DataFrame = pd.DataFrame()
             self.products: Set[Product] = set()
-            self.returns: pd.DataFrame = pd.DataFrame()
-            self.ic_series: pd.Series = pd.Series()
-            self.ic_stats: pd.Series = pd.Series()
-            self.report: pd.DataFrame = pd.DataFrame()
+            # 计算结果的实例级回退（无活跃 FactorTester 时使用，例如独立脚本场景）
+            self._table: pd.DataFrame = pd.DataFrame()
+            self._returns: pd.DataFrame = pd.DataFrame()
+            self._ic_series: pd.Series = pd.Series()
+            self._ic_stats: pd.Series = pd.Series()
+            self._report: pd.DataFrame = pd.DataFrame()
+
+    # ------------------------------------------------------------------
+    # 属性代理：当有活跃 FactorTester（通过 ContextVar 注入）时，
+    # 所有可变计算结果存入 tester 的 per-factor 字典，实现并发安全隔离。
+    # 无 tester 时（单机脚本场景）回退到实例私有属性。
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_active_tester():
+        try:
+            from tools.factors.FactorFamily import _active_tester
+            return _active_tester.get()
+        except ImportError:
+            return None
+
+    @property
+    def table(self) -> pd.DataFrame:
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_tables.get(self, pd.DataFrame())
+        return self._table
+
+    @table.setter
+    def table(self, value: pd.DataFrame):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_tables[self] = value
+        else:
+            self._table = value
+
+    @property
+    def returns(self) -> pd.DataFrame:
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_returns.get(self, pd.DataFrame())
+        return self._returns
+
+    @returns.setter
+    def returns(self, value: pd.DataFrame):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_returns[self] = value
+        else:
+            self._returns = value
+
+    @property
+    def ic_series(self) -> pd.Series:
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_ic_series.get(self, pd.Series())
+        return self._ic_series
+
+    @ic_series.setter
+    def ic_series(self, value: pd.Series):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_ic_series[self] = value
+        else:
+            self._ic_series = value
+
+    @property
+    def ic_stats(self) -> pd.Series:
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_ic_stats.get(self, pd.Series())
+        return self._ic_stats
+
+    @ic_stats.setter
+    def ic_stats(self, value: pd.Series):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_ic_stats[self] = value
+        else:
+            self._ic_stats = value
+
+    @property
+    def report(self) -> pd.DataFrame:
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_reports.get(self, pd.DataFrame())
+        return self._report
+
+    @report.setter
+    def report(self, value: pd.DataFrame):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_reports[self] = value
+        else:
+            self._report = value
 
     def clear(self):
         """清空所有计算结果，保留配置信息（func/params/family）。"""
@@ -82,27 +172,19 @@ class Factor(SerialObject):
         self.report = pd.DataFrame()
 
     def get_current_return_freq(self) -> Any:
-        """获取本 Factor 注册的收益率计算频率。"""
+        """获取本 Factor 的收益率计算频率（优先从活跃 tester 读取）。"""
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_return_freqs.get(self, ReturnFreqParam.default_value)
         return ReturnFreqParam.get_value(self)
-    
-    def change_current_return_freq(self, return_freq: Any) -> None:
-        """更改本 Factor 的收益率计算频率。"""
-        ReturnFreqParam.register(self, return_freq)
 
-    def get_current_start_calc_point(self) -> Any:
-        """获取本 Factor 注册的计算起始点（日期或时间戳）。"""
-        return StartCalcPointParam.get_value(self)
-    
-    if TYPE_CHECKING:
-        from tools.parameters import DateOrTimeParam
-        
-    def get_StartCalcPointParam(self) -> 'DateOrTimeParam':
-        """返回全局 StartCalcPointParam 单例，供外部查询 isDate 等属性。"""
-        return StartCalcPointParam
-    
-    def change_current_start_calc_point(self, start_calc_point: Any, **kwargs) -> None:
-        """更改本 Factor 的计算起始点。"""
-        StartCalcPointParam.register(self, start_calc_point, **kwargs)
+    def change_current_return_freq(self, return_freq: Any) -> None:
+        """更改本 Factor 的收益率计算频率（优先写入活跃 tester）。"""
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_return_freqs[self] = ReturnFreqParam.rectify_value(return_freq)
+        else:
+            ReturnFreqParam.register(self, return_freq)
 
     def _set_products(self):
         """从 table 列中提取 Product 实例集合，写入 self.products。"""
@@ -144,9 +226,7 @@ class Factor(SerialObject):
         products = list(products)
         if not products:
             raise ValueError(f"{self}: 无法计算，因为没有提供产品")
-        # 清除 FactorFamily 上缓存的信号同步索引，强制下次重新计算
-        if self.family is not None:
-            self.family.current_sync_signal_index = None
+        # sync_signal 索引缓存被清除在 FactorFamily.func() 里（通过 tester.sync_signal_index = None）
         self.table = self.func(products)
         if self.table.empty:
             raise ValueError(f"{self}: 计算结果为空，请检查func的实现")
@@ -182,16 +262,31 @@ class Factor(SerialObject):
         if self.products is None or not self.products:
             self._set_products()
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
-        start_calc_point = self.get_current_start_calc_point()
+        # 从活跃 FactorTester 获取带时区的起始时间
+        tester = self._get_active_tester()
+        start_calc_point = getattr(tester, 'start_calc_point', None)
         from tools.factors.FactorFamily import Returns
         # 每次 calc_returns 都创建一个新的临时 Returns 实例（factor_single_use=True），
         # 避免共享 sync_signal 缓存导致数据污染
         ReturnsFamily = Returns(factor_single_use=True)
-        StartCalcPointParam.register(ReturnsFamily, start_calc_point)
-        ReturnsFamily.products = self.products
         # OPEN 系列收益需提前 shift（下期开盘 = 当期结束后的第一根 bar）
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
-        StartCalcPointParam.register(return_factor, start_calc_point)
         self.returns = return_factor.calc(self.products)
+        # pct_change(价格为0) → inf 或 -1（次期价格为0），均视为无意义数据，替换为 NaN
+        self.returns = self.returns.replace([np.inf, -np.inf], np.nan)
+        self.returns = self.returns.where(self.returns > -1.0, other=np.nan)
+        # 用 start_calc_point 截断收益表（带时区对齐）
+        if start_calc_point is not None and not self.returns.empty:
+            idx = pd.DatetimeIndex(self.returns.index.get_level_values(-1))
+            ts = pd.Timestamp(start_calc_point)
+            if idx.tz is not None:
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(idx.tz)
+                else:
+                    ts = ts.tz_convert(idx.tz)
+            else:
+                if ts.tzinfo is not None:
+                    ts = ts.tz_convert('UTC').tz_localize(None)
+            self.returns = self.returns[idx >= ts]
         return self.returns

@@ -140,10 +140,10 @@ class DataMeta(SerialObject):
         self._set_time_index(time_index)
         return self.data
     
-    def get_data(self, copy: bool = False, **kwargs) -> pd.DataFrame:
+    def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
         """
         获取 DataFrame，若为空或指定了 source 则先触发加载。
-        同时应用 StartCalcPointParam 过滤（只返回计算起始点之后的数据）。
+        start_calc_point: 可选 Timestamp（带时区），为 None 时不进行截断。
         copy=True 时返回副本，避免外部修改影响缓存。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
@@ -152,7 +152,11 @@ class DataMeta(SerialObject):
             if self.data.empty or 'source' in kwargs:
                 self.load_data(**kwargs)
             data = self.data
-        data = self._filter_data_by_start_calc_point(data)
+        if start_calc_point is not None:
+            data = self._filter_data_by_start_calc_point(data, time=start_calc_point)
+        else:
+            # 备用：兼容旧有 duck-typing 注册机制（不为空则仍尝试过滤）
+            data = self._filter_data_by_start_calc_point(data)
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -170,42 +174,59 @@ class DataMeta(SerialObject):
             return index.get_level_values(level)
 
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
+        # 优先从 ContextVar 活跃 FactorTester 读取 start_calc_point（并发安全）
+        try:
+            from tools.factors.FactorFamily import _active_tester
+            tester = _active_tester.get()
+            if tester is not None and tester.start_calc_point is not None:
+                ts = pd.Timestamp(tester.start_calc_point)
+                time_is_date = (ts.hour == 0 and ts.minute == 0 and ts.second == 0)
+                return ts, time_is_date
+        except ImportError:
+            pass
+        # 兜底：从 kwargs 读取显式传入的 StartCalcPointParam
         from tools.parameters import DateOrTimeParam
-        if object is not None and isinstance(object, DataMeta) \
-            and callable(get_param := getattr(object.original_object, 'get_StartCalcPointParam', None)):
-            StartCalcPointParam = get_param()
-            if StartCalcPointParam is None:
-                time = None
-                time_is_date = None
-            else:
-                assert isinstance(StartCalcPointParam, DateOrTimeParam)
-                time = StartCalcPointParam.get_value(object.original_object)
-                time_is_date = StartCalcPointParam.is_date(object.original_object)
-        else:
-            StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
-            if StartCalcPointParam is not None:
-                assert isinstance(StartCalcPointParam, DateOrTimeParam)
-                time = StartCalcPointParam.default_value
-                time_is_date = StartCalcPointParam.is_date(value=time)
-            else:
-                time = None
-                time_is_date = None
-        return time, time_is_date
+        StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
+        if StartCalcPointParam is not None:
+            assert isinstance(StartCalcPointParam, DateOrTimeParam)
+            time = StartCalcPointParam.default_value
+            time_is_date = StartCalcPointParam.is_date(value=time)
+            return time, time_is_date
+        return None, None
     
     def _filter_data_by_start_calc_point(self, data: pd.DataFrame, time_col: Optional[str] = None,
                                         time: Optional[Any] = None, time_is_date: Optional[bool] = None,
                                         copy: bool = False, **kwargs) -> pd.DataFrame:
+        """
+        按起始时间截断数据。
+        time 可是带时区的 Timestamp，与索引比较时自动对齐时区。
+        """
         if time is None or time_is_date is None:
             time, time_is_date = self._process_start_calc_point(object=self, **kwargs)
-        if time is not None and time_is_date is not None:
+        if time is not None:
+            ts = pd.Timestamp(time)
             if time_col is None:
                 data_day_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1day')][-1]
                 data_min_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1min')][-1]
+                if time_is_date is None:
+                    # 显式传入的 Timestamp，自动判断是否日级
+                    time_is_date = (ts.hour == 0 and ts.minute == 0 and ts.second == 0)
                 if self.freq.value >= pd.Timedelta('1day') and time_is_date:
                     time_col = data_day_col
                 else:
                     time_col = data_day_col if time_is_date else data_min_col
-            data = data[self._get_level_index(data, time_col) >= pd.Timestamp(time)]
+            idx = self._get_level_index(data, time_col)
+            assert isinstance(idx, pd.DatetimeIndex), f"Expected DatetimeIndex for column '{time_col}', got {type(idx).__name__}"
+            # 对齐时区：如果索引带时区而 ts 不带（或反之），进行转换
+            if idx.tz is not None:
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(idx.tz)
+                else:
+                    ts = ts.tz_convert(idx.tz)
+            else:
+                if ts.tzinfo is not None:
+                    ts = ts.tz_convert('UTC').tz_localize(None)
+            data = data[idx >= ts]
         return data.copy() if copy else data
     
     def __getattr__(self, name: str) -> Any:

@@ -1,8 +1,7 @@
 import sys, os, importlib.util, threading, webbrowser, time, traceback
-from flask import Flask, request, jsonify, render_template  # 添加 render_template
+from flask import Flask, request, jsonify, render_template, session
 
 from tools.factors.FactorFamily import FactorFamily
-from tools.factors.Parameters import StartCalcPointParam
 
 import Settings as Settings
 
@@ -17,11 +16,42 @@ else:
 
 # --- FactorFamily singleton cache ---
 _factor_family_cache = {}
+_factor_family_cache_lock = threading.Lock()
 factor_testers = []
+_factor_testers_lock = threading.Lock()
+
+# 全局时间范围（由 set_time_range 端点更新）
+start_point = None
+end_point = None
+start_calc_point = None
+
+# Flask session secret key（per-user _params_list 隔离依赖 session cookie）
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
+
+_session_params_lock = threading.Lock()
+import pandas as pd
+from tools import DataColumn
+
+# 服务端内存存储 params（单用户本地应用，无需 session cookie 序列化）
+_params_store: dict = {}  # key: ff_alias, value: list of param dicts
+_params_store_lock = threading.Lock()
+
+def _get_session_params(ff_alias: str, ff) -> list:
+    """获取对应 FactorFamily 的 _params_list 副本，首次访问时从 ff._params_list 初始化。"""
+    with _params_store_lock:
+        if ff_alias not in _params_store:
+            _params_store[ff_alias] = list(ff._params_list)
+        return list(_params_store[ff_alias])
+
+def _save_session_params(ff_alias: str, params_list: list):
+    """将更新后的 params_list 写回内存存储。"""
+    with _params_store_lock:
+        _params_store[ff_alias] = list(params_list)
 
 def get_factor_family_instance(module_name):
-    if module_name in _factor_family_cache:
-        return _factor_family_cache[module_name]
+    with _factor_family_cache_lock:
+        if module_name in _factor_family_cache:
+            return _factor_family_cache[module_name]
     factors_dir = os.path.join(os.getcwd(), "Factors")
     module_path = os.path.join(factors_dir, f"{module_name}.py")
     spec = importlib.util.spec_from_file_location(module_name, module_path)
@@ -30,7 +60,8 @@ def get_factor_family_instance(module_name):
         spec.loader.exec_module(module)
         ff = getattr(module, module_name)()
         assert isinstance(ff, FactorFamily)
-        _factor_family_cache[module_name] = ff
+        with _factor_family_cache_lock:
+            _factor_family_cache[module_name] = ff
         return ff
     else:
         raise ImportError(f"Cannot load module '{module_name}' from '{module_path}'")
@@ -88,7 +119,7 @@ def get_factor_main_section_html(factor_family_alias):
         # 准备参数模块的数据
         params = ff.params
         param_aliases = [p.alias for p in params]
-        factors = ff.get_factors()
+        factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         
         # 准备时间范围模块的数据
         import pandas as pd
@@ -177,8 +208,14 @@ def add_params():
     params = data.get('params', {})
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        ff.add_params(**params)
-        return jsonify({'success': True})
+        # 校验参数值域（复用 FactorFamily 的校验逻辑）
+        ff._check_in_space(**params)
+        new_params = {p.alias: p.rectify_value(params[p.alias]) if p.alias in params else p.default_value for p in ff.params}
+        pl = _get_session_params(factor_family_alias, ff)
+        if new_params not in pl:
+            pl.append(new_params)
+        _save_session_params(factor_family_alias, pl)
+        return jsonify({'success': True, 'params_count': len(pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -189,12 +226,14 @@ def delete_params():
     factor_idx = int(data.get('factor_idx', -1))
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        if 0 <= factor_idx < len(ff._params_list):
-            ff._params_list.pop(factor_idx)
+        pl = _get_session_params(factor_family_alias, ff)
+        if 0 <= factor_idx < len(pl):
+            pl.pop(factor_idx)
+        _save_session_params(factor_family_alias, pl)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
-    
+
 @app.route('/reorder_params', methods=['POST'])
 def reorder_params():
     data = request.get_json()
@@ -203,9 +242,11 @@ def reorder_params():
     to_idx = int(data.get('to_idx', -1))
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        if 0 <= from_idx < len(ff._params_list) and 0 <= to_idx < len(ff._params_list):
-            param = ff._params_list.pop(from_idx)
-            ff._params_list.insert(to_idx, param)
+        pl = _get_session_params(factor_family_alias, ff)
+        if 0 <= from_idx < len(pl) and 0 <= to_idx < len(pl):
+            param = pl.pop(from_idx)
+            pl.insert(to_idx, param)
+        _save_session_params(factor_family_alias, pl)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -260,14 +301,11 @@ def set_time_range():
         start_point = pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone) if not is_trading_day else pd.Timestamp(start_date).tz_localize(timezone)
         end_point = pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone) if not is_trading_day else pd.Timestamp(end_date).tz_localize(timezone)
 
-        factors = ff.get_factors(start_calc_point=start_calc_point)
-        start_calc_param_val = list(set([StartCalcPointParam.get_value(factor) for factor in factors]))
-        assert len(start_calc_param_val) == 1
-        start_calc_param_val = f"{StartCalcPointParam.name} = {start_calc_param_val[0]}"
-
-        if factor_testers:
+        with _factor_testers_lock:
+            _testers_snapshot = list(factor_testers)
+        if _testers_snapshot:
             from tools.factors.FactorTester import FactorTester
-            for tester in factor_testers:
+            for tester in _testers_snapshot:
                 assert isinstance(tester, FactorTester)
                 tester.update_time_range((start_point, end_point))
 
@@ -275,10 +313,9 @@ def set_time_range():
         show_next = (start_date <= end_date)
 
         return jsonify({
-            'success': True, 
-            'show_next': show_next, 
-            'start_calc_param_val': start_calc_param_val, 
-            'change_factor_tester': bool(factor_testers)
+            'success': True,
+            'show_next': show_next,
+            'change_factor_tester': bool(_testers_snapshot)
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -512,8 +549,16 @@ def submit_selected_products():
                 selected_products.append(node)
         selected_products = sorted(list(set(selected_products)))
         from tools.factors.FactorTester import FactorTester
-        factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(start_point, end_point))
-        factor_testers.append(factor_tester)
+        # 如果 start_point/end_point 未设置，使用 Settings 中的默认值
+        _start_point = start_point
+        _end_point = end_point
+        if _start_point is None or _end_point is None:
+            from Settings import default_test_start_date, default_test_end_date
+            _start_point = default_test_start_date
+            _end_point = default_test_end_date
+        factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start_point, _end_point))
+        with _factor_testers_lock:
+            factor_testers.append(factor_tester)
         return jsonify({
             'success': True, 
             'count': len(selected_products), 
@@ -533,10 +578,11 @@ def reorder_submissions():
     new_order = data.get('new_order', [])
     try:
         global factor_testers
-        len_factor_testers = len(factor_testers)
-        id_to_tester = {int(tester.alias): tester for tester in factor_testers}
-        factor_testers = [id_to_tester[id_time] for id_time in new_order if id_time in id_to_tester]
-        assert len(factor_testers) == len_factor_testers, "Reordered list length mismatch"
+        with _factor_testers_lock:
+            len_factor_testers = len(factor_testers)
+            id_to_tester = {int(tester.alias): tester for tester in factor_testers}
+            factor_testers = [id_to_tester[id_time] for id_time in new_order if id_time in id_to_tester]
+            assert len(factor_testers) == len_factor_testers, "Reordered list length mismatch"
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -547,12 +593,13 @@ def delete_submission():
     id_time = data.get('id_time', None)
     try:
         global factor_testers
-        len_before = len(factor_testers)
-        factor_tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
-        assert factor_tester is not None, "Submission not found"
-        factor_tester.delete()  # 调用实例的删除方法以释放资源
-        factor_testers = [tester for tester in factor_testers if tester.alias != str(id_time)]
-        assert len(factor_testers) == len_before - 1, "No submission deleted"
+        with _factor_testers_lock:
+            len_before = len(factor_testers)
+            factor_tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
+            assert factor_tester is not None, "Submission not found"
+            factor_tester.delete()  # 调用实例的删除方法以释放资源
+            factor_testers = [tester for tester in factor_testers if tester.alias != str(id_time)]
+            assert len(factor_testers) == len_before - 1, "No submission deleted"
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -564,7 +611,8 @@ def delete_path_of_submission():
     new_paths = data.get('new_paths', None)
     try:
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(id_time)), None)
         assert tester is not None, "Submission not found"
         selected_products = []
         selected_paths = get_minimal_paths(new_paths)
@@ -588,7 +636,7 @@ def factor_list():
         return jsonify({'success': False, 'error': '缺少参数'})
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        factors = ff.get_factors()
+        factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         factor_data = []
         for f in factors:
             # 将 freq 转换为字符串，假设它是枚举或具有 value 属性
@@ -612,6 +660,7 @@ def run_ic_test():
     import pickle
     import hashlib
     from pathlib import Path
+    from tools.factors.FactorFamily import _active_tester
 
     data = request.get_json()
     submission_id = data.get('submission_id')
@@ -620,21 +669,26 @@ def run_ic_test():
     paths = data.get('paths', [])
     return_freq = data.get('return_freq', 'N')
     re_calc = data.get('re_calc', False)  # 是否强制重新计算，默认为 False
+    _token = None
     try:
 
         import pandas as pd
 
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         assert tester is not None, "未找到对应的测试器实例"
-        from tools.factors.FactorTester import FactorTester
-        assert isinstance(tester, FactorTester), "找到的实例类型不正确"
 
         factor_family = get_factor_family_instance(factor_family_alias)
         assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
-        factor_family.current_factor_tester = tester
 
-        factors = factor_family.get_factors()  # 获取因子列表
+        from tools.factors.FactorFamily import _active_tester
+        # 重置本次运行的同步索引缓存（products 可能在 func() 内更新，旧缓存应作废）
+        tester.sync_signal_index = None
+        tester.sync_signal_index_replaced = None
+        _token = _active_tester.set(tester)
+
+        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))  # 获取因子列表
         factors = [next((f for f in factors if f.alias == item['alias'])) for item in factor_alias_return_freq]
         
         return_freqs = {}
@@ -792,6 +846,9 @@ def run_ic_test():
         return jsonify(response)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+    finally:
+        if _token is not None:
+            _active_tester.reset(_token)
 
 @app.route('/get_factor_series', methods=['POST'])
 def get_factor_series():
@@ -806,13 +863,14 @@ def get_factor_series():
 
     try:
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
 
         # 获取因子家族和具体因子
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors()
+        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         target_factor = next((f for f in factors if f.name == factor_name), None)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -867,16 +925,25 @@ def get_factor_series():
                 tester.products = original_products
 
         assert series is not None, "无法获取因子序列数据"
-        # 转换为时间戳（毫秒）
+        # 按 tester 时间范围截断
         import numpy as np
         import pandas as pd
-        if isinstance(series.index, pd.MultiIndex):
-            timestamps = series.index.get_level_values(-1).view(np.int64) // 10**6
-        else:
-            timestamps = series.index.view(np.int64) // 10**6
+        def _get_idx(s): return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
+        def _localize(ts, idx):
+            tz = getattr(idx, 'tz', None)
+            return ts.tz_localize(tz) if tz is not None and ts.tzinfo is None else ts
+        idx = _get_idx(series)
+        if tester.start_date is not None:
+            _sd = _localize(pd.Timestamp(tester.start_date), idx)
+            series = series[idx >= _sd]; idx = _get_idx(series)  # type: ignore[operator]
+        if tester.end_date is not None:
+            _ed = _localize(pd.Timestamp(tester.end_date), idx)
+            series = series[idx <= _ed]; idx = _get_idx(series)  # type: ignore[operator]
+        # 转换为时间戳（毫秒）
+        timestamps = idx.view(np.int64) // 10**6  # type: ignore[attr-defined]
         values = series.values.tolist()
-        # 处理 NaN
-        values = [None if (isinstance(v, float) and pd.isna(v)) else v for v in values]
+        # 处理 NaN / Infinity（均不是合法 JSON）
+        values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v for v in values]
 
         return jsonify({'dates': timestamps.tolist(), 'values': values})
     except Exception as e:
@@ -897,13 +964,14 @@ def get_return_series():
 
     try:
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
         
         # 获取因子家族和具体因子
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors()
+        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         factor = next((f for f in factors if f.name == factor_name), None)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -955,19 +1023,34 @@ def get_return_series():
         if re_calc or (not cache_file_1_exists and not cache_file_2_exists) or series is None:
             factor.clear()
             factor.products = set([product])
-            series = factor.calc_returns(return_freq=(None if return_freq == 'N' else return_freq))
+            returns_df = factor.calc_returns(return_freq=(None if return_freq == 'N' else return_freq))
+            import pandas as pd
+            if isinstance(returns_df, pd.DataFrame):
+                series = returns_df[product].dropna() if product in returns_df.columns else returns_df.iloc[:, 0].dropna()
+            else:
+                series = returns_df.dropna()
             with open(cache_file_2, 'wb') as f:
                 pickle.dump((series, return_freq, tester.start_date, tester.end_date), f)
 
-        # 转换为时间戳和值
+        # 按 tester 时间范围截断
         import numpy as np
         import pandas as pd
-        if isinstance(series.index, pd.MultiIndex):
-            timestamps = series.index.get_level_values(-1).view(np.int64) // 10**6
-        else:
-            timestamps = series.index.view(np.int64) // 10**6
+        def _get_idx(s): return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
+        def _localize(ts, idx):
+            tz = getattr(idx, 'tz', None)
+            return ts.tz_localize(tz) if tz is not None and ts.tzinfo is None else ts
+        idx = _get_idx(series)
+        if tester.start_date is not None:
+            _sd = _localize(pd.Timestamp(tester.start_date), idx)
+            series = series[idx >= _sd]; idx = _get_idx(series)  # type: ignore[operator]
+        if tester.end_date is not None:
+            _ed = _localize(pd.Timestamp(tester.end_date), idx)
+            series = series[idx <= _ed]; idx = _get_idx(series)  # type: ignore[operator]
+        # 转换为时间戳和值
+        timestamps = idx.view(np.int64) // 10**6  # type: ignore[attr-defined]
         values = series.values.tolist()
-        values = [None if (isinstance(v, float) and pd.isna(v)) else v for v in values]
+        # 处理 NaN / Infinity（均不是合法 JSON）
+        values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v for v in values]
 
         return jsonify({'dates': timestamps.tolist(), 'values': values})
     except Exception as e:
@@ -993,13 +1076,14 @@ def get_price_series():
 
     try:
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
 
         # 获取因子对象
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors()
+        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         factor = next((f for f in factors if f.name == factor_name), None)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -1085,21 +1169,58 @@ def get_price_series():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/get_fee_table', methods=['POST'])
+def get_fee_table():
+    """
+    获取期货手续费率表。
+    自动检查今日数据是否存在，不存在则从 openctp 拉取。
+    POST body (JSON) 可选字段:
+      force_refresh: bool  — 强制重新拉取（忽略本地缓存）
+    Returns list of {variety_code, variety_name, exchange, multiplier,
+                     open_ratio, open_fixed, close_ratio, close_fixed,
+                     closetoday_ratio, closetoday_fixed, date}
+    """
+    import sys, os
+    # 确保 sources/ 可导入
+    _src = os.path.join(os.getcwd(), 'sources')
+    if _src not in sys.path:
+        sys.path.insert(0, _src)
+    from sources.FeeData import get_table_for_display, fetch_and_save
+
+    body = request.get_json(silent=True) or {}
+    force = body.get('force_refresh', False)
+    try:
+        if force:
+            fetch_and_save(force=True)
+        rows = get_table_for_display()
+        return jsonify({'success': True, 'rows': rows})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/run_group_test', methods=['POST'])
 def run_group_test():
     import pandas as pd
     import math
+    from tools.factors.FactorFamily import _active_tester
     data = request.get_json()
     submission_id = data.get('submission_id')
     factor_alias = data.get('factor_alias')
     n_groups = data.get('n_groups', 5)
-    fee = data.get('fee', 0.0)  # 手续费率，暂未使用
+    fee_pct = data.get('fee', 0.0)  # 统一费率（%，前端填写），0 表示不扣费
+    fee_uniform = float(fee_pct) / 100.0 if fee_pct else 0.0  # 转小数
+    # 各品种自定义费率：{variety_code: {open_ratio, close_ratio, ...}}（前端逐品种设置）
+    fee_map_raw: dict = data.get('fee_map', {})  # key = variety_code (小写)
+    use_closetoday: bool = bool(data.get('use_closetoday', False))
     start_date = data.get('start_date')
     end_date = data.get('end_date')
     
+    _gt_token = None
     try:
         global factor_testers
-        tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
+        with _factor_testers_lock:
+            tester = next((t for t in factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
         
@@ -1126,6 +1247,21 @@ def run_group_test():
             except Exception as e:
                 return jsonify({'success': False, 'error': f'时间范围格式错误: {e}'}), 400
         
+        # 设置活跃 tester 上下文（sync_signal 等方法需要通过 ContextVar 访问 tester）
+        _gt_token = _active_tester.set(tester)
+
+        # 将前端上报的每品种费率表规范化为单边开/平费率
+        fee_map: dict[str, dict[str, float]] = {}
+        for code, rates in fee_map_raw.items():
+            open_r  = float(rates.get('open_ratio', 0) or 0)
+            ct_key  = 'closetoday_ratio' if use_closetoday else 'close_ratio'
+            close_r = float(rates.get(ct_key, 0) or 0)
+            if open_r > 0 or close_r > 0:
+                fee_map[str(code).lower()] = {
+                    'open': open_r,
+                    'close': close_r,
+                }
+
         # 调用分组测试（不使用绘图）
         from tools.factors.FactorTester import _signal_time
         _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
@@ -1134,13 +1270,16 @@ def run_group_test():
             time_range=time_range,
             plot_flag=False,
             save_plot=False,
-            plot_show=False
+            plot_show=False,
+            fee=fee_uniform,
+            fee_map=fee_map,
         )
         
         # 直接用预计算的 cumulative_returns_np (T, n_groups) 和 index_list
+        import numpy as np
         groups_data = []
+        timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
         for group_idx in range(n_groups):
-            timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
             cum_values = [round(float(v), 8) if (not math.isnan(v) and not math.isinf(v)) else None
                           for v in cum_np[:, group_idx]]
             groups_data.append({
@@ -1148,15 +1287,87 @@ def run_group_test():
                 'timestamps': timestamps,
                 'cumulative_returns': cum_values
             })
-        
+
+        # Long-Short 组：从初始资金出发做资金账本递推。
+        # 先构造 long/short 两个 sleeve 的净收益，再用两条资金曲线合成为组合净值，
+        # 避免把两腿收益简单相加导致资金占用口径不清。
+        # long_leg_net  = (1 - cost_long)  * (1 + gross_long)  - 1
+        # short_leg_net = (1 - cost_short) * (1 - gross_short) - 1
+        gross_returns_np = getattr(tester, '_last_group_gross_returns_np', None)
+        fee_costs_np = getattr(tester, '_last_fee_costs_np', None)
+        if gross_returns_np is None:
+            gross_returns_np = np.zeros((len(timestamps), n_groups), dtype=float)
+        if fee_costs_np is None:
+            fee_costs_np = np.zeros((len(timestamps), n_groups), dtype=float)
+
+        gross_long = gross_returns_np[:, 0]
+        gross_short = gross_returns_np[:, n_groups - 1]
+        long_fee_costs = fee_costs_np[:, 0]
+        short_fee_costs = fee_costs_np[:, n_groups - 1]
+
+        long_leg_net = (1.0 - long_fee_costs) * (1.0 + gross_long) - 1.0
+        short_leg_net = (1.0 - short_fee_costs) * (1.0 - gross_short) - 1.0
+
+        # 资金使用口径：初始总资金=1，long/short 各占 50%
+        long_cap = 0.5
+        short_cap = 0.5
+        total_cap = long_cap + short_cap
+        r_ls_list = []
+        ls_cum_list = []
+        for rl, rs in zip(long_leg_net, short_leg_net):
+            rl_use = 0.0 if (np.isnan(rl) or np.isinf(rl)) else float(rl)
+            rs_use = 0.0 if (np.isnan(rs) or np.isinf(rs)) else float(rs)
+            long_cap = long_cap * (1.0 + rl_use)
+            short_cap = short_cap * (1.0 + rs_use)
+            new_total = long_cap + short_cap
+            r_ls_t = (new_total / total_cap - 1.0) if total_cap != 0 else 0.0
+            r_ls_list.append(r_ls_t)
+            ls_cum_list.append(new_total)
+            total_cap = new_total
+
+        r_ls = np.array(r_ls_list, dtype=float)
+        ls_cum_arr = np.array(ls_cum_list, dtype=float)
+        ls_values = [round(float(v), 8) if (not math.isnan(v) and not math.isinf(v)) else None for v in ls_cum_arr]
+        groups_data.append({
+            'name': 'Long-Short',
+            'timestamps': timestamps,
+            'cumulative_returns': ls_values,
+            'is_ls': True
+        })
+
+        # Long-Short 统计指标（基于逐期 r_ls）
+        ls_ret_series = pd.Series(r_ls).replace([np.inf, -np.inf], np.nan)
+        # 简单直接计算
+        s = ls_ret_series.dropna()
+        cum_s = (1 + s).cumprod()
+        n = len(s)
+        def _safe(v): return None if (math.isnan(v) or math.isinf(v)) else round(float(v), 6)
+        ls_total  = _safe((cum_s.iloc[-1] - 1) * 100) if n > 0 else None
+        ls_annual = _safe((cum_s.iloc[-1] ** (252 / n) - 1) * 100) if n > 1 else None
+        ls_vol    = _safe(s.std() * (252 ** 0.5) * 100)
+        ls_sharpe = _safe((s.mean() * 252) / (s.std() * (252 ** 0.5))) if s.std() != 0 else None
+        dd_series = (cum_s.cummax() - cum_s) / cum_s.cummax()
+        ls_dd     = _safe(dd_series.max() * 100) if n > 0 else None
+        ls_calmar = _safe(float(ls_annual) / float(ls_dd)) if (ls_annual is not None and ls_dd and ls_dd != 0) else None  # type: ignore[arg-type]
+        ls_win    = _safe((s > 0).sum() / n * 100) if n > 0 else None
+        ls_mean   = _safe(s.mean() * 100)
+        ls_skew   = _safe(float(s.skew()))  # type: ignore[arg-type]
+        ls_kurt   = _safe(float(s.kurtosis()))  # type: ignore[arg-type]
+        ls_metric = {
+            'Total Return': ls_total, 'Annual Return': ls_annual, 'Volatility': ls_vol,
+            'Sharpe Ratio': ls_sharpe, 'Max Drawdown': ls_dd, 'Calmar Ratio': ls_calmar,
+            'Win Rate': ls_win, 'Mean Return': ls_mean, 'Skewness': ls_skew, 'Kurtosis': ls_kurt
+        }
+
         # 统计指标
-        metrics = {}
+        metrics: dict = {}
         if not report_df.empty:
             metrics = {
-                int(k): {mk: (None if (mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv)))) else float(mv))
+                str(k): {mk: (None if (mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv)))) else float(mv))
                          for mk, mv in v.items()}
                 for k, v in report_df.to_dict(orient='index').items()
             }
+        metrics['LS'] = ls_metric
         
         return jsonify({
             'success': True,
@@ -1168,6 +1379,9 @@ def run_group_test():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if _gt_token is not None:
+            _active_tester.reset(_gt_token)
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():

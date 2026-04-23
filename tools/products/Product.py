@@ -48,19 +48,7 @@ class Product(UniqueObject):
                 setattr(self, freq.name, DataMeta(alias=f"{freq}", object=self, data_freq=freq, timezone=self.timezone))
             if TYPE_CHECKING:
                 from tools.parameters import DateOrTimeParam
-            self._StartCalcPointParam : DateOrTimeParam  # 计算起始点参数属性
 
-    if TYPE_CHECKING:
-        from tools.parameters import DateOrTimeParam
-    def set_StartCalcPointParam(self, param: 'DateOrTimeParam', value: Optional[Any] = None):
-        """设置本产品的计算起始点参数并注册值。"""
-        self._StartCalcPointParam = param
-        param.register(self, value if value is not None else param.default_value)
-
-    def get_StartCalcPointParam(self) -> 'Optional[DateOrTimeParam]':
-        """获取本产品已设置的计算起始点参数。"""
-        return getattr(self, '_StartCalcPointParam', None)
-        
     def list_available_freqs(self) -> List[DataFreq]:
         """列出本产品在所有已注册 DataSource 中可用的数据频率。"""
         return [source.freq for source in DataSource if source.if_object_is_in_source(self)]

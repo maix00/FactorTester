@@ -261,6 +261,11 @@
         const factorInfo = factorList.find(f => f.name === factorName);
         const freq = (factorInfo && factorInfo.freq !== 'N') ? factorInfo.freq : '1D';
 
+        const _safeJson = async (r, label) => {
+                const text = await r.text();
+                try { return JSON.parse(text); }
+                catch (e) { throw new Error(`${label} 返回非JSON (HTTP ${r.status}): ${text.slice(0, 300)}`); }
+            };
         try {
             const [factorData, returnData] = await Promise.all([
                 fetch('/get_factor_series', {
@@ -271,7 +276,7 @@
                         factor_name: factorName,
                         product: product
                     })
-                }).then(r => r.json()),
+                }).then(r => _safeJson(r, 'get_factor_series')),
                 fetch('/get_return_series', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -281,8 +286,10 @@
                         product: product,
                         paths: submission.paths
                     })
-                }).then(r => r.json())
+                }).then(r => _safeJson(r, 'get_return_series'))
             ]);
+            if (factorData.error) throw new Error('get_factor_series 错误: ' + factorData.error);
+            if (returnData.error) throw new Error('get_return_series 错误: ' + returnData.error);
 
             const factorDates = factorData.dates;
             const adjustCheckbox = document.getElementById(`adjust-price-${subId}-${factorIdx}`);
@@ -481,7 +488,7 @@
                         </div>
                         ${buildFactorConfigPanel(sub.id, factorList)}
                         <div id="ic-result-${sub.id}"></div>
-                        <div id="chart-container-${sub.id}" style="width:100%; height:460px; margin-top:14px;"></div>
+                        <div id="chart-container-${sub.id}" style="width:100%; margin-top:14px;"></div>
                     </div>
                 </div>
             `;

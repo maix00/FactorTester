@@ -13,7 +13,7 @@ import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__f
 from tools import DataColumn, Product, FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
 
-class MmPosPct(FactorFamily):
+class MmPosPctNeg(FactorFamily):
     """
     上涨天数占比因子（胜率因子）。
 
@@ -54,12 +54,12 @@ class MmPosPct(FactorFamily):
         # 计算 RF 步长的收益率
         ret = product.MIN1[P].pct_change(RF)
         # 在 WF 窗口内统计收益率 > 0 的比例
-        pos_ratio = (ret > 0).rolling(WF).mean()
+        pos_ratio_neg = - (ret > 0).rolling(WF).mean()
         # 对齐到信号时间点并返回
-        return self.sync_signal(pos_ratio, F)
+        return self.sync_signal(pos_ratio_neg, F)
     
 if __name__ == '__main__':
-    ff = MmPosPct()
+    ff = MmPosPctNeg()
 
     ff.clear_params()
     # ff.add_params(F='5m', RF='1m', WF='5m')

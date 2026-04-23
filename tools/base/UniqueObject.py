@@ -6,6 +6,7 @@
 # 所有核心业务对象（Product、DataSource、Factor、Parameter 等）均继承自此类。
 # =============================================================================
 from abc import ABC
+import threading
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -23,16 +24,17 @@ class UniqueObject(ABC):
 
     # 弱引用实例字典，键为 (name, 类名)，保证同类同名对象全局唯一
     _instances = WeakValueDictionary()
+    # 保护 _instances 读写的类级别锁
+    _instances_lock = threading.Lock()
 
     def __new__(cls, name: str, *args, **kwargs):
         """对象创建钩子：若同名实例已存在则直接返回，否则新建并注册。"""
         key = (name, cls.__name__)
-        if key in cls._instances:
-            # 已存在同名实例，直接复用，实现单例语义
-            return cls._instances[key]
-        
-        instance = super().__new__(cls)
-        cls._instances[key] = instance  # 注册到全局缓存
+        with cls._instances_lock:
+            if key in cls._instances:
+                return cls._instances[key]
+            instance = super().__new__(cls)
+            cls._instances[key] = instance
         return instance
     
     def __init__(self, name: str, *args, **kwargs):

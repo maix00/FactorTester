@@ -18,6 +18,7 @@ import threading
 import pandas as pd
 from functools import partial
 from weakref import WeakValueDictionary
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, List, Optional, Sequence, Any, Tuple, Callable
 
 from tqdm import tqdm
@@ -30,6 +31,10 @@ from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
 from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
+
+# 每个执行上下文（线程/协程）的活跃 FactorTester，由 test() 或服务端路由设置。
+# 通过 ContextVar 保证并发安全：每个请求线程拥有独立的值，互不干扰。
+_active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
 
 class FactorFamily(SerialObject):
     """
@@ -72,15 +77,7 @@ class FactorFamily(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
-            self.products = set()                 # 当前关联的 Product 集合
-            self.common_signal_freq: DataFreq     # 共同信号频率（计算后设置）
             self.factor_single_use = factor_single_use
-            self.current_factor_tester: Optional['FactorTester'] = None
-            # 信号同步索引缓存（basepoint='last' 的版本）
-            self.current_sync_signal_index: Optional[pd.Index] = None
-            # 信号同步索引缓存（replace_basepoint 的版本）
-            self.current_sync_signal_index_replaced: Optional[pd.Index] = None
-            self._sync_lock = threading.Lock()    # 多线程场景下保护缓存的锁
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         """
@@ -101,18 +98,41 @@ class FactorFamily(SerialObject):
             DataFrame，列为 Product，索引为 MultiIndex（信号层 + 精度层）
         """
         try:
+            # 过滤无数据品种（停牌、尚未上市等），避免 func_timeseries 里得到空索引
+            valid_products = [p for p in products if not p.get_some_data(copy=False).empty]
+            if not valid_products:
+                raise ValueError("No products with valid data")
+            # 更新活跃 tester 的有效品种集，并使同步索引缓存失效。
+            # single_use 辅助族（如 Returns）不永久覆盖用户选定的品种集，
+            # 但需要临时切换到当前计算品种（_get_sync_signal_index 从 tester.products 读取），
+            # 计算结束后恢复原值。
+            tester = _active_tester.get()
+            _prev_products = None
+            if tester is not None:
+                if self.factor_single_use:
+                    _prev_products = tester.products  # 保存以便恢复
+                tester.products = set(valid_products)
+                tester.sync_signal_index = None
+                tester.sync_signal_index_replaced = None
             factors = {}
-            if len(products) <= 200:
-                for product in tqdm(products, desc=f"Calculating factor signals"):
-                    factors[product] = self.func_timeseries(product, *args, **kwargs)
-            else:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                def compute_factor(product, *args, **kwargs):
-                    return product, self.func_timeseries(product, *args, **kwargs)
-                with ThreadPoolExecutor(max_workers=8) as executor:
-                    futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in products}
-                    for future in tqdm(as_completed(futures), total=len(products), desc="Calculating factor signals"):
-                        product, factor = future.result(); factors[product] = factor
+            try:
+                if len(valid_products) <= 200:
+                    for product in tqdm(valid_products, desc=f"Calculating factor signals"):
+                        factors[product] = self.func_timeseries(product, *args, **kwargs)
+                else:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    def compute_factor(product, *args, **kwargs):
+                        return product, self.func_timeseries(product, *args, **kwargs)
+                    with ThreadPoolExecutor(max_workers=8) as executor:
+                        futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in valid_products}
+                        for future in tqdm(as_completed(futures), total=len(valid_products), desc="Calculating factor signals"):
+                            product, factor = future.result(); factors[product] = factor
+            finally:
+                # single_use 辅助族计算结束后，将 tester.products 恢复为调用前的品种集
+                if tester is not None and _prev_products is not None:
+                    tester.products = _prev_products
+                    tester.sync_signal_index = None
+                    tester.sync_signal_index_replaced = None
             # 假设所有 df 的 MultiIndex 具有相同的 level 名称和顺序
             # 先取并集
             all_index = factors[list(factors.keys())[0]].index
@@ -210,36 +230,21 @@ class FactorFamily(SerialObject):
         params_str = '|'.join(f"{key}:{self.params_dict[key].get_value_alias(value)}" for key, value in params.items())
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
-    def set_current_start_calc_point(self, start_calc_point: Optional[Any] = None):
-        """在本 FactorFamily 实例上注册计算起始点。"""
-        StartCalcPointParam.register(self, start_calc_point)
-
-    def get_current_start_calc_point(self) -> Any:
-        """获取本 FactorFamily 实例注册的计算起始点。"""
-        return StartCalcPointParam.get_value(self)
-    
-    if TYPE_CHECKING:
-        from tools.parameters import DateOrTimeParam
-
-    def get_StartCalcPointParam(self) -> 'DateOrTimeParam':
-        """返回全局 StartCalcPointParam 单例（供外部读取 isDate 等属性）。"""
-        return StartCalcPointParam
-
-    def get_factors(self, return_freq: Optional[Any] = None,
-                    start_calc_point: Optional[Any] = None, **kwargs) -> List[Factor]:
+    def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
         参数：
             return_freq      : 收益率计算频率（覆盖 Factor 默认值）
-            start_calc_point : 计算起始点（覆盖 Factor 默认值）
+            params_list      : 若提供，则使用此列表代替 self._params_list（用于 per-user 隔离）
             **kwargs         : 额外参数（如 timezone）
 
         返回：
             Factor 列表，同时写入 self.factors
         """
+        _pl = params_list if params_list is not None else self._params_list
         factors = []
-        for params in self._params_list:
+        for params in _pl:
             factor_alias = self.get_alias(**params)
             factor_func = partial(self.func, **params)
             factor = Factor(alias=factor_alias, func=factor_func, family=self, single_use=self.factor_single_use)
@@ -247,10 +252,7 @@ class FactorFamily(SerialObject):
                 self.params_dict[param_alias].register(factor, value)
             if return_freq is not None:
                 factor.change_current_return_freq(return_freq)
-            if start_calc_point is not None:
-                factor.change_current_start_calc_point(start_calc_point, **kwargs)
             factors.append(factor)
-        self.factors = factors
         return factors
 
     def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs) -> Factor:
@@ -273,8 +275,6 @@ class FactorFamily(SerialObject):
         factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self, single_use=self.factor_single_use)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
-        if start_calc_point is not None:
-            factor.change_current_start_calc_point(start_calc_point, **kwargs)
         return factor
 
     def test(self, categories: Optional['str|List[str]'] = None,
@@ -312,43 +312,49 @@ class FactorFamily(SerialObject):
         start_date = ic_test_time_range[0] if ic_test_time_range is not None else default_test_start_date
         end_date = ic_test_time_range[1] if ic_test_time_range is not None else default_test_end_date
         tester = get_factor_tester(time_range=(start_date, end_date))
-        self.current_factor_tester = tester
+        # start_calc_point 通过 tester.start_calc_point（带时区 Timestamp）统一访问
+        if start_calc_point is not None:
+            tester.start_calc_point = pd.Timestamp(start_calc_point)
 
         returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED  # 默认使用次日开盘→开盘收益
 
-        factors = self.get_factors(return_freq=return_freq, start_calc_point=start_calc_point, **kwargs)
-        tester.calc_factor(factors)
-        tester.calc_ic(returns_col=returns_col)
+        _token = _active_tester.set(tester)
+        try:
+            factors = self.get_factors(return_freq=return_freq, **kwargs)
+            tester.calc_factor(factors)
+            tester.calc_ic(returns_col=returns_col)
 
-        for factor in factors:
+            for factor in factors:
 
-            _, _, report_df, _, _ = tester.test_by_group(factor, returns_col=returns_col,
-                plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
-                plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
-                )
+                _, _, report_df, _, _ = tester.test_by_group(factor, returns_col=returns_col,
+                    plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
+                    plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
+                    )
 
-            # 将分组回测结果拼入发布报告行
-            report_dict = {}
-            for col in report_df.columns:
-                key_0 = f"{col} {report_df.index[0]}"
-                report_dict[key_0] = report_df.loc[report_df.index[0], col]
-            for col in report_df.columns:
-                key_1 = f"{col} {report_df.index[1]}"
-                report_dict[key_1] = report_df.loc[report_df.index[1], col]
+                # 将分组回测结果拼入发布报告行
+                report_dict = {}
+                for col in report_df.columns:
+                    key_0 = f"{col} {report_df.index[0]}"
+                    report_dict[key_0] = report_df.loc[report_df.index[0], col]
+                for col in report_df.columns:
+                    key_1 = f"{col} {report_df.index[1]}"
+                    report_dict[key_1] = report_df.loc[report_df.index[1], col]
 
-            new_row = pd.Series({
-                'factor_stem': self.alias,
-                'serial_num': pd.Timestamp.now(),
-                'factor_name': factor.alias,
-                'factor_freq': factor.freq,
-                'start_date': tester.start_date,
-                'end_date': tester.end_date,
-                'sift_volume_ratio': sift_volume_ratio,
-                'categories': categories,
-            } | factor.params_dict | factor.ic_stats.to_dict() | report_dict)
-            factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
-            factor.report = factor_table
-            factor_table.to_csv(factor_cache_path, index=False)
+                new_row = pd.Series({
+                    'factor_stem': self.alias,
+                    'serial_num': pd.Timestamp.now(),
+                    'factor_name': factor.alias,
+                    'factor_freq': factor.freq,
+                    'start_date': tester.start_date,
+                    'end_date': tester.end_date,
+                    'sift_volume_ratio': sift_volume_ratio,
+                    'categories': categories,
+                } | factor.params_dict | factor.ic_stats.to_dict() | report_dict)
+                factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
+                factor.report = factor_table
+                factor_table.to_csv(factor_cache_path, index=False)
+        finally:
+            _active_tester.reset(_token)
 
         return tester
     
@@ -383,12 +389,11 @@ class FactorFamily(SerialObject):
         返回：
             pd.MultiIndex，名称形如 ['_SIGNAL@{freq}', 'bar_timestamp', ...]
         """
-        if self.current_factor_tester is not None:
-            products = self.current_factor_tester.products
-        elif self.products:
-            products = self.products
+        tester = _active_tester.get()
+        if tester is not None:
+            products = tester.products
         else:
-            raise ValueError("No current factor tester is set on this Factor instance - cannot sync signal without a FactorTester to pull products from.")
+            raise ValueError("No active tester set in context - _get_sync_signal_index requires an active FactorTester via _active_tester ContextVar.")
         data_dict = {product: product.get_some_data() for product in products}
         assert data_dict, "无法确定交易时间，因为没有产品具有交易数据"
 
@@ -517,12 +522,16 @@ class FactorFamily(SerialObject):
         if isinstance(data, DataMeta):
             data = data.data
 
+        tester = _active_tester.get()
+        assert tester is not None, \
+            "sync_signal must be called within an active test context (set _active_tester via test() or the server route)"
+
         # 日度倍数 + first：各品种开盘时间不同，直接用品种自身数据取第一 bar
         if freq_dc.is_day_multiple() and isinstance(basepoint, str) and basepoint.lower() == 'first':
-            if replace_basepoint is not None and self.current_sync_signal_index_replaced is None:
-                with self._sync_lock:
-                    if self.current_sync_signal_index_replaced is None:
-                        self.current_sync_signal_index_replaced = self._get_sync_signal_index(
+            if replace_basepoint is not None and tester.sync_signal_index_replaced is None:
+                with tester._sync_lock:
+                    if tester.sync_signal_index_replaced is None:
+                        tester.sync_signal_index_replaced = self._get_sync_signal_index(
                             freq_dc, basepoint=replace_basepoint, **kwargs)
             # 找到 freq 对应的日期层级索引位置
             _idx_freqs = [DataFreq(l) for l in data.index.names]
@@ -537,8 +546,8 @@ class FactorFamily(SerialObject):
             data.index.names = [signal_name if i == _mult_idx else str(n).split('@')[-1]
                                  for i, n in enumerate(data.index.names)]
             # 将每日 first-bar 时间戳替换为 last-bar 时间戳（保持与收益对齐）
-            if self.current_sync_signal_index_replaced is not None:
-                replaced_idx = self.current_sync_signal_index_replaced
+            if tester.sync_signal_index_replaced is not None:
+                replaced_idx = tester.sync_signal_index_replaced
                 sig_col_r = next(str(n) for n in replaced_idx.names if str(n).startswith('_SIGNAL@'))
                 sig_pos_r = list(replaced_idx.names).index(sig_col_r)
                 right_cols_r = [str(n) for n in replaced_idx.names[sig_pos_r + 1:]]
@@ -557,25 +566,25 @@ class FactorFamily(SerialObject):
             return data
 
         # 标准情况（last、子日频、或可调用 basepoint）
-        if self.current_sync_signal_index is None:
-            with self._sync_lock:
-                if self.current_sync_signal_index is None:
-                    self.current_sync_signal_index = self._get_sync_signal_index(
+        if tester.sync_signal_index is None:
+            with tester._sync_lock:
+                if tester.sync_signal_index is None:
+                    tester.sync_signal_index = self._get_sync_signal_index(
                         freq_dc, basepoint=basepoint, **kwargs)
-        if replace_basepoint is not None and self.current_sync_signal_index_replaced is None:
-            with self._sync_lock:
-                if self.current_sync_signal_index_replaced is None:
-                    self.current_sync_signal_index_replaced = self._get_sync_signal_index(
+        if replace_basepoint is not None and tester.sync_signal_index_replaced is None:
+            with tester._sync_lock:
+                if tester.sync_signal_index_replaced is None:
+                    tester.sync_signal_index_replaced = self._get_sync_signal_index(
                         freq_dc, basepoint=replace_basepoint, **kwargs)
-        assert self.current_sync_signal_index is not None
-        mask = self.current_sync_signal_index.isin(data.index)
+        assert tester.sync_signal_index is not None
+        mask = tester.sync_signal_index.isin(data.index)
         # 筛选落在信号索引上的行
-        data = data[data.index.isin(self.current_sync_signal_index)].copy()
+        data = data[data.index.isin(tester.sync_signal_index)].copy()
         # 将索引层级名重命名为信号层名（_SIGNAL@{freq}）
-        data.index.names = self.current_sync_signal_index.names
+        data.index.names = tester.sync_signal_index.names
         # 若有 replace_basepoint，用替换索引覆盖输出索引（改变时间戳）
-        if self.current_sync_signal_index_replaced is not None:
-            index_replaced = self.current_sync_signal_index_replaced
+        if tester.sync_signal_index_replaced is not None:
+            index_replaced = tester.sync_signal_index_replaced
             data.index = index_replaced[mask]
         return data
 

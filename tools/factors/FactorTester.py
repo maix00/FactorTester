@@ -14,6 +14,7 @@
 # =============================================================================
 import os
 import logging
+import threading
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -92,17 +93,30 @@ class FactorTester(SerialObject):
             self.all_products = set(products)   # 原始全量品种集
             self.sift_product_by_empty_data_bool = False  # 记录是否已执行空数据过滤
             self.factors = []
+            # 信号同步索引缓存（per-run，避免跨并发请求共享）
+            self.sync_signal_index: Optional[pd.Index] = None
+            self.sync_signal_index_replaced: Optional[pd.Index] = None
+            self._sync_lock = threading.Lock()
+            # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
+            self.factor_tables: Dict['Factor', pd.DataFrame] = {}
+            self.factor_returns: Dict['Factor', pd.DataFrame] = {}
+            self.factor_return_freqs: Dict['Factor', Any] = {}
+            self.factor_ic_series: Dict['Factor', pd.Series] = {}
+            self.factor_ic_stats: Dict['Factor', pd.Series] = {}
+            self.factor_reports: Dict['Factor', pd.DataFrame] = {}
             if time_range is not None:
                 self.update_time_range(time_range)
             else:
                 self.start_date = None
                 self.end_date = None
+                self.start_calc_point = None  # 计算起始点（带时区 Timestamp，与 start_date 合并为同一概念）
             self.logger.info(f"FactorTester initialized with {len(self.products)} products")
     
     def update_time_range(self, time_range: Tuple):
-        """更新测试时间区间并记录日志。"""
+        """更新测试时间区间并记录日志。start_calc_point 与 start_date 为同一概念。"""
         self.start_date = pd.to_datetime(time_range[0])
         self.end_date = pd.to_datetime(time_range[1])
+        self.start_calc_point = self.start_date  # 带时区，与 start_date 保持同步
         self.logger.info(f"Time range updated to {self.start_date} - {self.end_date}")
 
     def sift_product(self, sift_func: Callable[[Product], bool]):
@@ -114,10 +128,9 @@ class FactorTester(SerialObject):
         self.products = new_products
 
     def sift_product_by_empty_data(self):
-        """移除所有无有效成交量数据的品种，同时为剩余品种注册计算起始点。"""
+        """移除所有无有效成交量数据的品种（使用全量数据判断，不依赖 start_calc_point）。"""
         new_products = set()
         for product in self.products:
-            product.set_StartCalcPointParam(StartCalcPointParam, StartCalcPointParam.get_value(self.factors[0]))
             df = product.get_some_data(copy=False)
             if not df.empty and max(df[DataColumn.VOLUME.name]) > 0:
                 new_products.add(product)
@@ -154,7 +167,7 @@ class FactorTester(SerialObject):
 
     def calc_factor(self, factors: 'Factor|List[Factor]'):
         """
-        批量计算因子值并自动过滤空数据品种。
+        批量计算因子值。品种筛选由 func 内部处理。
 
         参数：
             factors : 单个 Factor 或 Factor 列表
@@ -162,7 +175,6 @@ class FactorTester(SerialObject):
         if isinstance(factors, Factor):
             factors = [factors]
         self.factors = factors
-        self.sift_product_by_empty_data()
         for factor in tqdm(self.factors, desc=f'Calculate factors for {len(self.products)} products'):
             factor.calc(self.products)
 
@@ -236,6 +248,9 @@ class FactorTester(SerialObject):
             stats_df['avg_coverage'] = avg_coverage
             factor.ic_stats = stats_df
             ic_stats[factor] = stats_df
+            # 同时存入 tester 的 per-factor 字典，供并发安全读取
+            self.factor_ic_series[factor] = factor.ic_series
+            self.factor_ic_stats[factor] = stats_df
         return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
@@ -262,7 +277,9 @@ class FactorTester(SerialObject):
                                      plot_remark_str: Optional[str],
                                      plot_flag: bool, save_plot: bool, plot_show: bool,
                                      plot_n_group_list: Optional[List[int]],
-                                     sift_volume_ratio: Optional[float] = None) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+                                     sift_volume_ratio: Optional[float] = None,
+                                     fee: float = 0.0,
+                                     fee_map: dict = {}) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
         """单因子分组测试核心逻辑（已 numpy 加速），供多线程调用。"""
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date   = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
@@ -319,11 +336,19 @@ class FactorTester(SerialObject):
             isnan_ret = np.isnan(ret_row)   # (P,)
             isnan_fac = np.isnan(row)       # (P,)
 
-            # carryover：上期持有 & 本期 returns=NaN 的品种继续保留
+            # 破产品种：收益 <= -1 或 inf（本期不应被持有也不应被分配）
+            isbad_ret = (ret_row <= -1.0) | np.isinf(ret_row)  # (P,)
+            if isbad_ret.any():
+                bad_products = [valid_cols[i] for i in np.where(isbad_ret)[0]]
+                bad_rets = [float(ret_row[i]) for i in np.where(isbad_ret)[0]]
+                print(f"[WARN] t={t} ({index_list[t]}): 品种收益异常（≤-1 或 inf），将从分配中剔除: "
+                      + ", ".join(f"{p}={r:.4f}" for p, r in zip(bad_products, bad_rets)))
+
+            # carryover：上期持有 & 本期 returns=NaN（且非破产）的品种继续保留
             if t == 0:
                 carry_members = np.zeros((n_groups, P), dtype=bool)
             else:
-                carry_members = current_members & isnan_ret[np.newaxis, :]  # (n_groups, P)
+                carry_members = current_members & isnan_ret[np.newaxis, :] & (~isbad_ret[np.newaxis, :])  # (n_groups, P)
 
             # active_groups：上期有持仓且本期 carryover < 上期持仓数的组，或全新组
             prev_count  = current_members.sum(axis=1)   # (n_groups,)
@@ -334,9 +359,9 @@ class FactorTester(SerialObject):
             # 更新 current_members 为 carryover 状态
             current_members = carry_members.copy()
 
-            # 可分配品种 = 因子值非 NaN & 未被 carryover 持有
-            held_mask      = carry_members.any(axis=0)          # (P,)
-            available_mask = (~isnan_fac) & (~held_mask)        # (P,)
+            # 可分配品种 = 因子值非 NaN & 未被 carryover 持有 & 本期收益正常
+            held_mask      = carry_members.any(axis=0)                      # (P,)
+            available_mask = (~isnan_fac) & (~held_mask) & (~isbad_ret)     # (P,)
             available_idx  = np.where(available_mask)[0]
 
             if len(available_idx) > 0 and len(active_groups) > 0:
@@ -360,18 +385,86 @@ class FactorTester(SerialObject):
         }
 
         # ---------- 向量化计算各组各期收益 ----------
-        # returns_np_filled: NaN→0，shape (T, P)
-        returns_filled = np.where(np.isnan(returns_np), 0.0, returns_np)
-        # group_returns_np: (T, n_groups) — 等权平均
-        member_counts = membership_np.sum(axis=2).astype(float)          # (T, n_groups)
-        member_counts[member_counts == 0] = 1.0                           # 避免除零
-        group_returns_np = (membership_np * returns_filled[:, np.newaxis, :]).sum(axis=2) / member_counts  # (T, n_groups)
+        # returns_np_filled: NaN→0，≤-1 或 inf → 0（破产品种当期按 0 收益计）
+        bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
+        returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
+        # 严格资金口径：按每个品种的实际资金差额调仓。
+        # 先追踪上期收益后的各品种持仓金额 pre_trade_amounts，
+        # 再与本期目标等权金额 target_amounts 比较得到买卖金额差：
+        # buy_amt = max(target_amounts - pre_trade_amounts, 0)
+        # sell_amt = max(pre_trade_amounts - target_amounts, 0)
+        # 手续费 = sum(buy_amt * open_fee + sell_amt * close_fee) / wealth_before_trade
+        member_counts = membership_np.sum(axis=2).astype(float)  # (T, n_groups)
+
+        def _variety(col) -> str:
+            """从产品列名提取品种代码（小写），如 IF.CFE→if, rb.SHF→rb。"""
+            nm = getattr(col, 'name', str(col))
+            return nm.split('.')[0].lower()
+
+        half_fee = float(fee) / 2.0
+        open_fee_vec = np.array([
+            float((fee_map.get(_variety(c), {}) or {}).get('open', half_fee))
+            for c in valid_cols
+        ], dtype=float)
+        close_fee_vec = np.array([
+            float((fee_map.get(_variety(c), {}) or {}).get('close', half_fee))
+            for c in valid_cols
+        ], dtype=float)
+
+        group_gross_returns_np = np.zeros((T, n_groups), dtype=float)
+        fee_costs_np = np.zeros((T, n_groups), dtype=float)
+        group_returns_np = np.zeros((T, n_groups), dtype=float)
+
+        for g in range(n_groups):
+            wealth = 1.0
+            prev_end_amounts = np.zeros(P, dtype=float)
+            for t in range(T):
+                curr_mask = membership_np[t, g]
+                curr_count = int(member_counts[t, g])
+                wealth_before_trade = float(wealth)
+
+                if wealth_before_trade <= 0:
+                    prev_end_amounts = np.zeros(P, dtype=float)
+                    continue
+
+                if curr_count > 0:
+                    target_amounts = curr_mask.astype(float) * (wealth_before_trade / curr_count)
+                else:
+                    target_amounts = np.zeros(P, dtype=float)
+
+                buy_amounts = np.clip(target_amounts - prev_end_amounts, 0.0, None)
+                sell_amounts = np.clip(prev_end_amounts - target_amounts, 0.0, None)
+                fee_amount = float((buy_amounts * open_fee_vec + sell_amounts * close_fee_vec).sum())
+                fee_ratio = fee_amount / wealth_before_trade
+
+                if curr_count > 0:
+                    gross_ret = float((target_amounts / wealth_before_trade * returns_filled[t]).sum())
+                else:
+                    gross_ret = 0.0
+
+                net_ret = (1.0 - fee_ratio) * (1.0 + gross_ret) - 1.0
+                wealth = wealth_before_trade * (1.0 + net_ret)
+
+                group_gross_returns_np[t, g] = gross_ret
+                fee_costs_np[t, g] = fee_ratio
+                group_returns_np[t, g] = net_ret
+
+                if curr_count > 0:
+                    prev_end_amounts = target_amounts * (1.0 + returns_filled[t]) * (1.0 - fee_ratio)
+                else:
+                    prev_end_amounts = np.zeros(P, dtype=float)
+
+        self._last_fee_costs_np = fee_costs_np  # 供 L-S 计算时使用
+        self._last_group_gross_returns_np = group_gross_returns_np
 
         # 兼容原接口：构建 returns_dict[g][dt]
         returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 
         # 预计算累积收益 (T, n_groups)，供调用方直接使用
-        cum_rets_filled = np.where(np.isnan(group_returns_np), 0.0, group_returns_np)
+        # 空组（某天无持仓）→ 收益为 0；inf 也置 0，防止 cumprod 链式溢出
+        # r = -1（某品种跌100%）→ 1+(-1)=0，cumprod链式归零 → 同样置0
+        bad = np.isnan(group_returns_np) | np.isinf(group_returns_np) | (group_returns_np <= -1.0)
+        cum_rets_filled = np.where(bad, 0.0, group_returns_np)
         cumulative_returns_np = np.cumprod(1 + cum_rets_filled, axis=0)  # (T, n_groups)
 
         # ---------- 汇总指标（向量化） ----------
@@ -462,6 +555,8 @@ class FactorTester(SerialObject):
             if plot_show:
                 plt.show()
 
+        # 存入 tester 的 per-factor 字典，供外部并发安全读取
+        self.factor_reports[factor] = report_df
         return products_dict, returns_dict, report_df, cumulative_returns_np, index_list
 
     def test_by_group(self, factors: 'Optional[Factor|List[Factor]]' = None,
@@ -471,7 +566,8 @@ class FactorTester(SerialObject):
                       plot_remark_str: Optional[str] = None,
                       plot_flag: bool = False, save_plot: bool = True, plot_show: bool = True,
                       plot_n_group_list: Optional[List[int]] = None,
-                      sift_volume_ratio: Optional[float] = None, **kwargs) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+                      sift_volume_ratio: Optional[float] = None,
+                      fee: float = 0.0, fee_map: dict = {}, **kwargs) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
         """
         按因子值分 N 组，逐期持有并统计各组收益指标。多因子时并行执行（ThreadPoolExecutor）。
 
@@ -517,6 +613,8 @@ class FactorTester(SerialObject):
                 plot_flag=plot_flag, save_plot=save_plot, plot_show=plot_show,
                 plot_n_group_list=plot_n_group_list,
                 sift_volume_ratio=sift_volume_ratio,
+                fee=fee,
+                fee_map=fee_map,
             )
 
         cum_np_out: Optional[np.ndarray] = None

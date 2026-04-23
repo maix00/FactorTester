@@ -2,52 +2,53 @@
  * 时间范围模块独立脚本
  * 功能：独立年/月/日/时/分输入、时区输入、交易日/期货日盘/夜盘选项、进位/退位逻辑
  * 通过 API /api/default_time_range 获取默认值
+ * 共用 date_utils.js 中的 pad / getMaxDay / carryOver / adjustTime 函数
  */
 
 (function() {
+    // 等待 DateUtils 加载完成
+    function waitForDateUtils(callback) {
+        if (window.DateUtils) {
+            callback();
+        } else {
+            setTimeout(function() { waitForDateUtils(callback); }, 50);
+        }
+    }
+
     // DOM 元素引用
-    const startYear = document.getElementById('start_year');
-    const startMonth = document.getElementById('start_month');
-    const startDay = document.getElementById('start_day');
-    const startHour = document.getElementById('start_hour');
-    const startMinute = document.getElementById('start_minute');
-    const endYear = document.getElementById('end_year');
-    const endMonth = document.getElementById('end_month');
-    const endDay = document.getElementById('end_day');
-    const endHour = document.getElementById('end_hour');
-    const endMinute = document.getElementById('end_minute');
-    const isTradingDayCheck = document.getElementById('is_trading_day');
-    const isCnFuturesDayCheck = document.getElementById('is_cn_futures_day');
-    const isCnFuturesNightCheck = document.getElementById('is_cn_futures_night');
-    const timezoneInput = document.getElementById('timezone_input');
-    const confirmBtn = document.getElementById('confirm_time_btn');
-    const statusSpan = document.getElementById('confirm_time_status');
-    const currentSettingsSpan = document.getElementById('current_settings');
+    var startYear = document.getElementById('start_year');
+    var startMonth = document.getElementById('start_month');
+    var startDay = document.getElementById('start_day');
+    var startHour = document.getElementById('start_hour');
+    var startMinute = document.getElementById('start_minute');
+    var endYear = document.getElementById('end_year');
+    var endMonth = document.getElementById('end_month');
+    var endDay = document.getElementById('end_day');
+    var endHour = document.getElementById('end_hour');
+    var endMinute = document.getElementById('end_minute');
+    var isTradingDayCheck = document.getElementById('is_trading_day');
+    var isCnFuturesDayCheck = document.getElementById('is_cn_futures_day');
+    var isCnFuturesNightCheck = document.getElementById('is_cn_futures_night');
+    var timezoneInput = document.getElementById('timezone_input');
+    var confirmBtn = document.getElementById('confirm_time_btn');
+    var statusSpan = document.getElementById('confirm_time_status');
+    var currentSettingsSpan = document.getElementById('current_settings');
 
     // 全局配置（将从 API 加载）
-    let default_day_start_time = '09:30';
-    let default_day_end_time = '15:00';
-    let default_cn_futures_day_start = '09:00';
-    let default_cn_futures_day_end = '15:00';
-    let default_cn_futures_night_start = '21:00';
-    let default_cn_futures_night_end = '15:00';
-    let factorFamilyAlias = '';
+    var default_day_start_time = '09:30';
+    var default_day_end_time = '15:00';
+    var default_cn_futures_day_start = '09:00';
+    var default_cn_futures_day_end = '15:00';
+    var default_cn_futures_night_start = '21:00';
+    var default_cn_futures_night_end = '15:00';
+    var factorFamilyAlias = '';
 
-    // ---------- 辅助函数 ----------
-    function pad(n) {
-        n = parseInt(n);
-        return n < 10 ? '0' + n : n.toString();
-    }
-
-    function getMaxDay(year, month) {
-        year = parseInt(year);
-        month = parseInt(month);
-        if (isNaN(year) || isNaN(month) || month < 1 || month > 12) return 31;
-        return new Date(year, month, 0).getDate();
-    }
+    // ---------- 辅助函数（直接使用 DateUtils） ----------
+    function pad(n) { return window.DateUtils.pad(n); }
+    function getMaxDay(year, month) { return window.DateUtils.getMaxDay(year, month); }
 
     function setTimeInputsDisabled(disabled) {
-        [startHour, startMinute, endHour, endMinute].forEach(el => {
+        [startHour, startMinute, endHour, endMinute].forEach(function(el) {
             if (el) {
                 el.disabled = disabled;
                 el.style.background = disabled ? '#ccc' : '#eee';
@@ -55,119 +56,13 @@
         });
     }
 
-    // 进位/退位逻辑（与原版相同）
+    // 进位/退位逻辑（直接使用 DateUtils）
     function carryOver(thisId, thisMin, thisMax, lastId, prefix) {
-        const thisElem = document.getElementById(thisId);
-        const lastElem = document.getElementById(lastId);
-        if (!thisElem || !lastElem) return;
-        let thisNum = parseInt(thisElem.value);
-        let lastNum = parseInt(lastElem.value);
-
-        if (isNaN(thisNum)) {
-            thisElem.value = pad(thisMin);
-            return;
-        }
-        if (isNaN(lastNum)) {
-            lastElem.value = pad(thisMin);
-            if (thisNum < thisMin) thisElem.value = pad(thisMin);
-            else if (thisNum > thisMax) thisElem.value = pad(thisMax);
-            else thisElem.value = pad(thisNum);
-            return;
-        }
-        if (thisNum === thisMin - 1) {
-            lastElem.value = pad(lastNum - 1);
-            if (thisId.endsWith('day')) {
-                thisElem.value = pad(1);
-                adjustTime(lastId, prefix);
-                const newMonth = parseInt(document.getElementById(prefix + '_month').value);
-                const newYear = parseInt(document.getElementById(prefix + '_year').value);
-                const maxDay = getMaxDay(newYear, newMonth);
-                thisElem.value = pad(maxDay);
-            } else {
-                thisElem.value = pad(thisMax);
-            }
-            adjustTime(lastId, prefix);
-            lastElem.value = pad(parseInt(lastElem.value));
-            return;
-        }
-        if (thisNum === thisMax + 1) {
-            lastElem.value = pad(lastNum + 1);
-            thisElem.value = pad(thisMin);
-            adjustTime(lastId, prefix);
-            return;
-        }
-        if (thisNum > thisMax + 1) {
-            thisElem.value = pad(thisMax);
-            return;
-        }
-        if (thisNum < thisMin - 1) {
-            thisElem.value = pad(thisMin);
-            return;
-        }
-        thisElem.value = pad(thisNum);
+        window.DateUtils.carryOver(thisId, thisMin, thisMax, lastId, prefix);
     }
 
     function adjustTime(id, prefix) {
-        const minuteId = prefix + '_minute';
-        const hourId = prefix + '_hour';
-        const dayId = prefix + '_day';
-        const yearId = prefix + '_year';
-        const monthId = prefix + '_month';
-
-        const minuteElem = document.getElementById(minuteId);
-        if (!minuteElem) return;
-        let minuteVal = parseInt(minuteElem.value);
-        if (isNaN(minuteVal) || minuteVal > 59 || minuteVal < 0) {
-            carryOver(minuteId, 0, 59, hourId, prefix);
-            return;
-        } else {
-            minuteElem.value = pad(minuteVal);
-        }
-
-        const hourElem = document.getElementById(hourId);
-        if (!hourElem) return;
-        let hourVal = parseInt(hourElem.value);
-        if (isNaN(hourVal) || hourVal > 23 || hourVal < 0) {
-            carryOver(hourId, 0, 23, dayId, prefix);
-            return;
-        } else {
-            hourElem.value = pad(hourVal);
-        }
-
-        const dayElem = document.getElementById(dayId);
-        const yearElem = document.getElementById(yearId);
-        const monthElem = document.getElementById(monthId);
-        if (!dayElem || !yearElem || !monthElem) return;
-        let year = parseInt(yearElem.value);
-        let month = parseInt(monthElem.value);
-        let dayVal = parseInt(dayElem.value);
-        let maxDay = getMaxDay(year, month);
-
-        if (id.endsWith('month') && dayVal > maxDay) {
-            dayElem.value = pad(maxDay);
-        }
-
-        if (isNaN(dayVal) || dayVal > maxDay || dayVal < 1) {
-            carryOver(dayId, 1, maxDay, monthId, prefix);
-            return;
-        } else {
-            dayElem.value = pad(dayVal);
-        }
-
-        if (isNaN(month) || month > 12 || month < 1) {
-            carryOver(monthId, 1, 12, yearId, prefix);
-            return;
-        } else {
-            monthElem.value = pad(month);
-        }
-
-        if (isNaN(year) || year < 1900 || year > 2100) {
-            if (year < 1900) yearElem.value = '1900';
-            else yearElem.value = '2100';
-            return;
-        } else {
-            yearElem.value = pad(year);
-        }
+        window.DateUtils.adjustTime(id, prefix);
     }
 
     // 更新时间显示和按钮状态
@@ -394,6 +289,8 @@
                 
                 // 更新显示
                 updateCurrentSettings();
+                // 通知其他模块默认时间已就绪
+                document.dispatchEvent(new CustomEvent('timeRangeDefaultLoaded'));
             })
             .catch(err => {
                 console.error('加载默认时间设置失败:', err);
@@ -402,9 +299,9 @@
             });
     }
 
-    // 初始化
+    // ---------- 初始化 ----------
     function init() {
-        loadDefaultSettings().then(() => {
+        loadDefaultSettings().then(function() {
             bindInputEvents();
             isTradingDayCheck.addEventListener('change', toggleTradingDay);
             isCnFuturesDayCheck.addEventListener('change', toggleCnFutures);
@@ -414,6 +311,6 @@
         });
     }
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
+    // 确保 DateUtils 已加载后再初始化
+    waitForDateUtils(init);
 })();

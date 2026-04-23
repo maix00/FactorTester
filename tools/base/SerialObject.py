@@ -7,12 +7,15 @@
 #   - single_use 模式下使用全局递增计数器，不在 serial_map 中注册，适用于临时对象。
 #   - 支持通过 Cls[N] 下标语法按序列号快速检索实例。
 # =============================================================================
+import threading
 from typing import Dict, Optional
 from weakref import WeakValueDictionary
 
 from tools.base.UniqueObject import UniqueObject
 
 class SerialObject(UniqueObject):
+    # 保护计数器的类级别锁（所有子类共享，保证跨线程序列号唯一性）
+    _counter_lock = threading.Lock()
     # 一次性（single_use）对象的全局计数器，从 -1 开始递增
     _single_use_count = -1
     # 各 type_alias 的实例计数器，键为 type_alias，值为当前最大序列号
@@ -23,6 +26,8 @@ class SerialObject(UniqueObject):
     _type_alias_owners: Dict[str, type] = {}
     # 当前类的 type_alias（创建时动态写入）
     _type_alias: str = 'SO'
+    # __new__ 传递给 __init__ 的序列号暂存（实例级，仅在初始化期间有效）
+    _pending_serial: int
 
     @classmethod
     def _get_family_root(cls):
@@ -41,48 +46,55 @@ class SerialObject(UniqueObject):
 
     def __new__(cls, type_alias: str, alias: Optional[str] = None, search: bool = False, single_use: bool = False, *args, **kwargs):
 
-        if type_alias in cls._type_alias_owners:
-            owner = cls._type_alias_owners[type_alias]
-            if not issubclass(cls, owner):
-                raise ValueError(f"type_alias '{type_alias}' is already used by {owner.__name__} family")
-        else:
-            cls._type_alias_owners[type_alias] = cls._get_family_root()
-            owner = cls
-        
-        owner._type_alias = type_alias
-        cls._type_alias = type_alias
-
-        if search and type_alias in cls._serial_map_dict:
-            for instance in cls._serial_map_dict[type_alias].values():
-                if instance.alias == alias and instance.__class__ is cls:
-                    assert isinstance(instance, cls)
-                    return instance
-        
-        if single_use:
-            cls._single_use_count += 1
-            name = f"{type_alias}@SU@{cls._single_use_count}"
-        else:
-            if type_alias in cls._instance_count_dict:
-                cls._instance_count_dict[type_alias] += 1
+        with cls._counter_lock:
+            if type_alias in cls._type_alias_owners:
+                owner = cls._type_alias_owners[type_alias]
+                if not issubclass(cls, owner):
+                    raise ValueError(f"type_alias '{type_alias}' is already used by {owner.__name__} family")
             else:
-                cls._instance_count_dict[type_alias] = 0
-            name = f"{type_alias}@{cls._instance_count_dict[type_alias]}"
-            name = name if alias is None else f"{name}:{alias}"
+                cls._type_alias_owners[type_alias] = cls._get_family_root()
+                owner = cls
+
+            owner._type_alias = type_alias
+            cls._type_alias = type_alias
+
+            if search and type_alias in cls._serial_map_dict:
+                for instance in cls._serial_map_dict[type_alias].values():
+                    if instance.alias == alias and instance.__class__ is cls:
+                        assert isinstance(instance, cls)
+                        return instance
+
+            if single_use:
+                cls._single_use_count += 1
+                serial = cls._single_use_count
+                name = f"{type_alias}@SU@{serial}"
+            else:
+                if type_alias in cls._instance_count_dict:
+                    cls._instance_count_dict[type_alias] += 1
+                else:
+                    cls._instance_count_dict[type_alias] = 0
+                serial = cls._instance_count_dict[type_alias]
+                name = f"{type_alias}@{serial}"
+                name = name if alias is None else f"{name}:{alias}"
         instance = super().__new__(cls, name=name)
+        if not hasattr(instance, '_initialized'):
+            instance._pending_serial = serial
         return instance
 
     def __init__(self, type_alias: str, alias: Optional[str] = None, single_use: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
+            serial = self._pending_serial
             if single_use:
-                name = f"{type_alias}@SU@{self._single_use_count}"
+                name = f"{type_alias}@SU@{serial}"
             else:
-                self.serial_number = self._instance_count_dict[type_alias]
+                self.serial_number = serial
                 name = f"{type_alias}@{self.serial_number}"
             self.alias = alias or name
             name = name if alias is None else f"{name}:{alias}"
             super().__init__(name=name)
             if not single_use:
-                self._serial_map_dict.setdefault(type_alias, WeakValueDictionary())[self.serial_number] = self
+                with self._counter_lock:
+                    self._serial_map_dict.setdefault(type_alias, WeakValueDictionary())[self.serial_number] = self
 
     def __reduce__(self):
         return (self.__class__, (self.alias,))
