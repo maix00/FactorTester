@@ -27,7 +27,7 @@ class MmRet(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),              # 价格列
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),              # 价格列
     ]
 
     chinese_name = '收益率动量'
@@ -60,7 +60,7 @@ class MmRet(FactorFamily):
         \end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+    def func_timeseries(self, product: Product, P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         """
         计算单品种收益率动量因子。
 

@@ -57,14 +57,15 @@ class MmClose2High(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{C_t - \min_{N}(L)}{\max_{N}(H) - \min_{N}(L)}
+            H_t^{(N)} &:= \mathrm{RollingMax}_{N}(H)_t,\quad L_t^{(N)} := \mathrm{RollingMin}_{N}(L)_t \\[4pt]
+            X_t &:= \frac{C_t - L_t^{(N)}}{H_t^{(N)} - L_t^{(N)}}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('14d'), **kwargs) -> pd.Series:
-        high  = product.MIN1[DataColumn.HIGH]
-        low   = product.MIN1[DataColumn.LOW]
-        close = product.MIN1[DataColumn.CLOSE]
+        high  = product.MIN1[DataColumn.HIGH_ADJUSTED]
+        low   = product.MIN1[DataColumn.LOW_ADJUSTED]
+        close = product.MIN1[DataColumn.CLOSE_ADJUSTED]
         highest = high.rolling(N).max()
         lowest  = low.rolling(N).min()
         rng = (highest - lowest).replace(0, float('nan'))

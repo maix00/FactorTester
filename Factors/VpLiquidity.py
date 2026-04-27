@@ -59,13 +59,13 @@ class VpLiquidity(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{1}{N} \sum_{s} \frac{Vol_s}{\lvert r_s \rvert}.
+            X_t &:= \frac{1}{N} \sum_{s=t-N+1}^{t} \frac{Vol_s}{\lvert r_s \rvert}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'),
                         RF: Any = pd.Timedelta('1m'), **kwargs) -> pd.Series:
-        close  = product.MIN1[DataColumn.CLOSE]
+        close  = product.MIN1[DataColumn.CLOSE_ADJUSTED]
         volume = product.MIN1[DataColumn.VOLUME]
 
         eps = 1e-6

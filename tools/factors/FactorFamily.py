@@ -53,7 +53,6 @@ class FactorFamily(SerialObject):
         description_sections (list) : 因子结构化说明，供前端展示
         params               (list) : 本族使用的参数对象列表（子类应覆盖）
     """
-    _instances = WeakValueDictionary()
     math_expr: str = ""       # 子类可覆盖，填写 LaTeX 格式的数学表达式
     chinese_name: str = ""    # 子类可覆盖，填写因子中文名称，供前端显示和搜索
     description_sections: List[dict] = []
@@ -105,6 +104,9 @@ class FactorFamily(SerialObject):
             alias=alias if alias else self.__class__.__name__
             super().__init__(type_alias='FF', alias=alias)
             self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
+            self._source_freqs_lock = threading.Lock()
+            self._source_freqs_seen: set[DataFreq] = set()
+            self._last_source_data_freq: Optional[DataFreq] = None
             self.params.append(FactorFreqParam)   # 所有子类默认包含信号频率参数 F
             self.params.append(ReverseParam)       # 所有子类默认包含反转参数 $Rev（1/True=-反向；0/False=正向）
             self.params_dict = {param.alias: param for param in self.params}
@@ -138,6 +140,9 @@ class FactorFamily(SerialObject):
         signal_freq = kwargs.get('F', pd.Timedelta('1d'))
         # 提取反转参数，不转发给 func_timeseries（统一使用 $Rev）
         is_reversed: bool = kwargs.pop('$Rev', False)
+        with self._source_freqs_lock:
+            self._source_freqs_seen.clear()
+            self._last_source_data_freq = None
         try:
             # 过滤无数据品种（停牌、尚未上市等），避免 func_timeseries 里得到空索引
             valid_products = [p for p in products if not p.get_some_data(copy=False).empty]
@@ -159,13 +164,21 @@ class FactorFamily(SerialObject):
             try:
                 if len(valid_products) <= 200:
                     for product in tqdm(valid_products, desc=f"Calculating factor signals"):
-                        self._runtime_ctx.signal_freq = signal_freq
-                        factors[product] = self.func_timeseries(product, *args, **kwargs)
+                        DataMeta.begin_cleanup_scope()
+                        try:
+                            self._runtime_ctx.signal_freq = signal_freq
+                            factors[product] = self.func_timeseries(product, *args, **kwargs)
+                        finally:
+                            DataMeta.end_cleanup_scope()
                 else:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     def compute_factor(product, *args, **kwargs):
-                        self._runtime_ctx.signal_freq = signal_freq
-                        return product, self.func_timeseries(product, *args, **kwargs)
+                        DataMeta.begin_cleanup_scope()
+                        try:
+                            self._runtime_ctx.signal_freq = signal_freq
+                            return product, self.func_timeseries(product, *args, **kwargs)
+                        finally:
+                            DataMeta.end_cleanup_scope()
                     with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in valid_products}
                         for future in tqdm(as_completed(futures), total=len(valid_products), desc="Calculating factor signals"):
@@ -207,6 +220,10 @@ class FactorFamily(SerialObject):
                         result = merged
             if is_reversed:
                 result = -result
+            with self._source_freqs_lock:
+                if self._source_freqs_seen:
+                    # 若存在多个频率，记录最细粒度（最小 timedelta）作为收益计算频率。
+                    self._last_source_data_freq = min(self._source_freqs_seen, key=lambda f: f.value)
             return result
         except Exception as e:
             raise e
@@ -605,6 +622,29 @@ class FactorFamily(SerialObject):
         if isinstance(data, DataMeta):
             data = data.data
 
+        # 记录本次因子计算实际使用的数据源频率（按最细粒度识别）。
+        try:
+            if isinstance(data.index, pd.MultiIndex):
+                idx_freqs = []
+                for n in data.index.names:
+                    try:
+                        idx_freqs.append(DataFreq(str(n).split('@')[-1]))
+                    except Exception:
+                        continue
+                if idx_freqs:
+                    with self._source_freqs_lock:
+                        self._source_freqs_seen.add(min(idx_freqs, key=lambda f: f.value))
+            else:
+                if getattr(data.index, 'name', None) is not None:
+                    try:
+                        one_freq = DataFreq(str(data.index.name).split('@')[-1])
+                        with self._source_freqs_lock:
+                            self._source_freqs_seen.add(one_freq)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         tester = _active_tester.get()
         assert tester is not None, \
             "sync_signal must be called within an active test context (set _active_tester via test() or the server route)"
@@ -660,15 +700,75 @@ class FactorFamily(SerialObject):
                     tester.sync_signal_index_replaced = self._get_sync_signal_index(
                         freq_dc, basepoint=replace_basepoint, **kwargs)
         assert tester.sync_signal_index is not None
-        mask = tester.sync_signal_index.isin(data.index)
-        # 筛选落在信号索引上的行
-        data = data[data.index.isin(tester.sync_signal_index)].copy()
-        # 将索引层级名重命名为信号层名（_SIGNAL@{freq}）
-        data.index.names = tester.sync_signal_index.names
-        # 若有 replace_basepoint，用替换索引覆盖输出索引（改变时间戳）
+        signal_index = tester.sync_signal_index
+
+        def _pick_signal_level(idx: pd.Index, target_freq: DataFreq) -> int:
+            """Select best level for signal alignment.
+
+            Priority:
+              1) explicit _SIGNAL@{target_freq}
+              2) any level whose name parses to target_freq
+              3) rightmost datetime-like level
+              4) last level (MultiIndex) / only level (Index)
+            """
+            if isinstance(idx, pd.MultiIndex):
+                names = [str(n) for n in idx.names]
+
+                exact_signal = f"_SIGNAL@{target_freq.name}"
+                if exact_signal in names:
+                    return names.index(exact_signal)
+
+                for i, n in enumerate(names):
+                    base = n.split('@')[-1]
+                    try:
+                        if DataFreq(base) == target_freq:
+                            return i
+                    except Exception:
+                        continue
+
+                for i in range(idx.nlevels - 1, -1, -1):
+                    if pd.api.types.is_datetime64_any_dtype(idx.get_level_values(i).dtype):
+                        return i
+                return idx.nlevels - 1
+
+            return 0
+
+        data_level = _pick_signal_level(data.index, freq_dc)
+        signal_level = _pick_signal_level(signal_index, freq_dc)
+
+        data_time = data.index.get_level_values(data_level)
+        signal_time = signal_index.get_level_values(signal_level)
+        data_mask = data_time.isin(signal_time)
+
+        # 按“最细时间层”筛选信号点，兼容单层与多层索引。
+        data = data[data_mask].copy()
+
+        # 保留完整 MultiIndex，仅将信号层重命名为 _SIGNAL@{freq}，其他层去掉 @xxx 后缀
+        signal_level_name = signal_index.names[signal_level] if signal_index.names else f"_SIGNAL@{freq_dc.name}"
+        if isinstance(data.index, pd.MultiIndex):
+            data.index.names = [signal_level_name if i == data_level else str(n).split('@')[-1]
+                                 for i, n in enumerate(data.index.names)]
+        else:
+            data.index.name = signal_level_name
+
+        # 若有 replace_basepoint，仅替换信号层的时间戳，其余层保持不变。
         if tester.sync_signal_index_replaced is not None:
-            index_replaced = tester.sync_signal_index_replaced
-            data.index = index_replaced[mask]
+            replaced_idx = tester.sync_signal_index_replaced
+            replaced_level = _pick_signal_level(replaced_idx, freq_dc)
+            sig_vals = signal_index.get_level_values(signal_level)
+            rep_vals = replaced_idx.get_level_values(replaced_level)
+            mapping = dict(zip(sig_vals, rep_vals))
+
+            if isinstance(data.index, pd.MultiIndex):
+                arrays = [data.index.get_level_values(i) for i in range(data.index.nlevels)]
+                arrays[data_level] = pd.DatetimeIndex(
+                    [mapping.get(t, pd.NaT) for t in arrays[data_level]])
+                data.index = pd.MultiIndex.from_arrays(arrays, names=data.index.names)
+                data = data[pd.notna(data.index.get_level_values(data_level))]
+            else:
+                new_time = pd.DatetimeIndex([mapping.get(t, pd.NaT) for t in data.index], name=data.index.name)
+                data.index = new_time
+                data = data[pd.notna(data.index)]
         return data
 
 class Returns(FactorFamily):

@@ -33,7 +33,7 @@ class MmMACD(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('Fast',   default_value='12d'),
         WindowParam('Slow',   default_value='26d'),
         WindowParam('Signal', default_value='9d'),
@@ -65,8 +65,8 @@ class MmMACD(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            DIF_t &:= EMA(P, Fast)_t - EMA(P, Slow)_t \\[5pt]
-            DEA_t &:= EMA(DIF, Signal)_t \\[5pt]
+            DIF_t &:= \mathrm{EMA}_{Fast}(P)_t - \mathrm{EMA}_{Slow}(P)_t \\[5pt]
+            DEA_t &:= \mathrm{EMA}_{Signal}(DIF)_t \\[5pt]
             X_t   &:= (DIF_t - DEA_t) / P_t
         \end{aligned}
     '''
@@ -74,7 +74,7 @@ class MmMACD(FactorFamily):
     def func_timeseries(self, product: Product, Fast: Any = pd.Timedelta('12d'),
                         Slow: Any = pd.Timedelta('26d'),
                         Signal: Any = pd.Timedelta('9d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         # ewm 的 span 参数只接受数值；Timedelta 窗口用 halflife 表达
         ema_fast = price.ewm(halflife=Fast, adjust=False).mean()

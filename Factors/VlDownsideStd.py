@@ -7,7 +7,6 @@
 # 与普通波动率（VlRetStd）的比值可衡量下行风险相对总风险的占比。
 # =============================================================================
 import pandas as pd
-import numpy as np
 from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -30,7 +29,7 @@ class VlDownsideStd(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N',  default_value='20d'),
         WindowParam('RF', default_value='1d'),
     ]
@@ -61,22 +60,17 @@ class VlDownsideStd(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \sqrt{\frac{1}{N}\sum_{s:\,r_s < 0} r_s^2}
+            r_t^- &:= \min(r_t,\,0) \\[4pt]
+            X_t &:= \sqrt{\mathrm{RollingMean}_{N}\!\left((r^-)^2\right)_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         ret = price.pct_change(RF)
         neg_ret = ret.clip(upper=0)  # 非负归零，仅保留负值
-
-        def _downside_std(x: np.ndarray) -> float:
-            sq_mean = (x ** 2).mean()
-            return float(np.sqrt(sq_mean)) if sq_mean > 0 else 0.0
-
-        factor = neg_ret.rolling(N).apply(_downside_std, raw=True)
-        factor = factor.fillna(0.0)
+        factor = ((neg_ret ** 2).rolling(N).mean() ** 0.5).fillna(0.0)
         return self.sync_signal(factor)
 if __name__ == '__main__':
     ff = VlDownsideStd()

@@ -6,7 +6,7 @@
          ../data/fees/fees_latest.parquet（最新一份，供快速读取）
 
 字段说明（从 openctp 表格提取）：
-  variety_code  : 品种代码（小写，如 rb、cu）
+  variety_code  : 品种代码（大写，如 RB、CU）
   exchange      : 交易所（SHFE/DCE/CZCE/CFFEX/INE/GFEX）
   variety_name  : 品种名称（中文）
   multiplier    : 合约乘数
@@ -81,8 +81,8 @@ def _parse_raw(df: pd.DataFrame) -> pd.DataFrame:
                 'closetoday_ratio', 'closetoday_fixed', 'volume', 'open_interest']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # 品种代码统一小写
-    df['variety_code'] = df['variety_code'].astype(str).str.strip().str.lower()
+    # 品种代码统一大写
+    df['variety_code'] = df['variety_code'].astype(str).str.strip().str.upper()
     df['exchange'] = df['exchange'].astype(str).str.strip()
     df['variety_name'] = df['variety_name'].astype(str).str.strip()
     df['contract_code'] = df['contract_code'].astype(str).str.strip()
@@ -169,7 +169,7 @@ def get_fee_map(use_closetoday: bool = False) -> dict[str, dict]:
     df = load_latest()
     result: dict = {}
     for _, row in df.iterrows():
-        code = str(row['variety_code']).lower()
+        code = str(row['variety_code']).upper()
         close_ratio = float(row['closetoday_ratio'] if use_closetoday else row['close_ratio']) or 0.0
         close_fixed = float(row['closetoday_fixed'] if use_closetoday else row['close_fixed']) or 0.0
         result[code] = {

@@ -72,6 +72,16 @@ enddate_col_name = '标准合约终止交易日'
 
 name_code_version_dict = {}
 
+
+def _infer_unique_version(code: str, exchange_short: Optional[str] = None) -> Optional[str]:
+    """Infer version when a product has exactly one version in metadata."""
+    df = _data[_data[code_col_name].astype(str) == str(code)]
+    if exchange_short is not None:
+        exch = exchange_map_reversed.get(exchange_short, exchange_short)
+        df = df[df[exchange_code_col_name].astype(str) == str(exch)]
+    versions = sorted(set(df[version_col_name].dropna().astype(str)))
+    return versions[0] if len(versions) == 1 else None
+
 def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str | None:
     if version is None:
         return None
@@ -95,7 +105,8 @@ class CNFutures(Futures):
         super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract, timezone='Asia/Shanghai')
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
-        self.version = name.split('@')[1] if '@' in name else None
+        exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
+        self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
 
 from tools.products.Product import Product
@@ -185,13 +196,23 @@ def get_all_futures() -> List[CNFutures]:
         data_cols_mapping=datacolumn_map_reversed,
     )
 
+    # 先统计同一 code+exchange 下版本数，单版本则省略 @version。
+    _tmp = _data.copy()
+    _tmp['_KEY'] = _tmp[code_col_name].astype(str) + '|' + _tmp[exchange_code_col_name].astype(str)
+    version_count = _tmp.groupby('_KEY')[version_col_name].nunique(dropna=True).to_dict()
+
     cnfutures_list = []
     for _, row in _data.iterrows():
         code = row[code_col_name]
         exchange = row[exchange_code_col_name]
         exchange = exchange_map.get(exchange, exchange)
         version = str(row[version_col_name])
-        cnfutures_list.append(CNFutures(f"{code}.{exchange}@{version}"))
+        key = f"{code}|{row[exchange_code_col_name]}"
+        if version_count.get(key, 0) <= 1:
+            name = f"{code}.{exchange}"
+        else:
+            name = f"{code}.{exchange}@{version}"
+        cnfutures_list.append(CNFutures(name))
 
     return cnfutures_list
 

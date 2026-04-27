@@ -62,8 +62,8 @@ class VlPK(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('14d'), **kwargs) -> pd.Series:
-        high = product.DAY1[DataColumn.HIGH]
-        low  = product.DAY1[DataColumn.LOW]
+        high = product.DAY1[DataColumn.HIGH_ADJUSTED]
+        low  = product.DAY1[DataColumn.LOW_ADJUSTED]
 
         eps = 1e-10
         hl = np.log((high / (low + eps).replace(0, eps)).clip(lower=eps))

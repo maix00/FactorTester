@@ -65,10 +65,10 @@ class MmIntradayRange(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        high   = product.DAY1[DataColumn.HIGH]
-        low    = product.DAY1[DataColumn.LOW]
-        open_  = product.DAY1[DataColumn.OPEN]
-        close  = product.DAY1[DataColumn.CLOSE]
+        high   = product.DAY1[DataColumn.HIGH_ADJUSTED]
+        low    = product.DAY1[DataColumn.LOW_ADJUSTED]
+        open_  = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        close  = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         hl_range   = high - low
         co_change  = close - open_

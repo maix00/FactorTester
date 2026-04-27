@@ -58,13 +58,13 @@ class VlHLRange(FactorFamily):
     math_expr = r'''
         \begin{aligned}
             HL_t &:= \frac{H_t - L_t}{(H_t + L_t) / 2} \\[5pt]
-            X_t  &:= MA(HL,\, N)_t
+            X_t  &:= \mathrm{RollingMean}_{N}(HL)_t
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        high = product.MIN1[DataColumn.HIGH]
-        low  = product.MIN1[DataColumn.LOW]
+        high = product.MIN1[DataColumn.HIGH_ADJUSTED]
+        low  = product.MIN1[DataColumn.LOW_ADJUSTED]
         mid  = ((high + low) / 2.0).replace(0, float('nan'))
         hl_range = (high - low) / mid
         factor = hl_range.rolling(N).mean()

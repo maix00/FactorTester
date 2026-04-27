@@ -8,7 +8,6 @@
 #   - 所有实例由 DataSourceMeta 元类维护的全局字典注册。
 # =============================================================================
 from abc import ABCMeta
-from weakref import WeakValueDictionary
 from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -27,7 +26,8 @@ class DataSourceMeta(ABCMeta):
       - DataSource['alias']    按别名查找
       - 默认数据源管理：第一个被创建的源自动成为默认源
     """
-    _data_sources = WeakValueDictionary()  # 全局数据源实例缓存，键为 alias
+    # 使用强引用注册表，避免 source 在仅有弱引用时被 GC 回收。
+    _data_sources: Dict[str, 'DataSource'] = {}  # 全局数据源实例缓存，键为 alias
 
     def __iter__(cls):
         """for ds in DataSource 语法支持。"""
@@ -75,7 +75,6 @@ class DataSource(SerialObject, metaclass=DataSourceMeta):
         time_cols_mapping     : {csv列名: DataFreq} 映射，将文件中的时间列映射到 DataFreq.name
         data_cols_mapping     : {csv列名: DataColumn} 映射，将文件中的数据列映射到 DataColumn.name
     """
-    _instances = WeakValueDictionary()
     default_source: 'DataSource'
 
     def __new__(cls, alias: str, *args, **kwargs):

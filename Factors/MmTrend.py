@@ -8,7 +8,6 @@
 # 正值表示上涨趋势，负值表示下跌趋势。
 # =============================================================================
 import pandas as pd
-import numpy as np
 from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -31,7 +30,7 @@ class MmTrend(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N', default_value='20d'),
     ]
 
@@ -61,32 +60,19 @@ class MmTrend(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            \hat{\beta}_t &:= \frac{\sum_s s \cdot y_s - n\bar{s}\bar{y}}{\sum_s s^2 - n\bar{s}^2} \\[5pt]
-            X_t &:= \frac{\hat{\beta}_t}{\overline{P}_t}
+            X_t &:= \frac{P_t - P_{t-N+1}}{(N-1)\cdot\mathrm{RollingMean}_{N}(P)_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
-        price = product.MIN1[P]
-
-        def _linslope(x: np.ndarray) -> float:
-            n = len(x)
-            if n < 2:
-                return 0.0
-            s = np.arange(n, dtype=float)
-            s_mean = s.mean()
-            x_mean = x.mean()
-            if x_mean == 0:
-                return 0.0
-            cov = ((s - s_mean) * (x - x_mean)).sum()
-            var = ((s - s_mean) ** 2).sum()
-            slope = cov / var if var != 0 else 0.0
-            return float(slope / x_mean)
-
-        slope_series = price.rolling(N).apply(_linslope, raw=True)
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
+        price  = product.MIN1[P]
+        n_bars = price._get_window_k(N)
+        ma     = price.rolling(N).mean()
+        slope_series = (price - price.shift(n_bars - 1)) / ((n_bars - 1) * ma.replace(0, float('nan')))
         slope_series = slope_series.fillna(0.0)
         return self.sync_signal(slope_series)
+    
 if __name__ == '__main__':
     ff = MmTrend()
     ff.clear_params()

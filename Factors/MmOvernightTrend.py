@@ -62,8 +62,8 @@ class MmOvernightTrend(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        daily_open  = product.DAY1[DataColumn.OPEN]
-        daily_close = product.DAY1[DataColumn.CLOSE]
+        daily_open  = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        daily_close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         prev_close = daily_close.shift(1)
         overnight_ret = (daily_open - prev_close) / prev_close.replace(0, float('nan'))

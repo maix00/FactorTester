@@ -35,7 +35,7 @@ class OiPriceDiv(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N',  default_value='10d'),
         WindowParam('RF', default_value='1d'),
     ]
@@ -66,14 +66,16 @@ class OiPriceDiv(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{1}{N} \sum_{s} \operatorname{sign}(\Delta P_s) \cdot \operatorname{sign}(\Delta OI_s)
+            \Delta P_t &:= P_t - P_{t-RF},\quad \Delta OI_t := OI_t - OI_{t-RF} \\[4pt]
+            d_t &:= \operatorname{sign}(\Delta P_t)\cdot\operatorname{sign}(\Delta OI_t) \\[4pt]
+            X_t &:= \frac{1}{N}\sum_{s=t-N+1}^{t} d_s
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
-        oi    = product.MIN1[DataColumn.OPEN_INTEREST]
+        oi    = product.MIN1[DataColumn.OPEN_ADJUSTED_INTEREST]
         price_sign = np.sign(price.diff(RF))
         oi_sign    = np.sign(oi.diff(RF))
         div = price_sign * oi_sign

@@ -63,10 +63,10 @@ class Mm(FactorFamily):
 
     math_expr = '''
         \\begin{aligned}
-            PH_t &:= \\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
-            h_t  &:= \\arg\\max_{t-F \\leq s \\leq t} H_s, \\\\[5pt]
-            PL_t &:= \\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
-            l_t  &:= \\arg\\min_{t-F \\leq s \\leq t} L_s, \\\\[5pt]
+            PH_t &:= \\mathrm{RollingMax}_{F}(H)_t, \\\\[5pt]
+            h_t  &:= \\mathrm{RollingArgMax}_{F}(H)_t, \\\\[5pt]
+            PL_t &:= \\mathrm{RollingMin}_{F}(L)_t, \\\\[5pt]
+            l_t  &:= \\mathrm{RollingArgMin}_{F}(L)_t, \\\\[5pt]
             X_t  &:=
             \\begin{cases}
                 \\frac{PH_t - PL_t}{PH_t}, & h_t > l_t, \\\\
@@ -76,8 +76,8 @@ class Mm(FactorFamily):
         \\end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, H: DataColumn = DataColumn.HIGH,
-                        L: DataColumn = DataColumn.LOW, **kwargs) -> pd.Series:
+    def func_timeseries(self, product: Product, H: DataColumn = DataColumn.HIGH_ADJUSTED,
+                        L: DataColumn = DataColumn.LOW_ADJUSTED, **kwargs) -> pd.Series:
         """
         计算单品种 Mm 因子。
 
@@ -110,11 +110,7 @@ class Mm(FactorFamily):
         up   = h_pos > l_pos   # 最高价在最低价之后 → 上涨动量
         down = l_pos > h_pos   # 最低价在最高价之后 → 下跌动量
 
-        factor = pd.Series(
-            np.where(up,   (ph - pl) / ph_safe,
-            np.where(down, (pl - ph) / pl_safe, 0.0)),
-            index=high.index
-        ).fillna(0.0)
+        factor = ((ph - pl) / ph_safe * up + (pl - ph) / pl_safe * down).fillna(0.0)
 
         return self.sync_signal(factor)
 if __name__ == '__main__':

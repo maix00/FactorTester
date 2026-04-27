@@ -30,7 +30,7 @@ class MmSkew(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N',  default_value='20d'),
         WindowParam('RF', default_value='1d'),
     ]
@@ -61,12 +61,12 @@ class MmSkew(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \operatorname{skew}(r_{t-N+1},\, \ldots,\, r_t)
+            X_t &:= \mathrm{RollingSkew}_{N}(r)_t
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         ret = price.pct_change(RF)
         skew = ret.rolling(N).skew()

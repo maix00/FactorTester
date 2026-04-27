@@ -22,14 +22,20 @@ class UniqueObject(ABC):
     直接子类：SerialObject, Product, CNFutures, Factor, Parameter, DataSource, DataMeta 等。
     '''
 
-    # 弱引用实例字典，键为 (name, 类名)，保证同类同名对象全局唯一
+    # 基类兜底实例字典；真实使用中每个子类会在 __init_subclass__ 时自动获得自己的实例字典。
     _instances = WeakValueDictionary()
-    # 保护 _instances 读写的类级别锁
+    # 基类兜底锁；子类会自动获得自己的锁。
     _instances_lock = threading.Lock()
+
+    def __init_subclass__(cls, **kwargs):
+        """每个子类自动维护独立的弱引用实例池和锁，无需显式声明。"""
+        super().__init_subclass__(**kwargs)
+        cls._instances = WeakValueDictionary()
+        cls._instances_lock = threading.Lock()
 
     def __new__(cls, name: str, *args, **kwargs):
         """对象创建钩子：若同名实例已存在则直接返回，否则新建并注册。"""
-        key = (name, cls.__name__)
+        key = name
         with cls._instances_lock:
             if key in cls._instances:
                 return cls._instances[key]
@@ -71,5 +77,7 @@ class UniqueObject(ABC):
     
     def delete(self):
         """从全局缓存中移除该实例，使其可被垃圾回收。"""
-        key = (self.name, self.__class__.__name__)
-        self._instances.pop(key, None)
+        key = self.name
+        cls = self.__class__
+        with cls._instances_lock:
+            cls._instances.pop(key, None)

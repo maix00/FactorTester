@@ -63,7 +63,7 @@ class OiChgRatio(FactorFamily):
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
                         **kwargs) -> pd.Series:
-        oi = product.MIN1[DataColumn.OPEN_INTEREST]
+        oi = product.MIN1[DataColumn.OPEN_ADJUSTED_INTEREST]
         if isinstance(N, pd.Timedelta) and isinstance(RF, pd.Timedelta):
             steps = max(1, int(N / RF))
         else:

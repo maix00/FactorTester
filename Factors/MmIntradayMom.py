@@ -62,8 +62,8 @@ class MmIntradayMom(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        daily_open  = product.DAY1[DataColumn.OPEN]
-        daily_close = product.DAY1[DataColumn.CLOSE]
+        daily_open  = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        daily_close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         intraday_ret = (daily_close - daily_open) / daily_open.replace(0, float('nan'))
         factor = intraday_ret.rolling(N).mean().fillna(0.0)

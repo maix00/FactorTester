@@ -64,17 +64,17 @@ class MmGKTrend(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        high  = product.DAY1[DataColumn.HIGH]
-        low   = product.DAY1[DataColumn.LOW]
-        open_ = product.DAY1[DataColumn.OPEN]
-        close = product.DAY1[DataColumn.CLOSE]
+        high  = product.DAY1[DataColumn.HIGH_ADJUSTED]
+        low   = product.DAY1[DataColumn.LOW_ADJUSTED]
+        open_ = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         eps = 1e-10
-        hl = np.log((high / (low   + eps).replace(0, eps)).clip(lower=eps))
-        co = np.log((close / (open_ + eps).replace(0, eps)).clip(lower=eps))
+        hl = (high / (low   + eps).replace(0, eps)).clip(lower=eps).log()
+        co = (close / (open_ + eps).replace(0, eps)).clip(lower=eps).log()
 
         gk_bar    = 0.5 * hl ** 2 - (2 * np.log(2) - 1) * co ** 2
-        direction = (close - open_).apply(np.sign)
+        direction = (close - open_).sign()
         factor    = (direction * gk_bar).rolling(N).mean().fillna(0.0)
 
         return self.sync_signal(factor)

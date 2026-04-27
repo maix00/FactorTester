@@ -11,11 +11,10 @@
 #   X_t = (+DI_t - -DI_t) / (+DI_t + -DI_t)  ∈ (-1, 1)
 # =============================================================================
 import pandas as pd
-import numpy as np
 from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn, Product, FactorFamily
+from tools import DataColumn, Product, FactorFamily, max
 from tools.parameters import WindowParam
 
 
@@ -61,14 +60,27 @@ class MmDMI(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
+            TR_t &:= \max\!\left(H_t-L_t,\,|H_t-C_{t-1}|,\,|L_t-C_{t-1}|\right) \\[4pt]
+            +DM_t &:=
+            \begin{cases}
+                H_t-H_{t-1}, & H_t-H_{t-1} > L_{t-1}-L_t\ \text{and}\ H_t-H_{t-1}>0 \\
+                0, & \text{otherwise}
+            \end{cases} \\[4pt]
+            -DM_t &:=
+            \begin{cases}
+                L_{t-1}-L_t, & L_{t-1}-L_t > H_t-H_{t-1}\ \text{and}\ L_{t-1}-L_t>0 \\
+                0, & \text{otherwise}
+            \end{cases} \\[4pt]
+            +DI_t &:= 100\cdot\frac{\sum_{s=t-N+1}^{t} +DM_s}{\sum_{s=t-N+1}^{t} TR_s},\quad
+            -DI_t := 100\cdot\frac{\sum_{s=t-N+1}^{t} -DM_s}{\sum_{s=t-N+1}^{t} TR_s} \\[4pt]
             X_t &:= \frac{(+DI_t) - (-DI_t)}{(+DI_t) + (-DI_t)}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('14d'), **kwargs) -> pd.Series:
-        high  = product.MIN1[DataColumn.HIGH]
-        low   = product.MIN1[DataColumn.LOW]
-        close = product.MIN1[DataColumn.CLOSE]
+        high  = product.MIN1[DataColumn.HIGH_ADJUSTED]
+        low   = product.MIN1[DataColumn.LOW_ADJUSTED]
+        close = product.MIN1[DataColumn.CLOSE_ADJUSTED]
 
         prev_high  = high.shift(1)
         prev_low   = low.shift(1)
@@ -77,15 +89,12 @@ class MmDMI(FactorFamily):
         tr1 = high - low
         tr2 = (high - prev_close).abs()
         tr3 = (low  - prev_close).abs()
-        tr = tr1.where(tr1 >= tr2, tr2)
-        tr = tr.where(tr >= tr3, tr3)
+        tr = max(tr1, tr2, tr3)
 
         up_move   = high - prev_high
         down_move = prev_low - low
-        pdm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-        ndm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-        pdm = pd.Series(pdm, index=high.index)
-        ndm = pd.Series(ndm, index=high.index)
+        pdm = up_move.clip(lower=0.0) * (up_move > down_move)
+        ndm = down_move.clip(lower=0.0) * (down_move > up_move)
 
         tr_sum  = tr.rolling(N).sum()
         pdi = 100.0 * pdm.rolling(N).sum() / tr_sum.replace(0, float('nan'))

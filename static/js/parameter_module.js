@@ -25,8 +25,8 @@
             }
         }
 
-        // 刷新整个参数模块（不刷新页面）
-        function reloadParamModule() {
+        // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
+        function reloadParamModule(callback) {
             fetch(window.location.pathname + '?factor=' + encodeURIComponent(factorAlias))
                 .then(res => res.text())
                 .then(html => {
@@ -37,6 +37,7 @@
                         const oldModule = document.getElementById('parameter_module');
                         oldModule.parentNode.replaceChild(newModule, oldModule);
                         window.initParameterModule();  // 重新初始化事件
+                        if (typeof callback === 'function') callback();
                     }
                 })
                 .catch(err => alert('刷新参数模块失败: ' + err));
@@ -44,41 +45,76 @@
 
         // 绑定事件
         function bindEvents() {
+            // 收集当前输入框参数
+            function collectParams() {
+                const params = {};
+                paramAliases.forEach(function(alias) {
+                    const input = document.getElementById('param_' + alias);
+                    if (input) params[alias] = input.value;
+                });
+                return params;
+            }
+
+            // 执行新增因子
+            function doAdd() {
+                const params = collectParams();
+                fetch('/add_params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        factor_family_alias: factorAlias,
+                        params: params
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // 重新加载模块，加载完成后更新输入框为新添加的参数值
+                        reloadParamModule(function() {
+                            if (data.added_params) {
+                                paramAliases.forEach(function(alias) {
+                                    const input = document.getElementById('param_' + alias);
+                                    if (input && data.added_params[alias] !== undefined) {
+                                        input.value = data.added_params[alias];
+                                    }
+                                });
+                            }
+                            // 若已确认过时间，自动为新因子应用同一时间范围
+                            if (window._confirmedTimeData) {
+                                fetch('/set_time_range', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(window._confirmedTimeData)
+                                }).catch(function() {});
+                            }
+                        });
+                        if (typeof window.refreshICModule === 'function') {
+                            window.refreshICModule();
+                        }
+                    } else {
+                        alert('添加失败: ' + data.error);
+                    }
+                });
+            }
+
             // 新增按钮
             const addBtn = document.querySelector('.add_factor_btn');
             if (addBtn) {
-                addBtn.addEventListener('click', function() {
-                    const params = {};
-                    paramAliases.forEach(function(alias) {
-                        const input = document.getElementById('param_' + alias);
-                        if (input) params[alias] = input.value;
-                    });
-                    fetch('/add_params', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            factor_family_alias: factorAlias,
-                            params: params
-                        })
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            reloadParamModule();
-                            if (typeof window.refreshICModule === 'function') {
-                                window.refreshICModule();
-                            }
-                            const statusSpan = document.getElementById('confirm_time_status');
-                            if (statusSpan) {
-                                statusSpan.innerText = '⚠️ 点击确定按钮更新因子计算的时间范围';
-                                statusSpan.style.color = '#d40000';
-                            }
-                        } else {
-                            alert('添加失败: ' + data.error);
+                addBtn.addEventListener('click', doAdd);
+            }
+
+            // 输入框回车键触发新增
+            paramAliases.forEach(function(alias) {
+                const input = document.getElementById('param_' + alias);
+                if (input) {
+                    input.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            doAdd();
                         }
                     });
-                });
-            }
+                }
+            });
 
             // 删除按钮（事件委托）
             if (tbody) {

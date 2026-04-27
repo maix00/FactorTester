@@ -29,7 +29,7 @@ class MmRateOfChg(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N', default_value='10d'),
     ]
 
@@ -64,7 +64,7 @@ class MmRateOfChg(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         # pct_change 直接接受 Timedelta，无需 groupby
         roc = price.pct_change(N)

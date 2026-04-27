@@ -29,9 +29,34 @@ from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturn
 
 from Settings import get_all_products, logger_dir_path_default, factor_info_path
 
-def _signal_time(obj: Any):
+def _signal_time(obj: Any) -> Any:
     """从索引项中提取最末一级时间戳（兼容 tuple 多级索引和单值索引）。"""
-    return obj if not isinstance(obj, tuple) else obj[-1]
+    return obj[-1] if isinstance(obj, tuple) else obj
+
+
+def _align_ts(lhs: Any, rhs: Any) -> Any:
+    """将 lhs 时区对齐到 rhs；若任一非 Timestamp 则原样返回 lhs。"""
+    if isinstance(lhs, pd.Timestamp) and isinstance(rhs, pd.Timestamp):
+        if lhs.tzinfo is None and rhs.tzinfo is not None:
+            return lhs.tz_localize(rhs.tz)
+        if lhs.tzinfo is not None and rhs.tzinfo is None:
+            return lhs.tz_localize(None)
+        if lhs.tzinfo is not None and rhs.tzinfo is not None:
+            return lhs.tz_convert(rhs.tz)
+    return lhs
+
+
+def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
+    """从信号索引中提取时间戳层，返回 DatetimeIndex。
+
+    - DatetimeIndex：直接转换后返回
+    - MultiIndex：优先取名称以 _SIGNAL@ 开头的层级，否则取最后一层
+    """
+    if isinstance(idx, pd.MultiIndex):
+        signal_name = next((n for n in idx.names if n and str(n).startswith('_SIGNAL')), None)
+        level = idx.names.index(signal_name) if signal_name is not None else -1
+        return pd.DatetimeIndex(idx.get_level_values(level), name=idx.names[level])
+    return pd.DatetimeIndex(idx)
 
 class FactorTester(SerialObject):
     """
@@ -213,19 +238,23 @@ class FactorTester(SerialObject):
 
         for factor in tqdm(factors, desc='Calculating IC'):
             factor_rank = self.calc_rank(factor.table)
-            # 若收益为空或频率不匹配，重新计算收益
-            if factor.returns.empty or (not factor.returns.empty and DataFreq(factor.get_current_return_freq()) != DataFreq(return_freq)):
-                return_df = factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=return_freq)
-            else:
-                return_df = factor.returns
+            # 收益频率默认与因子信号频率一致；若与缓存不匹配则重新计算并记录
+            effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
+            cached_freq = self.factor_return_freqs.get(factor)
+            if factor.returns.empty or cached_freq != effective_freq:
+                factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=effective_freq)
+                self.factor_return_freqs[factor] = effective_freq
+            return_df = factor.returns
             assert not return_df.empty
             return_rank = self.calc_rank(return_df)
-            # 取因子与收益的交集时间点，并按 start/end_date 截断
+            factor_rank.index = _extract_signal_index(factor_rank.index)
+            return_rank.index = _extract_signal_index(return_rank.index)
+            # 取因子与收益的交集时间点，向量化按 start/end_date 截断
             dt_index = factor_rank.index.intersection(return_rank.index)
-            if start_date is not None:
-                dt_index = dt_index[[start_date <= _signal_time(k) for k in dt_index]]
-            if end_date is not None:
-                dt_index = dt_index[[_signal_time(k) <= end_date for k in dt_index]]
+            if start_date is not None and len(dt_index) > 0:
+                dt_index = dt_index[dt_index >= _align_ts(pd.Timestamp(start_date), dt_index[0])]
+            if end_date is not None and len(dt_index) > 0:
+                dt_index = dt_index[dt_index <= _align_ts(pd.Timestamp(end_date), dt_index[0])]
             ic = []
             coverage = []
             for dt in dt_index:
@@ -241,7 +270,17 @@ class FactorTester(SerialObject):
                         ic.append(np.nan)
                 else:
                     ic.append(np.nan)
-            factor.ic_series = pd.Series(ic, index=dt_index)
+            # 若 factor.table 有 MultiIndex，将 ic_series 的索引还原为相同结构
+            if isinstance(factor.table.index, pd.MultiIndex):
+                tbl_signal_idx = _extract_signal_index(factor.table.index)
+                mask = tbl_signal_idx.isin(dt_index)
+                mapping = {sig: full for sig, full in zip(tbl_signal_idx[mask], factor.table.index[mask])}
+                valid = [ts for ts in dt_index if ts in mapping]
+                full_idx = pd.MultiIndex.from_tuples([mapping[ts] for ts in valid], names=factor.table.index.names)
+                ic_vals = [v for ts, v in zip(dt_index, ic) if ts in mapping]
+                factor.ic_series = pd.Series(ic_vals, index=full_idx)
+            else:
+                factor.ic_series = pd.Series(ic, index=dt_index)
             ic_series[factor] = factor.ic_series
             avg_coverage = np.mean(coverage)
             stats_df = self.ic_stats(ic_series[factor])
@@ -289,19 +328,21 @@ class FactorTester(SerialObject):
         assert not factor.returns.empty
 
         # ---------- numpy 预计算 ----------
-        # 先按时间范围截取数据（兼容 tuple 多级索引）
+        # 先归一化索引（MultiIndex → DatetimeIndex），再按时间范围截取
         table_src   = factor.table
         returns_src = factor.returns
+        table_src.index   = _extract_signal_index(table_src.index)
+        returns_src.index = _extract_signal_index(returns_src.index)
         if start_date is not None:
-            mask = [_signal_time(k) >= start_date for k in table_src.index]
-            table_src   = table_src[mask]
-            mask = [_signal_time(k) >= start_date for k in returns_src.index]
-            returns_src = returns_src[mask]
+            _sd = _align_ts(pd.Timestamp(start_date), table_src.index[0]) if len(table_src) > 0 else pd.Timestamp(start_date)
+            table_src   = table_src[table_src.index >= _sd]
+            _sd = _align_ts(pd.Timestamp(start_date), returns_src.index[0]) if len(returns_src) > 0 else pd.Timestamp(start_date)
+            returns_src = returns_src[returns_src.index >= _sd]
         if end_date is not None:
-            mask = [_signal_time(k) <= end_date for k in table_src.index]
-            table_src   = table_src[mask]
-            mask = [_signal_time(k) <= end_date for k in returns_src.index]
-            returns_src = returns_src[mask]
+            _ed = _align_ts(pd.Timestamp(end_date), table_src.index[0]) if len(table_src) > 0 else pd.Timestamp(end_date)
+            table_src   = table_src[table_src.index <= _ed]
+            _ed = _align_ts(pd.Timestamp(end_date), returns_src.index[0]) if len(returns_src) > 0 else pd.Timestamp(end_date)
+            returns_src = returns_src[returns_src.index <= _ed]
 
         # 对齐两个 DataFrame 的索引（factor.returns 因 shift 可能比 factor.table 少最后一行）
         common_index = table_src.index.intersection(returns_src.index)
@@ -397,9 +438,9 @@ class FactorTester(SerialObject):
         member_counts = membership_np.sum(axis=2).astype(float)  # (T, n_groups)
 
         def _variety(col) -> str:
-            """从产品列名提取品种代码（小写），如 IF.CFE→if, rb.SHF→rb。"""
+            """从产品列名提取品种代码（大写），如 IF.CFE→IF, rb.SHF→RB。"""
             nm = getattr(col, 'name', str(col))
-            return nm.split('.')[0].lower()
+            return nm.split('.')[0].upper()
 
         half_fee = float(fee) / 2.0
         open_fee_vec = np.array([
@@ -469,12 +510,13 @@ class FactorTester(SerialObject):
 
         # ---------- 汇总指标（向量化） ----------
         # 构建时间戳数组，用于日期过滤
-        signal_times = np.array([_signal_time(d) for d in index_list])
+        signal_times = pd.DatetimeIndex(index_list)   # already flat after _extract_signal_index
+        _ref = signal_times[0] if T > 0 else pd.Timestamp('2000-01-01')
         mask_report = np.ones(T, dtype=bool)
         if start_date is not None:
-            mask_report &= (signal_times >= start_date)
+            mask_report &= (signal_times >= _align_ts(pd.Timestamp(start_date), _ref))
         if end_date is not None:
-            mask_report &= (signal_times <= end_date)
+            mask_report &= (signal_times <= _align_ts(pd.Timestamp(end_date), _ref))
 
         report_groups = {}
         for idx in range(n_groups):
@@ -521,9 +563,9 @@ class FactorTester(SerialObject):
             _end_date   = end_date   if end_date   is not None else self.end_date
             plot_mask = np.ones(T, dtype=bool)
             if _start_date is not None:
-                plot_mask &= (signal_times >= _start_date)
+                plot_mask &= (signal_times >= _align_ts(pd.Timestamp(_start_date), _ref))
             if _end_date is not None:
-                plot_mask &= (signal_times <= _end_date)
+                plot_mask &= (signal_times <= _align_ts(pd.Timestamp(_end_date), _ref))
             plot_index = [index_list[t] for t in range(T) if plot_mask[t]]
             dates = plot_index
             for idx in range(n_groups):
@@ -532,7 +574,7 @@ class FactorTester(SerialObject):
                 rets = group_returns_np[plot_mask, idx]
                 cumulative_returns = np.cumprod(1 + np.where(np.isnan(rets), 0.0, rets)) * 10000
                 plt.plot(
-                    [str(d[-1].date()) if isinstance(d, tuple) else str(d.date()) for d in plot_index],
+                    [str(d.date()) for d in plot_index],
                     cumulative_returns, label=n_names[idx]
                 )
             plt.xlabel('日期')
@@ -543,7 +585,7 @@ class FactorTester(SerialObject):
             n_ticks = 10
             if dates:
                 tick_indices = np.linspace(0, len(dates) - 1, min(n_ticks, len(dates)), dtype=int)
-                ticks = [str(dates[i][-1].date()) if isinstance(dates[i], tuple) else str(dates[i].date()) for i in tick_indices]
+                ticks = [str(dates[i].date()) for i in tick_indices]
                 plt.xticks(ticks=ticks, rotation=45)
             plt.tight_layout()
             if save_plot:

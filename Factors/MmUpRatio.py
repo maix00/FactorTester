@@ -26,7 +26,7 @@ class MmUpRatio(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),          # 价格列
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),          # 价格列
         WindowParam('N', default_value='5d'),             # 窗口长度
         WindowParam('RF', default_value='1d'),            # 收益率计算频率
     ]
@@ -63,7 +63,7 @@ class MmUpRatio(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         """
         计算涨幅占比因子。
 
@@ -77,7 +77,7 @@ class MmUpRatio(FactorFamily):
             滚动窗口长度
         RF : Any, default=pd.Timedelta('1d')
             收益率计算频率
-        P : DataColumn, default=DataColumn.CLOSE
+        P : DataColumn, default=DataColumn.CLOSE_ADJUSTED
             使用的价格列
 
         Returns

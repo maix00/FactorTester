@@ -58,7 +58,7 @@ class VpTurnoverAccel(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{MA(TO,\, N_s)}{MA(TO,\, N_l)} - 1
+            X_t &:= \frac{\mathrm{RollingMean}_{N_s}(TO)_t}{\mathrm{RollingMean}_{N_l}(TO)_t} - 1
         \end{aligned}
     '''
 

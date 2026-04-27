@@ -38,96 +38,95 @@
         const container = document.getElementById(containerId);
         if (!container) return;
 
-        // 构建 OHLC 数据
-        const ohlcData = priceData.dates.map((ts, i) => [
-            ts,
-            priceData.OPEN[i],
-            priceData.HIGH[i],
-            priceData.LOW[i],
-            priceData.CLOSE[i]
-        ]);
-        // 因子值数据
-        const factorValues = factorData.dates.map((ts, i) => [ts, factorData.values[i]]);
-        // 收益率数据
-        const returnValues = returnData.dates.map((ts, i) => [ts, returnData.values[i]]);
+        const _parseTs = ts => typeof ts === 'string' ? new Date(ts + 'T00:00:00').getTime() : ts;
+        const isDaily = factorData.dates.length > 0 && typeof factorData.dates[0] === 'string';
+        const _fmtHeader = isDaily
+            ? x => Highcharts.dateFormat('%Y-%m-%d', x)
+            : x => Highcharts.dateFormat('%Y-%m-%d %H:%M', x);
+        const ohlcData     = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.OPEN[i], priceData.HIGH[i], priceData.LOW[i], priceData.CLOSE[i]]);
+        const factorValues = factorData.dates.map((ts, i) => [_parseTs(ts), factorData.values[i]]);
+        const returnValues = returnData.dates.map((ts, i) => [_parseTs(ts), returnData.values[i]]);
 
         Highcharts.stockChart(container, {
-            chart: { zoomType: 'xy' },
-            title: { text: `${productName} - 价格 vs ${factorName} vs 收益率` },
-            xAxis: { type: 'datetime' },
+            chart: { zoomType: 'x' },
+            title: { text: `${productName} — ${factorName}` },
+            xAxis: { type: 'datetime', crosshair: true },
             yAxis: [
-                {   // 价格轴（左侧）
-                    labels: { format: '{value:.2f}' },
+                {   // 价格轴
+                    labels: { format: '{value:.2f}', align: 'right', x: -8 },
                     title: { text: '价格' },
                     height: '50%',
+                    lineWidth: 1,
                     resize: { enabled: true }
                 },
-                {   // 因子值轴（右侧，独占一段）
-                    labels: { format: '{value:.4f}' },
+                {   // 因子值轴
+                    labels: { format: '{value:.4f}', align: 'right', x: -8 },
                     title: { text: '因子值' },
-                    top: '55%',          // 从 55% 开始
-                    height: '25%',       // 占 25% 高度
-                    opposite: true,
-                    offset: 0
+                    top: '52%',
+                    height: '26%',
+                    offset: 0,
+                    lineWidth: 1
                 },
-                {   // 收益率轴（右侧，独占另一段）
-                    labels: {
-                        formatter: function() {
-                            // 假设收益率数据为小数（0.05 → 5.00%）
-                            return (this.value * 100).toFixed(2) + '%';
-                        }
-                    },
-                    title: { text: '下一期收益率' },
-                    top: '82%',          // 从 82% 开始
-                    height: '15%',       // 占 15% 高度
-                    opposite: true,
-                    offset: 0
+                {   // 收益率轴
+                    labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; }, align: 'right', x: -8 },
+                    title: { text: '收益率' },
+                    top: '80%',
+                    height: '20%',
+                    offset: 0,
+                    lineWidth: 1
                 }
             ],
+            // split: true — 每个面板（yAxis 段）各自显示独立的 tooltip 气泡
             tooltip: {
-                shared: true,
+                split: true,
                 formatter: function() {
-                    const points = this.points;
-                    let result = '';
-                    points.forEach(point => {
-                        if (point.series.type === 'candlestick') {
-                            result += `<b>${point.series.name}</b><br/>
-                                    开盘: ${point.point.open.toFixed(2)}<br/>
-                                    最高: ${point.point.high.toFixed(2)}<br/>
-                                    最低: ${point.point.low.toFixed(2)}<br/>
-                                    收盘: ${point.point.close.toFixed(2)}<br/>`;
-                        } else if (point.series.userOptions.id === 'factor') {
-                            result += `<b>${point.series.name}</b><br/>
-                                    因子值: ${point.y.toFixed(4)}<br/>`;
-                        } else if (point.series.userOptions.id === 'return') {
-                            result += `<b>${point.series.name}</b><br/>
-                                    收益率: ${(point.y * 100).toFixed(2)}%<br/>`;
+                    // 返回数组：第一项为 header（时间），后续每项对应一条 series
+                    const header = _fmtHeader(this.x);
+                    return [header].concat(this.points.map(pt => {
+                        if (pt.series.type === 'candlestick') {
+                            const p = pt.point;
+                            return `开: <b>${p.open.toFixed(2)}</b>  高: <b>${p.high.toFixed(2)}</b><br/>` +
+                                   `低: <b>${p.low.toFixed(2)}</b>  收: <b>${p.close.toFixed(2)}</b>`;
                         }
-                        result += `<span style="color:#666">时间: ${Highcharts.dateFormat('%Y-%m-%d %H:%M:%S', point.x)}</span><br/><br/>`;
-                    });
-                    return result;
+                        if (pt.series.options.id === 'factor') {
+                            return `因子值: <b>${pt.y.toFixed(4)}</b>`;
+                        }
+                        if (pt.series.options.id === 'return') {
+                            return `收益率: <b>${(pt.y * 100).toFixed(2)}%</b>`;
+                        }
+                        return `${pt.series.name}: <b>${pt.y}</b>`;
+                    }));
                 }
             },
-            series: [{
-                name: `${productName} 价格`,
-                type: 'candlestick',
-                data: ohlcData,
-                yAxis: 0
-            }, {
-                name: `因子值`,
-                type: 'line',
-                data: factorValues,
-                yAxis: 1,
-                color: '#FF5722',
-                id: 'factor'
-            }, {
-                name: `下一期收益率`,
-                type: 'line',
-                data: returnValues,
-                yAxis: 2,
-                color: '#4CAF50',
-                id: 'return'
-            }],
+            series: [
+                {
+                    name: `${productName} 价格`,
+                    type: 'candlestick',
+                    data: ohlcData,
+                    yAxis: 0,
+                    dataGrouping: { enabled: false }
+                },
+                {
+                    name: `因子值`,
+                    id: 'factor',
+                    type: 'line',
+                    data: factorValues,
+                    yAxis: 1,
+                    color: '#FF5722',
+                    dataGrouping: { enabled: false },
+                    marker: { enabled: true, radius: 2 }
+                },
+                {
+                    name: `下一期收益率`,
+                    id: 'return',
+                    type: 'line',
+                    data: returnValues,
+                    yAxis: 2,
+                    color: '#4CAF50',
+                    dataGrouping: { enabled: false },
+                    marker: { enabled: true, radius: 2 }
+                }
+            ],
             navigator: { enabled: true },
             scrollbar: { enabled: true },
             rangeSelector: { enabled: true }
@@ -139,13 +138,15 @@
         if (typeof Highcharts === 'undefined') return;
         const container = document.getElementById(containerId);
         if (!container || !seriesData || !seriesData.dates || !seriesData.values) return;
-        const data = seriesData.dates.map((ts, i) => [ts, seriesData.values[i]]);
+        const isDaily = seriesData.dates.length > 0 && typeof seriesData.dates[0] === 'string';
+        const _parseTs = ts => typeof ts === 'string' ? new Date(ts + 'T00:00:00').getTime() : ts;
+        const data = seriesData.dates.map((ts, i) => [_parseTs(ts), seriesData.values[i]]);
         Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: null },
             xAxis: { type: 'datetime', ordinal: true },
             yAxis: { title: { text: seriesName }, crosshair: true },
-            tooltip: { shared: true, valueDecimals: 4, xDateFormat: '%Y-%m-%d %H:%M:%S' },
+            tooltip: { shared: true, valueDecimals: 4, xDateFormat: isDaily ? '%Y-%m-%d' : '%Y-%m-%d %H:%M:%S' },
             series: [{ name: seriesName, data: data, type: 'line', dataGrouping: { enabled: false }, marker: { enabled: true, radius: 2 } }],
             navigator: { enabled: true },
             scrollbar: { enabled: true },
@@ -207,9 +208,9 @@
                             <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
                         </label>
                     </div>
-                    <!-- 因子值序列和收益率序列容器 -->
-                    <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:8px;">
-                        <div style="width:100%;"><div id="factor-chart-${subId}-${idx}" style="width:100%;"></div></div>
+                    <!-- 价格 / 因子值 / 收益率 三联图容器 -->
+                    <div style="margin-top:8px;">
+                        <div id="factor-chart-${subId}-${idx}" style="width:100%;"></div>
                     </div>
                 </div>
             `;
@@ -292,6 +293,8 @@
             if (returnData.error) throw new Error('get_return_series 错误: ' + returnData.error);
 
             const factorDates = factorData.dates;
+            // get_price_series expects ms timestamps; convert ISO strings (daily) if needed
+            const factorDatesMs = factorDates.map(d => typeof d === 'string' ? new Date(d + 'T00:00:00Z').getTime() : d);
             const adjustCheckbox = document.getElementById(`adjust-price-${subId}-${factorIdx}`);
             const adjusted = adjustCheckbox ? adjustCheckbox.checked : false;
             const priceData = await fetch('/get_price_series', {
@@ -301,7 +304,7 @@
                     product: product,
                     factor_family_alias: factorFamilyAlias,
                     factor_name: factorName,
-                    factor_dates: factorDates,
+                    factor_dates: factorDatesMs,
                     adjusted: adjusted,
                     start_date: submission.start_date,
                     end_date: submission.end_date
@@ -377,6 +380,9 @@
             if (!data.success) {
                 statusSpan.innerText = '✗ IC测试失败: ' + data.error;
                 statusSpan.style.color = '#d40000';
+                if (data.traceback) {
+                    resultDiv.innerHTML = `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:12px;overflow:auto;white-space:pre-wrap;">${data.traceback.replace(/</g,'&lt;')}</pre>`;
+                }
                 return;
             }
             statusSpan.innerText = '✓ IC测试完成' + (data.paths_hash ? (' (路径哈希: ' + data.paths_hash + ')') : '');

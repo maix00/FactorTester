@@ -83,6 +83,7 @@ class SerialObject(UniqueObject):
 
     def __init__(self, type_alias: str, alias: Optional[str] = None, single_use: bool = False, *args, **kwargs):
         if not hasattr(self, '_initialized'):
+            self._instance_type_alias = type_alias
             serial = self._pending_serial
             if single_use:
                 name = f"{type_alias}@SU@{serial}"
@@ -111,8 +112,10 @@ class SerialObject(UniqueObject):
         raise TypeError(f"Invalid key type: {type(key).__name__}. Expected int for serial number lookup.")
     
     def delete(self):
-        type_alias = self._type_alias
+        type_alias = getattr(self, '_instance_type_alias', self._type_alias)
         serial_number = getattr(self, 'serial_number', None)
-        if serial_number is not None and type_alias in self._serial_map_dict and serial_number in self._serial_map_dict[type_alias]:
-            del self._serial_map_dict[type_alias][serial_number]
+        if serial_number is not None:
+            with self._counter_lock:
+                if type_alias in self._serial_map_dict and serial_number in self._serial_map_dict[type_alias]:
+                    del self._serial_map_dict[type_alias][serial_number]
         super().delete()

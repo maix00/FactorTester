@@ -24,10 +24,8 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),          # 价格列
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),          # 价格列
         TimeDeltaParam('N', flag='pos', default_value='5d'),   # 移动平均窗口长度
-        # 保留 RF 参数以保持接口一致，但在本因子中不使用
-        TimeDeltaParam('RF', flag='pos', default_value='1d'),
     ]
 
     chinese_name = '均线偏离度'
@@ -56,13 +54,12 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
 
     math_expr = r'''
         \begin{aligned}
-            MA_t(N) &:= \frac{1}{N}\sum_{i=0}^{N-1} P_{t-i} \\
-            X_t &:= -\frac{MA_t(N)}{P_t}
+            X_t &:= -\frac{\mathrm{RollingMean}_{N}(P)_t}{P_t}
         \end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'),
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         """
         计算均线偏离比值因子。
 
@@ -74,9 +71,7 @@ class MmMADevRat(FactorFamily): # Momemtum Moving Average Deviation Ratio
             输出频率
         N : Any, default=pd.Timedelta('5d')
             移动平均窗口长度
-        RF : Any, default=pd.Timedelta('1d')
-            未使用，为保持接口一致而保留
-        P : DataColumn, default=DataColumn.CLOSE
+        P : DataColumn, default=DataColumn.CLOSE_ADJUSTED
             使用的价格列
 
         Returns

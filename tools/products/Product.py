@@ -107,11 +107,14 @@ class Product(UniqueObject):
             end_date = pd.to_datetime(end_date)
         mask = (time_index >= start_date) & (time_index <= end_date)
         if adjusted:
-            list_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
-            if any([col not in data.columns for col in list_cols]):
+            adjusted_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
+            nonadjusted_cols = ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']
+            if any([col not in data.columns for col in adjusted_cols]):
                 dataMeta = getattr(self, self.get_current_freq().name)
-                data = dataMeta.get_and_adjust_cols(list_cols)
-            return data.loc[mask][list_cols]
+                data = dataMeta.get_and_adjust_cols(adjusted_cols)
+            # 若复权列仍不可用（如非 Futures），则回退到原始 OHLCV。
+            selected_cols = adjusted_cols if all(col in data.columns for col in adjusted_cols) else nonadjusted_cols
+            return data.loc[mask][selected_cols]
         else:
             return data.loc[mask][['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']]
 

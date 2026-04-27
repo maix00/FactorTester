@@ -66,6 +66,7 @@ class Factor(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
 
             self.products: Set[Product] = set()
+            self.source_data_freq: Optional[DataFreq] = None  # 因子计算实际使用的数据源频率（如 MIN1 / DAY1）
             # 计算结果的实例级回退（无活跃 FactorTester 时使用，例如独立脚本场景）
             self._table: pd.DataFrame = pd.DataFrame()
             self._returns: pd.DataFrame = pd.DataFrame()
@@ -166,17 +167,11 @@ class Factor(SerialObject):
         """清空所有计算结果，保留配置信息（func/params/family）。"""
         self.table = pd.DataFrame()
         self.products = set()
+        self.source_data_freq = None
         self.returns = pd.DataFrame()
         self.ic_series = pd.Series()
         self.ic_stats = pd.Series()
         self.report = pd.DataFrame()
-
-    def get_current_return_freq(self) -> Any:
-        """获取本 Factor 的收益率计算频率（优先从活跃 tester 读取）。"""
-        t = self._get_active_tester()
-        if t is not None:
-            return t.factor_return_freqs.get(self, ReturnFreqParam.default_value)
-        return ReturnFreqParam.get_value(self)
 
     def change_current_return_freq(self, return_freq: Any) -> None:
         """更改本 Factor 的收益率计算频率（优先写入活跃 tester）。"""
@@ -237,6 +232,8 @@ class Factor(SerialObject):
             raise ValueError(f"{self}: 计算结果为空，请检查func的实现")
         self._set_products()
         self.freq = self.get_freq()
+        if self.family is not None:
+            self.source_data_freq = getattr(self.family, '_last_source_data_freq', None)
         return self.table
     
     def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
@@ -262,6 +259,17 @@ class Factor(SerialObject):
         if self.products is None or not self.products:
             self._set_products()
         assert self.freq is not None, f"{self}: 无法计算收益，因为频率未设置，请先调用calc方法计算因子值以设置频率，或者手动设置频率后再调用本方法"
+        # 优先使用因子计算时记录的数据源频率，确保 returns 与因子时序来源一致。
+        source_freq = self.source_data_freq
+        old_freq_map: Dict[Product, Any] = {}
+        if source_freq is not None and self.products:
+            for p in self.products:
+                try:
+                    old_freq_map[p] = p.get_current_freq()
+                    if source_freq in p.list_available_freqs():
+                        p.set_current_freq(source_freq)
+                except Exception:
+                    pass
         # 从活跃 FactorTester 获取带时区的起始时间
         tester = self._get_active_tester()
         start_calc_point = getattr(tester, 'start_calc_point', None)
@@ -272,7 +280,15 @@ class Factor(SerialObject):
         # OPEN 系列收益需提前 shift（下期开盘 = 当期结束后的第一根 bar）
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
-        self.returns = return_factor.calc(self.products)
+        try:
+            self.returns = return_factor.calc(self.products)
+        finally:
+            if old_freq_map:
+                for p, f in old_freq_map.items():
+                    try:
+                        p.set_current_freq(f)
+                    except Exception:
+                        pass
         # pct_change(价格为0) → inf 或 -1（次期价格为0），均视为无意义数据，替换为 NaN
         self.returns = self.returns.replace([np.inf, -np.inf], np.nan)
         self.returns = self.returns.where(self.returns > -1.0, other=np.nan)

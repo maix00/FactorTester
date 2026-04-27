@@ -12,7 +12,7 @@ from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from tools import DataColumn, Product, FactorFamily
-from tools.parameters import DataColumnParam, WindowParam
+from tools.parameters import WindowParam
 
 
 class MmCCI(FactorFamily):
@@ -20,18 +20,16 @@ class MmCCI(FactorFamily):
     顺势指标因子（Commodity Channel Index）。
 
     典型价格 TP = (HIGH + LOW + CLOSE) / 3，
-    在 N 期窗口内计算 TP 与其均值的偏差除以平均绝对偏差：
-      X_t = (TP_t - MA(TP, N)) / (0.015 * MAD(TP, N))
+    在 N 期窗口内计算 TP 与其均值的偏差除以标准差：
+      X_t = (TP_t - MA(TP, N)) / (0.015 * STD(TP, N))
 
     参数：
         N  (Timedelta) : 滚动窗口长度，默认 20d
-        RF (Timedelta) : 单期步长（用于 pct_change 对齐，本因子中对齐信号用）
         F  (Timedelta) : 输出信号频率
     """
 
     params = [
         WindowParam('N', default_value='20d'),
-        WindowParam('RF', default_value='1d'),
     ]
 
     chinese_name = '商品通道指数'
@@ -60,22 +58,22 @@ class MmCCI(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            TP_t &:= \frac{H_t + L_t + C_t}{3} \\[5pt]
-            X_t  &:= \frac{TP_t - \overline{TP}_t}{0.015 \cdot MAD_t}
+            TP_t &:= \frac{HA_t + LA_t + CA_t}{3} \\[5pt]
+            X_t  &:= \frac{TP_t - \mathrm{RollingMean}_{N}(TP)_t}{0.015 \cdot \mathrm{RollingSTD}_{N}(TP)_t}
         \end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'), RF: Any = pd.Timedelta('1d'),
-                        **kwargs) -> pd.Series:
-        high  = product.MIN1[DataColumn.HIGH]
-        low   = product.MIN1[DataColumn.LOW]
-        close = product.MIN1[DataColumn.CLOSE]
+    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'), **kwargs) -> pd.Series:
+        high  = product.MIN1[DataColumn.HIGH_ADJUSTED]
+        low   = product.MIN1[DataColumn.LOW_ADJUSTED]
+        close = product.MIN1[DataColumn.CLOSE_ADJUSTED]
         tp = (high + low + close) / 3.0
-        ma = tp.rolling(N).mean()
-        mad = tp.rolling(N).apply(lambda x: (x - x.mean()).abs().mean(), raw=True)
+        ma  = tp.rolling(N).mean()
+        mad = tp.rolling(N).std()
         cci = (tp - ma) / (0.015 * mad.replace(0, float('nan')))
         cci = cci.fillna(0.0)
         return self.sync_signal(cci)
+    
 if __name__ == '__main__':
     ff = MmCCI()
     ff.clear_params()

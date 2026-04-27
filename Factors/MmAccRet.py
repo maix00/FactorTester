@@ -28,7 +28,7 @@ class MmAccRet(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('NL', default_value='252d'),
         WindowParam('NS', default_value='21d'),
     ]
@@ -65,7 +65,7 @@ class MmAccRet(FactorFamily):
 
     def func_timeseries(self, product: Product, NL: Any = pd.Timedelta('252d'),
                         NS: Any = pd.Timedelta('21d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         # P_{t-NS}：NS 期前价格（近端）
         p_near = price.shift(NS)

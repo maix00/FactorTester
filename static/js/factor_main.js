@@ -48,9 +48,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify(data)
             })
             .then(response => response.json())
-            .then(data => {
+            .then(result => {
                 if (statusSpan) {
-                    if (data.success) {
+                    if (result.success) {
+                        window._confirmedTimeData = data;  // 记录已确认的时间，供新增因子自动应用
                         statusSpan.innerText = '✓ 已保存，时间范围已更新';
                         statusSpan.style.color = '#28a745';
                         setTimeout(() => {
@@ -59,7 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         }, 3000);
                     } else {
-                        statusSpan.innerText = '保存失败: ' + (data.error || '未知错误');
+                        statusSpan.innerText = '保存失败: ' + (result.error || '未知错误');
                         statusSpan.style.color = '#d40000';
                     }
                 }

@@ -349,5 +349,203 @@
                 }
             });
         }
+
+        // ── 路径模板管理 ──────────────────────────────────────────────────────
+
+        function tplStatus(msg, ok) {
+            var $s = $('#tpl-status');
+            $s.text(msg).css('color', ok ? '#28a745' : '#d40000');
+            setTimeout(function() { if ($s.text() === msg) $s.text(''); }, 3000);
+        }
+
+        function collectAllCurrentPaths() {
+            var paths = [];
+            submissions.forEach(function(sub) {
+                sub.paths.forEach(function(p) { if (!paths.includes(p)) paths.push(p); });
+            });
+            return paths;
+        }
+
+        function populateTplSelect(selectId) {
+            var $sel = $('#' + (selectId || 'tpl-select'));
+            var prev = $sel.val();
+            fetch('/api/path_templates')
+                .then(r => r.json())
+                .then(function(data) {
+                    $sel.empty().append('<option value="">— 选择模板 —</option>');
+                    if (data.success && data.templates) {
+                        data.templates.forEach(function(t) {
+                            $sel.append($('<option>').val(t.id).text(t.name));
+                        });
+                    }
+                    if (prev) $sel.val(prev);
+                });
+        }
+
+        populateTplSelect();
+
+        // 加载模板：把模板中的路径作为新提交递交一次（复用 submit 流程）
+        $('#tpl-load-btn').on('click', function() {
+            var id = $('#tpl-select').val();
+            if (!id) { tplStatus('请先选择一个模板', false); return; }
+            fetch('/api/path_templates/' + id)
+                .then(r => r.json())
+                .then(function(data) {
+                    if (!data.success) { tplStatus('加载失败: ' + data.error, false); return; }
+                    var paths = data.template.paths;
+                    // 复用 submit 接口
+                    var id_time = Date.now();
+                    fetch('/submit_selected_products', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ selected_paths: paths, id_time: id_time })
+                    })
+                    .then(r => r.json())
+                    .then(function(res) {
+                        if (!res.success) { tplStatus('提交失败: ' + res.error, false); return; }
+                        var timeRange = getCurrentTimeRange();
+                        submissions.push({
+                            id: id_time,
+                            paths: res.selected_paths || paths,
+                            pathsDescMap: {},
+                            factor_tester_name: res.factor_tester_name,
+                            factor_tester_serial: res.factor_tester_serial,
+                            count_desc: res.count_desc,
+                            timestamp: new Date().toLocaleTimeString(),
+                            start_date: timeRange.start_date,
+                            end_date: timeRange.end_date,
+                            start_time: timeRange.start_time,
+                            end_time: timeRange.end_time
+                        });
+                        renderHistory();
+                        tplStatus('✓ 模板已加载', true);
+                        if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
+                    });
+                });
+        });
+
+        // 另存为新模板
+        $('#tpl-save-btn').on('click', function() {
+            var paths = collectAllCurrentPaths();
+            if (paths.length === 0) { tplStatus('当前没有路径可保存', false); return; }
+            var name = prompt('请输入模板名称：');
+            if (!name || !name.trim()) return;
+            fetch('/api/path_templates', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: name.trim(), paths: paths })
+            })
+            .then(r => r.json())
+            .then(function(data) {
+                if (data.success) {
+                    tplStatus('✓ 模板已保存', true);
+                    populateTplSelect();
+                    // 自动选中新模板
+                    setTimeout(function() { $('#tpl-select').val(data.id); }, 300);
+                } else {
+                    tplStatus('保存失败: ' + data.error, false);
+                }
+            });
+        });
+
+        // 覆盖更新选中模板的路径
+        $('#tpl-update-btn').on('click', function() {
+            var id = $('#tpl-select').val();
+            if (!id) { tplStatus('请先选择一个模板', false); return; }
+            var paths = collectAllCurrentPaths();
+            if (paths.length === 0) { tplStatus('当前没有路径可保存', false); return; }
+            fetch('/api/path_templates/' + id, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ paths: paths })
+            })
+            .then(r => r.json())
+            .then(function(data) {
+                tplStatus(data.success ? '✓ 模板已更新' : '更新失败: ' + data.error, data.success);
+            });
+        });
+
+        // 双击下拉选项名称 → 行内重命名（通过双击 select 旁的名称标签实现）
+        function updateTplNameDisplay() {
+            var $sel = $('#tpl-select');
+            var name = $sel.find('option:selected').text();
+            var id = $sel.val();
+            var $lbl = $('#tpl-name-label');
+            if (id) {
+                $lbl.text(name).show();
+            } else {
+                $lbl.hide();
+            }
+        }
+
+        $('#tpl-select').on('change', function() {
+            $('#tpl-name-input').hide();
+            updateTplNameDisplay();
+        });
+
+        // 双击名称标签 → 变为输入框
+        $(document).on('dblclick', '#tpl-name-label', function() {
+            var id = $('#tpl-select').val();
+            if (!id) return;
+            var $lbl = $(this);
+            var $inp = $('#tpl-name-input');
+            $inp.val($lbl.text()).show().focus();
+            $lbl.hide();
+        });
+
+        // 输入框 blur 或 Enter → 提交重命名
+        $(document).on('keydown blur', '#tpl-name-input', function(e) {
+            if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== 'Escape') return;
+            var $inp = $(this);
+            if (e.key === 'Escape') {
+                $inp.hide();
+                $('#tpl-name-label').show();
+                return;
+            }
+            var id = $('#tpl-select').val();
+            if (!id) { $inp.hide(); return; }
+            var newName = $inp.val().trim();
+            if (!newName) { $inp.hide(); $('#tpl-name-label').show(); return; }
+            fetch('/api/path_templates/' + id, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: newName })
+            })
+            .then(r => r.json())
+            .then(function(data) {
+                $inp.hide();
+                if (data.success) {
+                    populateTplSelect();
+                    setTimeout(function() {
+                        $('#tpl-select').val(id);
+                        updateTplNameDisplay();
+                    }, 300);
+                    tplStatus('✓ 重命名成功', true);
+                } else {
+                    $('#tpl-name-label').show();
+                    tplStatus('重命名失败: ' + data.error, false);
+                }
+            });
+        });
+
+        // 删除选中模板
+        $('#tpl-delete-btn').on('click', function() {
+            var id = $('#tpl-select').val();
+            if (!id) { tplStatus('请先选择一个模板', false); return; }
+            var name = $('#tpl-select option:selected').text();
+            if (!confirm('确定删除模板「' + name + '」？')) return;
+            fetch('/api/path_templates/' + id, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(function(data) {
+                    if (data.success) {
+                        tplStatus('✓ 模板已删除', true);
+                        populateTplSelect();
+                    } else {
+                        tplStatus('删除失败: ' + data.error, false);
+                    }
+                });
+        });
+
+        // ── 路径模板管理 END ──────────────────────────────────────────────────
     });
 })();

@@ -64,10 +64,10 @@ class MmPKTrend(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        high  = product.DAY1[DataColumn.HIGH]
-        low   = product.DAY1[DataColumn.LOW]
-        open_ = product.DAY1[DataColumn.OPEN]
-        close = product.DAY1[DataColumn.CLOSE]
+        high  = product.DAY1[DataColumn.HIGH_ADJUSTED]
+        low   = product.DAY1[DataColumn.LOW_ADJUSTED]
+        open_ = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         eps = 1e-10
         hl = np.log((high / (low + eps).replace(0, eps)).clip(lower=eps))

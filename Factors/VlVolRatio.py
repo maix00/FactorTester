@@ -32,7 +32,7 @@ class VlVolRatio(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('Ns', default_value='5d'),
         WindowParam('Nl', default_value='20d'),
         WindowParam('RF', default_value='1d'),
@@ -64,14 +64,17 @@ class VlVolRatio(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{\sigma(r,\, N_s)_t}{\sigma(r,\, N_l)_t}
+            r_t &:= \frac{P_t - P_{t-RF}}{P_{t-RF}} \\[4pt]
+            \sigma_s(t) &:= \mathrm{RollingSTD}_{N_s}(r)_t,\quad
+            \sigma_l(t) := \mathrm{RollingSTD}_{N_l}(r)_t \\[4pt]
+            X_t &:= \frac{\mathrm{RollingSTD}_{N_s}(r)_t}{\mathrm{RollingSTD}_{N_l}(r)_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, Ns: Any = pd.Timedelta('5d'),
                         Nl: Any = pd.Timedelta('20d'),
                         RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price   = product.MIN1[P]
         ret     = price.pct_change(RF)
         vol_s   = ret.rolling(Ns).std()

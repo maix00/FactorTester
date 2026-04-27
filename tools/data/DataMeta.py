@@ -10,7 +10,9 @@
 #   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
 # =============================================================================
 import builtins as _py_builtins
+import numpy as np
 import pandas as pd
+import threading
 from weakref import WeakValueDictionary
 from typing import List, Dict, Optional, Tuple, Any, override
 
@@ -121,7 +123,49 @@ class DataMeta(SerialObject):
 
     一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
     """
-    _instances = WeakValueDictionary()
+    __array_priority__ = 1000
+    _track_ctx = threading.local()
+
+    @classmethod
+    def begin_cleanup_scope(cls) -> None:
+        """Start a per-thread tracking scope for temporary DataMeta objects."""
+        scopes = getattr(cls._track_ctx, 'scopes', None)
+        if scopes is None:
+            scopes = []
+            cls._track_ctx.scopes = scopes
+        scopes.append([])
+
+    @classmethod
+    def end_cleanup_scope(cls) -> None:
+        """Cleanup DataMeta chain in the latest scope, keeping Product-root data nodes."""
+        scopes = getattr(cls._track_ctx, 'scopes', None)
+        if not scopes:
+            return
+        tracked = scopes.pop()
+        # 仅清理中间节点：object 指向上游 DataMeta 的链式节点。
+        for dm in reversed(tracked):
+            if not isinstance(dm, DataMeta):
+                continue
+            if isinstance(getattr(dm, 'object', None), DataMeta):
+                try:
+                    dm.data = pd.DataFrame()
+                except Exception:
+                    pass
+                try:
+                    # 打断强引用链，保留 original_object 信息
+                    dm.object = dm.original_object
+                except Exception:
+                    pass
+                try:
+                    dm.delete()
+                except Exception:
+                    pass
+
+    @classmethod
+    def _track_instance(cls, instance: 'DataMeta') -> None:
+        scopes = getattr(cls._track_ctx, 'scopes', None)
+        if scopes:
+            scopes[-1].append(instance)
 
     def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
         preserve_alias = kwargs.pop('preserve_alias', False)
@@ -143,6 +187,7 @@ class DataMeta(SerialObject):
             self.path: Any
             self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
             self.day_periods: int                         # 每日 bar 数量缓存，用于窗口换算
+            self._track_instance(self)
 
     def _get_freq(self, **kwargs) -> DataFreq:
         """获取本对象的数据频率（若已知直接返回，否则从索引列名推断）。"""
@@ -355,8 +400,22 @@ class DataMeta(SerialObject):
                     args, kwargs = _rectify_window_arg(*args, **kwargs)
                 return self._wrap(method(*args, **kwargs), alias=f"{name.upper()}{_rectify_args_kwargs(*args, **kwargs)}")
             return wrapper
-        else:
-            raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
+
+        # NumPy ufunc fallback: allow DataMeta.log()/sqrt()/exp()/sign() style calls.
+        np_func = getattr(np, name, None)
+        if isinstance(np_func, np.ufunc):
+            def np_wrapper(*args, **kwargs):
+                values = [self._get_data(arg) for arg in args]
+                result = np_func(self.get_data(), *values, **kwargs)
+                alias = f"UFUNC_{name.upper()}{_rectify_args_kwargs(*args, **kwargs)}"
+                if isinstance(result, tuple):
+                    return tuple(self._wrap(x, alias=alias) if isinstance(x, (pd.Series, pd.DataFrame)) else x for x in result)
+                if isinstance(result, (pd.Series, pd.DataFrame)):
+                    return self._wrap(result, alias=alias)
+                return result
+            return np_wrapper
+
+        raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
     
     def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None,
               preserve_alias: bool = False, **kwargs) -> DataMeta:
@@ -370,6 +429,33 @@ class DataMeta(SerialObject):
         own_attrs = set(super().__dir__())
         data_attrs = set(dir(self.data))
         return sorted(own_attrs | data_attrs)
+
+    def __array_ufunc__(self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any) -> Any:
+        """Support NumPy ufuncs directly on DataMeta, e.g. np.log(dm)."""
+        if method != '__call__':
+            return NotImplemented
+
+        raw_inputs = [self._get_data(value) for value in inputs]
+        result = ufunc(*raw_inputs, **kwargs)
+        alias = f"UFUNC_{getattr(ufunc, '__name__', 'UNKNOWN').upper()}"
+
+        if isinstance(result, tuple):
+            return tuple(self._wrap(x, alias=alias) if isinstance(x, (pd.Series, pd.DataFrame)) else x for x in result)
+        if isinstance(result, (pd.Series, pd.DataFrame)):
+            return self._wrap(result, alias=alias)
+        return result
+
+    def log(self):
+        return self._wrap(np.log(self.get_data()), alias='LOG')
+
+    def exp(self):
+        return self._wrap(np.exp(self.get_data()), alias='EXP')
+
+    def sqrt(self):
+        return self._wrap(np.sqrt(self.get_data()), alias='SQRT')
+
+    def sign(self):
+        return self._wrap(np.sign(self.get_data()), alias='SIGN')
     
     @staticmethod
     def _get_alias(other: Any) -> str:
@@ -416,7 +502,12 @@ class DataMeta(SerialObject):
         col = DataColumn(key).name
         if col.endswith('_ADJUSTED') and col not in self.get_data().columns:
             data = self.get_and_adjust_cols(col, copy=False)
-            return self._wrap(data[col], alias=col)
+            if col in data.columns:
+                return self._wrap(data[col], alias=col)
+            fallback_col = self._get_nonadjusted_col_name(col)
+            if fallback_col in data.columns:
+                return self._wrap(data[fallback_col], alias=col)
+            raise KeyError(f"Neither adjusted column '{col}' nor fallback '{fallback_col}' exists")
         return self._wrap(self.get_data()[col], alias=col)
     def __setitem__(self, key, value): self.get_data()[DataColumn(key).name] = value
     def __delitem__(self, key): del self.get_data()[DataColumn(key).name]
@@ -496,15 +587,19 @@ class DataMeta(SerialObject):
         return col.endswith("_ADJUSTED")
 
     def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True) -> pd.DataFrame:
-        
-        from tools.products.Futures import Futures
-
-        if not isinstance(self.object, Futures):
-            return self.get_data(copy=copy)
         if not isinstance(cols, list):
             cols = [cols]
-        df = self.get_data(copy=copy)
         cols = list(set(cols))
+
+        from tools.products.Futures import Futures
+
+        df = self.get_data(copy=copy)
+        if not isinstance(self.object, Futures):
+            # 非期货产品不做复权：将 *_ADJUSTED 回退到原始列返回。
+            fallback_cols = [self._get_nonadjusted_col_name(col) if self._check_is_adjusted(col) else col for col in cols]
+            existing_cols = [col for col in fallback_cols if col in df.columns]
+            return df[existing_cols] if existing_cols else df
+
         adjust_cols = [col if self._check_is_adjusted(col) else self._get_adjusted_col_name(col) for col in cols]
         adjust_cols = [col for col in adjust_cols if col not in df.columns]
         if len(adjust_cols) > 0:

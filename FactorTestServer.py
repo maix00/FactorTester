@@ -45,11 +45,11 @@ def _get_session_id() -> str:
     return sid
 
 def _get_session_params(ff_alias: str, ff) -> list:
-    """获取当前用户对应 FactorFamily 的 _params_list 副本，首次访问时从 ff._params_list 初始化。"""
+    """获取当前用户对应 FactorFamily 的 _params_list 副本，首次访问时初始化为空列表。"""
     store_key = (_get_session_id(), ff_alias)
     with _params_store_lock:
         if store_key not in _params_store:
-            _params_store[store_key] = list(ff._params_list)
+            _params_store[store_key] = []
         return list(_params_store[store_key])
 
 def _save_session_params(ff_alias: str, params_list: list):
@@ -258,7 +258,18 @@ def add_params():
         if new_params not in pl:
             pl.append(new_params)
         _save_session_params(factor_family_alias, pl)
-        return jsonify({'success': True, 'params_count': len(pl)})
+        # 返回添加的参数的显示形式，供前端更新输入框
+        added_display = {}
+        for p in ff.params:
+            val = new_params.get(p.alias)
+            if val is not None and hasattr(p, 'get_value_alias'):
+                try:
+                    added_display[p.alias] = p.get_value_alias(val)
+                except Exception:
+                    added_display[p.alias] = str(val)
+            else:
+                added_display[p.alias] = str(val) if val is not None else ''
+        return jsonify({'success': True, 'params_count': len(pl), 'added_params': added_display})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -672,6 +683,94 @@ def delete_path_of_submission():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# ─── 路径模板持久化 ────────────────────────────────────────────────────────────
+import json as _json
+_TEMPLATES_FILE = os.path.join(os.getcwd(), 'data', 'path_templates.json')
+_templates_lock = threading.Lock()
+
+def _load_templates_raw() -> list:
+    """从磁盘读取模板列表（已持有锁后调用）。"""
+    try:
+        if os.path.exists(_TEMPLATES_FILE):
+            with open(_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+def _save_templates_raw(templates: list):
+    """将模板列表写入磁盘（已持有锁后调用）。"""
+    os.makedirs(os.path.dirname(_TEMPLATES_FILE), exist_ok=True)
+    with open(_TEMPLATES_FILE, 'w', encoding='utf-8') as f:
+        _json.dump(templates, f, ensure_ascii=False, indent=2)
+
+@app.route('/api/path_templates', methods=['GET'])
+def list_path_templates():
+    with _templates_lock:
+        templates = _load_templates_raw()
+    # 只返回 id + name，不返回 paths（减少传输量）
+    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
+
+@app.route('/api/path_templates', methods=['POST'])
+def save_path_template():
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    paths = data.get('paths', [])
+    if not name:
+        return jsonify({'success': False, 'error': '模板名称不能为空'})
+    if not isinstance(paths, list) or len(paths) == 0:
+        return jsonify({'success': False, 'error': '路径列表不能为空'})
+    with _templates_lock:
+        templates = _load_templates_raw()
+        new_id = str(int(__import__('time').time() * 1000))
+        templates.append({'id': new_id, 'name': name, 'paths': paths})
+        _save_templates_raw(templates)
+    return jsonify({'success': True, 'id': new_id})
+
+@app.route('/api/path_templates/<tpl_id>', methods=['GET'])
+def get_path_template(tpl_id):
+    with _templates_lock:
+        templates = _load_templates_raw()
+    tpl = next((t for t in templates if t['id'] == tpl_id), None)
+    if not tpl:
+        return jsonify({'success': False, 'error': '模板不存在'}), 404
+    return jsonify({'success': True, 'template': tpl})
+
+@app.route('/api/path_templates/<tpl_id>', methods=['PUT'])
+def update_path_template(tpl_id):
+    data = request.get_json()
+    with _templates_lock:
+        templates = _load_templates_raw()
+        tpl = next((t for t in templates if t['id'] == tpl_id), None)
+        if not tpl:
+            return jsonify({'success': False, 'error': '模板不存在'}), 404
+        if 'name' in data:
+            name = data['name'].strip()
+            if not name:
+                return jsonify({'success': False, 'error': '模板名称不能为空'})
+            tpl['name'] = name
+        if 'paths' in data:
+            if not isinstance(data['paths'], list) or len(data['paths']) == 0:
+                return jsonify({'success': False, 'error': '路径列表不能为空'})
+            tpl['paths'] = data['paths']
+        _save_templates_raw(templates)
+    return jsonify({'success': True})
+
+@app.route('/api/path_templates/<tpl_id>', methods=['DELETE'])
+def delete_path_template(tpl_id):
+    with _templates_lock:
+        templates = _load_templates_raw()
+        before = len(templates)
+        templates = [t for t in templates if t['id'] != tpl_id]
+        if len(templates) == before:
+            return jsonify({'success': False, 'error': '模板不存在'}), 404
+        _save_templates_raw(templates)
+    return jsonify({'success': True})
+
+# ─── 路径模板持久化 END ────────────────────────────────────────────────────────
+
 @app.route('/api/factor_list')
 def factor_list():
     factor_family_alias = request.args.get('factor_family_alias')
@@ -852,14 +951,20 @@ def run_ic_test():
             ic_series_dates = None
             ic_series_values = None
             ic_series = factor.ic_series.dropna()
-            # 新代码：返回时间戳（毫秒）
             import numpy as np
+            # 提取信号层时间戳（_SIGNAL@ 层，兼容 MultiIndex）
             if isinstance(ic_series.index, pd.MultiIndex):
-                # 多级索引时取第二级（通常是时间）
-                timestamps = ic_series.index.get_level_values(-1).view(np.int64) // 10**6
+                _sig_name = next((str(n) for n in ic_series.index.names if str(n).startswith('_SIGNAL')), None)
+                _sig_level = ic_series.index.names.index(_sig_name) if _sig_name is not None else -1
+                signal_ts = pd.DatetimeIndex(ic_series.index.get_level_values(_sig_level))
             else:
-                timestamps = ic_series.index.view(np.int64) // 10**6
-            ic_series_dates = timestamps.tolist()
+                signal_ts = pd.DatetimeIndex(ic_series.index)
+            # 日频及以上：发送 ISO 日期字符串，避免无时区时间戳被前端错误加上时区偏移
+            _is_daily = factor.freq is not None and factor.freq.is_day_multiple()
+            if _is_daily:
+                ic_series_dates = [ts.strftime('%Y-%m-%d') for ts in signal_ts]
+            else:
+                ic_series_dates = (signal_ts.view(np.int64) // 10**6).tolist()
             ic_series_values = ic_series.values.tolist()
             ic_series_values = [None if (isinstance(v, float) and (pd.isna(v) or pd.isnull(v))) else v for v in ic_series_values]
             response['factors'].append({
@@ -887,7 +992,8 @@ def run_ic_test():
 
         return jsonify(response)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
         if _token is not None:
             _active_tester.reset(_token)
@@ -973,7 +1079,11 @@ def get_factor_series():
         def _get_idx(s): return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
         def _localize(ts, idx):
             tz = getattr(idx, 'tz', None)
-            return ts.tz_localize(tz) if tz is not None and ts.tzinfo is None else ts
+            if tz is not None and ts.tzinfo is None:
+                return ts.tz_localize(tz)
+            elif tz is None and ts.tzinfo is not None:
+                return ts.replace(tzinfo=None)
+            return ts
         idx = _get_idx(series)
         if tester.start_date is not None:
             _sd = _localize(pd.Timestamp(tester.start_date), idx)
@@ -981,13 +1091,17 @@ def get_factor_series():
         if tester.end_date is not None:
             _ed = _localize(pd.Timestamp(tester.end_date), idx)
             series = series[idx <= _ed]; idx = _get_idx(series)  # type: ignore[operator]
-        # 转换为时间戳（毫秒）
-        timestamps = idx.view(np.int64) // 10**6  # type: ignore[attr-defined]
+        # 日频及以上：发送 ISO 日期字符串，避免前端时区偏移
+        _is_daily = target_factor.freq is not None and target_factor.freq.is_day_multiple()
+        if _is_daily:
+            dates_out = [ts.strftime('%Y-%m-%d') for ts in idx]
+        else:
+            dates_out = (idx.view(np.int64) // 10**6).tolist()  # type: ignore[attr-defined]
         values = series.values.tolist()
         # 处理 NaN / Infinity（均不是合法 JSON）
         values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v for v in values]
 
-        return jsonify({'dates': timestamps.tolist(), 'values': values})
+        return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
@@ -1080,7 +1194,11 @@ def get_return_series():
         def _get_idx(s): return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
         def _localize(ts, idx):
             tz = getattr(idx, 'tz', None)
-            return ts.tz_localize(tz) if tz is not None and ts.tzinfo is None else ts
+            if tz is not None and ts.tzinfo is None:
+                return ts.tz_localize(tz)
+            elif tz is None and ts.tzinfo is not None:
+                return ts.replace(tzinfo=None)
+            return ts
         idx = _get_idx(series)
         if tester.start_date is not None:
             _sd = _localize(pd.Timestamp(tester.start_date), idx)
@@ -1088,13 +1206,17 @@ def get_return_series():
         if tester.end_date is not None:
             _ed = _localize(pd.Timestamp(tester.end_date), idx)
             series = series[idx <= _ed]; idx = _get_idx(series)  # type: ignore[operator]
-        # 转换为时间戳和值
-        timestamps = idx.view(np.int64) // 10**6  # type: ignore[attr-defined]
+        # 日频及以上：发送 ISO 日期字符串，避免前端时区偏移
+        _is_daily = factor.freq is not None and factor.freq.is_day_multiple()
+        if _is_daily:
+            dates_out = [ts.strftime('%Y-%m-%d') for ts in idx]
+        else:
+            dates_out = (idx.view(np.int64) // 10**6).tolist()  # type: ignore[attr-defined]
         values = series.values.tolist()
         # 处理 NaN / Infinity（均不是合法 JSON）
         values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v for v in values]
 
-        return jsonify({'dates': timestamps.tolist(), 'values': values})
+        return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
@@ -1201,8 +1323,13 @@ def get_price_series():
         ohlc.index = factor_idx
         timestamps = ohlc.index.astype(np.int64) // 10**6
 
+        _is_daily = factor.freq is not None and factor.freq.is_day_multiple()
+        if _is_daily:
+            dates_out = [ts.strftime('%Y-%m-%d') for ts in factor_idx]
+        else:
+            dates_out = factor_dates
         return jsonify({
-            'dates': factor_dates,  # timestamps.tolist()
+            'dates': dates_out,
             'OPEN': ohlc['OPEN'].tolist(),
             'HIGH': ohlc['HIGH'].tolist(),
             'LOW': ohlc['LOW'].tolist(),
@@ -1253,7 +1380,7 @@ def run_group_test():
     fee_pct = data.get('fee', 0.0)  # 统一费率（%，前端填写），0 表示不扣费
     fee_uniform = float(fee_pct) / 100.0 if fee_pct else 0.0  # 转小数
     # 各品种自定义费率：{variety_code: {open_ratio, close_ratio, ...}}（前端逐品种设置）
-    fee_map_raw: dict = data.get('fee_map', {})  # key = variety_code (小写)
+    fee_map_raw: dict = data.get('fee_map', {})  # key = variety_code (大写)
     use_closetoday: bool = bool(data.get('use_closetoday', False))
     start_date = data.get('start_date')
     end_date = data.get('end_date')
@@ -1299,7 +1426,7 @@ def run_group_test():
             ct_key  = 'closetoday_ratio' if use_closetoday else 'close_ratio'
             close_r = float(rates.get(ct_key, 0) or 0)
             if open_r > 0 or close_r > 0:
-                fee_map[str(code).lower()] = {
+                fee_map[str(code).upper()] = {
                     'open': open_r,
                     'close': close_r,
                 }

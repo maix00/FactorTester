@@ -59,15 +59,15 @@ class MmYZTrend(FactorFamily):
     math_expr = r'''
         \begin{aligned}
             \sigma_{YZ}^2 &:= \sigma_o^2 + \omega\,\sigma_c^2 + (1-\omega)\,\sigma_{RS}^2, \\[4pt]
-            X_t           &:= \sigma_{YZ} \cdot \overline{\text{sign}(C_s - O_s)}_N.
+            X_t           &:= \sigma_{YZ}\cdot\mathrm{RollingMean}_{N}\!\left(\operatorname{sign}(C-O)\right)_t
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), **kwargs) -> pd.Series:
-        high  = product.DAY1[DataColumn.HIGH]
-        low   = product.DAY1[DataColumn.LOW]
-        open_ = product.DAY1[DataColumn.OPEN]
-        close = product.DAY1[DataColumn.CLOSE]
+        high  = product.DAY1[DataColumn.HIGH_ADJUSTED]
+        low   = product.DAY1[DataColumn.LOW_ADJUSTED]
+        open_ = product.DAY1[DataColumn.OPEN_ADJUSTED]
+        close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
 
         eps = 1e-10
 

@@ -27,7 +27,7 @@ class MmPosPct(FactorFamily):
         F  (Timedelta)  : 输出信号频率（继承自 FactorFamily）
     """
 
-    params = [DataColumnParam('P', DataColumn.CLOSE), WindowParam('WF', default_value='10m'), WindowParam('RF', default_value='1m')]
+    params = [DataColumnParam('P', DataColumn.CLOSE_ADJUSTED), WindowParam('WF', default_value='10m'), WindowParam('RF', default_value='1m')]
 
     chinese_name = '上涨占比（胜率）'
     description_sections = [
@@ -60,7 +60,7 @@ class MmPosPct(FactorFamily):
         \\end{aligned}
     '''
 
-    def func_timeseries(self, product: Product, WF: Any = 1, RF: Any = 1, P: DataColumn = DataColumn.CLOSE, **kwargs):
+    def func_timeseries(self, product: Product, WF: Any = 1, RF: Any = 1, P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs):
         """
         计算单品种上涨天数占比因子。
 

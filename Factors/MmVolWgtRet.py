@@ -30,7 +30,7 @@ class MmVolWgtRet(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N',  default_value='10d'),
         WindowParam('RF', default_value='1d'),
     ]
@@ -67,7 +67,7 @@ class MmVolWgtRet(FactorFamily):
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price  = product.MIN1[P]
         volume = product.MIN1[DataColumn.VOLUME]
         ret = price.pct_change(RF)

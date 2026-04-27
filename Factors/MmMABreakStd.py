@@ -29,7 +29,7 @@ class MmMABreakStd(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N', default_value='10d'),
     ]
 
@@ -59,12 +59,12 @@ class MmMABreakStd(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{P_t - \overline{P}_N}{\sigma_N(P)}.
+            X_t &:= \frac{P_t - \mathrm{RollingMean}_{N}(P)_t}{\mathrm{RollingSTD}_{N}(P)_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
         ma    = price.rolling(N).mean()
         std   = price.rolling(N).std().replace(0, float('nan'))

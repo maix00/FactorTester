@@ -58,14 +58,14 @@ class VlATR(FactorFamily):
     math_expr = r'''
         \begin{aligned}
             TR_t &:= \max(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|) \\[5pt]
-            X_t  &:= \frac{MA(TR,\, N)_t}{C_t}
+            X_t  &:= \frac{\mathrm{RollingMean}_{N}(TR)_t}{C_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('14d'), **kwargs) -> pd.Series:
-        high  = product.MIN1[DataColumn.HIGH]
-        low   = product.MIN1[DataColumn.LOW]
-        close = product.MIN1[DataColumn.CLOSE]
+        high  = product.MIN1[DataColumn.HIGH_ADJUSTED]
+        low   = product.MIN1[DataColumn.LOW_ADJUSTED]
+        close = product.MIN1[DataColumn.CLOSE_ADJUSTED]
         prev_close = close.shift(1)
         tr1 = high - low
         tr2 = (high - prev_close).abs()

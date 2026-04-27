@@ -35,7 +35,7 @@ class OiNetBuild(FactorFamily):
     """
 
     params = [
-        DataColumnParam('P', DataColumn.CLOSE),
+        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
         WindowParam('N',  default_value='10d'),
         WindowParam('RF', default_value='1d'),
     ]
@@ -66,28 +66,24 @@ class OiNetBuild(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
+            \Delta P_t &:= P_t - P_{t-RF},\quad \Delta OI_t := OI_t - OI_{t-RF} \\[4pt]
             s_t &:=
             \begin{cases}
                 +1 & \Delta OI_t > 0 \text{ and } \Delta P_t > 0 \\
                 -1 & \Delta OI_t > 0 \text{ and } \Delta P_t < 0 \\
                 0  & \Delta OI_t \leq 0
             \end{cases} \\[5pt]
-            X_t &:= \frac{1}{N}\sum_{s} s_s
+            X_t &:= \frac{1}{N}\sum_{s=t-N+1}^{t} s_s
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('10d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE, **kwargs) -> pd.Series:
+                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
         price = product.MIN1[P]
-        oi    = product.MIN1[DataColumn.OPEN_INTEREST]
+        oi    = product.MIN1[DataColumn.OPEN_ADJUSTED_INTEREST]
         d_price = price.diff(RF)
         d_oi    = oi.diff(RF)
-        signal = np.where(
-            d_oi > 0,
-            np.sign(d_price),   # 持仓增，看价格方向
-            0.0                  # 持仓减或不变，不判断方向
-        )
-        signal = pd.Series(signal, index=price.index)
+        signal = np.sign(d_price).where(d_oi > 0, 0.0)  # 持仓增取价格方向，否则为 0
         factor = signal.rolling(N).mean()
         factor = factor.fillna(0.0)
         return self.sync_signal(factor)

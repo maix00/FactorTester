@@ -57,12 +57,13 @@ class OiTurnoverRat(FactorFamily):
 
     math_expr = r'''
         \begin{aligned}
-            X_t &:= \frac{OI_t}{MA(V,\, N)_t}
+            \overline{V}_t &:= \mathrm{RollingMean}_{N}(V)_t \\[4pt]
+            X_t &:= \frac{OI_t}{\overline{V}_t}
         \end{aligned}
     '''
 
     def func_timeseries(self, product: Product, N: Any = pd.Timedelta('5d'), **kwargs) -> pd.Series:
-        oi     = product.MIN1[DataColumn.OPEN_INTEREST]
+        oi     = product.MIN1[DataColumn.OPEN_ADJUSTED_INTEREST]
         volume = product.MIN1[DataColumn.VOLUME]
         ma_vol = volume.rolling(N).mean().replace(0, float('nan'))
         factor = oi / ma_vol
