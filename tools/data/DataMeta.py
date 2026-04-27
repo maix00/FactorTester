@@ -501,7 +501,7 @@ class DataMeta(SerialObject):
     def __getitem__(self, key):
         col = DataColumn(key).name
         if col.endswith('_ADJUSTED') and col not in self.get_data().columns:
-            data = self.get_and_adjust_cols(col, copy=False)
+            data = self.get_and_adjust_cols([col], copy=False)
             if col in data.columns:
                 return self._wrap(data[col], alias=col)
             fallback_col = self._get_nonadjusted_col_name(col)

@@ -9,7 +9,6 @@
         </div>
 
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <!-- 费率模式切换 -->
             <label style="margin-bottom:0;white-space:nowrap;">手续费：</label>
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
                 <input type="radio" name="fee_mode" id="fee_mode_none" value="none" checked> 不扣除
@@ -17,28 +16,29 @@
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="所有品种使用相同费率">
                 <input type="radio" name="fee_mode" id="fee_mode_uniform" value="uniform"> 统一费率
             </label>
-            <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="按品种分别设置费率，需先点击"获取费率"">
+            <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="按品种分别设置费率">
                 <input type="radio" name="fee_mode" id="fee_mode_per_product" value="per_product"> 按品种费率
             </label>
 
-            <!-- 统一费率输入（仅"统一费率"模式下显示） -->
+            <!-- 统一费率输入 -->
             <span id="fee_uniform_wrap" style="display:none;align-items:center;gap:4px;">
                 <input type="number" id="fee_rate" value="0.03" step="0.001" min="0" style="width:80px;" title="双边手续费率（%），例如 0.03 表示万分之三">
                 <span style="font-size:12px;color:#666;">%（双边）</span>
             </span>
 
-            <!-- 按品种费率控件（仅"按品种费率"模式下显示） -->
+            <!-- 按品种费率控件 -->
             <span id="fee_per_product_wrap" style="display:none;align-items:center;gap:6px;">
-                <!-- 平今/平昨状态标签 + 切换按钮 -->
                 <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
                     当前：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
                 </span>
                 <button id="use_closetoday_btn" class="btn btn-outline-secondary btn-sm"
                         title="点击切换平今/平昨模式，将影响费率计算"
                         style="white-space:nowrap;">切换为平今仓</button>
-                <button id="fetch_fee_btn" class="btn btn-outline-primary btn-sm"
-                        title="从 openctp 拉取今日期货手续费率">获取费率</button>
-                <span id="fee_fetch_status" style="font-size:12px;color:#888;"></span>
+                <!-- 打开费率抽屉按钮 -->
+                <span id="group-fee-drawer-trigger" title="查看/编辑品种费率"
+                      style="display:inline-flex;cursor:pointer;align-items:center;gap:4px;padding:2px 8px;border:1px solid #d0d5dd;border-radius:4px;background:#f6f8fa;font-size:12px;white-space:nowrap;margin-left:4px;">
+                    📋 品种费率 <span id="group-fee-summary" style="font-size:12px;color:#888;"></span>
+                </span>
             </span>
         </div>
     </div>
@@ -62,34 +62,41 @@
         </div>
     </div>
 
-    <!-- 按品种费率设置（可折叠） -->
-    <div id="fee_table_section" style="margin-bottom:16px; display:none;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span style="font-size:13px;font-weight:600;color:#334155;">按品种手续费率</span>
-            <span style="font-size:12px;color:#888;">（费率来源：openctp；运行测试时将自动使用，无需手动调整）</span>
-            <button id="collapse_fee_table_btn" class="btn btn-outline-secondary btn-sm" style="margin-left:auto;">收起</button>
-        </div>
-        <div style="overflow-x:auto;max-height:320px;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
-            <table id="fee_table" style="border-collapse:collapse;width:100%;font-size:12px;">
-                <thead>
-                    <tr style="background:#f7fbff;position:sticky;top:0;z-index:2;">
-                        <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种代码</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种名称</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">交易所</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">乘数</th>
-                        <th id="fee_col_open" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">开仓比率</th>
-                        <th id="fee_col_close" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">平仓比率</th>
-                        <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">双边合计（%）</th>
-                    </tr>
-                </thead>
-                <tbody id="fee_table_body">
-                    <tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无费率数据，请选择"按品种费率"后点击"获取费率"</td></tr>
-                </tbody>
-            </table>
+    <!-- 费率抽屉 -->
+    <div class="settings-drawer-overlay" id="group-fee-drawer">
+        <div class="settings-drawer-panel">
+            <button class="drawer-close-btn" id="group-fee-drawer-close">✕ 关闭</button>
+            <h5 style="margin-bottom:12px;">📋 按品种手续费率</h5>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+                <button id="drawer_fetch_fee_btn" class="btn btn-outline-primary btn-sm">获取费率</button>
+                <button id="drawer_reset_fee_btn" class="btn btn-outline-warning btn-sm" title="恢复所有费率为获取时的原始值">↺ 恢复原始值</button>
+                <span id="drawer_fee_fetch_status" style="font-size:12px;color:#888;"></span>
+            </div>
+            <div style="overflow-x:auto;max-height:60vh;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
+                <table id="fee_table" style="border-collapse:collapse;width:100%;font-size:12px;">
+                    <thead>
+                        <tr style="background:#f7fbff;position:sticky;top:0;z-index:2;">
+                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种代码</th>
+                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种名称</th>
+                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">交易所</th>
+                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">乘数</th>
+                            <th id="fee_col_open" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">开仓比率</th>
+                            <th id="fee_col_close" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">平仓比率</th>
+                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">双边合计（%）</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fee_table_body">
+                        <tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无费率数据，请点击"获取费率"</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#888;">
+                提示：可手动修改开仓比率和平仓比率，修改过的单元格会以 <span style="background:#fff3cd;padding:1px 4px;border-radius:3px;">黄色背景</span> 标记。修改仅在当前会话有效，不保存到后端。
+            </div>
         </div>
     </div>
     
-    <!-- 两级选项卡：第一级 submission，第二级 factor -->
+    <!-- 两级选项卡 -->
     <div id="group-tab-container" style="margin-top:16px;">
         <div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>
     </div>

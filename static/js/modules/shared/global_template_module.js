@@ -64,6 +64,13 @@
             group_end_day: document.getElementById('group_end_day')?.value || ''
         };
 
+        // 6. 费率修改（按品种费率的手动编辑值）
+        if (window._getFeeModifications) {
+            snapshot.fee_modifications = window._getFeeModifications();
+        } else {
+            snapshot.fee_modifications = {};
+        }
+
         return snapshot;
     }
 
@@ -148,6 +155,11 @@
                     if (el) el.value = gs[id];
                 }
             });
+        }
+
+        // 6. 恢复费率修改
+        if (snapshot.fee_modifications && window._applyFeeModifications) {
+            window._applyFeeModifications(snapshot.fee_modifications);
         }
     }
 

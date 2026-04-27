@@ -262,6 +262,18 @@ th {
     border-color: #4a90d9;
     background: #f0f5fb;
 }
+
+/* 费率表可编辑单元格修改标记 */
+.fee-cell-modified {
+    background-color: #fff3cd !important;
+    outline: 2px solid #e6a817;
+    outline-offset: -1px;
+}
+.fee-cell-modified:focus {
+    background-color: #fff8e1 !important;
+    outline: 2px solid #f0b400;
+}
+
 .setting-summary-label {
     font-size: 14px;
     font-weight: 600;

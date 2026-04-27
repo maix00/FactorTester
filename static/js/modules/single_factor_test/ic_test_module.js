@@ -291,8 +291,24 @@
                     })
                 }).then(r => _safeJson(r, 'get_return_series'))
             ]);
-            if (factorData.error) throw new Error('get_factor_series 错误: ' + factorData.error);
-            if (returnData.error) throw new Error('get_return_series 错误: ' + returnData.error);
+            if (factorData.error) {
+                var factorErr = 'get_factor_series 错误: ' + factorData.error;
+                if (factorData.traceback) {
+                    factorChartDiv.innerHTML = '<div style="color:#d00; text-align:left;">' + factorErr + '</div>' +
+                        `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;">${factorData.traceback.replace(/</g,'&lt;')}</pre>`;
+                    return;
+                }
+                throw new Error(factorErr);
+            }
+            if (returnData.error) {
+                var returnErr = 'get_return_series 错误: ' + returnData.error;
+                if (returnData.traceback) {
+                    factorChartDiv.innerHTML = '<div style="color:#d00; text-align:left;">' + returnErr + '</div>' +
+                        `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;">${returnData.traceback.replace(/</g,'&lt;')}</pre>`;
+                    return;
+                }
+                throw new Error(returnErr);
+            }
 
             const factorDates = factorData.dates;
             // get_price_series expects ms timestamps; convert ISO strings (daily) if needed
@@ -312,6 +328,16 @@
                     end_date: submission.end_date
                 })
             }).then(r => r.json());
+
+            if (priceData.error) {
+                var priceErr = 'get_price_series 错误: ' + priceData.error;
+                if (priceData.traceback) {
+                    factorChartDiv.innerHTML = '<div style="color:#d00; text-align:left;">' + priceErr + '</div>' +
+                        `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;">${priceData.traceback.replace(/</g,'&lt;')}</pre>`;
+                    return;
+                }
+                throw new Error(priceErr);
+            }
 
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
                 factorChartDiv.style.height = '800px';

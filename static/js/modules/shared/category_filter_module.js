@@ -17,7 +17,7 @@
             html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
             html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; display:flex; flex-direction:column; gap:4px; border-bottom:1px solid #e1e4e8;">';
             var labelHtml = sub.label
-                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;">' + sub.label + '</span>'
+                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:13px;">' + sub.label + '</span>'
                 : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
             var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">';
             // 第一行：序号 + 序列号 + 时间 + 删除按钮
@@ -455,7 +455,6 @@
                     if (!data.success) { tplStatus('加载失败: ' + data.error, false); return; }
                     var tplSubs = data.template.submissions;
                     if (!tplSubs || tplSubs.length === 0) { tplStatus('该模板没有提交记录', false); return; }
-                    if (!confirm('加载模板将保留当前全部提交记录，确定继续？')) return;
                     // 清空后端
                     var clr = await fetch('/clear_all_submissions', { method: 'POST' });
                     var clrData = await clr.json();

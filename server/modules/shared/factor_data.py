@@ -7,6 +7,7 @@ Shared factor data-query routes (any test module can use):
 """
 import numpy as np
 import pandas as pd
+import traceback
 from flask import request, jsonify
 from server.shared import get_factor_family_instance, _get_session_params, _factor_testers_lock
 import server.shared as shared
@@ -120,7 +121,7 @@ def get_factor_series():
                   for v in series.values.tolist()]
         return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @shared_bp.route('/get_return_series', methods=['POST'])
@@ -208,7 +209,7 @@ def get_return_series():
                   for v in series.values.tolist()]
         return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 @shared_bp.route('/get_price_series', methods=['POST'])
@@ -279,4 +280,4 @@ def get_price_series():
             'CLOSE': ohlc['CLOSE'].tolist(),
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

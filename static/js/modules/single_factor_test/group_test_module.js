@@ -331,6 +331,13 @@
             if (!data.success) {
                 statusSpan.innerHTML = '✗ 分组测试失败: ' + data.error;
                 statusSpan.style.color = '#d40000';
+                if (data.traceback) {
+                    var chartContainer = document.getElementById('group_chart_container');
+                    if (chartContainer) {
+                        chartContainer.style.display = 'block';
+                        chartContainer.innerHTML = '<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;color:#a00;">' + data.traceback.replace(/</g,'&lt;') + '</pre>';
+                    }
+                }
                 return;
             }
             statusSpan.innerHTML = '✓ 分组测试完成';
@@ -410,11 +417,28 @@
 
     // ---------- 手续费表相关状态与函数 ----------
     var _useCloseToday = false;
-    var _feeTableData = [];  // [{variety_code, variety_name, exchange, multiplier, open_ratio, close_ratio, closetoday_ratio, ...}]
+    var _feeTableData = [];          // 原始费率数据（从后端获取的，不可变）
+    var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio}}
 
-    /** 从 /get_fee_table 拉取今日费率并渲染到品种费率表 */
+    /** 获取当前费率修改（供全局模板 collectSnapshot 调用） */
+    window._getFeeModifications = function() {
+        return JSON.parse(JSON.stringify(_feeModifications));
+    };
+
+    /** 应用费率修改（供全局模板 applySnapshot 调用） */
+    window._applyFeeModifications = function(mods) {
+        _feeModifications = {};
+        if (mods && typeof mods === 'object') {
+            Object.keys(mods).forEach(function(code) {
+                _feeModifications[code] = mods[code];
+            });
+        }
+        if (_feeTableData.length) renderFeeTable();
+    };
+
+    /** 从 /get_fee_table 拉取今日费率 */
     function fetchFeeTable(forceRefresh) {
-        var statusEl = document.getElementById('fee_fetch_status');
+        var statusEl = document.getElementById('drawer_fee_fetch_status');
         if (statusEl) { statusEl.textContent = '加载中...'; statusEl.style.color = '#0078d4'; }
         fetch('/get_fee_table', {
             method: 'POST',
@@ -428,13 +452,9 @@
                 return;
             }
             _feeTableData = data.rows || [];
+            _feeModifications = {};  // 新数据覆盖后清空修改
             renderFeeTable();
-            // 仅在"按品种费率"模式时展开费率表
-            var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
-            if (feeModeEl && feeModeEl.value === 'per_product') {
-                var section = document.getElementById('fee_table_section');
-                if (section) section.style.display = '';
-            }
+            updateFeeSummary();
             if (statusEl) { statusEl.textContent = '✓ 已加载 ' + _feeTableData.length + ' 个品种'; statusEl.style.color = '#28a745'; }
         })
         .catch(function(err) {
@@ -442,11 +462,19 @@
         });
     }
 
-    /** 渲染品种费率表 */
+    /** 获取某品种的当前显示值（优先使用修改值） */
+    function _getEffectiveRow(row) {
+        var code = (row.variety_code || '').toLowerCase();
+        var mod = _feeModifications[code] || {};
+        var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
+        var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+        return { code: code, openR: openR, closeR: closeR };
+    }
+
+    /** 渲染品种费率表（可编辑单元格） */
     function renderFeeTable() {
         var tbody = document.getElementById('fee_table_body');
         if (!tbody) return;
-        // 更新表头列标题（平仓/平今）
         var closeColEl = document.getElementById('fee_col_close');
         if (closeColEl) closeColEl.textContent = _useCloseToday ? '平今比率' : '平仓比率';
         if (!_feeTableData.length) {
@@ -455,33 +483,125 @@
         }
         var html = '';
         _feeTableData.forEach(function(row) {
-            var openR  = (parseFloat(row.open_ratio) || 0);
-            var closeR = _useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0);
-            var total  = (openR + closeR) * 100;  // 转百分比
+            var code = (row.variety_code || '');
+            var codeLower = code.toLowerCase();
+            var eff = _getEffectiveRow(row);
+            var total  = (eff.openR + eff.closeR) * 100;
+            var openModified  = !!(_feeModifications[codeLower] && _feeModifications[codeLower].open_ratio  !== undefined);
+            var closeModified = !!(_feeModifications[codeLower] && _feeModifications[codeLower].close_ratio !== undefined);
+            var openClass  = openModified  ? 'fee-cell-modified' : '';
+            var closeClass = closeModified ? 'fee-cell-modified' : '';
+
             html += '<tr>';
-            html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;font-weight:600;">' + (row.variety_code || '') + '</td>';
+            html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;font-weight:600;">' + code + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.variety_name || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.exchange || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + (row.multiplier || '') + '</td>';
-            html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + openR.toFixed(6) + '</td>';
-            html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + closeR.toFixed(6) + '</td>';
+            html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.openR.toFixed(6) + '</td>';
+            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="close_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.closeR.toFixed(6) + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">';
             html += total > 0 ? total.toFixed(4) + '%' : '—';
             html += '</td>';
             html += '</tr>';
         });
         tbody.innerHTML = html;
+
+        // 绑定可编辑单元格事件
+        tbody.querySelectorAll('[contenteditable="true"]').forEach(function(cell) {
+            cell.addEventListener('blur', _onFeeCellBlur);
+            cell.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+                if (e.key === 'Escape') { this.blur(); }
+            });
+        });
     }
 
-    /** 从品种费率表构建 fee_map: {variety_code: {open_ratio, close_ratio, closetoday_ratio}} */
+    /** 可编辑单元格 blur 处理 */
+    function _onFeeCellBlur() {
+        var variety = this.getAttribute('data-variety');
+        var field = this.getAttribute('data-field');
+        var rawVal = (this.textContent || '').trim();
+        var val = parseFloat(rawVal);
+        if (isNaN(val) || val < 0) {
+            // 恢复原始值
+            var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
+            if (row) {
+                var orig = _getEffectiveRow(row);
+                this.textContent = (field === 'open_ratio' ? orig.openR : orig.closeR).toFixed(6);
+            }
+            return;
+        }
+
+        // 对比原始值
+        var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
+        if (!row) return;
+        var origVal = field === 'open_ratio'
+            ? (parseFloat(row.open_ratio) || 0)
+            : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+
+        if (Math.abs(val - origVal) < 1e-9) {
+            // 恢复为原始值，清除修改
+            this.textContent = origVal.toFixed(6);
+            this.classList.remove('fee-cell-modified');
+            if (_feeModifications[variety]) {
+                delete _feeModifications[variety][field];
+                if (Object.keys(_feeModifications[variety]).length === 0) delete _feeModifications[variety];
+            }
+        } else {
+            // 记录修改
+            this.textContent = val.toFixed(6);
+            this.classList.add('fee-cell-modified');
+            if (!_feeModifications[variety]) _feeModifications[variety] = {};
+            _feeModifications[variety][field] = val;
+        }
+        updateFeeSummary();
+
+        // 刷新该行的双边合计列
+        _refreshTotalColumn(variety);
+    }
+
+    /** 刷新某品种的双边合计列 */
+    function _refreshTotalColumn(variety) {
+        var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
+        if (!row) return;
+        var eff = _getEffectiveRow(row);
+        var total = (eff.openR + eff.closeR) * 100;
+        var cells = document.querySelectorAll('#fee_table_body td[data-variety="' + variety + '"]');
+        // 该行最后一个 td 是合计列（没有 contenteditable 属性）
+        var allCellsInRow = [];
+        var tr = cells.length > 0 ? cells[0].parentElement : null;
+        if (tr) {
+            var lastTd = tr.querySelector('td:last-child');
+            if (lastTd) lastTd.innerHTML = total > 0 ? total.toFixed(4) + '%' : '—';
+        }
+    }
+
+    /** 更新抽屉外部的费率摘要 */
+    function updateFeeSummary() {
+        var summaryEl = document.getElementById('group-fee-summary');
+        if (!summaryEl) return;
+        var total = _feeTableData.length;
+        var modifiedCount = Object.keys(_feeModifications).length;
+        if (total === 0) {
+            summaryEl.textContent = '(暂无数据)';
+        } else if (modifiedCount === 0) {
+            summaryEl.textContent = '(' + total + '个)';
+        } else {
+            summaryEl.textContent = '(' + total + '个, ' + modifiedCount + '个已修改)';
+            summaryEl.style.color = '#d97706';
+        }
+    }
+
+    /** 从品种费率表构建 fee_map（合并修改值） */
     function buildFeeMap() {
         var map = {};
         _feeTableData.forEach(function(row) {
             var code = (row.variety_code || '').toLowerCase();
             if (!code) return;
+            var mod = _feeModifications[code] || {};
             map[code] = {
-                open_ratio:        parseFloat(row.open_ratio)        || 0,
-                close_ratio:       parseFloat(row.close_ratio)       || 0,
+                open_ratio:        (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio)        || 0),
+                close_ratio:       (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio)       || 0),
                 closetoday_ratio:  parseFloat(row.closetoday_ratio)  || 0,
                 open_fixed:        parseFloat(row.open_fixed)        || 0,
                 close_fixed:       parseFloat(row.close_fixed)       || 0,
@@ -489,6 +609,13 @@
             };
         });
         return map;
+    }
+
+    /** 恢复所有费率为原始值 */
+    function resetAllFees() {
+        _feeModifications = {};
+        renderFeeTable();
+        updateFeeSummary();
     }
 
     /** 更新平今/平昨状态文字与切换按钮文字 */
@@ -506,6 +633,20 @@
         }
     }
 
+    // ---------- 费率抽屉开关 ----------
+    function openFeeDrawer() {
+        var overlay = document.getElementById('group-fee-drawer');
+        var badge = document.getElementById('user-badge');
+        if (overlay) overlay.classList.add('open');
+        if (badge) badge.style.display = 'none';
+    }
+    function closeFeeDrawer() {
+        var overlay = document.getElementById('group-fee-drawer');
+        var badge = document.getElementById('user-badge');
+        if (overlay) overlay.classList.remove('open');
+        if (badge) badge.style.display = '';
+    }
+
     /** 绑定费率相关按钮事件 */
     function bindFeeControls() {
         // 费率模式单选按钮
@@ -514,21 +655,32 @@
                 var mode = this.value;
                 var uniformWrap     = document.getElementById('fee_uniform_wrap');
                 var perProductWrap  = document.getElementById('fee_per_product_wrap');
-                var feeTableSection = document.getElementById('fee_table_section');
                 if (uniformWrap)    uniformWrap.style.display    = (mode === 'uniform')     ? 'flex' : 'none';
                 if (perProductWrap) perProductWrap.style.display  = (mode === 'per_product') ? 'flex' : 'none';
-                // 切换为按品种时自动展开费率表（如已有数据）
-                if (mode === 'per_product' && feeTableSection) {
-                    if (_feeTableData.length) feeTableSection.style.display = '';
-                } else if (feeTableSection && mode !== 'per_product') {
-                    feeTableSection.style.display = 'none';
-                }
             });
         });
 
-        // 获取费率按钮
-        var fetchBtn = document.getElementById('fetch_fee_btn');
+        // 打开费率抽屉
+        var trigger = document.getElementById('group-fee-drawer-trigger');
+        if (trigger) trigger.addEventListener('click', openFeeDrawer);
+
+        // 关闭费率抽屉
+        var closeBtn = document.getElementById('group-fee-drawer-close');
+        if (closeBtn) closeBtn.addEventListener('click', closeFeeDrawer);
+
+        // 点击遮罩层关闭
+        var overlay = document.getElementById('group-fee-drawer');
+        if (overlay) overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) closeFeeDrawer();
+        });
+
+        // 抽屉内获取费率按钮
+        var fetchBtn = document.getElementById('drawer_fetch_fee_btn');
         if (fetchBtn) fetchBtn.addEventListener('click', function() { fetchFeeTable(false); });
+
+        // 抽屉内恢复原始值按钮
+        var resetBtn = document.getElementById('drawer_reset_fee_btn');
+        if (resetBtn) resetBtn.addEventListener('click', resetAllFees);
 
         // 平今/平昨切换按钮
         var ctBtn = document.getElementById('use_closetoday_btn');
@@ -536,13 +688,6 @@
             _useCloseToday = !_useCloseToday;
             updateClosetodayUI();
             if (_feeTableData.length) renderFeeTable();
-        });
-
-        // 折叠品种表按钮
-        var collapseBtn = document.getElementById('collapse_fee_table_btn');
-        if (collapseBtn) collapseBtn.addEventListener('click', function() {
-            var section = document.getElementById('fee_table_section');
-            if (section) section.style.display = 'none';
         });
     }
 

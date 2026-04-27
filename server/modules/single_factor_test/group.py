@@ -29,9 +29,9 @@ def run_group_test():
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 
-        factor = next((f for f in tester.factors if f.alias == factor_alias), None)
+        factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
         if not factor:
-            return jsonify({'success': False, 'error': f'未找到因子 {factor_alias}'}), 404
+            return jsonify({'success': False, 'error': f'未找到因子 {factor_alias}，可用因子: {[(f.alias, f.name) for f in tester.factors]}'}), 404
 
         time_range = None
         if start_date and end_date:
@@ -124,8 +124,7 @@ def run_group_test():
 
         return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups})
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
         if _gt_token is not None:
             _active_tester.reset(_gt_token)
