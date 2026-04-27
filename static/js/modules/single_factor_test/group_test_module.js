@@ -75,27 +75,46 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     }
 
-    // ---------- 获取当前上下文（与 IC 模块联动） ----------
+    // ---------- 获取当前上下文（从 group test 自己的两级选项卡） ----------
     function getCurrentContext() {
+        // 优先从 group test 自己的选项卡获取
+        var activeGroupSubTab = document.querySelector('#groupTab .nav-link.active');
+        if (activeGroupSubTab) {
+            var panelId = activeGroupSubTab.getAttribute('data-bs-target');
+            if (panelId) {
+                var match = panelId.match(/group-panel-(\d+)/);
+                if (match) {
+                    var subId = match[1];
+                    var panel = document.querySelector(panelId);
+                    if (panel) {
+                        var activeFactorTab = panel.querySelector('.factor-tabs-container .nav-link.active');
+                        if (activeFactorTab) {
+                            var factorName = activeFactorTab.textContent.trim();
+                            var factorInfo = window.factorList ? window.factorList.find(function(f) { return f.name === factorName || f.alias === factorName; }) : null;
+                            if (factorInfo) {
+                                return { submission_id: subId, factor_alias: factorInfo.alias };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 回退到 IC 测试的当前选项卡
         var activeIcTab = document.querySelector('#icTab .nav-link.active');
         if (!activeIcTab) return null;
-        var panelId = activeIcTab.getAttribute('data-bs-target');
-        if (!panelId) return null;
-        var panel = document.querySelector(panelId);
-        if (!panel) return null;
-        
-        var match = panelId.match(/ic-panel-(\d+)/);
-        if (!match) return null;
-        var subId = match[1];
-        
-        var activeFactorTab = panel.querySelector('.factor-tabs-container .nav-link.active');
-        if (!activeFactorTab) return null;
-        var factorName = activeFactorTab.textContent.trim();
-        
-        var factorInfo = window.factorList ? window.factorList.find(function(f) { return f.name === factorName || f.alias === factorName; }) : null;
-        if (!factorInfo) return null;
-        
-        return { submission_id: subId, factor_alias: factorInfo.alias };
+        var icPanelId = activeIcTab.getAttribute('data-bs-target');
+        if (!icPanelId) return null;
+        var icMatch = icPanelId.match(/ic-panel-(\d+)/);
+        if (!icMatch) return null;
+        var icSubId = icMatch[1];
+        var icPanel = document.querySelector(icPanelId);
+        if (!icPanel) return null;
+        var activeICFactorTab = icPanel.querySelector('.factor-tabs-container .nav-link.active');
+        if (!activeICFactorTab) return null;
+        var icFactorName = activeICFactorTab.textContent.trim();
+        var icFactorInfo = window.factorList ? window.factorList.find(function(f) { return f.name === icFactorName || f.alias === icFactorName; }) : null;
+        if (!icFactorInfo) return null;
+        return { submission_id: icSubId, factor_alias: icFactorInfo.alias };
     }
 
     // ---------- 清空测试结果 ----------
@@ -379,11 +398,11 @@
         });
     }
 
-    // ---------- 监听 IC 模块的选项卡切换，自动清空结果 ----------
+    // ---------- 监听 IC 模块及自身选项卡切换，自动清空结果 ----------
     function bindICModuleEvents() {
         document.addEventListener('shown.bs.tab', function(event) {
             var target = event.target;
-            if (target.closest('#icTab') || target.closest('.factor-tabs-container')) {
+            if (target.closest('#icTab') || target.closest('#groupTab') || target.closest('.factor-tabs-container')) {
                 clearResults();
             }
         });
@@ -534,14 +553,77 @@
         bindICModuleEvents();
         bindTimeSyncListeners();
         bindFeeControls();
-        syncFromTimeModule();  // 初始自动填充（若时间模块已加载）
-        // 时间模块异步加载完默认值后再同步一次
+        syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
-        // 若时间模块尚未填充（脚本顺序问题），延迟再同步一次
         setTimeout(syncFromTimeModule, 0);
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
+
+        // 如果已有 submissions，渲染两级选项卡
+        if (window.submissions && window.submissions.length > 0) {
+            window.renderGroupTabs(window.submissions);
+        }
     }
+
+    // 暴露给外部调用：渲染分组测试的两级选项卡（submission → factor）
+    window.renderGroupTabs = function(submissions) {
+        var container = document.getElementById('group-tab-container');
+        var runBtn = document.getElementById('run_group_test_btn');
+        if (!container) return;
+        if (!submissions || submissions.length === 0) {
+            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
+            if (runBtn) runBtn.style.display = 'none';
+            return;
+        }
+        if (runBtn) runBtn.style.display = '';
+
+        var factorList = window.factorList || [];
+        var tabsHtml = '<ul class="nav nav-tabs" id="groupTab" role="tablist">';
+        var panelsHtml = '<div class="tab-content" id="groupTabContent">';
+        submissions.forEach(function(sub, idx) {
+            var activeClass = idx === 0 ? 'active' : '';
+            var showClass = idx === 0 ? 'show active' : '';
+            var tabId = 'group-tab-' + sub.id;
+            var panelId = 'group-panel-' + sub.id;
+            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.label || ('测试器' + (idx+1))) + '</button></li>';
+
+            // 第二级：因子选项卡
+            var factorTabsHtml = '';
+            var factorPanesHtml = '';
+            if (factorList.length > 0) {
+                factorTabsHtml = '<ul class="nav nav-tabs factor-tabs-container" style="margin-top:12px;">';
+                factorPanesHtml = '<div class="tab-content">';
+                factorList.forEach(function(f, fi) {
+                    var fActive = fi === 0 ? 'active' : '';
+                    var fShow = fi === 0 ? 'show active' : '';
+                    var fTabId = 'group-factor-tab-' + sub.id + '-' + fi;
+                    var fPaneId = 'group-factor-pane-' + sub.id + '-' + fi;
+                    factorTabsHtml += '<li class="nav-item"><button class="nav-link ' + fActive + '" id="' + fTabId + '" data-bs-toggle="tab" data-bs-target="#' + fPaneId + '" type="button" role="tab">' + (f.alias || f.name) + '</button></li>';
+                    factorPanesHtml += '<div class="tab-pane fade ' + fShow + '" id="' + fPaneId + '" role="tabpanel">' +
+                        '<div style="color:#888;padding:16px;text-align:center;">已选择因子 <b>' + (f.alias || f.name) + '</b>，配置好参数后点击上方"运行分组测试"</div>' +
+                        '</div>';
+                });
+                factorTabsHtml += '</ul>';
+                factorPanesHtml += '</div>';
+            }
+
+            panelsHtml += '<div class="tab-pane fade ' + showClass + '" id="' + panelId + '" role="tabpanel">' +
+                factorTabsHtml + factorPanesHtml +
+                '</div>';
+        });
+        tabsHtml += '</ul>';
+        panelsHtml += '</div>';
+        container.innerHTML = tabsHtml + panelsHtml;
+
+        // 初始化 Bootstrap 选项卡
+        if (typeof bootstrap !== 'undefined') {
+            var tabTriggers = document.querySelectorAll('#groupTab button[data-bs-toggle="tab"]');
+            tabTriggers.forEach(function(trigger) {
+                var tab = new bootstrap.Tab(trigger);
+                trigger.addEventListener('click', function(e) { e.preventDefault(); tab.show(); });
+            });
+        }
+    };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

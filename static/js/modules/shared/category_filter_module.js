@@ -15,9 +15,24 @@
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
             html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
-            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e1e4e8;">';
-            html += '    <span style="font-size:13px;"><i class="fas fa-grip-vertical" style="margin-right:8px; color:#888;"></i> <strong>#' + (index+1) + '</strong> ' + sub.factor_tester_serial + ' (' + sub.timestamp + ')' + (sub.count_desc ? ' <span style="color:#d00;">' + sub.count_desc + '</span>' : '') + '</span>';
-            html += '    <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
+            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; display:flex; flex-direction:column; gap:4px; border-bottom:1px solid #e1e4e8;">';
+            var labelHtml = sub.label
+                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;">' + sub.label + '</span>'
+                : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
+            var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">';
+            // 第一行：序号 + 序列号 + 时间 + 删除按钮
+            html += '    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">';
+            html += '      <span style="font-size:13px;display:flex;align-items:center;gap:4px;">'
+                + '<i class="fas fa-grip-vertical" style="margin-right:6px; color:#888; flex-shrink:0;"></i>'
+                + '<strong style="flex-shrink:0;">#' + (index+1) + '</strong>'
+                + '<span style="flex-shrink:0;margin:0 4px;">' + sub.factor_tester_serial + '</span>'
+                + '<span style="color:#888;font-size:12px;flex-shrink:0;">(' + sub.timestamp + ')</span>'
+                + (sub.count_desc ? ' <span style="color:#d00;flex-shrink:0;">' + sub.count_desc + '</span>' : '')
+                + '</span>';
+            html += '      <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
+            html += '    </div>';
+            // 第二行：标签名称
+            html += '    <div style="display:flex;align-items:center;">' + labelHtml + labelInput + '</div>';
             html += '  </div>';
             html += '  <div style="padding:8px 12px;">';
             html += '    <table style="width:100%; border-collapse:collapse;">';
@@ -154,6 +169,52 @@
         if (typeof window.renderICTabs === 'function') {
             window.renderICTabs(submissions);
         }
+        if (typeof window.renderGroupTabs === 'function') {
+            window.renderGroupTabs(submissions);
+        }
+
+        // ── 提交名称（label）行内编辑 ────────────────────────────────────────
+        function commitLabelEdit($inp) {
+            var idx = parseInt($inp.data('index'), 10);
+            var val = $inp.val().trim();
+            submissions[idx].label = val || '';
+            $inp.hide();
+            // Update display without full re-render
+            var $lbl = $('.sub-label-text[data-index="' + idx + '"], .sub-label-add[data-index="' + idx + '"]');
+            if (val) {
+                $lbl.replaceWith('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;margin-right:4px;">' + val + '</span>');
+            } else {
+                $lbl.replaceWith('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
+            }
+            // Notify IC and Group modules
+            if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
+            if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+        }
+
+        $(document).off('click.sublabel').on('click.sublabel', '.sub-label-text, .sub-label-add', function() {
+            var idx = $(this).data('index');
+            var $inp = $('.sub-label-input[data-index="' + idx + '"]');
+            $(this).hide();
+            $inp.show().focus().select();
+        });
+
+        $(document).off('keydown.sublabel').on('keydown.sublabel', '.sub-label-input', function(e) {
+            if (e.key === 'Enter') { commitLabelEdit($(this)); }
+            if (e.key === 'Escape') {
+                var idx = $(this).data('index');
+                $(this).hide();
+                var val = submissions[idx] ? (submissions[idx].label || '') : '';
+                var $lbl = val
+                    ? $('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;margin-right:4px;">' + val + '</span>')
+                    : $('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
+                $(this).before($lbl);
+            }
+        });
+
+        $(document).off('blur.sublabel').on('blur.sublabel', '.sub-label-input', function() {
+            if ($(this).is(':visible')) commitLabelEdit($(this));
+        });
+        // ── 提交名称编辑 END ─────────────────────────────────────────────────
     }
 
     // 加载指定路径的产品详情
@@ -384,56 +445,72 @@
 
         populateTplSelect();
 
-        // 加载模板：把模板中的路径作为新提交递交一次（复用 submit 流程）
+        // 加载模板：清空当前所有提交，批量重新提交模板中存储的所有 submission
         $('#tpl-load-btn').on('click', function() {
             var id = $('#tpl-select').val();
             if (!id) { tplStatus('请先选择一个模板', false); return; }
             fetch('/api/path_templates/' + id)
                 .then(r => r.json())
-                .then(function(data) {
+                .then(async function(data) {
                     if (!data.success) { tplStatus('加载失败: ' + data.error, false); return; }
-                    var paths = data.template.paths;
-                    // 复用 submit 接口
-                    var id_time = Date.now();
-                    fetch('/submit_selected_products', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ selected_paths: paths, id_time: id_time })
-                    })
-                    .then(r => r.json())
-                    .then(function(res) {
-                        if (!res.success) { tplStatus('提交失败: ' + res.error, false); return; }
-                        var timeRange = getCurrentTimeRange();
-                        submissions.push({
-                            id: id_time,
-                            paths: res.selected_paths || paths,
-                            pathsDescMap: {},
-                            factor_tester_name: res.factor_tester_name,
-                            factor_tester_serial: res.factor_tester_serial,
-                            count_desc: res.count_desc,
-                            timestamp: new Date().toLocaleTimeString(),
-                            start_date: timeRange.start_date,
-                            end_date: timeRange.end_date,
-                            start_time: timeRange.start_time,
-                            end_time: timeRange.end_time
-                        });
-                        renderHistory();
-                        tplStatus('✓ 模板已加载', true);
-                        if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
-                    });
+                    var tplSubs = data.template.submissions;
+                    if (!tplSubs || tplSubs.length === 0) { tplStatus('该模板没有提交记录', false); return; }
+                    if (!confirm('加载模板将保留当前全部提交记录，确定继续？')) return;
+                    // 清空后端
+                    var clr = await fetch('/clear_all_submissions', { method: 'POST' });
+                    var clrData = await clr.json();
+                    if (!clrData.success) { tplStatus('清空失败: ' + clrData.error, false); return; }
+                    // 清空前端
+                    submissions.length = 0;
+                    renderHistory();
+                    // 逐条重新提交
+                    var timeRange = getCurrentTimeRange();
+                    for (var si = 0; si < tplSubs.length; si++) {
+                        var tplSub = tplSubs[si];
+                        var id_time = Date.now() + si;
+                        try {
+                            var res = await fetch('/submit_selected_products', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time })
+                            }).then(r => r.json());
+                            if (!res.success) { tplStatus('提交失败: ' + res.error, false); continue; }
+                            submissions.push({
+                                id: id_time,
+                                paths: res.selected_paths || tplSub.paths,
+                                pathsDescMap: {},
+                                factor_tester_name: res.factor_tester_name,
+                                factor_tester_serial: res.factor_tester_serial,
+                                count_desc: res.count_desc,
+                                timestamp: new Date().toLocaleTimeString(),
+                                start_date: timeRange.start_date,
+                                end_date: timeRange.end_date,
+                                start_time: timeRange.start_time,
+                                end_time: timeRange.end_time,
+                                label: tplSub.label || ''
+                            });
+                        } catch(e) { tplStatus('提交异常: ' + e.message, false); }
+                    }
+                    renderHistory();
+                    tplStatus('✓ 模板已加载（' + submissions.length + '条提交）', true);
+                    if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
+                    if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
                 });
         });
 
+        function collectSubmissionsForTemplate() {
+            return submissions.map(function(s) { return { label: s.label || '', paths: s.paths.slice() }; });
+        }
+
         // 另存为新模板
         $('#tpl-save-btn').on('click', function() {
-            var paths = collectAllCurrentPaths();
-            if (paths.length === 0) { tplStatus('当前没有路径可保存', false); return; }
+            if (submissions.length === 0) { tplStatus('当前没有提交记录可保存', false); return; }
             var name = prompt('请输入模板名称：');
             if (!name || !name.trim()) return;
             fetch('/api/path_templates', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name: name.trim(), paths: paths })
+                body: JSON.stringify({ name: name.trim(), submissions: collectSubmissionsForTemplate() })
             })
             .then(r => r.json())
             .then(function(data) {
@@ -448,16 +525,15 @@
             });
         });
 
-        // 覆盖更新选中模板的路径
+        // 覆盖更新选中模板的提交列表
         $('#tpl-update-btn').on('click', function() {
             var id = $('#tpl-select').val();
             if (!id) { tplStatus('请先选择一个模板', false); return; }
-            var paths = collectAllCurrentPaths();
-            if (paths.length === 0) { tplStatus('当前没有路径可保存', false); return; }
+            if (submissions.length === 0) { tplStatus('当前没有提交记录可保存', false); return; }
             fetch('/api/path_templates/' + id, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ paths: paths })
+                body: JSON.stringify({ submissions: collectSubmissionsForTemplate() })
             })
             .then(r => r.json())
             .then(function(data) {
@@ -547,5 +623,20 @@
         });
 
         // ── 路径模板管理 END ──────────────────────────────────────────────────
+
+        // 暴露给全局模板模块
+        window._getCurrentSubmissions = function() {
+            return submissions;
+        };
+        window._applySubmissions = function(newSubmissions) {
+            submissions = newSubmissions;
+            window.submissions = newSubmissions;
+            expandedState = {};
+            renderHistory();
+            if (typeof updateCategorySummary === 'function') updateCategorySummary();
+            // 触发 IC/Group 模块刷新
+            if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
+            if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+        };
     });
 })();

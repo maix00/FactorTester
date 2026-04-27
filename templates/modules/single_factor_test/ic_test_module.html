@@ -1,3 +1,36 @@
+<!-- 收益率频率设置摘要行 -->
+<div class="setting-summary-row" id="ic-freq-summary-row" onclick="document.getElementById('ic-freq-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+    <span class="setting-summary-label">📊 收益率频率设置</span>
+    <span class="setting-summary-value" id="ic-freq-summary-text">默认使用因子$F</span>
+    <span class="setting-summary-arrow">编辑 ▶</span>
+</div>
+
+<!-- 收益率频率设置抽屉 -->
+<div class="settings-drawer-overlay" id="ic-freq-drawer"
+     onclick="if(event.target===this){this.classList.remove('open');document.getElementById('user-badge').style.display=''}">
+    <div class="settings-drawer-panel">
+        <button class="drawer-close-btn"
+                onclick="document.getElementById('ic-freq-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
+        <div class="module">
+            <div class="section-title">收益率频率设置</div>
+            <div style="color:#666;font-size:13px;margin-bottom:12px;">为每个因子设置收益率频率($RF)，留空则默认使用因子$F。</div>
+            <div class="ic-freq-actions" style="margin-bottom:10px;display:flex;gap:8px;">
+                <button class="btn btn-sm btn-outline-primary" id="ic-freq-select-all">全选</button>
+                <button class="btn btn-sm btn-outline-primary" id="ic-freq-deselect-all">全不选</button>
+                <button class="btn btn-sm btn-outline-primary" id="ic-freq-reset">清空收益率频率</button>
+            </div>
+            <div id="ic-freq-table-wrap" style="max-height:60vh;overflow-y:auto;">
+                <table class="factor-config-table" style="width:100%;">
+                    <thead><tr><th>因子名称</th><th>收益率频率($RF，留空默认使用因子$F)</th></tr></thead>
+                    <tbody id="ic-freq-table-body">
+                        <tr><td colspan="2" style="color:#888;text-align:center;">暂无因子数据</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="module" id="ic_test_module" style="margin-top:24px;">
     <div class="section-title">IC测试</div>
     <div id="ic-tab-container">
@@ -106,34 +139,11 @@
         border-radius: 4px;
         border: 1px solid #ccc;
     }
-    /* 因子配置面板样式 */
-    .factor-config-panel {
-        margin: 12px 0;
-        border: 1px solid #e1e4e8;
-        border-radius: 8px;
-        background: #fafbfc;
-    }
-    .factor-config-header {
-        padding: 8px 12px;
-        background: #f1f3f5;
-        cursor: pointer;
-        user-select: none;
-        font-weight: 500;
+    /* 收益率频率抽屉表格样式 */
+    .ic-freq-actions {
+        margin-bottom: 8px;
         display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-radius: 8px 8px 0 0;
-    }
-    .factor-config-header:hover {
-        background: #e9ecef;
-    }
-    .factor-config-content {
-        padding: 12px;
-        display: none;
-        border-top: 1px solid #e1e4e8;
-    }
-    .factor-config-content.expanded {
-        display: block;
+        gap: 8px;
     }
     .factor-config-table {
         width: 100%;
@@ -148,11 +158,6 @@
         background: #f8f9fa;
         font-weight: 600;
     }
-    .factor-config-actions {
-        margin-bottom: 8px;
-        display: flex;
-        gap: 8px;
-    }
 </style>
 
 <!-- 依赖库 -->
@@ -164,4 +169,4 @@
 <script>
     window.factorFamilyAlias = '{{ factor_family_alias }}';
 </script>
-<script src="{{ url_for('static', filename='js/ic_test_module.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/ic_test_module.js') }}"></script>

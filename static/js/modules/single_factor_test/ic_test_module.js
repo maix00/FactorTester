@@ -114,6 +114,7 @@
                     yAxis: 1,
                     color: '#FF5722',
                     dataGrouping: { enabled: false },
+                    connectNulls: true,
                     marker: { enabled: true, radius: 2 }
                 },
                 {
@@ -124,6 +125,7 @@
                     yAxis: 2,
                     color: '#4CAF50',
                     dataGrouping: { enabled: false },
+                    connectNulls: true,
                     marker: { enabled: true, radius: 2 }
                 }
             ],
@@ -334,9 +336,9 @@
         const recalcCheckbox = document.getElementById(`recalc-checkbox-${subId}`);
         const re_calc = recalcCheckbox ? recalcCheckbox.checked : false;
 
-        // 收集选中的因子及频率
+        // 收集选中的因子及频率（从全局抽屉读取）
         const selectedFactors = [];
-        const checkboxes = document.querySelectorAll(`#factor-config-${subId} .factor-checkbox:checked`);
+        const checkboxes = document.querySelectorAll('#ic-freq-table-body .factor-checkbox:checked');
         if (checkboxes.length === 0) {
             statusSpan.innerText = '请至少选择一个因子';
             statusSpan.style.color = '#d40000';
@@ -344,12 +346,8 @@
         }
         checkboxes.forEach(cb => {
             const alias = cb.getAttribute('data-factor-alias');
-            const configRoot = document.getElementById(`factor-config-${subId}`);
-            let freqInput = null;
-            if (configRoot) {
-                const allFreqInputs = configRoot.querySelectorAll('.factor-return-freq-input');
-                freqInput = Array.from(allFreqInputs).find(input => input.getAttribute('data-factor-alias') === alias) || null;
-            }
+            const allFreqInputs = document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input');
+            const freqInput = Array.from(allFreqInputs).find(input => input.getAttribute('data-factor-alias') === alias) || null;
             const return_freq = freqInput ? freqInput.value.trim() : '';
             selectedFactors.push({ alias, return_freq });
         });
@@ -422,10 +420,21 @@
         }
     };
 
-    // 生成因子配置面板 HTML
-    function buildFactorConfigPanel(subId, factors) {
-        if (!factors || factors.length === 0) return '<div class="ic-empty">暂无因子数据，请先选择因子家族。</div>';
+    // 填充收益率频率设置抽屉
+    function populateFreqDrawer(factors) {
+        const tbody = document.getElementById('ic-freq-table-body');
+        const summaryText = document.getElementById('ic-freq-summary-text');
+        const summaryRow = document.getElementById('ic-freq-summary-row');
+        if (!tbody || !summaryText) return;
+        if (!factors || factors.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
+            summaryText.textContent = '暂无因子数据';
+            return;
+        }
+        // 如果摘要行隐藏，显示它
+        if (summaryRow) summaryRow.style.display = '';
         let rows = '';
+        let customCount = 0;
         factors.forEach(f => {
             const defaultReturnFreq = f.default_return_freq || '';
             const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
@@ -445,32 +454,37 @@
                 </td>
             </tr>`;
         });
-        return `
-            <div class="factor-config-panel" id="factor-config-${subId}">
-                <div class="factor-config-header" onclick="document.getElementById('factor-config-content-${subId}').classList.toggle('expanded')">
-                    <span>📊 因子配置 (点击展开/折叠)</span>
-                    <span>▼</span>
-                </div>
-                <div class="factor-config-content" id="factor-config-content-${subId}">
-                    <div class="factor-config-actions">
-                        <button class="btn btn-sm btn-outline-primary" id="select-all-${subId}">全选</button>
-                        <button class="btn btn-sm btn-outline-primary" id="deselect-all-${subId}">全不选</button>
-                        <button class="btn btn-sm btn-outline-primary" id="reset-freq-${subId}">清空收益率频率</button>
-                    </div>
-                    <table class="factor-config-table">
-                        <thead><tr><th>因子名称</th><th>收益率频率($RF，留空默认使用因子$F)</th></tr></thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-            </div>
-            <script>
-                document.getElementById('select-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = true); };
-                document.getElementById('deselect-all-' + '${subId}').onclick = () => { document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-checkbox').forEach(cb => cb.checked = false); };
-                document.getElementById('reset-freq-' + '${subId}').onclick = () => {
-                    document.querySelectorAll('#factor-config-' + '${subId}' + ' .factor-return-freq-input').forEach(input => input.value = '');
-                };
-            </script>
-        `;
+        tbody.innerHTML = rows;
+        // 更新摘要
+        updateFreqSummary();
+        // 监听输入变化更新摘要
+        tbody.querySelectorAll('.factor-return-freq-input').forEach(inp => {
+            inp.addEventListener('input', updateFreqSummary);
+        });
+        tbody.querySelectorAll('.factor-checkbox').forEach(cb => {
+            cb.addEventListener('change', updateFreqSummary);
+        });
+    }
+    
+    function updateFreqSummary() {
+        const summaryText = document.getElementById('ic-freq-summary-text');
+        if (!summaryText) return;
+        const tbody = document.getElementById('ic-freq-table-body');
+        if (!tbody) return;
+        const inputs = tbody.querySelectorAll('.factor-return-freq-input');
+        let customCount = 0;
+        inputs.forEach(inp => { if (inp.value.trim()) customCount++; });
+        const checkedCount = tbody.querySelectorAll('.factor-checkbox:checked').length;
+        if (customCount > 0) {
+            summaryText.textContent = `${customCount}个因子设置了自定义频率，${checkedCount}个因子参与测试`;
+        } else {
+            summaryText.textContent = `默认使用因子$F，${checkedCount}个因子参与测试`;
+        }
+    }
+
+    // 弃用旧的内联面板生成，保留兼容性（返回空字符串）
+    function buildFactorConfigPanel(subId, factors) {
+        return '';
     }
 
     // 渲染主选项卡（外部调用）
@@ -483,6 +497,8 @@
         }
         // 获取因子列表（如果尚未获取）
         if (factorList.length === 0) await fetchFactorList();
+        // 填充收益率频率抽屉（全局，所有tab共享）
+        populateFreqDrawer(factorList);
         let tabsHtml = '<ul class="nav nav-tabs" id="icTab" role="tablist">';
         let panelsHtml = '<div class="tab-content" id="icTabContent">';
         submissions.forEach((sub, idx) => {
@@ -490,7 +506,7 @@
             const showClass = idx === 0 ? 'show active' : '';
             const tabId = `ic-tab-${sub.id}`;
             const panelId = `ic-panel-${sub.id}`;
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.factor_tester_serial || ('测试器' + (idx+1))}</button></li>`;
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.label || sub.factor_tester_serial || ('测试器' + (idx+1))}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
@@ -501,7 +517,6 @@
                             </label>
                             <span id="ic-status-${sub.id}" class="ic-status"></span>
                         </div>
-                        ${buildFactorConfigPanel(sub.id, factorList)}
                         <div id="ic-result-${sub.id}"></div>
                         <div id="chart-container-${sub.id}" style="width:100%; margin-top:14px;"></div>
                     </div>
@@ -518,10 +533,33 @@
                 trigger.addEventListener('click', (e) => { e.preventDefault(); tab.show(); });
             });
         }
+        if (typeof window.renderGroupTabs === 'function') {
+            window.renderGroupTabs(submissions);
+        }
     };
 
     // 页面加载完成后，如果已有 submissions，则渲染
+    // 收益率频率抽屉的按钮事件
+    function initFreqDrawerButtons() {
+        const selectAll = document.getElementById('ic-freq-select-all');
+        const deselectAll = document.getElementById('ic-freq-deselect-all');
+        const resetFreq = document.getElementById('ic-freq-reset');
+        if (selectAll) selectAll.onclick = () => {
+            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = true);
+            updateFreqSummary();
+        };
+        if (deselectAll) deselectAll.onclick = () => {
+            document.querySelectorAll('#ic-freq-table-body .factor-checkbox').forEach(cb => cb.checked = false);
+            updateFreqSummary();
+        };
+        if (resetFreq) resetFreq.onclick = () => {
+            document.querySelectorAll('#ic-freq-table-body .factor-return-freq-input').forEach(input => input.value = '');
+            updateFreqSummary();
+        };
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
+        initFreqDrawerButtons();
         if (window.submissions && window.submissions.length) {
             await window.renderICTabs(window.submissions);
         }
@@ -531,10 +569,14 @@
     window.refreshICModule = async function() {
         console.log('刷新 IC 模块因子列表');
         await fetchFactorList();  // 重新获取因子列表
+        populateFreqDrawer(factorList);  // 刷新收益率频率抽屉
         if (window.submissions && window.submissions.length) {
             await window.renderICTabs(window.submissions);
         }
         window.factorList = factorList;
+        if (typeof window.renderGroupTabs === 'function' && window.submissions && window.submissions.length) {
+            window.renderGroupTabs(window.submissions);
+        }
     };
 
     window.factorList = factorList;

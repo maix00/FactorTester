@@ -313,4 +313,168 @@
 
     // 确保 DateUtils 已加载后再初始化
     waitForDateUtils(init);
+
+    // ── 时间模板管理 ─────────────────────────────────────────────────────────
+    var $tSel  = document.getElementById('time-tpl-select');
+    var $tLbl  = document.getElementById('time-tpl-name-label');
+    var $tInp  = document.getElementById('time-tpl-name-input');
+    var $tStat = document.getElementById('time-tpl-status');
+
+    if (!$tSel) return;
+
+    function tTplStatus(msg, ok) {
+        $tStat.textContent = msg;
+        $tStat.style.color = ok ? '#28a745' : '#d40000';
+        setTimeout(function() { if ($tStat.textContent === msg) $tStat.textContent = ''; }, 2500);
+    }
+
+    function collectCurrentTimeData() {
+        return {
+            start_date:        startYear.value + '-' + pad(startMonth.value) + '-' + pad(startDay.value),
+            start_time:        pad(startHour.value) + ':' + pad(startMinute.value),
+            end_date:          endYear.value + '-' + pad(endMonth.value) + '-' + pad(endDay.value),
+            end_time:          pad(endHour.value) + ':' + pad(endMinute.value),
+            timezone:          timezoneInput.value,
+            is_trading_day:    isTradingDayCheck.checked,
+            is_cn_futures_day: isCnFuturesDayCheck.checked,
+            is_cn_futures_night: isCnFuturesNightCheck.checked
+        };
+    }
+
+    function applyTimeData(td) {
+        if (!td) return;
+        var sd = (td.start_date || '').split('-');
+        var ed = (td.end_date   || '').split('-');
+        var st = (td.start_time || '').split(':');
+        var et = (td.end_time   || '').split(':');
+        if (sd.length === 3) { startYear.value = sd[0]; startMonth.value = +sd[1]; startDay.value = +sd[2]; }
+        if (ed.length === 3) { endYear.value   = ed[0]; endMonth.value   = +ed[1]; endDay.value   = +ed[2]; }
+        if (st.length === 2) { startHour.value = st[0]; startMinute.value = st[1]; }
+        if (et.length === 2) { endHour.value   = et[0]; endMinute.value   = et[1]; }
+        if (td.timezone != null) timezoneInput.value = td.timezone;
+        if (td.is_trading_day    != null) isTradingDayCheck.checked    = td.is_trading_day;
+        if (td.is_cn_futures_day != null) isCnFuturesDayCheck.checked  = td.is_cn_futures_day;
+        if (td.is_cn_futures_night != null) isCnFuturesNightCheck.checked = td.is_cn_futures_night;
+        updateCurrentSettings();
+    }
+
+    function populateTimeTplSelect() {
+        var prev = $tSel.value;
+        fetch('/api/time_templates')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                while ($tSel.options.length > 1) $tSel.remove(1);
+                if (data.success && data.templates) {
+                    data.templates.forEach(function(t) {
+                        var opt = document.createElement('option');
+                        opt.value = t.id; opt.textContent = t.name;
+                        $tSel.appendChild(opt);
+                    });
+                }
+                if (prev) $tSel.value = prev;
+                updateTimeTplNameDisplay();
+            });
+    }
+
+    function updateTimeTplNameDisplay() {
+        var id = $tSel.value;
+        if (id) { $tLbl.textContent = $tSel.options[$tSel.selectedIndex].text; $tLbl.style.display = ''; }
+        else    { $tLbl.style.display = 'none'; }
+    }
+
+    $tSel.addEventListener('change', function() {
+        $tInp.style.display = 'none'; updateTimeTplNameDisplay();
+    });
+
+    $tLbl.addEventListener('dblclick', function() {
+        var id = $tSel.value; if (!id) return;
+        $tInp.value = $tLbl.textContent;
+        $tInp.style.display = ''; $tInp.focus();
+        $tLbl.style.display = 'none';
+    });
+
+    function commitTimeTplRename(e) {
+        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== 'Escape') return;
+        if (e.key === 'Escape') { $tInp.style.display = 'none'; $tLbl.style.display = ''; return; }
+        var id = $tSel.value; if (!id) { $tInp.style.display = 'none'; return; }
+        var newName = $tInp.value.trim();
+        if (!newName) { $tInp.style.display = 'none'; $tLbl.style.display = ''; return; }
+        fetch('/api/time_templates/' + id, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: newName })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            $tInp.style.display = 'none';
+            if (data.success) {
+                tTplStatus('✓ 重命名成功', true);
+                populateTimeTplSelect();
+                setTimeout(function() { $tSel.value = id; updateTimeTplNameDisplay(); }, 300);
+            } else {
+                $tLbl.style.display = ''; tTplStatus('重命名失败: ' + data.error, false);
+            }
+        });
+    }
+    $tInp.addEventListener('keydown', commitTimeTplRename);
+    $tInp.addEventListener('blur',    commitTimeTplRename);
+
+    document.getElementById('time-tpl-load-btn').addEventListener('click', function() {
+        var id = $tSel.value;
+        if (!id) { tTplStatus('请先选择一个模板', false); return; }
+        fetch('/api/time_templates/' + id)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.success) { tTplStatus('加载失败: ' + data.error, false); return; }
+                applyTimeData(data.template.time_data);
+                confirmBtn.disabled = false;
+                confirmBtn.click();
+                tTplStatus('✓ 模板已加载', true);
+            });
+    });
+
+    document.getElementById('time-tpl-save-btn').addEventListener('click', function() {
+        var td = collectCurrentTimeData();
+        var name = prompt('请输入模板名称：');
+        if (!name || !name.trim()) return;
+        fetch('/api/time_templates', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: name.trim(), time_data: td })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.success) {
+                tTplStatus('✓ 模板已保存', true);
+                populateTimeTplSelect();
+                setTimeout(function() { $tSel.value = data.id; updateTimeTplNameDisplay(); }, 300);
+            } else { tTplStatus('保存失败: ' + data.error, false); }
+        });
+    });
+
+    document.getElementById('time-tpl-update-btn').addEventListener('click', function() {
+        var id = $tSel.value;
+        if (!id) { tTplStatus('请先选择一个模板', false); return; }
+        var td = collectCurrentTimeData();
+        fetch('/api/time_templates/' + id, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ time_data: td })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            tTplStatus(data.success ? '✓ 模板已更新' : '更新失败: ' + data.error, data.success);
+        });
+    });
+
+    document.getElementById('time-tpl-delete-btn').addEventListener('click', function() {
+        var id = $tSel.value;
+        if (!id) { tTplStatus('请先选择一个模板', false); return; }
+        var name = $tSel.options[$tSel.selectedIndex].text;
+        if (!confirm('确定删除模板「' + name + '」？')) return;
+        fetch('/api/time_templates/' + id, { method: 'DELETE' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) { tTplStatus('✓ 模板已删除', true); populateTimeTplSelect(); }
+                else { tTplStatus('删除失败: ' + data.error, false); }
+            });
+    });
+
+    populateTimeTplSelect();
+    // ── 时间模板管理 END ──────────────────────────────────────────────────────
+
 })();

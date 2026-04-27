@@ -1,0 +1,32 @@
+<!-- 数学公式（始终可见） -->
+{% if math_expr %}
+<div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;">
+    $$ {{ math_expr }} $$
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+{% endif %}
+
+<!-- 因子说明摘要行（公式下方） -->
+<div class="setting-summary-row" id="latex-summary-row" onclick="(function(module,btn){var isOpen=module.style.display!=='none';module.style.display=isOpen?'none':'';btn.textContent=isOpen?'▼ 展开':'▲ 收起';})(document.getElementById('latex-content'),this.querySelector('.latex-toggle'))">
+    <span class="setting-summary-label">📖 因子说明</span>
+    <span class="setting-summary-value" id="latex-summary-text">
+        {% if description_sections %}有说明{% else %}-{% endif %}
+    </span>
+    <span class="latex-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+</div>
+
+<!-- 因子说明展开区（仅描述内容，无嵌套标题） -->
+<div id="latex-content" style="display:none;margin-bottom:10px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+    {% if description_sections %}
+        <div style="display:flex;flex-direction:column;gap:14px;">
+            {% for section in description_sections %}
+                <div style="padding:12px 14px;background:#f8fafc;border-radius:8px;border-left:4px solid #2563eb;">
+                    <div style="font-size:15px;font-weight:600;color:#1f2937;margin-bottom:6px;">{{ section.title }}</div>
+                    <div style="font-size:14px;line-height:1.75;color:#374151;white-space:pre-line;">{{ section.body }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <span style="color:#888;">该因子暂未提供说明</span>
+    {% endif %}
+</div>

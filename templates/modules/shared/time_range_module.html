@@ -1,3 +1,17 @@
+<!-- 时间范围摘要行 -->
+<div class="setting-summary-row" onclick="document.getElementById('time-range-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+    <span class="setting-summary-label">📅 时间范围</span>
+    <span class="setting-summary-value" id="time-summary-text">加载中…</span>
+    <span class="setting-summary-arrow">编辑 ▶</span>
+</div>
+
+<!-- 时间范围抽屉 -->
+<div class="settings-drawer-overlay" id="time-range-drawer"
+     onclick="if(event.target===this){this.classList.remove('open');document.getElementById('user-badge').style.display=''}">
+    <div class="settings-drawer-panel">
+        <button class="drawer-close-btn"
+                onclick="document.getElementById('time-range-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
+
 <div class="module" id="time_range_module" style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
     <div class="section-title" style="font-size:18px;font-weight:600;margin-bottom:20px;padding-bottom:8px;border-bottom:2px solid #e1e4e8;">⏱️ 时间范围设置</div>
     
@@ -63,6 +77,21 @@
         <span id="current_settings" style="font-weight:500;color:#24292e;"></span>
     </div>
     
+    <!-- 时间模板区 -->
+    <div id="time-template-bar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
+        <select id="time-tpl-select" style="flex:1;min-width:120px;max-width:180px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
+            <option value="">— 选择模板 —</option>
+        </select>
+        <span id="time-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;"
+            onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
+        <input id="time-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
+        <button id="time-tpl-load-btn" title="加载选中模板的时间设置" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
+        <button id="time-tpl-save-btn" title="将当前时间设置保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
+        <button id="time-tpl-update-btn" title="用当前时间设置覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
+        <button id="time-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
+        <span id="time-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
+    </div>
+
     <!-- 操作按钮 -->
     <div style="display:flex;align-items:center;gap:16px;">
         <button id="confirm_time_btn" style="background:#0078d4;color:#fff;border:none;border-radius:6px;padding:8px 24px;font-size:14px;font-weight:500;cursor:pointer;transition:0.2s;" disabled>保存设置</button>
@@ -70,5 +99,36 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/date_utils.js') }}"></script>
-<script src="{{ url_for('static', filename='js/time_range_module.js') }}"></script>
+    </div><!-- /.settings-drawer-panel -->
+</div><!-- /.settings-drawer-overlay #time-range-drawer -->
+
+<script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/time_range_module.js') }}"></script>
+<script>
+(function () {
+    function updateTimeSummary() {
+        var el = document.getElementById('time-summary-text');
+        var src = document.getElementById('current_settings');
+        if (el && src) {
+            var text = src.textContent || '未设置';
+            // 精简显示：去掉 "起始时间:" 和 ", 终末时间:"，用 → 连接
+            text = text.replace('起始时间: ', '').replace(', 终末时间: ', ' → ');
+            el.textContent = text;
+        }
+    }
+    var drawer = document.getElementById('time-range-drawer');
+    if (drawer) {
+        drawer.addEventListener('transitionend', function () {
+            if (!this.classList.contains('open')) updateTimeSummary();
+        });
+    }
+    // current_settings 由 JS 填充，用 MutationObserver 监听
+    document.addEventListener('DOMContentLoaded', function () {
+        var src = document.getElementById('current_settings');
+        if (src) {
+            new MutationObserver(updateTimeSummary).observe(src, { childList: true, characterData: true, subtree: true });
+            updateTimeSummary();
+        }
+    });
+})();
+</script>

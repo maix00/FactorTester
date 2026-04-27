@@ -1,0 +1,46 @@
+<!-- 全局设置模板摘要行 -->
+<div class="setting-summary-row" id="global-tpl-summary-row" onclick="document.getElementById('global-tpl-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+    <span class="setting-summary-label">📦 全局设置模板</span>
+    <span class="setting-summary-value" id="global-tpl-summary-text">保存/加载所有设置</span>
+    <span class="setting-summary-arrow">编辑 ▶</span>
+</div>
+
+<!-- 全局设置模板抽屉 -->
+<div class="settings-drawer-overlay" id="global-tpl-drawer"
+     onclick="if(event.target===this){this.classList.remove('open');document.getElementById('user-badge').style.display=''}">
+    <div class="settings-drawer-panel">
+        <button class="drawer-close-btn"
+                onclick="document.getElementById('global-tpl-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
+        <div class="module">
+            <div class="section-title">全局设置模板</div>
+            <div style="color:#666;font-size:13px;margin-bottom:12px;">
+                一键保存或加载当前所有设置：参数、时间范围、品种分类、收益率频率、分组测试设置。
+            </div>
+
+            <!-- 保存区域 -->
+            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:14px;">
+                <div style="font-weight:600;font-size:14px;margin-bottom:8px;">💾 保存当前设置</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="text" id="global-tpl-save-name" placeholder="模板名称（默认当前时间戳）" 
+                           style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
+                    <button class="btn btn-primary btn-sm" id="global-tpl-save-btn">保存</button>
+                </div>
+                <div id="global-tpl-save-status" style="margin-top:8px;font-size:12px;color:#888;"></div>
+            </div>
+
+            <!-- 加载区域 -->
+            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:14px;">
+                <div style="font-weight:600;font-size:14px;margin-bottom:8px;">📂 加载已保存的设置</div>
+                <div id="global-tpl-list" style="max-height:300px;overflow-y:auto;">
+                    <div style="color:#888;text-align:center;padding:10px;">加载中...</div>
+                </div>
+                <div id="global-tpl-load-status" style="margin-top:8px;font-size:12px;color:#888;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.factorFamilyAlias = '{{ factor_family_alias }}';
+</script>
+<script src="{{ url_for('static', filename='js/modules/shared/global_template_module.js') }}"></script>

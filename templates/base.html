@@ -8,15 +8,20 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <button class="shutdown-btn-topright" onclick="shutdownServer()">关闭服务器</button>
+    <div id="user-badge" style="position:fixed;top:10px;right:16px;z-index:1000;align-items:center;gap:8px;font-size:13px;color:#444;">
+        <span id="user-badge-name" style="background:#f0f4f8;border:1px solid #d0d5dd;border-radius:14px;padding:3px 12px;"></span>
+        <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
+    </div>
     <div class="container">
         <div class="sidebar">
+            <div style="margin-bottom:12px;">
+                <a href="/" style="font-size:13px;color:#4a90d9;text-decoration:none;">← 返回首页</a>
+            </div>
             <h2>单因子测试 (./Factors)</h2>
             <input type="text" id="search" placeholder="搜索因子名称..." value="{{ search_query }}" autocomplete="off">
             <div id="factor-groups">
                 {{ group_html | safe }}
             </div>
-            <button onclick="shutdownServer()">关闭服务器</button>
         </div>
         <div class="main">
             {% if main_content %}
@@ -30,6 +35,21 @@
     </div>
     
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
+    <script>
+        (async function() {
+            try {
+                const r = await fetch('/api/me');
+                const d = await r.json();
+                if (d.username) {
+                    document.getElementById('user-badge-name').textContent = d.username;
+                }
+            } catch(e) {}
+        })();
+        async function doLogout() {
+            await fetch('/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
