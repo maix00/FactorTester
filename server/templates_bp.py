@@ -254,7 +254,23 @@ def get_current_params(ff_alias):
     try:
         ff = get_factor_family_instance(ff_alias)
         params_list = _get_session_params(ff_alias, ff)
-        return jsonify({'success': True, 'params_list': params_list})
+        # 将 Timedelta/Arrow 等不可 JSON 序列化的值转为字符串
+        import pandas as pd
+        def _serialize_params(pl):
+            result = []
+            for params in pl:
+                item = {}
+                for k, v in params.items():
+                    if isinstance(v, pd.Timedelta):
+                        item[k] = str(v)
+                    else:
+                        try:
+                            item[k] = str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+                        except Exception:
+                            item[k] = repr(v)
+                result.append(item)
+            return result
+        return jsonify({'success': True, 'params_list': _serialize_params(params_list)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -267,11 +283,16 @@ def replace_params():
     params_list = data.get('params_list', [])
     try:
         ff = get_factor_family_instance(ff_alias)
+        seen = set()
         new_pl = []
         for params in params_list:
             ff._check_in_space(**params)
             new_params = {p.alias: p.rectify_value(params[p.alias]) if p.alias in params else p.default_value for p in ff.params}
-            new_pl.append(new_params)
+            # 去重：将参数值转为可哈希的 tuple 来判断是否重复
+            key = tuple(str(new_params.get(p.alias, '')) for p in ff.params)
+            if key not in seen:
+                seen.add(key)
+                new_pl.append(new_params)
         _save_session_params(ff_alias, new_pl)
         return jsonify({'success': True})
     except Exception as e:

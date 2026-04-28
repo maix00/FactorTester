@@ -46,7 +46,16 @@
         </div>
     </div>
 
-    <!-- 第二行：时间范围 + 时间同步按钮 -->
+    <!-- 第二行：多周期收益率频率选择 -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
+            <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
+            <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
+        </div>
+    </div>
+
+    <!-- 第三行：时间范围 + 时间同步按钮 -->
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
             <label style="margin-bottom:0;white-space:nowrap;">时间范围：</label>
@@ -119,6 +128,17 @@
             <thead id="metrics_head"></thead>
             <tbody id="metrics_body"></tbody>
         </table>
+    </div>
+
+    <!-- 多周期对比结果表格 -->
+    <div id="multi_horizon_container" style="margin-top:20px;display:none;">
+        <h6 style="margin-bottom:8px;">📊 多周期收益率对比</h6>
+        <div style="overflow-x:auto;">
+            <table class="ic-table" style="width:100%;font-size:12px;">
+                <thead id="multi_horizon_head"></thead>
+                <tbody id="multi_horizon_body"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 

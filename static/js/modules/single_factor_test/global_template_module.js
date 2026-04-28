@@ -6,35 +6,42 @@
     const FF_ALIAS = window.factorFamilyAlias || '';
 
     // ── 参数模板辅助函数 ──────────────────────────────────────────────────
-    // 查找名为 __global_restore__ 的参数模板，返回 { id, ... } 或 null
-    async function _findGlobalRestoreTpl() {
+    // 每个全局模板对应一个独立的参数模板，名字为 __global_tpl_<全局模板id>__
+    function _paramTplName(globalTplId) {
+        return '__global_tpl_' + globalTplId + '__';
+    }
+
+    // 查找指定全局模板对应的参数模板，返回 { id, name } 或 null
+    async function _findParamTpl(globalTplId) {
         try {
-            const resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS));
-            const data = await resp.json();
+            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS));
+            var data = await resp.json();
             if (data.success && data.templates) {
-                return data.templates.find(function(t) { return t.name === '__global_restore__'; }) || null;
+                var targetName = _paramTplName(globalTplId);
+                return data.templates.find(function(t) { return t.name === targetName; }) || null;
             }
         } catch(e) {}
         return null;
     }
 
-    // 删除名为 __global_restore__ 的参数模板（若存在）
-    async function _deleteGlobalRestoreTpl() {
-        var existing = await _findGlobalRestoreTpl();
+    // 删除指定全局模板对应的参数模板（若存在）
+    async function _deleteParamTpl(globalTplId) {
+        var existing = await _findParamTpl(globalTplId);
         if (existing) {
             try {
                 await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
                     method: 'DELETE'
                 });
             } catch(e) {
-                console.error('删除旧 __global_restore__ 失败:', e);
+                console.error('删除参数模板 ' + _paramTplName(globalTplId) + ' 失败:', e);
             }
         }
     }
 
-    // 保存/更新 __global_restore__ 参数模板
-    async function _saveOrUpdateGlobalRestoreTpl(params_list) {
-        var existing = await _findGlobalRestoreTpl();
+    // 保存/更新指定全局模板对应的参数模板
+    async function _saveOrUpdateParamTpl(globalTplId, params_list) {
+        var existing = await _findParamTpl(globalTplId);
+        var tplName = _paramTplName(globalTplId);
         if (existing) {
             // 更新已有的
             var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
@@ -49,7 +56,7 @@
             var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: '__global_restore__', params_list: params_list })
+                body: JSON.stringify({ name: tplName, params_list: params_list })
             });
             var data = await resp.json();
             return { success: data.success, id: data.id, error: data.error };
@@ -60,11 +67,38 @@
     async function collectSnapshot() {
         const snapshot = {};
 
-        // 1. 参数设置 — 从后端API获取（避免DOM展示值与原始值不一致）
+        // 1. 参数设置 — 从 DOM 收集（与参数模板保存逻辑一致，避免 Timedelta 等对象序列化问题）
+        //    优先从已渲染的因子行收集，若为空则从 input 框收集
         try {
-            const resp = await fetch('/api/current_params/' + encodeURIComponent(FF_ALIAS));
-            const data = await resp.json();
-            snapshot.params_list = (data.success && data.params_list) ? data.params_list : [];
+            var pl = [];
+            var tbodyEl = document.getElementById('factor_table_body');
+            var moduleElem = document.getElementById('parameter_module');
+            var paramAliases = [];
+            if (moduleElem) {
+                var aliasesAttr = moduleElem.getAttribute('data-param-aliases');
+                if (aliasesAttr) {
+                    try { paramAliases = JSON.parse(aliasesAttr); } catch(e) {}
+                }
+            }
+            if (tbodyEl && paramAliases.length > 0) {
+                var rows = tbodyEl.querySelectorAll('tr');
+                rows.forEach(function(row) {
+                    // 跳过 add_row（输入框行，不收集）
+                    if (row.id === 'add_row') return;
+                    var cells = row.querySelectorAll('td');
+                    if (cells.length >= paramAliases.length + 1) {
+                        var rowParams = {};
+                        for (var i = 0; i < paramAliases.length; i++) {
+                            var tdText = (cells[i + 1].textContent || '').trim();
+                            if (tdText) rowParams[paramAliases[i]] = tdText;
+                        }
+                        if (Object.keys(rowParams).length > 0) {
+                            pl.push(rowParams);
+                        }
+                    }
+                });
+            }
+            snapshot.params_list = pl;
         } catch (e) {
             snapshot.params_list = [];
         }
@@ -150,7 +184,8 @@
 
     // ── 应用快照 ──────────────────────────────────────────────────────────
     // 顺序很重要：先设时间范围（影响tester创建），再设参数，最后重建tester
-    async function applySnapshot(snapshot) {
+    // tplId: 全局模板 ID，用于查找/创建对应的参数模板
+    async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
 
         // 1. 先设置时间范围（后端 /set_time_range 会更新 shared.start_point/end_point，
@@ -239,43 +274,30 @@
             }
         }
 
-        // 2. 恢复参数设置（通过参数模板的保存/加载链路，复用参数模块的成熟恢复流程）
+        // 2. 恢复参数设置 — 直接调用 /replace_params 写入 session，刷新参数模块 UI 即可
         if (snapshot.params_list && snapshot.params_list.length > 0) {
             try {
-                // 先清空现有参数，然后通过参数模板方式加载（去重合并=直接替换）
-                await fetch('/replace_params', {
+                var replaceResp = await fetch('/replace_params', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ factor_family_alias: FF_ALIAS, params_list: [] })
+                    body: JSON.stringify({ factor_family_alias: FF_ALIAS, params_list: snapshot.params_list })
                 });
-                // 先清理旧的 __global_restore__ 参数模板
-                await _deleteGlobalRestoreTpl();
-                // 保存新的临时参数模板
-                var saveData = await _saveOrUpdateGlobalRestoreTpl(snapshot.params_list);
-                if (saveData.success && saveData.id) {
-                    // 把下拉框设到这个临时模板
-                    var pSel = document.getElementById('params-tpl-select');
-                    if (pSel) {
-                        var found = false;
-                        for (var i = 0; i < pSel.options.length; i++) {
-                            if (pSel.options[i].value === String(saveData.id)) { found = true; break; }
-                        }
-                        if (!found) {
-                            var opt = document.createElement('option');
-                            opt.value = saveData.id;
-                            opt.textContent = '__global_restore__';
-                            pSel.appendChild(opt);
-                        }
-                        pSel.value = String(saveData.id);
-                        var pLbl = document.getElementById('params-tpl-name-label');
-                        if (pLbl) { pLbl.textContent = '__global_restore__'; pLbl.style.display = ''; }
-                    }
-                    // 调用参数模块的加载函数（去重合并→因为已清空，等于直接替换）
-                    if (typeof window._loadParamsTemplate === 'function') {
-                        await window._loadParamsTemplate();
-                    }
+                var replaceData = await replaceResp.json();
+                if (!replaceData.success) {
+                    alert('恢复参数失败: ' + (replaceData.error || ''));
                 } else {
-                    alert('恢复参数失败: 无法创建临时参数模板 - ' + (saveData.error || ''));
+                    // 同步保存/更新该全局模板对应的参数模板（供参数模块下拉框显示）
+                    if (tplId) {
+                        _saveOrUpdateParamTpl(tplId, snapshot.params_list).catch(function(e) {
+                            console.error('同步参数模板失败:', e);
+                        });
+                    }
+                    // 刷新参数模块 UI
+                    if (typeof window.reloadParamModule === 'function') {
+                        await new Promise(function(resolve) {
+                            window.reloadParamModule(resolve);
+                        });
+                    }
                 }
             } catch (e) {
                 alert('恢复参数异常: ' + e.message);
@@ -390,18 +412,6 @@
         }
         const snapshot = await collectSnapshot();
 
-        // 同步保存/更新 __global_restore__ 参数模板（用于加载时恢复参数）
-        if (snapshot.params_list && snapshot.params_list.length > 0) {
-            try {
-                var result = await _saveOrUpdateGlobalRestoreTpl(snapshot.params_list);
-                if (!result.success) {
-                    console.error('保存/更新 __global_restore__ 参数模板失败:', result.error);
-                }
-            } catch(e) {
-                console.error('保存 __global_restore__ 异常:', e);
-            }
-        }
-
         statusEl.textContent = '保存中...';
         statusEl.style.color = '#0078d4';
         try {
@@ -416,6 +426,17 @@
             });
             const data = await resp.json();
             if (data.success) {
+                // 拿到全局模板 ID 后，同步保存对应的参数模板
+                if (snapshot.params_list && snapshot.params_list.length > 0) {
+                    try {
+                        var result = await _saveOrUpdateParamTpl(data.id, snapshot.params_list);
+                        if (!result.success) {
+                            console.error('保存参数模板失败:', result.error);
+                        }
+                    } catch(e) {
+                        console.error('保存参数模板异常:', e);
+                    }
+                }
                 statusEl.textContent = '✓ 已保存: ' + name;
                 statusEl.style.color = '#28a745';
                 if (nameInput) nameInput.value = '';
@@ -541,7 +562,7 @@
                 statusEl.style.color = '#d40000';
                 return;
             }
-            await applySnapshot(data.template.snapshot);
+            await applySnapshot(data.template.snapshot, tplId);
             statusEl.textContent = '✓ 已加载: ' + data.template.name;
             statusEl.style.color = '#28a745';
             // 关闭抽屉
@@ -563,8 +584,8 @@
             const resp = await fetch('/api/global_templates/' + tplId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
-                // 同时删除关联的 __global_restore__ 参数模板
-                await _deleteGlobalRestoreTpl();
+                // 同时删除该全局模板关联的参数模板
+                await _deleteParamTpl(tplId);
                 statusEl.textContent = '✓ 已删除';
                 statusEl.style.color = '#28a745';
                 await loadTemplateList();

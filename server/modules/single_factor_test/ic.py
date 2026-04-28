@@ -8,6 +8,7 @@ from pathlib import Path
 from flask import request, jsonify
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.products.Product import Product
+from tools.data.DataFreq import DataFreq
 from . import sft_bp
 from server.shared import (
     get_factor_family_instance, _get_session_params,
@@ -54,6 +55,10 @@ def run_ic_test():
             factor: (None if item.get('return_freq') in (None, '', 'N') else item.get('return_freq'))
             for factor, item in zip(factors, factor_alias_return_freq)
         }
+
+        # 新功能参数
+        ic_decay_lags = data.get('ic_decay_lags', None)      # [1, 2, 3, 5, 10, 20] 或 None 表示不计算
+        rolling_window = data.get('rolling_window', None)     # 如 60、120、252，None 表示不计算滚动 IC
 
         cache_dir_ic     = Path('../data/cache/ic')
         cache_dir_factor = Path('../data/cache/factor')
@@ -151,6 +156,51 @@ def run_ic_test():
             'factors': [],
         }
 
+        # ─── IC 衰减分析（多周期 IC decay）───
+        ic_decay_results = {}  # factor.alias → [{'lag': 1, 'mean':..., 'ir':..., 't_stat':...}, ...]
+        if ic_decay_lags and isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
+            base_freqs = return_freqs.copy()
+            for factor in factors:
+                base_freq = base_freqs.get(factor, None)
+                # 基准频率（用于计算 lag 步长）
+                if base_freq is None:
+                    base_freq_str = '1d'  # 默认日频
+                else:
+                    base_freq_str = base_freq
+                try:
+                    base_td = pd.Timedelta(base_freq_str)
+                except Exception:
+                    base_td = pd.Timedelta('1d')
+                decay_list = []
+                for lag in ic_decay_lags:
+                    try:
+                        lag_td = base_td * int(lag)
+                        ic_s_df_lag, ic_st_df_lag = tester.calc_ic(
+                            factors=factor, return_freq=DataFreq(lag_td)
+                        )
+                        ic_s_lag = ic_s_df_lag.iloc[:, 0].dropna()
+                        if len(ic_s_lag) > 1:
+                            mean_val = float(ic_s_lag.mean())
+                            std_val = float(ic_s_lag.std())
+                            ir_val = mean_val / std_val if std_val != 0 else None
+                            n_val = len(ic_s_lag)
+                            t_stat_val = (mean_val / (std_val / np.sqrt(n_val))) if std_val != 0 and n_val > 1 else None
+                            decay_list.append({
+                                'lag': int(lag),
+                                'mean': round(mean_val, 6),
+                                'std': round(std_val, 6),
+                                'ir': round(ir_val, 6) if ir_val is not None else None,
+                                't_stat': round(t_stat_val, 6) if t_stat_val is not None else None,
+                                'n': n_val,
+                            })
+                        else:
+                            decay_list.append({'lag': int(lag), 'mean': None, 'std': None, 'ir': None, 't_stat': None, 'n': 0})
+                    except Exception:
+                        decay_list.append({'lag': int(lag), 'mean': None, 'std': None, 'ir': None, 't_stat': None, 'n': 0})
+                ic_decay_results[factor.alias] = decay_list
+                # 恢复原始 base 频率（后续代码依赖）
+                return_freqs[factor] = base_freq
+
         for factor in factors:
             ic_s = factor.ic_series.dropna()
             if isinstance(ic_s.index, pd.MultiIndex):
@@ -176,7 +226,37 @@ def run_ic_test():
                 except Exception:
                     pass
 
-            response['factors'].append({
+            # ─── 滚动窗口 IC ───
+            rolling_ic = None
+            if rolling_window and isinstance(rolling_window, (int, float)) and rolling_window > 1:
+                win = int(rolling_window)
+                s_vals = ic_s.dropna().values
+                s_idx = ic_s.dropna().index
+                if len(s_vals) >= win:
+                    # 滚动计算每窗的 mean/IR
+                    r_mean = []
+                    r_ir = []
+                    r_dates = []
+                    for i in range(win - 1, len(s_vals)):
+                        win_slice = s_vals[i - win + 1 : i + 1]
+                        m = float(np.mean(win_slice))
+                        std_win = float(np.std(win_slice))
+                        r = m / std_win if std_win != 0 else None
+                        r_mean.append(round(m, 6))
+                        r_ir.append(round(r, 6) if r is not None else None)
+                        ts_i = s_idx[i]
+                        if hasattr(ts_i, 'strftime'):
+                            r_dates.append(ts_i.strftime('%Y-%m-%d') if _daily else int(ts_i.value // 10**6))
+                        else:
+                            r_dates.append(str(ts_i))
+                    rolling_ic = {
+                        'window': win,
+                        'dates': r_dates,
+                        'mean': r_mean,
+                        'ir': r_ir,
+                    }
+
+            factor_data = {
                 'name': factor.name, 'alias': factor.alias,
                 'ic_series': {'dates': dates, 'values': vals},
                 'autocorr': autocorr,
@@ -185,7 +265,13 @@ def run_ic_test():
                     for p in (factor.table.columns if factor.table is not None else [])
                     if p in tester.products and isinstance(p, Product)
                 ],
-            })
+            }
+            # 附加衰减和滚动结果
+            if ic_decay_results:
+                factor_data['ic_decay'] = ic_decay_results.get(factor.alias, [])
+            if rolling_ic:
+                factor_data['rolling_ic'] = rolling_ic
+            response['factors'].append(factor_data)
 
         # Merge into tester.factors
         existing = {f.alias for f in tester.factors}

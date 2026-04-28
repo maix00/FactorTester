@@ -1,6 +1,7 @@
 """Core Blueprint: application entry point.
   GET  /                    — 门户首页（模块列表）
   GET  /single_factor_test  — 单因子测试页
+  GET  /multi_factor_test     — 多因子分析页
 """
 import os, traceback
 from flask import Blueprint, request, jsonify, render_template
@@ -60,6 +61,18 @@ def index():
         main_content=main_content,
         initial_modules=[],
     )
+
+
+@core_bp.route('/multi_factor_test', methods=['GET'])
+def multi_factor():
+    """多因子分析页面。"""
+    return render_template('multi_factor.html')
+
+
+@core_bp.route('/docs', methods=['GET'])
+def docs():
+    """技术文档页面。"""
+    return render_template('docs.html')
 
 
 

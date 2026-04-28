@@ -162,6 +162,86 @@
         });
     }
 
+    // 绘制 IC 衰减分析图（多周期 IC mean + IR）
+    function drawICDecayChart(containerId, icDecay) {
+        if (typeof Highcharts === 'undefined') return;
+        const container = document.getElementById(containerId);
+        if (!container || !icDecay || !icDecay.length) return;
+        const lags = icDecay.map(d => d.lag);
+        const means = icDecay.map(d => d.mean);
+        const irs = icDecay.map(d => d.ir);
+        Highcharts.chart(container, {
+            chart: { zoomType: 'x' },
+            title: { text: null },
+            xAxis: {
+                categories: lags.map(l => 'Lag ' + l),
+                title: { text: '收益滞后期数' },
+                crosshair: true,
+            },
+            yAxis: [
+                { title: { text: 'IC Mean' }, labels: { format: '{value:.4f}' } },
+                { title: { text: 'IR' }, opposite: true, labels: { format: '{value:.2f}' } },
+            ],
+            tooltip: { shared: true },
+            plotOptions: {
+                column: { pointPadding: 0.1, groupPadding: 0.05, borderWidth: 0 },
+            },
+            series: [
+                {
+                    name: 'IC Mean',
+                    type: 'column',
+                    data: means,
+                    yAxis: 0,
+                    color: '#0078d4',
+                    tooltip: { valueDecimals: 6 },
+                },
+                {
+                    name: 'IR',
+                    type: 'spline',
+                    data: irs,
+                    yAxis: 1,
+                    color: '#f44336',
+                    marker: { enabled: true, radius: 4 },
+                    tooltip: { valueDecimals: 4 },
+                },
+            ],
+            credits: { enabled: false },
+        });
+    }
+
+    // 绘制滚动窗口 IC 图
+    function drawRollingICChart(containerId, rollingIc) {
+        if (typeof Highcharts === 'undefined') return;
+        const container = document.getElementById(containerId);
+        if (!container || !rollingIc || !rollingIc.dates || !rollingIc.dates.length) return;
+        const isDaily = rollingIc.dates.length > 0 && typeof rollingIc.dates[0] === 'string';
+        const _parseTs = ts => typeof ts === 'string' ? new Date(ts + 'T00:00:00').getTime() : ts;
+        const meanData = rollingIc.dates.map((ts, i) => [_parseTs(ts), rollingIc.mean[i]]);
+        const irData = rollingIc.dates.map((ts, i) => [_parseTs(ts), rollingIc.ir[i]]);
+        Highcharts.stockChart(container, {
+            chart: { zoomType: 'x' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: [
+                { title: { text: 'IC Mean' }, labels: { format: '{value:.4f}' }, crosshair: true },
+                { title: { text: 'IR' }, opposite: true, labels: { format: '{value:.2f}' } },
+            ],
+            tooltip: {
+                shared: true,
+                valueDecimals: 6,
+                xDateFormat: isDaily ? '%Y-%m-%d' : '%Y-%m-%d %H:%M:%S',
+            },
+            series: [
+                { name: 'IC Mean', type: 'line', data: meanData, yAxis: 0, color: '#0078d4', tooltip: { valueDecimals: 6 } },
+                { name: 'IR', type: 'line', data: irData, yAxis: 1, color: '#f44336', dashStyle: 'Dash', tooltip: { valueDecimals: 4 } },
+            ],
+            navigator: { enabled: true },
+            scrollbar: { enabled: true },
+            rangeSelector: { enabled: true },
+            credits: { enabled: false },
+        });
+    }
+
     // 绘制自相关衰减柱状图
     function drawAutocorrChart(containerId, autocorr) {
         if (typeof Highcharts === 'undefined') return;
@@ -271,6 +351,15 @@
             const paneId = `factor-pane-${subId}-${idx}`;
             tabsHtml += `<li class="nav-item" role="presentation"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${paneId}" type="button" role="tab">${factor.alias || factor.name}</button></li>`;
             const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p.name}">${p.name}${p.desc && p.desc !== p.name ? ' · ' + p.desc : ''}</option>`).join('') : '<option value="">无可用产品</option>';
+            // IC 衰减 & 滚动窗口 附加图表（如有数据）
+            let icDecayHtml = '';
+            let rollingIcHtml = '';
+            if (factor.ic_decay && factor.ic_decay.length > 0) {
+                icDecayHtml = `<div style="margin-top:20px;"><h6>IC 衰减分析（多周期）</h6><div id="ic-decay-chart-${subId}-${idx}" style="width:100%; height:300px;"></div></div>`;
+            }
+            if (factor.rolling_ic && factor.rolling_ic.dates && factor.rolling_ic.dates.length > 0) {
+                rollingIcHtml = `<div style="margin-top:20px;"><h6>滚动窗口 IC（窗口=${factor.rolling_ic.window}）</h6><div id="ic-rolling-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>`;
+            }
             panesHtml += `
                 <div class="tab-pane fade ${showClass}" id="${paneId}" role="tabpanel">
                     <!-- IC 序列图 & 自相关衰减图 -->
@@ -278,6 +367,8 @@
                         <div style="flex:1;min-width:45%;"><h6>IC 序列</h6><div id="ic-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
                         <div style="flex:1;min-width:45%;"><h6>IC 自相关衰减</h6><div id="ic-acf-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
                     </div>
+                    ${icDecayHtml}
+                    ${rollingIcHtml}
                     <!-- 产品选择、加载按钮和复权复选框 -->
                     <div style="margin-top:16px;">
                         <label>选择产品：</label>
@@ -311,6 +402,14 @@
             // 绘制自相关衰减图
             if (factor.autocorr && factor.autocorr.length > 0) {
                 drawAutocorrChart(`ic-acf-chart-${subId}-${idx}`, factor.autocorr);
+            }
+            // 绘制 IC 衰减分析图
+            if (factor.ic_decay && factor.ic_decay.length > 0) {
+                drawICDecayChart(`ic-decay-chart-${subId}-${idx}`, factor.ic_decay);
+            }
+            // 绘制滚动窗口 IC 图
+            if (factor.rolling_ic && factor.rolling_ic.dates && factor.rolling_ic.dates.length > 0) {
+                drawRollingICChart(`ic-rolling-chart-${subId}-${idx}`, factor.rolling_ic);
             }
         });
         // 绑定加载按钮事件
@@ -469,6 +568,21 @@
         statusSpan.innerText = 'IC测试运行中...';
         statusSpan.style.color = '#0078d4';
         resultDiv.innerHTML = '';
+
+        // 读取 IC 衰减和滚动窗口参数
+        const decayLagsInput = document.getElementById(`ic-decay-lags-${subId}`);
+        const rollingWinInput = document.getElementById(`ic-rolling-window-${subId}`);
+        let ic_decay_lags = null;
+        let rolling_window = null;
+        if (decayLagsInput && decayLagsInput.value.trim()) {
+            const parts = decayLagsInput.value.trim().split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+            if (parts.length > 0) ic_decay_lags = parts;
+        }
+        if (rollingWinInput && rollingWinInput.value.trim()) {
+            const w = parseInt(rollingWinInput.value.trim(), 10);
+            if (!isNaN(w) && w > 1) rolling_window = w;
+        }
+
         try {
             const response = await fetch('/run_ic_test', {
                 method: 'POST',
@@ -478,7 +592,9 @@
                     factor_family_alias: factorFamilyAlias,
                     paths: submission.paths,
                     factors: selectedFactors,  // 发送因子列表
-                    re_calc: re_calc   // 新增参数
+                    re_calc: re_calc,
+                    ic_decay_lags: ic_decay_lags,
+                    rolling_window: rolling_window
                 })
             });
             const data = await response.json();
@@ -624,6 +740,20 @@
                                 <input type="checkbox" id="recalc-checkbox-${sub.id}"> 强制重新计算（忽略缓存）
                             </label>
                             <span id="ic-status-${sub.id}" class="ic-status"></span>
+                        </div>
+                        <!-- IC 衰减 & 滚动窗口 参数 -->
+                        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
+                            <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
+                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                                IC衰减滞后期
+                                <input type="text" id="ic-decay-lags-${sub.id}" value="" placeholder="1,2,3,5,10,20"
+                                       style="width:110px; font-size:12px; padding:2px 6px;" title="逗号分隔的滞后期数，计算各周期IC统计量">
+                            </label>
+                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                                滚动窗口
+                                <input type="number" id="ic-rolling-window-${sub.id}" value="" placeholder="如60"
+                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
+                            </label>
                         </div>
                         <div id="ic-result-${sub.id}"></div>
                         <div id="chart-container-${sub.id}" style="width:100%; margin-top:14px;"></div>

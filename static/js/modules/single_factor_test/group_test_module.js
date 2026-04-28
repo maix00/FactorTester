@@ -117,12 +117,96 @@
         return { submission_id: icSubId, factor_alias: icFactorInfo.alias };
     }
 
+    // ---------- 多周期收益率频率复选框 ----------
+    var RETURN_FREQ_OPTIONS = ['1d', '2d', '3d', '5d', '10d', '20d'];
+    function renderReturnFreqCheckboxes() {
+        var container = document.getElementById('return_freqs_checkboxes');
+        if (!container) return;
+        var html = '';
+        RETURN_FREQ_OPTIONS.forEach(function(rf) {
+            html += '<label style="display:flex;align-items:center;gap:3px;margin-bottom:0;cursor:pointer;font-weight:normal;font-size:12px;white-space:nowrap;">' +
+                '<input type="checkbox" class="return-freq-cb" value="' + rf + '"> ' + rf +
+                '</label>';
+        });
+        container.innerHTML = html;
+    }
+
+    function getSelectedReturnFreqs() {
+        var cbs = document.querySelectorAll('#return_freqs_checkboxes .return-freq-cb:checked');
+        var freqs = [];
+        cbs.forEach(function(cb) { freqs.push(cb.value); });
+        return freqs;
+    }
+
+    /** 渲染多周期对比结果表格 */
+    function renderMultiHorizonTable(results, n_groups) {
+        var container = document.getElementById('multi_horizon_container');
+        if (!container) return;
+        if (!results || !results.length) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+
+        // 收集所有指标名
+        var allMetricNames = [];
+        results.forEach(function(r) {
+            if (r.ls_metrics) {
+                Object.keys(r.ls_metrics).forEach(function(k) {
+                    if (allMetricNames.indexOf(k) < 0) allMetricNames.push(k);
+                });
+            }
+        });
+
+        var metricNamesCN = {
+            'Total Return': '总收益率', 'Annual Return': '年化收益率', 'Volatility': '年化波动率',
+            'Sharpe Ratio': '夏普比率', 'Max Drawdown': '最大回撤', 'Calmar Ratio': 'Calmar比率',
+            'Win Rate': '胜率', 'Mean Return': '均值收益率', 'Skewness': '偏度', 'Kurtosis': '峰度',
+            'Avg Turnover': '平均换手率'
+        };
+
+        // 表头：指标名 | 频率1 | 频率2 | ...
+        var headHtml = '<tr><th>指标 (LS)</th>';
+        results.forEach(function(r) {
+            headHtml += '<th>' + (r.return_freq || '?') + '</th>';
+        });
+        headHtml += '</tr>';
+        document.getElementById('multi_horizon_head').innerHTML = headHtml;
+
+        // 表体：每行一个指标
+        var bodyHtml = '';
+        allMetricNames.forEach(function(name) {
+            var cnName = metricNamesCN[name] || name;
+            bodyHtml += '<tr><td style="font-weight:600;">' + cnName + '</td>';
+            results.forEach(function(r) {
+                var val = (r.ls_metrics && r.ls_metrics[name] !== undefined) ? r.ls_metrics[name] : null;
+                var display;
+                if (val === null || val === undefined) {
+                    display = '—';
+                } else if (name === 'Avg Turnover') {
+                    display = (val * 100).toFixed(1) + '%';
+                } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
+                    display = val.toFixed(2) + '%';
+                } else if (name.includes('Ratio') || name === 'Skewness' || name === 'Kurtosis') {
+                    display = val.toFixed(4);
+                } else {
+                    display = val.toFixed(4);
+                }
+                bodyHtml += '<td>' + display + '</td>';
+            });
+            bodyHtml += '</tr>';
+        });
+        document.getElementById('multi_horizon_body').innerHTML = bodyHtml;
+    }
+
     // ---------- 清空测试结果 ----------
     function clearResults() {
         var chartContainer = document.getElementById('group_chart_container');
         var metricsContainer = document.getElementById('group_metrics_container');
+        var multiHorizonContainer = document.getElementById('multi_horizon_container');
         if (chartContainer) chartContainer.style.display = 'none';
         if (metricsContainer) metricsContainer.style.display = 'none';
+        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
         var status = document.getElementById('group_test_status');
         if (status) status.innerHTML = '';
     }
@@ -408,9 +492,16 @@
             return;
         }
         
+        // 收集多周期收益率频率
+        var return_freqs = getSelectedReturnFreqs();
+
         statusSpan.innerHTML = '分组测试运行中...';
         statusSpan.style.color = '#0078d4';
-        
+
+        // 隐藏旧结果
+        var multiHorizonContainer = document.getElementById('multi_horizon_container');
+        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
+
         fetch('/run_group_test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -422,7 +513,8 @@
                 fee_map: fee_map,
                 use_closetoday: use_closetoday,
                 start_date: start_date,
-                end_date: end_date
+                end_date: end_date,
+                return_freqs: return_freqs.length > 0 ? return_freqs : null
             })
         })
         .then(function(res) { return res.json(); })
@@ -439,6 +531,24 @@
                 }
                 return;
             }
+
+            // 多周期对比模式
+            if (data.multi_horizon) {
+                statusSpan.innerHTML = '✓ 多周期对比完成（' + data.results.length + ' 个频率）';
+                statusSpan.style.color = '#28a745';
+                // 隐藏单频率图表和指标表
+                var chartContainer = document.getElementById('group_chart_container');
+                var metricsContainer = document.getElementById('group_metrics_container');
+                if (chartContainer) chartContainer.style.display = 'none';
+                if (metricsContainer) metricsContainer.style.display = 'none';
+                // 清空缓存
+                _lastGrossData = null;
+                _lastMetrics = null;
+                // 渲染多周期对比表格
+                renderMultiHorizonTable(data.results, data.n_groups);
+                return;
+            }
+
             statusSpan.innerHTML = '✓ 分组测试完成';
             statusSpan.style.color = '#28a745';
             // 缓存原始数据，供成本敏感性滑条使用
@@ -1015,6 +1125,7 @@
 
     // ---------- 初始化 ----------
     function init() {
+        renderReturnFreqCheckboxes();
         bindDateValidation();
         bindUseTimeRange();
         bindICModuleEvents();

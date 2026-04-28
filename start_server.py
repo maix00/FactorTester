@@ -39,4 +39,8 @@ def run_flask_server(port=8000, directory='.'):
 
 
 if __name__ == '__main__':
-    run_flask_server(port=8000, directory='.')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=8000)
+    args = parser.parse_args()
+    run_flask_server(port=args.port, directory='.')
