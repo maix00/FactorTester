@@ -154,7 +154,7 @@
                 var node = data.node;
                 data.result = {
                     url: '/get_products',
-                    data: { path: node.key }
+                    data: { path: node.key, checkbox: 'false' }
                 };
             },
             renderNode: function(event, data) {
@@ -286,7 +286,60 @@
             d.volume
         ]);
 
+        const hasOI = data.has_oi && data.data.some(d => d.open_interest != null);
+        const oi = hasOI ? data.data.map(d => [
+            d.timestamp,
+            d.open_interest
+        ]) : [];
+
         const title = `${data.product}${data.desc ? ' — ' + data.desc : ''} (${data.adjusted ? '复权' : '原始'})`;
+
+        // 构建 yAxis 和 series
+        const yAxisArr = [{
+            labels: { align: 'right', x: -3 },
+            title: { text: '' },
+            height: hasOI ? '50%' : '60%',
+            lineWidth: 2,
+            resize: { enabled: true }
+        }, {
+            labels: { align: 'right', x: -3 },
+            title: { text: '' },
+            top: hasOI ? '55%' : '65%',
+            height: hasOI ? '25%' : '35%',
+            offset: 0,
+            lineWidth: 2
+        }];
+        const seriesArr = [{
+            type: 'candlestick',
+            name: data.product,
+            data: ohlc,
+            tooltip: { valueDecimals: 2 }
+        }, {
+            type: 'column',
+            name: 'Volume',
+            data: volume,
+            yAxis: 1,
+            tooltip: { valueDecimals: 0 }
+        }];
+
+        if (hasOI) {
+            yAxisArr.push({
+                labels: { align: 'right', x: -3 },
+                title: { text: '' },
+                top: '82%',
+                height: '18%',
+                offset: 0,
+                lineWidth: 2
+            });
+            seriesArr.push({
+                type: 'line',
+                name: 'Open Interest',
+                data: oi,
+                yAxis: 2,
+                color: '#E91E63',
+                tooltip: { valueDecimals: 0 }
+            });
+        }
 
         Highcharts.stockChart(container, {
             chart: { animation: false, height: 500 },
@@ -303,40 +356,12 @@
                 ],
                 selected: 4,
             },
-            yAxis: [{
-                labels: { align: 'right', x: -3 },
-                title: { text: '' },
-                height: '60%',
-                lineWidth: 2,
-                resize: { enabled: true }
-            }, {
-                labels: { align: 'right', x: -3 },
-                title: { text: '' },
-                top: '65%',
-                height: '35%',
-                offset: 0,
-                lineWidth: 2
-            }],
+            yAxis: yAxisArr,
             tooltip: {
                 split: true,
                 valueDecimals: 2
             },
-            series: [{
-                type: 'candlestick',
-                name: data.product,
-                data: ohlc,
-                tooltip: {
-                    valueDecimals: 2
-                }
-            }, {
-                type: 'column',
-                name: 'Volume',
-                data: volume,
-                yAxis: 1,
-                tooltip: {
-                    valueDecimals: 0
-                }
-            }],
+            series: seriesArr,
             credits: { enabled: false },
             navigator: { enabled: true },
             scrollbar: { enabled: false }

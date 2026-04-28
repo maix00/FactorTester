@@ -38,6 +38,7 @@
   let currentComboMethod = 'equal_weight';
 
   // ── Init ──────────────────────────────────────────────────
+  let _hierSelectsPopulated = false;
   function init() {
     loadSubmissions();
     submissionSel.addEventListener('change', onSubmissionChange);
@@ -65,13 +66,6 @@
 
     initHeatmapButtons();
     runHierBtn.addEventListener('click', runHierarchy);
-
-    // 因子列表加载后更新分层选择器
-    const origRenderTags = renderTags;
-    renderTags = function() {
-      origRenderTags();
-      populateHierSelects();
-    };
   }
 
   // ── Submissions ───────────────────────────────────────────
@@ -183,6 +177,9 @@
     tagsWrap.querySelectorAll('.factor-tag').forEach(tag => {
       tag.addEventListener('click', () => toggleFactor(tag.dataset.alias));
     });
+
+    // 更新分层选择器的因子列表
+    populateHierSelects();
   }
 
   function getSelectedAliases() {
@@ -737,6 +734,9 @@
       scrollbar: { enabled: false }
     });
   }
+
+  // ── Bootstrap ─────────────────────────────────────────
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();

@@ -457,10 +457,56 @@
             <tr><td><code>sources/FeeData.py</code></td><td>期货手续费率模块，从 openctp.cn 获取实时费率或加载本地缓存</td></tr>
         </table>
 
-        <h3>7.2 配置</h3>
+        <h3>7.2 CNFutures 数据文件</h3>
+        <p><code>CNFutures</code> 通过 <code>../data/</code> 目录下的文件读取行情与元数据，数据管线如下：</p>
+
+        <h4>元数据 &amp; 映射</h4>
+        <table>
+            <tr><th>文件</th><th>格式</th><th>说明</th></tr>
+            <tr><td><code>../data/sectors.csv</code></td><td>CSV</td><td>品种分类元数据。含品种代码、合约标的、类别、交易所、版本、日夜盘时间、标准合约终止日等字段</td></tr>
+            <tr><td><code>../data/wind_mapping.parquet</code></td><td>Parquet</td><td>Wind 主力合约映射表。记录每个交易日各品种对应的主力合约代码（S_INFO_WINDCODE → FS_MAPPING_WINDCODE），含起止日期</td></tr>
+            <tr><td><code>../data/wind_mapping.csv</code></td><td>CSV</td><td>同上，CSV 格式备份</td></tr>
+        </table>
+
+        <h4>原始行情数据</h4>
+        <table>
+            <tr><th>文件/目录</th><th>格式</th><th>说明</th></tr>
+            <tr><td><code>../data/data_dayk.parquet</code></td><td>Parquet</td><td>全量合约日线行情。含 open/high/low/close/volume/turnover/open_interest/twap/vwap/settlement 及复权因子</td></tr>
+            <tr><td><code>../data/data_mink/</code></td><td>Parquet (按月分片)</td><td>全量合约分钟线原始数据（如 <code>data_qc_future_mink_202401.parquet</code>），覆盖 2024-01 至今</td></tr>
+            <tr><td><code>../data/data_mink_2024.7z</code></td><td>7z 压缩包</td><td>2024 年分钟线原始数据压缩归档</td></tr>
+            <tr><td><code>../data/data_mink_2025.7z</code></td><td>7z 压缩包</td><td>2025 年分钟线原始数据压缩归档</td></tr>
+        </table>
+
+        <h4>预处理中间数据</h4>
+        <table>
+            <tr><th>文件/目录</th><th>格式</th><th>说明</th></tr>
+            <tr><td><code>../data/data_mink_product/</code></td><td>Parquet (按合约)</td><td>预处理后的合约分钟数据，按 <code>unique_instrument_id</code> 拆分为独立文件（如 <code>DCE|F|M|2501.parquet</code>）。由 <code>GenerateMain.preprocess_minute_data()</code> 生成</td></tr>
+            <tr><td><code>../data/minute_index.parquet</code></td><td>Parquet</td><td>分钟数据索引文件，加速合约数据定位</td></tr>
+        </table>
+
+        <h4>主力连续合约输出</h4>
+        <table>
+            <tr><th>文件/目录</th><th>格式</th><th>说明</th></tr>
+            <tr><td><code>../data/main_dayk/</code></td><td>Parquet (按品种)</td><td>日线主力连续合约序列（如 <code>M.DCE.parquet</code>）。由 mapping 表拼接各合约段并复权后生成，覆盖六大交易所 ~200 个品种</td></tr>
+            <tr><td><code>../data/main_mink/</code></td><td>Parquet (按品种)</td><td>分钟线主力连续合约序列，命名规则同 <code>main_dayk/</code></td></tr>
+            <tr><td><code>../data/main_series_adjusted.parquet</code></td><td>Parquet</td><td>日线主力连续序列的合并文件（所有品种汇总）</td></tr>
+            <tr><td><code>../data/roller_info.parquet</code></td><td>Parquet</td><td>展期信息表。记录每个品种每段主力的合约代码、起止日、换月前后收盘价及复权因子</td></tr>
+            <tr><td><code>../data/roller_info.csv</code></td><td>CSV</td><td>同上，CSV 格式备份</td></tr>
+        </table>
+
+        <h4>其他数据</h4>
+        <table>
+            <tr><th>文件/目录</th><th>格式</th><th>说明</th></tr>
+            <tr><td><code>../data/fees/</code></td><td>Parquet (按日)</td><td>手续费率缓存（如 <code>fees_20260428.parquet</code>），<code>fees_latest.parquet</code> 为最新费率快照</td></tr>
+            <tr><td><code>../data/accounts.json</code></td><td>JSON</td><td>用户账号存储（注册/登录）</td></tr>
+            <tr><td><code>../data/cache/</code></td><td>—</td><td>因子计算结果缓存目录</td></tr>
+            <tr><td><code>../data/logs/</code></td><td>—</td><td>运行日志目录</td></tr>
+        </table>
+
+        <h3>7.3 配置</h3>
         <p><code>Settings.py</code> 全局配置：默认测试时间范围 (2025年)、时区 (Asia/Shanghai)、成交量筛选比例 (0.8)、数据/日志路径。</p>
 
-        <h3>7.3 环境依赖</h3>
+        <h3>7.4 环境依赖</h3>
         <p>Python <strong>3.14.0</strong>，Conda 环境名 <code>GTHT</code>，完整依赖清单如下：</p>
         <details style="margin:8px 0;">
             <summary style="cursor:pointer;font-size:13px;color:#4a90d9;">展开查看完整 pip 包清单 (76个)</summary>
@@ -542,7 +588,7 @@ zope.interface==8.1</pre>
         </details>
         <p style="margin-top:8px;">安装方式：<code>conda create -n GTHT python=3.14</code> → <code>conda activate GTHT</code> → <code>pip install -r requirements.txt</code>（以上清单即 requirements.txt 内容）。</p>
 
-        <h3>7.4 启动</h3>
+        <h3>7.5 启动</h3>
         <pre>cd /path/to/Codes
 conda activate GTHT
 python start_server.py --port 54865</pre>

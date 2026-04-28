@@ -38,6 +38,16 @@
         const container = document.getElementById(containerId);
         if (!container) return;
 
+        // 从 containerId 中提取 idx（格式：factor-chart-{subId}-{idx}）
+        const parts = containerId.split('-');
+        const idx = parts[parts.length - 1];
+
+        const showVolume = document.getElementById(`show-volume-${subId}-${idx}`)?.checked;
+        const showOI = document.getElementById(`show-oi-${subId}-${idx}`)?.checked;
+        const hasOI = priceData.OPEN_INTEREST && priceData.OPEN_INTEREST.length > 0;
+        const volumeOn = showVolume && priceData.VOLUME && priceData.VOLUME.length > 0;
+        const oiOn = showOI && hasOI;
+
         const _parseTs = ts => typeof ts === 'string' ? new Date(ts + 'T00:00:00').getTime() : ts;
         const isDaily = factorData.dates.length > 0 && typeof factorData.dates[0] === 'string';
         const _fmtHeader = isDaily
@@ -47,6 +57,117 @@
         const factorValues = factorData.dates.map((ts, i) => [_parseTs(ts), factorData.values[i]]);
         const returnValues = returnData.dates.map((ts, i) => [_parseTs(ts), returnData.values[i]]);
 
+        // 动态计算各面板布局（gap=0.5%，总和精确=100%）
+        let priceH, factorH, returnH, extraH;
+        if (volumeOn && oiOn) {
+            // 5联: 48+20+12+9+9 + 4×0.5 = 100
+            priceH = 48; factorH = 20; returnH = 12; extraH = 9;
+        } else if (volumeOn || oiOn) {
+            // 4联: 52+22+14+10 + 3×0.5 = 99.5 ≈ 100
+            priceH = 52; factorH = 22; returnH = 14; extraH = 10;
+        } else {
+            // 3联: 56+24+18 + 2×0.5 = 99
+            priceH = 56; factorH = 24; returnH = 18;
+        }
+
+        // 构建 yAxis
+        let gap = 0.5;
+        const yAxis = [
+            {
+                labels: { format: '{value:.2f}', align: 'right', x: -8 },
+                title: { text: '价格' },
+                height: priceH + '%',
+                resize: { enabled: true }
+            },
+            {
+                labels: { format: '{value:.4f}', align: 'right', x: -8 },
+                title: { text: '因子值' },
+                top: (priceH + gap) + '%',
+                height: factorH + '%',
+                opposite: true,
+                offset: 0,
+            },
+            {
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; }, align: 'right', x: -8 },
+                title: { text: '下一期收益率' },
+                top: (priceH + factorH + gap * 2) + '%',
+                height: returnH + '%',
+                opposite: true,
+                offset: 0,
+            }
+        ];
+
+        // 构建 series
+        const series = [
+            {
+                name: `${productName} 价格`,
+                type: 'candlestick',
+                data: ohlcData,
+                yAxis: 0,
+            },
+            {
+                name: `因子值`,
+                type: 'line',
+                data: factorValues,
+                yAxis: 1,
+                color: '#FF5722',
+                id: 'factor'
+            },
+            {
+                name: `下一期收益率`,
+                type: 'line',
+                data: returnValues,
+                yAxis: 2,
+                color: '#4CAF50',
+                id: 'return'
+            }
+        ];
+
+        let nextTop = priceH + factorH + returnH + gap * 3;
+        let nextIdx = 3;
+
+        if (volumeOn) {
+            const volData = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.VOLUME[i]]);
+            yAxis.push({
+                labels: { format: '{value:.0f}', align: 'right', x: -8 },
+                title: { text: '成交量' },
+                top: nextTop + '%',
+                height: extraH + '%',
+                opposite: true,
+                offset: 0,
+            });
+            series.push({
+                name: `成交量`,
+                type: 'column',
+                data: volData,
+                yAxis: nextIdx,
+                color: '#90CAF9',
+                id: 'volume'
+            });
+            nextTop += extraH + gap;
+            nextIdx++;
+        }
+
+        if (oiOn) {
+            const oiData = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.OPEN_INTEREST[i]]);
+            yAxis.push({
+                labels: { format: '{value:.0f}', align: 'right', x: -8 },
+                title: { text: '持仓量' },
+                top: nextTop + '%',
+                height: extraH + '%',
+                opposite: true,
+                offset: 0,
+            });
+            series.push({
+                name: `持仓量`,
+                type: 'line',
+                data: oiData,
+                yAxis: nextIdx,
+                color: '#E91E63',
+                id: 'oi'
+            });
+        }
+
         Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: `${productName} — ${factorName}` },
@@ -55,7 +176,6 @@
                     point: {
                         events: {
                             click: function() {
-                                // 只对因子值系列（id='factor'）响应
                                 if (this.series.options.id === 'factor') {
                                     openFactorDistribution(subId, factorName, this.x, product);
                                 }
@@ -65,35 +185,10 @@
                 }
             },
             xAxis: { type: 'datetime' },
-            yAxis: [
-                {   // 价格轴
-                    labels: { format: '{value:.2f}', align: 'right', x: -8 },
-                    title: { text: '价格' },
-                    height: '50%',
-                    resize: { enabled: true }
-                },
-                {   // 因子值轴
-                    labels: { format: '{value:.4f}', align: 'right', x: -8 },
-                    title: { text: '因子值' },
-                    top: '55%',
-                    height: '25%',
-                    opposite: true,
-                    offset: 0,
-                },
-                {   // 收益率轴
-                    labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; }, align: 'right', x: -8 },
-                    title: { text: '下一期收益率' },
-                    top: '82%',
-                    height: '15%',
-                    opposite: true,
-                    offset: 0,
-                }
-            ],
-            // split: true — 每个面板（yAxis 段）各自显示独立的 tooltip 气泡
+            yAxis: yAxis,
             tooltip: {
                 split: true,
                 formatter: function() {
-                    // 返回数组：第一项为 header（时间），后续每项对应一条 series
                     const header = _fmtHeader(this.x);
                     return [header].concat(this.points.map(pt => {
                         if (pt.series.type === 'candlestick') {
@@ -107,39 +202,35 @@
                         if (pt.series.options.id === 'return') {
                             return `收益率: <b>${(pt.y * 100).toFixed(2)}%</b>`;
                         }
+                        if (pt.series.options.id === 'volume') {
+                            return `成交量: <b>${pt.y.toFixed(0)}</b>`;
+                        }
+                        if (pt.series.options.id === 'oi') {
+                            return `持仓量: <b>${pt.y.toFixed(0)}</b>`;
+                        }
                         return `${pt.series.name}: <b>${pt.y}</b>`;
                     }));
                 }
             },
-            series: [
-                {
-                    name: `${productName} 价格`,
-                    type: 'candlestick',
-                    data: ohlcData,
-                    yAxis: 0,
-                },
-                {
-                    name: `因子值`,
-                    type: 'line',
-                    data: factorValues,
-                    yAxis: 1,
-                    color: '#FF5722',
-                    id: 'factor'
-                },
-                {
-                    name: `下一期收益率`,
-                    type: 'line',
-                    data: returnValues,
-                    yAxis: 2,
-                    color: '#4CAF50',
-                    id: 'return'
-                }
-            ],
+            series: series,
             navigator: { enabled: true },
             scrollbar: { enabled: true },
             rangeSelector: { enabled: true }
         });
     }
+
+    // Volume / OI 复选框切换时重绘对比图（全局函数，供 onchange 调用）
+    window.icRedrawComparison = function(subId, idx) {
+        const cacheKey = `${subId}-${idx}`;
+        const cache = window._icComparisonCache && window._icComparisonCache[cacheKey];
+        if (!cache) return;
+        const { priceData, factorData, returnData, product, factorName } = cache;
+        const chartDiv = document.getElementById(`factor-chart-${subId}-${idx}`);
+        if (chartDiv) {
+            chartDiv.style.height = '800px';
+            drawComparisonChart(`factor-chart-${subId}-${idx}`, priceData, factorData, returnData, product, factorName, subId, product);
+        }
+    };
 
     // 绘制 Highcharts 图表（保持原有功能）
     function drawChart(containerId, seriesData, seriesName) {
@@ -377,6 +468,12 @@
                         <label style="margin-left:12px;">
                             <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
                         </label>
+                        <label style="margin-left:12px;">
+                            <input type="checkbox" id="show-volume-${subId}-${idx}" onchange="window.icRedrawComparison(${subId},${idx})"> 📊 成交量
+                        </label>
+                        <label style="margin-left:8px;">
+                            <input type="checkbox" id="show-oi-${subId}-${idx}" onchange="window.icRedrawComparison(${subId},${idx})"> 📈 持仓量
+                        </label>
                     </div>
                     <!-- 价格 / 因子值 / 收益率 三联图容器 -->
                     <div style="margin-top:8px;">
@@ -521,6 +618,10 @@
             }
 
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
+                // 缓存数据以便 Volume/OI 复选框切换时重绘
+                const cacheKey = `${subId}-${factorIdx}`;
+                window._icComparisonCache = window._icComparisonCache || {};
+                window._icComparisonCache[cacheKey] = { priceData, factorData, returnData, product, factorName };
                 factorChartDiv.style.height = '800px';
                 drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName, subId, product);
             } else {

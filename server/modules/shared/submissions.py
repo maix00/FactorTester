@@ -20,7 +20,7 @@ from . import shared_bp
 @shared_bp.route('/api/tree-data')
 def get_tree_data():
     if shared._fancytree_cache is None:
-        shared._fancytree_cache = convert_to_fancytree(tree)
+        shared._fancytree_cache = convert_to_fancytree(tree, checkbox_default=True)
     return jsonify(shared._fancytree_cache)
 
 
@@ -29,6 +29,8 @@ def get_products():
     original_path = request.args.get('path')
     if not original_path:
         return jsonify([])
+    # 叶节点 checkbox 默认 True，可通过 ?checkbox=false 关闭
+    leaf_checkbox = request.args.get('checkbox', 'true').lower() != 'false'
     node_path = original_path[:-10] if original_path.endswith('/_products') else original_path
     parts = node_path.split('/')
     node = find_node_by_path(tree, parts)
@@ -45,7 +47,7 @@ def get_products():
         child_nodes.append({
             'title':        prod_name,
             'key':          f"{original_path}/{prod_id}",
-            'checkbox':     False,
+            'checkbox':     leaf_checkbox,
             'folder':       False,
             'lazy':         False,
             'extraClasses': 'product-node',

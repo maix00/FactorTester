@@ -262,7 +262,7 @@ def get_factor_main_section_html(factor_family_alias):
         """
 
 # ─── Tree / product utilities ─────────────────────────────────────────────────
-def convert_to_fancytree(tree_dict):
+def convert_to_fancytree(tree_dict, checkbox_default=True):
     def create_node(key, value, path):
         key_str = str(key) if not isinstance(key, type) else key.__name__
         current_path = f"{path}/{key_str}" if path else key_str
@@ -283,7 +283,7 @@ def convert_to_fancytree(tree_dict):
                 child_nodes.append(create_node(k, v, current_path))
         has_objects = isinstance(value, dict) and "$OBJECTS$" in value and bool(value["$OBJECTS$"])
         has_subclass = isinstance(value, dict) and "$SUBCLASS$" in value and bool(value["$SUBCLASS$"])
-        node = {"title": key_str, "key": current_path, "checkbox": True}
+        node = {"title": key_str, "key": current_path, "checkbox": checkbox_default}
         if child_nodes:
             node["folder"] = True
             node["lazy"] = False
