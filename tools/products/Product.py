@@ -106,17 +106,21 @@ class Product(UniqueObject):
             start_date = pd.to_datetime(start_date)
             end_date = pd.to_datetime(end_date)
         mask = (time_index >= start_date) & (time_index <= end_date)
+        # 基础 OHLCV 列 + 可选 OI 列
+        base_cols = ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']
         if adjusted:
-            adjusted_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
-            nonadjusted_cols = ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']
-            if any([col not in data.columns for col in adjusted_cols]):
+            adj_cols = ['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME']
+            if any(col not in data.columns for col in adj_cols):
                 dataMeta = getattr(self, self.get_current_freq().name)
-                data = dataMeta.get_and_adjust_cols(adjusted_cols)
-            # 若复权列仍不可用（如非 Futures），则回退到原始 OHLCV。
-            selected_cols = adjusted_cols if all(col in data.columns for col in adjusted_cols) else nonadjusted_cols
-            return data.loc[mask][selected_cols]
+                data = dataMeta.get_and_adjust_cols(adj_cols)
+            # 若复权列仍不可用（如非 Futures），则回退到原始 OHLCV
+            selected = adj_cols if all(col in data.columns for col in adj_cols) else base_cols
         else:
-            return data.loc[mask][['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME']]
+            selected = list(base_cols)
+        # 附加 OPEN_INTEREST 列（如有）
+        if 'OPEN_INTEREST' in data.columns and 'OPEN_INTEREST' not in selected:
+            selected.append('OPEN_INTEREST')
+        return data.loc[mask][selected]
 
     def get_time_cols(self, data_freq: Optional[Any] = None) -> List[str]:
         data_freq = self.get_current_freq() if data_freq is None else DataFreq(data_freq)

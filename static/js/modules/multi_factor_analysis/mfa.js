@@ -64,6 +64,14 @@
     runComboBtn.addEventListener('click', runCombination);
 
     initHeatmapButtons();
+    runHierBtn.addEventListener('click', runHierarchy);
+
+    // 因子列表加载后更新分层选择器
+    const origRenderTags = renderTags;
+    renderTags = function() {
+      origRenderTags();
+      populateHierSelects();
+    };
   }
 
   // ── Submissions ───────────────────────────────────────────
@@ -522,6 +530,212 @@
       <span>红 (${vmax.toFixed(4)})</span>
     </div>`;
     heatmapContainer.innerHTML = html;
+  }
+
+  // ── Hierarchy ──────────────────────────────────────────
+  const hierFactorA    = $('#mf-hier-factor-a');
+  const hierFactorB    = $('#mf-hier-factor-b');
+  const hierNGroupsA   = $('#mf-hier-n-groups-a');
+  const hierNGroupsB   = $('#mf-hier-n-groups-b');
+  const hierReturnFreq = $('#mf-hier-return-freq');
+  const runHierBtn     = $('#mf-run-hierarchy-btn');
+  const hierStatus     = $('#mf-hier-status');
+  const hierContainer  = $('#mf-hierarchy-container');
+
+  function populateHierSelects() {
+    const aliases = getSelectedAliases();
+    const options = allFactors
+      .filter(f => selectedFactors.has(f.alias))
+      .map(f => `<option value="${f.alias}">${f.alias}</option>`)
+      .join('');
+    hierFactorA.innerHTML = '<option value="">— 选择因子 —</option>' + options;
+    hierFactorB.innerHTML = '<option value="">— 选择因子 —</option>' + options;
+  }
+
+  async function runHierarchy() {
+    const id = submissionSel.value;
+    const family = familySel.value;
+    const aAlias = hierFactorA.value;
+    const bAlias = hierFactorB.value;
+    const nA = parseInt(hierNGroupsA.value) || 3;
+    const nB = parseInt(hierNGroupsB.value) || 5;
+
+    if (!id) { alert('请选择提交'); return; }
+    if (!family) { alert('请选择因子家族'); return; }
+    if (!aAlias || !bAlias) { alert('请选择因子A和因子B'); return; }
+    if (aAlias === bAlias) { alert('请选择两个不同的因子'); return; }
+
+    hierStatus.textContent = '运行中...';
+    hierStatus.style.color = '#888';
+    runHierBtn.disabled = true;
+
+    try {
+      const resp = await fetch('/run_mfa_hierarchy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submission_id: id,
+          factor_family_alias: family,
+          factor_a_alias: aAlias,
+          factor_b_alias: bAlias,
+          n_groups_a: nA,
+          n_groups_b: nB,
+          return_freq: hierReturnFreq.value || null
+        })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        renderHierarchy(data);
+        hierStatus.textContent = '✓ 完成';
+        hierStatus.style.color = '#2e7d32';
+      } else {
+        hierContainer.innerHTML = `<div style="color:#d40000;padding:20px;">${data.error || '运行失败'}</div>`;
+        hierStatus.textContent = '✗ 失败';
+        hierStatus.style.color = '#d40000';
+      }
+    } catch (e) {
+      console.error('runHierarchy', e);
+      hierStatus.textContent = '✗ 网络错误';
+      hierStatus.style.color = '#d40000';
+    } finally {
+      runHierBtn.disabled = false;
+    }
+  }
+
+  function renderHierarchy(data) {
+    if (typeof Highcharts === 'undefined') {
+      hierContainer.innerHTML = '<div style="color:#888;padding:20px;">Highcharts 未加载</div>';
+      return;
+    }
+
+    let html = '';
+
+    // 因子 A 参考分组图表
+    if (data.factor_a_groups && data.factor_a_groups.length) {
+      html += `<h4 style="font-size:14px;margin:12px 0 8px;">因子A (${data.factor_a}) 分组参考</h4>`;
+      html += `<div id="hier-chart-a" class="mf-chart-container" style="height:300px;"></div>`;
+    }
+
+    // 整理 A 组的数据用于汇总表
+    let summaryRows = '';
+
+    // 每个 A 层一个子图
+    const layers = data.layers || [];
+    const validLayers = layers.filter(l => l.sub_groups && l.sub_groups.length > 0);
+    
+    for (let li = 0; li < layers.length; li++) {
+      const layer = layers[li];
+      const chartId = `hier-chart-${li}`;
+      
+      if (!layer.sub_groups || layer.sub_groups.length === 0) {
+        html += `<div style="margin:8px 0;padding:12px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100;">
+          <strong>${layer.label_a}</strong>: ${layer.error || '品种数不足，无法子分层'}
+        </div>`;
+        continue;
+      }
+
+      html += `<div style="margin:16px 0;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">`;
+      html += `<div style="background:#f8fafc;padding:10px 16px;font-weight:600;font-size:14px;border-bottom:1px solid #e2e8f0;">
+        ${layer.label_a} (因子A: ${data.factor_a})
+      </div>`;
+      html += `<div style="padding:12px;">`;
+
+      // 绩效指标表
+      const hasMetrics = layer.sub_groups.some(g => g.metrics && Object.keys(g.metrics).length > 0);
+      if (hasMetrics) {
+        html += `<table class="corr-table" style="margin-bottom:12px;font-size:11px;">
+          <tr style="background:#f1f5f9;">
+            <td class="label-cell" style="font-weight:600;">子组</td>
+            <td class="label-cell" style="font-weight:600;">累计收益</td>
+            <td class="label-cell" style="font-weight:600;">年化收益</td>
+            <td class="label-cell" style="font-weight:600;">夏普</td>
+            <td class="label-cell" style="font-weight:600;">最大回撤</td>
+          </tr>`;
+        for (const sg of layer.sub_groups) {
+          const m = sg.metrics || {};
+          html += `<tr>
+            <td class="label-cell">${sg.name}</td>
+            <td class="label-cell">${m.TotalReturn != null ? (m.TotalReturn*100).toFixed(2)+'%' : '-'}</td>
+            <td class="label-cell">${m.AnnualReturn != null ? (m.AnnualReturn*100).toFixed(2)+'%' : '-'}</td>
+            <td class="label-cell">${m.Sharpe != null ? m.Sharpe.toFixed(2) : '-'}</td>
+            <td class="label-cell">${m.MaxDrawdown != null ? (m.MaxDrawdown*100).toFixed(2)+'%' : '-'}</td>
+          </tr>`;
+        }
+        html += `</table>`;
+      }
+
+      // 子组图表
+      html += `<div id="${chartId}" class="mf-chart-container" style="height:250px;"></div>`;
+      html += `</div></div>`;
+
+      // 构建汇总行
+      const s = data.summary && data.summary[layer.group_a] ? data.summary[layer.group_a] : {};
+      summaryRows += `<tr>
+        <td class="label-cell">${layer.label_a}</td>
+        <td class="label-cell">${s.mean_ret != null ? (s.mean_ret*100).toFixed(2)+'%' : '-'}</td>
+        <td class="label-cell">${s.mean_sharpe != null ? s.mean_sharpe.toFixed(2) : '-'}</td>
+        <td class="label-cell">${s.best_group || '-'}</td>
+      </tr>`;
+    }
+
+    // 汇总表
+    if (summaryRows) {
+      html = `<h4 style="font-size:14px;margin:0 0 8px;">📊 分层汇总</h4>
+        <table class="corr-table" style="margin-bottom:16px;font-size:11px;">
+          <tr style="background:#f1f5f9;">
+            <td class="label-cell" style="font-weight:600;">A组</td>
+            <td class="label-cell" style="font-weight:600;">B子组平均收益</td>
+            <td class="label-cell" style="font-weight:600;">B子组平均夏普</td>
+            <td class="label-cell" style="font-weight:600;">最佳B子组</td>
+          </tr>${summaryRows}
+        </table>` + html;
+    }
+
+    hierContainer.innerHTML = html;
+
+    // 延迟渲染 Highcharts 图表
+    setTimeout(() => {
+      // 因子 A 参考图
+      if (data.factor_a_groups && data.factor_a_groups.length) {
+        const aChartDiv = document.getElementById('hier-chart-a');
+        if (aChartDiv) {
+          renderHierarchyChart('hier-chart-a', data.factor_a_groups, `因子A (${data.factor_a}) 分组表现`);
+        }
+      }
+
+      // 每个 A 层的子图表
+      for (let li = 0; li < layers.length; li++) {
+        const layer = layers[li];
+        if (!layer.sub_groups || layer.sub_groups.length === 0) continue;
+        const chartId = `hier-chart-${li}`;
+        const chartDiv = document.getElementById(chartId);
+        if (chartDiv) {
+          renderHierarchyChart(chartId, layer.sub_groups, `${layer.label_a} → 因子B (${data.factor_b}) 子组表现`);
+        }
+      }
+    }, 50);
+  }
+
+  function renderHierarchyChart(divId, groups, title) {
+    const series = groups.map(g => ({
+      name: g.name,
+      data: (g.timestamps || []).map((t, i) => [t * 1000, (g.cumulative_returns || [])[i]]),
+      type: 'line',
+      lineWidth: 1.5,
+      marker: { enabled: false }
+    }));
+
+    Highcharts.stockChart(divId, {
+      chart: { animation: false },
+      title: { text: title, style: { fontSize: '13px' } },
+      xAxis: { type: 'datetime', title: { text: '' } },
+      yAxis: { title: { text: '' } },
+      series: series,
+      credits: { enabled: false },
+      rangeSelector: { enabled: false },
+      navigator: { enabled: false },
+      scrollbar: { enabled: false }
+    });
   }
     document.addEventListener('DOMContentLoaded', init);
   } else {

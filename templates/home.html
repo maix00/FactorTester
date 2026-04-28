@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GTHT — 量化工具箱</title>
+    <title>工具箱</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -60,7 +60,7 @@
 
     <div class="home-wrapper">
         <div class="home-header">
-            <h1>量化工具箱</h1>
+            <h1>工具箱</h1>
             <div class="user-area" id="user-area"></div>
         </div>
         <div class="module-grid">
@@ -74,10 +74,15 @@
                 <div class="card-title">多因子测试</div>
                 <div class="card-desc">多因子合成与组合回测</div>
             </div>
-            <div class="module-card coming-soon">
+            <div class="module-card" onclick="goModule('/price_viewer')">
                 <div class="card-icon">📈</div>
                 <div class="card-title">价格序列查看</div>
-                <div class="card-desc">查看产品历史价格与收益率序列（开发中）</div>
+                <div class="card-desc">查看产品历史价格走势（复权/非复权）</div>
+            </div>
+            <div class="module-card" onclick="goModule('/docs')">
+                <div class="card-icon">📖</div>
+                <div class="card-title">技术文档</div>
+                <div class="card-desc">前后端架构、API 接口、因子说明</div>
             </div>
         </div>
     </div>

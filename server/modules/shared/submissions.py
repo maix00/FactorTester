@@ -41,14 +41,17 @@ def get_products():
         prod_id   = getattr(prod, 'id',   str(prod))
         prod_name = getattr(prod, 'name', str(prod))
         prod_desc = getattr(prod, 'desc', '')
+        prod_code = getattr(prod, 'code', None)
         child_nodes.append({
             'title':        prod_name,
             'key':          f"{original_path}/{prod_id}",
-            'checkbox':     True,
+            'checkbox':     False,
             'folder':       False,
             'lazy':         False,
             'extraClasses': 'product-node',
             'desc':         prod_desc,
+            'product_name': prod_name,
+            'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
         })
     return jsonify(child_nodes)
 

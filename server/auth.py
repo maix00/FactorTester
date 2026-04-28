@@ -14,7 +14,8 @@ auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.before_app_request
 def _check_login():
-    PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.api_me', 'core.home', 'static'}
+    PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.api_me', 'core.home', 'core.docs', 'core.docs_tools', 'core.docs_tool_detail', 'core.price_viewer', 'static',
+                        'shared.list_product_names', 'shared.get_product_tree', 'shared.get_price_data', 'shared.get_products'}
     ep = request.endpoint
     if ep is None or ep in PUBLIC_ENDPOINTS:
         return None

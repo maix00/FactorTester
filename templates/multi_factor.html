@@ -167,6 +167,45 @@
             <div style="color:#888;text-align:center;padding:24px;">点击"生成热力图"查看因子 IC 在时间维度的表现</div>
         </div>
     </div>
+
+    <!-- 步骤5：因子分层回测 -->
+    <div class="mf-card">
+        <h3>5. 因子分层回测</h3>
+        <p style="font-size:12px;color:#666;margin:0 0 12px;">
+            先按因子A将标的分为N组，再在每组内部按因子B分为M组，观察因子B在不同市场环境下的表现。
+        </p>
+        <div class="mf-row">
+            <label>因子A（宏观分组）：</label>
+            <select id="mf-hier-factor-a" style="width:160px;">
+                <option value="">— 选择因子 —</option>
+            </select>
+            <label style="margin-left:12px;">分组数：</label>
+            <input type="number" id="mf-hier-n-groups-a" value="3" min="2" max="10" style="width:60px;">
+            <label style="margin-left:16px;">因子B（子组因子）：</label>
+            <select id="mf-hier-factor-b" style="width:160px;">
+                <option value="">— 选择因子 —</option>
+            </select>
+            <label style="margin-left:12px;">分组数：</label>
+            <input type="number" id="mf-hier-n-groups-b" value="5" min="2" max="10" style="width:60px;">
+        </div>
+        <div class="mf-row" style="margin-top:8px;">
+            <label>收益频率：</label>
+            <select id="mf-hier-return-freq">
+                <option value="">因子默认</option>
+                <option value="1d">1d</option>
+                <option value="3d">3d</option>
+                <option value="5d">5d</option>
+                <option value="10d">10d</option>
+            </select>
+        </div>
+        <div style="margin-top:12px;">
+            <button id="mf-run-hierarchy-btn" class="btn btn-primary btn-sm">运行分层回测</button>
+            <span id="mf-hier-status" class="mf-status"></span>
+        </div>
+        <div id="mf-hierarchy-container" style="margin-top:12px;">
+            <div style="color:#888;text-align:center;padding:24px;">点击"运行分层回测"查看因子在分层结构中的表现</div>
+        </div>
+    </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/modules/multi_factor_analysis/mfa.js') }}"></script>

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>价格序列查看 — GTHT</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Fancytree -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Highcharts Stock -->
+    <script src="https://code.highcharts.com/stock/highstock.js"></script>
+    <script src="https://code.highcharts.com/highcharts-more.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <style>
+        body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .pv-wrapper { max-width: 1300px; margin: 0 auto; padding: 24px; }
+        .pv-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .pv-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
+        .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
+        .pv-header .back-link:hover { text-decoration: underline; }
+        .pv-layout { display: flex; gap: 20px; }
+        .pv-sidebar {
+            width: 340px; min-width: 340px; background: #fff; border: 1px solid #e2e8f0;
+            border-radius: 10px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            max-height: calc(100vh - 140px); overflow-y: auto; position: sticky; top: 24px;
+        }
+        .pv-sidebar h3 { font-size: 14px; color: #1a1a1a; margin: 0 0 8px; }
+        .pv-main { flex: 1; min-width: 0; }
+        .pv-chart-card {
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+            padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 16px;
+        }
+        .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .pv-chart-header .title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+        .pv-chart-header .info { font-size: 12px; color: #888; }
+        .pv-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .pv-controls label { font-size: 12px; color: #555; }
+        .pv-controls select, .pv-controls input { font-size: 12px; padding: 4px 8px; border: 1px solid #d0d5dd; border-radius: 4px; }
+        .method-btn {
+            padding: 4px 12px; border: 1px solid #d0d5dd; border-radius: 4px;
+            background: #fff; cursor: pointer; font-size: 12px; transition: all 0.15s;
+        }
+        .method-btn:hover { border-color: #4a90d9; }
+        .method-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 600; }
+        .pv-chart-container { width: 100%; height: 500px; }
+        .pv-empty { text-align: center; padding: 80px 20px; color: #888; }
+        .pv-empty .icon { font-size: 48px; margin-bottom: 16px; }
+        .pv-loading { text-align: center; padding: 40px; color: #888; }
+        /* Fancytree 内 product-node 突出显示 */
+        .fancytree-container .product-node .fancytree-title { color: #0078d4; font-weight: 600; }
+        .fancytree-container .product-node.active .fancytree-title { background: #dbeafe; border-radius: 4px; padding: 1px 4px; }
+        .fancytree-container .node-description { color: #888; margin-left: 6px; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="pv-wrapper">
+    <div class="pv-header">
+        <a href="/" class="back-link">← 返回首页</a>
+        <h1>📈 价格序列查看</h1>
+    </div>
+
+    <div class="pv-layout">
+        <!-- 左侧产品树 -->
+        <div class="pv-sidebar" id="pv-sidebar">
+            <h3>📋 品种列表</h3>
+            <div style="margin-bottom: 8px; color: #586069; font-size: 12px;">
+                树状结构，点击叶子节点查看价格
+            </div>
+            <!-- Fancytree 容器 -->
+            <div id="pv-tree-container" style="max-height: calc(100vh - 240px); overflow-y: auto; border: 1px solid #e1e4e8; border-radius: 8px; padding: 8px; background: #fff;"></div>
+        </div>
+
+        <!-- 右侧图表区 -->
+        <div class="pv-main">
+            <div class="pv-chart-card">
+                <div class="pv-chart-header">
+                    <span class="title" id="pv-chart-title">— 请选择品种 —</span>
+                    <span class="info" id="pv-chart-info"></span>
+                </div>
+                <div class="pv-controls">
+                    <label>频率：</label>
+                    <select id="pv-freq" onchange="loadPriceData()">
+                        <option value="DAY1">日线</option>
+                        <option value="MIN1">1分钟</option>
+                    </select>
+                    <label style="margin-left:12px;">价格类型：</label>
+                    <button class="method-btn active" id="pv-btn-raw" onclick="setAdjusted(false)">原始</button>
+                    <button class="method-btn" id="pv-btn-adj" onclick="setAdjusted(true)">复权</button>
+                    <label style="margin-left:12px;">开始：</label>
+                    <input type="date" id="pv-start-date" value="2024-01-01" onchange="loadPriceData()">
+                    <label>结束：</label>
+                    <input type="date" id="pv-end-date" value="" onchange="loadPriceData()">
+                </div>
+                <div id="pv-chart-container" class="pv-chart-container">
+                    <div class="pv-empty">
+                        <div class="icon">📊</div>
+                        <div>从左侧列表选择品种查看价格走势</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Fancytree + jQuery -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+
+<script>
+(function() {
+    'use strict';
+
+    let currentProduct = null;
+    let currentAdjusted = false;
+    let treeInstance = null;
+    let allProductsMap = {};  // name -> product info
+
+    // ── Init ──────────────────────────────────────────────
+    async function init() {
+        document.getElementById('pv-end-date').value = new Date().toISOString().split('T')[0];
+
+        // 加载品种列表用于按名称查找
+        try {
+            const resp = await fetch('/api/list_product_names');
+            const data = await resp.json();
+            if (data.success) {
+                for (const p of data.products) {
+                    allProductsMap[p.name] = p;
+                }
+            }
+        } catch (e) {
+            console.error('加载品种列表失败', e);
+        }
+
+        // 初始化 Fancytree 产品树
+        initFancytree();
+    }
+
+    function initFancytree() {
+        const $container = $('#pv-tree-container');
+        $container.empty();
+        $container.html('<div style="color:#888;text-align:center;padding:20px;">加载产品树...</div>');
+
+        $container.fancytree({
+            source: { url: '/api/product_tree' },
+            checkbox: false,
+            selectMode: 1,  // 单选
+            init: function(event, data) {
+                treeInstance = data.tree;
+                $container.find('> div:first-child').remove();
+            },
+            lazyLoad: function(event, data) {
+                var node = data.node;
+                data.result = {
+                    url: '/get_products',
+                    data: { path: node.key }
+                };
+            },
+            renderNode: function(event, data) {
+                var node = data.node;
+                var desc = node.data.desc;
+                if (desc) {
+                    var $title = $(node.span).find('.fancytree-title');
+                    $title.siblings('.node-description').remove();
+                    $title.after('<span class="node-description">' + desc + '</span>');
+                }
+            },
+            activate: function(event, data) {
+                // 点击节点时选中产品
+                var node = data.node;
+                // 从节点 data 中读取 product_name（懒加载产品节点会带这个字段）
+                var productName = node.data.product_name;
+                if (!productName) {
+                    // 非懒加载叶子节点，尝试从 key 中提取
+                    productName = extractProductName(node);
+                }
+                if (productName) {
+                    selectProduct(productName);
+                }
+            },
+            click: function(event, data) {
+                if (data.targetType === 'title' || data.targetType === 'icon') {
+                    var node = data.node;
+                    var productName = node.data.product_name || extractProductName(node);
+                    if (productName) selectProduct(productName);
+                }
+            }
+        });
+    }
+
+    function extractProductName(node) {
+        // 从节点 key 中提取产品名（fallback 当 data.product_name 不可用时）
+        // key 格式如: "Product/板块/夜盘时段/产品名" 或 "Product/板块/夜盘时段/_products/..."
+        if (!node || !node.key) return null;
+        var parts = node.key.split('/');
+        var lastPart = parts[parts.length - 1];
+        // 跳过 _products 和纯数字 id
+        if (lastPart === '_products' || /^[0-9]+$/.test(lastPart)) return null;
+        return lastPart;
+    }
+
+    function selectProduct(name) {
+        var info = allProductsMap[name];
+        if (!info) {
+            // 可能是直接从树节点拿到名字，尝试用 name 本身
+            info = { name: name, desc: name, code: name };
+        }
+
+        currentProduct = info;
+
+        // 更新标题
+        var code = info.code || (info.name ? info.name.split('.')[0] : name);
+        var desc = info.desc || info.name || name;
+        document.getElementById('pv-chart-title').textContent = code + ' ' + desc;
+        document.getElementById('pv-chart-info').textContent = info.name || name;
+
+        // 更新 tree 中的 visual active（移除旧 active，添加新 active）
+        $('#pv-tree-container .product-node').removeClass('active');
+        if (treeInstance) {
+            var activeNode = treeInstance.getActiveNode();
+            if (activeNode) {
+                $(activeNode.span).addClass('active');
+            }
+        }
+
+        loadPriceData();
+    }
+
+    window.setAdjusted = function(adjusted) {
+        currentAdjusted = adjusted;
+        document.getElementById('pv-btn-raw').classList.toggle('active', !adjusted);
+        document.getElementById('pv-btn-adj').classList.toggle('active', adjusted);
+        if (currentProduct) loadPriceData();
+    };
+
+    async function loadPriceData() {
+        if (!currentProduct) return;
+
+        const container = document.getElementById('pv-chart-container');
+        container.innerHTML = '<div class="pv-loading">加载中...</div>';
+
+        try {
+            const resp = await fetch('/api/get_price_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    product_name: currentProduct.name || currentProduct.code,
+                    adjusted: currentAdjusted,
+                    freq: document.getElementById('pv-freq').value,
+                    start_date: document.getElementById('pv-start-date').value || null,
+                    end_date: document.getElementById('pv-end-date').value || null,
+                })
+            });
+            const data = await resp.json();
+            if (data.success && data.data && data.data.length > 0) {
+                document.getElementById('pv-chart-info').textContent =
+                    `${data.product} | ${data.adjusted ? '复权' : '原始'} | ${data.freq} | ${data.count} 条`;
+                drawChart(data);
+            } else {
+                container.innerHTML = `<div class="pv-empty">
+                    <div class="icon">⚠️</div>
+                    <div>${data.error || '无价格数据'}</div>
+                </div>`;
+            }
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = `<div class="pv-empty">
+                <div class="icon">⚠️</div>
+                <div>网络错误</div>
+            </div>`;
+        }
+    }
+    window.loadPriceData = loadPriceData;
+
+    function drawChart(data) {
+        const container = document.getElementById('pv-chart-container');
+        container.innerHTML = '';
+
+        const ohlc = data.data.map(d => [
+            d.timestamp,
+            d.open, d.high, d.low, d.close
+        ]);
+        const volume = data.data.map(d => [
+            d.timestamp,
+            d.volume
+        ]);
+
+        const title = `${data.product}${data.desc ? ' — ' + data.desc : ''} (${data.adjusted ? '复权' : '原始'})`;
+
+        Highcharts.stockChart(container, {
+            chart: { animation: false, height: 500 },
+            title: { text: title, style: { fontSize: '15px' } },
+            subtitle: { text: `${data.freq} · ${data.count} 条数据`, style: { fontSize: '11px', color: '#888' } },
+            rangeSelector: {
+                buttons: [
+                    { type: 'day',   count: 3,  text: '3天' },
+                    { type: 'week',  count: 1,  text: '1周' },
+                    { type: 'month', count: 1,  text: '1月' },
+                    { type: 'month', count: 3,  text: '3月' },
+                    { type: 'year',  count: 1,  text: '1年' },
+                    { type: 'all',             text: '全部' },
+                ],
+                selected: 4,
+            },
+            yAxis: [{
+                labels: { align: 'right', x: -3 },
+                title: { text: '' },
+                height: '60%',
+                lineWidth: 2,
+                resize: { enabled: true }
+            }, {
+                labels: { align: 'right', x: -3 },
+                title: { text: '' },
+                top: '65%',
+                height: '35%',
+                offset: 0,
+                lineWidth: 2
+            }],
+            tooltip: {
+                split: true,
+                valueDecimals: 2
+            },
+            series: [{
+                type: 'candlestick',
+                name: data.product,
+                data: ohlc,
+                tooltip: {
+                    valueDecimals: 2
+                }
+            }, {
+                type: 'column',
+                name: 'Volume',
+                data: volume,
+                yAxis: 1,
+                tooltip: {
+                    valueDecimals: 0
+                }
+            }],
+            credits: { enabled: false },
+            navigator: { enabled: true },
+            scrollbar: { enabled: false }
+        });
+    }
+
+    init();
+})();
+</script>
+</body>
+</html>

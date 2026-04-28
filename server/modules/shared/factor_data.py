@@ -239,11 +239,15 @@ def get_price_series():
         factor_idx = pd.to_datetime(factor_dates, unit='ms')
         start_date = factor_idx.min().strftime('%Y-%m-%d')
         end_date   = factor_idx.max().strftime('%Y-%m-%d')
-        required = (['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED'] if adjusted
-                    else ['OPEN', 'HIGH', 'LOW', 'CLOSE'])
+        required = (['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME'] if adjusted
+                    else ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME'])
         raw_df = product.get_price_data(start_date, end_date, adjusted=adjusted)
         if raw_df is None or raw_df.empty:
             return jsonify({'error': '无价格数据'}), 404
+        # 检测 OI 列
+        _has_oi = 'OPEN_INTEREST' in raw_df.columns
+        if _has_oi:
+            required.append('OPEN_INTEREST')
         for col in required:
             if col not in raw_df.columns:
                 return jsonify({'error': f'价格数据缺少列: {col}'}), 500
@@ -272,12 +276,16 @@ def get_price_series():
 
         # 分组聚合
         def agg_func(group):
-            return pd.Series({
+            result = {
                 'OPEN': group[required[0]].iloc[0],      # 区间内第一笔 open
                 'HIGH': group[required[1]].max(),
                 'LOW': group[required[2]].min(),
-                'CLOSE': group[required[3]].iloc[-1]    # 区间内最后一笔 close
-            })
+                'CLOSE': group[required[3]].iloc[-1],    # 区间内最后一笔 close
+                'VOLUME': group[required[4]].sum(),       # 区间内总成交量
+            }
+            if _has_oi:
+                result['OPEN_INTEREST'] = group['OPEN_INTEREST'].iloc[-1]  # 区间末持仓量
+            return pd.Series(result)
         
         # 按 bin_indices 分组
         grouped = raw_filtered.groupby(bin_indices)
@@ -291,13 +299,17 @@ def get_price_series():
             dates_out = [ts.strftime('%Y-%m-%d') for ts in factor_idx]
         else:
             dates_out = factor_dates
-        return jsonify({
+        result = {
             'dates': dates_out,
             'OPEN': ohlc['OPEN'].tolist(),
             'HIGH': ohlc['HIGH'].tolist(),
             'LOW': ohlc['LOW'].tolist(),
-            'CLOSE': ohlc['CLOSE'].tolist()
-        })
+            'CLOSE': ohlc['CLOSE'].tolist(),
+            'VOLUME': ohlc['VOLUME'].tolist(),
+        }
+        if _has_oi:
+            result['OPEN_INTEREST'] = ohlc['OPEN_INTEREST'].tolist()
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
