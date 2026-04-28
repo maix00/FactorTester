@@ -14,27 +14,29 @@
     <script src="https://code.highcharts.com/modules/accessibility.js"></script>
     <style>
         body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        .pv-wrapper { max-width: 1300px; margin: 0 auto; padding: 24px; }
-        .pv-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .pv-wrapper { max-width: 100%; margin: 0 auto; padding: 20px 24px; height: calc(100vh - 40px); display: flex; flex-direction: column; }
+        .pv-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-shrink: 0; }
         .pv-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
         .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
         .pv-header .back-link:hover { text-decoration: underline; }
-        .pv-layout { display: flex; gap: 20px; }
+        .pv-layout { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
         .pv-sidebar {
-            width: 340px; min-width: 340px; background: #fff; border: 1px solid #e2e8f0;
-            border-radius: 10px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            max-height: calc(100vh - 140px); overflow-y: auto; position: sticky; top: 24px;
+            width: 280px; min-width: 280px; background: #fff; border: 1px solid #e2e8f0;
+            border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            max-height: calc(100vh - 120px); overflow-y: auto; position: sticky; top: 20px;
         }
         .pv-sidebar h3 { font-size: 14px; color: #1a1a1a; margin: 0 0 8px; }
-        .pv-main { flex: 1; min-width: 0; }
+        .pv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .pv-chart-card {
             background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
-            padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); margin-bottom: 16px;
+            padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            display: flex; flex-direction: column; flex: 1 1 auto;
+            min-height: 0;
         }
-        .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .pv-chart-header .title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
         .pv-chart-header .info { font-size: 12px; color: #888; }
-        .pv-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .pv-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; flex-shrink: 0; }
         .pv-controls label { font-size: 12px; color: #555; }
         .pv-controls select, .pv-controls input { font-size: 12px; padding: 4px 8px; border: 1px solid #d0d5dd; border-radius: 4px; }
         .method-btn {
@@ -43,10 +45,16 @@
         }
         .method-btn:hover { border-color: #4a90d9; }
         .method-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 600; }
-        .pv-chart-container { width: 100%; height: 500px; }
+        .pv-chart-container { width: 100%; min-height: 400px; flex: 1 1 auto; }
         .pv-empty { text-align: center; padding: 80px 20px; color: #888; }
         .pv-empty .icon { font-size: 48px; margin-bottom: 16px; }
         .pv-loading { text-align: center; padding: 40px; color: #888; }
+        /* 合约表格 */
+        #pv-contract-table-container { flex: 0 0 auto; max-height: 250px; overflow-y: auto; border: 1px solid #e1e4e8; border-radius: 6px; background: #fff; margin-top: 10px; }
+        #pv-contract-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        #pv-contract-table th { position: sticky; top: 0; background: #f6f8fa; z-index: 1; }
+        #pv-contract-table td, #pv-contract-table th { padding: 6px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        #pv-contract-table tbody tr:hover { background: rgba(255,165,0,0.08); }
         /* Fancytree 内 product-node 突出显示 */
         .fancytree-container .product-node .fancytree-title { color: #0078d4; font-weight: 600; }
         .fancytree-container .product-node.active .fancytree-title { background: #dbeafe; border-radius: 4px; padding: 1px 4px; }
@@ -80,10 +88,11 @@
                 </div>
                 <div class="pv-controls">
                     <label>频率：</label>
-                    <select id="pv-freq" onchange="loadPriceData()">
+                    <select id="pv-freq" onchange="loadPriceData()" style="display:none;">
                         <option value="DAY1">日线</option>
                         <option value="MIN1">1分钟</option>
                     </select>
+                    <span id="pv-freq-buttons"></span>
                     <label style="margin-left:12px;">价格类型：</label>
                     <button class="method-btn active" id="pv-btn-raw" onclick="setAdjusted(false)">原始</button>
                     <button class="method-btn" id="pv-btn-adj" onclick="setAdjusted(true)">复权</button>
@@ -97,6 +106,19 @@
                         <div class="icon">📊</div>
                         <div>从左侧列表选择品种查看价格走势</div>
                     </div>
+                </div>
+                <!-- 合约列表表格（仅 Futures 类品种显示） -->
+                <div id="pv-contract-table-container" style="display:none;">
+                    <table id="pv-contract-table">
+                        <thead>
+                            <tr>
+                                <th>合约</th>
+                                <th>起始日期</th>
+                                <th>结束日期</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -115,6 +137,93 @@
     let currentAdjusted = false;
     let treeInstance = null;
     let allProductsMap = {};  // name -> product info
+    let currentChart = null;  // Highcharts chart instance
+    let currentContracts = []; // 当前主力连续的合约列表
+    let highlightedRow = null; // 当前高亮的表格行
+
+    // ── 合约表格 ────────────────────────────────────────
+    async function loadContractsForProduct(productName) {
+        var tableContainer = document.getElementById('pv-contract-table-container');
+        var tbody = document.querySelector('#pv-contract-table tbody');
+        tbody.innerHTML = '';
+        currentContracts = [];
+        highlightedRow = null;
+        tableContainer.style.display = 'none';
+
+        try {
+            var resp = await fetch('/api/get_contracts?product=' + encodeURIComponent(productName));
+            var data = await resp.json();
+            if (data.success && data.contracts && data.contracts.length > 0) {
+                currentContracts = data.contracts;
+                console.log('[DEBUG] 加载到合约数:', currentContracts.length);
+                for (var i = 0; i < data.contracts.length; i++) {
+                    var c = data.contracts[i];
+                    var tr = document.createElement('tr');
+                    tr.setAttribute('data-idx', i);
+                    tr.style.cursor = 'pointer';
+                    tr.innerHTML =
+                        '<td>' + c.contract + '</td>' +
+                        '<td>' + (c.start || '') + '</td>' +
+                        '<td>' + (c.end || '') + '</td>';
+                    // hover → 高亮
+                    tr.addEventListener('mouseenter', (function(idx) {
+                        return function() { highlightContractBand(idx); };
+                    })(i));
+                    tr.addEventListener('mouseleave', function() {
+                        if (highlightedRow === null) clearHighlight();
+                    });
+                    // click → 选中/取消
+                    tr.addEventListener('click', (function(idx) {
+                        return function() {
+                            var rows = tbody.querySelectorAll('tr');
+                            if (highlightedRow === idx) {
+                                highlightedRow = null;
+                                rows[idx].style.background = '';
+                                clearHighlight();
+                            } else {
+                                rows.forEach(function(r) { r.style.background = ''; });
+                                highlightedRow = idx;
+                                rows[idx].style.background = 'rgba(255,165,0,0.15)';
+                                highlightContractBand(idx);
+                            }
+                        };
+                    })(i));
+                    tbody.appendChild(tr);
+                }
+            }
+        } catch (e) {
+            console.error('加载合约列表失败', e);
+        }
+    }
+
+    function clearHighlight() {
+        if (!currentChart) return;
+        currentChart.xAxis.forEach(function(ax) {
+            if (ax && ax.removePlotBand) {
+                ax.removePlotBand('highlight');
+            }
+        });
+    }
+
+    function highlightContractBand(idx) {
+        if (!currentChart) return;
+        var c = currentContracts[idx];
+        if (!c || !c.start_ts || !c.end_ts) return;
+
+        currentChart.xAxis.forEach(function(ax) {
+            if (ax && ax.removePlotBand) {
+                ax.removePlotBand('highlight');
+            }
+        });
+
+        currentChart.xAxis[0].addPlotBand({
+            id: 'highlight',
+            from: c.start_ts,
+            to: c.end_ts,
+            color: 'rgba(255,165,0,0.2)',
+            zIndex: 5
+        });
+    }
 
     // ── Init ──────────────────────────────────────────────
     async function init() {
@@ -224,7 +333,15 @@
             }
         }
 
-        loadPriceData();
+        // 切换品种：重置合约表格
+        document.querySelector('#pv-contract-table tbody').innerHTML = '';
+        document.getElementById('pv-contract-table-container').style.display = 'none';
+        currentContracts = [];
+        highlightedRow = null;
+
+        loadContractsForProduct(info.name || name).then(function() {
+            loadPriceData();
+        });
     }
 
     window.setAdjusted = function(adjusted) {
@@ -234,29 +351,46 @@
         if (currentProduct) loadPriceData();
     };
 
-    async function loadPriceData() {
+    async function loadPriceData(freqOverride) {
         if (!currentProduct) return;
 
         const container = document.getElementById('pv-chart-container');
         container.innerHTML = '<div class="pv-loading">加载中...</div>';
 
+        // 如果传了频率覆盖，先更新下拉框
+        if (freqOverride) {
+            document.getElementById('pv-freq').value = freqOverride;
+        }
+
+        var body = {
+            product_name: currentProduct.name || currentProduct.code,
+            adjusted: currentAdjusted,
+            freq: document.getElementById('pv-freq').value,
+            start_date: document.getElementById('pv-start-date').value || null,
+            end_date: document.getElementById('pv-end-date').value || null,
+        };
+
         try {
             const resp = await fetch('/api/get_price_data', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    product_name: currentProduct.name || currentProduct.code,
-                    adjusted: currentAdjusted,
-                    freq: document.getElementById('pv-freq').value,
-                    start_date: document.getElementById('pv-start-date').value || null,
-                    end_date: document.getElementById('pv-end-date').value || null,
-                })
+                body: JSON.stringify(body)
             });
             const data = await resp.json();
             if (data.success && data.data && data.data.length > 0) {
                 document.getElementById('pv-chart-info').textContent =
                     `${data.product} | ${data.adjusted ? '复权' : '原始'} | ${data.freq} | ${data.count} 条`;
                 drawChart(data);
+                // 更新频率按钮
+                updateFreqButtons(data.available_freqs || [], data.freq);
+                // 只有 Futures 类 + 主力连续模式才显示合约表格
+                var tableContainer = document.getElementById('pv-contract-table-container');
+                console.log('[DEBUG] is_futures:', data.is_futures, 'contract_uid:', body.contract_uid, 'currentContracts.length:', currentContracts.length);
+                if (data.is_futures && !body.contract_uid && currentContracts.length > 0) {
+                    tableContainer.style.display = 'block';
+                } else {
+                    tableContainer.style.display = 'none';
+                }
             } else {
                 container.innerHTML = `<div class="pv-empty">
                     <div class="icon">⚠️</div>
@@ -272,6 +406,28 @@
         }
     }
     window.loadPriceData = loadPriceData;
+
+    // ── 数据源（频率）按钮 ──────────────────────────────
+    function updateFreqButtons(availableFreqs, currentFreq) {
+        var container = document.getElementById('pv-freq-buttons');
+        if (!container) return;
+        if (!availableFreqs || availableFreqs.length <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+        var html = '';
+        var freqLabels = {
+            'MIN1':  '1分钟', 'MIN5': '5分钟', 'MIN15': '15分钟', 'MIN30': '30分钟',
+            'HOUR1': '1小时', 'DAY1': '日线'
+        };
+        function label(f) { return freqLabels[f] || f; }
+        for (var i = 0; i < availableFreqs.length; i++) {
+            var f = availableFreqs[i];
+            var active = (f === currentFreq) ? ' active' : '';
+            html += '<button class="method-btn' + active + '" onclick="loadPriceData(\'' + f + '\')">' + label(f) + '</button>';
+        }
+        container.innerHTML = html;
+    }
 
     function drawChart(data) {
         const container = document.getElementById('pv-chart-container');
@@ -294,13 +450,31 @@
 
         const title = `${data.product}${data.desc ? ' — ' + data.desc : ''} (${data.adjusted ? '复权' : '原始'})`;
 
+        // 判断是否为日内频率（非日线倍数）
+        var freqStr = data.freq || '';
+        var isIntraday = freqStr.indexOf('MIN') === 0 || freqStr.indexOf('HOUR') === 0 || freqStr.indexOf('SEC') === 0;
+
+        // 合约 plotBands（Futures 类才有）
+        var plotBands = [];
+        if (data.is_futures && data.contracts && data.contracts.length > 0) {
+            plotBands = data.contracts.map(function(c, i) {
+                return {
+                    id: 'contract-' + i,
+                    from: c.start_ts,
+                    to: c.end_ts,
+                    color: 'rgba(100,149,237,0.04)',
+                };
+            });
+        }
+
         // 构建 yAxis 和 series
         const yAxisArr = [{
             labels: { align: 'right', x: -3 },
             title: { text: '' },
             height: hasOI ? '50%' : '60%',
             lineWidth: 2,
-            resize: { enabled: true }
+            resize: { enabled: true },
+            plotBands: plotBands
         }, {
             labels: { align: 'right', x: -3 },
             title: { text: '' },
@@ -313,10 +487,16 @@
             type: 'candlestick',
             name: data.product,
             data: ohlc,
-            tooltip: { valueDecimals: 2 }
+            tooltip: {
+                pointFormat:
+                    '<span style="font-weight:bold">开盘</span> {point.open:.2f}<br/>' +
+                    '<span style="font-weight:bold">最高</span> {point.high:.2f}<br/>' +
+                    '<span style="font-weight:bold">最低</span> {point.low:.2f}<br/>' +
+                    '<span style="font-weight:bold">收盘</span> {point.close:.2f}'
+            }
         }, {
             type: 'column',
-            name: 'Volume',
+            name: '成交量',
             data: volume,
             yAxis: 1,
             tooltip: { valueDecimals: 0 }
@@ -333,7 +513,7 @@
             });
             seriesArr.push({
                 type: 'line',
-                name: 'Open Interest',
+                name: '持仓量',
                 data: oi,
                 yAxis: 2,
                 color: '#E91E63',
@@ -341,8 +521,29 @@
             });
         }
 
-        Highcharts.stockChart(container, {
-            chart: { animation: false, height: 500 },
+        // xAxis 标签格式：日内显示时间+日期，日线仅显示日期
+        var xAxisOptions = {
+            type: 'datetime',
+            labels: {
+                formatter: function() {
+                    var d = new Date(this.value);
+                    var dateStr = Highcharts.dateFormat('%Y-%m-%d', this.value);
+                    if (isIntraday) {
+                        var timeStr = Highcharts.dateFormat('%H:%M', this.value);
+                        var days = ['日','一','二','三','四','五','六'];
+                        var dayName = days[d.getDay()];
+                        return timeStr + '<br/>' + dateStr + ' 周' + dayName;
+                    } else {
+                        var days = ['日','一','二','三','四','五','六'];
+                        var dayName = days[d.getDay()];
+                        return dateStr + ' 周' + dayName;
+                    }
+                }
+            }
+        };
+
+        currentChart = Highcharts.stockChart(container, {
+            chart: { animation: false },
             title: { text: title, style: { fontSize: '15px' } },
             subtitle: { text: `${data.freq} · ${data.count} 条数据`, style: { fontSize: '11px', color: '#888' } },
             rangeSelector: {
@@ -356,10 +557,22 @@
                 ],
                 selected: 4,
             },
+            xAxis: xAxisOptions,
             yAxis: yAxisArr,
             tooltip: {
                 split: true,
-                valueDecimals: 2
+                valueDecimals: 2,
+                dateTimeLabelFormats: isIntraday ? {
+                    millisecond: '%H:%M:%S.%L',
+                    second: '%H:%M:%S',
+                    minute: '%H:%M',
+                    hour: '%H:%M'
+                } : {
+                    millisecond: '%Y-%m-%d',
+                    second: '%Y-%m-%d %H:%M',
+                    minute: '%Y-%m-%d %H:%M',
+                    hour: '%Y-%m-%d %H:%M'
+                }
             },
             series: seriesArr,
             credits: { enabled: false },

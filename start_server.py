@@ -2,6 +2,7 @@ import os, threading, webbrowser, time
 from flask import request, jsonify, session
 from server import create_app
 from server.shared import _current_user, _load_accounts, _accts_lock
+from tools.base.IdleResourceManager import IdleResourceManager
 
 app = create_app()
 
@@ -28,6 +29,10 @@ def run_flask_server(port=8000, directory='.'):
     os.chdir(directory)
     url = f"http://localhost:{port}/"
     print(f"Serving Flask on {url} from {os.path.abspath(directory)}")
+
+    # 启动全局空闲资源清理守护线程
+    IdleResourceManager.get_instance().start(scan_interval=5)
+    print("IdleResourceManager started.")
 
     def open_browser():
         time.sleep(1)

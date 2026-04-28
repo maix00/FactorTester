@@ -99,15 +99,22 @@ class CNFuturesContract(FuturesContract):
 
 class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
+
     def __init__(self, name: str, point_value: Optional[int] = None, 
-                 mappings_path: Optional[str] = None, 
+                 roller_info_path: Optional[str] = None,
                  data_path: Optional[str] = None):
-        super().__init__(name, point_value, 'CNY', mappings_path, data_path, CNFuturesContract, timezone='Asia/Shanghai')
+        super().__init__(name, point_value, 'CNY', roller_info_path, CNFuturesContract, timezone='Asia/Shanghai')
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
+
+    def get_roller_info_path(self) -> str:
+        if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):
+            from Settings import DATA_DIR
+            self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
+        return self._ROLLER_INFO_PATH_CACHED
 
 from tools.products.Product import Product
 
