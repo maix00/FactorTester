@@ -384,7 +384,7 @@
                 }
                 
                 var addedCount = merged.length - curList.length;
-                fetch('/replace_params', {
+                return fetch('/replace_params', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ factor_family_alias: factorAlias, params_list: merged })

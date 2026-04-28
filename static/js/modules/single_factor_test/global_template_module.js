@@ -5,6 +5,57 @@
 (function() {
     const FF_ALIAS = window.factorFamilyAlias || '';
 
+    // ── 参数模板辅助函数 ──────────────────────────────────────────────────
+    // 查找名为 __global_restore__ 的参数模板，返回 { id, ... } 或 null
+    async function _findGlobalRestoreTpl() {
+        try {
+            const resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS));
+            const data = await resp.json();
+            if (data.success && data.templates) {
+                return data.templates.find(function(t) { return t.name === '__global_restore__'; }) || null;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    // 删除名为 __global_restore__ 的参数模板（若存在）
+    async function _deleteGlobalRestoreTpl() {
+        var existing = await _findGlobalRestoreTpl();
+        if (existing) {
+            try {
+                await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
+                    method: 'DELETE'
+                });
+            } catch(e) {
+                console.error('删除旧 __global_restore__ 失败:', e);
+            }
+        }
+    }
+
+    // 保存/更新 __global_restore__ 参数模板
+    async function _saveOrUpdateGlobalRestoreTpl(params_list) {
+        var existing = await _findGlobalRestoreTpl();
+        if (existing) {
+            // 更新已有的
+            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ params_list: params_list })
+            });
+            var data = await resp.json();
+            return { success: data.success, id: existing.id, error: data.error };
+        } else {
+            // 新建
+            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: '__global_restore__', params_list: params_list })
+            });
+            var data = await resp.json();
+            return { success: data.success, id: data.id, error: data.error };
+        }
+    }
+
     // ── 收集当前所有设置快照 ──────────────────────────────────────────────
     async function collectSnapshot() {
         const snapshot = {};
@@ -197,13 +248,10 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ factor_family_alias: FF_ALIAS, params_list: [] })
                 });
-                // 保存一个临时参数模板
-                var saveResp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: '__global_restore__', params_list: snapshot.params_list })
-                });
-                var saveData = await saveResp.json();
+                // 先清理旧的 __global_restore__ 参数模板
+                await _deleteGlobalRestoreTpl();
+                // 保存新的临时参数模板
+                var saveData = await _saveOrUpdateGlobalRestoreTpl(snapshot.params_list);
                 if (saveData.success && saveData.id) {
                     // 把下拉框设到这个临时模板
                     var pSel = document.getElementById('params-tpl-select');
@@ -342,11 +390,16 @@
         }
         const snapshot = await collectSnapshot();
 
-        // 同步保存参数模板，用于加载时通过参数模块的恢复流程来恢复参数
-        if (typeof window._saveCurrentParamsAsTemplate === 'function') {
+        // 同步保存/更新 __global_restore__ 参数模板（用于加载时恢复参数）
+        if (snapshot.params_list && snapshot.params_list.length > 0) {
             try {
-                await window._saveCurrentParamsAsTemplate('__global_restore__');
-            } catch(e) {}
+                var result = await _saveOrUpdateGlobalRestoreTpl(snapshot.params_list);
+                if (!result.success) {
+                    console.error('保存/更新 __global_restore__ 参数模板失败:', result.error);
+                }
+            } catch(e) {
+                console.error('保存 __global_restore__ 异常:', e);
+            }
         }
 
         statusEl.textContent = '保存中...';
@@ -510,6 +563,8 @@
             const resp = await fetch('/api/global_templates/' + tplId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
+                // 同时删除关联的 __global_restore__ 参数模板
+                await _deleteGlobalRestoreTpl();
                 statusEl.textContent = '✓ 已删除';
                 statusEl.style.color = '#28a745';
                 await loadTemplateList();
