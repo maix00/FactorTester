@@ -274,6 +274,24 @@ th {
     outline: 2px solid #f0b400;
 }
 
+/* 分组测试指标名 hover 样式 */
+.metric-name-cell {
+    color: #0f4c81;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.metric-name-cell:hover {
+    background: #e8f0fe;
+    color: #0078d4;
+}
+
+/* 指标 hover 浮窗 */
+#metric-hover-popup {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    transition: opacity 0.15s ease;
+}
+
 .setting-summary-label {
     font-size: 14px;
     font-weight: 600;

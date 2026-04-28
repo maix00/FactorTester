@@ -190,30 +190,66 @@
         var metricNamesCN = {
             'Total Return': '总收益率', 'Annual Return': '年化收益率', 'Volatility': '年化波动率',
             'Sharpe Ratio': '夏普比率', 'Max Drawdown': '最大回撤', 'Calmar Ratio': 'Calmar比率',
-            'Win Rate': '胜率', 'Mean Return': '均值收益率', 'Skewness': '偏度', 'Kurtosis': '峰度'
+            'Win Rate': '胜率', 'Mean Return': '均值收益率', 'Skewness': '偏度', 'Kurtosis': '峰度',
+            'Avg Turnover': '平均换手率'
         };
+        var metricDescs = {
+            'Total Return': '整个回测期间的累计净收益率',
+            'Annual Return': '年化收益率，基于几何平均折算',
+            'Volatility': '收益率的年化标准差',
+            'Sharpe Ratio': '夏普比率：衡量单位风险的超额回报',
+            'Max Drawdown': '最大回撤：净值从峰值到谷底的最大跌幅',
+            'Calmar Ratio': 'Calmar比率：年化收益率与最大回撤的比值',
+            'Win Rate': '胜率：正收益周期占总周期的比例',
+            'Mean Return': '单期收益率的算术平均值',
+            'Skewness': '偏度：收益率分布的偏斜程度',
+            'Kurtosis': '峰度：收益率分布的尾部厚度',
+            'Avg Turnover': '平均换手率：相邻两期持仓变动的比例',
+        };
+        var metricMathExprs = {
+            'Total Return': '$$R_{\\text{total}} = \\prod_t (1+r_t) - 1$$',
+            'Annual Return': '$$R_{\\text{ann}} = (1+R_{\\text{total}})^{252/n} - 1$$',
+            'Volatility': '$$\\sigma_{\\text{ann}} = \\sigma_{\\text{daily}} \\cdot \\sqrt{252}$$',
+            'Sharpe Ratio': '$$\\text{Sharpe} = \\frac{R_{\\text{ann}}}{\\sigma_{\\text{ann}}}$$',
+            'Max Drawdown': '$$\\text{MDD} = \\max_t \\left( \\frac{\\text{Peak}_t - \\text{NAV}_t}{\\text{Peak}_t} \\right)$$',
+            'Calmar Ratio': '$$\\text{Calmar} = \\frac{R_{\\text{ann}}}{|\\text{MDD}|}$$',
+            'Win Rate': '$$\\text{WinRate} = \\frac{N_{\\text{positive}}}{N_{\\text{total}}}$$',
+            'Mean Return': '$$\\bar{r} = \\frac{1}{n}\\sum_{t=1}^n r_t$$',
+            'Skewness': '$$S = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^3$$',
+            'Kurtosis': '$$K = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^4 - 3$$',
+            'Avg Turnover': '$$\\text{Turnover} = \\frac{|\\text{持仓变动}|}{\\text{平均持仓数}}$$',
+        };
+
+        // 收集分组标签
+        var groupLabels = [];
+        for (var groupIdx in metrics) {
+            if (!metrics.hasOwnProperty(groupIdx)) continue;
+            groupLabels.push(groupIdx);
+        }
         
-        // 表头
-        var theadHtml = '<tr><th>分组</th>';
-        metricNames.forEach(function(name) {
-            theadHtml += '<th>' + (metricNamesCN[name] || name) + '</th>';
+        // 转置：行 = 指标名，列 = 分组
+        // 表头：第一列「指标」，后面每个分组一列
+        var theadHtml = '<tr><th>指标</th>';
+        groupLabels.forEach(function(g) {
+            var isLS = (g === 'LS');
+            theadHtml += '<th' + (isLS ? ' style="background:#f0f0f0;"' : '') + '>' + (isLS ? 'Long-Short' : ('第' + (parseInt(g)+1) + '组')) + '</th>';
         });
         theadHtml += '</tr>';
         document.getElementById('metrics_head').innerHTML = theadHtml;
         
-        // 表体
+        // 表体：每行一个指标
         var tbodyHtml = '';
-        for (var groupIdx in metrics) {
-            if (!metrics.hasOwnProperty(groupIdx)) continue;
-            var groupMetrics = metrics[groupIdx];
-            var isLS = (groupIdx === 'LS');
-            var label = isLS ? '<strong>Long-Short</strong>' : ('<strong>第' + (parseInt(groupIdx)+1) + '组</strong>');
-            var rowStyle = isLS ? ' style="background:#f0f0f0;font-weight:600;"' : '';
-            tbodyHtml += '<tr' + rowStyle + '><td>' + label + '</td>';
-            metricNames.forEach(function(name) {
-                var val = groupMetrics[name];
+        metricNames.forEach(function(name) {
+            var cnName = metricNamesCN[name] || name;
+            tbodyHtml += '<tr><td class="metric-name-cell" data-metric="' + name.replace(/"/g, '&quot;') + '" style="cursor:pointer;position:relative;">' + cnName + '</td>';
+            groupLabels.forEach(function(g) {
+                var isLS = (g === 'LS');
+                var val = metrics[g][name];
+                var style = isLS ? ' style="background:#f0f0f0;"' : '';
                 if (typeof val === 'number') {
-                    if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
+                    if (name === 'Avg Turnover') {
+                        val = (val * 100).toFixed(1) + '%';
+                    } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
                         val = val.toFixed(2) + '%';
                     } else if (name.includes('Ratio')) {
                         val = val.toFixed(4);
@@ -223,11 +259,74 @@
                 } else if (val === null || val === undefined) {
                     val = '—';
                 }
-                tbodyHtml += '<td>' + val + '</td>';
+                tbodyHtml += '<td' + style + '>' + val + '</td>';
             });
             tbodyHtml += '</tr>';
-        }
+        });
         document.getElementById('metrics_body').innerHTML = tbodyHtml;
+
+        // 绑定指标名 hover 弹出描述和数学公式
+        bindMetricHoverPopup(metricNamesCN, metricDescs, metricMathExprs);
+    }
+
+    /** 为指标名列绑定 hover 浮窗 */
+    function bindMetricHoverPopup(metricNamesCN, metricDescs, metricMathExprs) {
+        // 创建全局浮窗元素（只创建一次）
+        var popup = document.getElementById('metric-hover-popup');
+        if (!popup) {
+            popup = document.createElement('div');
+            popup.id = 'metric-hover-popup';
+            popup.style.cssText = 'display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.18);padding:18px 20px;max-width:420px;min-width:280px;pointer-events:none;';
+            document.body.appendChild(popup);
+        }
+
+        var cells = document.querySelectorAll('#metrics_body .metric-name-cell');
+        cells.forEach(function(cell) {
+            cell.addEventListener('mouseenter', function(e) {
+                var metricName = this.getAttribute('data-metric');
+                var cnName = metricNamesCN[metricName] || metricName;
+                var desc = metricDescs[metricName] || '';
+                var mathExpr = metricMathExprs[metricName] || '';
+
+                var html = '<div style="font-size:15px;font-weight:700;color:#0f4c81;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #e5e7eb;">' + cnName + '</div>';
+                if (mathExpr) {
+                    html += '<div style="font-size:18px;text-align:center;margin:10px 0;padding:8px;background:#f8fafc;border-radius:6px;">' + mathExpr + '</div>';
+                }
+                if (desc) {
+                    html += '<div style="font-size:13px;color:#555;line-height:1.7;margin-top:8px;">' + desc + '</div>';
+                }
+
+                popup.innerHTML = html;
+                popup.style.display = 'block';
+
+                // 定位浮窗：在单元格右侧
+                var rect = this.getBoundingClientRect();
+                var left = rect.right + 12;
+                var top = rect.top - 10;
+                // 防止溢出屏幕右边
+                if (left + 420 > window.innerWidth) {
+                    left = rect.left - 432;
+                }
+                // 防止溢出屏幕底部
+                var popupHeight = popup.offsetHeight || 200;
+                if (top + popupHeight > window.innerHeight) {
+                    top = window.innerHeight - popupHeight - 10;
+                }
+                if (top < 10) top = 10;
+                popup.style.left = left + 'px';
+                popup.style.top = top + 'px';
+
+                // 触发 MathJax 渲染
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    MathJax.typesetPromise([popup]).catch(function(err) { console.warn('MathJax render error:', err); });
+                }
+            });
+
+            cell.addEventListener('mouseleave', function() {
+                popup.style.display = 'none';
+                popup.innerHTML = '';
+            });
+        });
     }
 
     // ---------- 运行分组测试 ----------
@@ -342,14 +441,209 @@
             }
             statusSpan.innerHTML = '✓ 分组测试完成';
             statusSpan.style.color = '#28a745';
+            // 缓存原始数据，供成本敏感性滑条使用
+            _lastGrossData = data.groups;  // 每组含 gross_returns / fee_costs
+            _lastMetrics = data.metrics;
+            _lastNgroups = data.n_groups;
+            _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
+            // 初次渲染使用原始数据
             drawGroupChart(data.groups);
             renderMetricsTable(data.metrics);
+            // 重置滑条到0
+            var slider = document.getElementById('fee_sensitivity_slider');
+            if (slider) { slider.value = 0; updateSensitivityLabel(0); }
         })
         .catch(function(err) {
             statusSpan.innerHTML = '请求失败: ' + err.message;
             statusSpan.style.color = '#d40000';
             console.error(err);
         });
+    }
+
+    // ---------- 成本敏感性：缓存数据 ----------
+    var _lastGrossData = null;   // 上次返回的 groups（含 gross_returns / fee_costs）
+    var _lastMetrics = null;
+    var _lastTimestamps = [];
+    var _lastNgroups = 0;
+
+    /** 更新敏感性滑条标签 */
+    function updateSensitivityLabel(val) {
+        var lbl = document.getElementById('fee_sensitivity_label');
+        if (lbl) lbl.textContent = parseFloat(val).toFixed(3) + '%';
+    }
+
+    /** 根据新费率重算累积净值（统一费率模式） */
+    function recalcWithFee(newFeePct) {
+        if (!_lastGrossData || _lastGrossData.length === 0) return;
+        var feeRatio = parseFloat(newFeePct) / 100.0;  // % → 小数
+        var halfFee = feeRatio / 2.0;
+
+        var nGroups = _lastNgroups;
+        var recalcGroups = [];
+
+        // 前 n_groups 组：做多组
+        for (var g = 0; g < nGroups; g++) {
+            var src = _lastGrossData[g];
+            if (!src || !src.gross_returns) {
+                recalcGroups.push(src);
+                continue;
+            }
+            var cumVals = [];
+            var wealth = 1.0;
+            var gross = src.gross_returns;
+            var prevFee = src.fee_costs || [];  // 原始费率成本，供参考
+            for (var i = 0; i < gross.length; i++) {
+                var gRet = gross[i];
+                // 近似：净收益 = (1 - half_fee) * (1 + gross) - 1
+                //         ≈ gross - half_fee （费率很小时）
+                // 使用更精确的形式（与后台一致）：net = (1-fee)*(1+gross)-1
+                var net = (1.0 - feeRatio) * (1.0 + gRet) - 1.0;
+                if (isNaN(net) || !isFinite(net)) net = 0.0;
+                wealth *= (1.0 + net);
+                cumVals.push(roundVal(wealth));
+            }
+            recalcGroups.push({
+                name: src.name,
+                timestamps: src.timestamps,
+                cumulative_returns: cumVals,
+                gross_returns: src.gross_returns,
+                fee_costs: src.fee_costs,
+                is_ls: false
+            });
+        }
+
+        // Long-Short 组
+        var lsSrc = _lastGrossData[nGroups];
+        if (lsSrc && lsSrc.is_ls) {
+            var topGross = _lastGrossData[0] ? _lastGrossData[0].gross_returns || [] : [];
+            var botGross = _lastGrossData[nGroups - 1] ? _lastGrossData[nGroups - 1].gross_returns || [] : [];
+            var longCap = 0.5, shortCap = 0.5, totalCap = 1.0;
+            var lsCum = [];
+            for (var i = 0; i < Math.min(topGross.length, botGross.length); i++) {
+                var longGross = topGross[i];
+                var shortGross = -botGross[i];
+                var longNet = (1.0 - feeRatio) * (1.0 + longGross) - 1.0;
+                var shortNet = (1.0 - feeRatio) * (1.0 + shortGross) - 1.0;
+                if (isNaN(longNet) || !isFinite(longNet)) longNet = 0.0;
+                if (isNaN(shortNet) || !isFinite(shortNet)) shortNet = 0.0;
+                longCap *= (1.0 + longNet);
+                shortCap *= (1.0 + shortNet);
+                totalCap = longCap + shortCap;
+                lsCum.push(roundVal(totalCap));
+            }
+            recalcGroups.push({
+                name: 'Long-Short',
+                timestamps: _lastTimestamps,
+                cumulative_returns: lsCum,
+                is_ls: true
+            });
+        }
+
+        drawGroupChart(recalcGroups);
+
+        // 重算指标表
+        calcAndRenderMetricsFromGroups(recalcGroups, nGroups);
+    }
+
+    function roundVal(v) {
+        if (isNaN(v) || !isFinite(v)) return null;
+        return Math.round(v * 1e8) / 1e8;
+    }
+
+    /** 从重算后的 groups 计算各组指标（简化版，只更新费率敏感的指标） */
+    function calcAndRenderMetricsFromGroups(recalcGroups, nGroups) {
+        if (!_lastMetrics) return;
+        // 用重算的累积净值反推每期净收益，再算指标
+        var newMetrics = {};
+        var t = _lastTimestamps;
+
+        for (var g = 0; g < nGroups; g++) {
+            var cumVals = recalcGroups[g].cumulative_returns;
+            var returns = [];
+            for (var i = 1; i < cumVals.length; i++) {
+                returns.push(cumVals[i] / cumVals[i-1] - 1.0);
+            }
+            newMetrics[String(g)] = calcMetricsFromReturns(returns);
+        }
+
+        // LS
+        var lsCum = recalcGroups[nGroups] ? recalcGroups[nGroups].cumulative_returns : null;
+        if (lsCum) {
+            var lsReturns = [];
+            for (var i = 1; i < lsCum.length; i++) {
+                lsReturns.push(lsCum[i] / lsCum[i-1] - 1.0);
+            }
+            newMetrics['LS'] = calcMetricsFromReturns(lsReturns);
+        }
+
+        // 保留 Avg Turnover（不受费率影响）
+        if (_lastMetrics) {
+            for (var k in _lastMetrics) {
+                if (_lastMetrics.hasOwnProperty(k) && newMetrics[k] && _lastMetrics[k]['Avg Turnover'] !== undefined) {
+                    newMetrics[k]['Avg Turnover'] = _lastMetrics[k]['Avg Turnover'];
+                }
+            }
+        }
+
+        renderMetricsTable(newMetrics);
+    }
+
+    /** 从收益率序列计算指标 */
+    function calcMetricsFromReturns(returns) {
+        if (!returns || returns.length === 0) return {};
+        var n = returns.length;
+        var cum = 1.0;
+        var cumMax = 1.0;
+        var maxDD = 0.0;
+        var winCount = 0;
+        var sum = 0.0;
+        var sumSq = 0.0;
+
+        for (var i = 0; i < n; i++) {
+            var r = returns[i];
+            if (isNaN(r) || !isFinite(r)) continue;
+            cum *= (1.0 + r);
+            if (cum > cumMax) cumMax = cum;
+            var dd = (cumMax - cum) / cumMax;
+            if (dd > maxDD) maxDD = dd;
+            if (r > 0) winCount++;
+            sum += r;
+            sumSq += r * r;
+        }
+
+        var mean = sum / n;
+        var variance = (sumSq / n) - (mean * mean);
+        var std = Math.sqrt(Math.max(variance, 0));
+        var totalRet = (cum - 1.0) * 100;
+        var annualRet = (Math.pow(cum, 252 / n) - 1) * 100;
+        var vol = std * Math.sqrt(252) * 100;
+        var sharpe = std > 0 ? (mean * 252) / (std * Math.sqrt(252)) : 0;
+        var calmar = maxDD > 0 ? annualRet / (maxDD * 100) : 0;
+        var winRate = (winCount / n) * 100;
+
+        var skew = 0.0, kurt = 0.0;
+        if (std > 0) {
+            for (var i = 0; i < n; i++) {
+                var z = (returns[i] - mean) / std;
+                skew += z * z * z;
+                kurt += z * z * z * z;
+            }
+            skew /= n;
+            kurt = kurt / n - 3;
+        }
+
+        return {
+            'Total Return': roundVal(totalRet),
+            'Annual Return': roundVal(annualRet),
+            'Volatility': roundVal(vol),
+            'Sharpe Ratio': roundVal(sharpe),
+            'Max Drawdown': roundVal(maxDD * 100),
+            'Calmar Ratio': roundVal(calmar),
+            'Win Rate': roundVal(winRate),
+            'Mean Return': roundVal(mean * 100),
+            'Skewness': roundVal(skew),
+            'Kurtosis': roundVal(kurt),
+        };
     }
 
     // ---------- 绑定"使用当前时间范围"按钮 ----------
@@ -689,6 +983,34 @@
             updateClosetodayUI();
             if (_feeTableData.length) renderFeeTable();
         });
+
+        // 成本敏感性滑条（仅统一费率模式有效）
+        var _sliderDebounceTimer = null;
+        var slider = document.getElementById('fee_sensitivity_slider');
+        if (slider) {
+            function onSliderInput() {
+                var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
+                var mode = feeModeEl ? feeModeEl.value : 'none';
+                if (mode !== 'uniform') return;  // 仅在统一费率模式下生效
+                var val = parseFloat(slider.value);
+                updateSensitivityLabel(val);
+                // 防抖：50ms 内的连续滑动只执行最后一次
+                if (_sliderDebounceTimer) clearTimeout(_sliderDebounceTimer);
+                _sliderDebounceTimer = setTimeout(function() {
+                    recalcWithFee(val);
+                }, 50);
+            }
+            slider.addEventListener('input', onSliderInput);
+            slider.addEventListener('change', function() {
+                if (_sliderDebounceTimer) clearTimeout(_sliderDebounceTimer);
+                var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
+                var mode = feeModeEl ? feeModeEl.value : 'none';
+                if (mode !== 'uniform') return;
+                var val = parseFloat(this.value);
+                updateSensitivityLabel(val);
+                recalcWithFee(val);
+            });
+        }
     }
 
     // ---------- 初始化 ----------
@@ -745,7 +1067,7 @@
                     var fPaneId = 'group-factor-pane-' + sub.id + '-' + fi;
                     factorTabsHtml += '<li class="nav-item"><button class="nav-link ' + fActive + '" id="' + fTabId + '" data-bs-toggle="tab" data-bs-target="#' + fPaneId + '" type="button" role="tab">' + (f.alias || f.name) + '</button></li>';
                     factorPanesHtml += '<div class="tab-pane fade ' + fShow + '" id="' + fPaneId + '" role="tabpanel">' +
-                        '<div style="color:#888;padding:16px;text-align:center;">已选择因子 <b>' + (f.alias || f.name) + '</b>，配置好参数后点击上方"运行分组测试"</div>' +
+                        '<div style="color:#888;padding:16px;text-align:center;">已选择因子 <b>' + (f.alias || f.name) + '</b>，配置好参数后点击下方"运行分组测试"</div>' +
                         '</div>';
                 });
                 factorTabsHtml += '</ul>';

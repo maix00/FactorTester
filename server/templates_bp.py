@@ -301,65 +301,114 @@ def list_global_templates():
 
 
 def _build_snapshot_summary(snap: dict) -> dict:
-    """从快照构建可读摘要"""
+    """从快照构建可读摘要，展示各模块的具体值（类似外部摘要行）"""
     summary = {}
-    # 时间范围
+
+    # ── 时间范围 ──
     td = snap.get('time_data', {})
     if td:
-        s = (td.get('start_date') or td.get('start') or '')
-        e = (td.get('end_date') or td.get('end') or '')
-        if s or e:
-            summary['time_range'] = f"{s} ~ {e}"
-    # 参数列表
+        s_date = td.get('start_date') or td.get('start') or ''
+        s_time = td.get('start_time', '')
+        e_date = td.get('end_date') or td.get('end') or ''
+        e_time = td.get('end_time', '')
+        parts = [s_date]
+        if s_time:
+            parts.append(' ' + s_time)
+        parts.append(' ~ ')
+        parts.append(e_date)
+        if e_time:
+            parts.append(' ' + e_time)
+        suffix = ''
+        if td.get('is_trading_day'):
+            suffix = ' (交易日)'
+        elif td.get('is_cn_futures_day'):
+            suffix = ' (期货日盘)'
+        elif td.get('is_cn_futures_night'):
+            suffix = ' (期货夜盘)'
+        summary['time_range'] = ''.join(parts) + suffix
+
+    # ── 参数列表 ── 每组参数单独展示具体值
     params = snap.get('params_list', [])
     if params:
-        # 兼容旧格式
+        # 兼容旧格式 [{factor_name, params}, ...]
         if params[0] and 'params' in params[0]:
             params = [p.get('params', {}) for p in params]
-        # 汇总所有参数（所有组共享的 key）
-        all_keys = set()
-        for p in params:
-            all_keys.update(p.keys())
-        if all_keys:
-            # 取第一组的参数值作为展示
-            first = params[0] if params else {}
-            items = []
-            for k in sorted(all_keys):
-                v = first.get(k, '—')
-                items.append(f"{k}={v}")
-            summary['params'] = items[:8]  # 最多8个
-            if len(all_keys) > 8:
-                summary['params'].append(f'...共{len(all_keys)}个参数')
-    # 品种分类
+        param_items = []
+        for i, p in enumerate(params):
+            if not p:
+                continue
+            pairs = [f"{k}={v}" for k, v in sorted(p.items())]
+            if len(params) > 1:
+                param_items.append(f"#{i+1}: " + ', '.join(pairs))
+            else:
+                param_items.append(', '.join(pairs))
+        if param_items:
+            summary['params'] = param_items
+
+    # ── 品种分类 ── 展示每个提交的label和实际品种数（优先用 count_desc）
     subs = snap.get('submissions', [])
     if subs:
-        paths_all = []
+        sub_items = []
         for s in subs:
-            paths_all.extend(s.get('paths', []))
-        if paths_all:
-            summary['products'] = f"{len(subs)}个提交, {len(paths_all)}个路径"
-    # 收益率频率
+            label = s.get('label', '')
+            count_desc = s.get('count_desc', '')
+            if label and count_desc:
+                sub_items.append(f"{label}({count_desc})")
+            elif label:
+                sub_items.append(label)
+            elif count_desc:
+                sub_items.append(count_desc)
+        if sub_items:
+            summary['products'] = sub_items
+
+    # ── 收益率频率 ── 展示每个因子的频率设置
     freqs = snap.get('return_freqs', [])
     if freqs:
-        checked = [f for f in freqs if f.get('checked')]
-        with_rf = [f for f in freqs if f.get('return_freq')]
-        parts = []
-        if checked:
-            parts.append(f"{len(checked)}个因子选中")
-        if with_rf:
-            parts.append(f"{len(with_rf)}个设了频率")
-        if parts:
-            summary['return_freqs'] = ', '.join(parts)
-    # 分组测试
+        freq_items = []
+        for f in freqs:
+            if f.get('checked') is False:
+                continue
+            alias = f.get('alias', '?')
+            rf = f.get('return_freq', '')
+            if rf:
+                freq_items.append(f"{alias}:{rf}")
+            else:
+                freq_items.append(f"{alias}(默认)")
+        if freq_items:
+            summary['return_freqs'] = freq_items
+
+    # ── 分组测试 ── 展示具体的分组设置
     gs = snap.get('group_settings', {})
     if gs:
         g_parts = []
-        if gs.get('group_count'):
-            g_parts.append(f"分组数={gs['group_count']}")
-        if gs.get('fee_mode') and gs['fee_mode'] != 'none':
-            g_parts.append(f"费率模式={gs['fee_mode']}")
+        gc = gs.get('group_count', '')
+        if gc:
+            g_parts.append(f"分组数={gc}")
+        fee_mode = gs.get('fee_mode', '')
+        if fee_mode and fee_mode != 'none':
+            fee_labels = {'none': '无', 'percent': '百分比', 'fixed': '固定'}
+            g_parts.append(f"费率={fee_labels.get(fee_mode, fee_mode)}")
             if gs.get('fee_rate'):
-                g_parts.append(f"费率={gs['fee_rate']}%")
+                g_parts.append(f"{gs['fee_rate']}%")
+        if gs.get('use_closetoday'):
+            g_parts.append('平今')
+        # 分组时间范围
+        gs_start = '-'.join(filter(None, [
+            gs.get('group_start_year', ''),
+            str(gs.get('group_start_month', '')).zfill(2) if gs.get('group_start_month') else '',
+            str(gs.get('group_start_day', '')).zfill(2) if gs.get('group_start_day') else '',
+        ]))
+        gs_end = '-'.join(filter(None, [
+            gs.get('group_end_year', ''),
+            str(gs.get('group_end_month', '')).zfill(2) if gs.get('group_end_month') else '',
+            str(gs.get('group_end_day', '')).zfill(2) if gs.get('group_end_day') else '',
+        ]))
+        if gs_start and gs_end:
+            g_parts.append(f"{gs_start} ~ {gs_end}")
+        elif gs_start:
+            g_parts.append(f"起始={gs_start}")
+        elif gs_end:
+            g_parts.append(f"终末={gs_end}")
         if g_parts:
             summary['group_test'] = ', '.join(g_parts)
     return summary

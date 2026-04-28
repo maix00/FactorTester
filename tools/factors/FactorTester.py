@@ -296,7 +296,8 @@ class FactorTester(SerialObject):
         """
         计算 IC 序列的汇总统计量。
 
-        返回 pd.Series，包含：mean、std、IR（=mean/std）、t_stat、max、min
+        返回 pd.Series，包含：mean、std、IR（=mean/std）、t_stat、max、min、
+        ac1（lag-1 自相关）、half_life（自相关衰减到 0.5 的滞后期数）
         """
         mean = ic_series.mean()
         std = ic_series.std()
@@ -304,8 +305,36 @@ class FactorTester(SerialObject):
         t_stat = mean / (std / np.sqrt(len(ic_series.dropna()))) if std != 0 and len(ic_series.dropna()) > 1 else np.nan
         max_ic = ic_series.max()
         min_ic = ic_series.min()
+
+        # 自相关 & 半衰期
+        s = ic_series.dropna()
+        ac1 = None
+        half_life = None
+        if len(s) > 2:
+            from statsmodels.tsa.stattools import acf
+            try:
+                # 计算前 min(20, len(s)//2) 个滞后期自相关
+                nlags = min(20, max(1, len(s) // 2 - 1))
+                acf_vals = acf(s.values, nlags=nlags, fft=False)
+                ac1 = float(acf_vals[1]) if len(acf_vals) > 1 else None
+                # 半衰期：找到自相关首次 < 0.5 的 lag（从 lag=1 开始）
+                for lag in range(1, len(acf_vals)):
+                    if acf_vals[lag] < 0.5:
+                        # 线性插值
+                        prev = acf_vals[lag-1]
+                        curr = acf_vals[lag]
+                        frac = (0.5 - prev) / (curr - prev) if curr != prev else 0.0
+                        half_life = float(lag - 1 + frac)
+                        break
+                # 如果在所有计算 lag 内未衰减到 0.5，返回正无穷大
+                if half_life is None:
+                    half_life = float('inf')
+            except Exception:
+                pass
+
         stats_df = pd.Series({
-            'mean': mean, 'std': std, 'IR': ir, 't_stat': t_stat, 'max': max_ic, 'min': min_ic
+            'mean': mean, 'std': std, 'IR': ir, 't_stat': t_stat, 'max': max_ic, 'min': min_ic,
+            'ac1': ac1, 'half_life': half_life,
         })
         return stats_df
 
@@ -508,6 +537,25 @@ class FactorTester(SerialObject):
         cum_rets_filled = np.where(bad, 0.0, group_returns_np)
         cumulative_returns_np = np.cumprod(1 + cum_rets_filled, axis=0)  # (T, n_groups)
 
+        # ---------- 计算各组平均换手率 ----------
+        # 换手率 = |本期持仓 △ 上期持仓| / 2 / 本期持仓数，若无持仓则为 0
+        avg_turnover = np.zeros(n_groups, dtype=float)
+        for g in range(n_groups):
+            turnovers = []
+            for t in range(1, T):
+                prev = membership_np[t-1, g]
+                curr = membership_np[t, g]
+                prev_count = int(prev.sum())
+                curr_count = int(curr.sum())
+                if curr_count == 0 and prev_count == 0:
+                    continue
+                avg_count = (prev_count + curr_count) / 2.0
+                if avg_count == 0:
+                    continue
+                changed = int((prev ^ curr).sum()) / 2.0
+                turnovers.append(changed / avg_count)
+            avg_turnover[g] = float(np.mean(turnovers)) if turnovers else 0.0
+
         # ---------- 汇总指标（向量化） ----------
         # 构建时间戳数组，用于日期过滤
         signal_times = pd.DatetimeIndex(index_list)   # already flat after _extract_signal_index
@@ -549,6 +597,7 @@ class FactorTester(SerialObject):
                 'Mean Return':   m['mean_ret'],
                 'Skewness':      m['skew'],
                 'Kurtosis':      m['kurt'],
+                'Avg Turnover':  avg_turnover[idx],
             })
 
         report_df = pd.DataFrame(report_groups).T.sort_index()

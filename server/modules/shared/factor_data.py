@@ -300,3 +300,103 @@ def get_price_series():
         })
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@shared_bp.route('/get_factor_distribution', methods=['POST'])
+def get_factor_distribution():
+    """返回某个时间点所有品种的因子截面分布值。"""
+    import pickle
+    from pathlib import Path
+    data = request.get_json()
+    submission_id       = data.get('submission_id')
+    factor_family_alias = data.get('factor_family_alias')
+    factor_name         = data.get('factor_name')
+    timestamp_ms        = data.get('timestamp')  # 毫秒时间戳
+    product_name        = data.get('product')    # 当前选中产品名，用于高亮
+    try:
+        ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
+        with _factor_testers_lock:
+            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+        if not tester:
+            return jsonify({'error': '未找到测试器实例'}), 404
+        factor_family = get_factor_family_instance(factor_family_alias)
+        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        target_factor = next((f for f in factors if f.name == factor_name), None)
+        if not target_factor:
+            return jsonify({'error': '未找到因子'}), 404
+
+        cache_dir = Path('../data/cache/factor')
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        scp_str = str(shared.start_calc_point).replace(':', '-').replace(' ', '_') if shared.start_calc_point else 'latest'
+        cache = cache_dir / f"{target_factor.alias}_{scp_str}.pkl"
+
+        table = None
+        if cache.exists():
+            with open(cache, 'rb') as f:
+                table, scp_cache = pickle.load(f)
+            if scp_cache != shared.start_calc_point:
+                table = None
+        if table is None:
+            orig_products = tester.products.copy()
+            try:
+                target_factor.clear()
+                tester.calc_factor(factors=target_factor)
+                table = target_factor.table
+            finally:
+                tester.products = orig_products
+
+        if table is None or table.empty:
+            return jsonify({'error': '因子数据为空'}), 404
+
+        idx = table.index.get_level_values(-1) if isinstance(table.index, pd.MultiIndex) else table.index
+        tz = getattr(idx, 'tz', None)
+        ts_compare = ts.tz_localize(tz) if tz and ts.tzinfo is None else (
+            ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
+        diffs = np.abs(idx - ts_compare)
+        nearest_i = diffs.argmin()
+        nearest_diff = diffs[nearest_i]
+        if nearest_diff > pd.Timedelta(days=2):
+            return jsonify({'error': f'未找到 {ts_compare} 附近的因子数据，最近差 {nearest_diff}'}), 404
+
+        row = table.iloc[nearest_i]
+        actual_ts = idx[nearest_i]
+        values = []
+        for col, val in row.items():
+            if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
+                continue
+            values.append({
+                'product': str(getattr(col, 'name', col) if hasattr(col, 'name') else col),
+                'value': float(val)
+            })
+
+        arr = np.array([v['value'] for v in values], dtype=float)
+        n = len(arr)
+        mean = float(np.mean(arr)) if n > 0 else None
+        std  = float(np.std(arr, ddof=0)) if n > 1 else None
+        mn   = float(np.min(arr))  if n > 0 else None
+        mx   = float(np.max(arr))  if n > 0 else None
+        skew = float(pd.Series(arr).skew()) if n > 2 else None
+        kurt = float(pd.Series(arr).kurtosis()) if n > 3 else None
+        pcts = {}
+        for pct in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
+            pcts[str(pct)] = round(float(np.percentile(arr, pct)), 6) if n > 0 else None
+
+        # 查找当前产品在该截面上的因子值
+        highlight_value = None
+        if product_name:
+            for v in values:
+                if str(v['product']) == str(product_name):
+                    highlight_value = v['value']
+                    break
+
+        return jsonify({
+            'success': True,
+            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
+            'n': n,
+            'stats': {'mean': mean, 'std': std, 'min': mn, 'max': mx, 'skewness': skew, 'kurtosis': kurt, 'percentiles': pcts},
+            'values': sorted(values, key=lambda v: v['value']),
+            'highlight_value': highlight_value,
+            'highlight_product': product_name,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

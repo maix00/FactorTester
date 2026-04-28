@@ -33,7 +33,7 @@
         }
     }
 
-    function drawComparisonChart(containerId, priceData, factorData, returnData, productName, factorName) {
+    function drawComparisonChart(containerId, priceData, factorData, returnData, productName, factorName, subId, product) {
         if (typeof Highcharts === 'undefined') return;
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -50,6 +50,20 @@
         Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: `${productName} — ${factorName}` },
+            plotOptions: {
+                series: {
+                    point: {
+                        events: {
+                            click: function() {
+                                // 只对因子值系列（id='factor'）响应
+                                if (this.series.options.id === 'factor') {
+                                    openFactorDistribution(subId, factorName, this.x, product);
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             xAxis: { type: 'datetime' },
             yAxis: [
                 {   // 价格轴
@@ -148,6 +162,67 @@
         });
     }
 
+    // 绘制自相关衰减柱状图
+    function drawAutocorrChart(containerId, autocorr) {
+        if (typeof Highcharts === 'undefined') return;
+        const container = document.getElementById(containerId);
+        if (!container || !autocorr || !autocorr.length) return;
+        const lags = autocorr.map(d => 'Lag ' + d.lag);
+        const acValues = autocorr.map(d => d.ac);
+        // 找半衰期点
+        let hlAnnotation = null;
+        for (let i = 0; i < autocorr.length; i++) {
+            if (autocorr[i].ac < 0.5) {
+                const prev = i > 0 ? autocorr[i-1].ac : 1.0;
+                const curr = autocorr[i].ac;
+                const frac = (0.5 - prev) / (curr - prev);
+                hlAnnotation = i - 1 + frac;
+                break;
+            }
+        }
+
+        Highcharts.chart(container, {
+            chart: { type: 'column', zoomType: 'x' },
+            title: { text: null },
+            xAxis: {
+                categories: lags,
+                title: { text: '滞后期数' },
+                crosshair: true,
+            },
+            yAxis: {
+                title: { text: '自相关系数' },
+                min: -0.2,
+                max: 1.0,
+                plotLines: [{
+                    value: 0.5,
+                    color: '#f44336',
+                    dashStyle: 'dash',
+                    width: 1,
+                    label: { text: '半衰线 0.5', style: { color: '#f44336', fontSize: '10px' } },
+                    zIndex: 5,
+                }],
+            },
+            tooltip: {
+                pointFormat: '<b>{point.category}</b>: {point.y:.4f}',
+            },
+            plotOptions: {
+                column: {
+                    pointPadding: 0.05,
+                    groupPadding: 0,
+                    borderWidth: 0,
+                    color: '#0078d4',
+                    negativeColor: '#f44336',
+                },
+            },
+            series: [{
+                name: '自相关',
+                data: acValues,
+                showInLegend: false,
+            }],
+            credits: { enabled: false },
+        });
+    }
+
     // 构建统计表格 HTML
     function buildPrettyTable(data) {
         if (!data || !data.ic_stats || !data.ic_stats.columns || !data.ic_stats.rows || !data.ic_stats.columns.length) {
@@ -162,7 +237,16 @@
             html += '<tr>';
             data.ic_stats.columns.forEach((col, i) => {
                 let val = row[col];
-                let display = (val === null || val === undefined || val === '') ? '—' : (typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(6)) : String(val));
+                let display;
+                if (val === null || val === undefined || val === '') {
+                    display = '—';
+                } else if (col === 'half_life' && !isFinite(val)) {
+                    display = '∞';
+                } else if (typeof val === 'number') {
+                    display = Number.isInteger(val) ? val : val.toFixed(6);
+                } else {
+                    display = String(val);
+                }
                 html += '<td class="' + (i === 0 ? 'idx-col' : '') + '">' + display + '</td>';
             });
             html += '</tr>';
@@ -189,9 +273,10 @@
             const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p.name}">${p.name}${p.desc && p.desc !== p.name ? ' · ' + p.desc : ''}</option>`).join('') : '<option value="">无可用产品</option>';
             panesHtml += `
                 <div class="tab-pane fade ${showClass}" id="${paneId}" role="tabpanel">
-                    <!-- IC 序列图 -->
+                    <!-- IC 序列图 & 自相关衰减图 -->
                     <div style="display:flex; flex-wrap:wrap; gap:20px; margin-top:20px;">
-                        <div style="width:100%;"><h6>IC 序列</h6><div id="ic-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
+                        <div style="flex:1;min-width:45%;"><h6>IC 序列</h6><div id="ic-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
+                        <div style="flex:1;min-width:45%;"><h6>IC 自相关衰减</h6><div id="ic-acf-chart-${subId}-${idx}" style="width:100%; height:350px;"></div></div>
                     </div>
                     <!-- 产品选择、加载按钮和复权复选框 -->
                     <div style="margin-top:16px;">
@@ -204,6 +289,7 @@
                     </div>
                     <!-- 价格 / 因子值 / 收益率 三联图容器 -->
                     <div style="margin-top:8px;">
+                        <p style="font-size:11px;color:#888;margin:0 0 4px 0;">💡 点击图中 <b style="color:#0078d4;">因子值</b> 曲线上的数据点可查看该时刻的截面分布</p>
                         <div id="factor-chart-${subId}-${idx}" style="width:100%;"></div>
                     </div>
                 </div>
@@ -221,6 +307,10 @@
         factors.forEach((factor, idx) => {
             if (factor.ic_series && factor.ic_series.dates && factor.ic_series.values) {
                 drawChart(`ic-chart-${subId}-${idx}`, factor.ic_series, 'IC');
+            }
+            // 绘制自相关衰减图
+            if (factor.autocorr && factor.autocorr.length > 0) {
+                drawAutocorrChart(`ic-acf-chart-${subId}-${idx}`, factor.autocorr);
             }
         });
         // 绑定加载按钮事件
@@ -333,7 +423,7 @@
 
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
                 factorChartDiv.style.height = '800px';
-                drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName);
+                drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName, subId, product);
             } else {
                 factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格、因子或收益率数据无效</div>';
             }
@@ -598,4 +688,140 @@
     };
 
     window.factorList = factorList;
+
+    // ========== 因子截面分布可视化 ==========
+
+    async function openFactorDistribution(subId, factorName, tsMs, product) {
+        const drawer = document.getElementById('factor-dist-drawer');
+        const title  = document.getElementById('dist-drawer-title');
+        const chartContainer = document.getElementById('dist-chart-container');
+        if (!drawer || !title || !chartContainer) return;
+
+        // 打开抽屉并显示加载状态
+        drawer.classList.add('open');
+        title.textContent = `${factorName} 截面分布` + (product ? ` · ${product}` : '');
+        chartContainer.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">加载中...</div>';
+
+        try {
+            const res = await fetch('/get_factor_distribution', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    submission_id: String(subId),
+                    factor_family_alias: factorFamilyAlias,
+                    factor_name: factorName,
+                    timestamp: tsMs,
+                    product: product || null,
+                }),
+            });
+            const data = await res.json();
+            if (!data.success) {
+                chartContainer.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#d00;">${data.error || '获取分布数据失败'}</div>`;
+                return;
+            }
+            drawDistributionHistogram(chartContainer, data, factorName);
+        } catch (err) {
+            console.error('获取因子分布异常:', err);
+            chartContainer.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#d00;">请求失败: ${err.message}</div>`;
+        }
+    }
+
+    function drawDistributionHistogram(container, data, factorName) {
+        if (typeof Highcharts === 'undefined') return;
+        const values = data.values.map(v => v.value);
+        const stats  = data.stats;
+        const n      = data.n;
+        const highlightValue = data.highlight_value;
+        const highlightProduct = data.highlight_product;
+
+        // 自动分箱：用 Sturges 公式 k = ceil(log2(n) + 1)
+        const nBins = Math.max(8, Math.min(80, Math.ceil(Math.log2(n) + 1)));
+        const vmin = stats.min, vmax = stats.max;
+        const binWidth = (vmax - vmin) / nBins || 1;
+        const bins = [];
+        let highlightBinIdx = -1;
+        for (let i = 0; i < nBins; i++) {
+            bins.push({ low: vmin + i * binWidth, high: vmin + (i + 1) * binWidth, count: 0 });
+        }
+        for (const v of values) {
+            let idx = Math.min(nBins - 1, Math.max(0, Math.floor((v - vmin) / binWidth)));
+            if (idx === nBins) idx = nBins - 1;
+            bins[idx].count++;
+        }
+        // 找高亮产品所在的 bin
+        if (highlightValue !== null && highlightValue !== undefined) {
+            highlightBinIdx = Math.min(nBins - 1, Math.max(0, Math.floor((highlightValue - vmin) / binWidth)));
+            if (highlightBinIdx === nBins) highlightBinIdx = nBins - 1;
+        }
+
+        // 用区间中点作为 x 值，Highcharts 可自动计算合适的刻度密度
+        const binMids = bins.map(b => (b.low + b.high) / 2);
+        const binCounts = bins.map(b => b.count);
+
+        // 构建 tooltip 用的完整区间说明
+        const binFullNames = bins.map((b, i) => {
+            if (i === nBins - 1) return `[${b.low.toFixed(4)}, ${b.high.toFixed(4)}]`;
+            return `[${b.low.toFixed(4)}, ${b.high.toFixed(4)})`;
+        });
+
+        // 构建数据点，高亮柱用不同颜色
+        const seriesData = binMids.map((mid, i) => ({
+            x: mid,
+            y: binCounts[i],
+            color: (i === highlightBinIdx) ? '#e74c3c' : '#0078d4',
+        }));
+
+        const pcts = stats.percentiles || {};
+        const extraInfo = [];
+        if (highlightProduct && highlightValue !== null && highlightValue !== undefined) {
+            extraInfo.push(`${highlightProduct} 因子值=${highlightValue.toFixed(4)}`);
+        }
+        const subtitle = [
+            `N=${n}`,
+            `均值=${stats.mean?.toFixed(4)}`,
+            `标准差=${stats.std?.toFixed(4)}`,
+            `偏度=${stats.skewness?.toFixed(4)}`,
+            `峰度=${stats.kurtosis?.toFixed(4)}`,
+            `P1=${pcts['1']}`,
+            `P99=${pcts['99']}`,
+        ].concat(extraInfo).join(' ｜ ');
+
+        Highcharts.chart(container, {
+            chart: { type: 'column', zoomType: 'x' },
+            title: { text: `${factorName} 截面分布`, style: { fontSize: '14px' } },
+            subtitle: { text: subtitle, style: { fontSize: '11px', color: '#666' } },
+            xAxis: {
+                title: { text: '因子值' },
+                crosshair: true,
+                labels: { style: { fontSize: '10px' }, formatter: function() { return this.value.toFixed(4); } },
+            },
+            yAxis: {
+                title: { text: '频数' },
+                min: 0,
+            },
+            tooltip: {
+                formatter: function() {
+                    var tip = '<b>' + binFullNames[this.point.index] + '</b><br/>频数: <b>' + this.y + '</b>';
+                    if (this.point.index === highlightBinIdx && highlightProduct) {
+                        tip += '<br/>🔴 <b>' + highlightProduct + '</b> (' + highlightValue.toFixed(4) + ')';
+                    }
+                    return tip;
+                },
+            },
+            series: [{
+                name: '品种数',
+                data: seriesData,
+                pointPadding: 0,
+                groupPadding: 0,
+            }],
+            plotOptions: {
+                column: {
+                    borderWidth: 0,
+                },
+            },
+            credits: { enabled: false },
+            legend: { enabled: false },
+        });
+    }
+
 })();

@@ -44,9 +44,7 @@ def _get_session_id() -> str:
 def _get_session_params(ff_alias: str, ff) -> list:
     store_key = (_get_session_id(), ff_alias)
     with _params_store_lock:
-        if store_key not in _params_store:
-            _params_store[store_key] = []
-        return list(_params_store[store_key])
+        return list(_params_store.get(store_key, []))
 
 def _save_session_params(ff_alias: str, params_list: list):
     store_key = (_get_session_id(), ff_alias)

@@ -162,9 +162,24 @@ def run_ic_test():
             _daily = factor.freq is not None and factor.freq.is_day_multiple()
             dates = [ts.strftime('%Y-%m-%d') for ts in signal_ts] if _daily else (signal_ts.view(np.int64) // 10**6).tolist()
             vals  = [None if (isinstance(v, float) and (pd.isna(v) or pd.isnull(v))) else v for v in ic_s.values.tolist()]
+
+            # 自相关衰减序列 (lag 1~min(20, len/2-1))
+            autocorr = None
+            s = ic_s.dropna()
+            if len(s) > 2:
+                from statsmodels.tsa.stattools import acf
+                try:
+                    nlags = min(20, max(1, len(s) // 2 - 1))
+                    acf_vals = acf(s.values, nlags=nlags, fft=False)
+                    # 从 lag=1 开始，返回 [{'lag': 1, 'ac': ...}, ...]
+                    autocorr = [{'lag': i, 'ac': round(float(v), 6)} for i, v in enumerate(acf_vals[1:], start=1)]
+                except Exception:
+                    pass
+
             response['factors'].append({
                 'name': factor.name, 'alias': factor.alias,
                 'ic_series': {'dates': dates, 'values': vals},
+                'autocorr': autocorr,
                 'products': [
                     {'name': p.name, 'desc': getattr(p, 'desc', p.name)}
                     for p in (factor.table.columns if factor.table is not None else [])

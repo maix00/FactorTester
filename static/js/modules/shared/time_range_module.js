@@ -189,6 +189,11 @@
                 }
                 statusSpan.innerText = msg;
                 statusSpan.style.color = '#28a745';
+                // 自动退出抽屉
+                var drawer = document.getElementById('time-range-drawer');
+                if (drawer) drawer.classList.remove('open');
+                var badge = document.getElementById('user-badge');
+                if (badge) badge.style.display = '';
                 setTimeout(() => {
                     if (statusSpan.innerText === msg) statusSpan.innerText = '';
                 }, 3000);

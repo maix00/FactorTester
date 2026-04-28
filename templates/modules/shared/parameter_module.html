@@ -147,11 +147,12 @@
                     {% for param in params %}
                         <td>
                             <input type="text" id="param_{{ param.alias }}" 
-                                   value="{{ param.get_value_alias(param.default_value) }}">
+                                   value="{{ param.get_value_alias(param.default_value) }}"
+                                   onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
                         </td>
                     {% endfor %}
                     <td>
-                        <button class="param-btn add_factor_btn">新增</button>
+                        <button class="param-btn add_factor_btn" onclick="window._doAddParam()">新增</button>
                     </td>
                 </tr>
                 {% for factor in factors %}

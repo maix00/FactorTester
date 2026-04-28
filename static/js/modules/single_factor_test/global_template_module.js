@@ -31,6 +31,8 @@
         var eH = document.getElementById('end_hour');
         var eMin = document.getElementById('end_minute');
         var isTd = document.getElementById('is_trading_day');
+        var isCfd = document.getElementById('is_cn_futures_day');
+        var isCfn = document.getElementById('is_cn_futures_night');
         var tz = document.getElementById('timezone_input');
         var pad = function(n) { return (parseInt(n) < 10 ? '0' : '') + parseInt(n); };
         snapshot.time_data = {
@@ -39,6 +41,8 @@
             end_date: eY ? (eY.value||(sY?sY.value:'')) + '-' + pad(eM?.value||1) + '-' + pad(eD?.value||1) : '',
             end_time: eH ? pad(eH?.value||15) + ':' + pad(eMin?.value||0) : '15:00',
             is_trading_day: isTd ? isTd.checked : false,
+            is_cn_futures_day: isCfd ? isCfd.checked : false,
+            is_cn_futures_night: isCfn ? isCfn.checked : false,
             timezone: tz ? tz.value : 'Asia/Shanghai',
             // 保留旧格式兼容
             start: '',
@@ -103,7 +107,7 @@
         if (snapshot.time_data) {
             var td = snapshot.time_data;
             // 恢复到时间模块的 DOM 输入框（id 用下划线）
-            var setVal = function(id, val) { var el = document.getElementById(id); if (el && val) el.value = val; };
+            var setVal = function(id, val) { var el = document.getElementById(id); if (el && val !== null && val !== undefined) el.value = val; };
             if (td.start_date) {
                 var parts = td.start_date.split('-');
                 setVal('start_year', parts[0]);
@@ -127,8 +131,40 @@
                 setVal('end_minute', parts[1]);
             }
             setVal('timezone_input', td.timezone);
+            // 恢复复选框状态
             var isTdCb = document.getElementById('is_trading_day');
+            var isCfdCb = document.getElementById('is_cn_futures_day');
+            var isCfnCb = document.getElementById('is_cn_futures_night');
             if (isTdCb) isTdCb.checked = !!td.is_trading_day;
+            if (isCfdCb) isCfdCb.checked = !!td.is_cn_futures_day;
+            if (isCfnCb) isCfnCb.checked = !!td.is_cn_futures_night;
+            // 根据复选框状态恢复时间输入框 disabled 状态
+            var timeDisabled = !!(td.is_trading_day || td.is_cn_futures_day || td.is_cn_futures_night);
+            [document.getElementById('start_hour'), document.getElementById('start_minute'),
+             document.getElementById('end_hour'), document.getElementById('end_minute')].forEach(function(el) {
+                if (el) {
+                    el.disabled = timeDisabled;
+                    el.style.background = timeDisabled ? '#ccc' : '#eee';
+                }
+            });
+            // 触发时间模块的 current_settings 更新
+            var currentSettingsSpan = document.getElementById('current_settings');
+            if (currentSettingsSpan) {
+                var padFn = function(n) { n = parseInt(n); return n < 10 ? '0' + n : String(n); };
+                var sy = document.getElementById('start_year')?.value || '';
+                var sm = padFn(document.getElementById('start_month')?.value || 1);
+                var sd = padFn(document.getElementById('start_day')?.value || 1);
+                var sh = padFn(document.getElementById('start_hour')?.value || 0);
+                var smin = padFn(document.getElementById('start_minute')?.value || 0);
+                var ey = document.getElementById('end_year')?.value || '';
+                var em = padFn(document.getElementById('end_month')?.value || 1);
+                var ed = padFn(document.getElementById('end_day')?.value || 1);
+                var eh = padFn(document.getElementById('end_hour')?.value || 0);
+                var emin = padFn(document.getElementById('end_minute')?.value || 0);
+                var suffix = td.is_trading_day ? ' (交易日)' : (td.is_cn_futures_day ? ' (期货日盘)' : (td.is_cn_futures_night ? ' (期货夜盘)' : ''));
+                currentSettingsSpan.innerText = '起始时间: ' + sy + '-' + sm + '-' + sd + ' ' + sh + ':' + smin + ', 终末时间: ' + ey + '-' + em + '-' + ed + ' ' + eh + ':' + emin + suffix;
+            }
+            // 更新摘要行
             if (typeof updateTimeSummary === 'function') updateTimeSummary();
             // 提交到后端
             try {
@@ -142,6 +178,8 @@
                         end_date: td.end_date || '',
                         end_time: td.end_time || '15:00',
                         is_trading_day: td.is_trading_day || false,
+                        is_cn_futures_day: td.is_cn_futures_day || false,
+                        is_cn_futures_night: td.is_cn_futures_night || false,
                         timezone: td.timezone || 'Asia/Shanghai'
                     })
                 });
@@ -150,28 +188,49 @@
             }
         }
 
-        // 2. 恢复参数设置
+        // 2. 恢复参数设置（通过参数模板的保存/加载链路，复用参数模块的成熟恢复流程）
         if (snapshot.params_list && snapshot.params_list.length > 0) {
-            // 兼容旧格式 [{factor_name, params}, ...] → 新格式 [{alias: value}, ...]
-            var pl = snapshot.params_list;
-            if (pl[0] && pl[0].params !== undefined) {
-                pl = pl.map(function(p) { return p.params || {}; });
-            }
             try {
-                const resp = await fetch('/replace_params', {
+                // 先清空现有参数，然后通过参数模板方式加载（去重合并=直接替换）
+                await fetch('/replace_params', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        factor_family_alias: FF_ALIAS,
-                        params_list: pl
-                    })
+                    body: JSON.stringify({ factor_family_alias: FF_ALIAS, params_list: [] })
                 });
-                const data = await resp.json();
-                if (data.success && typeof window.reloadParamModule === 'function') {
-                    await window.reloadParamModule();
+                // 保存一个临时参数模板
+                var saveResp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: '__global_restore__', params_list: snapshot.params_list })
+                });
+                var saveData = await saveResp.json();
+                if (saveData.success && saveData.id) {
+                    // 把下拉框设到这个临时模板
+                    var pSel = document.getElementById('params-tpl-select');
+                    if (pSel) {
+                        var found = false;
+                        for (var i = 0; i < pSel.options.length; i++) {
+                            if (pSel.options[i].value === String(saveData.id)) { found = true; break; }
+                        }
+                        if (!found) {
+                            var opt = document.createElement('option');
+                            opt.value = saveData.id;
+                            opt.textContent = '__global_restore__';
+                            pSel.appendChild(opt);
+                        }
+                        pSel.value = String(saveData.id);
+                        var pLbl = document.getElementById('params-tpl-name-label');
+                        if (pLbl) { pLbl.textContent = '__global_restore__'; pLbl.style.display = ''; }
+                    }
+                    // 调用参数模块的加载函数（去重合并→因为已清空，等于直接替换）
+                    if (typeof window._loadParamsTemplate === 'function') {
+                        await window._loadParamsTemplate();
+                    }
+                } else {
+                    alert('恢复参数失败: 无法创建临时参数模板 - ' + (saveData.error || ''));
                 }
             } catch (e) {
-                console.error('恢复参数失败:', e);
+                alert('恢复参数异常: ' + e.message);
             }
         }
 
@@ -282,6 +341,14 @@
             name = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         }
         const snapshot = await collectSnapshot();
+
+        // 同步保存参数模板，用于加载时通过参数模块的恢复流程来恢复参数
+        if (typeof window._saveCurrentParamsAsTemplate === 'function') {
+            try {
+                await window._saveCurrentParamsAsTemplate('__global_restore__');
+            } catch(e) {}
+        }
+
         statusEl.textContent = '保存中...';
         statusEl.style.color = '#0078d4';
         try {
@@ -325,16 +392,36 @@
             data.templates.forEach(tpl => {
                 const tplId = tpl.id;
                 const summary = tpl.summary || {};
-                // 构建摘要行
-                var summaryLines = [];
-                if (summary.time_range) summaryLines.push('📅 ' + summary.time_range);
-                if (summary.params) summaryLines.push('⚙️ ' + summary.params.join(', '));
-                if (summary.products) summaryLines.push('📦 ' + summary.products);
-                if (summary.return_freqs) summaryLines.push('📈 ' + summary.return_freqs);
-                if (summary.group_test) summaryLines.push('🧪 ' + summary.group_test);
-                var summaryHtml = summaryLines.length > 0
-                    ? summaryLines.map(function(l) { return '<div style="font-size:11px;color:#666;padding:2px 0;">' + escapeHtml(l) + '</div>'; }).join('')
-                    : '<div style="font-size:11px;color:#999;">无设置信息</div>';
+
+                // 构建类似外部 summary-row 的摘要行
+                function buildSummaryRow(label, value, icon) {
+                    if (!value) return '';
+                    var valStr = '';
+                    if (Array.isArray(value)) {
+                        // 每个元素一行，多组参数时换行展示
+                        valStr = value.map(function(v) {
+                            return '<div style="font-size:11px;color:#555;padding:1px 0;">' + escapeHtml(v) + '</div>';
+                        }).join('');
+                    } else {
+                        valStr = '<span style="font-size:11px;color:#555;">' + escapeHtml(String(value)) + '</span>';
+                    }
+                    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;border-bottom:1px dotted #e5e7eb;">'
+                        + '<span style="font-size:12px;flex-shrink:0;min-width:18px;">' + (icon || '') + '</span>'
+                        + '<span style="font-size:12px;font-weight:500;color:#333;flex-shrink:0;min-width:70px;">' + escapeHtml(label) + '</span>'
+                        + '<span style="flex:1;min-width:0;">' + valStr + '</span>'
+                        + '</div>';
+                }
+
+                var summaryHtml = '';
+                summaryHtml += buildSummaryRow('时间范围', summary.time_range, '📅');
+                summaryHtml += buildSummaryRow('参数设置', summary.params, '⚙️');
+                summaryHtml += buildSummaryRow('品种分类', summary.products, '🌳');
+                summaryHtml += buildSummaryRow('因子参数', summary.return_freqs, '📈');
+                summaryHtml += buildSummaryRow('分组测试', summary.group_test, '🧪');
+
+                if (!summaryHtml) {
+                    summaryHtml = '<div style="font-size:11px;color:#999;padding:4px 0;">无设置信息</div>';
+                }
 
                 html += `
                 <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
@@ -345,7 +432,7 @@
                         </div>
                         <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;">▼</span>
                     </div>
-                    <div class="tpl-row-detail" style="display:none;padding:4px 10px 10px 10px;background:#f8fafc;">
+                    <div class="tpl-row-detail" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
                         ${summaryHtml}
                         <div style="margin-top:8px;display:flex;gap:6px;">
                             <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}">加载</button>

@@ -24,6 +24,9 @@
             <span id="fee_uniform_wrap" style="display:none;align-items:center;gap:4px;">
                 <input type="number" id="fee_rate" value="0.03" step="0.001" min="0" style="width:80px;" title="双边手续费率（%），例如 0.03 表示万分之三">
                 <span style="font-size:12px;color:#666;">%（双边）</span>
+                <span style="margin-left:8px;font-size:12px;color:#555;">敏感性:</span>
+                <input type="range" id="fee_sensitivity_slider" min="0" max="0.05" step="0.001" value="0" style="width:120px;" title="滑动查看不同费率下净值变化（不影响实际费率输入）">
+                <span id="fee_sensitivity_label" style="font-size:12px;color:#0078d4;white-space:nowrap;">0.000%</span>
             </span>
 
             <!-- 按品种费率控件 -->

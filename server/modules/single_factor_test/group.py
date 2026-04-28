@@ -64,13 +64,25 @@ def run_group_test():
         )
 
         timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+
+        _gross = getattr(tester, '_last_group_gross_returns_np', None)
+        gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
+        _fee = getattr(tester, '_last_fee_costs_np', None)
+        fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_groups))
+
         groups_data = []
         for g in range(n_groups):
             vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
-            groups_data.append({'name': f'Group {g+1}', 'timestamps': timestamps, 'cumulative_returns': vals})
+            gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
+            fee_vals   = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
+            groups_data.append({
+                'name': f'Group {g+1}',
+                'timestamps': timestamps,
+                'cumulative_returns': vals,
+                'gross_returns': gross_vals,
+                'fee_costs': fee_vals,
+            })
 
-        gross_np  = getattr(tester, '_last_group_gross_returns_np', None) or np.zeros((len(timestamps), n_groups))
-        fee_np    = getattr(tester, '_last_fee_costs_np',            None) or np.zeros((len(timestamps), n_groups))
         long_net  = (1.0 - fee_np[:, 0])           * (1.0 + gross_np[:, 0])          - 1.0
         short_net = (1.0 - fee_np[:, n_groups - 1]) * (1.0 - gross_np[:, n_groups-1]) - 1.0
 
@@ -96,7 +108,12 @@ def run_group_test():
         s     = pd.Series(r_ls).replace([np.inf, -np.inf], np.nan).dropna()
         cum_s = (1 + s).cumprod()
         n     = len(s)
-        def _safe(v): return None if (math.isnan(v) or math.isinf(v)) else round(float(v), 6)
+        def _safe(v):
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                return None
+            return None if (pd.isna(fv) or np.isinf(fv)) else round(fv, 6)
         dd = (cum_s.cummax() - cum_s) / cum_s.cummax()
         ls_annual = _safe((cum_s.iloc[-1] ** (252 / n) - 1) * 100) if n > 1 else None
         ls_dd     = _safe(dd.max() * 100) if n > 0 else None
@@ -109,8 +126,11 @@ def run_group_test():
             'Calmar Ratio':  _safe(float(ls_annual) / float(ls_dd)) if (ls_annual and ls_dd) else None,  # type: ignore[arg-type]
             'Win Rate':      _safe((s > 0).sum() / n * 100) if n > 0 else None,
             'Mean Return':   _safe(s.mean() * 100),
-            'Skewness':      _safe(float(s.skew())),
-            'Kurtosis':      _safe(float(s.kurtosis())),
+            'Skewness':      _safe(s.skew()),
+            'Kurtosis':      _safe(s.kurtosis()),
+            'Avg Turnover':  round(float(
+                (report_df['Avg Turnover'].iloc[0] + report_df['Avg Turnover'].iloc[-1]) / 2
+            ), 4) if not report_df.empty and 'Avg Turnover' in report_df.columns else None,
         }
 
         metrics: dict = {}
