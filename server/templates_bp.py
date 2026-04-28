@@ -286,7 +286,83 @@ def list_global_templates():
     u = _require_user()
     with _get_user_file_lock(u):
         templates = _load_user_tpls(u, 'global')
-    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name'], 'ff_alias': t.get('ff_alias', '')} for t in templates]})
+    result = []
+    for t in templates:
+        snap = t.get('snapshot', {})
+        # 生成设置摘要
+        summary = _build_snapshot_summary(snap)
+        result.append({
+            'id': t['id'],
+            'name': t['name'],
+            'ff_alias': t.get('ff_alias', ''),
+            'summary': summary,
+        })
+    return jsonify({'success': True, 'templates': result})
+
+
+def _build_snapshot_summary(snap: dict) -> dict:
+    """从快照构建可读摘要"""
+    summary = {}
+    # 时间范围
+    td = snap.get('time_data', {})
+    if td:
+        s = (td.get('start_date') or td.get('start') or '')
+        e = (td.get('end_date') or td.get('end') or '')
+        if s or e:
+            summary['time_range'] = f"{s} ~ {e}"
+    # 参数列表
+    params = snap.get('params_list', [])
+    if params:
+        # 兼容旧格式
+        if params[0] and 'params' in params[0]:
+            params = [p.get('params', {}) for p in params]
+        # 汇总所有参数（所有组共享的 key）
+        all_keys = set()
+        for p in params:
+            all_keys.update(p.keys())
+        if all_keys:
+            # 取第一组的参数值作为展示
+            first = params[0] if params else {}
+            items = []
+            for k in sorted(all_keys):
+                v = first.get(k, '—')
+                items.append(f"{k}={v}")
+            summary['params'] = items[:8]  # 最多8个
+            if len(all_keys) > 8:
+                summary['params'].append(f'...共{len(all_keys)}个参数')
+    # 品种分类
+    subs = snap.get('submissions', [])
+    if subs:
+        paths_all = []
+        for s in subs:
+            paths_all.extend(s.get('paths', []))
+        if paths_all:
+            summary['products'] = f"{len(subs)}个提交, {len(paths_all)}个路径"
+    # 收益率频率
+    freqs = snap.get('return_freqs', [])
+    if freqs:
+        checked = [f for f in freqs if f.get('checked')]
+        with_rf = [f for f in freqs if f.get('return_freq')]
+        parts = []
+        if checked:
+            parts.append(f"{len(checked)}个因子选中")
+        if with_rf:
+            parts.append(f"{len(with_rf)}个设了频率")
+        if parts:
+            summary['return_freqs'] = ', '.join(parts)
+    # 分组测试
+    gs = snap.get('group_settings', {})
+    if gs:
+        g_parts = []
+        if gs.get('group_count'):
+            g_parts.append(f"分组数={gs['group_count']}")
+        if gs.get('fee_mode') and gs['fee_mode'] != 'none':
+            g_parts.append(f"费率模式={gs['fee_mode']}")
+            if gs.get('fee_rate'):
+                g_parts.append(f"费率={gs['fee_rate']}%")
+        if g_parts:
+            summary['group_test'] = ', '.join(g_parts)
+    return summary
 
 
 @templates_bp.route('/api/global_templates', methods=['POST'])

@@ -18,12 +18,31 @@
             snapshot.params_list = [];
         }
 
-        // 2. 时间范围
-        const startTimeInput = document.getElementById('start-time-input');
-        const endTimeInput = document.getElementById('end-time-input');
+        // 2. 时间范围（完整字段，与 /set_time_range 对齐）
+        // DOM id 使用下划线：start_year, start_month, ...（见 time_range_module.html）
+        var sY = document.getElementById('start_year');
+        var sM = document.getElementById('start_month');
+        var sD = document.getElementById('start_day');
+        var sH = document.getElementById('start_hour');
+        var sMin = document.getElementById('start_minute');
+        var eY = document.getElementById('end_year');
+        var eM = document.getElementById('end_month');
+        var eD = document.getElementById('end_day');
+        var eH = document.getElementById('end_hour');
+        var eMin = document.getElementById('end_minute');
+        var isTd = document.getElementById('is_trading_day');
+        var tz = document.getElementById('timezone_input');
+        var pad = function(n) { return (parseInt(n) < 10 ? '0' : '') + parseInt(n); };
         snapshot.time_data = {
-            start: startTimeInput ? startTimeInput.value : '',
-            end: endTimeInput ? endTimeInput.value : ''
+            start_date: sY ? sY.value + '-' + pad(sM?.value||1) + '-' + pad(sD?.value||1) : '',
+            start_time: sH ? pad(sH?.value||9) + ':' + pad(sMin?.value||0) : '09:00',
+            end_date: eY ? (eY.value||(sY?sY.value:'')) + '-' + pad(eM?.value||1) + '-' + pad(eD?.value||1) : '',
+            end_time: eH ? pad(eH?.value||15) + ':' + pad(eMin?.value||0) : '15:00',
+            is_trading_day: isTd ? isTd.checked : false,
+            timezone: tz ? tz.value : 'Asia/Shanghai',
+            // 保留旧格式兼容
+            start: '',
+            end: ''
         };
 
         // 3. 品种分类
@@ -75,10 +94,63 @@
     }
 
     // ── 应用快照 ──────────────────────────────────────────────────────────
+    // 顺序很重要：先设时间范围（影响tester创建），再设参数，最后重建tester
     async function applySnapshot(snapshot) {
         if (!snapshot) return;
 
-        // 1. 恢复参数设置
+        // 1. 先设置时间范围（后端 /set_time_range 会更新 shared.start_point/end_point，
+        //    创建 tester 时需要用到）
+        if (snapshot.time_data) {
+            var td = snapshot.time_data;
+            // 恢复到时间模块的 DOM 输入框（id 用下划线）
+            var setVal = function(id, val) { var el = document.getElementById(id); if (el && val) el.value = val; };
+            if (td.start_date) {
+                var parts = td.start_date.split('-');
+                setVal('start_year', parts[0]);
+                setVal('start_month', parts[1]);
+                setVal('start_day', parts[2]);
+            }
+            if (td.start_time) {
+                var parts = td.start_time.split(':');
+                setVal('start_hour', parts[0]);
+                setVal('start_minute', parts[1]);
+            }
+            if (td.end_date) {
+                var parts = td.end_date.split('-');
+                setVal('end_year', parts[0]);
+                setVal('end_month', parts[1]);
+                setVal('end_day', parts[2]);
+            }
+            if (td.end_time) {
+                var parts = td.end_time.split(':');
+                setVal('end_hour', parts[0]);
+                setVal('end_minute', parts[1]);
+            }
+            setVal('timezone_input', td.timezone);
+            var isTdCb = document.getElementById('is_trading_day');
+            if (isTdCb) isTdCb.checked = !!td.is_trading_day;
+            if (typeof updateTimeSummary === 'function') updateTimeSummary();
+            // 提交到后端
+            try {
+                await fetch('/set_time_range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        factor_family_alias: FF_ALIAS,
+                        start_date: td.start_date || '',
+                        start_time: td.start_time || '09:00',
+                        end_date: td.end_date || '',
+                        end_time: td.end_time || '15:00',
+                        is_trading_day: td.is_trading_day || false,
+                        timezone: td.timezone || 'Asia/Shanghai'
+                    })
+                });
+            } catch (e) {
+                console.error('恢复时间范围失败:', e);
+            }
+        }
+
+        // 2. 恢复参数设置
         if (snapshot.params_list && snapshot.params_list.length > 0) {
             // 兼容旧格式 [{factor_name, params}, ...] → 新格式 [{alias: value}, ...]
             var pl = snapshot.params_list;
@@ -103,18 +175,54 @@
             }
         }
 
-        // 2. 恢复时间范围
-        if (snapshot.time_data) {
-            const startInp = document.getElementById('start-time-input');
-            const endInp = document.getElementById('end-time-input');
-            if (startInp && snapshot.time_data.start) startInp.value = snapshot.time_data.start;
-            if (endInp && snapshot.time_data.end) endInp.value = snapshot.time_data.end;
-            if (typeof updateTimeSummary === 'function') updateTimeSummary();
-        }
-
-        // 3. 恢复品种分类
-        if (snapshot.submissions && snapshot.submissions.length > 0 && typeof window._applySubmissions === 'function') {
-            window._applySubmissions(snapshot.submissions);
+        // 3. 清除旧 tester，为每个 submission 重新提交以重建后端 tester
+        if (snapshot.submissions && snapshot.submissions.length > 0) {
+            // 先清空后端旧 tester
+            try {
+                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+            } catch (e) {
+                console.error('清空旧测试器失败:', e);
+            }
+            // 按 submisssion_id 顺序重新提交
+            var restoredSubmissions = [];
+            for (var i = 0; i < snapshot.submissions.length; i++) {
+                var sub = snapshot.submissions[i];
+                if (!sub.paths || sub.paths.length === 0) continue;
+                var id_time = (sub.id !== undefined && sub.id !== null) ? sub.id : Date.now() + i;
+                try {
+                    var resp = await fetch('/submit_selected_products', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            selected_paths: sub.paths,
+                            id_time: id_time
+                        })
+                    });
+                    var result = await resp.json();
+                    if (result.success) {
+                        restoredSubmissions.push({
+                            id: id_time,
+                            label: sub.label || result.factor_tester_serial || '',
+                            paths: result.selected_paths || sub.paths,
+                            pathsDescMap: sub.pathsDescMap || {},
+                            factor_tester_name: result.factor_tester_name || sub.factor_tester_name,
+                            factor_tester_serial: result.factor_tester_serial || sub.factor_tester_serial,
+                            count_desc: result.count_desc || sub.count_desc,
+                            timestamp: sub.timestamp || '',
+                            start_date: sub.start_date || '',
+                            end_date: sub.end_date || '',
+                            start_time: sub.start_time || '',
+                            end_time: sub.end_time || ''
+                        });
+                    }
+                } catch (e) {
+                    console.error('重新提交测试器失败:', sub.id, e);
+                }
+            }
+            // 用新的 submissions 更新全局状态
+            if (restoredSubmissions.length > 0 && typeof window._applySubmissions === 'function') {
+                window._applySubmissions(restoredSubmissions);
+            }
         }
 
         // 4. 恢复收益率频率
@@ -215,24 +323,65 @@
             }
             let html = '';
             data.templates.forEach(tpl => {
+                const tplId = tpl.id;
+                const summary = tpl.summary || {};
+                // 构建摘要行
+                var summaryLines = [];
+                if (summary.time_range) summaryLines.push('📅 ' + summary.time_range);
+                if (summary.params) summaryLines.push('⚙️ ' + summary.params.join(', '));
+                if (summary.products) summaryLines.push('📦 ' + summary.products);
+                if (summary.return_freqs) summaryLines.push('📈 ' + summary.return_freqs);
+                if (summary.group_test) summaryLines.push('🧪 ' + summary.group_test);
+                var summaryHtml = summaryLines.length > 0
+                    ? summaryLines.map(function(l) { return '<div style="font-size:11px;color:#666;padding:2px 0;">' + escapeHtml(l) + '</div>'; }).join('')
+                    : '<div style="font-size:11px;color:#999;">无设置信息</div>';
+
                 html += `
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #eef2f7;gap:8px;">
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
-                        <div style="font-size:11px;color:#888;">${escapeHtml(tpl.ff_alias || '')}</div>
+                <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
+                    <div class="tpl-row-header" data-tpl-id="${tplId}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;cursor:pointer;gap:8px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
+                            <div style="font-size:11px;color:#888;">${escapeHtml(tpl.ff_alias || '')}</div>
+                        </div>
+                        <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;">▼</span>
                     </div>
-                    <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tpl.id}">加载</button>
-                    <button class="btn btn-sm btn-outline-danger global-tpl-delete-btn" data-tpl-id="${tpl.id}" style="color:#d40000;border-color:#d40000;">删除</button>
+                    <div class="tpl-row-detail" style="display:none;padding:4px 10px 10px 10px;background:#f8fafc;">
+                        ${summaryHtml}
+                        <div style="margin-top:8px;display:flex;gap:6px;">
+                            <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}">加载</button>
+                            <button class="btn btn-sm btn-outline-danger global-tpl-delete-btn" data-tpl-id="${tplId}" style="color:#d40000;border-color:#d40000;">删除</button>
+                        </div>
+                    </div>
                 </div>`;
             });
             listEl.innerHTML = html;
-            // 绑定加载按钮
-            listEl.querySelectorAll('.global-tpl-load-btn').forEach(btn => {
-                btn.onclick = () => loadTemplate(btn.getAttribute('data-tpl-id'));
+            // 绑定展开/收起
+            listEl.querySelectorAll('.tpl-row-header').forEach(function(header) {
+                header.addEventListener('click', function() {
+                    var detail = header.nextElementSibling;
+                    var icon = header.querySelector('.tpl-expand-icon');
+                    if (detail.style.display === 'none') {
+                        detail.style.display = 'block';
+                        icon.style.transform = 'rotate(180deg)';
+                    } else {
+                        detail.style.display = 'none';
+                        icon.style.transform = 'rotate(0deg)';
+                    }
+                });
             });
-            // 绑定删除按钮
+            // 绑定加载按钮（阻止冒泡，避免触发展开/收起）
+            listEl.querySelectorAll('.global-tpl-load-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    loadTemplate(this.getAttribute('data-tpl-id'));
+                });
+            });
+            // 绑定删除按钮（阻止冒泡）
             listEl.querySelectorAll('.global-tpl-delete-btn').forEach(btn => {
-                btn.onclick = () => deleteTemplate(btn.getAttribute('data-tpl-id'));
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    deleteTemplate(this.getAttribute('data-tpl-id'));
+                });
             });
         } catch (e) {
             listEl.innerHTML = '<div style="color:#d40000;text-align:center;padding:10px;">加载失败: ' + e.message + '</div>';

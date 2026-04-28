@@ -252,32 +252,51 @@ def get_price_series():
         if raw_df.index.tz is not None:
             raw_df.index = raw_df.index.tz_convert('UTC').tz_localize(None)
 
-        bins = factor_idx.union([raw_df.index.min()]).sort_values()
+        # 构建区间：每个因子时间点作为右边界，左边界为上一个因子时间点（第一个左边界为数据开始）
+        bins = factor_idx.union([raw_df.index.min()])  # 添加数据开始时间
+        bins = bins.sort_values()
+        # 使用 cut 将价格数据分到对应的区间（右闭？需要仔细）
+        # 我们希望区间为 (left, right] 即包含右端点，左开右闭
+        # 使用 pd.cut 的 right=True 参数
+        labels = factor_idx  # 区间右端点作为标签
+        # 将 raw_df 索引分到区间
+        # 注意：pd.cut 要求 bins 严格递增，且 left 边界可能小于最小值，我们手动处理
+        # 先创建区间索引
         intervals = pd.IntervalIndex.from_arrays(bins[:-1], bins[1:], closed='right')
+        # 为每个价格时间点找到所属区间
         bin_indices = intervals.get_indexer(raw_df.index)
+        # 过滤出属于有效区间的点（-1表示不在任何区间）
         mask = bin_indices >= 0
         raw_filtered = raw_df[mask]
-        bin_indices  = bin_indices[mask]
+        bin_indices = bin_indices[mask]
 
+        # 分组聚合
         def agg_func(group):
             return pd.Series({
-                'OPEN':  group[required[0]].iloc[0],
-                'HIGH':  group[required[1]].max(),
-                'LOW':   group[required[2]].min(),
-                'CLOSE': group[required[3]].iloc[-1],
+                'OPEN': group[required[0]].iloc[0],      # 区间内第一笔 open
+                'HIGH': group[required[1]].max(),
+                'LOW': group[required[2]].min(),
+                'CLOSE': group[required[3]].iloc[-1]    # 区间内最后一笔 close
             })
-
-        ohlc = raw_filtered.groupby(bin_indices).apply(agg_func).reindex(range(len(factor_idx)))
+        
+        # 按 bin_indices 分组
+        grouped = raw_filtered.groupby(bin_indices)
+        ohlc = grouped.apply(agg_func).reindex(range(len(factor_idx)))
         ohlc = ohlc.replace({np.nan: None})
+        # 将索引替换为因子时间点
         ohlc.index = factor_idx
-        _daily = factor.freq is not None and factor.freq.is_day_multiple()
-        dates_out = [ts.strftime('%Y-%m-%d') for ts in factor_idx] if _daily else factor_dates
+
+        _is_daily = factor.freq is not None and factor.freq.is_day_multiple()
+        if _is_daily:
+            dates_out = [ts.strftime('%Y-%m-%d') for ts in factor_idx]
+        else:
+            dates_out = factor_dates
         return jsonify({
             'dates': dates_out,
-            'OPEN':  ohlc['OPEN'].tolist(),
-            'HIGH':  ohlc['HIGH'].tolist(),
-            'LOW':   ohlc['LOW'].tolist(),
-            'CLOSE': ohlc['CLOSE'].tolist(),
+            'OPEN': ohlc['OPEN'].tolist(),
+            'HIGH': ohlc['HIGH'].tolist(),
+            'LOW': ohlc['LOW'].tolist(),
+            'CLOSE': ohlc['CLOSE'].tolist()
         })
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

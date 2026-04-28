@@ -114,7 +114,6 @@
                     yAxis: 1,
                     color: '#FF5722',
                     dataGrouping: { enabled: false },
-                    connectNulls: true,
                     marker: { enabled: true, radius: 2 }
                 },
                 {
@@ -125,7 +124,6 @@
                     yAxis: 2,
                     color: '#4CAF50',
                     dataGrouping: { enabled: false },
-                    connectNulls: true,
                     marker: { enabled: true, radius: 2 }
                 }
             ],
@@ -236,11 +234,65 @@
             btn.removeEventListener('click', loadHandler);
             btn.addEventListener('click', loadHandler);
         });
+        // 绑定复权复选框事件（只重新请求价格，复用缓存的因子/收益率）
+        document.querySelectorAll(`input[id^="adjust-price-${subId}"]`).forEach(function(cb) {
+            // remove old listener by cloning
+            var newCb = cb.cloneNode(true);
+            cb.parentNode.replaceChild(newCb, cb);
+            newCb.addEventListener('change', async function() {
+                var match = newCb.id.match(/adjust-price-\d+-(\d+)/);
+                if (!match) return;
+                var idx = match[1];
+                var ctx = _priceContextCache[subId + '-' + idx];
+                if (ctx) {
+                    await reloadPriceOnly(subId, idx, ctx.product, ctx.factorName, ctx.submission);
+                }
+            });
+        });
         async function loadHandler(e) {
             const sub = e.currentTarget.getAttribute('data-sub');
             const idx = e.currentTarget.getAttribute('data-idx');
             const factorName = e.currentTarget.getAttribute('data-factor-name');
             await loadFactorAndReturn(sub, idx, factorName);
+        }
+    }
+
+    // ── 复权价格切换缓存（按 subId-factIdx 缓存最近一次加载的因子/收益数据）────
+    var _priceContextCache = {};  // key: "subId-factIdx" → {factorData, returnData, product, factorName, submission}
+
+    // 仅重新加载价格并更新图表（用于复权复选框切换）
+    async function reloadPriceOnly(subId, factorIdx, product, factorName, submission) {
+        var context = _priceContextCache[`${subId}-${factorIdx}`];
+        if (!context || !context.factorData || !context.returnData) return;
+        var factorData = context.factorData;
+        var factorDatesMs = factorData.dates.map(function(d) { return typeof d === 'string' ? new Date(d + 'T00:00:00Z').getTime() : d; });
+        var adjustCheckbox = document.getElementById('adjust-price-' + subId + '-' + factorIdx);
+        var adjusted = adjustCheckbox ? adjustCheckbox.checked : false;
+        try {
+            var priceData = await fetch('/get_price_series', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    submission_id: subId,
+                    product: product,
+                    factor_family_alias: factorFamilyAlias,
+                    factor_name: factorName,
+                    factor_dates: factorDatesMs,
+                    adjusted: adjusted,
+                    start_date: submission.start_date,
+                    end_date: submission.end_date
+                })
+            }).then(function(r) { return r.json(); });
+            if (priceData.error) { console.error('reloadPriceOnly 错误:', priceData.error); return; }
+            if (priceData.dates && priceData.OPEN) {
+                // 直接重绘整张图（复用缓存的因子/收益数据），避免 jQuery chart.get 兼容性问题
+                var factorChartDiv = document.getElementById('factor-chart-' + subId + '-' + factorIdx);
+                if (factorChartDiv) {
+                    factorChartDiv.style.height = '800px';
+                    drawComparisonChart('factor-chart-' + subId + '-' + factorIdx, priceData, context.factorData, context.returnData, product, factorName);
+                }
+            }
+        } catch(e) {
+            console.error('reloadPriceOnly 异常:', e);
         }
     }
 
@@ -342,6 +394,14 @@
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
                 factorChartDiv.style.height = '800px';
                 drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName);
+                // 缓存因子和收益数据，供复权切换时复用
+                _priceContextCache[`${subId}-${factorIdx}`] = {
+                    factorData: factorData,
+                    returnData: returnData,
+                    product: product,
+                    factorName: factorName,
+                    submission: submission
+                };
             } else {
                 factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格、因子或收益率数据无效</div>';
             }

@@ -26,7 +26,7 @@
         }
 
         // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
-        function reloadParamModule(callback) {
+        window.reloadParamModule = function reloadParamModule(callback) {
             fetch(window.location.pathname + '?factor=' + encodeURIComponent(factorAlias))
                 .then(res => res.text())
                 .then(html => {
