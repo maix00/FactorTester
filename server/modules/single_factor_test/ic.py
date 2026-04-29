@@ -91,8 +91,8 @@ def run_ic_test():
                 try:
                     tester.products = run_products.copy()
                     tester.calc_factor(factors=factor)
-                except Exception:
-                    pass
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
                 finally:
                     tester.products = all_products.copy()
                     if factor.table is None or factor.table.empty:
@@ -129,8 +129,8 @@ def run_ic_test():
                     returns_table = factor.returns
                     ic_series = ic_s_df.iloc[:, 0]
                     ic_stats  = ic_st_df.iloc[:, 0]
-                except Exception:
-                    pass
+                except Exception as e:
+                    return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
             assert ic_series is not None and ic_stats is not None and not returns_table.empty, \
                 "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
             factor.ic_series = ic_series

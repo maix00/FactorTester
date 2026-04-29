@@ -146,8 +146,8 @@ def get_all_futures_contract() -> List[Product]:
 def get_object_path(object: Product, folder: str):
     path = os.path.join(folder, f"{object.alias}.{data_type}")
     
-    if not isinstance(object, CNFutures):
-        return path
+    if not isinstance(object, CNFutures) or not os.path.isfile(path):
+        return ''
     else:
         import pyarrow.parquet as pq
         parquet_file = pq.ParquetFile(path)
@@ -157,7 +157,7 @@ def get_object_path(object: Product, folder: str):
         schema = parquet_file.schema_arrow
         col_names = schema.names
         if target_col not in col_names:
-            raise ValueError(f"列 '{target_col}' 不存在")
+            return path
         col_idx = col_names.index(target_col)
 
         # 2. 遍历所有 Row Group，取出该列统计信息中的最小值

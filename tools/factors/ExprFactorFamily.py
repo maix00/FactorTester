@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import pandas as pd
 from functools import partial
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple, Set
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Sequence, Tuple, Set
 
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.Factor import Factor
@@ -84,6 +84,12 @@ class ExprFactorFamily(FactorFamily):
 
     params: List[Parameter] = []  # 重置为空，子类可覆盖
 
+    # ── 信号对齐参数（类属性，可在子类或实例上覆盖） ──
+    basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
+    daily_basepoint: 'str|None' = None       # 日倍频基准点（时间字符串，如 '15:00:00'），None 则用 basepoint
+    end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
+    end_session_gap: pd.Timedelta = pd.Timedelta('3hours')  # 盘间间隔阈值
+
     def __init_subclass__(cls, **kwargs):
         """子类定义完成后自动调用 factor_expr（如果定义了的话），并从表达式树自动收集 params。
         同时自动迁移旧字段 chinese_name → desc, description_sections → description。"""
@@ -112,6 +118,10 @@ class ExprFactorFamily(FactorFamily):
                  math_expr: Optional[str] = None,
                  extra_params: Optional[List[Parameter]] = None,
                  signal_freq: Optional[str] = None,
+                 basepoint: 'Optional[str|Callable]' = None,
+                 daily_basepoint: 'Optional[str]' = None,
+                 end_session_skip: Optional[bool] = None,
+                 end_session_gap: 'Optional[pd.Timedelta]' = None,
                  # ---- 向后兼容参数 ----
                  chinese_name: Optional[str] = None,
                  description_sections: Optional[List[dict]] = None,
@@ -189,6 +199,13 @@ class ExprFactorFamily(FactorFamily):
         self.desc = _desc
         self.description = _desc_full
         self.math_expr = _math or _expr.to_latex()
+
+        # 信号对齐参数（None 则从类属性取默认值）
+        self.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
+        self.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
+        self.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
+        self.end_session_gap = (end_session_gap if end_session_gap is not None
+                                else getattr(cls, 'end_session_gap', pd.Timedelta('3hours')))
 
         # 覆盖默认信号频率
         if _signal_freq != '1d':
@@ -279,20 +296,24 @@ class ExprFactorFamily(FactorFamily):
                 result = df[product] if product in df.columns else df.iloc[:, 0]
         else:
             result = df
-        # 对齐到信号频率
+        # 对齐到信号频率（如果返回的是 DataFrame，加一列变成单列 DataFrame 再对齐）
         signal_freq = kwargs.get('F', kwargs.get('$F', pd.Timedelta('1d')))
-        return self.sync_signal(result, freq=signal_freq)
+        if isinstance(result, pd.Series):
+            result = result.to_frame(name=product)
+        result = self._align_to_signal(result, signal_freq)
+        # 恢复为 Series
+        return result.iloc[:, 0]
 
     def func(self, products: Sequence['Product'], *args, **kwargs) -> pd.DataFrame:
         """
         重写 func()：直接通过表达式求值批量计算所有品种的信号。
 
         比默认 func() 更高效：一次性构建全品种 DataFrame，
-        避免逐个品种循环和 concat。
+        避免逐品种循环和 concat。
 
         流程：
           1. 表达式求值 → DataFrame（列=Product，行=时间MultiIndex）
-          2. 通过 sync_signal 对齐到信号频率
+          2. 根据 basepoint/end_session_skip 构建信号索引，一次性对齐
           3. 应用反转（如有）
         """
         kwargs = self._normalize_param_kwargs(**kwargs)
@@ -306,24 +327,114 @@ class ExprFactorFamily(FactorFamily):
         resolved = self._resolve_expr_params(self._expr)
         result = resolved.evaluate(products, freq, source=source)
 
-        # sync_signal 作用于整个 DataFrame
-        # 由于 sync_signal 默认处理 Series，这里给每列单独处理再合并
-        synced = {}
-        for col in result.columns:
-            synced[col] = self.sync_signal(result[col], freq=signal_freq)
+        # ── 信号对齐 ──
+        signal_df = self._align_to_signal(result, signal_freq)
 
-        # 按列 concat
-        all_index = synced[list(synced.keys())[0]].index
-        for s in list(synced.values())[1:]:
-            all_index = all_index.union(s.index)
-        signal_df = pd.concat(
-            {k: s.reindex(all_index) for k, s in synced.items()}, axis=1
-        )
+        return signal_df if not is_reversed else -signal_df
 
-        if is_reversed:
-            signal_df = -signal_df
+    def _align_to_signal(self, data: pd.DataFrame, freq: Any) -> pd.DataFrame:
+        """
+        将原始数据对齐到等间隔信号时间点。
 
-        return signal_df
+        直接对整个 DataFrame 操作，不做逐品种 sync_signal。
+        逻辑基于 FactorFamily._get_sync_signal_index 的 _signal_index_for，
+        但适配了 ExprFactorFamily 已有全品种 DataFrame 的场景。
+        """
+        freq_dc = DataFreq(freq)
+        bp = self.basepoint
+        end_skip = self.end_session_skip
+        end_gap = self.end_session_gap
+
+        # 找到 freq 是其整数倍的索引层级（第一个匹配的）
+        index_names = [str(n) for n in data.index.names]
+        index_freqs = [DataFreq(n) for n in index_names]
+        first_true_idx = next(
+            (i for i, f in enumerate(index_freqs)
+             if freq_dc.value.total_seconds() % f.value.total_seconds() == 0), None)
+        assert first_true_idx is not None, \
+            f"频率 {freq_dc} 不是任何数据索引频率的整数倍"
+        multiple = int(freq_dc.value.total_seconds() / index_freqs[first_true_idx].value.total_seconds())
+
+        idx_name = index_names[first_true_idx]
+        idx_series = data.index.get_level_values(idx_name).to_series().reset_index(drop=True)
+
+        # 确定各组的基准点位置
+        # 日倍频且有 daily_basepoint 时，daily_basepoint 优先
+        day_bp = None
+        if freq_dc.is_day_multiple and self.daily_basepoint is not None:
+            day_bp = self.daily_basepoint
+            try:
+                base_time = pd.Timestamp(day_bp).time()
+            except Exception:
+                raise ValueError(
+                    f"Invalid time basepoint '{day_bp}'. Must be a time string like '09:01:00' or '15:00:00'")
+            series = data.groupby(idx_name).transform(
+                lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
+        elif isinstance(bp, str):
+            bp_lower = bp.lower()
+            if bp_lower == 'last':
+                series = data.groupby(idx_name).cumcount(ascending=False) == 0
+            elif bp_lower == 'first':
+                series = data.groupby(idx_name).cumcount() == 0
+            else:
+                raise ValueError(
+                    f"Invalid basepoint '{bp}'. Must be 'last', 'first', or a callable")
+        else:
+            series = bp(data.groupby(idx_name))
+
+        if not any(series):
+            series = data.groupby(idx_name).cumcount(ascending=False) == 0
+        assert isinstance(series, pd.Series) and series.dtype == bool, \
+            "basepoint function must return a boolean Series"
+
+        basepoint_pos = series.reset_index(drop=True).index[series]
+
+        # 从基准点按 multiple 间隔取信号点：仅子日频需要跳过盘间间隔
+        if end_skip and freq_dc.value < pd.Timedelta('1day'):
+            last_col_name = index_names[-1]
+            last_col = data.index.get_level_values(last_col_name).to_series().reset_index(drop=True)
+            end_session_pos = last_col[last_col.shift(-1) - last_col >= end_gap].index
+            # 对每个 session 段，按 multiple 间隔取信号点
+            signal_map_mask = basepoint_pos.isin({
+                i
+                for start, end in zip(
+                    [0] + (end_session_pos[:-1].values + 1).tolist(),
+                    end_session_pos
+                )
+                for i in range(start + multiple - 1, end + 1, multiple)
+                if start + multiple - 1 <= end
+            })
+        else:
+            idx = basepoint_pos.to_series().reset_index(drop=True).index
+            signal_map_mask = (idx % multiple == multiple - 1)
+
+        signal_pos = basepoint_pos[signal_map_mask]
+        signal_map = idx_series.index.isin(signal_pos)
+
+        # 构建新的索引：左侧层级用 signal_map 打 NA，目标层级替换为信号值，右侧层级保持不变
+        left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]]
+        right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]]
+        signal_name = f'_SIGNAL@{freq_dc.name}'
+
+        left_arrays = [
+            data.index.get_level_values(index_names[i]).to_series().where(signal_map)
+            for i in range(first_true_idx)
+        ]
+        signal_vals = idx_series.where(signal_map)
+        right_arrays = [
+            data.index.get_level_values(index_names[i]).to_series()
+            for i in range(first_true_idx + 1, len(index_names))
+        ]
+        new_index = pd.MultiIndex.from_arrays(
+            left_arrays + [signal_vals] + right_arrays,
+            names=left_names + [signal_name] + right_names
+        ).dropna()
+
+        # 用新索引筛选数据
+        result = data[signal_map].copy()
+        result.index = new_index
+
+        return result
 
     def get_factors(self, return_freq=None, params_list=None, **kwargs) -> List[Factor]:
         """

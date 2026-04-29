@@ -341,7 +341,7 @@ class Factor(UniqueObject):
         ReturnsFamily = Returns()
         # OPEN 系列收益需提前 shift（下期开盘 = 当期结束后的第一根 bar）
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
-        return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))
+        return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, S=(shift if next_return else shift + 1))
         try:
             self.returns = return_factor.calc(self.products)
         finally:

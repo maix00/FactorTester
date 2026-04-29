@@ -285,20 +285,14 @@ class ColumnRef(FactorExpr):
         """
         from tools.data.DataSource import DataSource as DS
 
-        if source is not None:
-            if not source.if_object_is_in_source(product):
-                raise ValueError(
-                    f"品种 {product.name} 在指定数据源 {source.alias} 中不可用"
-                )
+        if source is not None and source.freq == freq and product in source:
             return source
-
-        # 自动选择：遍历所有 DataSource，找第一个匹配品种+freq的
-        for ds in DS:
-            if ds.freq == freq and ds.if_object_is_in_source(product):
-                return ds
-
-        # 无数据源注册时，返回 None（DataMeta 会用自己的加载逻辑）
-        return None
+        
+        available_sources = getattr(product, freq.name).list_available_sources()
+        if available_sources:
+            return available_sources[0]
+        else:
+            return None
 
     @property
     def dependencies(self) -> Set[FactorExpr]:
@@ -318,23 +312,21 @@ class ColumnRef(FactorExpr):
 
         series_dict = {}
         for p in products:
-            ds = self._select_source(p, freq, source)
             dm: DataMeta = getattr(p, freq.name)
-            # 指定 source 加载数据（None 时 DataMeta 用默认逻辑）
-            data = dm.get_data(copy=False, source=ds) if ds is not None else dm.get_data(copy=False)
-            col_name = self.column.name   # 如 'CA' for CLOSE_ADJUSTED
-            col_val = self.column.value   # 如 'CA'
+            if source is not None:
+                try:
+                    ds = dm.set_current_source(source)
+                except ValueError as e:
+                    raise Warning(f"ColumnRef: source {source.alias} is not compatible with product {p.name} at freq {freq.name}") from e
+            if dm.next_available_source() is None:
+                continue  # 无可用数据源，跳过此品种
+            col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA
 
-            if col_name in data.columns:
-                series = data[col_name]
-            elif col_val in data.columns:
-                series = data[col_val]
-            else:
-                raise KeyError(
-                    f"Column {self.column} not found in {p.name}.{freq.name}"
-                    + (f" (source={ds.alias})" if ds is not None else "")
-                )
-            series_dict[p] = series
+            # 使用 get_and_adjust_cols 确保复权列（如 CLOSE_ADJUSTED）被自动计算
+            data = dm.get_and_adjust_cols([col_name], copy=False)
+            if data.empty:
+                continue
+            series_dict[p] = data[col_name]
 
         result = pd.concat(series_dict, axis=1)
         result.columns = list(series_dict.keys())
@@ -607,21 +599,7 @@ class WindowOp(FactorExpr):
     @staticmethod
     def _resolve_window(window: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
         """将窗口参数统一转换为 bar 数量。"""
-        # 如果 window 是 Parameter，不能在此处解析（需要宿主对象注册表）
-        # 调用者应在求值前将其替换为实际值
-        if hasattr(window, 'get_value'):
-            raise RuntimeError(
-                f"Window parameter {window} must be resolved before evaluation"
-            )
-        if isinstance(window, int):
-            return window
-        if isinstance(window, pd.Timedelta):
-            td = window
-        else:
-            td = pd.Timedelta(window)  # type: ignore[arg-type]
-        if td.total_seconds() % freq.value.total_seconds() != 0:
-            raise ValueError(f"Window {window} not divisible by freq {freq.name}")
-        return int(td.total_seconds() / freq.value.total_seconds())
+        return _resolve_bars(window, freq)
 
     @property
     def op_name(self) -> str:
@@ -649,7 +627,7 @@ class WindowOp(FactorExpr):
 
 class ShiftOp(FactorExpr):
     """
-    位移算子：REF(x, N) 即前 N 期的 x 值。
+    位移算子：SHIFT(x, N) 即前 N 期的 x 值。
 
     periods 参数支持：
       - int: bar 数量
@@ -699,20 +677,7 @@ class ShiftOp(FactorExpr):
     @staticmethod
     def _resolve_periods(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
         """将位移参数统一转换为 bar 数量。"""
-        from tools.parameters.Parameter import Parameter
-        if isinstance(periods, Parameter):
-            raise RuntimeError(
-                f"Shift parameter {periods} must be resolved before evaluation"
-            )
-        if isinstance(periods, int):
-            return periods
-        if isinstance(periods, pd.Timedelta):
-            td = periods
-        else:
-            td = pd.Timedelta(periods)
-        if td.total_seconds() % freq.value.total_seconds() != 0:
-            raise ValueError(f"Shift {periods} not divisible by freq {freq.name}")
-        return int(td.total_seconds() / freq.value.total_seconds())
+        return _resolve_bars(periods, freq)
 
     @property
     def op_name(self) -> str:
@@ -739,6 +704,28 @@ class ShiftOp(FactorExpr):
 
     def __repr__(self) -> str:
         return f"ref({self.operand}, {self.periods})"
+
+
+def _resolve_bars(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
+    """将 int / str / pd.Timedelta / Parameter 统一转换为 bar 数量。
+
+    WindowOp._resolve_window、ShiftOp._resolve_periods 共享此逻辑。
+    若传入 Parameter（未解析），抛出 RuntimeError——调用者应在求值前解析。
+    """
+    from tools.parameters.Parameter import Parameter
+    if isinstance(periods, Parameter):
+        raise RuntimeError(
+            f"Parameter {periods} must be resolved before evaluation"
+        )
+    if isinstance(periods, int):
+        return periods
+    if isinstance(periods, pd.Timedelta):
+        td = periods
+    else:
+        td = pd.Timedelta(periods)
+    if td.total_seconds() % freq.value.total_seconds() != 0:
+        raise ValueError(f"{periods} not divisible by freq {freq.name}")
+    return int(td.total_seconds() / freq.value.total_seconds())
 
 
 # ═════════════════════════════════════════════════════════════════════════════

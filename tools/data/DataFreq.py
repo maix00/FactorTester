@@ -90,7 +90,7 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
             except:
                 # 如果无法直接解析，尝试按 DataFreq 名称格式解析，如 'MIN30' → '30min'
                 assert isinstance(freq, str)
-                name = freq.removeprefix('DataFreq.').split('@')[-1].upper()
+                name = freq.removeprefix('DataFreq.').removeprefix('DataFreq:').split('@')[-1].upper()
                 # 正则提取单位+数字对，拼接为 Timedelta 可识别字符串
                 value = ''.join(f"{num}{reverse_map.get(unit, unit)}" for unit, num in findall(r'([A-Z]+)(\d+)', name))
                 value = pd.Timedelta(value)

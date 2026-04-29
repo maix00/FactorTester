@@ -229,13 +229,16 @@ class DataMeta(UniqueObject):
         return periods
 
     def list_available_sources(self) -> List[DataSource]:
-        return [s for s in DataSource if s.if_object_is_in_source(self.object) and s.freq == self.freq]
+        return [s for s in DataSource if self.object in s and s.freq == self.freq]
     
+    def next_available_source(self) -> Optional[DataSource]:
+        return next((s for s in DataSource if self.object in s and s.freq == self.freq), None)
+
     def is_available(self) -> bool:
-        return bool(self.list_available_sources())
+        return bool(self.next_available_source())
     
     def set_current_source(self, source: Any) -> DataSource:
-        if source in self.list_available_sources():
+        if self.object in source and source.freq == self.freq:
             self.current_source = source
             return source
         else:
@@ -243,9 +246,9 @@ class DataMeta(UniqueObject):
         
     def get_current_source(self) -> DataSource:
         if not hasattr(self, 'current_source'):
-            if not (available_sources := self.list_available_sources()):
-                raise ValueError(f"No data source available for object {self.object.name}")
-            self.current_source = available_sources[0]
+            if not (source := self.next_available_source()):
+                 raise ValueError(f"No data source available for object {self.object.name}")
+            self.current_source = source
         return self.current_source
 
     def _load_data(self, source: Optional[Any] = None) -> pd.DataFrame:
@@ -270,6 +273,8 @@ class DataMeta(UniqueObject):
                   filter_object: bool = False,
                   filter_object_attr: str = 'name', **kwargs) -> pd.DataFrame:
         self.data = loaded_data if loaded_data is not None else self._load_data(source)
+        if self.data.empty:
+            return self.data
         self._map_time_cols(time_cols_mapping)
         self._map_data_cols(data_cols_mapping)
         if filter_object:
@@ -339,6 +344,8 @@ class DataMeta(UniqueObject):
         按起始时间截断数据。
         time 可是带时区的 Timestamp，与索引比较时自动对齐时区。
         """
+        if data.empty:
+            return data
         if time is None or time_is_date is None:
             time, time_is_date = self._process_start_calc_point(object=self, **kwargs)
         if time is not None:
@@ -593,6 +600,8 @@ class DataMeta(UniqueObject):
         from tools.products.Futures import Futures
 
         df = self.get_data(copy=copy)
+        if df.empty:
+            return df
         if not isinstance(self.object, Futures):
             # 非期货产品不做复权：将 *_ADJUSTED 回退到原始列返回。
             fallback_cols = [self._get_nonadjusted_col_name(col) if self._check_is_adjusted(col) else col for col in cols]

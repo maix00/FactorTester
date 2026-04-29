@@ -73,9 +73,13 @@ class FactorTester(UniqueObject):
     """
     _instances = WeakValueDictionary()
 
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        alias=alias if alias else cls.__name__
-        return super().__new__(cls, alias=alias, **kwargs)
+    def __new__(cls, alias: Optional[str] = None, *args, user=None, **kwargs):
+        core_alias = alias if alias else cls.__name__
+        # 将 user name 嵌入 alias，避免不同用户的同名 tester 冲突
+        if user is not None:
+            user_name = getattr(user, 'alias', str(user))
+            core_alias = f"{user_name}:{core_alias}"
+        return super().__new__(cls, alias=core_alias, **kwargs)
 
     def __init__(self, products: Sequence[Product],
                  alias: Optional[str] = None,

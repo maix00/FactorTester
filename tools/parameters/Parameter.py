@@ -183,6 +183,34 @@ class Parameter(UniqueObject):
         from tools.factors.FactorExpr import ParamRef
         return getattr(ParamRef(self), name)
 
+    # ── 运算符代理 ──
+    # Python 运算符不经过 __getattr__，需要显式代理到 ParamRef。
+
+    def _ref(self):
+        from tools.factors.FactorExpr import ParamRef
+        return ParamRef(self)
+
+    @staticmethod
+    def _to_expr_arg(x):
+        """若 x 是 Parameter，转成 ParamRef，否则原样返回。"""
+        if isinstance(x, Parameter):
+            from tools.factors.FactorExpr import ParamRef
+            return ParamRef(x)
+        return x
+
+    def __add__(self, other): return self._ref().__add__(self._to_expr_arg(other))
+    def __radd__(self, other): return self._ref().__radd__(self._to_expr_arg(other))
+    def __sub__(self, other): return self._ref().__sub__(self._to_expr_arg(other))
+    def __rsub__(self, other): return self._ref().__rsub__(self._to_expr_arg(other))
+    def __mul__(self, other): return self._ref().__mul__(self._to_expr_arg(other))
+    def __rmul__(self, other): return self._ref().__rmul__(self._to_expr_arg(other))
+    def __truediv__(self, other): return self._ref().__truediv__(self._to_expr_arg(other))
+    def __rtruediv__(self, other): return self._ref().__rtruediv__(self._to_expr_arg(other))
+    def __neg__(self): return self._ref().__neg__()
+    def __pos__(self): return self._ref().__pos__()
+    def __abs__(self): return self._ref().__abs__()
+    def __invert__(self): return self._ref().__invert__()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 子类 —— 利用 ValueSpace 工厂方法的语法糖

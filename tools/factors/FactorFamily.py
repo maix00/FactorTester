@@ -29,7 +29,8 @@ from tools.products.Product import Product
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools import UniqueObject, DataFreq, DataMeta, DataColumn
 from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
-from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns, ReverseParam
+from tools.factors.FactorExpr import _resolve_bars
+from tools.factors.ExprFactorFamily import ExprFactorFamily, ParamRef"
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
@@ -814,7 +815,7 @@ class FactorFamily(UniqueObject):
                 data = data[pd.notna(data.index)]
         return data
 
-class Returns(FactorFamily):
+class Returns(ExprFactorFamily):
     """
     内置收益率因子族。
 
@@ -823,64 +824,29 @@ class Returns(FactorFamily):
 
     参数：
         RF  (Timedelta) : 收益率计算频率，如 '1d'、'1h'
-        SC  (DataColumn): 收益起始价格列，默认 CLOSE
-        EC  (DataColumn): 收益终止价格列，默认 CLOSE
-        S   (int)       : 移位量，1 表示下期收益（shift(-1)），0 表示当期
+        SC  (DataColumn): 收益价格列，默认 CLOSE
+        S   (int)       : 移位量，0=当期收益，-1=下期收益
     """
 
-    params = [
-        WindowParam('RF'),  # 收益率计算频率，如 '1d'、'1h'、'30min'
-        DataColumnParam('SC', default_value=DataColumn.CLOSE),  # 收益起始列
-        DataColumnParam('EC', default_value=DataColumn.CLOSE),  # 收益终止列
-        TypeParam('S', default_value=1),  # 移位量：1=下期，0=当期，-1=上期
-    ]
+    source_freq = 'MIN1'
+    basepoint = 'last'
+    daily_basepoint = '15:00:00'
 
-    description_sections = [
-        {
-            'title': '这是什么',
-            'body': 'Returns 是系统内置的收益率序列生成因子，用于构造下一期或当期收益，通常作为 IC、分组测试和其他因子评估的目标变量。',
-        },
-        {
-            'title': '它在看什么',
-            'body': '它本身不是一个用于预测的 alpha，而是定义“你到底在预测哪个收益口径”。不同的收益频率、收益起点和是否使用下一期收益，会直接改变测试结论。',
-        },
-        {
-            'title': '为什么这个因子可能行得通',
-            'body': '严格来说，它不是“为什么有效”的问题，而是“为什么定义准确很重要”。如果目标收益定义错了，再好的预测因子也会被错误地评估。',
-        },
-        {
-            'title': '使用提醒',
-            'body': '回测中应优先确认收益频率、对齐方式和是否前视，再比较不同 alpha 的优劣。',
-        }
-    ]
+    @staticmethod
+    def factor_expr():
+        SC = DataColumnParam('SC', default_value=DataColumn.CLOSE)
+        RF = WindowParam('RF')
+        S = TypeParam('S', default_value=0)
+        # pct_change(RF) = delta(RF) / shift(RF), then shift for S (0=当期, -1=下期)
+        return (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
 
-    def func_timeseries(self, product: Product, RF: pd.Timedelta, SC: DataColumn, EC: DataColumn, S: int, *args, **kwargs) -> pd.Series:
-        """
-        计算单品种收益率时序。
-
-        当 SC == EC 时（同一价格列）：
-          - OPEN 系列：pct_change(RF) + shift(RF*S)，basepoint='first'（开盘对开盘）
-          - CLOSE 系列：pct_change(RF) + shift(RF*S)，basepoint='last'（收盘对收盘）
-          - 使用 replace_basepoint='last' 将开盘时间戳替换为收盘时间戳以对齐因子
-
-        参数：
-            RF : 收益频率
-            SC : 起始列（与 EC 相同时生效）
-            EC : 终止列
-            S  : 移位步数
-        """
-        data_freq = product.get_current_freq()
-        data = getattr(product, data_freq.name)
-        assert isinstance(data, DataMeta)
-        if SC == EC:
-            day_basepoint = 'last'
-            if SC in [DataColumn.OPEN, DataColumn.OPEN_ADJUSTED]:
-                day_basepoint = 'first'
-                ret = data[SC].pct_change(RF).shift(RF*(S-1))
-            elif SC in [DataColumn.CLOSE, DataColumn.CLOSE_ADJUSTED]:
-                ret = data[SC].pct_change(RF).shift(RF*(S-1))
-            else:
-                raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
-            return self.sync_signal(ret, RF, basepoint=day_basepoint, replace_basepoint='last')
+    def func(self, products, *args, **kwargs):
+        kwargs = self._normalize_param_kwargs(**kwargs)
+        SC = kwargs.get('SC', DataColumn.CLOSE)
+        # 根据价格列自动确定 basepoint
+        if SC in (DataColumn.OPEN, DataColumn.OPEN_ADJUSTED):
+            self.basepoint = 'first'
         else:
-            raise NotImplementedError("计算不同起止列的收益率尚未实现")
+            self.basepoint = 'last'
+            self.daily_basepoint = '15:00:00'
+        return super().func(products, *args, **kwargs)

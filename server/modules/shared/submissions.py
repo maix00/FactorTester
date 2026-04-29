@@ -108,8 +108,8 @@ def reorder_submissions():
     try:
         with _factor_testers_lock:
             n = len(shared.factor_testers)
-            id_to_tester = {int(t.alias): t for t in shared.factor_testers}
-            shared.factor_testers = [id_to_tester[i] for i in new_order if i in id_to_tester]
+            alias_to_tester = {t.alias: t for t in shared.factor_testers}
+            shared.factor_testers = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
             assert len(shared.factor_testers) == n, "Reordered list length mismatch"
         return jsonify({'success': True})
     except Exception as e:

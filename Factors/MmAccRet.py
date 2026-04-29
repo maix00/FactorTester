@@ -11,7 +11,6 @@ import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__f
 
 from tools.factors.ExprFactorFamily import ExprFactorFamily
 from tools.parameters import WindowParam, DataColumnParam
-from tools.data.DataColumn import DataColumn
 
 class MmAccRet(ExprFactorFamily):
     """
@@ -29,9 +28,9 @@ class MmAccRet(ExprFactorFamily):
 
     source_freq = 'MIN1'
 
-    @classmethod
-    def factor_expr(cls):
-        P = DataColumnParam('P', default_value=DataColumn.CLOSE_ADJUSTED)
+    @staticmethod
+    def factor_expr():
+        P = DataColumnParam('P', default_value='CA')
         NL = WindowParam('NL', default_value='30m')
         NS = WindowParam('NS', default_value='10m')
         return (P.shift(NS) - P.shift(NL)) / (P.shift(NL) + 1e-10)

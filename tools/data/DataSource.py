@@ -90,30 +90,25 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
             if not DataSource.all():
                 DataSource.set_default_source(self)
             DataSource._register_source(self)  # 注册到元类管理的字典
-            self._get_object_path_func = get_object_path
-            # 如果未提供可用性检测函数，默认检查房屏文件是否存在
+            self.get_object_path = get_object_path
+            # 如果未提供可用性检测函数，默认检查文件是否存在且非空
             if if_object_is_in_source is None:
                 import os
-                self._is_object_in_source_func = lambda object: os.path.isfile(get_object_path(object))
+                self._if_object_is_in_source_func = lambda object: os.path.isfile(self.get_object_path(object))
             else:
-                self._is_object_in_source_func = if_object_is_in_source
+                self._if_object_is_in_source_func = if_object_is_in_source
             self.timezone = kwargs.get('timezone', None)
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
-    def if_object_is_in_source(self, object: UniqueObject) -> bool:
+    def __contains__(self, object: UniqueObject) -> bool:
         """
-        判断指定 Product 是否在本数据源中有对应数据文件。
+        支持 object in data_source 语法，判断某个 Product 是否在此数据源中存在实际数据。
         必须时区匹配（如 Product.timezone == DataSource.timezone）。
         """
-        # 时区不匹配的品种和数据源不关联
         if hasattr(object, 'timezone') and getattr(object, 'timezone') != self.timezone:
             return False
-        return self._is_object_in_source_func(object)
-
-    def get_object_path(self, object: UniqueObject) -> Any:
-        """获取指定 Product 在本数据源中的文件路径。"""
-        return self._get_object_path_func(object)
+        return self._if_object_is_in_source_func(object)
     
     def set_time_cols_mapping(self, mapping: Dict[Any, Any]) -> None:
         """设置时间列映射：将数据文件内的时间列名映射到 DataFreq.name，将被用于构建多级索引。"""
