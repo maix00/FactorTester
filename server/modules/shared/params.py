@@ -18,7 +18,7 @@ def add_params():
         ff = get_factor_family_instance(factor_family_alias)
         ff._check_in_space(**params)
         new_params = {
-            p.alias: p.rectify_value(params[p.alias]) if p.alias in params else p.default_value
+            p.alias: p._value_space.rectify(params[p.alias]) if p.alias in params else p.default_value
             for p in ff.params
         }
         pl = _get_session_params(factor_family_alias, ff)
@@ -28,9 +28,9 @@ def add_params():
         added_display = {}
         for p in ff.params:
             val = new_params.get(p.alias)
-            if val is not None and hasattr(p, 'get_value_alias'):
+            if val is not None:
                 try:
-                    added_display[p.alias] = p.get_value_alias(val)
+                    added_display[p.alias] = p._value_space.alias(val)
                 except Exception:
                     added_display[p.alias] = str(val)
             else:

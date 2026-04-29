@@ -136,7 +136,7 @@
                 <tr>
                     <th style="min-width: 100px;">因子(家族)名</th>
                     {% for param in params %}
-                        <th>{{ param.name }}</th>
+                        <th{% if param.desc %} title="{{ param.desc | e }}"{% endif %}>{{ param.alias }}</th>
                     {% endfor %}
                     <th style="min-width: 80px;">操作</th>
                 </tr>
@@ -157,7 +157,7 @@
                 </tr>
                 {% for factor in factors %}
                 <tr draggable="true" data-factor-idx="{{ loop.index0 }}">
-                    <td>{{ factor.name }}</td>
+                    <td>{{ factor.alias }}</td>
                     {% for param in params %}
                         <td>{{ factor.params_dict[param.alias].get_value_alias(factor.params_dict[param.alias].get_value(factor)) }}</td>
                     {% endfor %}

@@ -142,7 +142,7 @@ def run_ic_test():
 
         tester.products = all_products.copy()
         ic_stats_all = pd.concat([f.ic_stats for f in factors], axis=1)
-        ic_stats_all.rename(columns=lambda x: str(x), inplace=True)
+        ic_stats_all.rename(columns=lambda x: x.alias if hasattr(x, 'alias') else str(x), inplace=True)
         columns = ic_stats_all.columns.tolist()
         rows    = ic_stats_all.to_dict(orient='records')
         indices = ic_stats_all.index.tolist()

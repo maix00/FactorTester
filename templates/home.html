@@ -136,7 +136,12 @@
             const area = document.getElementById('user-area');
             if (_currentUser) {
                 area.innerHTML = '<span class="username-badge">' + _currentUser + '</span>'
+                    + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#555;cursor:pointer;margin-left:4px;"><input type="checkbox" id="keep-login-cb" onchange="setKeepLogin(this.checked)" style="width:auto;margin:0;">保持登录</label>'
                     + '<button onclick="doLogout()">退出登录</button>';
+                // 从服务端获取当前 keep_login 状态
+                fetch('/api/me').then(r=>r.json()).then(d => {
+                    document.getElementById('keep-login-cb').checked = !!d.keep_login;
+                });
             } else {
                 area.innerHTML = '<button class="btn-login" onclick="openLoginModal(null)">登录 / 注册</button>';
             }
@@ -220,6 +225,14 @@
             await fetch('/logout', {method: 'POST'});
             _currentUser = null;
             renderUserArea();
+        }
+
+        async function setKeepLogin(val) {
+            await fetch('/api/keep_login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({keep_login: val}),
+            });
         }
 
         function shutdownServer() {

@@ -30,8 +30,8 @@ def run_flask_server(port=8000, directory='.'):
     url = f"http://localhost:{port}/"
     print(f"Serving Flask on {url} from {os.path.abspath(directory)}")
 
-    # 启动全局空闲资源清理守护线程
-    IdleResourceManager.get_instance().start(scan_interval=5)
+    # 启动全局空闲资源清理守护线程（idle 10s 后释放）
+    IdleResourceManager.get_instance().start(idle_timeout=10, scan_interval=5)
     print("IdleResourceManager started.")
 
     def open_browser():

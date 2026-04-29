@@ -1,10 +1,12 @@
 from typing import Optional, Any
 
 from tools import DataColumn
-from tools.parameters.Parameter import Parameter
+from tools.parameters.Parameter import Parameter, ValueSpace
 
 class DataColumnParam(Parameter):
     def __init__(self, alias: Optional[str] = None, default_value: Optional[Any] = None, *args, **kwargs):
+        if hasattr(self, '_initialized'):
+            return
         if default_value is not None:
             default_value = DataColumn(default_value)
         else:
@@ -14,33 +16,34 @@ class DataColumnParam(Parameter):
                 default_value = DataColumn(result.upper()) if alias else None
             except:
                 pass
-        if not hasattr(self, '_initialized'):
-            super().__init__(
-                alias = alias,
-                default_value=default_value,
-                whether_in_space=self._whether_in_space,
-                get_value_alias = lambda x: {col: col.value for col in DataColumn}.get(x, str(x)),
-                *args, **kwargs
-            )
-        else:
-            self.default_value = default_value
 
-    def _whether_in_space(self, value: Any) -> bool:
-        from tools import DataColumn
-        try:
-            DataColumn(value)
-            return True
-        except Exception:
-            return False
-        
-    def _rectify_value(self, value: Any, **kwargs) -> Any:
-        from tools import DataColumn
-        return DataColumn(value)
-    
+        space = ValueSpace(
+            contains=lambda v: _is_valid_datacolumn(v),
+            rectify=lambda v: DataColumn(v),
+            alias=lambda v: {col: col.value for col in DataColumn}.get(v, str(v)),
+        )
+
+        super().__init__(
+            alias=alias,
+            value_space=space,
+            default_value=default_value,
+            *args, **kwargs
+        )
+
     def col(self, col: Any):
         from tools import DataColumn
         col = DataColumn(col)
         return self.get_value_alias(col)
+
+
+def _is_valid_datacolumn(value: Any) -> bool:
+    from tools import DataColumn
+    try:
+        DataColumn(value)
+        return True
+    except Exception:
+        return False
+
 
 if __name__ == '__main__':
     C1 = DataColumnParam('C1')

@@ -287,7 +287,7 @@ def replace_params():
         new_pl = []
         for params in params_list:
             ff._check_in_space(**params)
-            new_params = {p.alias: p.rectify_value(params[p.alias]) if p.alias in params else p.default_value for p in ff.params}
+            new_params = {p.alias: p._value_space.rectify(params[p.alias]) if p.alias in params else p.default_value for p in ff.params}
             # 去重：将参数值转为可哈希的 tuple 来判断是否重复
             key = tuple(str(new_params.get(p.alias, '')) for p in ff.params)
             if key not in seen:

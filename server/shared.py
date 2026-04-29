@@ -34,6 +34,57 @@ start_calc_point = None
 _params_store: dict = {}  # key: (session_id, ff_alias) → list of param dicts
 _params_store_lock = threading.Lock()
 
+# ─── Auto-logout via IdleResourceManager ─────────────────────────────────────
+# session 空闲超时通过 IdleResourceManager 的 registry 来追踪。
+# 每次请求 touch，_check_login 检查 registry 中是否超时。
+SESSION_IDLE_NAMESPACE = "flask_session"
+SESSION_IDLE_TIMEOUT = 600  # 10 分钟
+
+
+def _session_resource_id(sid: str) -> str:
+    return f"{SESSION_IDLE_NAMESPACE}:{sid}"
+
+
+def _touch_session_activity() -> None:
+    """记录当前 session 的活动时间。"""
+    if session.get('keep_login'):
+        return
+    sid = _get_session_id()
+    try:
+        from tools.base.IdleResourceManager import IdleResourceManager
+        IdleResourceManager.get_instance().registry.record_use(_session_resource_id(sid))
+    except Exception:
+        pass
+
+
+def _check_session_idle() -> bool:
+    """检查当前 session 是否空闲超时。返回 True 表示已超时需退出。"""
+    if session.get('keep_login'):
+        return False
+    sid = session.get('_sid')
+    if sid is None:
+        return False
+    try:
+        from tools.base.IdleResourceManager import IdleResourceManager
+        rid = _session_resource_id(sid)
+        idle_list = IdleResourceManager.get_instance().registry.get_idle_resources(SESSION_IDLE_TIMEOUT)
+        return rid in idle_list
+    except Exception:
+        return False
+
+
+def _cleanup_session_resource(sid: str) -> None:
+    """从 registry 和 params_store 中清理指定 session。"""
+    try:
+        from tools.base.IdleResourceManager import IdleResourceManager
+        IdleResourceManager.get_instance().registry.remove(_session_resource_id(sid))
+    except Exception:
+        pass
+    with _params_store_lock:
+        keys_to_remove = [k for k in _params_store if k[0] == sid]
+        for k in keys_to_remove:
+            _params_store.pop(k, None)
+
 def _get_session_id() -> str:
     sid = session.get('_sid')
     if sid is None:
@@ -90,6 +141,18 @@ def _save_accounts(accounts: list):
 
 def _current_user() -> str | None:
     return session.get('username')
+
+def _current_user_obj():
+    """返回当前登录用户的 User 实例（None 若未登录）。"""
+    username = _current_user()
+    if not username:
+        return None
+    from tools.base.User import User
+    with _accts_lock:
+        accounts = _load_accounts()
+    acct = next((a for a in accounts if a['username'] == username), None)
+    is_admin = bool(acct and acct.get('is_admin', False))
+    return User(name=username, is_admin=is_admin)
 
 def _require_user() -> str:
     """Return current username. Only call within @login_required routes."""

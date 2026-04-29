@@ -54,14 +54,13 @@ class Category(FinRangeParam):
     始终包含 'Others' 类别，不属于任何已知类别的产品归入此类。
     """
     _instances = WeakValueDictionary()
-    _override_family_root = True  # SerialObject 序列号计数独立于其他类族
 
     def __new__(cls, alias: str, *args, **kwargs):
-        return super().__new__(cls, type_alias='C', alias=alias)
+        return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, alias: str, type: Type[UniqueObject], categories: List[str], *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='C', alias=alias, value_space=categories, *args, **kwargs)
+            super().__init__(alias=alias, value_space=categories, *args, **kwargs)
             self.type = type
             self.categories = categories
             if 'Others' not in self.categories:

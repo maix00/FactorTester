@@ -13,9 +13,11 @@
 # =============================================================================
 import numpy as np
 import pandas as pd
-from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Set, Any
+import uuid
+from typing import TYPE_CHECKING, Callable, List, Dict, Optional, Set, Any, Tuple
 
-from tools import SerialObject, DataFreq
+from tools import UniqueObject, DataFreq
+from tools.parameters import Parameter
 from tools.products.Product import Product
 from tools.parameters.Parameter import Parameter
 from tools.factors.Parameters import ReturnFreqParam, FactorNextPeriodReturns
@@ -23,7 +25,7 @@ from tools.factors.Parameters import ReturnFreqParam, FactorNextPeriodReturns
 if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
 
-class Factor(SerialObject):
+class Factor(UniqueObject):
     """
     量化因子对象。
 
@@ -40,29 +42,58 @@ class Factor(SerialObject):
         report     (DataFrame)  : 测试报告（由 FactorFamily.test 写入）
     """
 
-    def __new__(cls, alias: Optional[str] = None, single_use: bool = False, *args, **kwargs):
+    def __new__(cls, alias: Optional[str] = None, *args, family=None, **kwargs):
+        # alias 保持纯净（factor_alias），name = {user_prefix}:{core_alias}:{uuid}
+        core_alias = alias if alias else cls.__name__
+        user_prefix = cls._get_user_prefix(family)
+        if user_prefix:
+            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+        else:
+            name = f"{core_alias}:{uuid.uuid4().hex}"
+        # 移除 kwargs 中的 name（避免与 __new__ 自动生成的 name 冲突）
+        kwargs.pop('name', None)
         # search=True: 若已有同名同类 Factor，复用而非新建
-        return super().__new__(cls, type_alias='F', alias=alias, search=True, single_use=single_use)
+        return super().__new__(cls, name=name, alias=core_alias, search=True, **kwargs)
     
-    def __init__(self, alias: Optional[str], func: Callable[..., pd.DataFrame] = lambda _: pd.DataFrame(), 
+    def __init__(self, alias: Optional[str] = None, func: Callable[..., pd.DataFrame] = lambda _: pd.DataFrame(), 
                  family: Optional['FactorFamily'] = None, param_vals: Optional[Dict[Parameter, Any]] = None,
-                 single_use: bool = False):
+                 **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='F', alias=alias, single_use=single_use)
+            super().__init__(alias=alias)
             self.func = func            # 因子计算入口
             self.min_gap: Optional[pd.Timedelta] = None  # 最小时间间隔（计划中功能）
             self.freq: Optional[DataFreq] = None  # 计算后推断的信号频率
             self.family = family        # 创建此 Factor 的 FactorFamily
             
-            # 参数注册：优先使用 param_vals 中的键值，否则从 family.params 继承
+            # 参数注册：
+            #   $开头的参数 → 全局共享单例，直接注册
+            #   非$开头的参数 → 创建家族级共享副本，name = {alias}:{family.name}
             if param_vals is None:
                 assert self.family is not None, "如果没有提供param_vals参数，则必须提供family参数以从中获取默认参数值"
-                self.params = self.family.params
+                self.params = []
+                for param in self.family.params:
+                    if param.alias.startswith('$'):
+                        p = param
+                    else:
+                        clone_name = f"{param.alias}:{self.family.name}"
+                        p = Parameter(name=clone_name, alias=param.alias,
+                                      value_space=param._value_space,
+                                      default_value=param.default_value)
+                    p.register(self, p.default_value)
+                    self.params.append(p)
             else:
-                param_vals = param_vals if param_vals is not None else {}
-                self.params = list(param_vals.keys()) if param_vals is not None else []
-                for param in self.params:
-                    param.register(self, param_vals[param])
+                self.params = []
+                for param, value in param_vals.items():
+                    if param.alias.startswith('$'):
+                        p = param
+                    else:
+                        clone_name = f"{param.alias}:{self.family.name}"
+                        p = Parameter(name=clone_name, alias=param.alias,
+                                      value_space=param._value_space,
+                                      default_value=param.default_value)
+                    p.register(self, value)
+                    self.params.append(p)
+                    param.register(self, value)
             self.params_dict = {param.alias: param for param in self.params}
 
             self.products: Set[Product] = set()
@@ -163,6 +194,39 @@ class Factor(SerialObject):
         else:
             self._report = value
 
+    # ------------------------------------------------------------------
+    # 用户前缀管理：Factor.name = {user_prefix}:{factor_alias}:{uuid}
+    # 格式：'username@serial:family_alias|params:uuid'
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_user_prefix(family: Optional['FactorFamily'] = None) -> Optional[str]:
+        """从 family.name 中提取用户前缀 'username@serial' 或 '$COMMON'，无 family 时从 ContextVar 获取。"""
+        if family is not None:
+            prefix = family._extract_user_prefix()
+            if prefix is not None:
+                return prefix
+        try:
+            from tools.factors.FactorFamily import _active_user_prefix
+            return _active_user_prefix.get()
+        except ImportError:
+            pass
+        return None
+
+    @staticmethod
+    def _extract_user_prefix(name: str) -> Tuple[Optional[str], str]:
+        """
+        从 Factor.name 中分离用户前缀和剩余部分。
+
+        例：'张三@1:MmMABreak|F:1d:a1b2c3d4' → ('张三@1', 'MmMABreak|F:1d:a1b2c3d4')
+        若无用户前缀：'MmMABreak|F:1d:a1b2c3d4' → (None, 'MmMABreak|F:1d:a1b2c3d4')
+        """
+        if '@' in name:
+            parts = name.split(':', 1)
+            if len(parts) == 2 and '@' in parts[0] and parts[0].rsplit('@', 1)[-1].isdigit():
+                return parts[0], parts[1]
+        return None, name
+
     def clear(self):
         """清空所有计算结果，保留配置信息（func/params/family）。"""
         self.table = pd.DataFrame()
@@ -177,7 +241,7 @@ class Factor(SerialObject):
         """更改本 Factor 的收益率计算频率（优先写入活跃 tester）。"""
         t = self._get_active_tester()
         if t is not None:
-            t.factor_return_freqs[self] = ReturnFreqParam.rectify_value(return_freq)
+            t.factor_return_freqs[self] = ReturnFreqParam._value_space.rectify(return_freq)
         else:
             ReturnFreqParam.register(self, return_freq)
 
@@ -244,7 +308,7 @@ class Factor(SerialObject):
         流程：
           1. 确定收益频率（默认与因子信号频率相同）
           2. 按 returns_col 和 next_return 决定使用哪种价格列及 shift 方向
-          3. 临时创建 single_use Returns FactorFamily 实例计算收益
+          3. 通过 Returns FactorFamily 实例计算收益
           4. 结果写入 self.returns 并返回
 
         next_return=True  → 下一期收益（因子用于下期选股）
@@ -274,9 +338,7 @@ class Factor(SerialObject):
         tester = self._get_active_tester()
         start_calc_point = getattr(tester, 'start_calc_point', None)
         from tools.factors.FactorFamily import Returns
-        # 每次 calc_returns 都创建一个新的临时 Returns 实例（factor_single_use=True），
-        # 避免共享 sync_signal 缓存导致数据污染
-        ReturnsFamily = Returns(factor_single_use=True)
+        ReturnsFamily = Returns()
         # OPEN 系列收益需提前 shift（下期开盘 = 当期结束后的第一根 bar）
         shift = -1 if returns_col.value.name.startswith('OPEN') else 0
         return_factor = ReturnsFamily.get_factor(RF=return_freq.value, SC=returns_col.value, EC=returns_col.value, S=(shift if next_return else shift + 1))

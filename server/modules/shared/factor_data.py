@@ -27,7 +27,7 @@ def factor_list():
             factor_freq_param = f.params_dict.get('$F')
             factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
             factor_freq_str = (
-                factor_freq_param.get_value_alias(factor_freq_value)
+                factor_freq_param._value_space.alias(factor_freq_value)
                 if factor_freq_param is not None and factor_freq_value is not None
                 else ''
             )

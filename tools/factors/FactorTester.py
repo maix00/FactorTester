@@ -24,7 +24,8 @@ from typing import Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
 
 from tools.factors.Factor import Factor
 from tools.products.Product import Product
-from tools import SerialObject, DataColumn, DataFreq
+from tools import UniqueObject, DataColumn, DataFreq
+from tools.base.User import User
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
 from Settings import get_all_products, logger_dir_path_default, factor_info_path
@@ -58,7 +59,7 @@ def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
         return pd.DatetimeIndex(idx.get_level_values(level), name=idx.names[level])
     return pd.DatetimeIndex(idx)
 
-class FactorTester(SerialObject):
+class FactorTester(UniqueObject):
     """
     因子测试器。
 
@@ -74,11 +75,12 @@ class FactorTester(SerialObject):
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         alias=alias if alias else cls.__name__
-        return super().__new__(cls, type_alias='FT', alias=alias)
+        return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, products: Sequence[Product],
                  alias: Optional[str] = None,
                  time_range: Optional[Tuple] = None,
+                 user: Optional['User'] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
         """
@@ -88,12 +90,14 @@ class FactorTester(SerialObject):
             products       : 参与测试的品种列表
             alias          : 实例别名，默认类名
             time_range     : (start, end) 测试时间区间（Timestamp 或可解析字符串）
+            user           : 创建此 tester 的 User 实例
             logger_file    : 是否写日志到文件
             logger_dir_path: 日志目录
             logger_console : 是否同时输出到控制台
         """
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='FT', alias=alias)
+            super().__init__(alias=alias)
+            self.user = user  # 创建者 User 实例（None 表示无归属）
 
             # 初始化日志记录器
             self.logger = logging.getLogger(self.__class__.__name__)
@@ -109,7 +113,7 @@ class FactorTester(SerialObject):
                 if logger_file:
                     if not os.path.exists(logger_dir_path):
                         os.makedirs(logger_dir_path)
-                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{self.serial_number}_{datetime.now().strftime('%Y%m%d')}.log")
+                    logger_file_path = os.path.join(logger_dir_path, f"factor_tester_{self.name}_{datetime.now().strftime('%Y%m%d')}.log")
                     file_handler = logging.FileHandler(logger_file_path, encoding='utf-8')
                     file_handler.setFormatter(formatter)
                     self.logger.addHandler(file_handler)
@@ -136,7 +140,58 @@ class FactorTester(SerialObject):
                 self.end_date = None
                 self.start_calc_point = None  # 计算起始点（带时区 Timestamp，与 start_date 合并为同一概念）
             self.logger.info(f"FactorTester initialized with {len(self.products)} products")
-    
+
+    def delete(self):
+        """
+        清理 FactorTester 及其持有的所有 per-factor 数据。
+
+        调用后：
+          - 所有关联 Factor 的计算缓存被清空
+          - Factor 和其非$开头 Parameter 副本被从全局缓存中移除（delete）
+          - self.products / self.all_products 被置空
+          - 将 self 从所属 User 的 tester 列表中移除（如有）
+          - 关闭 logger handler 释放文件句柄
+        """
+        from tools.parameters.Parameter import Parameter
+        # 清理所有关联 Factor 及其非$开头参数
+        for f in list(self.factors):
+            try:
+                # 清理非$开头的 Parameter 副本（name = {alias}:{factor.name}）
+                for param in list(f.params):
+                    if not param.alias.startswith('$'):
+                        try:
+                            param.delete()
+                        except Exception:
+                            pass
+                f.clear()
+                f.delete()
+            except Exception:
+                pass
+        # 清空 per-factor 缓存 dict
+        self.factor_tables.clear()
+        self.factor_returns.clear()
+        self.factor_return_freqs.clear()
+        self.factor_ic_series.clear()
+        self.factor_ic_stats.clear()
+        self.factor_reports.clear()
+        self.factors.clear()
+        self.products = set()
+        self.all_products = set()
+        # 从 user 的 tester 列表移除
+        if self.user is not None:
+            try:
+                self.user.remove_tester(self)
+            except Exception:
+                pass
+        # 关闭 logger handler
+        for handler in list(self.logger.handlers):
+            handler.close()
+            self.logger.removeHandler(handler)
+        try:
+            self.logger.info(f"FactorTester {self.alias} deleted")
+        except Exception:
+            pass
+
     def update_time_range(self, time_range: Tuple):
         """更新测试时间区间并记录日志。start_calc_point 与 start_date 为同一概念。"""
         self.start_date = pd.to_datetime(time_range[0])

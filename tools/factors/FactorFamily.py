@@ -15,6 +15,7 @@
 # =============================================================================
 import os
 import threading
+import uuid
 import pandas as pd
 from functools import partial
 from weakref import WeakValueDictionary
@@ -26,7 +27,7 @@ from tqdm import tqdm
 from tools.factors.Factor import Factor
 from tools.products.Product import Product
 from tools.factors.FactorTester import FactorTester, get_factor_tester
-from tools import SerialObject, DataFreq, DataMeta, DataColumn
+from tools import UniqueObject, DataFreq, DataMeta, DataColumn
 from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
 from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns, ReverseParam
 
@@ -35,8 +36,11 @@ from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot
 # 每个执行上下文（线程/协程）的活跃 FactorTester，由 test() 或服务端路由设置。
 # 通过 ContextVar 保证并发安全：每个请求线程拥有独立的值，互不干扰。
 _active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
+# 活跃用户前缀，如 '$COMMON' 或 '张三@1'。由 FactorFamily 创建时注入，
+# 传递给所有子对象（Factor、非$开头 Parameter）以构建用户名前缀命名。
+_active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
 
-class FactorFamily(SerialObject):
+class FactorFamily(UniqueObject):
     """
     因子族基类。
 
@@ -88,21 +92,22 @@ class FactorFamily(SerialObject):
         return res
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        # 若未提供 alias，则使用类名作为默认别名
-        alias=alias if alias else cls.__name__
-        return super().__new__(cls, type_alias='FF', alias=alias)
+        # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
+        core_alias = alias if alias else cls.__name__
+        user_prefix = _active_user_prefix.get()
+        if user_prefix:
+            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+        else:
+            name = f"{core_alias}:{uuid.uuid4().hex}"
+        kwargs.pop('name', None)
+        return super().__new__(cls, name=name, alias=core_alias, **kwargs)
 
-    def __init__(self, alias: Optional[str] = None, factor_single_use: bool = False):
+    def __init__(self, alias: Optional[str] = None):
         """
-        初始化 FactorFamily。
-
-        参数：
-            alias            : 别名，默认为类名
-            factor_single_use: 若为 True，则由本族创建的 Factor 均为 single_use 临时对象
+        初始化 FactorFamily。alias 为纯净类名，不包含用户前缀。
         """
         if not hasattr(self, '_initialized'):
-            alias=alias if alias else self.__class__.__name__
-            super().__init__(type_alias='FF', alias=alias)
+            super().__init__(alias=alias if alias else self.__class__.__name__)
             self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
             self._source_freqs_lock = threading.Lock()
             self._source_freqs_seen: set[DataFreq] = set()
@@ -112,7 +117,20 @@ class FactorFamily(SerialObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
-            self.factor_single_use = factor_single_use
+
+    def _extract_user_prefix(self) -> Optional[str]:
+        """
+        从 self.name 中提取用户前缀。
+        
+        name 格式: '{user_prefix}:{alias}:{uuid}' 如 '$COMMON:MmMABreak:a1b2c3d4'
+        返回: '$COMMON' 或 '张三@1' 或 None
+        """
+        name = self.name
+        if ':' in name:
+            prefix = name.split(':', 1)[0]
+            if prefix == '$COMMON' or ('@' in prefix and prefix.rsplit('@', 1)[-1].isdigit()):
+                return prefix
+        return None
 
     def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
         """
@@ -149,14 +167,12 @@ class FactorFamily(SerialObject):
             if not valid_products:
                 raise ValueError("No products with valid data")
             # 更新活跃 tester 的有效品种集，并使同步索引缓存失效。
-            # single_use 辅助族（如 Returns）不永久覆盖用户选定的品种集，
-            # 但需要临时切换到当前计算品种（_get_sync_signal_index 从 tester.products 读取），
-            # 计算结束后恢复原值。
+            # 每次 func 调用都临时切换到当前计算品种，计算结束后恢复原值，
+            # 避免辅助族（如 Returns）永久覆盖用户选定的品种集。
             tester = _active_tester.get()
             _prev_products = None
             if tester is not None:
-                if self.factor_single_use:
-                    _prev_products = tester.products  # 保存以便恢复
+                _prev_products = tester.products  # 保存以便恢复
                 tester.products = set(valid_products)
                 tester.sync_signal_index = None
                 tester.sync_signal_index_replaced = None
@@ -184,7 +200,7 @@ class FactorFamily(SerialObject):
                         for future in tqdm(as_completed(futures), total=len(valid_products), desc="Calculating factor signals"):
                             product, factor = future.result(); factors[product] = factor
             finally:
-                # single_use 辅助族计算结束后，将 tester.products 恢复为调用前的品种集
+                # 辅助族计算结束后，将 tester.products 恢复为调用前的品种集
                 if tester is not None and _prev_products is not None:
                     tester.products = _prev_products
                     tester.sync_signal_index = None
@@ -292,7 +308,7 @@ class FactorFamily(SerialObject):
         """
         kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
-        new_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
+        new_params = {p.alias: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         if new_params not in self._params_list:
             self._params_list.append(new_params)
 
@@ -300,7 +316,7 @@ class FactorFamily(SerialObject):
         """从 _params_list 中删除与 kwargs 匹配的参数组合。"""
         kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
-        del_params = {p.alias: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
+        del_params = {p.alias: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         self._params_list = [params for params in self._params_list if params != del_params]
 
     def set_all_params(self):
@@ -317,7 +333,11 @@ class FactorFamily(SerialObject):
         """
         parts = []
         for key, value in params.items():
-            val_alias = self.params_dict[key].get_value_alias(value)
+            # $ 前缀标准化：与 _normalize_param_kwargs 保持一致
+            if key not in self.params_dict:
+                if not key.startswith('$') and f'${key}' in self.params_dict:
+                    key = f'${key}'
+            val_alias = self.params_dict[key]._value_space.alias(value)
             if val_alias:
                 if key == '$Rev':
                     if val_alias == '1':
@@ -344,9 +364,15 @@ class FactorFamily(SerialObject):
         for params in _pl:
             factor_alias = self.get_alias(**params)
             factor_func = partial(self.func, **params)
-            factor = Factor(alias=factor_alias, func=factor_func, family=self, single_use=self.factor_single_use)
+            factor = Factor(alias=factor_alias, func=factor_func, family=self)
+            # 注册参数值：使用 factor 自己的 params_dict（非$参数已为独立的副本）
             for param_alias, value in params.items():
-                self.params_dict[param_alias].register(factor, value)
+                # $ 前缀标准化
+                actual_alias = param_alias
+                if param_alias not in factor.params_dict:
+                    if not param_alias.startswith('$') and f'${param_alias}' in factor.params_dict:
+                        actual_alias = f'${param_alias}'
+                factor.params_dict[actual_alias].register(factor, value)
             if return_freq is not None:
                 factor.change_current_return_freq(return_freq)
             factors.append(factor)
@@ -366,11 +392,11 @@ class FactorFamily(SerialObject):
         """
         kwargs = self._normalize_param_kwargs(**kwargs)
         self._check_in_space(**kwargs)
-        param_vals = {p: p.rectify_value(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
+        param_vals = {p: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         new_params = {p.alias: param_vals[p] for p in self.params}
         factor_alias = self.get_alias(**new_params)
         factor_func = partial(self.func, **new_params)
-        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self, single_use=self.factor_single_use)
+        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self)
         if return_freq is not None:
             factor.change_current_return_freq(return_freq)
         return factor

@@ -81,7 +81,10 @@ def submit_selected_products():
         if _start is None or _end is None:
             from Settings import default_test_start_date, default_test_end_date
             _start, _end = default_test_start_date, default_test_end_date
-        factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end))
+        user = shared._current_user_obj()
+        factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
+        if user is not None:
+            user.add_tester(factor_tester)
         with _factor_testers_lock:
             shared.factor_testers.append(factor_tester)
         return jsonify({
@@ -91,7 +94,7 @@ def submit_selected_products():
             'selected_products':   [str(p) for p in selected_products],
             'selected_paths':      selected_paths,
             'factor_tester_name':   factor_tester.name,
-            'factor_tester_serial': 'FT@' + str(factor_tester.serial_number),
+            'factor_tester_serial': factor_tester.alias,
             'count_desc':          f"{len(selected_products)} 个产品",
         })
     except Exception as e:

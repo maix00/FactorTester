@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tools.base.UniqueObject import UniqueObject
-from tools.base.SerialObject import SerialObject
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 
@@ -56,7 +55,7 @@ class DataSourceMeta(ABCMeta):
         cls.default_source = source
         return source
 
-class DataSource(SerialObject, metaclass=DataSourceMeta):
+class DataSource(UniqueObject, metaclass=DataSourceMeta):
     """
     数据源。
 
@@ -78,13 +77,13 @@ class DataSource(SerialObject, metaclass=DataSourceMeta):
     default_source: 'DataSource'
 
     def __new__(cls, alias: str, *args, **kwargs):
-        return super().__new__(cls, type_alias='DS', alias=alias)
+        return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, alias: str, data_freq: Any,
                  get_object_path: Callable[[UniqueObject], Any],
                  if_object_is_in_source: Optional[Callable[[UniqueObject], bool]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(type_alias='DS', alias=alias)
+            super().__init__(alias=alias)
             self.alias = alias
             self.freq = DataFreq(data_freq)    # 数据频率对象
             # 第一个被创建的源自动成为默认源

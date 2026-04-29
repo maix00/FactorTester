@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Optional, Any
 
 from tools import DataColumn
-from tools.parameters import Parameter, TypeParam, FinRangeParam, TimeDeltaParam, DateOrTimeParam
+from tools.parameters import Parameter, DateOrTimeParam, ValueSpace
 
 from Settings import default_test_start_date
 
@@ -35,18 +35,19 @@ def _to_rev_bool(value: Any) -> bool:
             return False
     raise ValueError(f"Invalid reverse flag: {value}")
 
-def get_reverse_param(alias: Optional[str] = '$Rev') -> Parameter:
+def get_reverse_param(alias: Optional[str] = '$Rev', desc: Optional[str] = None) -> Parameter:
     """创建因子反转参数：1/True/-1 表示反转，0/False 表示不反转。"""
-    param = TypeParam(
-        alias=alias,
-        default_value=False,
-        type_=bool,
-        whether_in_space=_safe_is_rev,
-        get_value_alias=lambda x: '1' if _to_rev_bool(x) else '0',
+    space = ValueSpace(
+        contains=_safe_is_rev,
+        rectify=_to_rev_bool,
+        alias=lambda x: '1' if _to_rev_bool(x) else '0',
     )
-    # TypeParam 默认不做值转换，这里统一规范化为 bool 存储
-    param.whether_in_space = lambda x: _safe_is_rev(x)
-    param.rectify_value = lambda x, **kwargs: _to_rev_bool(x)
+    param = Parameter(
+        alias=alias,
+        value_space=space,
+        default_value=False,
+        desc=desc or '因子反转标志：1/True/-1 反转信号方向，0/False 保持信号方向不变',
+    )
     return param
 
 def _safe_is_rev(value: Any) -> bool:
@@ -56,25 +57,38 @@ def _safe_is_rev(value: Any) -> bool:
     except Exception:
         return False
 
-def get_return_freq_param(alias: Optional[str] = '$RF') -> Parameter:
+def get_return_freq_param(alias: Optional[str] = '$RF', desc: Optional[str] = None) -> Parameter:
     """
     创建收益率计算频率参数。
     该参数不出现在因子别名中（别名 getValue 返回 'N'），
     支持两种值域：有限枚举值（通常为 None）或任意正 Timedelta。
     """
-    param = FinRangeParam(alias, None, get_value_alias=lambda _: 'N')
-    param += TimeDeltaParam(flag='pos', single_use=True)  # 支持任意正时长
-    return param
+    fin_space = ValueSpace.finite([None])
+    fin_space = ValueSpace(contains=fin_space._contains, rectify=fin_space._rectify, alias=lambda _: 'N')
+    td_space = ValueSpace.timedelta('pos')
+    space = fin_space.union(td_space)
+    return Parameter(
+        alias=alias,
+        value_space=space,
+        default_value=None,
+        desc=desc or '收益率计算频率，支持任意正时长（如 1d、5d、30min）',
+    )
 
-def get_factor_freq_param(alias: Optional[str] = '$F') -> Parameter:
+def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = None) -> Parameter:
     """
     创建因子信号频率参数。
     默认值为 '1d'（日频），支持任意正 Timedelta 以及特殊枚举值 'S'（反转信号）。
     该参数的别名会出现在因子全名中。
     """
-    param = TimeDeltaParam(alias=alias, default_value='1d', flag='pos')
-    param += FinRangeParam(alias=None, value_space='S', single_use=True)  # 支持 'S' 表示反转
-    return param
+    td_space = ValueSpace.timedelta('pos')
+    s_space = ValueSpace.finite(['S'])
+    space = td_space.union(s_space)
+    return Parameter(
+        alias=alias,
+        value_space=space,
+        default_value='1d',
+        desc=desc or '因子信号频率，支持任意正时长（如 1d、5d、30min）',
+    )
 
 def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DateOrTimeParam:
     """

@@ -17,7 +17,6 @@ from weakref import WeakValueDictionary
 from typing import List, Dict, Optional, Tuple, Any, override
 
 from tools.base.UniqueObject import UniqueObject
-from tools.base.SerialObject import SerialObject
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
@@ -109,7 +108,7 @@ def min(*values: Any) -> Any:
     """多元逐元素 min（DataMeta 兼容，alias 形如 MIN_(a)_(b)_(c)）。"""
     return _MIN_REDUCER.apply(*values)
 
-class DataMeta(SerialObject):
+class DataMeta(UniqueObject):
     """
     数据元信息对象。
 
@@ -170,7 +169,7 @@ class DataMeta(SerialObject):
     def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
         preserve_alias = kwargs.pop('preserve_alias', False)
         alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
-        return super().__new__(cls, type_alias='DM', alias=alias)
+        return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, object: UniqueObject, data_freq: DataFreq, 
                  original_object: Optional[UniqueObject] = None,
@@ -178,7 +177,7 @@ class DataMeta(SerialObject):
         if not hasattr(self, '_initialized'):
             preserve_alias = kwargs.pop('preserve_alias', False)
             alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
-            super().__init__(type_alias='DM', alias=alias)
+            super().__init__(alias=alias)
             self.object = object                           # 关联的 Product 或上游 DataMeta
             self.original_object = object if original_object is None else original_object  # 原始 Product（链式操作时保持）
             self.freq = data_freq                          # 所属数据频率
