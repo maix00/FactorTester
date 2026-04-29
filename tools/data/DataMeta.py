@@ -4,109 +4,16 @@
 #
 # DataMeta 是围绕特定 Product + DataFreq 的 DataFrame 的薄封装层：
 #   - 管理数据加载、时间列处理、列名映射、时间索引构建
-#   - 透明转发 pandas 的大多数操作（rolling/pct_change/shift/+/-/... 等）
-#   - 计算结果（如 rolling().mean()）仍是 DataMeta，保留原始数据上下文
 #   - 支持按 StartCalcPointParam 过滤历史数据
 #   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
 # =============================================================================
-import builtins as _py_builtins
-import numpy as np
 import pandas as pd
-import threading
-from weakref import WeakValueDictionary
-from typing import List, Dict, Optional, Tuple, Any, override
+from typing import List, Dict, Optional, Tuple, Any
 
 from tools.base.UniqueObject import UniqueObject
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
-
-
-class _VariadicReducer:
-    """统一多元归并父类：子类定义 alias 前缀和聚合方向。"""
-
-    alias_prefix: str = "OP"
-
-    @staticmethod
-    def _agg(frame: pd.DataFrame) -> pd.Series:
-        raise NotImplementedError
-
-    @staticmethod
-    def _agg_scalars(values: tuple[Any, ...]) -> Any:
-        raise NotImplementedError
-
-    @staticmethod
-    def _to_series(value: Any, index: pd.Index) -> pd.Series:
-        if isinstance(value, pd.Series):
-            return value.reindex(index)
-        if isinstance(value, pd.DataFrame):
-            if value.shape[1] != 1:
-                raise ValueError("Variadic reducer only supports Series or single-column DataFrame values")
-            return value.iloc[:, 0].reindex(index)
-        return pd.Series(value, index=index)
-
-    def apply(self, *values: Any) -> Any:
-        if len(values) == 0:
-            raise ValueError(f"{self.alias_prefix.lower()} requires at least one value")
-
-        dm_values = [v for v in values if isinstance(v, DataMeta)]
-        if not dm_values:
-            return self._agg_scalars(values)
-
-        base_dm = dm_values[0]
-        raw_values = [DataMeta._get_data(v) for v in values]
-
-        pd_like = [v for v in raw_values if isinstance(v, (pd.Series, pd.DataFrame))]
-        if pd_like:
-            union_index = pd_like[0].index
-            for v in pd_like[1:]:
-                union_index = union_index.union(v.index)
-            aligned = [self._to_series(v, union_index) for v in raw_values]
-            result_raw = self._agg(pd.concat(aligned, axis=1))
-        else:
-            result_raw = self._agg_scalars(tuple(raw_values))
-
-        alias_parts = [DataMeta._get_alias(v) for v in values]
-        alias = f"{self.alias_prefix}_{'_'.join(alias_parts)}"
-        return base_dm._wrap(result_raw, alias=alias, preserve_alias=True)
-
-
-class _MaxReducer(_VariadicReducer):
-    alias_prefix = "MAX"
-
-    @staticmethod
-    def _agg(frame: pd.DataFrame) -> pd.Series:
-        return frame.max(axis=1, skipna=True)
-
-    @staticmethod
-    def _agg_scalars(values: tuple[Any, ...]) -> Any:
-        return _py_builtins.max(values)
-
-
-class _MinReducer(_VariadicReducer):
-    alias_prefix = "MIN"
-
-    @staticmethod
-    def _agg(frame: pd.DataFrame) -> pd.Series:
-        return frame.min(axis=1, skipna=True)
-
-    @staticmethod
-    def _agg_scalars(values: tuple[Any, ...]) -> Any:
-        return _py_builtins.min(values)
-
-
-_MAX_REDUCER = _MaxReducer()
-_MIN_REDUCER = _MinReducer()
-
-
-def max(*values: Any) -> Any:
-    """多元逐元素 max（DataMeta 兼容，alias 形如 MAX_(a)_(b)_(c)）。"""
-    return _MAX_REDUCER.apply(*values)
-
-
-def min(*values: Any) -> Any:
-    """多元逐元素 min（DataMeta 兼容，alias 形如 MIN_(a)_(b)_(c)）。"""
-    return _MIN_REDUCER.apply(*values)
 
 class DataMeta(UniqueObject):
     """
@@ -116,117 +23,38 @@ class DataMeta(UniqueObject):
       - 懒加载（数据首次访问时才从文件读取）
       - 列名映射（原始文件列名 → DataColumn 标准名称）
       - 时间索引构建（将日期/时间列设为 MultiIndex）
-      - 透明的 pandas 运算代理（所有在 data 上的操作都转发并返回新的 DataMeta）
       - StartCalcPoint 过滤（只返回计算起始点之后的数据）
       - 复权价格计算
 
     一般不直接实例化，而是通过 Product.MIN1 / Product.DAY1 访问。
     """
-    __array_priority__ = 1000
-    _track_ctx = threading.local()
-
-    @classmethod
-    def begin_cleanup_scope(cls) -> None:
-        """Start a per-thread tracking scope for temporary DataMeta objects."""
-        scopes = getattr(cls._track_ctx, 'scopes', None)
-        if scopes is None:
-            scopes = []
-            cls._track_ctx.scopes = scopes
-        scopes.append([])
-
-    @classmethod
-    def end_cleanup_scope(cls) -> None:
-        """Cleanup DataMeta chain in the latest scope, keeping Product-root data nodes."""
-        scopes = getattr(cls._track_ctx, 'scopes', None)
-        if not scopes:
-            return
-        tracked = scopes.pop()
-        # 仅清理中间节点：object 指向上游 DataMeta 的链式节点。
-        for dm in reversed(tracked):
-            if not isinstance(dm, DataMeta):
-                continue
-            if isinstance(getattr(dm, 'object', None), DataMeta):
-                try:
-                    dm.data = pd.DataFrame()
-                except Exception:
-                    pass
-                try:
-                    # 打断强引用链，保留 original_object 信息
-                    dm.object = dm.original_object
-                except Exception:
-                    pass
-                try:
-                    dm.delete()
-                except Exception:
-                    pass
-
-    @classmethod
-    def _track_instance(cls, instance: 'DataMeta') -> None:
-        scopes = getattr(cls._track_ctx, 'scopes', None)
-        if scopes:
-            scopes[-1].append(instance)
 
     def __new__(cls, object: UniqueObject, alias: Optional[str] = None, *args, **kwargs):
-        preserve_alias = kwargs.pop('preserve_alias', False)
-        alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
+        alias = alias if alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
         return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, object: UniqueObject, data_freq: DataFreq, 
-                 original_object: Optional[UniqueObject] = None,
                  alias: Optional[str] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            preserve_alias = kwargs.pop('preserve_alias', False)
-            alias = alias if preserve_alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
+            alias = alias if alias else ('(' + object.alias + ')' + ('_' + alias if alias else ''))
             super().__init__(alias=alias)
-            self.object = object                           # 关联的 Product 或上游 DataMeta
-            self.original_object = object if original_object is None else original_object  # 原始 Product（链式操作时保持）
+            self.object = object                           # 关联的 Product
             self.freq = data_freq                          # 所属数据频率
             self.data: Any = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')  # 实际数据（懒加载）
             self.current_source: DataSource
             self.path: Any
             self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
-            self.day_periods: int                         # 每日 bar 数量缓存，用于窗口换算
-            self._track_instance(self)
 
-    def _get_freq(self, **kwargs) -> DataFreq:
-        """获取本对象的数据频率（若已知直接返回，否则从索引列名推断）。"""
-        if hasattr(self, 'freq') and self.freq is not None:
-            return self.freq
-        data = self.get_data(copy=False, data=kwargs.pop('data', None), **kwargs)
-        self.freq = DataFreq(data.index.names[-1])
-        return self.freq
+    # ── 兼容旧因子路径（已废弃，保留空壳避免报错） ──
+    @classmethod
+    def begin_cleanup_scope(cls) -> None:
+        """[已废弃] 旧因子链式操作的内存清理入口。新表达式路径不再需要。"""
+        pass
 
-    def _get_window_k(self, window: Any, **kwargs) -> Any:
-        """
-        将时间窗口参数（Timedelta 或整数）转换为 bar 数量（整数 periods）。
-
-        规则：
-          - 整数：直接使用
-          - day-multiple 时间跨度（如 '5d'）：从数据推断每日 bar 数 × 天数
-          - 其他 Timedelta：要求整除当前数据频率，返回整数倍数
-        结果缓存在 self.day_periods 避免重复计算。
-        """
-        data_freq = self._get_freq(**kwargs)
-        if isinstance(window, int):
-            periods = window
-        else:
-            window_freq = DataFreq(window)
-            if window_freq.is_day_multiple():
-                import numpy as np
-                # 缓存“每个交易日的 bar 数”，但不能缓存“本次窗口对应 periods”。
-                # 否则不同窗口（如 21d 和 252d）会被错误地复用为同一个 shift 长度。
-                if not hasattr(self, 'day_periods') or self.day_periods is None:
-                    self.day_periods = pd.Series(
-                        np.diff(np.where((dates := pd.Series(self.data.index.get_level_values(-1).date)) != dates.shift(1)))[0]
-                    ).mode()[0]  # type: ignore
-                day_periods = int(self.day_periods)
-                day_count = int(window_freq.value.total_seconds() / pd.Timedelta('1day').total_seconds())
-                periods = day_periods * day_count
-            elif window_freq.value.total_seconds() % data_freq.value.total_seconds() == 0:
-                periods = int(window_freq.value / data_freq.value)
-            else:
-                raise ValueError(f"Window frequency {window_freq} is not compatible with data frequency {data_freq}")
-        return periods
+    @classmethod
+    def end_cleanup_scope(cls) -> None:
+        """[已废弃] 旧因子链式操作的内存清理出口。新表达式路径不再需要。"""
+        pass
 
     def list_available_sources(self) -> List[DataSource]:
         return [s for s in DataSource if self.object in s and s.freq == self.freq]
@@ -373,166 +201,6 @@ class DataMeta(UniqueObject):
                     ts = ts.tz_convert('UTC').tz_localize(None)
             data = data[idx >= ts]
         return data.copy() if copy else data
-    
-    def __getattr__(self, name: str) -> Any:
-        """
-        属性代理：将未显式定义的属性访问转发到内部 data（DataFrame/Series）。
-
-        特殊处理：
-          - rolling(window)  : 将 window 参数从 Timedelta 换算为 bar 数量
-          - pct_change(n)    : 同上
-          - shift(n)         : 同上
-          - 其他 DataFrame 方法：直接转发，结果包装为 DataMeta
-        这样可以直接写 product.MIN1.rolling('5d').mean() 而无需手动换算。
-        """
-        if (target := self.__dict__.get(name, None)) is not None:
-            return target
-        if (data := self.__dict__.get('data', None)) is None:
-            raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
-        if (method := getattr(data, name, None)) is not None:
-            def wrapper(*args, **kwargs):
-                def _rectify_window_arg(*args, arg_name: Optional[str] = None, **kwargs):
-                    if args:
-                        args = (self._get_window_k(args[0], **kwargs),) + args[1:] if args else args
-                    else:
-                        assert arg_name is not None
-                        kwargs = {arg_name: self._get_window_k(w, **kwargs), **kwargs} if (w := kwargs.pop(arg_name, None)) is not None else kwargs
-                    return args, kwargs
-                if name == 'rolling':
-                    args, kwargs = _rectify_window_arg(*args, arg_name='window', **kwargs)
-                elif name == 'pct_change':
-                    args, kwargs = _rectify_window_arg(*args, arg_name='periods', **kwargs)
-                elif name == 'shift':
-                    args, kwargs = _rectify_window_arg(*args, **kwargs)
-                return self._wrap(method(*args, **kwargs), alias=f"{name.upper()}{_rectify_args_kwargs(*args, **kwargs)}")
-            return wrapper
-
-        # NumPy ufunc fallback: allow DataMeta.log()/sqrt()/exp()/sign() style calls.
-        np_func = getattr(np, name, None)
-        if isinstance(np_func, np.ufunc):
-            def np_wrapper(*args, **kwargs):
-                values = [self._get_data(arg) for arg in args]
-                result = np_func(self.get_data(), *values, **kwargs)
-                alias = f"UFUNC_{name.upper()}{_rectify_args_kwargs(*args, **kwargs)}"
-                if isinstance(result, tuple):
-                    return tuple(self._wrap(x, alias=alias) if isinstance(x, (pd.Series, pd.DataFrame)) else x for x in result)
-                if isinstance(result, (pd.Series, pd.DataFrame)):
-                    return self._wrap(result, alias=alias)
-                return result
-            return np_wrapper
-
-        raise AttributeError(f"'DataMeta' object has no attribute '{name}'")
-    
-    def _wrap(self, data: Any, alias: str, target_type: Optional[type] = None,
-              preserve_alias: bool = False, **kwargs) -> DataMeta:
-        target_type = target_type if target_type is not None else DataMeta
-        res = target_type(data=data, object=self, original_object=self.original_object,
-                            alias=alias, data_freq=self.freq, timezone=self.timezone,
-                            preserve_alias=preserve_alias, **kwargs)
-        return res
-    
-    def __dir__(self):
-        own_attrs = set(super().__dir__())
-        data_attrs = set(dir(self.data))
-        return sorted(own_attrs | data_attrs)
-
-    def __array_ufunc__(self, ufunc: Any, method: str, *inputs: Any, **kwargs: Any) -> Any:
-        """Support NumPy ufuncs directly on DataMeta, e.g. np.log(dm)."""
-        if method != '__call__':
-            return NotImplemented
-
-        raw_inputs = [self._get_data(value) for value in inputs]
-        result = ufunc(*raw_inputs, **kwargs)
-        alias = f"UFUNC_{getattr(ufunc, '__name__', 'UNKNOWN').upper()}"
-
-        if isinstance(result, tuple):
-            return tuple(self._wrap(x, alias=alias) if isinstance(x, (pd.Series, pd.DataFrame)) else x for x in result)
-        if isinstance(result, (pd.Series, pd.DataFrame)):
-            return self._wrap(result, alias=alias)
-        return result
-
-    def log(self):
-        return self._wrap(np.log(self.get_data()), alias='LOG')
-
-    def exp(self):
-        return self._wrap(np.exp(self.get_data()), alias='EXP')
-
-    def sqrt(self):
-        return self._wrap(np.sqrt(self.get_data()), alias='SQRT')
-
-    def sign(self):
-        return self._wrap(np.sign(self.get_data()), alias='SIGN')
-    
-    @staticmethod
-    def _get_alias(other: Any) -> str:
-        if hasattr(other, 'alias'):
-            return '(' + (other.alias if other.alias is not None else str(other)) + ')'
-        elif isinstance(other, str):
-            return other
-        else:
-            return str(other)
-    
-    @staticmethod
-    def _get_data(other: Any) -> Any:
-        if isinstance(other, DataMeta):
-            return other.data
-        else:
-            return other
-    
-    def __add__(self, other): return self._wrap((self.get_data() + self._get_data(other)).where(self.get_data().notna()), alias=f"ADD_{self._get_alias(other)}")
-    def __sub__(self, other): return self._wrap((self.get_data() - self._get_data(other)).where(self.get_data().notna()), alias=f"SUB_{self._get_alias(other)}")
-    def __mul__(self, other): return self._wrap((self.get_data() * self._get_data(other)).where(self.get_data().notna()), alias=f"MUL_{self._get_alias(other)}")
-    def __truediv__(self, other): return self._wrap((self.get_data() / self._get_data(other)).where(self.get_data().notna()), alias=f"DIV_{self._get_alias(other)}")
-    def __floordiv__(self, other): return self._wrap((self.get_data() // self._get_data(other)).where(self.get_data().notna()), alias=f"FLOORDIV_{self._get_alias(other)}")
-    def __mod__(self, other): return self._wrap((self.get_data() % self._get_data(other)).where(self.get_data().notna()), alias=f"MOD_{self._get_alias(other)}")
-    def __pow__(self, other): return self._wrap((self.get_data() ** self._get_data(other)).where(self.get_data().notna()), alias=f"POW_{self._get_alias(other)}")
-    def __gt__(self, other): return self._wrap((self.get_data() > self._get_data(other)).where(self.get_data().notna()), alias=f"GT_{self._get_alias(other)}")
-    def __lt__(self, other): return self._wrap((self.get_data() < self._get_data(other)).where(self.get_data().notna()), alias=f"LT_{self._get_alias(other)}")
-    def __ge__(self, other): return self._wrap((self.get_data() >= self._get_data(other)).where(self.get_data().notna()), alias=f"GE_{self._get_alias(other)}")
-    def __le__(self, other): return self._wrap((self.get_data() <= self._get_data(other)).where(self.get_data().notna()), alias=f"LE_{self._get_alias(other)}")
-    def __eq__(self, other): return self._wrap((self.get_data() == self._get_data(other)).where(self.get_data().notna()), alias=f"EQ_{self._get_alias(other)}")
-    @override
-    def __ne__(self, other): #type: ignore[override]
-        # if isinstance(other, DataMeta):
-        #     return self.alias != other.alias
-        return self._wrap((self.get_data() != self._get_data(other)).where(self.get_data().notna()), alias=f"NE_{self._get_alias(other)}")
-    def __and__(self, other): return self._wrap((self.get_data() & self._get_data(other)).where(self.get_data().notna()), alias=f"AND_{self._get_alias(other)}")
-    def __or__(self, other): return self._wrap((self.get_data() | self._get_data(other)).where(self.get_data().notna()), alias=f"OR_{self._get_alias(other)}")
-    def __xor__(self, other): return self._wrap((self.get_data() ^ self._get_data(other)).where(self.get_data().notna()), alias=f"XOR_{self._get_alias(other)}")
-    
-    def __neg__(self): return self._wrap((-self.get_data()).where(self.get_data().notna()), alias=f"NEG")
-    def __pos__(self): return self._wrap((+self.get_data()).where(self.get_data().notna()), alias=f"POS")
-    def __abs__(self): return self._wrap(abs(self.get_data()).where(self.get_data().notna()), alias=f"ABS")
-    def __invert__(self): return self._wrap((~self.get_data()).where(self.get_data().notna()), alias=f"INVERT")
-    def __getitem__(self, key):
-        col = DataColumn(key).name
-        if col.endswith('_ADJUSTED') and col not in self.get_data().columns:
-            data = self.get_and_adjust_cols([col], copy=False)
-            if col in data.columns:
-                return self._wrap(data[col], alias=col)
-            fallback_col = self._get_nonadjusted_col_name(col)
-            if fallback_col in data.columns:
-                return self._wrap(data[fallback_col], alias=col)
-            raise KeyError(f"Neither adjusted column '{col}' nor fallback '{fallback_col}' exists")
-        return self._wrap(self.get_data()[col], alias=col)
-    def __setitem__(self, key, value): self.get_data()[DataColumn(key).name] = value
-    def __delitem__(self, key): del self.get_data()[DataColumn(key).name]
-
-    # 反向运算符（支持 scalar + meta）
-    def __radd__(self, other): return self._wrap((self._get_data(other) + self.get_data()).where(self.get_data().notna()), alias=f"RADD_{self._get_alias(other)}")
-    def __rsub__(self, other): return self._wrap((self._get_data(other) - self.get_data()).where(self.get_data().notna()), alias=f"RSUB_{self._get_alias(other)}")
-    def __rmul__(self, other): return self._wrap((self._get_data(other) * self.get_data()).where(self.get_data().notna()), alias=f"RMUL_{self._get_alias(other)}")
-    def __rtruediv__(self, other): return self._wrap((self._get_data(other) / self.get_data()).where(self.get_data().notna()), alias=f"RDIV_{self._get_alias(other)}")
-    def __rfloordiv__(self, other): return self._wrap((self._get_data(other) // self.get_data()).where(self.get_data().notna()), alias=f"RFLOORDIV_{self._get_alias(other)}")
-    def __rmod__(self, other): return self._wrap((self._get_data(other) % self.get_data()).where(self.get_data().notna()), alias=f"RMOD_{self._get_alias(other)}")
-    def __rpow__(self, other): return self._wrap((self._get_data(other) ** self.get_data()).where(self.get_data().notna()), alias=f"RPOW_{self._get_alias(other)}")
-    def __rand__(self, other): return self._wrap((self._get_data(other) & self.get_data()).where(self.get_data().notna()), alias=f"RAND_{self._get_alias(other)}")
-    def __ror__(self, other): return self._wrap((self._get_data(other) | self.get_data()).where(self.get_data().notna()), alias=f"ROR_{self._get_alias(other)}")
-    def __rxor__(self, other): return self._wrap((self._get_data(other) ^ self.get_data()).where(self.get_data().notna()), alias=f"RXOR_{self._get_alias(other)}")
-
-    # 可选：支持 len() 和 bool()
-    def __len__(self): return len(self.get_data())
-    def __bool__(self): return bool(self.get_data()) if self.get_data().size else False
 
     def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
         assert not self.data.empty
@@ -618,9 +286,3 @@ class DataMeta(UniqueObject):
                 df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
                     + df[DataColumn.ADJUSTMENT_ADD.name]
         return df
-
-def _rectify_args_kwargs(*args, **kwargs) -> str:
-    def _rectify(s: str):
-        return (s if ' ' not in s else '(' + s + ')').upper()
-    string = "_".join([_rectify(str(arg)) for arg in args] + [f"{_rectify(str(k))}={_rectify(str(v))}" for k, v in kwargs.items()])
-    return '_' + string if string else ''

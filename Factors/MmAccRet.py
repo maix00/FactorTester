@@ -5,14 +5,14 @@
 # 经典的跨期动量：计算 [t-NL, t-NS] 内的累积收益，跳过最近 NS 期以规避短期反转：
 #   X_t = (P_{t-NS} - P_{t-NL}) / P_{t-NL}
 #
-# 重写为 ExprFactorFamily 表达式驱动版本。
+# 重写为 FactorFamily 表达式驱动版本。
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.factors.ExprFactorFamily import ExprFactorFamily
+from tools.factors import FactorFamily
 from tools.parameters import WindowParam, DataColumnParam
 
-class MmAccRet(ExprFactorFamily):
+class MmAccRet(FactorFamily):
     """
     跳过近期的长周期累积收益因子（经典 12-1 动量）。
 

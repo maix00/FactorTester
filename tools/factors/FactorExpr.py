@@ -391,7 +391,7 @@ class ParamRef(FactorExpr):
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
         # ParamRef 不能独立求值——它需要一个宿主对象来查询注册表。
-        # 求值时由 ExprFactorFamily 在求值前将参数值替换为 ConstExpr 或 ColumnRef。
+        # 求值时由 FactorFamily 在求值前将参数值替换为 ConstExpr 或 ColumnRef。
         raise RuntimeError(
             "ParamRef.evaluate() should not be called directly; "
             "parameter values must be resolved by the FactorFamily before evaluation"
@@ -414,7 +414,6 @@ class ParamRef(FactorExpr):
 
     def __repr__(self) -> str:
         return f"ParamRef({self.param.alias})"
-
 
 class ConstExpr(FactorExpr):
     """

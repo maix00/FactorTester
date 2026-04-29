@@ -341,7 +341,7 @@ def test_expr_factor_family():
     """测试 ExprFactorFamily 整合。"""
     print("=== 10. ExprFactorFamily 整合 ===")
 
-    from tools.factors.ExprFactorFamily import ExprFactorFamily, make_factor_family
+    from tools.factors.FactorFamily import FactorFamily, make_factor_family
 
     # 定义表达式：日内位置因子
     expr = (CLOSE - OPEN) / (HIGH - LOW + 1e-8)
@@ -375,7 +375,7 @@ def test_expr_factor_family():
     print(f"  family2.alias = {family2.alias}")
     print(f"  family2.math_expr = {family2.math_expr}")
 
-    print("  ✓ ExprFactorFamily 整合通过\n")
+    print("  ✓ FactorFamily 整合通过\n")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -470,7 +470,7 @@ def test_param_resolve():
 
     W = WindowParam('W', 10)
     expr = (CLOSE - CLOSE.ma(W)) / CLOSE.std(W)
-    family = ExprFactorFamily('TestParamResolve', expr, source_freq='1min')
+    family = FactorFamily('TestParamResolve', expr, source_freq='1min')
 
     # 1. 解析前：window 是 Parameter
     # expr = (CLOSE - ma(CLOSE,W)) / std(CLOSE,W)
