@@ -231,7 +231,7 @@ def _load_chinese_names(factors_dir):
         name = os.path.splitext(fname)[0]
         try:
             ff = get_factor_family_instance(name)
-            cn = getattr(ff, 'chinese_name', '') or ''
+            cn = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
             result[name] = cn
         except Exception:
             result[name] = ''
@@ -291,8 +291,14 @@ def get_factor_main_section_html(factor_family_alias):
     try:
         ff = get_factor_family_instance(factor_family_alias)
         math_expr = getattr(ff, 'math_expr', '')
-        chinese_name = getattr(ff, 'chinese_name', '') or ''
-        description_sections = getattr(ff, 'description_sections', [])
+        chinese_name = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
+        description = getattr(ff, 'description', '') or ''
+        # 向后兼容：若无 description，尝试从 description_sections 转换
+        if not description:
+            ds = getattr(ff, 'description_sections', [])
+            if ds and not isinstance(ds, property):
+                from tools.factors.FactorFamily import FactorFamily
+                description = FactorFamily._sections_to_markdown(ds)
         params = ff.params
         param_aliases = [p.alias for p in params]
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
@@ -307,7 +313,7 @@ def get_factor_main_section_html(factor_family_alias):
             factor_family_alias=factor_family_alias,
             chinese_name=chinese_name,
             math_expr=math_expr,
-            description_sections=description_sections,
+            description=description,
             params=params,
             param_aliases=param_aliases,
             factors=factors,

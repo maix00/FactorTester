@@ -172,6 +172,17 @@ class Parameter(UniqueObject):
     def get_value(self, obj: UniqueObject) -> Any:
         return self._registry.get(obj, self.default_value)
 
+    # ── 表达式树代理 ──
+    # Parameter 实例可通过 .shift(N) / .ma(N) 等方法直接参与表达式构建，
+    # 内部创建 ParamRef(self) 代理所有 FactorExpr 上的方法。
+
+    def __getattr__(self, name: str):
+        # 避免在 __init__ 期间提前触发 ParamRef 导入
+        if name.startswith('_'):
+            raise AttributeError(name)
+        from tools.factors.FactorExpr import ParamRef
+        return getattr(ParamRef(self), name)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 子类 —— 利用 ValueSpace 工厂方法的语法糖

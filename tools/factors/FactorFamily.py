@@ -58,10 +58,27 @@ class FactorFamily(UniqueObject):
         params               (list) : 本族使用的参数对象列表（子类应覆盖）
     """
     math_expr: str = ""       # 子类可覆盖，填写 LaTeX 格式的数学表达式
-    chinese_name: str = ""    # 子类可覆盖，填写因子中文名称，供前端显示和搜索
-    description_sections: List[dict] = []
+    desc: str = ""            # 因子简短描述（中文名等），供前端显示和搜索（建议子类用这个替代 chinese_name）
+    description: str = ""     # 因子详细说明（Markdown 格式），建议子类用这个替代 description_sections
+    chinese_name: str = ""    # [兼容] 旧字段，等同于 desc；新因子请用 desc
+    description_sections: list = []  # [兼容] 旧字段，等同于 description；新因子请用 description
     _serial_map = {}
     params: List[Parameter] = []
+
+    @staticmethod
+    def _sections_to_markdown(sections: list) -> str:
+        """将 sections 列表转为 Markdown 字符串。"""
+        parts = []
+        for s in sections:
+            title = s.get('title', '')
+            body = s.get('body', s.get('content', ''))
+            if title:
+                parts.append(f'## {title}')
+            if body:
+                parts.append('')
+                parts.append(body)
+            parts.append('')
+        return '\n'.join(parts).strip()
 
     @staticmethod
     def _series_max2(a: Any, b: Any) -> Any:
