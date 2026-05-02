@@ -2,84 +2,55 @@
 # Factors/VlGK.py
 # Garman-Klass 波动率因子
 #
-# 结合日内高低点和开收价的波动率估计量：
-#   GK_bar = 0.5*ln(H/L)^2 - (2*ln2-1)*ln(C/O)^2
-#   X_t = sqrt((1/N) * sum(GK_bar))
+# FactorFamily 表达式驱动版本。
+# hl = ln(H/L); co = ln(C/O)
+# X = sqrt(MA(0.5*hl^2 - (2ln2-1)*co^2, N))
 # =============================================================================
-import numpy as np
-import pandas as pd
-from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn, Product, FactorFamily
-from tools.parameters import WindowParam
-
+from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
 
 class VlGK(FactorFamily):
-    """
-    Garman-Klass 波动率因子。
+    """Garman-Klass 波动率。"""
 
-    比单纯收益率方差估计效率更高，同时利用了 OHLC 四价信息。
+    source_freq = 'MIN1'
 
-    参数：
-        N (Timedelta) : 滚动窗口，默认 14d
-        F (Timedelta) : 输出信号频率
-    """
-
-    params = [
-        WindowParam('N', default_value='14d'),
-    ]
-
-    chinese_name = 'Garman-Klass 波动率'
-    description_sections = [
-        {
-            'title': '这是什么',
-            'body': 'VlGK 是 Garman-Klass 波动率估计量，综合利用日内高低点区间和开收价变化，理论上比纯收益率估计效率提升约 7 倍。',
-        },
-        {
-            'title': '它在看什么',
-            'body': '它将高低点之差（刻画日内最大波动范围）和开收价之差（刻画价格漂移方向）结合，给出一个更低方差的波动率估计。',
-        },
-        {
-            'title': '为什么这个因子可能行得通',
-            'body': '传统收益率标准差只用到收盘价，丢失了日内的振幅信息。GK 估计量利用了全部四价，在样本量相同的情况下能更准确地刻画波动率环境，进而更敏感地捕捉风险状态切换。',
-        },
-        {
-            'title': '使用提醒',
-            'body': 'GK 估计量假设无隔夜跳空（连续 Brownian Motion），在期货频繁出现夜盘跳空的品种上，估计偏差会比 YZ 或 RS 更大。',
-        },
-        {
-            'title': '反转信号',
-            'body': 'GK 波动率从极高位快速回落，代表日内扩张行情正在收缩，是等待方向选择而非追趋势的时机；GK 长期处于低位后突然放大，往往是方向性启动的前兆，原有盘整可能被打破。',
-        },
-    ]
-
-    math_expr = r'''
-        \begin{aligned}
-            GK_t &:= \tfrac{1}{2}\ln\!\left(\tfrac{H_t}{L_t}\right)^2
-                     - (2\ln 2 - 1)\ln\!\left(\tfrac{C_t}{O_t}\right)^2, \\[4pt]
-            X_t  &:= \sqrt{\frac{1}{N}\sum_{s=t-N+1}^{t} GK_s}.
-        \end{aligned}
-    '''
-
-    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('14d'), **kwargs) -> pd.Series:
-        high  = product.DAY1[DataColumn.HIGH_ADJUSTED]
-        low   = product.DAY1[DataColumn.LOW_ADJUSTED]
-        open_ = product.DAY1[DataColumn.OPEN_ADJUSTED]
-        close = product.DAY1[DataColumn.CLOSE_ADJUSTED]
-
+    @staticmethod
+    def factor_expr():
+        N = WindowParam('N', default_value='14d')
+        H = DataColumnParam('H', default_value='HA')
+        L = DataColumnParam('L', default_value='LA')
+        O = DataColumnParam('O', default_value='OA')
+        C = DataColumnParam('C', default_value='CA')
+        h = H.shift(0)
+        l = L.shift(0)
+        o = O.shift(0)
+        c = C.shift(0)
         eps = 1e-10
-        hl  = np.log((high / (low   + eps).replace(0, eps)).clip(lower=eps))
-        co  = np.log((close / (open_ + eps).replace(0, eps)).clip(lower=eps))
+        hl = (h / (l + eps)).log()
+        co = (c / (o + eps)).log()
+        gk_bar = 0.5 * hl * hl - (2.0 * 0.6931471805599453 - 1.0) * co * co
+        return gk_bar.ma(N).sqrt()
 
-        gk_bar = 0.5 * hl ** 2 - (2 * np.log(2) - 1) * co ** 2
-        gk_var = gk_bar.rolling(N).mean().clip(lower=0.0)
-        gk_vol = gk_var.apply(np.sqrt)
+    desc = 'Garman-Klass 波动率'
+    description = """
+## 这是什么
+VlGK 是 Garman-Klass (1980) 波动率估计量，利用日内高低点和开收盘价信息。
 
-        return self.sync_signal(gk_vol.fillna(0.0))
+## 它在看什么
+相比收盘价-收盘价波动率，GK 利用了日内价格路径信息，估计效率约为收盘波动率的 7.4 倍。
+
+## 为什么这个因子可能行得通
+信息利用率更高意味着同样数据量下估计更准确，对波动率变化反应更快。
+
+## 使用提醒
+GK 假设价格服从几何布朗运动且无跳空。跳空大的品种偏差较大。
+
+## 反转信号
+GK 波动率从高位回落代表极端波动消退，市场回归常态。
+"""
 
 if __name__ == '__main__':
     ff = VlGK()
-    ff.clear_params()
-    ff.add_params(F='1d', N='14d')
-    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai')
+    ff.add_params(F='1d')

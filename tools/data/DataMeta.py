@@ -6,21 +6,33 @@
 #   - 管理数据加载、时间列处理、列名映射、时间索引构建
 #   - 支持按 StartCalcPointParam 过滤历史数据
 #   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
+#
+# DataFrame 缓存统一委托给 IdleResourceManager（基于访问时间的自动回收）。
+# 不保留 self.data 属性，避免双重缓存。
 # =============================================================================
-import pandas as pd
+from __future__ import annotations
+
 from typing import List, Dict, Optional, Tuple, Any
 
+import pandas as pd
+
 from tools.base.UniqueObject import UniqueObject
+from tools.base.IdleResourceManager import IdleResourceManager
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
+
+# IdleResourceManager 中 DataMeta 使用的 namespace 常量
+_DATAMETA_NAMESPACE = "datameta"
+# 默认空闲 TTL（秒）：5 分钟无访问后自动回收
+_DEFAULT_IDLE_TTL = 300
 
 class DataMeta(UniqueObject):
     """
     数据元信息对象。
 
     封装了一个 Product 在特定 DataFreq 下的 DataFrame，并提供：
-      - 懒加载（数据首次访问时才从文件读取）
+      - 懒加载 + IdleResourceManager 缓存（自动回收闲置数据）
       - 列名映射（原始文件列名 → DataColumn 标准名称）
       - 时间索引构建（将日期/时间列设为 MultiIndex）
       - StartCalcPoint 过滤（只返回计算起始点之后的数据）
@@ -40,21 +52,11 @@ class DataMeta(UniqueObject):
             super().__init__(alias=alias)
             self.object = object                           # 关联的 Product
             self.freq = data_freq                          # 所属数据频率
-            self.data: Any = pd.DataFrame() if 'data' not in kwargs else kwargs.pop('data')  # 实际数据（懒加载）
             self.current_source: DataSource
-            self.path: Any
+            self.path: Any = None
             self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
 
-    # ── 兼容旧因子路径（已废弃，保留空壳避免报错） ──
-    @classmethod
-    def begin_cleanup_scope(cls) -> None:
-        """[已废弃] 旧因子链式操作的内存清理入口。新表达式路径不再需要。"""
-        pass
-
-    @classmethod
-    def end_cleanup_scope(cls) -> None:
-        """[已废弃] 旧因子链式操作的内存清理出口。新表达式路径不再需要。"""
-        pass
+    # ── DataSource 管理 ──
 
     def list_available_sources(self) -> List[DataSource]:
         return [s for s in DataSource if self.object in s and s.freq == self.freq]
@@ -79,54 +81,161 @@ class DataMeta(UniqueObject):
             self.current_source = source
         return self.current_source
 
-    def _load_data(self, source: Optional[Any] = None) -> pd.DataFrame:
-        source = self.set_current_source(source) if source is not None else self.get_current_source()
-        assert source is not None
-        self.path = source.get_object_path(self.object)
+    # ── 资源 ID ──
+
+    def _resource_id(self) -> str:
+        """生成 IdleResourceManager 的 resource_id: '{source_alias}:{product_name}:{freq_name}'。"""
+        source = self.get_current_source()
+        return f"{source.alias}:{self.object.name}:{self.freq.name}"
+
+    # ── 数据加载（委托给 IdleResourceManager） ──
+
+    def _load_raw_file(self, source: DataSource) -> pd.DataFrame:
+        """从磁盘读取原始文件（不解映射、不建索引）。"""
+        self.path = source.get_path(self.object)
         if self.path.endswith('.csv'):
-            self.data = pd.read_csv(self.path)
+            return pd.read_csv(self.path)
         elif self.path.endswith('.xlsx'):
-            self.data = pd.read_excel(self.path)
+            return pd.read_excel(self.path)
         elif self.path.endswith('.parquet'):
-            self.data = pd.read_parquet(self.path)
+            return pd.read_parquet(self.path)
         else:
             raise ValueError("Unsupported file type")
-        return self.data
-    
+
+    def _load_and_process(self, source: Optional[DataSource] = None,
+                          data_cols_mapping: Optional[Dict[Any, Any]] = None,
+                          time_cols_mapping: Optional[Dict[Any, Any]] = None,
+                          time_index: Optional[Any] = None,
+                          filter_object: bool = False,
+                          filter_object_attr: str = 'name') -> pd.DataFrame:
+        """
+        完整的「加载 + 后处理」流程。
+        不修改 self，返回处理好的 DataFrame（由 IdleResourceManager 缓存）。
+        """
+        src = self.set_current_source(source) if source is not None else self.get_current_source()
+        df = self._load_raw_file(src)
+        if df.empty:
+            return df
+
+        # 时间列映射
+        ds = self.get_current_source()
+        if time_cols_mapping is not None:
+            ds.set_time_cols_mapping(time_cols_mapping)
+        df = df.reset_index(drop=True)
+        df = df.rename(columns=ds.time_cols_mapping)
+
+        # 数据列映射
+        if data_cols_mapping is not None:
+            ds.set_data_cols_mapping(data_cols_mapping)
+        df = df.rename(columns=ds.data_cols_mapping)
+
+        # 过滤 object
+        if filter_object:
+            filter_object_name = getattr(self.object, filter_object_attr)
+            df = df[df[DataColumn.PRODUCT_NAME] == filter_object_name]
+
+        # 构建时间索引
+        if time_index is None:
+            time_index = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq(x).value, reverse=True)
+        for col in time_index:
+            if col not in df.columns:
+                raise ValueError(f"Column {col} not found in data")
+            df[col] = pd.to_datetime(df[col])
+        df = df.set_index(time_index)
+
+        # 时区处理
+        index = df.index
+        index_tzaware_list = []
+        for col in index.names:
+            col = str(col)
+            level_index = index.get_level_values(col)
+            assert isinstance(level_index, pd.DatetimeIndex)
+            if DataFreq(col).is_day_multiple():
+                if level_index.tz is not None:
+                    level_index = level_index.tz_localize(None)
+            else:
+                if level_index.tz is None:
+                    level_index = level_index.tz_localize(self.timezone)
+                elif level_index.tz is not None and str(level_index.tz) != self.timezone:
+                    level_index = level_index.tz_convert(self.timezone)
+            index_tzaware_list.append(level_index)
+        df.index = pd.MultiIndex.from_arrays(index_tzaware_list, names=index.names)
+
+        return df
+
+    # ── 对外 API ──
+
     def load_data(self, source: Optional[Any] = None,
                   loaded_data: Optional[pd.DataFrame] = None,
                   data_cols_mapping: Optional[Dict[Any, Any]] = None,
                   time_cols_mapping: Optional[Dict[Any, Any]] = None,
                   time_index: Optional[Any] = None,
                   filter_object: bool = False,
-                  filter_object_attr: str = 'name', **kwargs) -> pd.DataFrame:
-        self.data = loaded_data if loaded_data is not None else self._load_data(source)
-        if self.data.empty:
-            return self.data
-        self._map_time_cols(time_cols_mapping)
-        self._map_data_cols(data_cols_mapping)
-        if filter_object:
-            filter_object_name = getattr(self.object, filter_object_attr)
-            self.data = self.data[self.data[DataColumn.PRODUCT_NAME] == filter_object_name]
-        self._set_time_index(time_index)
-        return self.data
+                  filter_object_attr: str = 'name',
+                  force_reload: bool = False, **kwargs) -> pd.DataFrame:
+        """
+        加载数据（委托给 IdleResourceManager 缓存）。
+
+        若 loaded_data 不为 None，直接使用传入数据并处理后返回（不走缓存）。
+        force_reload=True 时跳过缓存，重新从文件加载。
+        """
+        if loaded_data is not None:
+            # 直接使用传入数据，不走缓存
+            df = loaded_data
+            if not df.empty:
+                ds = self.get_current_source()
+                if time_cols_mapping is not None:
+                    ds.set_time_cols_mapping(time_cols_mapping)
+                if data_cols_mapping is not None:
+                    ds.set_data_cols_mapping(data_cols_mapping)
+                if filter_object:
+                    filter_object_name = getattr(self.object, filter_object_attr)
+                    df = df[df[DataColumn.PRODUCT_NAME] == filter_object_name]
+                if time_index is None:
+                    time_index = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq(x).value, reverse=True)
+                for col in time_index:
+                    if col not in df.columns:
+                        raise ValueError(f"Column {col} not found in data")
+            return df
+
+        # 通过 IdleResourceManager 缓存
+        manager = IdleResourceManager.get_instance()
+        resource_id = self._resource_id()
+
+        if force_reload:
+            # 强制重载：先清理缓存
+            manager._cache.pop((_DATAMETA_NAMESPACE, resource_id), None)
+            manager.registry.remove(f"{_DATAMETA_NAMESPACE}:{resource_id}")
+
+        df = manager.load(
+            namespace=_DATAMETA_NAMESPACE,
+            path=resource_id,
+            reader=lambda _: self._load_and_process(
+                source=source,
+                data_cols_mapping=data_cols_mapping,
+                time_cols_mapping=time_cols_mapping,
+                time_index=time_index,
+                filter_object=filter_object,
+                filter_object_attr=filter_object_attr,
+            ),
+            ttl=_DEFAULT_IDLE_TTL,
+        )
+        return df
     
     def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
         """
-        获取 DataFrame，若为空或指定了 source 则先触发加载。
+        获取 DataFrame（通过 IdleResourceManager 缓存 + 自动回收）。
         start_calc_point: 可选 Timestamp（带时区），为 None 时不进行截断。
         copy=True 时返回副本，避免外部修改影响缓存。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
         else:
-            if self.data.empty or 'source' in kwargs:
-                self.load_data(**kwargs)
-            data = self.data
+            data = self.load_data(**kwargs)
+
         if start_calc_point is not None:
             data = self._filter_data_by_start_calc_point(data, time=start_calc_point)
         else:
-            # 备用：兼容旧有 duck-typing 注册机制（不为空则仍尝试过滤）
             data = self._filter_data_by_start_calc_point(data)
         return data.copy() if copy else data
     
@@ -161,7 +270,7 @@ class DataMeta(UniqueObject):
         if StartCalcPointParam is not None:
             assert isinstance(StartCalcPointParam, DateOrTimeParam)
             time = StartCalcPointParam.default_value
-            time_is_date = StartCalcPointParam.is_date(value=time)
+            time_is_date = StartCalcPointParam.is_date(object=StartCalcPointParam, value=time)
             return time, time_is_date
         return None, None
     
@@ -182,7 +291,6 @@ class DataMeta(UniqueObject):
                 data_day_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1day')][-1]
                 data_min_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1min')][-1]
                 if time_is_date is None:
-                    # 显式传入的 Timestamp，自动判断是否日级
                     time_is_date = (ts.hour == 0 and ts.minute == 0 and ts.second == 0)
                 if self.freq.value >= pd.Timedelta('1day') and time_is_date:
                     time_col = data_day_col
@@ -201,52 +309,6 @@ class DataMeta(UniqueObject):
                     ts = ts.tz_convert('UTC').tz_localize(None)
             data = data[idx >= ts]
         return data.copy() if copy else data
-
-    def _map_data_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
-        assert not self.data.empty
-        ds = self.get_current_source()
-        if mapping is not None:
-            ds.set_data_cols_mapping(mapping)
-        self.data.reset_index(inplace=True, drop=True)
-        self.data.rename(columns=ds.data_cols_mapping, inplace=True)
-        return self.data
-
-    def _map_time_cols(self, mapping: Optional[Dict[Any, Any]] = None) -> pd.DataFrame:
-        assert not self.data.empty
-        ds = self.get_current_source()
-        if mapping is not None:
-            ds.set_time_cols_mapping(mapping)
-        self.data.reset_index(inplace=True, drop=True)
-        self.data.rename(columns=ds.time_cols_mapping, inplace=True)
-        return self.data
-
-    def _set_time_index(self, index_names: Optional[Any] = None) -> pd.DataFrame:
-        assert not self.data.empty
-        if index_names is None:
-            ds = self.get_current_source()
-            index_names = sorted(ds.time_cols_mapping.values(), key=lambda x: DataFreq(x).value, reverse=True)
-        for col in index_names:
-            if col not in self.data.columns:
-                raise ValueError(f"Column {col} not found in data")
-            self.data[col] = pd.to_datetime(self.data[col])
-        self.data.set_index(index_names, inplace=True)
-        index = self.data.index
-        index_tzaware_list = []
-        for col in index.names:
-            col = str(col)
-            level_index = self.data.index.get_level_values(col)
-            assert isinstance(level_index, pd.DatetimeIndex)
-            if DataFreq(col).is_day_multiple():
-                if level_index.tz is not None:
-                    level_index = level_index.tz_localize(None)
-            else:
-                if level_index.tz is None:
-                    level_index = level_index.tz_localize(self.timezone)
-                elif level_index.tz is not None and str(level_index.tz) != self.timezone:
-                    level_index = level_index.tz_convert(self.timezone)
-            index_tzaware_list.append(level_index)
-        self.data.index = pd.MultiIndex.from_arrays(index_tzaware_list, names=index.names)
-        return self.data
     
     @staticmethod
     def _get_adjusted_col_name(col: str) -> str:
@@ -271,7 +333,6 @@ class DataMeta(UniqueObject):
         if df.empty:
             return df
         if not isinstance(self.object, Futures):
-            # 非期货产品不做复权：将 *_ADJUSTED 回退到原始列返回。
             fallback_cols = [self._get_nonadjusted_col_name(col) if self._check_is_adjusted(col) else col for col in cols]
             existing_cols = [col for col in fallback_cols if col in df.columns]
             return df[existing_cols] if existing_cols else df

@@ -1,80 +1,48 @@
 # =============================================================================
 # Factors/VlDownsideStd.py
-# 下行波动率因子（Downside Deviation）
+# 下行波动率因子
 #
-# 只统计负收益部分的滚动标准差，即半标准差：
-#   X_t = std({r_s | r_s < 0}, N)
-# 与普通波动率（VlRetStd）的比值可衡量下行风险相对总风险的占比。
+# FactorFamily 表达式驱动版本。
+# neg_ret = clip(ret, upper=0); X = sqrt(mean(neg_ret^2, N))
 # =============================================================================
-import pandas as pd
-from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn, Product, FactorFamily
+from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
 
-
 class VlDownsideStd(FactorFamily):
-    """
-    下行波动率因子（Downside Standard Deviation）。
+    """下行波动率（仅统计负收益的波动）。\n\n    参数：\n        P (DataColumn) : 价格列\n        RF (Timedelta)  : 收益步长\n        N (Timedelta)   : 滚动窗口"""
 
-    仅计算负收益的标准差（半标准差），衡量下行风险。
-    高值表示经常出现大幅下跌；低值表示下行冲击小。
+    source_freq = 'MIN1'
 
-    参数：
-        P  (DataColumn) : 价格列，默认 CLOSE
-        N  (Timedelta)  : 滚动窗口，默认 20d
-        RF (Timedelta)  : 收益率步长，默认 1d
-        F  (Timedelta)  : 输出信号频率
-    """
+    @staticmethod
+    def factor_expr():
+        P = DataColumnParam('P', default_value='CA')
+        RF = WindowParam('RF', default_value='1d')
+        N = WindowParam('N', default_value='20d')
+        p = P.shift(0)
+        ret = p.delta(RF) / (p.shift(RF) + 1e-10)
+        neg_ret = (ret - ret.abs()) / 2.0
+        return (neg_ret * neg_ret).ma(N).sqrt()
 
-    params = [
-        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
-        WindowParam('N',  default_value='20d'),
-        WindowParam('RF', default_value='1d'),
-    ]
+    desc = '下行波动率'
+    description = """
+## 这是什么
+VlDownsideStd 只统计负收益（下行）的波动率，忽略正收益。
 
-    chinese_name = '下行波动率'
-    description_sections = [
-        {
-            'title': '这是什么',
-            'body': 'VlDownsideStd 是下行波动率因子，只统计负收益部分的波动强度，用来专门刻画“坏波动”而不是全部波动。',
-        },
-        {
-            'title': '它在看什么',
-            'body': '如果最近窗口里的负收益更频繁、更剧烈，下行标准差就会升高；若负收益较少或较温和，则因子较低。它强调的是下跌风险聚集程度。',
-        },
-        {
-            'title': '为什么这个因子可能行得通',
-            'body': '市场参与者通常对下跌风险更敏感，因此下行波动往往比对称波动更能代表风险厌恶、止损压力和流动性脆弱性。很多时候，未来收益和风险补偿与“坏波动”关系比与总波动关系更紧。',
-        },
-        {
-            'title': '使用提醒',
-            'body': '在长期单边上涨市场中，下行样本可能偏少，统计量会变得不稳定。',
-        },
-        {
-            'title': '反转信号',
-            'body': '下行波动率因子与反转的关联：（1）下行波动率急速扩大（集中大幅下跌）后，市场常常出现超卖反弹——恐慌性抛售后买盘重新入场；（2）下行波动率高但均值收益接近 0（不创新低）——与之前的急跌相比上涨阻力减小，反转时机更接近；（3）下行波动率明显高于上行波动率（不对称），说明市场参与者普遍处于恐慌状态，这类状态历史上常为阶段底部。反转在以下情况更有效：下行波动率处于数月高点且成交量开始萎缩；多个资产的下行波动率同步飙升（系统性恐慌后的反弹通常更有力）。',
-        },
-    ]
+## 它在看什么
+上行波动是"好的波动"，下行波动才是风险。该因子分离出纯下行风险。
 
-    math_expr = r'''
-        \begin{aligned}
-            r_t^- &:= \min(r_t,\,0) \\[4pt]
-            X_t &:= \sqrt{\mathrm{RollingMean}_{N}\!\left((r^-)^2\right)_t}
-        \end{aligned}
-    '''
+## 为什么这个因子可能行得通
+投资者对下行风险天然更敏感。下行波动率在预测尾部风险方面优于对称波动率。
 
-    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'), RF: Any = pd.Timedelta('1d'),
-                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
-        price = product.MIN1[P]
-        ret = price.pct_change(RF)
-        neg_ret = ret.clip(upper=0)  # 非负归零，仅保留负值
-        factor = ((neg_ret ** 2).rolling(N).mean() ** 0.5).fillna(0.0)
-        return self.sync_signal(factor)
+## 使用提醒
+牛市中下行波动率接近零，因子可能失去区分度。
+
+## 反转信号
+下行波动率飙升后回落，是恐慌性抛售结束的信号。
+"""
+
 if __name__ == '__main__':
     ff = VlDownsideStd()
-    ff.clear_params()
-    ff.add_params(F='1d', N='20d', RF='1d')
-    ff.add_params(F='1d', N='10d', RF='1d')
-    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai')
+    ff.add_params(F='1d')

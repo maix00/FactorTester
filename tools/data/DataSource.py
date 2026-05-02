@@ -6,12 +6,16 @@
 #   - 包含数据频率、文件路径函数、列名映射表、时区等元数据。
 #   - 支持判断一个 Product 是否在此数据源中存在实际文件。
 #   - 所有实例由 DataSourceMeta 元类维护的全局字典注册。
+#   - 路径解析通过 PathResolver 可插拔（默认 LocalPathResolver）。
 # =============================================================================
+from __future__ import annotations
+
 from abc import ABCMeta
 from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from tools.base.UniqueObject import UniqueObject
+from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 
@@ -80,7 +84,8 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
         return super().__new__(cls, alias=alias, **kwargs)
 
     def __init__(self, alias: str, data_freq: Any,
-                 get_object_path: Callable[[UniqueObject], Any],
+                 get_object_path: Optional[Callable[[UniqueObject], Any]] = None,
+                 path_resolver: Optional[PathResolver] = None,
                  if_object_is_in_source: Optional[Callable[[UniqueObject], bool]] = None, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(alias=alias)
@@ -90,16 +95,29 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
             if not DataSource.all():
                 DataSource.set_default_source(self)
             DataSource._register_source(self)  # 注册到元类管理的字典
-            self.get_object_path = get_object_path
+
+            # ── 路径解析（可插拔） ──
+            if path_resolver is not None:
+                self._path_resolver: PathResolver = path_resolver
+            elif get_object_path is not None:
+                self._path_resolver = LocalPathResolver(get_object_path)
+            else:
+                raise ValueError("Either get_object_path or path_resolver must be provided")
+
             # 如果未提供可用性检测函数，默认检查文件是否存在且非空
             if if_object_is_in_source is None:
                 import os
-                self._if_object_is_in_source_func = lambda object: os.path.isfile(self.get_object_path(object))
+                self._if_object_is_in_source_func = lambda object: os.path.isfile(self.get_path(object))
             else:
                 self._if_object_is_in_source_func = if_object_is_in_source
             self.timezone = kwargs.get('timezone', None)
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
+
+    # ── 路径委托 ──
+    def get_path(self, obj: UniqueObject) -> str:
+        """通过内部 PathResolver 获取对象路径。"""
+        return self._path_resolver.get_path(self, obj)
 
     def __contains__(self, object: UniqueObject) -> bool:
         """

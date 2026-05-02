@@ -1,81 +1,45 @@
 # =============================================================================
 # Factors/MmTrend.py
-# 线性趋势斜率因子
+# 趋势斜率因子
 #
-# 在过去 N 个 RF 周期内，对价格序列做线性回归：
-#   y_s = α + β * s，s = 0, 1, ..., n-1
-#   X_t = β_t / MA_t(P, N)  （用均值归一化，可跨品种比较）
-# 正值表示上涨趋势，负值表示下跌趋势。
+# FactorFamily 表达式驱动版本。
+# X_t = (P_t - P_{t-N+1}) / ((N-1) * MA(N, P_t))
 # =============================================================================
-import pandas as pd
-from typing import Any
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import DataColumn, Product, FactorFamily
+from tools.factors import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
 
 
 class MmTrend(FactorFamily):
-    """
-    线性趋势斜率因子。
+    """趋势斜率因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)  : 窗口\n        F (Timedelta)  : 信号频率"""
 
-    在 N 期滚动窗口内对价格做最小二乘线性回归，
-    取斜率并除以窗口均价归一化，作为趋势强度信号。
+    source_freq = 'MIN1'
 
-    参数：
-        P  (DataColumn) : 价格列，默认 CLOSE
-        N  (Timedelta)  : 回归窗口长度，默认 20d
-        RF (Timedelta)  : 聚合步长，默认 1d
-        F  (Timedelta)  : 输出信号频率
-    """
+    @staticmethod
+    def factor_expr():
+        P = DataColumnParam('P', default_value='CA')
+        N = WindowParam('N', default_value='20d')
+        return (P - P.shift(N - 1)) / ((N - 1) * P.ma(N) + 1e-10)
 
-    params = [
-        DataColumnParam('P', DataColumn.CLOSE_ADJUSTED),
-        WindowParam('N', default_value='20d'),
-    ]
+    desc = '趋势斜率'
+    description = """
+## 这是什么
+MmTrend 是趋势斜率因子，用首尾价格差除以窗口均价估计线性趋势斜率。
 
-    chinese_name = '线性趋势斜率'
-    description_sections = [
-        {
-            'title': '这是什么',
-            'body': 'MmTrend 是线性趋势斜率因子。它在最近 N 期价格上拟合一条直线，并用斜率来刻画趋势方向和强度。',
-        },
-        {
-            'title': '它在看什么',
-            'body': '如果拟合斜率为正，说明这一窗口里的价格整体在向上倾斜；斜率越大，上升趋势越陡。再用平均价格做归一化后，可以更方便地跨价格水平比较。',
-        },
-        {
-            'title': '为什么这个因子可能行得通',
-            'body': '相比只看起点和终点收益，线性回归斜率会利用窗口内全部路径信息，因此对单点异常值不那么敏感。它更接近“价格是否在稳定地沿某个方向推进”，这正是许多趋势策略关心的核心量。',
-        },
-        {
-            'title': '使用提醒',
-            'body': '线性趋势默认把窗口内走势近似成一条直线，因此对弯折明显、分段切换频繁的路径解释力有限。',
-        },
-        {
-            'title': '反转信号',
-            'body': '线性趋势斜率因子的反转信号包括：（1）斜率绝对值从高位明显回落（斜率拐头）——即趋势还在延续方向，但速度已开始下降；（2）当拟合 R² 很低时，斜率本身的稳定性很差，此时因子信号容易产生反转；（3）价格偏离拟合直线过大时（残差扩大），表明近期有非线性冲击，斜率预测能力会暂时下降。反转在以下情况更有效：趋势明显加速后突然放慢——"速度骤降"比"方向反转"往往更早出现；市场处于关键整数关口或历史高低点附近；时间窗口较短（20d 以下）时斜率稳定性差，反转信号更多。',
-        },
-    ]
+## 它在看什么
+窗口内净变动幅度和方向，用均价做归一化。
 
-    math_expr = r'''
-        \begin{aligned}
-            X_t &:= \frac{P_t - P_{t-N+1}}{(N-1)\cdot\mathrm{RollingMean}_{N}(P)_t}
-        \end{aligned}
-    '''
+## 为什么这个因子可能行得通
+快速判断价格在窗口内的净变动，比纯收益率多了一层归一化。
 
-    def func_timeseries(self, product: Product, N: Any = pd.Timedelta('20d'),
-                        P: DataColumn = DataColumn.CLOSE_ADJUSTED, **kwargs) -> pd.Series:
-        price  = product.MIN1[P]
-        n_bars = price._get_window_k(N)
-        ma     = price.rolling(N).mean()
-        slope_series = (price - price.shift(n_bars - 1)) / ((n_bars - 1) * ma.replace(0, float('nan')))
-        slope_series = slope_series.fillna(0.0)
-        return self.sync_signal(slope_series)
-    
+## 使用提醒
+极端值可能出现在均价尚未追上价格剧烈波动的情况。
+
+## 反转信号
+趋势斜率在高位走平或拐头是趋势衰竭的早期信号。
+"""
+
 if __name__ == '__main__':
     ff = MmTrend()
-    ff.clear_params()
-    ff.add_params(F='1d', N='20d')
-    ff.add_params(F='1d', N='10d')
-    fft = ff.test(start_calc_point='2024-01-03 09:00:00', timezone='Asia/Shanghai')
+    ff.add_params(F='1d')

@@ -125,11 +125,18 @@ class FactorFamily(UniqueObject):
             
             cls = self.__class__
 
+            # copy-on-write：确保子类有自己独立的 params 列表，不污染基类和其他子类
+            if cls.params is FactorFamily.params:
+                cls.params = list(cls.params)
+
             # 从参数或类属性中取值
             _alias = alias if alias is not None else getattr(cls, 'alias', cls.__name__)
             super().__init__(alias=_alias, **kwargs)  # 先调用父类 __init__ 设置 name 和 alias
 
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
+            # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
+            if _expr is None and hasattr(cls, 'factor_expr'):
+                _expr = cls.factor_expr()
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', 'MIN1')
             _math = math_expr if math_expr is not None else getattr(cls, 'math_expr', None)
             _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)
@@ -142,7 +149,18 @@ class FactorFamily(UniqueObject):
             _desc_full = description if description is not None else getattr(cls, 'description', '')
 
             if _expr is None:
-                raise ValueError(f"{cls.__name__}: 必须提供 expr（表达式树）参数或类属性")
+                if hasattr(cls, 'factor_expr'):
+                    # 有 factor_expr 但返回了 None — 这不应该发生
+                    raise ValueError(f"{cls.__name__}.factor_expr() 返回了 None")
+                # 否则：旧式因子，手动实现 func()/params，不需要 expr，允许继续
+
+            # 声明式因子：从表达式树自动收集参数（避免子类重复声明 params 列表）
+            _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
+                                 and hasattr(cls, 'factor_expr'))
+            if _from_factor_expr:
+                for param in _expr.ordered_param_deps:
+                    if param.alias not in {p.alias for p in cls.params}:
+                        cls.params.append(param)
 
             # 需要在 super().__init__() 之前设置这些属性
             # 因为 __init__ 会调用 set_default_params() 读取 self.params
@@ -159,7 +177,7 @@ class FactorFamily(UniqueObject):
 
             self.desc = _desc
             self.description = _desc_full
-            self.math_expr = _math or _expr.to_latex()
+            self.math_expr = _math or (_expr.to_latex() if _expr is not None else '')
 
             # 信号对齐参数（None 则从类属性取默认值）
             self.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
@@ -176,8 +194,12 @@ class FactorFamily(UniqueObject):
             self._source_freqs_lock = threading.Lock()
             self._source_freqs_seen: set[DataFreq] = set()
             self._last_source_data_freq: Optional[DataFreq] = None
-            self.params.append(FactorFreqParam)   # 所有子类默认包含信号频率参数 F
-            self.params.append(ReverseParam)       # 所有子类默认包含反转参数 $Rev（1/True=-反向；0/False=正向）
+            # 注册内置参数 — 仅在首次实例化时追加到 cls.params
+            existing_aliases = {p.alias for p in cls.params}
+            if '$F' not in existing_aliases:
+                cls.params.append(FactorFreqParam)
+            if '$Rev' not in existing_aliases:
+                cls.params.append(ReverseParam)
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
@@ -506,6 +528,10 @@ class FactorFamily(UniqueObject):
         source = kwargs.pop('source', None)
 
         freq = DataFreq(self._source_freq_name)
+        if self._expr is None:
+            raise TypeError(
+                f"{self.__class__.__name__}: 未定义 expr（表达式树），无法使用 FactorFamily.func()。"
+                f"请覆盖 func() 方法或定义 factor_expr() / expression 类属性。")
         resolved = self._resolve_expr_params(self._expr)
         result = resolved.evaluate(products, freq, source=source)
 

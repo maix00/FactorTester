@@ -51,6 +51,70 @@ if TYPE_CHECKING:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 工具函数：sliding_window_view 向量化滚动 argmax/argmin
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _rolling_argmaxmin(
+    df: pd.DataFrame,
+    window: int,
+    op: str,
+    normalize: bool = True,
+) -> pd.DataFrame:
+    """
+    用 sliding_window_view 对 DataFrame 每列计算滚动 argmax 或 argmin。
+
+    参数
+    ----------
+    df : pd.DataFrame
+        形状 (n_rows, n_cols)，行=时间，列=品种。
+    window : int
+        滚动窗口大小（bar 数），必须 >= 2。
+    op : {'argmax', 'argmin'}
+        取最大值或最小值的位置。
+    normalize : bool
+        True 时返回值归一化到 [0, 1]，False 时返回整数索引 [0, window-1]。
+
+    返回
+    -------
+    pd.DataFrame
+        与 df 同形状，前 window-1 行为 NaN。
+    """
+    if window < 2:
+        raise ValueError(f"window must be >= 2, got {window}")
+
+    n_rows = len(df)
+    if n_rows < window:
+        # 行数不足，返回全 NaN（前 window-1 行不满，也不够产生任何一个有效窗口）
+        return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
+                            index=df.index, columns=df.columns)
+
+    arr = df.to_numpy(dtype=float)          # (n_rows, n_cols)
+    # sliding_window_view 零拷贝，NumPy 2.x 下 window 轴追加到末尾
+    # shape: (n_rows - window + 1, n_cols, window)
+    windows = np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
+
+    # 在 window 轴（最后一个轴）上取最右侧最大值/最小值的位置
+    # 反转 window 轴：原 [... t, t+1, ..., t+w-1] → [... t+w-1, ..., t+1, t]
+    # 反转后 arg=0 对应原索引 w-1（最右侧）
+    reversed_view = windows[..., ::-1]          # (n-w+1, n_cols, window)
+    if op == 'argmax':
+        pos = (window - 1) - np.argmax(reversed_view, axis=-1)
+    elif op == 'argmin':
+        pos = (window - 1) - np.argmin(reversed_view, axis=-1)
+    else:
+        raise ValueError(f"Invalid op: {op}")
+
+    pos = pos.astype(float)                     # (n_rows - window + 1, n_cols)
+    if normalize and window > 1:
+        pos = pos / (window - 1)
+
+    # 前 window-1 行填 NaN
+    nan_rows = np.full((window - 1, df.shape[1]), np.nan)
+    result = np.vstack([nan_rows, pos])
+    return pd.DataFrame(result, index=df.index, columns=df.columns)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Layer 1: 因子表达式基类
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -139,6 +203,18 @@ class FactorExpr:
     def __invert__(self) -> 'CompositeExpr':
         return CompositeExpr('not', self)
 
+    def __pow__(self, other: Any) -> 'CompositeExpr':
+        """幂运算：self ** other。"""
+        return CompositeExpr('pow', self, _to_expr(other))
+
+    def max(self, other: Any) -> 'CompositeExpr':
+        """逐元素最大值：fmax(self, other)。"""
+        return CompositeExpr('max', self, _to_expr(other))
+
+    def min(self, other: Any) -> 'CompositeExpr':
+        """逐元素最小值：fmin(self, other)。"""
+        return CompositeExpr('min', self, _to_expr(other))
+
     # ── 子类必须实现的接口 ──
 
     @property
@@ -204,6 +280,42 @@ class FactorExpr:
         """N 期移动标准差。"""
         return WindowOp('std', self, window)
 
+    def var(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期移动方差。"""
+        return WindowOp('var', self, window)
+
+    def rolling_min(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期滚动最小值。"""
+        return WindowOp('min', self, window)
+
+    def rolling_max(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期滚动最大值。"""
+        return WindowOp('max', self, window)
+
+    def rolling_sum(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期滚动求和。"""
+        return WindowOp('sum', self, window)
+
+    def ema(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期指数移动平均（EMA, span=window）。"""
+        return WindowOp('ema', self, window)
+
+    def corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'CorrOp':
+        """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
+        return CorrOp(self, other, window)
+
+    def skew(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期滚动偏度。"""
+        return WindowOp('skew', self, window)
+
+    def argmax(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
+        return WindowOp('argmax', self, window)
+
+    def argmin(self, window: Union[int, str, pd.Timedelta]) -> 'WindowOp':
+        """N 期内最小值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
+        return WindowOp('argmin', self, window)
+
     def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
         return ShiftOp('shift', self, periods)
@@ -223,6 +335,10 @@ class FactorExpr:
     def abs(self) -> 'UnaryOp':
         """绝对值。"""
         return UnaryOp('abs', self)
+
+    def sqrt(self) -> 'UnaryOp':
+        """平方根。"""
+        return UnaryOp('sqrt', self)
 
     def neg(self) -> 'UnaryOp':
         """取负。"""
@@ -497,6 +613,7 @@ class UnaryOp(FactorExpr):
             'abs': np.abs,
             'neg': np.negative,
             'not': np.logical_not,
+            'sqrt': np.sqrt,
         }
         func = _OP_MAP[self.op]
         result = func(x)
@@ -517,6 +634,7 @@ class UnaryOp(FactorExpr):
             'abs': f'|{operand_latex}|',
             'neg': f'-({operand_latex})',
             'not': f'\\neg({operand_latex})',
+            'sqrt': f'\\sqrt{{{operand_latex}}}',
         }
         return _LATEX_MAP.get(self.op, f'{self.op}({operand_latex})')
 
@@ -579,17 +697,24 @@ class WindowOp(FactorExpr):
         # 解析窗口
         window = self._resolve_window(self.window, freq)
 
-        _OP_MAP = {
-            'ma': lambda s: s.rolling(window, min_periods=max(1, window // 2)).mean(),
-            'std': lambda s: s.rolling(window, min_periods=max(1, window // 2)).std(),
-            'min': lambda s: s.rolling(window, min_periods=1).min(),
-            'max': lambda s: s.rolling(window, min_periods=1).max(),
-            'sum': lambda s: s.rolling(window, min_periods=1).sum(),
-        }
-        func = _OP_MAP[self.op]
+        # argmax/argmin 用 sliding_window_view 全向量化（比 rolling().apply 快数倍）
+        if self.op in ('argmax', 'argmin') and len(x) >= window:
+            result = _rolling_argmaxmin(x, window, self.op)
+        else:
+            _OP_MAP = {
+                'ma': lambda s: s.rolling(window, min_periods=max(1, window // 2)).mean(),
+                'std': lambda s: s.rolling(window, min_periods=max(1, window // 2)).std(),
+                'var': lambda s: s.rolling(window, min_periods=max(1, window // 2)).var(),
+                'min': lambda s: s.rolling(window, min_periods=1).min(),
+                'max': lambda s: s.rolling(window, min_periods=1).max(),
+                'sum': lambda s: s.rolling(window, min_periods=1).sum(),
+                'ema': lambda s: s.ewm(span=window, min_periods=max(1, window // 2)).mean(),
+                'skew': lambda s: s.rolling(window, min_periods=max(1, window // 2)).skew(),
+            }
+            func = _OP_MAP[self.op]
 
-        # 对每一列（每个品种）单独做 rolling
-        result = x.apply(func, axis=0)
+            # 对每一列（每个品种）单独做 rolling
+            result = x.apply(func, axis=0)
 
         if cache is not None:
             cache[self] = result
@@ -610,9 +735,14 @@ class WindowOp(FactorExpr):
         _LATEX_MAP = {
             'ma': f'\\text{{MA}}_{{{self.window}}}({operand_latex})',
             'std': f'\\sigma_{{{self.window}}}({operand_latex})',
+            'var': f'\\sigma^2_{{{self.window}}}({operand_latex})',
             'min': f'\\min_{{{self.window}}}({operand_latex})',
             'max': f'\\max_{{{self.window}}}({operand_latex})',
             'sum': f'\\sum_{{{self.window}}}({operand_latex})',
+            'ema': f'\\text{{EMA}}_{{{self.window}}}({operand_latex})',
+            'skew': f'\\text{{Skew}}_{{{self.window}}}({operand_latex})',
+            'argmax': f'\\text{{ArgMax}}_{{{self.window}}}({operand_latex})',
+            'argmin': f'\\text{{ArgMin}}_{{{self.window}}}({operand_latex})',
         }
         return _LATEX_MAP.get(self.op, f'{self.op}_{{{self.window}}}({operand_latex})')
 
@@ -703,6 +833,77 @@ class ShiftOp(FactorExpr):
 
     def __repr__(self) -> str:
         return f"ref({self.operand}, {self.periods})"
+
+
+class CorrOp(FactorExpr):
+    """
+    滚动相关系数算子：rolling(window).corr(self, other)。
+
+    对两个表达式在相同窗口内计算逐品种的皮尔逊相关系数。
+    """
+
+    def __init__(self, left: FactorExpr, right: FactorExpr,
+                 window: Union[int, str, pd.Timedelta, 'Parameter']):
+        self.left = left
+        self.right = right
+        self.window = window
+
+    @property
+    def dependencies(self) -> Set[FactorExpr]:
+        return {self.left, self.right}
+
+    @property
+    def param_deps(self) -> Set['Parameter']:
+        from tools.parameters.Parameter import Parameter
+        deps = self.left.param_deps | self.right.param_deps
+        if isinstance(self.window, Parameter):
+            deps.add(self.window)
+        return deps
+
+    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
+        from tools.parameters.Parameter import Parameter
+        self.left._collect_params_ordered(seen, result)
+        self.right._collect_params_ordered(seen, result)
+        if isinstance(self.window, Parameter) and self.window not in seen:
+            seen.add(self.window)
+            result.append(self.window)
+
+    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+                 source: Optional['DataSource'] = None,
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+        if cache is not None and self in cache:
+            return cache[self]
+
+        left_df = self.left.evaluate(products, freq, source=source, cache=cache)
+        right_df = self.right.evaluate(products, freq, source=source, cache=cache)
+
+        window = _resolve_bars(self.window, freq)
+
+        # 对每个品种逐列计算 rolling correlation
+        result = pd.DataFrame(index=left_df.index, columns=left_df.columns, dtype=float)
+        for col in left_df.columns:
+            result[col] = left_df[col].rolling(window).corr(right_df[col])
+
+        if cache is not None:
+            cache[self] = result
+        return result
+
+    @property
+    def op_name(self) -> str:
+        w = self.window if isinstance(self.window, int) else str(self.window)
+        return f"CORR_{w}"
+
+    def to_latex(self) -> str:
+        left_latex = self.left.to_latex()
+        right_latex = self.right.to_latex()
+        return f'\\text{{Corr}}_{{{self.window}}}({left_latex}, {right_latex})'
+
+    def _get_alias(self) -> str:
+        w = self.window if isinstance(self.window, int) else str(self.window).replace(' ', '')
+        return f"corr_{self.left._get_alias()}_{self.right._get_alias()}_W{w}"
+
+    def __repr__(self) -> str:
+        return f"corr({self.left}, {self.right}, {self.window})"
 
 
 def _resolve_bars(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
@@ -914,6 +1115,15 @@ class CompositeExpr(FactorExpr):
             _, fn = self._LOGIC_OPS[self.op]
             return fn(a, b)
 
+        if self.op == 'max':
+            return np.maximum(a, b)
+
+        if self.op == 'min':
+            return np.minimum(a, b)
+
+        if self.op == 'pow':
+            return a ** b
+
         raise ValueError(f"Unknown op: {self.op}")
 
     @property
@@ -926,6 +1136,8 @@ class CompositeExpr(FactorExpr):
             return self._LOGIC_OPS[self.op][0]
         if self.op in self._UNARY_OPS:
             return self._UNARY_OPS[self.op][0]
+        if self.op in ('max', 'min'):
+            return self.op
         return self.op
 
     def to_latex(self) -> str:
@@ -949,6 +1161,14 @@ class CompositeExpr(FactorExpr):
         if self.op in self._LOGIC_OPS:
             symbol = self._LOGIC_OPS[self.op][0]
             return f'({left} {symbol} {right})'
+
+        if self.op == 'max':
+            return f'\\max({left}, {right})'
+        if self.op == 'min':
+            return f'\\min({left}, {right})'
+
+        if self.op == 'pow':
+            return f'{{{left}}}^{{{right}}}'
 
         return f'{self.op}({left}, {right})'
 
