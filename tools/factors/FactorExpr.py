@@ -533,7 +533,8 @@ class ParamRef(FactorExpr):
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         # ParamRef 不能独立求值——它需要一个宿主对象来查询注册表。
         # 求值时由 FactorFamily 在求值前将参数值替换为 ConstExpr 或 ColumnRef。
         raise RuntimeError(
@@ -586,7 +587,8 @@ class ConstExpr(FactorExpr):
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         # 常量不产生 DataFrame，由 CompositeExpr._apply_op 提取 value 后内联处理
         # 此处返回 self 作为特殊标记，不直接调用 evaluate
         return self  # type: ignore[return-value]
