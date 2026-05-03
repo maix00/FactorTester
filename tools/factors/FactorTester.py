@@ -309,7 +309,7 @@ class FactorTester(UniqueObject):
             effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
             with self._sync_lock:
                 cached_freq = self.factor_return_freqs.get(factor)
-            if factor.returns.empty or cached_freq != effective_freq:
+            if factor.returns.empty or cached_freq is None or cached_freq != effective_freq:
                 factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=effective_freq)
                 with self._sync_lock:
                     self.factor_return_freqs[factor] = effective_freq
@@ -395,7 +395,14 @@ class FactorTester(UniqueObject):
         seen_return_aliases: Set[str] = set()
 
         for factor in factors:
-            effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
+            if return_freq is not None:
+                effective_freq = DataFreq(return_freq)
+            elif factor.freq is not None:
+                effective_freq = factor.freq
+            elif factor.source_data_freq is not None:
+                effective_freq = factor.source_data_freq
+            else:
+                raise ValueError(f"Factor {factor.alias}: 无法确定频率，请先调用 calc() 或手动设置 freq/source_data_freq")
             shift = -1 if returns_col.value.name.startswith('OPEN') else 0
             # 需要的是 next_return → S = shift (cf. calc_returns: S=shift if next_return else shift+1)
             rf = ReturnsFamily.get_factor(

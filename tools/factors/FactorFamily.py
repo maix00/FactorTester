@@ -579,7 +579,38 @@ class FactorFamily(UniqueObject):
             for p in self.params if p.alias in kwargs
         }
         resolved = self._resolve_expr_params(self._expr, param_values=param_values)
-        result = resolved.evaluate(products, freq, source=source)
+
+        # ── 预加载：收集所有需要的列，每个品种只读一次 ──
+        from tools.factors.FactorExpr import ColumnRef
+        from tools.data.DataMeta import DataMeta
+
+        preloaded: dict = {}
+        column_refs = resolved.collect_column_refs()
+        # 按 (product, freq_name) 分组，收集需要的列名
+        prod_freq_cols: dict[tuple, set] = {}
+        for cr in column_refs:
+            col_name = cr.column.name
+            for p in products:
+                key = (p, freq.name)
+                if key not in prod_freq_cols:
+                    prod_freq_cols[key] = set()
+                prod_freq_cols[key].add(col_name)
+
+        for (p, freq_name), cols in prod_freq_cols.items():
+            dm: DataMeta = getattr(p, freq_name)
+            if source is not None:
+                try:
+                    dm.set_current_source(source)
+                except ValueError:
+                    continue
+            if dm.next_available_source() is None:
+                continue
+            # 一次性读取该品种的所有需要的列
+            data = dm.get_and_adjust_cols(list(cols), copy=False)
+            if not data.empty:
+                preloaded[(p, freq_name)] = data
+
+        result = resolved.evaluate(products, freq, source=source, preloaded=preloaded)
 
         # ── 信号对齐 ──
         signal_df = self._align_to_signal(result, signal_freq)

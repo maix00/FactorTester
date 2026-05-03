@@ -239,19 +239,29 @@ class FactorExpr:
         """叶子节点默认无参数。子类按需覆盖。"""
         pass
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        """
+        收集表达式树中所有 ColumnRef 叶子节点。
+        用于在求值前批量预加载所有需要的列数据，避免逐列重复读取。
+        """
+        raise NotImplementedError
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         """
         求值：对给定品种集合和数据频率，计算因子值。
 
         返回 DataFrame，列为 Product，索引为时间（MultiIndex）。
 
         参数：
-            products : 品种列表
-            freq     : 使用的数据频率（通常是 product.MIN1 的 freq）
-            source   : 数据源。None=自动选择，指定后校验是否兼容
-            cache    : 表达式→DataFrame 缓存（避免重复计算）
+            products  : 品种列表
+            freq      : 使用的数据频率（通常是 product.MIN1 的 freq）
+            source    : 数据源。None=自动选择，指定后校验是否兼容
+            cache     : 表达式→DataFrame 缓存（避免重复计算）
+            preloaded : 预加载的数据字典 {(product, freq_name): DataFrame}，
+                        ColumnRef 优先从此字典提取列，避免重复 dm.get_and_adjust_cols()
         """
         raise NotImplementedError
 
@@ -421,9 +431,13 @@ class ColumnRef(FactorExpr):
     def param_deps(self) -> Set['Parameter']:
         return set()
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        return {self}
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
@@ -431,6 +445,14 @@ class ColumnRef(FactorExpr):
 
         series_dict = {}
         for p in products:
+            # 优先使用预加载数据
+            if preloaded is not None:
+                preload_key = (p, freq.name)
+                preloaded_df = preloaded.get(preload_key)
+                if preloaded_df is not None and self.column.name in preloaded_df.columns:
+                    series_dict[p] = preloaded_df[self.column.name]
+                    continue
+
             dm: DataMeta = getattr(p, freq.name)
             if source is not None:
                 try:
@@ -506,6 +528,9 @@ class ParamRef(FactorExpr):
             seen.add(self.param)
             result.append(self.param)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        return set()
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
@@ -556,6 +581,9 @@ class ConstExpr(FactorExpr):
     def param_deps(self) -> Set['Parameter']:
         return set()
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        return set()
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
@@ -604,13 +632,17 @@ class UnaryOp(FactorExpr):
     def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
         self.operand._collect_params_ordered(seen, result)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        return self.operand.collect_column_refs()
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
-        x = self.operand.evaluate(products, freq, source=source, cache=cache)
+        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
 
         _OP_MAP = {
             'log': np.log,
@@ -721,14 +753,21 @@ class RollingOp(FactorExpr):
             seen.add(self.window)
             result.append(self.window)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        result: Set['ColumnRef'] = set()
+        for opnd in self._get_operands():
+            result.update(opnd.collect_column_refs())
+        return result
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
         operands = self._get_operands()
-        dfs = tuple(opnd.evaluate(products, freq, source=source, cache=cache)
+        dfs = tuple(opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
                     for opnd in operands)
         window = _resolve_bars(self.window, freq)
         result = self._apply_rolling(dfs, window, freq)
@@ -905,13 +944,20 @@ class ShiftOp(FactorExpr):
         elif isinstance(self.periods, FactorExpr):
             self.periods._collect_params_ordered(seen, result)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        result = self.operand.collect_column_refs()
+        if isinstance(self.periods, FactorExpr):
+            result.update(self.periods.collect_column_refs())
+        return result
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
-        x = self.operand.evaluate(products, freq, source=source, cache=cache)
+        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
         periods = self._resolve_periods(self.periods, freq)
         result = x.shift(periods)
 
@@ -999,13 +1045,17 @@ class CrossSectionalOp(FactorExpr):
     def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
         self.operand._collect_params_ordered(seen, result)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        return self.operand.collect_column_refs()
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
-        x = self.operand.evaluate(products, freq, source=source, cache=cache)
+        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
         # x: DataFrame, index=MultiIndex(time), columns=Product
 
         if self.op == 'cs_zscore':
@@ -1144,14 +1194,21 @@ class CompositeExpr(FactorExpr):
         for opnd in self.operands:
             opnd._collect_params_ordered(seen, result)
 
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        result: Set['ColumnRef'] = set()
+        for opnd in self.operands:
+            result.update(opnd.collect_column_refs())
+        return result
+
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None) -> pd.DataFrame:
+                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
         # 递归求值所有子表达式
-        values = [opnd.evaluate(products, freq, source=source, cache=cache)
+        values = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
                   for opnd in self.operands]
 
         result = self._apply_op(values)
