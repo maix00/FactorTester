@@ -256,7 +256,7 @@ class DataMeta(UniqueObject):
     def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
         # 优先从 ContextVar 活跃 FactorTester 读取 start_calc_point（并发安全）
         try:
-            from tools.factors.FactorFamily import _active_tester
+            from tools.factors.FactorTester import _active_tester
             tester = _active_tester.get()
             if tester is not None and tester.start_calc_point is not None:
                 ts = pd.Timestamp(tester.start_calc_point)

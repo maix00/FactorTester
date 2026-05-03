@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from scipy.optimize import minimize
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from tools.factors.Factor import Factor

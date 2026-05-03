@@ -136,6 +136,15 @@ class FactorExpr:
 
     __array_priority__ = 1000
 
+    # ── 中间因子标记 ──
+
+    _is_intermediate: bool = False
+
+    def as_intermediate(self) -> 'FactorExpr':
+        """标记此表达式节点为中间因子，evaluate 时自动存入 family._intermediates。"""
+        self._is_intermediate = True
+        return self
+
     # ── 可哈希（用于 set/dict 中的依赖追踪和缓存） ──
 
     def __hash__(self) -> int:

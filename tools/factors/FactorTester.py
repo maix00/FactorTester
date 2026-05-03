@@ -20,7 +20,8 @@ import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
 from weakref import WeakValueDictionary
-from typing import Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.factors.Factor import Factor
@@ -30,6 +31,14 @@ from tools.base.User import User
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
 from Settings import get_all_products, logger_dir_path_default, factor_info_path
+
+if TYPE_CHECKING:
+    from tools.factors.FactorTester import FactorTester
+
+# ── 运行时上下文：活跃 FactorTester 与用户前缀 ──
+# 由 FactorTester / FactorFamily.test() 设置，Factor / DataMeta 读取
+_active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
+_active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
 
 def _signal_time(obj: Any) -> Any:
     """从索引项中提取最末一级时间戳（兼容 tuple 多级索引和单值索引）。"""
@@ -132,6 +141,7 @@ class FactorTester(UniqueObject):
             self.sync_signal_index_replaced: Optional[pd.Index] = None
             self._sync_lock = threading.Lock()
             # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
+            self.factor_source_tables: Dict['Factor', pd.DataFrame] = {}
             self.factor_tables: Dict['Factor', pd.DataFrame] = {}
             self.factor_returns: Dict['Factor', pd.DataFrame] = {}
             self.factor_return_freqs: Dict['Factor', Any] = {}
@@ -173,6 +183,7 @@ class FactorTester(UniqueObject):
             except Exception:
                 pass
         # 清空 per-factor 缓存 dict
+        self.factor_source_tables.clear()
         self.factor_tables.clear()
         self.factor_returns.clear()
         self.factor_return_freqs.clear()
@@ -264,7 +275,6 @@ class FactorTester(UniqueObject):
         self.factors = factors
 
         if parallel and len(factors) > 1:
-            from tools.factors.FactorFamily import _active_tester
             desc = f'Calculate {len(factors)} factors for {len(self.products)} products'
             # 捕获当前 context 中 _active_tester 的值，在每个 worker 线程里手动设置
             token = _active_tester.get()
@@ -383,7 +393,7 @@ class FactorTester(UniqueObject):
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
-        from tools.factors.FactorFamily import CrossSectionIC, _active_tester
+        from tools.factors.FactorFamily import CrossSectionIC
         from tools.factors.FactorExpr import DataColumn
         from tools.parameters import DataColumnParam, TypeParam
         from tools.parameters import WindowParam
@@ -469,15 +479,15 @@ class FactorTester(UniqueObject):
                 if end_date is not None and len(ic_series) > 0:
                     ic_series = ic_series[ic_series.index.get_level_values(-1) <= end_date]
 
-                # 提取 RE 中间因子 → 写入 factor.returns
-                re_df = CrossSectionFamily.get_intermediate('RE')
-                fe_df = CrossSectionFamily.get_intermediate('FE')
+                # 提取 RE/FE 中间因子 → 写入 factor
+                re_factor = CrossSectionFamily.get_intermediate('RE')
+                fe_factor = CrossSectionFamily.get_intermediate('FE')
 
                 for f in factor_list:
-                    if re_df is not None:
-                        f.returns = re_df.copy()
-                    if fe_df is not None and not hasattr(f, '_ic_fe_intermediate'):
-                        object.__setattr__(f, '_ic_fe_intermediate', fe_df.copy())
+                    if re_factor is not None:
+                        f.returns = re_factor.table.copy()
+                    if fe_factor is not None and not hasattr(f, '_ic_fe_intermediate'):
+                        object.__setattr__(f, '_ic_fe_intermediate', fe_factor.table.copy())
 
                 # 计算统计量
                 stats = self.ic_stats(ic_series)

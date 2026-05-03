@@ -113,14 +113,15 @@ class UniqueObject(ABC):
     # ── 实例创建 ──
 
     def __new__(cls, name: Optional[str] = None, alias: Optional[str] = None,
-                search: bool = False, *args, **kwargs):
+                search: bool = False, _local_only: bool = False, *args, **kwargs):
         """
         对象创建钩子。
 
         参数：
-            name  : 对象唯一名称（None 时自动生成 {alias}:{uuid}）
-            alias : 可选别名，用于 search 查找
-            search: 若为 True，先在 _alias_index 中按 alias 查找已有实例
+            name       : 对象唯一名称（None 时自动生成 {alias}:{uuid}）
+            alias      : 可选别名，用于 search 查找
+            search     : 若为 True，先在 _alias_index 中按 alias 查找已有实例
+            _local_only : 若为 True，跳过全局注册和后端存储（用于临时/中间对象）
         """
         # search 模式：按 alias 查找已有实例
         if search and alias is not None:
@@ -134,6 +135,10 @@ class UniqueObject(ABC):
         if name is None:
             alias_part = alias if alias else cls.__name__
             name = f"{alias_part}:{uuid.uuid4().hex}"
+
+        # _local_only：跳过全局缓存和后端存储
+        if _local_only:
+            return super().__new__(cls)
 
         # 第一层：本地弱引用缓存（同进程快速路径）
         with cls._instances_lock:
@@ -152,16 +157,19 @@ class UniqueObject(ABC):
         return instance
 
     def __init__(self, name: Optional[str] = None, alias: Optional[str] = None,
-                 desc: Optional[str] = None, search: bool = False, *args, **kwargs):
+                 desc: Optional[str] = None, search: bool = False,
+                 _local_only: bool = False, *args, **kwargs):
         """仅在首次创建时初始化，防止复用已有实例时重复初始化。"""
         if not hasattr(self, '_initialized'):
             self.name = name if name else f"{alias or self.__class__.__name__}:{uuid.uuid4().hex}"
             self.alias = alias if alias else self.name
             self.desc = desc if desc else self.__doc__[:80].strip() if self.__doc__ else ''
             self._initialized = True
-            # 注册到 alias 索引（支持 search）
-            with self._alias_index_lock:
-                self._alias_index.setdefault(self.alias, WeakValueDictionary())[id(self)] = self
+            self._local_only = _local_only
+            # 注册到 alias 索引（支持 search）；local_only 跳过
+            if not _local_only:
+                with self._alias_index_lock:
+                    self._alias_index.setdefault(self.alias, WeakValueDictionary())[id(self)] = self
 
     def __reduce__(self):
         """pickle 序列化：仅保存 identity（类名 + name），反序列化时复用单例。"""
@@ -199,6 +207,8 @@ class UniqueObject(ABC):
 
     def delete(self):
         """从全局缓存和后端存储中移除该实例，使其可被垃圾回收。"""
+        if getattr(self, '_local_only', False):
+            return  # 本地临时对象，无需清理全局状态
         key = self.name
         cls = self.__class__
         backend_key = f"{cls.__name__}:{key}"

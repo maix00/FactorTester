@@ -5,7 +5,7 @@ import math, traceback
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 from server.shared import _factor_testers_lock

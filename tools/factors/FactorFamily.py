@@ -20,7 +20,6 @@ import threading
 import uuid
 import pandas as pd
 from functools import partial
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Set
 
 from tools.factors.Factor import Factor
@@ -41,23 +40,26 @@ from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot
 if TYPE_CHECKING:
     from tools.products.Product import Product
 
-# 每个执行上下文（线程/协程）的活跃 FactorTester
-_active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
-# 活跃用户前缀，如 '$COMMON' 或 '张三@1'
-_active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
+# ── 从 FactorTester 导入运行时上下文（避免循环导入） ──
+# _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
+from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(UniqueObject):
+class FactorFamily(FactorExpr, UniqueObject):
     """
-    因子族基类 — 基于表达式树的统一因子框架。
+    因子族基类 — 含参数的表达式模板 + 信号对齐。
+
+    FactorFamily 继承 FactorExpr（它是带 ParamRef 的表达式树）
+    和 UniqueObject（全局唯一命名对象）。
 
     支持两种使用方式：
-        1. 声明式（推荐）— 子类定义 factor_expr() 静态方法，自动收集参数
+        1. 声明式（推荐）— 子类定义 factor_expr() 静态方法，自动从表达式树收集参数
         2. 命令式 — 直接传入 expr= 表达式树和 extra_params=
 
     功能：
       - func() — 表达式批量求值 + 信号对齐
-      - get_factor() / get_factors() — 创建 Factor 实例
+      - get_factor() / get_factors() — 创建 Factor 实例（已解析，无参数）
       - test()  — 一键 IC / 分组收益测试并持久化
+      - 中间因子管理 — evaluate() 时自动缓存子表达式结果
 
     类属性：
         math_expr    (str)  : 因子公式的 LaTeX 字符串
@@ -78,6 +80,7 @@ class FactorFamily(UniqueObject):
 
     def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
         # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
+        # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
         core_alias = alias if alias else cls.__name__
         user_prefix = _active_user_prefix.get()
         if user_prefix:
@@ -85,7 +88,7 @@ class FactorFamily(UniqueObject):
         else:
             name = f"{core_alias}:{uuid.uuid4().hex}"
         kwargs.pop('name', None)
-        return super().__new__(cls, name=name, alias=core_alias, **kwargs)
+        return UniqueObject.__new__(cls, name=name, alias=core_alias, **kwargs)
 
     def __init__(self, alias: Optional[str] = None,
                  expr: Optional[FactorExpr] = None,
@@ -196,7 +199,6 @@ class FactorFamily(UniqueObject):
             self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
             self._source_freqs_lock = threading.Lock()
             self._source_freqs_seen: set[DataFreq] = set()
-            self._last_source_data_freq: Optional[DataFreq] = None
             # 注册内置参数 — 仅在首次实例化时追加到 cls.params
             existing_aliases = {p.alias for p in cls.params}
             if '$F' not in existing_aliases:
@@ -206,6 +208,9 @@ class FactorFamily(UniqueObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
+            # 中间因子缓存：{str名称 或 FactorExpr → Factor(_local_only=True)}
+            # 仅显式调用 _save_intermediate() 的节点（如 FE/RE）才存入
+            self._intermediates: Dict[object, Factor] = {}
 
     def _extract_user_prefix(self) -> Optional[str]:
         """
@@ -630,7 +635,20 @@ class FactorFamily(UniqueObject):
             if not data.empty:
                 preloaded[(p, freq_name)] = data
 
-        result = resolved.evaluate(products, freq, source=source, preloaded=preloaded)
+        # evaluate cache：{FactorExpr → DataFrame}，递归求值时避免重复计算
+        df_cache: Dict[FactorExpr, pd.DataFrame] = {}
+        result = resolved.evaluate(products, freq, source=source, preloaded=preloaded,
+                                 cache=df_cache)
+
+        # 自动创建用户标记的中间因子（.as_intermediate() 标记的节点）
+        for expr, df in df_cache.items():
+            if expr is not resolved and getattr(expr, '_is_intermediate', False):
+                if expr not in self._intermediates:
+                    f = Factor(alias=expr._get_alias(), _local_only=True)
+                    f.table = self._align_to_signal(df, signal_freq)
+                    f.source_table = df
+                    f.family = self
+                    self._intermediates[expr] = f
 
         # 保存未对齐的原始数据，供 Factor.source_table 使用
         self._last_raw_result = result
@@ -793,17 +811,16 @@ class CrossSectionIC(FactorFamily):
 
     source_freq = 'MIN1'
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._intermediates: dict[str, pd.DataFrame] = {}
+    # _intermediates 已由 FactorFamily.__init__ 初始化为 {FactorExpr: Factor}
+    # 此处不再覆盖；func() 在 evaluate 后自动填充
 
-    def _save_intermediate(self, name: str, df: pd.DataFrame) -> None:
-        """保存中间因子 DataFrame（如 'FE', 'RE'），供外部取用。"""
-        self._intermediates[name] = df
+    def _save_intermediate(self, key: object, factor: 'Factor') -> None:
+        """保存中间因子，供外部取用。key 可以是 FactorExpr 或字符串名称。"""
+        self._intermediates[key] = factor
 
-    def get_intermediate(self, name: str) -> pd.DataFrame | None:
-        """获取已保存的中间因子 DataFrame。"""
-        return self._intermediates.get(name, None)
+    def get_intermediate(self, key: object) -> 'Factor | None':
+        """获取已保存的中间因子。key 可以是 FactorExpr 或字符串名称。"""
+        return self._intermediates.get(key, None)
 
     @staticmethod
     def factor_expr():
@@ -898,8 +915,18 @@ class CrossSectionIC(FactorFamily):
                 preloaded[(p, freq_name)] = data
 
         # ── 分别求值 FE / RE ──
-        fe_raw = fe_resolved.evaluate(products, freq, preloaded=preloaded)
-        re_raw = re_resolved.evaluate(products, freq, preloaded=preloaded)
+        df_cache: Dict[FactorExpr, pd.DataFrame] = {}
+        fe_raw = fe_resolved.evaluate(products, freq, preloaded=preloaded, cache=df_cache)
+        re_raw = re_resolved.evaluate(products, freq, preloaded=preloaded, cache=df_cache)
+
+        # 自动创建用户标记的中间因子（.as_intermediate() 标记的节点）
+        for expr, df in df_cache.items():
+            if getattr(expr, '_is_intermediate', False) and expr not in self._intermediates:
+                f = Factor(alias=expr._get_alias(), _local_only=True)
+                f.table = self._align_to_signal(df, signal_freq)
+                f.source_table = df
+                f.family = self
+                self._intermediates[expr] = f
 
         # ── 信号对齐 ──
         fe_df = self._align_to_signal(fe_raw, signal_freq)
@@ -908,9 +935,18 @@ class CrossSectionIC(FactorFamily):
         if is_reversed:
             fe_df = -fe_df
 
-        # 保存中间因子
-        self._save_intermediate('FE', fe_df)
-        self._save_intermediate('RE', re_df)
+        # 保存中间因子（匿名本地 Factor）—— FE/RE 总是作为中间因子暴露
+        fe_factor = Factor(alias='FE', _local_only=True)
+        fe_factor.table = fe_df
+        fe_factor.source_table = fe_raw
+        fe_factor.family = self
+        self._save_intermediate('FE', fe_factor)
+
+        re_factor = Factor(alias='RE', _local_only=True)
+        re_factor.table = re_df
+        re_factor.source_table = re_raw
+        re_factor.family = self
+        self._save_intermediate('RE', re_factor)
 
         # ── Lag 位移：RE.shift(-Lag)，Lag>0 时用历史 RE ──
         lag = kwargs.get('Lag', 0)
