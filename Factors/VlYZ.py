@@ -9,17 +9,11 @@
 # w = 0.34 / (1.34 + (n+1)/(n-1)), n = int(N / 1d)
 # X = sqrt(sigma_o^2 + w * sigma_c^2 + (1-w) * sigma_rs^2)
 # =============================================================================
-import pandas as pd
-import numpy as np
-from typing import Sequence
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools import FactorFamily, Product
+from tools import FactorFamily
 from tools.parameters import DataColumnParam, WindowParam
-from tools.factors.FactorExpr import (
-    FactorExpr, ColumnRef,
-)
-from tools.data import DataColumn, DataFreq
+from tools.factors.FactorExpr import FactorExpr
 
 class VlYZ(FactorFamily):
     """Yang-Zhang 波动率。"""
@@ -84,11 +78,14 @@ YZ 波动率的隔夜分量突然放大，往往意味着市场在非交易时�
 class _DynamicWeight(FactorExpr):
     """动态权重：w = 0.34 / (1.34 + (n+1)/(n-1))，其中 n = int(N / 1d)。
 
+    继承 RollingOp 以复用 window 解析和 _resolve_expr_params 统一分发。
+
     求值时从参数字典中取 N 的解析值计算 n 和 w，返回标量。
     """
     def __init__(self, window_param):
         from tools.parameters.Parameter import Parameter
         self._window_param = window_param
+        self.window = window_param  # 兼容 RollingOp 的 window 属性
         self._cached_value = None
 
     @property
@@ -112,11 +109,7 @@ class _DynamicWeight(FactorExpr):
         if self._cached_value is not None:
             return self._cached_value
 
-        from tools.parameters.Parameter import Parameter
-        w = self._window_param
-        if isinstance(w, Parameter):
-            w = w.default_value
-        n_int = _resolve_bars_or_default(w, freq, 14)
+        n_int = _resolve_bars_or_default(self._window_param, freq, 14)
         n = max(2, n_int)
         self._cached_value = 0.34 / (1.34 + (n + 1) / (n - 1))
         return self._cached_value

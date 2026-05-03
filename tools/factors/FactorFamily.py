@@ -28,7 +28,8 @@ from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
     FactorExpr, DataColumn, DataFreq,
     ColumnRef, ConstExpr, ParamRef, UnaryOp,
-    WindowOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    WindowOp, CorrOp,  # 向后兼容别名
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, FactorNextPeriodReturns
 from tools import UniqueObject, DataMeta
@@ -136,7 +137,7 @@ class FactorFamily(UniqueObject):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
             if _expr is None and hasattr(cls, 'factor_expr'):
-                _expr = cls.factor_expr()
+                _expr = getattr(cls, 'factor_expr')()
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', 'MIN1')
             _math = math_expr if math_expr is not None else getattr(cls, 'math_expr', None)
             _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)
@@ -158,6 +159,7 @@ class FactorFamily(UniqueObject):
             _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
                                  and hasattr(cls, 'factor_expr'))
             if _from_factor_expr:
+                assert _expr is not None  # _from_factor_expr 保证了 factor_expr 已被调用且成功
                 for param in _expr.ordered_param_deps:
                     if param.alias not in {p.alias for p in cls.params}:
                         cls.params.append(param)
@@ -446,14 +448,14 @@ class FactorFamily(UniqueObject):
     @property
     def expr(self) -> FactorExpr:
         """返回因子表达式树。"""
-        return self._expr
+        return self._expr  # type: ignore[return-value]
 
     def _resolve_expr_params(self, expr: FactorExpr) -> FactorExpr:
         """
         递归解析表达式树中的参数引用。
 
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型），
-        将 WindowOp(window=Parameter) → WindowOp(window=int/str)。
+        将 RollingOp/ShiftOp 中 window/periods Parameter → 实际值。
 
         返回一个全新的表达式树（不修改原始树）。
         """
@@ -479,6 +481,29 @@ class FactorFamily(UniqueObject):
                 return expr
             return type(expr)(expr.op, new_operand)
 
+        # 滚动窗口算子（一元/二元/多元统一处理）：
+        #   - 递归解析所有操作数
+        #   - 解析 window Parameter → 实际值
+        if isinstance(expr, RollingOp):
+            operands = expr._get_operands()
+            new_operands = tuple(self._resolve_expr_params(opnd) for opnd in operands)
+            window = expr.window
+            if isinstance(window, Parameter):
+                window = window.get_value(self)
+            if (all(a is b for a, b in zip(new_operands, operands))
+                    and window is expr.window):
+                return expr
+            # 用已知子类型重建（避免 type(expr) 导致类型检查器无法推断签名）
+            from tools.factors.FactorExpr import UnaryRollingOp, BinaryRollingOp
+            if isinstance(expr, UnaryRollingOp):
+                return UnaryRollingOp(expr.op, new_operands[0], window)
+            elif isinstance(expr, BinaryRollingOp):
+                return BinaryRollingOp(expr.op, new_operands[0], new_operands[1], window)
+            else:
+                # 自定义 RollingOp 子类，保持原实例只改 window
+                expr.window = window
+                return expr
+
         # 位移算子：递归 operand，解析 periods 参数
         if isinstance(expr, ShiftOp):
             new_operand = self._resolve_expr_params(expr.operand)
@@ -488,16 +513,6 @@ class FactorFamily(UniqueObject):
             if new_operand is expr.operand and periods is expr.periods:
                 return expr
             return ShiftOp(expr.op, new_operand, periods)
-
-        # 窗口算子：递归 operand，解析 window 参数
-        if isinstance(expr, WindowOp):
-            new_operand = self._resolve_expr_params(expr.operand)
-            window = expr.window
-            if isinstance(window, Parameter):
-                window = window.get_value(self)
-            if new_operand is expr.operand and window is expr.window:
-                return expr
-            return WindowOp(expr.op, new_operand, window)
 
         # 复合表达式：递归所有 operands
         if isinstance(expr, CompositeExpr):
