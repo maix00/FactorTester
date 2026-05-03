@@ -450,12 +450,17 @@ class FactorFamily(UniqueObject):
         """返回因子表达式树。"""
         return self._expr  # type: ignore[return-value]
 
-    def _resolve_expr_params(self, expr: FactorExpr) -> FactorExpr:
+    def _resolve_expr_params(self, expr: FactorExpr, param_values: dict | None = None) -> FactorExpr:
         """
         递归解析表达式树中的参数引用。
 
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型），
         将 RollingOp/ShiftOp 中 window/periods Parameter → 实际值。
+
+        参数：
+            expr         : 表达式树
+            param_values : 参数值字典（{alias: value}），优先于注册表查找。
+                           由 func() 根据当前 Factor 的 kwargs 构建。
 
         返回一个全新的表达式树（不修改原始树）。
         """
@@ -463,7 +468,7 @@ class FactorFamily(UniqueObject):
 
         # 叶子节点
         if isinstance(expr, ParamRef):
-            value = expr.resolve(self)
+            value = expr.resolve(self, param_values=param_values)
             # 根据参数值类型决定替换为什么
             if isinstance(expr.param, DataColumnParam):
                 from tools.data.DataColumn import DataColumn
@@ -476,7 +481,7 @@ class FactorFamily(UniqueObject):
 
         # 一元算子 / 横截面算子：递归 operand（无额外参数）
         if isinstance(expr, (UnaryOp, CrossSectionalOp)):
-            new_operand = self._resolve_expr_params(expr.operand)
+            new_operand = self._resolve_expr_params(expr.operand, param_values=param_values)
             if new_operand is expr.operand:
                 return expr
             return type(expr)(expr.op, new_operand)
@@ -486,10 +491,13 @@ class FactorFamily(UniqueObject):
         #   - 解析 window Parameter → 实际值
         if isinstance(expr, RollingOp):
             operands = expr._get_operands()
-            new_operands = tuple(self._resolve_expr_params(opnd) for opnd in operands)
+            new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in operands)
             window = expr.window
             if isinstance(window, Parameter):
-                window = window.get_value(self)
+                if param_values is not None and window.alias in param_values:
+                    window = param_values[window.alias]
+                else:
+                    window = window.get_value(self)
             if (all(a is b for a, b in zip(new_operands, operands))
                     and window is expr.window):
                 return expr
@@ -504,21 +512,38 @@ class FactorFamily(UniqueObject):
                 expr.window = window
                 return expr
 
-        # 位移算子：递归 operand，解析 periods 参数
+        # 位移算子：递归 operand，解析 periods 参数（periods 也可能是 FactorExpr）
         if isinstance(expr, ShiftOp):
-            new_operand = self._resolve_expr_params(expr.operand)
+            new_operand = self._resolve_expr_params(expr.operand, param_values=param_values)
             periods = expr.periods
             if isinstance(periods, Parameter):
-                periods = periods.get_value(self)
+                if param_values is not None and periods.alias in param_values:
+                    periods = param_values[periods.alias]
+                else:
+                    periods = periods.get_value(self)
+            elif isinstance(periods, FactorExpr):
+                resolved_periods = self._resolve_expr_params(periods, param_values=param_values)
+                if isinstance(resolved_periods, ConstExpr):
+                    periods = resolved_periods.value
+                else:
+                    periods = resolved_periods
             if new_operand is expr.operand and periods is expr.periods:
                 return expr
-            return ShiftOp(expr.op, new_operand, periods)
+            return ShiftOp(expr.op, new_operand, periods)  # type: ignore[arg-type]
 
-        # 复合表达式：递归所有 operands
+        # 复合表达式：递归所有 operands，尝试常量折叠
         if isinstance(expr, CompositeExpr):
-            new_operands = tuple(self._resolve_expr_params(opnd) for opnd in expr.operands)
+            new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in expr.operands)
             if all(a is b for a, b in zip(new_operands, expr.operands)):
                 return expr
+            # 常量折叠：全部是 ConstExpr 时直接计算
+            if all(isinstance(opnd, ConstExpr) for opnd in new_operands):
+                try:
+                    folded = CompositeExpr._fold_const(expr.op, new_operands)  # type: ignore[arg-type]
+                    if folded is not None:
+                        return folded
+                except Exception:
+                    pass
             return CompositeExpr(expr.op, *new_operands)
 
         return expr  # fallback
@@ -547,7 +572,13 @@ class FactorFamily(UniqueObject):
             raise TypeError(
                 f"{self.__class__.__name__}: 未定义 expr（表达式树），无法使用 FactorFamily.func()。"
                 f"请覆盖 func() 方法或定义 factor_expr() / expression 类属性。")
-        resolved = self._resolve_expr_params(self._expr)
+        # 构建 param_values：从 kwargs 中提取属于本 family 参数的值
+        # （排除 F、$F、$Rev、source 等已处理的键）
+        param_values = {
+            p.alias: kwargs[p.alias]
+            for p in self.params if p.alias in kwargs
+        }
+        resolved = self._resolve_expr_params(self._expr, param_values=param_values)
         result = resolved.evaluate(products, freq, source=source)
 
         # ── 信号对齐 ──
@@ -681,4 +712,10 @@ class Returns(FactorFamily):
         else:
             self.basepoint = 'last'
             self.daily_basepoint = '15:00:00'
+        # 收益率信号频率 = RF（而非独立的 F 参数）
+        # 移除可能冲突的 F/$F，用 RF 的值替代（Returns 不需要独立的 F 参数）
+        kwargs.pop('$F', None)
+        kwargs.pop('F', None)
+        if 'RF' in kwargs:
+            kwargs['F'] = kwargs['RF']
         return super().func(products, *args, **kwargs)

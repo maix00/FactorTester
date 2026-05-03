@@ -21,6 +21,7 @@ from tqdm import tqdm
 from datetime import datetime
 from weakref import WeakValueDictionary
 from typing import Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.factors.Factor import Factor
 from tools.products.Product import Product
@@ -249,40 +250,133 @@ class FactorTester(UniqueObject):
         sorted_products = sorted(results, key=lambda x: results[x], reverse=True)
         return set(sorted_products[:int(len(sorted_products) * ratio)])
 
-    def calc_factor(self, factors: 'Factor|List[Factor]'):
+    def calc_factor(self, factors: 'Factor|List[Factor]', parallel: bool = True, max_workers: int = 4):
         """
         批量计算因子值。品种筛选由 func 内部处理。
 
         参数：
-            factors : 单个 Factor 或 Factor 列表
+            factors    : 单个 Factor 或 Factor 列表
+            parallel   : 是否并行计算（默认 True，单因子时自动退化为串行）
+            max_workers: 并行线程数（默认 4）
         """
         if isinstance(factors, Factor):
             factors = [factors]
         self.factors = factors
-        for factor in tqdm(self.factors, desc=f'Calculate factors for {len(self.products)} products'):
-            factor.calc(self.products)
+
+        if parallel and len(factors) > 1:
+            from tools.factors.FactorFamily import _active_tester
+            desc = f'Calculate {len(factors)} factors for {len(self.products)} products'
+            # 捕获当前 context 中 _active_tester 的值，在每个 worker 线程里手动设置
+            token = _active_tester.get()
+            def _calc_one(factor: Factor) -> None:
+                _active_tester.set(token)
+                factor.calc(self.products)
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
+                futures = {pool.submit(_calc_one, f): f for f in factors}
+                for future in tqdm(as_completed(futures), total=len(futures), desc=desc):
+                    exc = future.exception()
+                    if exc is not None:
+                        for fut in futures:
+                            fut.cancel()
+                        raise RuntimeError(
+                            f"calc_factor: {futures[future].alias} 计算失败") from exc
+        else:
+            for factor in tqdm(factors, desc=f'Calculate factors for {len(self.products)} products'):
+                factor.calc(self.products)
 
     def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:
         """对 DataFrame 按行（各信号时间点）进行百分位秩排名，只保留属于 self.products 的列。"""
         df = df.loc[:, df.columns.isin(self.products)]
         return df.rank(axis=1, method='average', na_option='keep', pct=True)
 
+    def _calc_ic_single(self, factor: 'Factor',
+                        returns_col: FactorNextPeriodReturns,
+                        return_freq: Optional[Any],
+                        start_date: Optional[pd.Timestamp],
+                        end_date: Optional[pd.Timestamp],
+                        returns_df: Optional[pd.DataFrame] = None,
+                        return_rank: Optional[pd.DataFrame] = None) -> 'tuple[Factor, pd.Series, pd.Series]':
+        """单因子 IC 计算（线程安全，不修改共享状态）。
+
+        returns_df  : 若提供，则直接用作收益率表，跳过 calc_returns() 调用。
+        return_rank : 若提供，则直接用作收益率排名，跳过 calc_rank() 调用。
+        """
+        factor_rank = self.calc_rank(factor.table)
+        if returns_df is not None:
+            return_df = returns_df
+            factor.returns = returns_df  # 同步写入，保证后续访问一致性
+        else:
+            effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
+            with self._sync_lock:
+                cached_freq = self.factor_return_freqs.get(factor)
+            if factor.returns.empty or cached_freq != effective_freq:
+                factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=effective_freq)
+                with self._sync_lock:
+                    self.factor_return_freqs[factor] = effective_freq
+            return_df = factor.returns
+        assert not return_df.empty
+        if return_rank is not None:
+            rank_df = return_rank
+        else:
+            rank_df = self.calc_rank(return_df)
+        factor_rank.index = _extract_signal_index(factor_rank.index)
+        rank_df.index = _extract_signal_index(rank_df.index)
+        dt_index = factor_rank.index.intersection(rank_df.index)
+        if start_date is not None and len(dt_index) > 0:
+            dt_index = dt_index[dt_index >= _align_ts(pd.Timestamp(start_date), dt_index[0])]
+        if end_date is not None and len(dt_index) > 0:
+            dt_index = dt_index[dt_index <= _align_ts(pd.Timestamp(end_date), dt_index[0])]
+        ic = []
+        coverage = []
+        for dt in dt_index:
+            f = factor_rank.loc[dt]
+            r = rank_df.loc[dt]
+            valid = f.notna() & r.notna()
+            coverage.append(valid.sum())
+            if valid.sum() > 1:
+                if f[valid].nunique() > 1 and r[valid].nunique() > 1:
+                    with np.errstate(invalid='ignore'):
+                        ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
+                else:
+                    ic.append(np.nan)
+            else:
+                ic.append(np.nan)
+        # 若 factor.table 有 MultiIndex，将 ic_series 的索引还原为相同结构
+        if isinstance(factor.table.index, pd.MultiIndex):
+            tbl_signal_idx = _extract_signal_index(factor.table.index)
+            mask = tbl_signal_idx.isin(dt_index)
+            mapping = {sig: full for sig, full in zip(tbl_signal_idx[mask], factor.table.index[mask])}
+            valid_ts = [ts for ts in dt_index if ts in mapping]
+            full_idx = pd.MultiIndex.from_tuples([mapping[ts] for ts in valid_ts], names=factor.table.index.names)
+            ic_vals = [v for ts, v in zip(dt_index, ic) if ts in mapping]
+            ic_series = pd.Series(ic_vals, index=full_idx)
+        else:
+            ic_series = pd.Series(ic, index=dt_index)
+        avg_coverage = np.mean(coverage)
+        stats_df = self.ic_stats(ic_series)
+        stats_df['avg_coverage'] = avg_coverage
+        return factor, ic_series, stats_df
+
     def calc_ic(self, returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                 return_freq: Optional[Any] = None, factors: 'Optional[Factor|List[Factor]]' = None,
-                time_range: Optional[Tuple] = None) -> 'tuple[pd.DataFrame, pd.DataFrame]':
+                time_range: Optional[Tuple] = None,
+                parallel: bool = True, max_workers: int = 4) -> 'tuple[pd.DataFrame, pd.DataFrame]':
         """
         计算 Spearman IC 序列及统计量。
 
         流程：
-          1. 对因子值和收益率分别做百分位秩排名
-          2. 逐时间点计算二者的 Spearman 相关系数
-          3. 汇总为 ic_series 和 ic_stats 写入各 Factor
+          1. 收集所有因子的收益率因子 → 去重 → 并行 calc（第二轮因子计算）
+          2. 对因子值和收益率分别做百分位秩排名
+          3. 逐时间点计算二者的 Spearman 相关系数
+          4. 汇总为 ic_series 和 ic_stats 写入各 Factor
 
         参数：
             returns_col : 收益类型枚举（默认次日开盘收益）
             return_freq : 收益频率（None 则沿用 Factor 现有收益）
             factors     : 指定 Factor，None 则使用 self.factors
             time_range  : 覆盖 self.start_date/end_date 的测试区间
+            parallel    : 是否并行计算
+            max_workers : 并行线程数
 
         返回：
             (ic_series_df, ic_stats_df) 两个 DataFrame
@@ -292,64 +386,155 @@ class FactorTester(UniqueObject):
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
-        ic_series = {}
-        ic_stats = {}
+        # ── 步骤 1: 构建去重后的收益率因子并并行计算 ──
+        from tools.factors.FactorFamily import Returns, _active_tester
+        ReturnsFamily = Returns()
+        returns_map: Dict[str, pd.DataFrame] = {}  # alias → returns DataFrame
+        factor_to_returns_alias: Dict[Factor, str] = {}  # 每个因子对应哪个 returns alias
+        unique_return_factors: List[Factor] = []
+        seen_return_aliases: Set[str] = set()
 
-        for factor in tqdm(factors, desc='Calculating IC'):
-            factor_rank = self.calc_rank(factor.table)
-            # 收益频率默认与因子信号频率一致；若与缓存不匹配则重新计算并记录
+        for factor in factors:
             effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
-            cached_freq = self.factor_return_freqs.get(factor)
-            if factor.returns.empty or cached_freq != effective_freq:
-                factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=effective_freq)
-                self.factor_return_freqs[factor] = effective_freq
-            return_df = factor.returns
-            assert not return_df.empty
-            return_rank = self.calc_rank(return_df)
-            factor_rank.index = _extract_signal_index(factor_rank.index)
-            return_rank.index = _extract_signal_index(return_rank.index)
-            # 取因子与收益的交集时间点，向量化按 start/end_date 截断
-            dt_index = factor_rank.index.intersection(return_rank.index)
-            if start_date is not None and len(dt_index) > 0:
-                dt_index = dt_index[dt_index >= _align_ts(pd.Timestamp(start_date), dt_index[0])]
-            if end_date is not None and len(dt_index) > 0:
-                dt_index = dt_index[dt_index <= _align_ts(pd.Timestamp(end_date), dt_index[0])]
-            ic = []
-            coverage = []
-            for dt in dt_index:
-                f = factor_rank.loc[dt]
-                r = return_rank.loc[dt]
-                valid = f.notna() & r.notna()
-                coverage.append(valid.sum())
-                if valid.sum() > 1:
-                    if f[valid].nunique() > 1 and r[valid].nunique() > 1:
-                        with np.errstate(invalid='ignore'):
-                            ic.append(pd.Series(f[valid]).corr(r[valid], method='spearman'))
-                    else:
-                        ic.append(np.nan)
+            shift = -1 if returns_col.value.name.startswith('OPEN') else 0
+            # 需要的是 next_return → S = shift (cf. calc_returns: S=shift if next_return else shift+1)
+            rf = ReturnsFamily.get_factor(
+                RF=effective_freq.value, SC=returns_col.value, S=shift)
+            r_alias = rf.alias
+            factor_to_returns_alias[factor] = r_alias
+            if r_alias not in seen_return_aliases:
+                seen_return_aliases.add(r_alias)
+                unique_return_factors.append(rf)
+
+        if unique_return_factors:
+            # 切换到数据源频率并记录旧频率
+            old_freq_map: Dict[Product, Any] = {}
+            sample_factor = factors[0]
+            if sample_factor.source_data_freq is not None and sample_factor.products:
+                for p in sample_factor.products:
+                    try:
+                        old_freq_map[p] = p.get_current_freq()
+                        if sample_factor.source_data_freq in p.list_available_freqs():
+                            p.set_current_freq(sample_factor.source_data_freq)
+                    except Exception:
+                        pass
+
+            try:
+                if parallel and len(unique_return_factors) > 1:
+                    token = _active_tester.get()
+                    def _calc_return_one(rf: Factor):
+                        _active_tester.set(token)
+                        return rf, rf.calc(sample_factor.products)
+                    with ThreadPoolExecutor(max_workers=min(max_workers, len(unique_return_factors))) as pool:
+                        ret_futures = {
+                            pool.submit(_calc_return_one, rf): rf
+                            for rf in unique_return_factors
+                        }
+                        for future in tqdm(as_completed(ret_futures), total=len(ret_futures),
+                                           desc='Calculating returns'):
+                            exc = future.exception()
+                            if exc is not None:
+                                for fut in ret_futures:
+                                    fut.cancel()
+                                raise RuntimeError(
+                                    f"calc_ic: {ret_futures[future].alias} 收益计算失败") from exc
+                            rf, ret_df = future.result()
+                            # post-processing: inf 清洗 & start_calc_point 截断
+                            ret_df = ret_df.replace([np.inf, -np.inf], np.nan)
+                            ret_df = ret_df.where(ret_df > -1.0, other=np.nan)
+                            if self.start_calc_point is not None and not ret_df.empty:
+                                idx = pd.DatetimeIndex(ret_df.index.get_level_values(-1))
+                                ts = pd.Timestamp(self.start_calc_point)
+                                if idx.tz is not None:
+                                    if ts.tzinfo is None:
+                                        ts = ts.tz_localize(idx.tz)
+                                    else:
+                                        ts = ts.tz_convert(idx.tz)
+                                else:
+                                    if ts.tzinfo is not None:
+                                        ts = ts.tz_convert('UTC').tz_localize(None)
+                                ret_df = ret_df[idx >= ts]
+                            returns_map[rf.alias] = ret_df
                 else:
-                    ic.append(np.nan)
-            # 若 factor.table 有 MultiIndex，将 ic_series 的索引还原为相同结构
-            if isinstance(factor.table.index, pd.MultiIndex):
-                tbl_signal_idx = _extract_signal_index(factor.table.index)
-                mask = tbl_signal_idx.isin(dt_index)
-                mapping = {sig: full for sig, full in zip(tbl_signal_idx[mask], factor.table.index[mask])}
-                valid = [ts for ts in dt_index if ts in mapping]
-                full_idx = pd.MultiIndex.from_tuples([mapping[ts] for ts in valid], names=factor.table.index.names)
-                ic_vals = [v for ts, v in zip(dt_index, ic) if ts in mapping]
-                factor.ic_series = pd.Series(ic_vals, index=full_idx)
-            else:
-                factor.ic_series = pd.Series(ic, index=dt_index)
-            ic_series[factor] = factor.ic_series
-            avg_coverage = np.mean(coverage)
-            stats_df = self.ic_stats(ic_series[factor])
-            stats_df['avg_coverage'] = avg_coverage
-            factor.ic_stats = stats_df
-            ic_stats[factor] = stats_df
-            # 同时存入 tester 的 per-factor 字典，供并发安全读取
-            self.factor_ic_series[factor] = factor.ic_series
-            self.factor_ic_stats[factor] = stats_df
-        return pd.DataFrame(ic_series), pd.DataFrame(ic_stats)
+                    for rf in tqdm(unique_return_factors, desc='Calculating returns'):
+                        ret_df = rf.calc(sample_factor.products)
+                        ret_df = ret_df.replace([np.inf, -np.inf], np.nan)
+                        ret_df = ret_df.where(ret_df > -1.0, other=np.nan)
+                        if self.start_calc_point is not None and not ret_df.empty:
+                            idx = pd.DatetimeIndex(ret_df.index.get_level_values(-1))
+                            ts = pd.Timestamp(self.start_calc_point)
+                            if idx.tz is not None:
+                                if ts.tzinfo is None:
+                                    ts = ts.tz_localize(idx.tz)
+                                else:
+                                    ts = ts.tz_convert(idx.tz)
+                            else:
+                                if ts.tzinfo is not None:
+                                    ts = ts.tz_convert('UTC').tz_localize(None)
+                            ret_df = ret_df[idx >= ts]
+                        returns_map[rf.alias] = ret_df
+            finally:
+                if old_freq_map:
+                    for p, f in old_freq_map.items():
+                        try:
+                            p.set_current_freq(f)
+                        except Exception:
+                            pass
+        # ── 步骤 2: 预计算 returns rank（避免每个因子重复 rank 同一 returns） ──
+        return_rank_map: Dict[str, pd.DataFrame] = {}
+        for r_alias, ret_df in returns_map.items():
+            return_rank_map[r_alias] = self.calc_rank(ret_df)
+
+        # ── 步骤 3: 并行 IC 计算（传入预计算的 returns 和 rank） ──
+
+        ic_series_map = {}
+        ic_stats_map = {}
+
+        if parallel and len(factors) > 1:
+            token = _active_tester.get()
+            def _calc_ic_one(factor: Factor):
+                _active_tester.set(token)
+                r_alias = factor_to_returns_alias[factor]
+                ret_df = returns_map.get(r_alias)
+                ret_rank = return_rank_map.get(r_alias)
+                return self._calc_ic_single(factor, returns_col, return_freq, start_date, end_date,
+                                            returns_df=ret_df, return_rank=ret_rank)
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
+                futures: dict = {
+                    pool.submit(_calc_ic_one, f): f
+                    for f in factors
+                }
+                for future in tqdm(as_completed(futures), total=len(futures), desc='Calculating IC'):
+                    exc = future.exception()
+                    if exc is not None:
+                        for fut in futures:
+                            fut.cancel()
+                        raise RuntimeError(
+                            f"calc_ic: {futures[future].alias} IC 计算失败") from exc
+                    factor, ic_s, ic_st = future.result()
+                    factor.ic_series = ic_s
+                    factor.ic_stats = ic_st
+                    ic_series_map[factor] = ic_s
+                    ic_stats_map[factor] = ic_st
+                    with self._sync_lock:
+                        self.factor_ic_series[factor] = ic_s
+                        self.factor_ic_stats[factor] = ic_st
+        else:
+            for factor in tqdm(factors, desc='Calculating IC'):
+                r_alias = factor_to_returns_alias[factor]
+                ret_df = returns_map.get(r_alias)
+                ret_rank = return_rank_map.get(r_alias)
+                factor, ic_s, ic_st = self._calc_ic_single(
+                    factor, returns_col, return_freq, start_date, end_date,
+                    returns_df=ret_df, return_rank=ret_rank)
+                factor.ic_series = ic_s
+                factor.ic_stats = ic_st
+                ic_series_map[factor] = ic_s
+                ic_stats_map[factor] = ic_st
+                self.factor_ic_series[factor] = ic_s
+                self.factor_ic_stats[factor] = ic_st
+
+        return pd.DataFrame(ic_series_map), pd.DataFrame(ic_stats_map)
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
         """

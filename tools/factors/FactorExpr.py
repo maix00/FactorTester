@@ -360,9 +360,12 @@ class FactorExpr:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _to_expr(value: Any) -> FactorExpr:
-    """将非 FactorExpr 值包装为 ConstExpr。"""
+    """将非 FactorExpr 值包装为 ConstExpr，将 Parameter 转为 ParamRef。"""
     if isinstance(value, FactorExpr):
         return value
+    from tools.parameters.Parameter import Parameter
+    if isinstance(value, Parameter):
+        return ParamRef(value)
     return ConstExpr(value)
 
 
@@ -513,8 +516,10 @@ class ParamRef(FactorExpr):
             "parameter values must be resolved by the FactorFamily before evaluation"
         )
 
-    def resolve(self, host: 'UniqueObject') -> Any:
-        """从宿主对象的注册表中取出当前参数值。"""
+    def resolve(self, host: 'UniqueObject', param_values: dict | None = None) -> Any:
+        """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
+        if param_values is not None and self.param.alias in param_values:
+            return param_values[self.param.alias]
         return self.param.get_value(host)
 
     @property
@@ -886,14 +891,19 @@ class ShiftOp(FactorExpr):
         deps = self.operand.param_deps.copy()
         if isinstance(self.periods, Parameter):
             deps.add(self.periods)
+        elif isinstance(self.periods, FactorExpr):
+            deps.update(self.periods.param_deps)
         return deps
 
     def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
         from tools.parameters.Parameter import Parameter
         self.operand._collect_params_ordered(seen, result)
-        if isinstance(self.periods, Parameter) and self.periods not in seen:
-            seen.add(self.periods)
-            result.append(self.periods)
+        if isinstance(self.periods, Parameter):
+            if self.periods not in seen:
+                seen.add(self.periods)
+                result.append(self.periods)
+        elif isinstance(self.periods, FactorExpr):
+            self.periods._collect_params_ordered(seen, result)
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
@@ -917,7 +927,7 @@ class ShiftOp(FactorExpr):
     @property
     def op_name(self) -> str:
         p = self.periods if isinstance(self.periods, int) else str(self.periods)
-        return f"REF_{p}"
+        return f"SHIFT_{p}"
 
     def to_latex(self) -> str:
         operand_latex = self.operand.to_latex()
@@ -931,14 +941,14 @@ class ShiftOp(FactorExpr):
         if isinstance(self.operand, (ColumnRef, ParamRef)) and operand_latex.endswith('_{t}'):
             base = operand_latex[:-3]  # 去掉 "{t}"，保留 "X_"
             return base + '{t - ' + p_label + '}'
-        return f"\\text{{REF}}_{{{p_label}}}({operand_latex})"
+        return f"\\text{{SHIFT}}_{{{p_label}}}({operand_latex})"
 
     def _get_alias(self) -> str:
         p = self.periods if isinstance(self.periods, int) else str(self.periods).replace(' ', '')
-        return f"ref_{self.operand._get_alias()}_{p}"
+        return f"shift_{self.operand._get_alias()}_{p}"
 
     def __repr__(self) -> str:
-        return f"ref({self.operand}, {self.periods})"
+        return f"shift({self.operand}, {self.periods})"
 
 
 def _resolve_bars(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
@@ -1091,6 +1101,36 @@ class CompositeExpr(FactorExpr):
             deps.add(opnd)
             deps.update(opnd.dependencies)
         return deps
+
+    @staticmethod
+    def _fold_const(op: str, operands: Tuple['ConstExpr', ...]) -> Optional['ConstExpr']:
+        """
+        常量折叠：当所有 operands 都是 ConstExpr 时，尝试直接计算。
+
+        返回 ConstExpr 或 None（无法折叠时）。
+        """
+        from tools.parameters.Parameter import Parameter
+        values = [opnd.value for opnd in operands]
+        try:
+            if op == 'add':
+                result = values[0] + values[1]
+            elif op == 'sub':
+                result = values[0] - values[1]
+            elif op == 'mul':
+                result = values[0] * values[1]
+            elif op == 'div':
+                result = values[0] / values[1]
+            elif op == 'neg':
+                result = -values[0]
+            elif op == 'abs':
+                result = abs(values[0])
+            else:
+                return None
+            if isinstance(result, Parameter):
+                return None
+            return ConstExpr(result)
+        except Exception:
+            return None
 
     @property
     def param_deps(self) -> Set['Parameter']:

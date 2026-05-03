@@ -325,3 +325,18 @@ th {
     color: #4a90d9;
     flex-shrink: 0;
 }
+
+/* ── IC 表格表头拖拽排序 ── */
+.ic-table th.draggable-col {
+    cursor: grab;
+    user-select: none;
+    transition: background 0.15s, opacity 0.15s;
+}
+.ic-table th.draggable-col:active {
+    cursor: grabbing;
+}
+.ic-table th.draggable-col.drag-over {
+    background: #d0e4f7;
+    outline: 2px dashed #4a90d9;
+    outline-offset: -2px;
+}

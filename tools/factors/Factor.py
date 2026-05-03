@@ -30,16 +30,16 @@ class Factor(UniqueObject):
     量化因子对象。
 
     属性：
-        func       (Callable)   : 计算因子值的函数，签名 func(products) → DataFrame
+        func       (Callable)    : 计算因子值的函数，签名 func(products) → DataFrame
         family     (FactorFamily): 创建此 Factor 的 FactorFamily 实例
-        params     (list)       : 参数对象列表
-        params_dict(dict)       : alias→Parameter 字典
-        table      (DataFrame)  : 因子值表，列=Product，索引=信号时间戳 MultiIndex
-        products   (set)        : 参与计算的 Product 集合
-        returns    (DataFrame)  : 对应下期收益表
-        ic_series  (Series)     : IC 时间序列
-        ic_stats   (Series)     : IC 统计量（mean/std/IR/t_stat/max/min）
-        report     (DataFrame)  : 测试报告（由 FactorFamily.test 写入）
+        params     (list)        : 参数对象列表
+        params_dict(dict)        : alias→Parameter 字典
+        table      (DataFrame)   : 因子值表，列=Product，索引=信号时间戳 MultiIndex
+        products   (set)         : 参与计算的 Product 集合
+        returns    (DataFrame)   : 对应下期收益表
+        ic_series  (Series)      : IC 时间序列
+        ic_stats   (Series)      : IC 统计量（mean/std/IR/t_stat/max/min）
+        report     (DataFrame)   : 测试报告（由 FactorFamily.test 写入）
     """
 
     def __new__(cls, alias: Optional[str] = None, *args, family=None, **kwargs):
@@ -87,6 +87,7 @@ class Factor(UniqueObject):
                     if param.alias.startswith('$'):
                         p = param
                     else:
+                        assert self.family is not None, "param_vals 中非$参数需要 family 来生成 clone_name"
                         clone_name = f"{param.alias}:{self.family.name}"
                         p = Parameter(name=clone_name, alias=param.alias,
                                       value_space=param._value_space,
