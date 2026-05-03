@@ -364,11 +364,8 @@ class FactorTester(UniqueObject):
         """
         计算 Spearman IC 序列及统计量。
 
-        流程：
-          1. 收集所有因子的收益率因子 → 去重 → 并行 calc（第二轮因子计算）
-          2. 对因子值和收益率分别做百分位秩排名
-          3. 逐时间点计算二者的 Spearman 相关系数
-          4. 汇总为 ic_series 和 ic_stats 写入各 Factor
+        使用 CrossSectionIC FactorFamily：将因子表达式 FE 和收益率表达式 RE
+        作为参数传入，统一预加载和求值后计算截面 Spearman 秩相关系数。
 
         参数：
             returns_col : 收益类型枚举（默认次日开盘收益）
@@ -386,13 +383,18 @@ class FactorTester(UniqueObject):
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
-        # ── 步骤 1: 构建去重后的收益率因子并并行计算 ──
-        from tools.factors.FactorFamily import Returns, _active_tester
-        ReturnsFamily = Returns()
-        returns_map: Dict[str, pd.DataFrame] = {}  # alias → returns DataFrame
-        factor_to_returns_alias: Dict[Factor, str] = {}  # 每个因子对应哪个 returns alias
-        unique_return_factors: List[Factor] = []
-        seen_return_aliases: Set[str] = set()
+        from tools.factors.FactorFamily import CrossSectionIC, _active_tester
+        from tools.factors.FactorExpr import DataColumn
+        from tools.parameters import DataColumnParam, TypeParam
+        from tools.parameters import WindowParam
+
+        CrossSectionFamily = CrossSectionIC()
+
+        # ── 构建去重参数组合 ──
+        # 每个因子有唯一的 FE 表达式和频率，RE 可能共享
+        # Key: (fe_expr_key, freq_key, lag, returns_col) — 去重后用同一个 CrossSectionIC Factor
+        ic_param_map: Dict[tuple, List[Factor]] = {}  # param_key → factors sharing it
+        param_key_info: Dict[tuple, tuple] = {}        # param_key → (fe_expr, freq, lag)
 
         for factor in factors:
             if return_freq is not None:
@@ -402,144 +404,127 @@ class FactorTester(UniqueObject):
             elif factor.source_data_freq is not None:
                 effective_freq = factor.source_data_freq
             else:
-                raise ValueError(f"Factor {factor.alias}: 无法确定频率，请先调用 calc() 或手动设置 freq/source_data_freq")
-            shift = -1 if returns_col.value.name.startswith('OPEN') else 0
-            # 需要的是 next_return → S = shift (cf. calc_returns: S=shift if next_return else shift+1)
-            rf = ReturnsFamily.get_factor(
-                RF=effective_freq.value, SC=returns_col.value, S=shift)
-            r_alias = rf.alias
-            factor_to_returns_alias[factor] = r_alias
-            if r_alias not in seen_return_aliases:
-                seen_return_aliases.add(r_alias)
-                unique_return_factors.append(rf)
+                raise ValueError(f"Factor {factor.alias}: 无法确定频率")
 
-        if unique_return_factors:
-            # 切换到数据源频率并记录旧频率
-            old_freq_map: Dict[Product, Any] = {}
-            sample_factor = factors[0]
-            if sample_factor.source_data_freq is not None and sample_factor.products:
-                for p in sample_factor.products:
+            # Lag: OPEN 类型用 -1（收益率领先1期 → Lag=1），否则用 0
+            lag = 1 if returns_col.value.name.startswith('OPEN') else 0
+            fe_expr = factor.family._expr if factor.family is not None else None
+            if fe_expr is None:
+                raise ValueError(f"Factor {factor.alias}: 没有关联的表达式树")
+            param_key = (id(fe_expr), effective_freq.name, lag, returns_col.value.name)
+            if param_key not in ic_param_map:
+                ic_param_map[param_key] = []
+                param_key_info[param_key] = (fe_expr, effective_freq, lag)
+            ic_param_map[param_key].append(factor)
+
+        # ── 构建 RE 表达式（共享） ──
+        # Returns: (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+        # 对于 IC，S=shift where shift=-1 for OPEN else 0
+        shift = -1 if returns_col.value.name.startswith('OPEN') else 0
+        SC = DataColumnParam('SC', default_value=returns_col.value)
+        RF = WindowParam('RF')
+        S = TypeParam('S', default_value=shift)
+        re_expr = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+
+        # ── 切换到数据源频率 ──
+        sample_factor = factors[0]
+        old_freq_map: Dict = {}
+        if sample_factor.source_data_freq is not None and sample_factor.products:
+            for p in sample_factor.products:
+                try:
+                    old_freq_map[p] = p.get_current_freq()
+                    if sample_factor.source_data_freq in p.list_available_freqs():
+                        p.set_current_freq(sample_factor.source_data_freq)
+                except Exception:
+                    pass
+
+        try:
+            ic_series_map = {}
+            ic_stats_map = {}
+
+            # ── 并行或串行计算每个去重参数组 ──
+            param_items = list(ic_param_map.items())
+
+            def _calc_one_group(param_key, factor_list):
+                fe_expr, effective_freq, lag = param_key_info[param_key]
+                # 创建 CrossSectionIC Factor
+                ic_factor = CrossSectionFamily.get_factor(
+                    FE=fe_expr,
+                    RE=re_expr,
+                    Lag=lag,
+                    F=effective_freq.value,
+                )
+                ic_factor.calc(sample_factor.products)
+
+                # 提取 IC 序列
+                ic_raw = ic_factor.table
+                if isinstance(ic_raw, pd.DataFrame):
+                    ic_series = ic_raw.iloc[:, 0] if ic_raw.shape[1] > 0 else pd.Series(dtype=float)
+                else:
+                    ic_series = ic_raw
+
+                # 时间范围截断
+                if start_date is not None and len(ic_series) > 0:
+                    ic_series = ic_series[ic_series.index.get_level_values(-1) >= start_date]
+                if end_date is not None and len(ic_series) > 0:
+                    ic_series = ic_series[ic_series.index.get_level_values(-1) <= end_date]
+
+                # 提取 RE 中间因子 → 写入 factor.returns
+                re_df = CrossSectionFamily.get_intermediate('RE')
+                fe_df = CrossSectionFamily.get_intermediate('FE')
+
+                for f in factor_list:
+                    if re_df is not None:
+                        f.returns = re_df.copy()
+                    if fe_df is not None and not hasattr(f, '_ic_fe_intermediate'):
+                        object.__setattr__(f, '_ic_fe_intermediate', fe_df.copy())
+
+                # 计算统计量
+                stats = self.ic_stats(ic_series)
+                return factor_list, ic_series, stats
+
+            if parallel and len(param_items) > 1:
+                token = _active_tester.get()
+                def _worker(item):
+                    _active_tester.set(token)
+                    pk, fl = item
+                    return _calc_one_group(pk, fl)
+                with ThreadPoolExecutor(max_workers=min(max_workers, len(param_items))) as pool:
+                    futures = {pool.submit(_worker, item): item for item in param_items}
+                    for future in tqdm(as_completed(futures), total=len(futures), desc='Calculating IC'):
+                        exc = future.exception()
+                        if exc is not None:
+                            for fut in futures:
+                                fut.cancel()
+                            raise RuntimeError("calc_ic: IC 计算失败") from exc
+                        factor_list, ic_series, stats = future.result()
+                        for f in factor_list:
+                            f.ic_series = ic_series
+                            f.ic_stats = stats
+                            ic_series_map[f] = ic_series
+                            ic_stats_map[f] = stats
+                            with self._sync_lock:
+                                self.factor_ic_series[f] = ic_series
+                                self.factor_ic_stats[f] = stats
+            else:
+                for param_key, factor_list in tqdm(param_items, desc='Calculating IC'):
+                    factor_list, ic_series, stats = _calc_one_group(param_key, factor_list)
+                    for f in factor_list:
+                        f.ic_series = ic_series
+                        f.ic_stats = stats
+                        ic_series_map[f] = ic_series
+                        ic_stats_map[f] = stats
+                        with self._sync_lock:
+                            self.factor_ic_series[f] = ic_series
+                            self.factor_ic_stats[f] = stats
+
+        finally:
+            if old_freq_map:
+                for p, f in old_freq_map.items():
                     try:
-                        old_freq_map[p] = p.get_current_freq()
-                        if sample_factor.source_data_freq in p.list_available_freqs():
-                            p.set_current_freq(sample_factor.source_data_freq)
+                        p.set_current_freq(f)
                     except Exception:
                         pass
-
-            try:
-                if parallel and len(unique_return_factors) > 1:
-                    token = _active_tester.get()
-                    def _calc_return_one(rf: Factor):
-                        _active_tester.set(token)
-                        return rf, rf.calc(sample_factor.products)
-                    with ThreadPoolExecutor(max_workers=min(max_workers, len(unique_return_factors))) as pool:
-                        ret_futures = {
-                            pool.submit(_calc_return_one, rf): rf
-                            for rf in unique_return_factors
-                        }
-                        for future in tqdm(as_completed(ret_futures), total=len(ret_futures),
-                                           desc='Calculating returns'):
-                            exc = future.exception()
-                            if exc is not None:
-                                for fut in ret_futures:
-                                    fut.cancel()
-                                raise RuntimeError(
-                                    f"calc_ic: {ret_futures[future].alias} 收益计算失败") from exc
-                            rf, ret_df = future.result()
-                            # post-processing: inf 清洗 & start_calc_point 截断
-                            ret_df = ret_df.replace([np.inf, -np.inf], np.nan)
-                            ret_df = ret_df.where(ret_df > -1.0, other=np.nan)
-                            if self.start_calc_point is not None and not ret_df.empty:
-                                idx = pd.DatetimeIndex(ret_df.index.get_level_values(-1))
-                                ts = pd.Timestamp(self.start_calc_point)
-                                if idx.tz is not None:
-                                    if ts.tzinfo is None:
-                                        ts = ts.tz_localize(idx.tz)
-                                    else:
-                                        ts = ts.tz_convert(idx.tz)
-                                else:
-                                    if ts.tzinfo is not None:
-                                        ts = ts.tz_convert('UTC').tz_localize(None)
-                                ret_df = ret_df[idx >= ts]
-                            returns_map[rf.alias] = ret_df
-                else:
-                    for rf in tqdm(unique_return_factors, desc='Calculating returns'):
-                        ret_df = rf.calc(sample_factor.products)
-                        ret_df = ret_df.replace([np.inf, -np.inf], np.nan)
-                        ret_df = ret_df.where(ret_df > -1.0, other=np.nan)
-                        if self.start_calc_point is not None and not ret_df.empty:
-                            idx = pd.DatetimeIndex(ret_df.index.get_level_values(-1))
-                            ts = pd.Timestamp(self.start_calc_point)
-                            if idx.tz is not None:
-                                if ts.tzinfo is None:
-                                    ts = ts.tz_localize(idx.tz)
-                                else:
-                                    ts = ts.tz_convert(idx.tz)
-                            else:
-                                if ts.tzinfo is not None:
-                                    ts = ts.tz_convert('UTC').tz_localize(None)
-                            ret_df = ret_df[idx >= ts]
-                        returns_map[rf.alias] = ret_df
-            finally:
-                if old_freq_map:
-                    for p, f in old_freq_map.items():
-                        try:
-                            p.set_current_freq(f)
-                        except Exception:
-                            pass
-        # ── 步骤 2: 预计算 returns rank（避免每个因子重复 rank 同一 returns） ──
-        return_rank_map: Dict[str, pd.DataFrame] = {}
-        for r_alias, ret_df in returns_map.items():
-            return_rank_map[r_alias] = self.calc_rank(ret_df)
-
-        # ── 步骤 3: 并行 IC 计算（传入预计算的 returns 和 rank） ──
-
-        ic_series_map = {}
-        ic_stats_map = {}
-
-        if parallel and len(factors) > 1:
-            token = _active_tester.get()
-            def _calc_ic_one(factor: Factor):
-                _active_tester.set(token)
-                r_alias = factor_to_returns_alias[factor]
-                ret_df = returns_map.get(r_alias)
-                ret_rank = return_rank_map.get(r_alias)
-                return self._calc_ic_single(factor, returns_col, return_freq, start_date, end_date,
-                                            returns_df=ret_df, return_rank=ret_rank)
-            with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
-                futures: dict = {
-                    pool.submit(_calc_ic_one, f): f
-                    for f in factors
-                }
-                for future in tqdm(as_completed(futures), total=len(futures), desc='Calculating IC'):
-                    exc = future.exception()
-                    if exc is not None:
-                        for fut in futures:
-                            fut.cancel()
-                        raise RuntimeError(
-                            f"calc_ic: {futures[future].alias} IC 计算失败") from exc
-                    factor, ic_s, ic_st = future.result()
-                    factor.ic_series = ic_s
-                    factor.ic_stats = ic_st
-                    ic_series_map[factor] = ic_s
-                    ic_stats_map[factor] = ic_st
-                    with self._sync_lock:
-                        self.factor_ic_series[factor] = ic_s
-                        self.factor_ic_stats[factor] = ic_st
-        else:
-            for factor in tqdm(factors, desc='Calculating IC'):
-                r_alias = factor_to_returns_alias[factor]
-                ret_df = returns_map.get(r_alias)
-                ret_rank = return_rank_map.get(r_alias)
-                factor, ic_s, ic_st = self._calc_ic_single(
-                    factor, returns_col, return_freq, start_date, end_date,
-                    returns_df=ret_df, return_rank=ret_rank)
-                factor.ic_series = ic_s
-                factor.ic_stats = ic_st
-                ic_series_map[factor] = ic_s
-                ic_stats_map[factor] = ic_st
-                self.factor_ic_series[factor] = ic_s
-                self.factor_ic_stats[factor] = ic_st
 
         return pd.DataFrame(ic_series_map), pd.DataFrame(ic_stats_map)
 

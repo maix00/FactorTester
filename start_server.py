@@ -1,11 +1,11 @@
 import os, threading, webbrowser, time
 from flask import request, jsonify, session
+from waitress import serve
 from server import create_app
 from server.shared import _current_user, _load_accounts, _accts_lock
 from tools.base.IdleResourceManager import IdleResourceManager
 
 app = create_app()
-
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
@@ -17,11 +17,8 @@ def shutdown():
     acct = next((a for a in accounts if a['username'] == username), None)
     if not acct or not acct.get('is_admin', False):
         return jsonify({'success': False, 'error': '无权限'}), 403
-    func = request.environ.get('werkzeug.server.shutdown')
-    if func:
-        func()
-    else:
-        threading.Thread(target=lambda: os._exit(0)).start()
+    # waitress 没有内置 shutdown 机制，直接退出进程
+    threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0))).start()
     return '', 200
 
 
@@ -39,7 +36,8 @@ def run_flask_server(port=8000, directory='.'):
         webbrowser.open(url)
 
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='localhost', port=port, debug=False, use_reloader=False)
+    print(f"服务器已启动 (waitress, threads=8)")
+    serve(app, host='0.0.0.0', port=port, threads=8)
     print("服务器已关闭。")
 
 

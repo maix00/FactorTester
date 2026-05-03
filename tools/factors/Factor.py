@@ -100,7 +100,9 @@ class Factor(UniqueObject):
             self.products: Set[Product] = set()
             self.source_data_freq: Optional[DataFreq] = None  # 因子计算实际使用的数据源频率（如 MIN1 / DAY1）
             # 计算结果的实例级回退（无活跃 FactorTester 时使用，例如独立脚本场景）
-            self._table: pd.DataFrame = pd.DataFrame()
+            self._source_table: pd.DataFrame = pd.DataFrame()  # sync 前完整高频数据（唯一真实数据源）
+            self._aligned_table: pd.DataFrame = pd.DataFrame()  # 当前信号频率对齐后的视图缓存
+            self._aligned_freq: Optional[DataFreq] = None       # _aligned_table 对应的信号频率
             self._returns: pd.DataFrame = pd.DataFrame()
             self._ic_series: pd.Series = pd.Series()
             self._ic_stats: pd.Series = pd.Series()
@@ -121,11 +123,31 @@ class Factor(UniqueObject):
             return None
 
     @property
+    def source_table(self) -> pd.DataFrame:
+        """sync 前的完整高频数据 — 因子的唯一真实数据源。"""
+        t = self._get_active_tester()
+        if t is not None:
+            return t.factor_source_tables.get(self, pd.DataFrame())
+        return self._source_table
+
+    @source_table.setter
+    def source_table(self, value: pd.DataFrame):
+        t = self._get_active_tester()
+        if t is not None:
+            t.factor_source_tables[self] = value
+        else:
+            self._source_table = value
+        # 清除 table 视图缓存
+        self._aligned_table = pd.DataFrame()
+        self._aligned_freq = None
+
+    @property
     def table(self) -> pd.DataFrame:
+        """信号对齐后的因子值 — source_table 的视图。"""
         t = self._get_active_tester()
         if t is not None:
             return t.factor_tables.get(self, pd.DataFrame())
-        return self._table
+        return self._aligned_table
 
     @table.setter
     def table(self, value: pd.DataFrame):
@@ -133,7 +155,7 @@ class Factor(UniqueObject):
         if t is not None:
             t.factor_tables[self] = value
         else:
-            self._table = value
+            self._aligned_table = value
 
     @property
     def returns(self) -> pd.DataFrame:
@@ -276,20 +298,24 @@ class Factor(UniqueObject):
         """
         计算因子值。
 
-        调用 self.func(products) 获取 DataFrame，
-        并自动：清除缓存索引（令 FactorFamily 重新构建信号同步索引）、
-        删除全 NaN 或常数列（无信息量的品种）、
-        写入 products 和 freq。
+        流程：
+          1. 调用 self.func(products) 获取信号对齐后的 DataFrame → table
+          2. 从 family._last_raw_result 获取 sync 前完整数据 → source_table
+          3. 删除全 NaN 或常数列，写入 products 和 freq
         """
         if isinstance(products, Product):
             products = [products]
         products = list(products)
         if not products:
             raise ValueError(f"{self}: 无法计算，因为没有提供产品")
-        # sync_signal 索引缓存被清除在 FactorFamily.func() 里（通过 tester.sync_signal_index = None）
         self.table = self.func(products)
         if self.table.empty:
             raise ValueError(f"{self}: 计算结果为空，请检查func的实现")
+        # 从 family 取 sync 前的完整高频数据
+        if self.family is not None and hasattr(self.family, '_last_raw_result'):
+            raw = self.family._last_raw_result
+            if raw is not None and not raw.empty:
+                self.source_table = raw
         # 删除全 NaN 或常数列（对因子无贡献的品种）
         col_todrop = [col for col in self.table.columns if (droppedna := self.table[col].dropna()).empty or max(droppedna) == min(droppedna)]
         self.table.drop(columns=col_todrop, inplace=True)

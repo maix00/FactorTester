@@ -21,14 +21,15 @@ import uuid
 import pandas as pd
 from functools import partial
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Sequence, Tuple, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Set
 
 from tools.factors.Factor import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorExpr import (
     FactorExpr, DataColumn, DataFreq,
     ColumnRef, ConstExpr, ParamRef, UnaryOp,
-    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    RollingOp, ShiftOp, CrossSectionalOp, CrossSectionalBinaryOp, CompositeExpr,
+    OperandExpr,
     WindowOp, CorrOp,  # 向后兼容别名
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, FactorNextPeriodReturns
@@ -470,6 +471,8 @@ class FactorFamily(UniqueObject):
         if isinstance(expr, ParamRef):
             value = expr.resolve(self, param_values=param_values)
             # 根据参数值类型决定替换为什么
+            if isinstance(value, FactorExpr):
+                return value       # 参数值本身是表达式（如 FE=某个因子表达式）
             if isinstance(expr.param, DataColumnParam):
                 from tools.data.DataColumn import DataColumn
                 return ColumnRef(DataColumn(value))
@@ -479,18 +482,33 @@ class FactorFamily(UniqueObject):
         if isinstance(expr, (ColumnRef, ConstExpr)):
             return expr  # 不变
 
-        # 一元算子 / 横截面算子：递归 operand（无额外参数）
-        if isinstance(expr, (UnaryOp, CrossSectionalOp)):
-            new_operand = self._resolve_expr_params(expr.operand, param_values=param_values)
-            if new_operand is expr.operand:
-                return expr
-            return type(expr)(expr.op, new_operand)
+        # ── OperandExpr 通用分发：委托给 _resolve_operand_expr ──
+        if isinstance(expr, OperandExpr):
+            resolved = self._resolve_operand_expr(expr, param_values)
+            if resolved is not None:
+                return resolved
 
-        # 滚动窗口算子（一元/二元/多元统一处理）：
-        #   - 递归解析所有操作数
-        #   - 解析 window Parameter → 实际值
+        return expr  # fallback
+
+    def _resolve_operand_expr(self, expr: 'OperandExpr', param_values: Optional[Dict[str, Any]]) -> Optional['OperandExpr']:
+        """
+        对 OperandExpr 子类进行参数解析和重建。
+
+        子类分发：
+          - RollingOp: 递归 operands + 解析 window
+          - ShiftOp: 递归 operand + 解析 periods
+          - CompositeExpr: 递归 operands + 常量折叠
+          - 其他（UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp）: 仅递归 operands
+        """
+        from tools.factors.FactorExpr import (
+            UnaryRollingOp, BinaryRollingOp, CompositeExpr, RollingOp, ShiftOp,
+            UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp,
+        )
+        from tools.parameters.Parameter import Parameter
+
+        # ── RollingOp: 递归所有 _operands，解析 window ──
         if isinstance(expr, RollingOp):
-            operands = expr._get_operands()
+            operands = expr._operands
             new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in operands)
             window = expr.window
             if isinstance(window, Parameter):
@@ -501,18 +519,15 @@ class FactorFamily(UniqueObject):
             if (all(a is b for a, b in zip(new_operands, operands))
                     and window is expr.window):
                 return expr
-            # 用已知子类型重建（避免 type(expr) 导致类型检查器无法推断签名）
-            from tools.factors.FactorExpr import UnaryRollingOp, BinaryRollingOp
             if isinstance(expr, UnaryRollingOp):
                 return UnaryRollingOp(expr.op, new_operands[0], window)
             elif isinstance(expr, BinaryRollingOp):
                 return BinaryRollingOp(expr.op, new_operands[0], new_operands[1], window)
             else:
-                # 自定义 RollingOp 子类，保持原实例只改 window
                 expr.window = window
                 return expr
 
-        # 位移算子：递归 operand，解析 periods 参数（periods 也可能是 FactorExpr）
+        # ── ShiftOp: 递归 operand，解析 periods ──
         if isinstance(expr, ShiftOp):
             new_operand = self._resolve_expr_params(expr.operand, param_values=param_values)
             periods = expr.periods
@@ -531,22 +546,27 @@ class FactorFamily(UniqueObject):
                 return expr
             return ShiftOp(expr.op, new_operand, periods)  # type: ignore[arg-type]
 
-        # 复合表达式：递归所有 operands，尝试常量折叠
+        # ── CompositeExpr: 递归所有 operands，尝试常量折叠 ──
         if isinstance(expr, CompositeExpr):
             new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in expr.operands)
             if all(a is b for a, b in zip(new_operands, expr.operands)):
                 return expr
-            # 常量折叠：全部是 ConstExpr 时直接计算
             if all(isinstance(opnd, ConstExpr) for opnd in new_operands):
                 try:
                     folded = CompositeExpr._fold_const(expr.op, new_operands)  # type: ignore[arg-type]
                     if folded is not None:
-                        return folded
+                        return folded  # type: ignore[return-type]
                 except Exception:
                     pass
             return CompositeExpr(expr.op, *new_operands)
 
-        return expr  # fallback
+        # ── 通用 OperandExpr（UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp）: 仅递归 operands ──
+        operands = expr.operands
+        new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in operands)
+        if all(a is b for a, b in zip(new_operands, operands)):
+            return expr
+        # 用原始类型重建
+        return type(expr)(expr.op, *new_operands)
 
     def func(self, products: Sequence['Product'], *args, **kwargs) -> pd.DataFrame:
         """
@@ -611,6 +631,9 @@ class FactorFamily(UniqueObject):
                 preloaded[(p, freq_name)] = data
 
         result = resolved.evaluate(products, freq, source=source, preloaded=preloaded)
+
+        # 保存未对齐的原始数据，供 Factor.source_table 使用
+        self._last_raw_result = result
 
         # ── 信号对齐 ──
         signal_df = self._align_to_signal(result, signal_freq)
@@ -750,3 +773,168 @@ class Returns(FactorFamily):
         if 'RF' in kwargs:
             kwargs['F'] = kwargs['RF']
         return super().func(products, *args, **kwargs)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CrossSectionIC —— 统一截面 IC 因子族
+# ═════════════════════════════════════════════════════════════════════════════
+
+class CrossSectionIC(FactorFamily):
+    """
+    截面 IC 因子族：接受主因子表达式 FE 和收益率表达式 RE 作为参数，
+    通过 factor_expr() 声明式地计算截面 Spearman 秩相关系数。
+
+    参数：
+        FE  : 主因子表达式树 (FactorExpr)
+        RE  : 收益率表达式树 (FactorExpr)，默认使用 Returns 族表达式
+        Lag : IC 时滞，非负整数。0=同期IC，Lag>0=因子领先收益率Lag期
+        F   : 信号频率（复用 FactorFreqParam）
+    """
+
+    source_freq = 'MIN1'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._intermediates: dict[str, pd.DataFrame] = {}
+
+    def _save_intermediate(self, name: str, df: pd.DataFrame) -> None:
+        """保存中间因子 DataFrame（如 'FE', 'RE'），供外部取用。"""
+        self._intermediates[name] = df
+
+    def get_intermediate(self, name: str) -> pd.DataFrame | None:
+        """获取已保存的中间因子 DataFrame。"""
+        return self._intermediates.get(name, None)
+
+    @staticmethod
+    def factor_expr():
+        from tools.parameters import FactorParam, TypeParam
+        from tools.factors.FactorExpr import CrossSectionalBinaryOp
+        FE = FactorParam('FE')
+        RE = FactorParam('RE')
+        Lag = TypeParam('Lag', default_value=0, typ=int)
+        # 截面 IC = cs_spearman(FE, RE.shift(-Lag))
+        # Lag>0 表示因子领先收益率 Lag 期：用 Lag 期前的 RE 与当期 FE 计算
+        return FE.cs_spearman(RE.shift(-Lag))
+
+    def func(self, products, *args, **kwargs):
+        """
+        求值 FE 和 RE 子表达式，保存中间结果，然后计算截面 IC。
+        """
+        kwargs = self._normalize_param_kwargs(**kwargs)
+        signal_freq = kwargs.get('F', pd.Timedelta('1d'))
+        is_reversed: bool = kwargs.pop('$Rev', False)
+        source = kwargs.pop('source', None)
+
+        freq = DataFreq(self._source_freq_name)
+        if self._expr is None:
+            raise TypeError(f"{self.__class__.__name__}: 未定义 expr")
+
+        # 构建 FE 和 RE 子表达式
+        # factor_expr() 返回的树中，FE 和 RE 是 CrossSectionalBinaryOp 的左右子节点
+        # 但我们需要单独求值它们来保存中间结果
+        from tools.parameters import TypeParam
+        fe_param = next((p for p in self.params if p.alias == 'FE'), None)
+        re_param = next((p for p in self.params if p.alias == 'RE'), None)
+
+        param_values = {
+            p.alias: kwargs[p.alias]
+            for p in self.params if p.alias in kwargs
+        }
+
+        # 构建 FE 子表达式
+        from tools.factors.FactorExpr import ParamRef, ColumnRef
+        fe_expr = ParamRef(fe_param) if fe_param else None
+        re_expr = ParamRef(re_param) if re_param else None
+
+        # 若 RE 未提供，用内置 Returns 表达式
+        if re_expr is None or kwargs.get('RE', None) is None:
+            from tools.parameters import DataColumnParam, WindowParam
+            SC = DataColumnParam('SC', default_value=DataColumn.CLOSE)
+            RF = WindowParam('RF', default_value='1d')
+            S = TypeParam('S', default_value=0)
+            re_expr = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+            re_param = None
+
+        # 解析参数
+        fe_resolved = self._resolve_expr_params(fe_expr, param_values=param_values)  # type: ignore[arg-type]
+        if re_param is not None:
+            re_resolved = self._resolve_expr_params(re_expr, param_values=param_values)
+        else:
+            re_resolved = re_expr  # Returns 表达式不含 ParamRef
+
+        # 校验：抛出具体原因，而非 AttributeError: 'ConstExpr' has no 'index'
+        from tools.factors.FactorExpr import ConstExpr
+        if isinstance(fe_resolved, ConstExpr) and fe_resolved.value is None:
+            fe_val = kwargs.get('FE', fe_param and fe_param.default_value)
+            raise ValueError(f"FE 参数未设置 (当前值: {fe_val!r})，请为 {self.name} 指定 FE 表达式。")
+
+        # ── 统一预加载 ──
+        from tools.data.DataMeta import DataMeta
+        fe_refs = fe_resolved.collect_column_refs()
+        re_refs = re_resolved.collect_column_refs()
+        all_refs = fe_refs | re_refs
+
+        preloaded: dict = {}
+        prod_freq_cols: dict[tuple, set] = {}
+        for cr in all_refs:
+            col_name = cr.column.name
+            for p in products:
+                key = (p, freq.name)
+                if key not in prod_freq_cols:
+                    prod_freq_cols[key] = set()
+                prod_freq_cols[key].add(col_name)
+
+        for (p, freq_name), cols in prod_freq_cols.items():
+            dm: DataMeta = getattr(p, freq_name)
+            if source is not None:
+                try:
+                    dm.set_current_source(source)
+                except ValueError:
+                    continue
+            if dm.next_available_source() is None:
+                continue
+            data = dm.get_and_adjust_cols(list(cols), copy=False)
+            if not data.empty:
+                preloaded[(p, freq_name)] = data
+
+        # ── 分别求值 FE / RE ──
+        fe_raw = fe_resolved.evaluate(products, freq, preloaded=preloaded)
+        re_raw = re_resolved.evaluate(products, freq, preloaded=preloaded)
+
+        # ── 信号对齐 ──
+        fe_df = self._align_to_signal(fe_raw, signal_freq)
+        re_df = self._align_to_signal(re_raw, signal_freq)
+
+        if is_reversed:
+            fe_df = -fe_df
+
+        # 保存中间因子
+        self._save_intermediate('FE', fe_df)
+        self._save_intermediate('RE', re_df)
+
+        # ── Lag 位移：RE.shift(-Lag)，Lag>0 时用历史 RE ──
+        lag = kwargs.get('Lag', 0)
+        if lag != 0:
+            re_df = re_df.shift(-lag)
+
+        # ── 截面 Spearman IC ──
+        from tools.factors.FactorExpr import CrossSectionalBinaryOp
+        import numpy as np
+        result = CrossSectionalBinaryOp._apply_spearman(fe_df, re_df)
+
+        # 还原为 MultiIndex
+        from tools.factors.FactorTester import _extract_signal_index as _ext_sig
+        if isinstance(fe_df.index, pd.MultiIndex):
+            fe_sig = _ext_sig(fe_df.index)
+            dt_index = result.index
+            mask = fe_sig.isin(dt_index)
+            mapping = {sig: full for sig, full in zip(fe_sig[mask], fe_df.index[mask])}
+            valid_ts = [ts for ts in dt_index if ts in mapping]
+            full_idx = pd.MultiIndex.from_tuples(
+                [mapping[ts] for ts in valid_ts],
+                names=fe_df.index.names)
+            ic_vals = [result.loc[ts, result.columns[0]] if ts in result.index else np.nan
+                       for ts in valid_ts]
+            result = pd.Series(ic_vals, index=full_idx)
+
+        return result.to_frame(name=self.name) if isinstance(result, pd.Series) else result

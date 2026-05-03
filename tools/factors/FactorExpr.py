@@ -141,6 +141,53 @@ class FactorExpr:
     def __hash__(self) -> int:
         return id(self)
 
+    # ── 子类必须实现的接口 ──
+
+    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+                 source: Optional['DataSource'] = None,
+                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
+        """求值：对给定品种集合和数据频率，计算因子值。"""
+        raise NotImplementedError
+
+    @property
+    def op_name(self) -> str:
+        """表达式操作名，用于生成别名和 LaTeX。"""
+        raise NotImplementedError
+
+    def to_latex(self) -> str:
+        """生成 LaTeX 数学表达式。"""
+        raise NotImplementedError
+
+    def _get_alias(self) -> str:
+        """生成唯一别名，用于 Factor 注册。"""
+        raise NotImplementedError
+
+    @property
+    def dependencies(self) -> Set['FactorExpr']:
+        """返回此节点依赖的上游表达式集合（不含自身）。"""
+        return set()
+
+    @property
+    def param_deps(self) -> Set['Parameter']:
+        """返回此节点依赖的参数集合。"""
+        return set()
+
+    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
+        """深度优先遍历收集参数，结果按首次出现顺序存入 result。"""
+        pass
+
+    @property
+    def ordered_param_deps(self) -> List['Parameter']:
+        seen: Set['Parameter'] = set()
+        result: List['Parameter'] = []
+        self._collect_params_ordered(seen, result)
+        return result
+
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        """收集表达式树中的所有 ColumnRef 叶子节点。"""
+        return set()
+
     # ── 运算符重载：自动构建 CompositeExpr ──
 
     def __add__(self, other: Any) -> 'CompositeExpr':
@@ -214,71 +261,6 @@ class FactorExpr:
     def min(self, other: Any) -> 'CompositeExpr':
         """逐元素最小值：fmin(self, other)。"""
         return CompositeExpr('min', self, _to_expr(other))
-
-    # ── 子类必须实现的接口 ──
-
-    @property
-    def dependencies(self) -> Set['FactorExpr']:
-        """返回此节点依赖的上游表达式集合。叶子节点返回空集。"""
-        raise NotImplementedError
-
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        """返回此节点依赖的参数集合。叶子节点返回空集。"""
-        raise NotImplementedError
-
-    @property
-    def ordered_param_deps(self) -> List['Parameter']:
-        """按表达式树深度优先遍历顺序返回依赖的参数列表（去重保留首次出现顺序）。"""
-        seen: Set['Parameter'] = set()
-        result: List['Parameter'] = []
-        self._collect_params_ordered(seen, result)
-        return result
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        """叶子节点默认无参数。子类按需覆盖。"""
-        pass
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        """
-        收集表达式树中所有 ColumnRef 叶子节点。
-        用于在求值前批量预加载所有需要的列数据，避免逐列重复读取。
-        """
-        raise NotImplementedError
-
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        """
-        求值：对给定品种集合和数据频率，计算因子值。
-
-        返回 DataFrame，列为 Product，索引为时间（MultiIndex）。
-
-        参数：
-            products  : 品种列表
-            freq      : 使用的数据频率（通常是 product.MIN1 的 freq）
-            source    : 数据源。None=自动选择，指定后校验是否兼容
-            cache     : 表达式→DataFrame 缓存（避免重复计算）
-            preloaded : 预加载的数据字典 {(product, freq_name): DataFrame}，
-                        ColumnRef 优先从此字典提取列，避免重复 dm.get_and_adjust_cols()
-        """
-        raise NotImplementedError
-
-    @property
-    def op_name(self) -> str:
-        """表达式操作名，用于生成别名和 LaTeX。"""
-        raise NotImplementedError
-
-    def to_latex(self) -> str:
-        """生成 LaTeX 数学表达式。"""
-        raise NotImplementedError
-
-    # ── 别名生成 ──
-
-    def _get_alias(self) -> str:
-        """生成唯一别名，用于 Factor 注册。"""
-        raise NotImplementedError
 
     # ── 便利方法：时序算子 ──
 
@@ -364,6 +346,10 @@ class FactorExpr:
         """横截面排名（从小到大，0~1 归一化）。"""
         return CrossSectionalOp('cs_rank', self)
 
+    def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalBinaryOp':
+        """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
+        return CrossSectionalBinaryOp('cs_spearman', self, other)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 辅助：将标量/ndarray 转为 ConstExpr
@@ -377,6 +363,104 @@ def _to_expr(value: Any) -> FactorExpr:
     if isinstance(value, Parameter):
         return ParamRef(value)
     return ConstExpr(value)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Layer 1.5: 多元算子基类
+# ═════════════════════════════════════════════════════════════════════════════
+
+class OperandExpr(FactorExpr):
+    """
+    多元算子基类 — 所有含有子表达式的节点继承此类。
+
+    核心设计：
+      - __init__(op, *operands) 存储操作名和子表达式元组
+      - _operands 属性自动从 self.operands 派生
+      - evaluate() 递归求值所有子表达式 → 调用 _apply_op(values)
+      - 子类只需覆盖 _apply_op() 和展示方法（op_name/to_latex/_get_alias）
+
+    dependencies / param_deps / collect_column_refs / _collect_params_ordered
+    均从 _operands 自动派生，无需子类覆盖。
+    """
+
+    def __init__(self, op: str, *operands: 'FactorExpr'):
+        self.op = op
+        self.operands: Tuple[FactorExpr, ...] = operands
+
+    @property
+    def _operands(self) -> Sequence['FactorExpr']:
+        return self.operands
+
+    @property
+    def dependencies(self) -> Set['FactorExpr']:
+        deps: Set['FactorExpr'] = set()
+        for opnd in self._operands:
+            deps.add(opnd)
+            deps.update(opnd.dependencies)
+        return deps
+
+    @property
+    def param_deps(self) -> Set['Parameter']:
+        deps: Set['Parameter'] = set()
+        for opnd in self._operands:
+            deps |= opnd.param_deps
+        return deps
+
+    @property
+    def ordered_param_deps(self) -> List['Parameter']:
+        seen: Set['Parameter'] = set()
+        result: List['Parameter'] = []
+        self._collect_params_ordered(seen, result)
+        return result
+
+    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
+        for opnd in self._operands:
+            opnd._collect_params_ordered(seen, result)
+
+    def collect_column_refs(self) -> Set['ColumnRef']:
+        result: Set['ColumnRef'] = set()
+        for opnd in self._operands:
+            result.update(opnd.collect_column_refs())
+        return result
+
+    # ── 通用求值 ──
+
+    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+                 source: Optional['DataSource'] = None,
+                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
+        if cache is not None and self in cache:
+            return cache[self]
+
+        values = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
+                  for opnd in self.operands]
+        result = self._apply_op(values)
+
+        if cache is not None:
+            cache[self] = result
+        return result
+
+    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
+        """子类覆盖：对已求值的 operands DataFrame 执行核心运算。"""
+        raise NotImplementedError
+
+    # ── 展示方法 ──
+
+    @property
+    def op_name(self) -> str:
+        return self.op.upper()
+
+    def to_latex(self) -> str:
+        parts = [opnd.to_latex() for opnd in self.operands]
+        return f'\\text{{{self.op}}}({", ".join(parts)})'
+
+    def _get_alias(self) -> str:
+        parts = [opnd._get_alias() for opnd in self.operands]
+        return f"{self.op.upper()}_{'_'.join(parts)}"
+
+    def __repr__(self) -> str:
+        parts = [repr(opnd) for opnd in self.operands]
+        return f"{self.op}({', '.join(parts)})"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -422,14 +506,6 @@ class ColumnRef(FactorExpr):
             return available_sources[0]
         else:
             return None
-
-    @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return set()
-
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        return set()
 
     def collect_column_refs(self) -> Set['ColumnRef']:
         return {self}
@@ -516,10 +592,6 @@ class ParamRef(FactorExpr):
         self.param = param
 
     @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return set()
-
-    @property
     def param_deps(self) -> Set['Parameter']:
         return {self.param}
 
@@ -527,9 +599,6 @@ class ParamRef(FactorExpr):
         if self.param not in seen:
             seen.add(self.param)
             result.append(self.param)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        return set()
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
@@ -574,17 +643,6 @@ class ConstExpr(FactorExpr):
     def __init__(self, value: Union[int, float, np.ndarray]):
         self.value = value
 
-    @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return set()
-
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        return set()
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        return set()
-
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
@@ -614,38 +672,20 @@ class ConstExpr(FactorExpr):
 # Layer 3: 一元算子
 # ═════════════════════════════════════════════════════════════════════════════
 
-class UnaryOp(FactorExpr):
+class UnaryOp(OperandExpr):
     """
-    一元算子：LOG, SIGN, ABS, NEG, NOT 等。
+    一元算子：LOG, SIGN, ABS, NEG, NOT, SQRT 等。
     """
 
     def __init__(self, op: str, operand: FactorExpr):
-        self.op = op
-        self.operand = operand
+        super().__init__(op, operand)
 
     @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return {self.operand}
+    def operand(self) -> FactorExpr:
+        return self.operands[0]
 
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        return self.operand.param_deps
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        self.operand._collect_params_ordered(seen, result)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        return self.operand.collect_column_refs()
-
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
-
-        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
-
+    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
+        x = values[0]
         _OP_MAP = {
             'log': np.log,
             'sign': np.sign,
@@ -654,16 +694,7 @@ class UnaryOp(FactorExpr):
             'not': np.logical_not,
             'sqrt': np.sqrt,
         }
-        func = _OP_MAP[self.op]
-        result = func(x)
-
-        if cache is not None:
-            cache[self] = result
-        return result
-
-    @property
-    def op_name(self) -> str:
-        return self.op.upper()
+        return _OP_MAP[self.op](x)
 
     def to_latex(self) -> str:
         operand_latex = self.operand.to_latex()
@@ -688,7 +719,7 @@ class UnaryOp(FactorExpr):
 # Layer 4: 滚动窗口算子
 # ═════════════════════════════════════════════════════════════════════════════
 
-class RollingOp(FactorExpr):
+class RollingOp(OperandExpr):
     """
     滚动窗口算子抽象基类。
 
@@ -706,7 +737,8 @@ class RollingOp(FactorExpr):
 
     # ── 子类必须实现 ──
 
-    def _get_operands(self) -> Sequence[FactorExpr]:
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
         """返回此算子依赖的所有操作数表达式。"""
         raise NotImplementedError
 
@@ -716,7 +748,7 @@ class RollingOp(FactorExpr):
         核心滚动运算。
 
         参数：
-            dfs    : 各操作数的求值结果（与 _get_operands() 顺序一致）
+            dfs    : 各操作数的求值结果（与 _operands 顺序一致）
             window : 已解析为整数 bar 数的窗口
             freq   : 数据频率
         返回：
@@ -731,17 +763,13 @@ class RollingOp(FactorExpr):
             return str(w)
         return str(w).replace(' ', '')
 
-    # ── 公共接口（子类无需覆盖） ──
-
-    @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return set(self._get_operands())
+    # ── window 参数相关（覆盖基类默认实现） ──
 
     @property
     def param_deps(self) -> Set['Parameter']:
         from tools.parameters.Parameter import Parameter
         deps: Set['Parameter'] = set()
-        for opnd in self._get_operands():
+        for opnd in self._operands:
             deps |= opnd.param_deps
         if isinstance(self.window, Parameter):
             deps.add(self.window)
@@ -749,17 +777,11 @@ class RollingOp(FactorExpr):
 
     def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
         from tools.parameters.Parameter import Parameter
-        for opnd in self._get_operands():
+        for opnd in self._operands:
             opnd._collect_params_ordered(seen, result)
         if isinstance(self.window, Parameter) and self.window not in seen:
             seen.add(self.window)
             result.append(self.window)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        result: Set['ColumnRef'] = set()
-        for opnd in self._get_operands():
-            result.update(opnd.collect_column_refs())
-        return result
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
@@ -768,7 +790,7 @@ class RollingOp(FactorExpr):
         if cache is not None and self in cache:
             return cache[self]
 
-        operands = self._get_operands()
+        operands = self._operands
         dfs = tuple(opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
                     for opnd in operands)
         window = _resolve_bars(self.window, freq)
@@ -796,7 +818,8 @@ class UnaryRollingOp(RollingOp):
         self.op = op           # 'ma', 'std', 'var', 'min', 'max', 'sum', 'ema', 'skew', 'argmax', 'argmin'
         self.operand = operand
 
-    def _get_operands(self) -> Sequence[FactorExpr]:
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
         return (self.operand,)
 
     def _apply_rolling(self, dfs: Sequence[pd.DataFrame],
@@ -865,7 +888,8 @@ class BinaryRollingOp(RollingOp):
         self.left = left
         self.right = right
 
-    def _get_operands(self) -> Sequence[FactorExpr]:
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
         return (self.left, self.right)
 
     def _apply_rolling(self, dfs: Sequence[pd.DataFrame],
@@ -906,7 +930,7 @@ WindowOp = UnaryRollingOp   # 旧名，保持兼容
 CorrOp = BinaryRollingOp    # 旧名，保持兼容
 
 
-class ShiftOp(FactorExpr):
+class ShiftOp(OperandExpr):
     """
     位移算子：SHIFT(x, N) 即前 N 期的 x 值。
 
@@ -923,8 +947,8 @@ class ShiftOp(FactorExpr):
         self.periods = periods
 
     @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return {self.operand}
+    def _operands(self) -> Sequence['FactorExpr']:
+        return (self.operand,)
 
     @property
     def param_deps(self) -> Set['Parameter']:
@@ -947,7 +971,7 @@ class ShiftOp(FactorExpr):
             self.periods._collect_params_ordered(seen, result)
 
     def collect_column_refs(self) -> Set['ColumnRef']:
-        result = self.operand.collect_column_refs()
+        result = super().collect_column_refs()
         if isinstance(self.periods, FactorExpr):
             result.update(self.periods.collect_column_refs())
         return result
@@ -1025,60 +1049,31 @@ def _resolve_bars(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: Dat
 # Layer 5: 横截面算子
 # ═════════════════════════════════════════════════════════════════════════════
 
-class CrossSectionalOp(FactorExpr):
+class CrossSectionalOp(OperandExpr):
     """
-    横截面算子：CS_ZSCORE, CS_RANK 等。
+    一元横截面算子：CS_ZSCORE, CS_RANK 等。
 
     在每个时间点对横截面（所有品种）进行聚合计算。
     """
 
     def __init__(self, op: str, operand: FactorExpr):
-        self.op = op
-        self.operand = operand
+        super().__init__(op, operand)
 
     @property
-    def dependencies(self) -> Set[FactorExpr]:
-        return {self.operand}
+    def operand(self) -> FactorExpr:
+        return self.operands[0]
 
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        return self.operand.param_deps
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        self.operand._collect_params_ordered(seen, result)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        return self.operand.collect_column_refs()
-
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
-
-        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
-        # x: DataFrame, index=MultiIndex(time), columns=Product
-
+    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
+        x = values[0]
         if self.op == 'cs_zscore':
-            # (x - mean) / std, across columns at each time point
             mean = x.mean(axis=1)
             std = x.std(axis=1)
-            std = std.replace(0, np.nan)  # 避免除零
-            result = x.sub(mean, axis=0).div(std, axis=0)
+            std = std.replace(0, np.nan)
+            return x.sub(mean, axis=0).div(std, axis=0)
         elif self.op == 'cs_rank':
-            # rank from 0 to 1
-            result = x.rank(axis=1, pct=True) - 0.5  # 中心化到 [-0.5, 0.5]
+            return x.rank(axis=1, pct=True) - 0.5
         else:
             raise ValueError(f"Unknown cross-sectional op: {self.op}")
-
-        if cache is not None:
-            cache[self] = result
-        return result
-
-    @property
-    def op_name(self) -> str:
-        return self.op.upper()
 
     def to_latex(self) -> str:
         operand_latex = self.operand.to_latex()
@@ -1096,18 +1091,83 @@ class CrossSectionalOp(FactorExpr):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 二元横截面算子
+# ═════════════════════════════════════════════════════════════════════════════
+
+class CrossSectionalBinaryOp(OperandExpr):
+    """
+    二元横截面算子：cs_spearman 等。
+    """
+
+    def __init__(self, op: str, left: FactorExpr, right: FactorExpr):
+        super().__init__(op, left, right)
+
+    @property
+    def left(self) -> FactorExpr:
+        return self.operands[0]
+
+    @property
+    def right(self) -> FactorExpr:
+        return self.operands[1]
+
+    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
+        left_df, right_df = values[0], values[1]
+        if self.op == 'cs_spearman':
+            return self._apply_spearman(left_df, right_df)
+        raise ValueError(f"Unknown cross-sectional binary op: {self.op}")
+
+    @staticmethod
+    def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
+        import numpy as np
+        common_idx = left_df.index.intersection(right_df.index)
+        ic_values = []
+        idx_list = []
+        for idx in common_idx:
+            l = left_df.loc[idx]
+            r = right_df.loc[idx]
+            if isinstance(l, pd.DataFrame):
+                l = l.iloc[0]
+            if isinstance(r, pd.DataFrame):
+                r = r.iloc[0]
+            valid = l.notna() & r.notna()
+            if valid.sum() > 1 and l[valid].nunique() > 1 and r[valid].nunique() > 1:
+                with np.errstate(invalid='ignore'):
+                    ic_values.append(pd.Series(l[valid]).corr(r[valid], method='spearman'))
+            else:
+                ic_values.append(np.nan)
+            idx_list.append(idx)
+        result = pd.DataFrame({'IC': ic_values}, index=pd.Index(idx_list))
+        result.index.names = left_df.index.names
+        return result
+
+    def to_latex(self) -> str:
+        left_latex = self.left.to_latex()
+        right_latex = self.right.to_latex()
+        if self.op == 'cs_spearman':
+            return f'\\rho_s({left_latex}, {right_latex})'
+        return f'\\text{{{self.op}}}({left_latex}, {right_latex})'
+
+    def _get_alias(self) -> str:
+        return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
+
+    def __repr__(self) -> str:
+        return f"{self.op}({self.left}, {self.right})"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Layer 6: 复合表达式（二元运算树节点）
 # ═════════════════════════════════════════════════════════════════════════════
 
-class CompositeExpr(FactorExpr):
+class CompositeExpr(OperandExpr):
     """
-    复合表达式 — 由两个子表达式通过二元运算符组合而成。
+    复合表达式 — 元素级多元运算。
 
-    表达式树内部节点。支持：
+    支持：
       - add, sub, mul, div（算术）
       - gt, lt, ge, le, eq, ne（比较）
       - and, or（逻辑）
-      - max, min（多元聚合）
+      - max, min, pow（多元聚合）
+      - neg, abs, not（一元）
     """
 
     _ARITH_OPS = {
@@ -1138,21 +1198,7 @@ class CompositeExpr(FactorExpr):
     }
 
     def __init__(self, op: str, *operands: FactorExpr):
-        """
-        参数：
-            op      : 操作名（'add', 'sub', 'mul', 'div', 'gt', ...）
-            *operands : 子表达式（1 个用于一元 op，2 个用于二元 op）
-        """
-        self.op = op
-        self.operands: Tuple[FactorExpr, ...] = operands
-
-    @property
-    def dependencies(self) -> Set[FactorExpr]:
-        deps: Set[FactorExpr] = set()
-        for opnd in self.operands:
-            deps.add(opnd)
-            deps.update(opnd.dependencies)
-        return deps
+        super().__init__(op, *operands)
 
     @staticmethod
     def _fold_const(op: str, operands: Tuple['ConstExpr', ...]) -> Optional['ConstExpr']:
@@ -1184,43 +1230,8 @@ class CompositeExpr(FactorExpr):
         except Exception:
             return None
 
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        pdeps: Set['Parameter'] = set()
-        for opnd in self.operands:
-            pdeps.update(opnd.param_deps)
-        return pdeps
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        """按 operands 顺序深度优先收集参数。"""
-        for opnd in self.operands:
-            opnd._collect_params_ordered(seen, result)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        result: Set['ColumnRef'] = set()
-        for opnd in self.operands:
-            result.update(opnd.collect_column_refs())
-        return result
-
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
-
-        # 递归求值所有子表达式
-        values = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
-                  for opnd in self.operands]
-
-        result = self._apply_op(values)
-
-        if cache is not None:
-            cache[self] = result
-        return result
-
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
-        """根据 op 类型执行实际运算。"""
+        """根据 op 类型执行实际运算（由 OperandExpr.evaluate 调用）。"""
         v = values
 
         # 一元算
