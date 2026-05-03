@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class OiAmtChgRat(FactorFamily):
     """持仓金额变化率。\n\n    参数：\n        P (DataColumn) : 价格列\n        OI (DataColumn) : 持仓量列\n        N (Timedelta)   : 回看窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

@@ -172,12 +172,13 @@ class FactorTester(UniqueObject):
         for f in list(self.factors):
             try:
                 # 清理非$开头的 Parameter 副本（name = {alias}:{factor.name}）
-                for param in list(f.params):
-                    if not param.alias.startswith('$'):
-                        try:
-                            param.delete()
-                        except Exception:
-                            pass
+                if f.family is not None:
+                    for param in list(f.family.params):
+                        if not param.alias.startswith('$'):
+                            try:
+                                param.delete()
+                            except Exception:
+                                pass
                 f.clear()
                 f.delete()
             except Exception:
@@ -464,7 +465,9 @@ class FactorTester(UniqueObject):
                     Lag=lag,
                     F=effective_freq.value,
                 )
-                ic_factor.calc(sample_factor.products)
+                # 复用主因子的 source_freq，确保索引一致
+                ic_factor.calc(sample_factor.products,
+                               source_freq=sample_factor.source_data_freq)
 
                 # 提取 IC 序列
                 ic_raw = ic_factor.table

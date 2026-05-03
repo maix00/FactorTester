@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmPosPct(FactorFamily):
     """正收益占比（胜率）因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        WF (Timedelta) : 统计窗口\n        RF (Timedelta) : 单期步长\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

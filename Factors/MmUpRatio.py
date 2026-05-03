@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmUpRatio(FactorFamily):
     """上涨占比因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)  : 统计周期数\n        RF (Timedelta) : 单期步长\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

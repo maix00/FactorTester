@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlGK(FactorFamily):
     """Garman-Klass 波动率。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

@@ -19,7 +19,6 @@ import os
 import threading
 import uuid
 import pandas as pd
-from functools import partial
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Set
 
 from tools.factors.Factor import Factor
@@ -31,7 +30,7 @@ from tools.factors.FactorExpr import (
     OperandExpr,
     WindowOp, CorrOp,  # 向后兼容别名
 )
-from tools.factors.Parameters import FactorFreqParam, ReverseParam, FactorNextPeriodReturns
+from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools import UniqueObject, DataMeta
 from tools.parameters import Parameter
 
@@ -110,7 +109,6 @@ class FactorFamily(FactorExpr, UniqueObject):
             class MyFactor(FactorFamily):
                 alias = 'MyFactor'
                 expr = _expr
-                source_freq = 'MIN1'
                 params = [...]
                 desc = '...'
                 description = '...'
@@ -142,7 +140,7 @@ class FactorFamily(FactorExpr, UniqueObject):
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
             if _expr is None and hasattr(cls, 'factor_expr'):
                 _expr = getattr(cls, 'factor_expr')()
-            _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', 'MIN1')
+            _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
             _math = math_expr if math_expr is not None else getattr(cls, 'math_expr', None)
             _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)
             _signal_freq = signal_freq if signal_freq is not None else getattr(cls, 'signal_freq', '1d')
@@ -320,8 +318,13 @@ class FactorFamily(FactorExpr, UniqueObject):
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
+        Factor 创建时即完成参数解析：
+          - $F → signal_freq（信号对齐频率）
+          - $Rev → is_reversed（是否取反）
+          - 其他参数 → 通过 _resolve_expr_params 固化到 _resolved_expr 中
+
         参数：
-            return_freq      : 收益率计算频率（覆盖 Factor 默认值）
+            return_freq      : 收益率计算频率（暂存于 tester 中）
             params_list      : 若提供，则使用此列表代替 self._params_list（用于 per-user 隔离）
             **kwargs         : 额外参数（如 timezone）
 
@@ -331,20 +334,13 @@ class FactorFamily(FactorExpr, UniqueObject):
         _pl = params_list if params_list is not None else self._params_list
         factors = []
         for params in _pl:
-            factor_alias = self.get_alias(**params)
-            factor_func = partial(self.func, **params)
-            factor = Factor(alias=factor_alias, func=factor_func, family=self)
-            # 注册参数值：使用 factor 自己的 params_dict（非$参数已为独立的副本）
-            for param_alias, value in params.items():
-                # $ 前缀标准化
-                actual_alias = param_alias
-                if param_alias not in factor.params_dict:
-                    if not param_alias.startswith('$') and f'${param_alias}' in factor.params_dict:
-                        actual_alias = f'${param_alias}'
-                factor.params_dict[actual_alias].register(factor, value)
+            factor = self._create_factor(params)
             if return_freq is not None:
-                factor.change_current_return_freq(return_freq)
+                t = Factor._get_active_tester()
+                if t is not None:
+                    t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
+        self.factors = factors
         return factors
 
     def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs) -> Factor:
@@ -363,12 +359,62 @@ class FactorFamily(FactorExpr, UniqueObject):
         self._check_in_space(**kwargs)
         param_vals = {p: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
         new_params = {p.alias: param_vals[p] for p in self.params}
-        factor_alias = self.get_alias(**new_params)
-        factor_func = partial(self.func, **new_params)
-        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self)
+        factor = self._create_factor(new_params)
         if return_freq is not None:
-            factor.change_current_return_freq(return_freq)
+            t = Factor._get_active_tester()
+            if t is not None:
+                t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
         return factor
+
+    def _create_factor(self, params: dict) -> Factor:
+        """
+        根据参数组合创建 Factor。
+
+        流程：
+          1. 提取 $F（信号频率）和 $Rev（是否取反）
+          2. 用 _resolve_expr_params 将其他参数固化为纯表达式树
+          3. 用 SignalAlign 包裹解析后的表达式（对齐由表达式树自动完成）
+          4. 创建 Factor(alias, _resolved_expr, signal_freq, is_reversed, family)
+        """
+        from tools.factors.FactorExpr import SignalAlign
+
+        factor_alias = self.get_alias(**params)
+
+        # 提取元参数
+        signal_freq = params.pop('$F', params.pop('F', '1d'))
+        is_reversed: bool = params.pop('$Rev', params.pop('Rev', False))
+
+        # 构建 param_values（排除已提取的元参数）
+        param_values = {
+            p.alias: params[p.alias]
+            for p in self.params
+            if p.alias in params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
+        }
+
+        # 解析表达式树：将 ParamRef 替换为实际值
+        if self._expr is not None:
+            resolved_expr = self._resolve_expr_params(self._expr, param_values=param_values)
+        else:
+            resolved_expr = None
+
+        # 包裹 SignalAlign 节点：信号对齐内建到表达式求值中
+        if resolved_expr is not None:
+            resolved_expr = SignalAlign(
+                resolved_expr, signal_freq,
+                basepoint=self.basepoint,
+                daily_basepoint=self.daily_basepoint,
+                end_session_skip=self.end_session_skip,
+                end_session_gap=self.end_session_gap,
+            )
+
+        return Factor(
+            alias=factor_alias,
+            _resolved_expr=resolved_expr,
+            signal_freq=signal_freq,
+            is_reversed=is_reversed,
+            family=self,
+            _param_values=params,  # 所有参数的原始值（含 $F/$Rev），供 calc() 推断 source_freq
+        )
 
     def test(self, categories: Optional['str|List[str]'] = None,
              return_freq: Optional[Any] = None,
@@ -442,7 +488,7 @@ class FactorFamily(FactorExpr, UniqueObject):
                     'end_date': tester.end_date,
                     'sift_volume_ratio': sift_volume_ratio,
                     'categories': categories,
-                } | factor.params_dict | factor.ic_stats.to_dict() | report_dict)
+                } | (factor.family.params_dict if factor.family else {}) | factor.ic_stats.to_dict() | report_dict)
                 factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
                 factor.report = factor_table
                 factor_table.to_csv(factor_cache_path, index=False)
@@ -592,7 +638,7 @@ class FactorFamily(FactorExpr, UniqueObject):
         is_reversed: bool = kwargs.pop('$Rev', False)
         source = kwargs.pop('source', None)
 
-        freq = DataFreq(self._source_freq_name)
+        freq = DataFreq(self._source_freq_name or 'MIN1')
         if self._expr is None:
             raise TypeError(
                 f"{self.__class__.__name__}: 未定义 expr（表达式树），无法使用 FactorFamily.func()。"
@@ -659,113 +705,23 @@ class FactorFamily(FactorExpr, UniqueObject):
         return signal_df if not is_reversed else -signal_df
 
     def _align_to_signal(self, data: pd.DataFrame, freq: Any) -> pd.DataFrame:
-        """
-        将原始数据对齐到等间隔信号时间点。
-
-        对整个 DataFrame 一次性操作，不做逐品种循环。
-        """
-        freq_dc = DataFreq(freq)
-        bp = self.basepoint
-        end_skip = self.end_session_skip
-        end_gap = self.end_session_gap
-
-        # 找到 freq 是其整数倍的索引层级（第一个匹配的）
-        index_names = [str(n) for n in data.index.names]
-        index_freqs = [DataFreq(n) for n in index_names]
-        first_true_idx = next(
-            (i for i, f in enumerate(index_freqs)
-             if freq_dc.value.total_seconds() % f.value.total_seconds() == 0), None)
-        assert first_true_idx is not None, \
-            f"频率 {freq_dc} 不是任何数据索引频率的整数倍"
-        multiple = int(freq_dc.value.total_seconds() / index_freqs[first_true_idx].value.total_seconds())
-
-        idx_name = index_names[first_true_idx]
-        idx_series = data.index.get_level_values(idx_name).to_series().reset_index(drop=True)
-
-        # 确定各组的基准点位置
-        # 日倍频且有 daily_basepoint 时，daily_basepoint 优先
-        day_bp = None
-        if freq_dc.is_day_multiple and self.daily_basepoint is not None:
-            day_bp = self.daily_basepoint
-            try:
-                base_time = pd.Timestamp(day_bp).time()
-            except Exception:
-                raise ValueError(
-                    f"Invalid time basepoint '{day_bp}'. Must be a time string like '09:01:00' or '15:00:00'")
-            series = data.groupby(idx_name).transform(
-                lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
-        elif isinstance(bp, str):
-            bp_lower = bp.lower()
-            if bp_lower == 'last':
-                series = data.groupby(idx_name).cumcount(ascending=False) == 0
-            elif bp_lower == 'first':
-                series = data.groupby(idx_name).cumcount() == 0
-            else:
-                raise ValueError(
-                    f"Invalid basepoint '{bp}'. Must be 'last', 'first', or a callable")
-        else:
-            series = bp(data.groupby(idx_name))
-
-        if not any(series):
-            series = data.groupby(idx_name).cumcount(ascending=False) == 0
-        assert isinstance(series, pd.Series) and series.dtype == bool, \
-            "basepoint function must return a boolean Series"
-
-        basepoint_pos = series.reset_index(drop=True).index[series]
-
-        # 从基准点按 multiple 间隔取信号点：仅子日频需要跳过盘间间隔
-        if end_skip and freq_dc.value < pd.Timedelta('1day'):
-            last_col_name = index_names[-1]
-            last_col = data.index.get_level_values(last_col_name).to_series().reset_index(drop=True)
-            end_session_pos = last_col[last_col.shift(-1) - last_col >= end_gap].index
-            # 对每个 session 段，按 multiple 间隔取信号点
-            signal_map_mask = basepoint_pos.isin({
-                i
-                for start, end in zip(
-                    [0] + (end_session_pos[:-1].values + 1).tolist(),
-                    end_session_pos
-                )
-                for i in range(start + multiple - 1, end + 1, multiple)
-                if start + multiple - 1 <= end
-            })
-        else:
-            idx = basepoint_pos.to_series().reset_index(drop=True).index
-            signal_map_mask = (idx % multiple == multiple - 1)
-
-        signal_pos = basepoint_pos[signal_map_mask]
-        signal_map = idx_series.index.isin(signal_pos)
-
-        # 构建新的索引：左侧层级用 signal_map 打 NA，目标层级替换为信号值，右侧层级保持不变
-        left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]]
-        right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]]
-        signal_name = f'_SIGNAL@{freq_dc.name}'
-
-        left_arrays = [
-            data.index.get_level_values(index_names[i]).to_series().where(signal_map)
-            for i in range(first_true_idx)
-        ]
-        signal_vals = idx_series.where(signal_map)
-        right_arrays = [
-            data.index.get_level_values(index_names[i]).to_series()
-            for i in range(first_true_idx + 1, len(index_names))
-        ]
-        new_index = pd.MultiIndex.from_arrays(
-            left_arrays + [signal_vals] + right_arrays,
-            names=left_names + [signal_name] + right_names
-        ).dropna()
-
-        # 用新索引筛选数据
-        result = data[signal_map].copy()
-        result.index = new_index
-
-        return result
+        """委托给 signal_align 工具函数。"""
+        from tools.factors.FactorExpr import signal_align
+        return signal_align(
+            data, freq,
+            basepoint=self.basepoint,
+            daily_basepoint=self.daily_basepoint,
+            end_session_skip=self.end_session_skip,
+            end_session_gap=self.end_session_gap,
+        )
 
 class Returns(FactorFamily):
     """
     内置收益率因子族。
-    """
 
-    source_freq = 'MIN1'
+    不再硬编码 source_freq —— 由 Factor.calc() 自动推断
+    或在 calc() 调用时通过 source_freq 参数显式指定。
+    """
 
     @staticmethod
     def factor_expr():
@@ -807,9 +763,10 @@ class CrossSectionIC(FactorFamily):
         RE  : 收益率表达式树 (FactorExpr)，默认使用 Returns 族表达式
         Lag : IC 时滞，非负整数。0=同期IC，Lag>0=因子领先收益率Lag期
         F   : 信号频率（复用 FactorFreqParam）
-    """
 
-    source_freq = 'MIN1'
+    不再硬编码 source_freq —— 由 Factor.calc() 自动推断。
+    func() 向后兼容：无显式 source_freq 时回退 'MIN1'。
+    """
 
     # _intermediates 已由 FactorFamily.__init__ 初始化为 {FactorExpr: Factor}
     # 此处不再覆盖；func() 在 evaluate 后自动填充
@@ -842,7 +799,7 @@ class CrossSectionIC(FactorFamily):
         is_reversed: bool = kwargs.pop('$Rev', False)
         source = kwargs.pop('source', None)
 
-        freq = DataFreq(self._source_freq_name)
+        freq = DataFreq(self._source_freq_name or 'MIN1')
         if self._expr is None:
             raise TypeError(f"{self.__class__.__name__}: 未定义 expr")
 

@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class OiTurnoverRat(FactorFamily):
     """持仓换手率因子。\n\n    参数：\n        N (Timedelta) : 滚动窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

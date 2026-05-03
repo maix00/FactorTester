@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class Mm(FactorFamily):
     """区间方向动量因子——最高价与最低价出现先后的方向判断。\n\n    参数：\n        H (DataColumn) : 最高价列\n        L (DataColumn) : 最低价列\n        F (Timedelta) : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

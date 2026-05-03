@@ -18,7 +18,6 @@ from tools.factors.FactorExpr import FactorExpr
 class VlYZ(FactorFamily):
     """Yang-Zhang 波动率。"""
 
-    source_freq = 'DAY1'
 
     @staticmethod
     def factor_expr():

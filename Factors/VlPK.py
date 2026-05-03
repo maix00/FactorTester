@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlPK(FactorFamily):
     """Parkinson 波动率。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

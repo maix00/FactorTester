@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlHLRange(FactorFamily):
     """高低点区间比因子。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

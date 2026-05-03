@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VpVolPriceCorr(FactorFamily):
     """量价相关性。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

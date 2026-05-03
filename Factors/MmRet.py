@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmRet(FactorFamily):
     """收益率动量因子。\n\n    参数：\n        P (DataColumn) : 价格列，默认 CLOSE_ADJUSTED\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

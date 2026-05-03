@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmMABreakStd(FactorFamily):
     """标准化均价突破因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)  : 窗口\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

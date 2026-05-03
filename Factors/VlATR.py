@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlATR(FactorFamily):
     """平均真实波幅因子。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

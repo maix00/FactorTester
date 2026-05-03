@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlVolRatio(FactorFamily):
     """短长波动率比。\n\n    参数：\n        P (DataColumn) : 价格列\n        Ns (Timedelta)  : 短窗口\n        Nl (Timedelta)  : 长窗口\n        RF (Timedelta)  : 收益步长"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

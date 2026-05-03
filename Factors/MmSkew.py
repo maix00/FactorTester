@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmSkew(FactorFamily):
     """收益率偏度因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)  : 偏度窗口\n        RF (Timedelta) : 收益步长"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmOvernightTrend(FactorFamily):
     """隔夜趋势因子。\n\n    参数：\n        C (DataColumn) : 收盘价列\n        N (Timedelta)  : 天数\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

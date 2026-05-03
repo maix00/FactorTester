@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class OiNetBuild(FactorFamily):
     """净建仓因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        OI (DataColumn) : 持仓量列\n        RF (Timedelta)  : 差分步长\n        N (Timedelta)   : 滚动窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

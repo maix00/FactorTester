@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmPKTrend(FactorFamily):
     """Parkinson 波动趋势因子。\n\n    参数：\n        N (Timedelta) : 天数"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

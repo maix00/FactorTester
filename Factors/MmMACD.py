@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmMACD(FactorFamily):
     """MACD 柱状线趋势加速因子。\n\n    参数：\n        P (DataColumn) : 价格列\n        Fast (Timedelta)  : 快线 EMA 窗口\n        Slow (Timedelta)  : 慢线 EMA 窗口\n        Signal (Timedelta): 信号线 EMA 窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

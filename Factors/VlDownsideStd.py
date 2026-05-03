@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlDownsideStd(FactorFamily):
     """下行波动率（仅统计负收益的波动）。\n\n    参数：\n        P (DataColumn) : 价格列\n        RF (Timedelta)  : 收益步长\n        N (Timedelta)   : 滚动窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

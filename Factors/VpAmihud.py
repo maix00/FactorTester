@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VpAmihud(FactorFamily):
     """Amihud 非流动性指标。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)   : 滚动窗口\n        RF (Timedelta)  : 收益步长"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

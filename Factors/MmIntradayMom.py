@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmIntradayMom(FactorFamily):
     """日内动量因子。\n\n    参数：\n        O (DataColumn) : 开盘价列\n        C (DataColumn) : 收盘价列\n        N (Timedelta)  : 天数\n        F (Timedelta)  : 信号频率"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

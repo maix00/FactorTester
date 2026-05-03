@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VlRetStd(FactorFamily):
     """收益率标准差。\n\n    参数：\n        P (DataColumn) : 价格列\n        RF (Timedelta)  : 收益步长\n        N (Timedelta)   : 滚动窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class VpTurnoverAccel(FactorFamily):
     """成交额加速度。\n\n    参数：\n        Ns (Timedelta) : 短窗口\n        Nl (Timedelta) : 长窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

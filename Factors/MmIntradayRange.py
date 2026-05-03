@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmIntradayRange(FactorFamily):
     """日内累计振幅因子。\n\n    参数：\n        N (Timedelta) : 天数"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

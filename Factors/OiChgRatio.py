@@ -13,7 +13,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class OiChgRatio(FactorFamily):
     """持仓量变化比值。"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

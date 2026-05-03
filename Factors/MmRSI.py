@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmRSI(FactorFamily):
     """相对强弱指数（RSI）。\n\n    参数：\n        P (DataColumn) : 价格列\n        N (Timedelta)  : RSI 窗口\n        RF (Timedelta) : 收益步长"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

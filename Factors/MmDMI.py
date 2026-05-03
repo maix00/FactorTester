@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmDMI(FactorFamily):
     """方向性动量指标（DMI/DX）。\n\n    参数：\n        N (Timedelta) : 滚动窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

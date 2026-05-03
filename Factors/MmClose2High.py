@@ -14,7 +14,6 @@ from tools.parameters import DataColumnParam, WindowParam
 class MmClose2High(FactorFamily):
     """收盘价区间位置（Williams %R 正向化版本）。\n\n    参数：\n        N (Timedelta) : 回看窗口"""
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():

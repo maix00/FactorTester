@@ -26,7 +26,6 @@ class MmAccRet(FactorFamily):
         F  (Timedelta)  : 输出信号频率
     """
 
-    source_freq = 'MIN1'
 
     @staticmethod
     def factor_expr():
