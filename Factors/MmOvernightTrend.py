@@ -20,7 +20,7 @@ class MmOvernightTrend(FactorFamily):
         C = DataColumnParam('C', default_value='CA')
         N = WindowParam('N', default_value='10d')
         gap = (C - C.shift('1d')) / (C.shift('1d') + 1e-10)
-        return gap.ma(N)
+        return gap.rolling_mean(N)
 
     desc = '隔夜趋势'
     description = """

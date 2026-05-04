@@ -61,17 +61,17 @@ def test_window_operators():
     print("=== 2. 时序窗口算子 ===")
 
     # MA
-    ma_expr = CLOSE.ma(20)
+    ma_expr = CLOSE.rolling_mean(20)
     assert isinstance(ma_expr, RollingOp)
-    assert ma_expr.op == 'ma'
+    assert ma_expr.op == 'rolling_mean'
     assert ma_expr.window == 20
-    print(f"  CLOSE.ma(20) = {ma_expr}")
+    print(f"  CLOSE.rolling_mean(20) = {ma_expr}")
 
     # STD
-    std_expr = CLOSE.std(20)
+    std_expr = CLOSE.rolling_std(20)
     assert isinstance(std_expr, RollingOp)
-    assert std_expr.op == 'std'
-    print(f"  CLOSE.std(20) = {std_expr}")
+    assert std_expr.op == 'rolling_std'
+    print(f"  CLOSE.rolling_std(20) = {std_expr}")
 
     # SHIFT
     shift_expr = CLOSE.shift(5)
@@ -156,7 +156,7 @@ def test_chained_expression():
     intraday_pos = (CLOSE - OPEN) / (HIGH - LOW + 1e-8)
 
     # 因子 2：价格在 20 日均线上方程度
-    ma_break = (CLOSE - CLOSE.ma(20)) / CLOSE.std(20)
+    ma_break = (CLOSE - CLOSE.rolling_mean(20)) / CLOSE.rolling_std(20)
 
     # 因子 3：横截面标准化后组合
     combined = intraday_pos.cs_zscore() * 0.5 + ma_break.cs_zscore() * 0.5
@@ -276,9 +276,9 @@ def test_expression_evaluation():
     print(f"  OPEN-CLOSE shape: {o_c.shape}")
 
     # 测试窗口操作
-    ma20 = CLOSE.ma(20).evaluate(products, freq)
+    ma20 = CLOSE.rolling_mean(20).evaluate(products, freq)
     assert ma20.shape == (500, 3)
-    print(f"  CLOSE.ma(20) shape: {ma20.shape}")
+    print(f"  CLOSE.rolling_mean(20) shape: {ma20.shape}")
 
     # 测试横截面
     cs_z = CLOSE.cs_zscore().evaluate(products, freq)
@@ -292,7 +292,7 @@ def test_expression_evaluation():
     print(f"  CLOSE.cs_zscore() row_mean={mean_by_row:.6f}, row_std={std_by_row:.4f}")
 
     # 测试复杂表达式
-    expr = (CLOSE - CLOSE.ma(20)) / (CLOSE.std(20) + 1e-8)
+    expr = (CLOSE - CLOSE.rolling_mean(20)) / (CLOSE.rolling_std(20) + 1e-8)
     result = expr.evaluate(products, freq)
     assert result.shape == (500, 3)
     # 不应有全 NaN 列
@@ -324,11 +324,11 @@ def test_cache_reuse():
 
     # 依赖缓存：表达式求值时，子表达式也被缓存
     cache2 = {}
-    expr = CLOSE.ma(10)
+    expr = CLOSE.rolling_mean(10)
     result3 = expr.evaluate(products, freq, cache=cache2)
     # CLOSE 应该在缓存中（被 expr 的递归求值自动缓存）
     print(f"  After evaluate: CLOSE in cache = {CLOSE in cache2}")
-    print(f"  After evaluate: ma(10) in cache = {expr in cache2}")
+    print(f"  After evaluate: rolling_mean(10) in cache = {expr in cache2}")
 
     print("  ✓ 求值缓存通过\n")
 
@@ -368,7 +368,7 @@ def test_expr_factor_family():
     # 快捷创建
     family2 = make_factor_family(
         'MaBreak',
-        (CLOSE - CLOSE.ma(20)) / CLOSE.std(20),
+        (CLOSE - CLOSE.rolling_mean(20)) / CLOSE.rolling_std(20),
         chinese_name='均线突破',
         source_freq='DAY1',
     )
@@ -392,7 +392,7 @@ def test_latex_generation():
     print(f"  CLOSE / OPEN: {(CLOSE / OPEN).to_latex()}")
 
     # 复合
-    expr = (CLOSE - CLOSE.ma(20)) / CLOSE.std(20)
+    expr = (CLOSE - CLOSE.rolling_mean(20)) / CLOSE.rolling_std(20)
     print(f"  (CLOSE-MA20)/STD20: {expr.to_latex()}")
 
     # max/min
@@ -431,10 +431,10 @@ def test_param_deps():
     print(f"  Unary/Shift/CS passthrough: OK")
 
     # 3. RollingOp — operand 的 param_deps + 自身的 Parameter window
-    ma_with_param = CLOSE.ma(W)
+    ma_with_param = CLOSE.rolling_mean(W)
     assert ma_with_param.param_deps == {W}, f"RollingOp(W) should have W, got {ma_with_param.param_deps}"
 
-    ma_no_param = CLOSE.ma(20)
+    ma_no_param = CLOSE.rolling_mean(20)
     assert ma_no_param.param_deps == set(), "RollingOp(20) should have no param_deps"
     print(f"  RollingOp tracking: OK")
 
@@ -442,11 +442,11 @@ def test_param_deps():
     simple = CLOSE - OPEN
     assert simple.param_deps == set(), "Pure expression should have no param_deps"
 
-    with_param = (CLOSE - CLOSE.ma(W)) / CLOSE.std(W)
+    with_param = (CLOSE - CLOSE.rolling_mean(W)) / CLOSE.rolling_std(W)
     assert with_param.param_deps == {W}, f"Composite should aggregate W, got {with_param.param_deps}"
 
     W2 = WindowParam('W2', 5)
-    multi_param = CLOSE.ma(W) + CLOSE.std(W2)
+    multi_param = CLOSE.rolling_mean(W) + CLOSE.rolling_std(W2)
     assert multi_param.param_deps == {W, W2}, f"Should track both W and W2, got {multi_param.param_deps}"
     print(f"  CompositeExpr aggregation: OK")
 
@@ -469,12 +469,12 @@ def test_param_resolve():
     from tools.factors.ExprFactorFamily import ExprFactorFamily
 
     W = WindowParam('W', 10)
-    expr = (CLOSE - CLOSE.ma(W)) / CLOSE.std(W)
+    expr = (CLOSE - CLOSE.rolling_mean(W)) / CLOSE.rolling_std(W)
     family = FactorFamily('TestParamResolve', expr, source_freq='1min')
 
     # 1. 解析前：window 是 Parameter
-    # expr = (CLOSE - ma(CLOSE,W)) / std(CLOSE,W)
-    # operands[1] = std(CLOSE,W) 即 RollingOp —— 直接是 RollingOp
+    # expr = (CLOSE - rolling_mean(CLOSE,W)) / rolling_std(CLOSE,W)
+    # operands[1] = rolling_std(CLOSE,W) 即 RollingOp —— 直接是 RollingOp
     std_op = family._expr.operands[1]
     assert isinstance(std_op, RollingOp)
     from tools.parameters.Parameter import Parameter

@@ -21,7 +21,7 @@ class MmSkew(FactorFamily):
         N = WindowParam('N', default_value='20d')
         RF = WindowParam('RF', default_value='1d')
         r = P.delta(RF) / P.shift(RF)
-        return r.skew(N)
+        return r.rolling_skew(N)
 
     desc = '收益率偏度'
     description = """

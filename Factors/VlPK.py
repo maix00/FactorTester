@@ -24,7 +24,7 @@ class VlPK(FactorFamily):
         eps = 1e-10
         hl = (h / (l + eps)).log()
         pk_bar = hl * hl / (4.0 * 0.6931471805599453)
-        return pk_bar.ma(N).sqrt()
+        return pk_bar.rolling_mean(N).sqrt()
 
     desc = 'Parkinson 波动率'
     description = """

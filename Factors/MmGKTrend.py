@@ -25,7 +25,7 @@ class MmGKTrend(FactorFamily):
         hl = (H.shift(0) / L.shift(0)).log()
         co = (C.shift(0) / O.shift(0)).log()
         gk = 0.5 * hl * hl - (2.0 * 0.6931471805599453 - 1.0) * co * co  # 2*ln2-1
-        return (gk * co.sign()).ma(N)
+        return (gk * co.sign()).rolling_mean(N)
 
     desc = 'GK 波动趋势'
     description = """

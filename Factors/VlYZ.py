@@ -45,9 +45,9 @@ class VlYZ(FactorFamily):
         rs_bar = hc * ho + lc * lo
 
         # Rolling variances
-        sig_o2 = log_oc_prev.var(N)
-        sig_c2 = log_co.var(N)
-        sig_rs2 = rs_bar.ma(N).max(0.0)
+        sig_o2 = log_oc_prev.rolling_var(N)
+        sig_c2 = log_co.rolling_var(N)
+        sig_rs2 = rs_bar.rolling_mean(N).max(0.0)
 
         # Weight: w = 0.34 / (1.34 + (n+1)/(n-1)), n = int(N/1d)
         # w is computed during evaluation because it depends on N/1d ratio

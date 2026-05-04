@@ -22,7 +22,7 @@ class VlDownsideStd(FactorFamily):
         p = P.shift(0)
         ret = p.delta(RF) / (p.shift(RF) + 1e-10)
         neg_ret = (ret - ret.abs()) / 2.0
-        return (neg_ret * neg_ret).ma(N).sqrt()
+        return (neg_ret * neg_ret).rolling_mean(N).sqrt()
 
     desc = '下行波动率'
     description = """

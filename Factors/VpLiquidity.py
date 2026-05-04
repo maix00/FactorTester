@@ -23,7 +23,7 @@ class VpLiquidity(FactorFamily):
         vol = v.shift(0)
         ret = price.delta(1) / (price.shift(1) + 1e-10)
         liquidity_per_bar = vol / (ret.abs() + 1e-6)
-        return liquidity_per_bar.ma(N)
+        return liquidity_per_bar.rolling_mean(N)
 
     desc = '流动性'
     description = """

@@ -22,7 +22,7 @@ class MmCCI(FactorFamily):
         L = DataColumnParam('L', default_value='LA')
         C = DataColumnParam('C', default_value='CA')
         tp = (H.shift(0) + L.shift(0) + C.shift(0)) / 3.0
-        return (tp - tp.ma(N)) / (0.015 * tp.std(N) + 1e-10)
+        return (tp - tp.rolling_mean(N)) / (0.015 * tp.rolling_std(N) + 1e-10)
 
     desc = '商品通道指数'
     description = """

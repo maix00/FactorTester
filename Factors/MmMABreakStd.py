@@ -19,7 +19,7 @@ class MmMABreakStd(FactorFamily):
     def factor_expr():
         P = DataColumnParam('P', default_value='CA')
         N = WindowParam('N', default_value='10d')
-        return (P - P.ma(N)) / (P.std(N) + 1e-10)
+        return (P - P.rolling_mean(N)) / (P.rolling_std(N) + 1e-10)
 
     desc = '标准化均价突破'
     description = """

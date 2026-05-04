@@ -3,7 +3,7 @@
 # 净建仓因子
 #
 # FactorFamily 表达式驱动版本。
-# signal = sign(d_price) when d_oi > 0 else 0; X = signal.ma(N)
+# signal = sign(d_price) when d_oi > 0 else 0; X = signal.rolling_mean(N)
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -25,7 +25,7 @@ class OiNetBuild(FactorFamily):
         d_price = p.delta(RF)
         d_oi = oi.delta(RF)
         signal = d_price.sign() * (d_oi > 0)
-        return signal.ma(N)
+        return signal.rolling_mean(N)
 
     desc = '净建仓因子'
     description = """

@@ -19,7 +19,7 @@ class MmMABreak(FactorFamily):
     def factor_expr():
         P = DataColumnParam('P', default_value='CA')
         N = WindowParam('N', default_value='10d')
-        return P - P.ma(N)
+        return P - P.rolling_mean(N)
 
     desc = '均价突破'
     description = """

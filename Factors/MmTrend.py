@@ -19,7 +19,7 @@ class MmTrend(FactorFamily):
     def factor_expr():
         P = DataColumnParam('P', default_value='CA')
         N = WindowParam('N', default_value='20d')
-        return (P - P.shift(N - 1)) / ((N - 1) * P.ma(N) + 1e-10)
+        return (P - P.shift(N - 1)) / ((N - 1) * P.rolling_mean(N) + 1e-10)
 
     desc = '趋势斜率'
     description = """

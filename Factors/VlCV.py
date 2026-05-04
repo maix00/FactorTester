@@ -21,7 +21,7 @@ class VlCV(FactorFamily):
         N = WindowParam('N', default_value='20d')
         p = P.shift(0)
         ret = p.delta(RF) / (p.shift(RF) + 1e-10)
-        return ret.std(N) / (ret.ma(N).abs() + 1e-10)
+        return ret.rolling_std(N) / (ret.rolling_mean(N).abs() + 1e-10)
 
     desc = '变异系数'
     description = """

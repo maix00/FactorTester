@@ -23,7 +23,7 @@ class MmIntradayRange(FactorFamily):
         L = DataColumnParam('L', default_value='LA')
         C = DataColumnParam('C', default_value='CA')
         step = (2.0 * (H.shift(0) - L.shift(0)) * (C.shift(0) - O.shift(0)).sign() - (C.shift(0) - O.shift(0))) / (C.shift(0) + 1e-10)
-        return step.ma(N)
+        return step.rolling_mean(N)
 
     desc = '日内累计振幅'
     description = """

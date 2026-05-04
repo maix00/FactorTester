@@ -23,7 +23,7 @@ class VpAmihud(FactorFamily):
         to = DataColumnParam('TO', default_value='TO')
         turn = to.shift(0)
         abs_ret = (p.delta(RF) / (p.shift(RF) + 1e-10)).abs()
-        return (abs_ret / (turn + 1e-10)).ma(N)
+        return (abs_ret / (turn + 1e-10)).rolling_mean(N)
 
     desc = 'Amihud 非流动性'
     description = """

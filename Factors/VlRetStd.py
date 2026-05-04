@@ -21,7 +21,7 @@ class VlRetStd(FactorFamily):
         N = WindowParam('N', default_value='20d')
         p = P.shift(0)
         ret = p.delta(RF) / (p.shift(RF) + 1e-10)
-        return ret.std(N)
+        return ret.rolling_std(N)
 
     desc = '收益率标准差'
     description = """

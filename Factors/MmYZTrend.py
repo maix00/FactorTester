@@ -25,8 +25,8 @@ class MmYZTrend(FactorFamily):
         co = (C.shift(0) - O.shift(0)).sign()
         oc = (O.shift(0) / C.shift('1d')).log()
         co_log = (C.shift(0) / O.shift(0)).log()
-        sigma2 = oc.ema(N).abs() + 0.5 * co_log.ema(N).abs()
-        return sigma2 * co.ma(N)
+        sigma2 = oc.rolling_ema(N).abs() + 0.5 * co_log.rolling_ema(N).abs()
+        return sigma2 * co.rolling_mean(N)
 
     desc = 'YZ 波动趋势'
     description = """

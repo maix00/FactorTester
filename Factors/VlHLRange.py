@@ -23,7 +23,7 @@ class VlHLRange(FactorFamily):
         l = L.shift(0)
         mid = (h + l) / 2.0
         hl_range = (h - l) / (mid + 1e-10)
-        return hl_range.ma(N)
+        return hl_range.rolling_mean(N)
 
     desc = '高低点区间比'
     description = """

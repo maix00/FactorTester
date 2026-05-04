@@ -19,7 +19,7 @@ class MmMADevRat(FactorFamily):
     def factor_expr():
         P = DataColumnParam('P', default_value='CA')
         N = WindowParam('N', default_value='5d')
-        return -P.ma(N) / (P + 1e-10)
+        return -P.rolling_mean(N) / (P + 1e-10)
 
     desc = '均线偏离比'
     description = """

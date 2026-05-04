@@ -24,7 +24,7 @@ class MmPKTrend(FactorFamily):
         C = DataColumnParam('C', default_value='CA')
         pk = (H.shift(0) / L.shift(0)).log().abs()
         pk = pk * pk / (4.0 * 0.6931471805599453)  # 4*ln2
-        return (pk * (C.shift(0) - O.shift(0)).sign()).ma(N)
+        return (pk * (C.shift(0) - O.shift(0)).sign()).rolling_mean(N)
 
     desc = 'PK 波动趋势'
     description = """

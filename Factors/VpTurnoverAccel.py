@@ -20,7 +20,7 @@ class VpTurnoverAccel(FactorFamily):
         Nl = WindowParam('Nl', default_value='20d')
         to = DataColumnParam('TO', default_value='TO')
         turn = to.shift(0)
-        return turn.ma(Ns) / (turn.ma(Nl) + 1e-10) - 1.0
+        return turn.rolling_mean(Ns) / (turn.rolling_mean(Nl) + 1e-10) - 1.0
 
     desc = '成交额加速度'
     description = """

@@ -21,8 +21,8 @@ class MmRSI(FactorFamily):
         N = WindowParam('N', default_value='14d')
         RF = WindowParam('RF', default_value='1d')
         r = P.delta(RF) / P.shift(RF)
-        gain = ((r + r.abs()) / 2.0).ma(N)
-        loss = ((r.abs() - r) / 2.0).ma(N)
+        gain = ((r + r.abs()) / 2.0).rolling_mean(N)
+        loss = ((r.abs() - r) / 2.0).rolling_mean(N)
         rs = gain / (loss + 1e-10)
         return rs / (1.0 + rs)
 

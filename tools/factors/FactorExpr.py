@@ -142,28 +142,75 @@ class FactorExpr:
         """生成唯一别名，用于 Factor 注册。"""
         raise NotImplementedError
 
+    def _repr_head(self) -> str:
+        """单个节点的展示名（不含子节点）。"""
+        if hasattr(self, 'op'):
+            return str(getattr(self, 'op'))
+        if hasattr(self, 'column'):
+            col = getattr(self, 'column')
+            return f"ColumnRef[{getattr(col, 'name', col)}]"
+        if hasattr(self, 'param'):
+            param = getattr(self, 'param')
+            return f"ParamRef[{getattr(param, 'alias', param)}]"
+        if hasattr(self, 'value'):
+            return f"Const[{getattr(self, 'value')!r}]"
+        return type(self).__name__
+
+    def __repr__(self) -> str:
+        operands = list(getattr(self, '_operands', ()))
+        head = self._repr_head()
+        if not operands:
+            return head
+        return f"{head}({', '.join(repr(op) for op in operands)})"
+
+    def tree_repr(self, indent: int = 2, _level: int = 0) -> str:
+        """以树状格式打印表达式。"""
+        pad = ' ' * (indent * _level)
+        line = f"{pad}{self._repr_head()}"
+        operands = list(getattr(self, '_operands', ()))
+        if not operands:
+            return line
+
+        child_lines: List[str] = []
+        for op in operands:
+            if isinstance(op, FactorExpr):
+                child_lines.append(op.tree_repr(indent=indent, _level=_level + 1))
+            else:
+                child_pad = ' ' * (indent * (_level + 1))
+                child_lines.append(f"{child_pad}{op!r}")
+        return '\n'.join([line, *child_lines])
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        """是否作为依赖追踪中的叶子引用节点。"""
+        ops = getattr(self, '_operands', ())
+        return len(list(ops)) == 0
+
     @property
     def dependencies(self) -> Set['FactorExpr']:
-        """返回此节点依赖的上游表达式集合（不含自身）。"""
-        return set()
+        """返回此节点依赖的叶子表达式集合（不含自身与 ConstExpr）。"""
+        deps = {
+            d for d in self.get_ref_types(FactorExpr, leaf_only=True)
+            if not isinstance(d, ConstExpr)
+        }
+        deps.discard(self)
+        return deps
 
     @property
     def param_deps(self) -> Set['Parameter']:
         """返回此节点依赖的参数集合。"""
-        return set()
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        """深度优先遍历收集参数，结果按首次出现顺序存入 result。"""
-        pass
+        params: Set['Parameter'] = set()
+        for ref in self.get_ref_types(ParamRef):
+            params.add(ref.param)
+        return params
 
     @property
     def ordered_param_deps(self) -> List['Parameter']:
-        seen: Set['Parameter'] = set()
-        result: List['Parameter'] = []
-        self._collect_params_ordered(seen, result)
-        return result
+        params = list(self.param_deps)
+        params.sort(key=lambda p: (type(p).__name__, p.alias))
+        return params
     
-    def get_ref_types(self, typ: type) -> Set[Any]:
+    def get_ref_types(self, typ: type, leaf_only: bool = False) -> Set[Any]:
         """收集表达式树中的所有指定类型的引用节点。"""
         result: Set[Any] = set()
         seen: set[tuple] = set()  # 用 structural_key 去重
@@ -175,9 +222,13 @@ class FactorExpr:
             if sk in seen:
                 continue
             seen.add(sk)
-            if isinstance(node, typ):
+            ops = getattr(node, '_operands', [])
+            ops_list = list(ops)
+            is_leaf = node.is_leaf_ref
+
+            if isinstance(node, typ) and (not leaf_only or is_leaf):
                 result.add(node)
-            for op in getattr(node, '_operands', []):
+            for op in reversed(ops_list):
                 stack.append(op)
 
         return result
@@ -268,49 +319,49 @@ class FactorExpr:
 
     # ── 便利方法：时序算子 ──
 
-    def ma(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_mean(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动平均（简单平均）。"""
-        return RollingOp('ma', _to_expr(window), self)
+        return RollingOp('rolling_mean', _to_expr(window), self)
 
-    def std(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_std(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动标准差。"""
-        return RollingOp('std', _to_expr(window), self)
+        return RollingOp('rolling_std', _to_expr(window), self)
 
-    def var(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_var(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动方差。"""
-        return RollingOp('var', _to_expr(window), self)
+        return RollingOp('rolling_var', _to_expr(window), self)
 
     def rolling_min(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动最小值。"""
-        return RollingOp('min', _to_expr(window), self)
+        return RollingOp('rolling_min', _to_expr(window), self)
 
     def rolling_max(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动最大值。"""
-        return RollingOp('max', _to_expr(window), self)
+        return RollingOp('rolling_max', _to_expr(window), self)
 
     def rolling_sum(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动求和。"""
-        return RollingOp('sum', _to_expr(window), self)
+        return RollingOp('rolling_sum', _to_expr(window), self)
 
-    def ema(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_ema(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期指数移动平均（EMA, span=window）。"""
-        return RollingOp('ema', _to_expr(window), self)
+        return RollingOp('rolling_ema', _to_expr(window), self)
 
     def corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
         return RollingOp('corr', _to_expr(window), self, other)
 
-    def skew(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_skew(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动偏度。"""
-        return RollingOp('skew', _to_expr(window), self)
+        return RollingOp('rolling_skew', _to_expr(window), self)
 
-    def argmax(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_argmax(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
-        return RollingOp('argmax', _to_expr(window), self)
+        return RollingOp('rolling_argmax', _to_expr(window), self)
 
-    def argmin(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_argmin(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期内最小值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
-        return RollingOp('argmin', _to_expr(window), self)
+        return RollingOp('rolling_argmin', _to_expr(window), self)
 
     def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
@@ -356,20 +407,6 @@ class FactorExpr:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 辅助：将标量/ndarray 转为 ConstExpr
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _to_expr(value: Any) -> FactorExpr:
-    """将非 FactorExpr 值包装为 ConstExpr，将 Parameter 转为 ParamRef。"""
-    if isinstance(value, FactorExpr):
-        return value
-    from tools.parameters.Parameter import Parameter
-    if isinstance(value, Parameter):
-        return ParamRef(value)
-    return ConstExpr(value)  # type: ignore[arg-type]
-
-
-# ═════════════════════════════════════════════════════════════════════════════
 # Layer 1.5: 多元算子基类
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -383,8 +420,7 @@ class OperandExpr(FactorExpr):
       - evaluate() 递归求值所有子表达式 → 调用 _apply_op(values)
       - 子类只需覆盖 _apply_op() 和展示方法（op_name/to_latex/_get_alias）
 
-    dependencies / param_deps / _collect_params_ordered
-    均从 _operands 自动派生，无需子类覆盖。
+    dependencies / param_deps 均复用 FactorExpr 基类的树遍历实现。
     """
 
     def __init__(self, op: str, *operands: 'FactorExpr'):
@@ -394,32 +430,6 @@ class OperandExpr(FactorExpr):
     @property
     def _operands(self) -> Sequence['FactorExpr']:
         return self.operands
-
-    @property
-    def dependencies(self) -> Set['FactorExpr']:
-        deps: Set['FactorExpr'] = set()
-        for opnd in self._operands:
-            deps.add(opnd)
-            deps.update(opnd.dependencies)
-        return deps
-
-    @property
-    def param_deps(self) -> Set['Parameter']:
-        deps: Set['Parameter'] = set()
-        for opnd in self._operands:
-            deps |= opnd.param_deps
-        return deps
-
-    @property
-    def ordered_param_deps(self) -> List['Parameter']:
-        seen: Set['Parameter'] = set()
-        result: List['Parameter'] = []
-        self._collect_params_ordered(seen, result)
-        return result
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        for opnd in self._operands:
-            opnd._collect_params_ordered(seen, result)
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
@@ -444,7 +454,8 @@ class OperandExpr(FactorExpr):
         if cache is not None and self in cache:
             return cache[self]
 
-        values = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
+        values = [opnd.evaluate(products=products, freq=freq, source=source,
+                    cache=cache, preloaded=preloaded)
                   for opnd in self.operands]
         result = self._apply_op(values)
 
@@ -474,10 +485,6 @@ class OperandExpr(FactorExpr):
     def _get_alias(self) -> str:
         parts = [opnd._get_alias() for opnd in self.operands]
         return f"{self.op.upper()}_{'_'.join(parts)}"
-
-    def __repr__(self) -> str:
-        parts = [repr(opnd) for opnd in self.operands]
-        return f"{self.op}({', '.join(parts)})"
 
     # ── 结构等价（FactorData 去重 key） ──
 
@@ -525,6 +532,10 @@ class ColumnRef(FactorExpr):
 
     def __init__(self, column: DataColumn):
         self.column = column
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
 
     @property
     def required_columns(self) -> Set[str]:
@@ -612,18 +623,15 @@ class ColumnRef(FactorExpr):
     def _structural_key(self) -> tuple:
         return ('ColumnRef', self.column)
 
-    def __repr__(self) -> str:
-        return f"ColumnRef({self.column.name})"
-
 class ParamRef(FactorExpr):
     """
     参数引用 — 表达式树的叶子节点，运行时从 FactorFamily 注册表取参数值。
 
     示例：
         window_param = WindowParam('W', 5)            # 2. WindowParam 来自 tools/parameters
-        close_ma = ColumnRef(DataColumn.CLOSE_ADJUSTED).ma(window_param)
+        close_ma = ColumnRef(DataColumn.CLOSE_ADJUSTED).rolling_mean(window_param)
 
-        # 等价于：close_ma = CLOSE.ma(5)，但窗口长度由外部参数化
+        # 等价于：close_ma = CLOSE.rolling_mean(5)，但窗口长度由外部参数化
 
     支持的类型：
       - DataColumnParam: 值会被 rectify 为 DataColumn 后用于列查找
@@ -635,13 +643,8 @@ class ParamRef(FactorExpr):
         self.param = param
 
     @property
-    def param_deps(self) -> Set['Parameter']:
-        return {self.param}
-
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        if self.param not in seen:
-            seen.add(self.param)
-            result.append(self.param)
+    def is_leaf_ref(self) -> bool:
+        return True
 
     def evaluate(self, *args, **kwargs) -> pd.DataFrame:
         raise RuntimeError("ParamRef.evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
@@ -696,9 +699,6 @@ class ParamRef(FactorExpr):
     def _get_alias(self) -> str:
         return f"P{self.param.alias}"
 
-    def __repr__(self) -> str:
-        return f"ParamRef({self.param.alias})"
-
     def _structural_key(self) -> tuple:
         return ('ParamRef', self.param.alias)
 
@@ -716,10 +716,16 @@ class ConstExpr(FactorExpr):
     def __init__(self, value: Any):
         self.value = value
 
-    def evaluate(self, freq: DataFreq,
-                 dm: Optional['DataMeta'] = None, *args, **kwargs
-                 ) -> pd.DataFrame:
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    def evaluate(self, *, freq: DataFreq,
+                 dm: Optional['DataMeta'] = None, **kwargs) -> pd.DataFrame:
+
         if isinstance(self.value, (pd.Timedelta, DataFreq)):
+            if freq is None:
+                raise ValueError("ConstExpr 以 Timedelta/DataFreq 为 value 需要 DataFreq 参数")
             if dm is None:
                 raise ValueError("ConstExpr 以 Timedelta/DataFreq 为 value 需要 DataMeta 以计算 day_periods")
             return cast(pd.DataFrame, _resolve_window(self.value, freq, dm))
@@ -739,14 +745,25 @@ class ConstExpr(FactorExpr):
             return str(v).replace('.', 'd').replace('-', 'N')
         return 'const'
 
-    def __repr__(self) -> str:
-        return f"ConstExpr({self.value})"
-
     def _structural_key(self) -> tuple:
         v = self.value
         if isinstance(v, np.ndarray):
             return ('ConstExpr', v.tobytes())
         return ('ConstExpr', v)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 辅助：将标量/ndarray 转为 ConstExpr
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _to_expr(value: Any) -> FactorExpr:
+    """将非 FactorExpr 值包装为 ConstExpr，将 Parameter 转为 ParamRef。"""
+    if isinstance(value, FactorExpr):
+        return value
+    from tools.parameters.Parameter import Parameter
+    if isinstance(value, Parameter):
+        return ParamRef(value)
+    return ConstExpr(value)  # type: ignore[arg-type]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -771,20 +788,20 @@ class RollingOp(OperandExpr):
     # ── 算子映射：op → lambda(*series_or_dfs, window) ──
 
     _OP_MAP = {
-        'ma':     lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).mean(),
-        'std':    lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).std(),
-        'var':    lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).var(),
-        'min':    lambda s, w: s.rolling(w, min_periods=1).min(),
-        'max':    lambda s, w: s.rolling(w, min_periods=1).max(),
-        'sum':    lambda s, w: s.rolling(w, min_periods=1).sum(),
-        'ema':    lambda s, w: s.ewm(span=w, min_periods=max(1, w // 2)).mean(),
-        'skew':   lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).skew(),
+        'rolling_mean': lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).mean(),
+        'rolling_std':  lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).std(),
+        'rolling_var':  lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).var(),
+        'rolling_min':  lambda s, w: s.rolling(w, min_periods=1).min(),
+        'rolling_max':  lambda s, w: s.rolling(w, min_periods=1).max(),
+        'rolling_sum':  lambda s, w: s.rolling(w, min_periods=1).sum(),
+        'rolling_ema':  lambda s, w: s.ewm(span=w, min_periods=max(1, w // 2)).mean(),
+        'rolling_skew': lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).skew(),
     }
 
     def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
                        freq: DataFreq) -> pd.DataFrame:
         # argmax/argmin：全向量化，不依赖 rolling()
-        if self.op in ('argmax', 'argmin'):
+        if self.op in ('rolling_argmax', 'rolling_argmin'):
             return _rolling_argmaxmin(dfs[0], window, self.op)
 
         if self.op in self._OP_MAP:
@@ -828,16 +845,16 @@ class RollingOp(OperandExpr):
             # 一元
             operand_latex = self.operands[1].to_latex()
             _LATEX_MAP = {
-                'ma': f'\\text{{MA}}_{{{w_str}}}({operand_latex})',
-                'std': f'\\sigma_{{{w_str}}}({operand_latex})',
-                'var': f'\\sigma^2_{{{w_str}}}({operand_latex})',
-                'min': f'\\min_{{{w_str}}}({operand_latex})',
-                'max': f'\\max_{{{w_str}}}({operand_latex})',
-                'sum': f'\\sum_{{{w_str}}}({operand_latex})',
-                'ema': f'\\text{{EMA}}_{{{w_str}}}({operand_latex})',
-                'skew': f'\\text{{Skew}}_{{{w_str}}}({operand_latex})',
-                'argmax': f'\\text{{ArgMax}}_{{{w_str}}}({operand_latex})',
-                'argmin': f'\\text{{ArgMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_mean': f'\\text{{RollingMean}}_{{{w_str}}}({operand_latex})',
+                'rolling_std': f'\\text{{RollingStd}}_{{{w_str}}}({operand_latex})',
+                'rolling_var': f'\\text{{RollingVar}}_{{{w_str}}}({operand_latex})',
+                'rolling_min': f'\\text{{RollingMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_max': f'\\text{{RollingMax}}_{{{w_str}}}({operand_latex})',
+                'rolling_sum': f'\\text{{RollingSum}}_{{{w_str}}}({operand_latex})',
+                'rolling_ema': f'\\text{{RollingEMA}}_{{{w_str}}}({operand_latex})',
+                'rolling_skew': f'\\text{{RollingSkew}}_{{{w_str}}}({operand_latex})',
+                'rolling_argmax': f'\\text{{RollingArgMax}}_{{{w_str}}}({operand_latex})',
+                'rolling_argmin': f'\\text{{RollingArgMin}}_{{{w_str}}}({operand_latex})',
             }
             return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
         else:
@@ -852,13 +869,6 @@ class RollingOp(OperandExpr):
         parts.append(f"W{self._window_str()}")
         return "_".join(parts)
 
-    def __repr__(self) -> str:
-        w_str = self._window_str()
-        if len(self.operands) == 2:
-            return f"{self.op}({self.operands[1]}, {w_str})"
-        else:
-            return f"{self.op}({self.operands[1]}, {self.operands[2]}, {w_str})"
-
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
@@ -867,7 +877,8 @@ class RollingOp(OperandExpr):
             return cache[self]
 
         # 先求值数据 operands（非 window）
-        data_vals = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
+        data_vals = [opnd.evaluate(products=products, freq=freq, source=source,
+                       cache=cache, preloaded=preloaded)
                      for opnd in self.operands[1:]]
 
         # 从第一个产品拿 DataMeta，用于窗口参数中的 day_periods 计算
@@ -877,9 +888,9 @@ class RollingOp(OperandExpr):
         # 求窗口值：ConstExpr 走专用签名；其它表达式走标准 evaluate
         window_expr = self.operands[0]
         if isinstance(window_expr, ConstExpr):
-            window_val = window_expr.evaluate(freq, dm=dm)
+            window_val = window_expr.evaluate(freq=freq, dm=dm)
         else:
-            window_val = window_expr.evaluate(products, freq, source=source,
+            window_val = window_expr.evaluate(products=products, freq=freq, source=source,
                                               cache=cache, preloaded=preloaded)
             if isinstance(window_val, ConstExpr):
                 if isinstance(window_val.value, (pd.Timedelta, DataFreq)):
@@ -922,8 +933,8 @@ class ShiftOp(OperandExpr):
             return cache[self]
 
         # 先求 operand（DataFrame）
-        operand_val = self.operands[1].evaluate(products, freq, source=source,
-                                                  cache=cache, preloaded=preloaded)
+        operand_val = self.operands[1].evaluate(products=products, freq=freq, source=source,
+                            cache=cache, preloaded=preloaded)
 
         # 从第一个产品拿 DataMeta，用于 periods 参数中的 day_periods 计算
         from tools.data.DataMeta import DataMeta
@@ -931,9 +942,9 @@ class ShiftOp(OperandExpr):
 
         periods_expr = self.operands[0]
         if isinstance(periods_expr, ConstExpr):
-            periods_val = periods_expr.evaluate(freq, dm=dm)
+            periods_val = periods_expr.evaluate(freq=freq, dm=dm)
         else:
-            periods_val = periods_expr.evaluate(products, freq, source=source,
+            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source,
                                                 cache=cache, preloaded=preloaded)
             if isinstance(periods_val, ConstExpr):
                 if isinstance(periods_val.value, (pd.Timedelta, DataFreq)):
@@ -973,9 +984,6 @@ class ShiftOp(OperandExpr):
         p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
         return f"shift_{self.operand._get_alias()}_{p}"
 
-    def __repr__(self) -> str:
-        return f"shift({self.operand}, {self.periods})"
-
 
 def _rolling_argmaxmin(
     df: pd.DataFrame,
@@ -995,9 +1003,9 @@ def _rolling_argmaxmin(
     arr = df.to_numpy(dtype=float)
     windows = np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
     reversed_view = windows[..., ::-1]
-    if op == 'argmax':
+    if op == 'rolling_argmax':
         pos = (window - 1) - np.argmax(reversed_view, axis=-1)
-    elif op == 'argmin':
+    elif op == 'rolling_argmin':
         pos = (window - 1) - np.argmin(reversed_view, axis=-1)
     else:
         raise ValueError(f"Invalid op: {op}")
@@ -1150,11 +1158,6 @@ class CrossSectionalOp(OperandExpr):
         if self.op == 'cs_spearman':
             return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
         return f"{self.op}_{self.operand._get_alias()}"
-
-    def __repr__(self) -> str:
-        if self.op == 'cs_spearman':
-            return f"{self.op}({self.left}, {self.right})"
-        return f"{self.op}({self.operand})"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1412,12 +1415,6 @@ class CompositeExpr(OperandExpr):
         parts = [opnd._get_alias() for opnd in self.operands]
         return f"{op_alias}_{'_'.join(parts)}"
 
-    def __repr__(self) -> str:
-        parts = [repr(opnd) for opnd in self.operands]
-        if len(parts) == 1:
-            return f"{self.op}({parts[0]})"
-        return f"({parts[0]} {self.op_name} {parts[1]})"
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 顶层便利函数：max / min 多元聚合
@@ -1649,5 +1646,3 @@ class SignalAlign(OperandExpr):
         inner = self.operands[0].to_latex()
         return f'\\text{{SIGNAL}}_{{{self.signal_freq}}}({inner})'
 
-    def __repr__(self) -> str:
-        return f"SignalAlign({self.operands[0]!r}, freq={self.signal_freq!r})"

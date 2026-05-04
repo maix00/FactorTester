@@ -20,7 +20,7 @@ class MmIntradayMom(FactorFamily):
         O = DataColumnParam('O', default_value='OA')
         C = DataColumnParam('C', default_value='CA')
         N = WindowParam('N', default_value='10d')
-        return ((C - O) / (O + 1e-10)).ma(N)
+        return ((C - O) / (O + 1e-10)).rolling_mean(N)
 
     desc = '日内动量'
     description = """

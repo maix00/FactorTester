@@ -22,8 +22,8 @@ class MmMACD(FactorFamily):
         Slow = WindowParam('Slow', default_value='26d')
         Signal = WindowParam('Signal', default_value='9d')
         p = P.shift(0)
-        dif = p.ema(Fast) - p.ema(Slow)
-        dea = dif.ema(Signal)
+        dif = p.rolling_ema(Fast) - p.rolling_ema(Slow)
+        dea = dif.rolling_ema(Signal)
         return (dif - dea) / (p + 1e-10)
 
     desc = '指数均线趋势加速'

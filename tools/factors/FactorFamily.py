@@ -297,12 +297,15 @@ class FactorFamily(FactorExpr, UniqueObject):
         值别名为空字符串的参数会被跳过，不出现在名称中。
         若无参数则直接返回家族别名。
         """
+        normalized = self._normalize_param_kwargs(**params)
+        ordered_keys = sorted(
+            (k for k in normalized.keys() if k in self.params_dict),
+            key=lambda k: (type(self.params_dict[k]).__name__, self.params_dict[k].alias),
+        )
+
         parts = []
-        for key, value in params.items():
-            # $ 前缀标准化：与 _normalize_param_kwargs 保持一致
-            if key not in self.params_dict:
-                if not key.startswith('$') and f'${key}' in self.params_dict:
-                    key = f'${key}'
+        for key in ordered_keys:
+            value = normalized[key]
             val_alias = self.params_dict[key]._value_space.alias(value)
             if val_alias:
                 if key == '$Rev':

@@ -30,7 +30,7 @@ class VlGK(FactorFamily):
         hl = (h / (l + eps)).log()
         co = (c / (o + eps)).log()
         gk_bar = 0.5 * hl * hl - (2.0 * 0.6931471805599453 - 1.0) * co * co
-        return gk_bar.ma(N).sqrt()
+        return gk_bar.rolling_mean(N).sqrt()
 
     desc = 'Garman-Klass 波动率'
     description = """

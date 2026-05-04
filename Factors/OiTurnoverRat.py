@@ -21,7 +21,7 @@ class OiTurnoverRat(FactorFamily):
         vol = DataColumnParam('V', default_value='V')
         oi_s = oi.shift(0)
         vol_s = vol.shift(0)
-        return oi_s / (vol_s.ma(N) + 1e-10)
+        return oi_s / (vol_s.rolling_mean(N) + 1e-10)
 
     desc = '持仓换手率'
     description = """

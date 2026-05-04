@@ -173,7 +173,7 @@ class Parameter(UniqueObject):
         return self._registry.get(obj, self.default_value)
 
     # ── 表达式树代理 ──
-    # Parameter 实例可通过 .shift(N) / .ma(N) 等方法直接参与表达式构建，
+    # Parameter 实例可通过 .shift(N) / .rolling_mean(N) 等方法直接参与表达式构建，
     # 内部创建 ParamRef(self) 代理所有 FactorExpr 上的方法。
 
     def __getattr__(self, name: str):

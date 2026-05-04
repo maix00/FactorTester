@@ -32,7 +32,7 @@ class VlRS(FactorFamily):
         lo = (l / (o + eps)).log()
         lc = (l / (c + eps)).log()
         rs_bar = hc * ho + lc * lo
-        return rs_bar.ma(N).sqrt()
+        return rs_bar.rolling_mean(N).sqrt()
 
     desc = 'Rogers-Satchell 波动率'
     description = """

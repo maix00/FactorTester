@@ -3,7 +3,7 @@
 # 价格持仓背离因子
 #
 # FactorFamily 表达式驱动版本。
-# div = sign(d_price) * sign(d_oi); X = div.ma(N)
+# div = sign(d_price) * sign(d_oi); X = div.rolling_mean(N)
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -25,7 +25,7 @@ class OiPriceDiv(FactorFamily):
         price_sign = p.delta(RF).sign()
         oi_sign = oi.delta(RF).sign()
         div = price_sign * oi_sign
-        return div.ma(N)
+        return div.rolling_mean(N)
 
     desc = '价格持仓背离'
     description = """

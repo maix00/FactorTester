@@ -27,7 +27,7 @@ class MmRSTrend(FactorFamily):
         lc = (L.shift(0) / C.shift(0)).log()
         lo = (L.shift(0) / O.shift(0)).log()
         rs = hc * ho + lc * lo
-        return (rs * (C.shift(0) - O.shift(0)).sign()).ma(N)
+        return (rs * (C.shift(0) - O.shift(0)).sign()).rolling_mean(N)
 
     desc = 'RS 波动趋势'
     description = """

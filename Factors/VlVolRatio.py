@@ -22,7 +22,7 @@ class VlVolRatio(FactorFamily):
         RF = WindowParam('RF', default_value='1d')
         p = P.shift(0)
         ret = p.delta(RF) / (p.shift(RF) + 1e-10)
-        return ret.std(Ns) / (ret.std(Nl) + 1e-10)
+        return ret.rolling_std(Ns) / (ret.rolling_std(Nl) + 1e-10)
 
     desc = '短长波动率比'
     description = """
