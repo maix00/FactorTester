@@ -269,7 +269,6 @@ def run_mfa_combination():
         # 4. 分组回测
         composite_factor = Factor(name='composite', family=factor_family)
         composite_factor.table = composite.to_frame(name='_COMPOSITE_')
-        composite_factor._set_products()
         composite_factor.freq = factors[0].freq if factors[0].freq else factor_family.get_default_freq()
         composite_factor.calc_returns(next_return=True, return_freq=freq)
 

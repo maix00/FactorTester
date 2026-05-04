@@ -159,7 +159,7 @@
                 <tr draggable="true" data-factor-idx="{{ loop.index0 }}">
                     <td>{{ factor.alias }}</td>
                     {% for param in params %}
-                        <td>{{ factor.params_dict[param.alias].get_value_alias(factor.params_dict[param.alias].get_value(factor)) }}</td>
+                        <td>{{ factor.family.params_dict[param.alias].get_value_alias(factor.family.params_dict[param.alias].get_value(factor)) }}</td>
                     {% endfor %}
                     <td>
                         <button class="param-btn param-btn-danger delete_factor_btn" 

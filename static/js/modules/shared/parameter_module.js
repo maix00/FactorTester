@@ -41,7 +41,7 @@
                         if (typeof callback === 'function') callback();
                     }
                 })
-                .catch(err => alert('刷新参数模块失败: ' + err));
+                .catch(err => console.error('刷新参数模块失败:', err));
         }
 
         // 绑定事件

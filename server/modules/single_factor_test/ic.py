@@ -96,7 +96,6 @@ def run_ic_test():
                 factor.table = table
                 if not hasattr(factor, 'freq') or factor.freq is None:
                     factor.freq = factor.get_freq()
-                factor._set_products()
         
         if need_calc:
             try:
@@ -116,7 +115,6 @@ def run_ic_test():
             if factor.table is not None and not factor.table.empty:
                 if not hasattr(factor, 'freq') or factor.freq is None:
                     factor.freq = factor.get_freq()
-                factor._set_products()
             # 不重复写入已有缓存
             if not factor_series_cache.exists():
                 with open(factor_series_cache, 'wb') as f:

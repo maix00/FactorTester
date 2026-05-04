@@ -238,9 +238,9 @@ class Factor(FactorExpr, UniqueObject):
           4. 否则 → MIN1
           5. 从产品可用频率中选 ≥ 所需频率的最低频（降级兼容）
         """
-        from tools.factors.FactorExpr import ConstExpr, FactorExpr
+        from tools.factors.FactorExpr import ConstExpr, FactorExpr, ShiftOp, RollingOp
 
-        # Step 1: 遍历表达式树，收集所有 Timedelta 常量
+        # Step 1: 遍历表达式树，用 DataFreq() 统一收集所有窗口值
         min_window: Optional[pd.Timedelta] = None
         seen: set[int] = set()
         stack: list[FactorExpr] = [self._resolved_expr]  # type: ignore[list-item]
@@ -249,6 +249,15 @@ class Factor(FactorExpr, UniqueObject):
             for op in getattr(expr, 'operands', []):
                 stack.append(op)
 
+        def try_collect(val: Any) -> None:
+            nonlocal min_window
+            try:
+                td = DataFreq(val).value
+            except Exception:
+                return
+            if min_window is None or td < min_window:
+                min_window = td
+
         while stack:
             node = stack.pop()
             node_id = id(node)
@@ -256,12 +265,12 @@ class Factor(FactorExpr, UniqueObject):
                 continue
             seen.add(node_id)
             if isinstance(node, ConstExpr):
-                val = node.value
-                if isinstance(val, pd.Timedelta):
-                    if min_window is None or val < min_window:
-                        min_window = val
-            else:
-                push_operands(node)
+                try_collect(node.value)
+            elif isinstance(node, ShiftOp) and not isinstance(node.periods, FactorExpr):
+                try_collect(node.periods)
+            elif isinstance(node, RollingOp) and not isinstance(node.window, FactorExpr):
+                try_collect(node.window)
+            push_operands(node)
 
         # Step 2: 根据最小窗口确定所需最低频率
         if min_window is None or min_window >= pd.Timedelta('1day'):

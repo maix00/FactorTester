@@ -578,7 +578,11 @@
             const sub = e.currentTarget.getAttribute('data-sub');
             const idx = e.currentTarget.getAttribute('data-idx');
             const factorName = e.currentTarget.getAttribute('data-factor-name');
-            await loadFactorAndReturn(sub, idx, factorName);
+            try {
+                await loadFactorAndReturn(sub, idx, factorName);
+            } catch (err) {
+                console.error('loadFactorAndReturn 失败:', err);
+            }
         }
     }
 

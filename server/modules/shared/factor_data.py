@@ -24,7 +24,7 @@ def factor_list():
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         factor_data = []
         for f in factors:
-            factor_freq_param = f.params_dict.get('$F')
+            factor_freq_param = f.family.params_dict.get('$F') if f.family else None
             factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
             factor_freq_str = (
                 factor_freq_param._value_space.alias(factor_freq_value)
@@ -178,7 +178,6 @@ def get_return_series():
                 re_calc = True
         if re_calc or series is None:
             factor.clear()
-            factor.products = set([product])
             returns_df = factor.calc_returns(return_freq=(None if return_freq == 'N' else return_freq))
             series = (returns_df[product].dropna()
                       if isinstance(returns_df, pd.DataFrame) and product in returns_df.columns
@@ -364,7 +363,7 @@ def get_factor_distribution():
         tz = getattr(idx, 'tz', None)
         ts_compare = ts.tz_localize(tz) if tz and ts.tzinfo is None else (
             ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
-        diffs = np.abs(idx - ts_compare)
+        diffs = np.abs(idx - ts_compare)  # type: ignore[operator]
         nearest_i = diffs.argmin()
         nearest_diff = diffs[nearest_i]
         if nearest_diff > pd.Timedelta(days=2):
@@ -387,8 +386,8 @@ def get_factor_distribution():
         std  = float(np.std(arr, ddof=0)) if n > 1 else None
         mn   = float(np.min(arr))  if n > 0 else None
         mx   = float(np.max(arr))  if n > 0 else None
-        skew = float(pd.Series(arr).skew()) if n > 2 else None
-        kurt = float(pd.Series(arr).kurtosis()) if n > 3 else None
+        skew = float(pd.Series(arr).skew()) if n > 2 else None  # type: ignore[arg-type]
+        kurt = float(pd.Series(arr).kurtosis()) if n > 3 else None  # type: ignore[arg-type]
         pcts = {}
         for pct in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
             pcts[str(pct)] = round(float(np.percentile(arr, pct)), 6) if n > 0 else None
@@ -403,7 +402,7 @@ def get_factor_distribution():
 
         return jsonify({
             'success': True,
-            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
+            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,  # type: ignore[union-attr]
             'n': n,
             'stats': {'mean': mean, 'std': std, 'min': mn, 'max': mx, 'skewness': skew, 'kurtosis': kurt, 'percentiles': pcts},
             'values': sorted(values, key=lambda v: v['value']),
