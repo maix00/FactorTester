@@ -59,6 +59,18 @@ class FactorData(UniqueObject):
 
     __slots__ = ('_source_table',)
 
+    def __new__(cls, expr: 'Optional[FactorExpr]' = None,
+                source_table: pd.DataFrame = pd.DataFrame(),
+                *args, **kwargs):
+        """预先计算 structural_key 作为 name，确保 __new__ 阶段即可去重。"""
+        from tools.factors.FactorExpr import FactorExpr
+
+        if expr is not None:
+            structural_key = str(expr._structural_key())
+        else:
+            structural_key = kwargs.get('name', kwargs.get('alias', 'unknown'))
+        return super().__new__(cls, name=structural_key, alias=structural_key, *args, **kwargs)
+
     def __init__(self, expr: 'Optional[FactorExpr]' = None,
                  source_table: pd.DataFrame = pd.DataFrame(),
                  *args, **kwargs):
@@ -70,14 +82,8 @@ class FactorData(UniqueObject):
         from tools.factors.FactorExpr import FactorExpr
 
         if not hasattr(self, '_initialized'):
-            # 首次初始化
-            if expr is not None:
-                structural_key = str(expr._structural_key())
-            else:
-                structural_key = kwargs.get('name', kwargs.get('alias', 'unknown'))
-
-            # 调用 UniqueObject.__init__，用 structural_key 做 name
-            super().__init__(name=structural_key, alias=structural_key)
+            # 首次初始化 —— name/alias 已在 __new__ 中设置
+            self._initialized = True
             self._source_table = source_table
 
     # ── 工厂方法 ──

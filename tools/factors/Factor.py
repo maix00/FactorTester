@@ -331,13 +331,14 @@ class Factor(FactorExpr, UniqueObject):
         计算因子值。
 
         流程（SignalAlign + FactorData 架构）：
-          1. _resolved_expr.evaluate() → 已对齐的 DataFrame
-             _resolved_expr 包含 SignalAlign 节点，求值即对齐
+          1. _resolved_expr.evaluate() → 已对齐（且可能取反）的 DataFrame
+             _resolved_expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
+             取反已内化到表达式层 → pos/neg 因子有不同 structural key
           2. FactorData(expr, raw_result) 去重存储（相同表达式只算一次）
              SignalAlign 的 _structural_key 包含对齐参数 → 不同对齐不同 key
+             neg() 包裹 → pos/neg 不同 key
           3. self._aligned_table = result（pandas CoW 零拷贝）
-          4. 按 is_reversed 取反
-          5. 删除全 NaN 或常数列
+          4. 删除全 NaN 或常数列
 
         source_freq: 可选，手动指定数据源频率。None 时自动推断。
         """
@@ -388,27 +389,33 @@ class Factor(FactorExpr, UniqueObject):
                 preloaded[(p, freq_name)] = data
 
         # ── 1. 表达式求值 ──
-        # _resolved_expr = SignalAlign(func_expr, ...)
-        # evaluate 返回已对齐的 DataFrame（SignalAlign._apply_op 对齐）
+        # _resolved_expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
+        # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         df_cache: Dict[FactorExpr, pd.DataFrame] = {}
         result = self._resolved_expr.evaluate(
             products, freq, preloaded=preloaded, cache=df_cache)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
-        # _raw_data 是 SignalAlign 的属性，运行时必定存在（_apply_op 已设置）
-        raw_data: pd.DataFrame = getattr(self._resolved_expr, '_raw_data', result)  # type: ignore[union-attr]
+        # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
+        raw_data: pd.DataFrame = result  # fallback
+        node = self._resolved_expr
+        while True:
+            if isinstance(node, SignalAlign):
+                raw_data = node._raw_data  # type: ignore[assignment]
+                break
+            # CompositeExpr('neg', ...) → 穿透
+            operands = getattr(node, 'operands', None) or getattr(node, '_operands', None)
+            if operands and len(operands) == 1:
+                node = operands[0]
+            else:
+                break
         self._factor_data = FactorData(expr=self._resolved_expr, source_table=raw_data)
 
         # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
         self._aligned_table = result
 
-        # ── 4. 取反 ──
-        if self.is_reversed:
-            result = -result
-            self._aligned_table = result
-
-        # ── 5. 删除无贡献的列 ──
+        # ── 4. 删除无贡献的列 ──
         col_todrop = [col for col in result.columns
                       if (droppedna := result[col].dropna()).empty
                       or max(droppedna) == min(droppedna)]
@@ -416,7 +423,7 @@ class Factor(FactorExpr, UniqueObject):
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
-        # ── 6. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
+        # ── 5. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
         t = Factor._get_active_tester()
         if t is not None:
             t.factor_source_tables[self] = self._factor_data.source_table

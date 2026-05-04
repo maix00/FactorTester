@@ -391,7 +391,7 @@ class FactorFamily(FactorExpr, UniqueObject):
         }
 
         # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
-        from tools.factors.FactorExpr import SignalAlign
+        from tools.factors.FactorExpr import SignalAlign, CompositeExpr
         if self._expr is not None:
             func_expr = self._resolve_expr_params(self._expr, param_values=param_values)
             # 包裹 SignalAlign：对齐参数来自 family 配置
@@ -405,16 +405,20 @@ class FactorFamily(FactorExpr, UniqueObject):
                 basepoint=bp, daily_basepoint=dbp,
                 end_session_skip=ess, end_session_gap=esg,
             )
+            # 取反：包在 SignalAlign 外层 → pos/neg 有不同 structural key
+            if is_reversed:
+                resolved_expr = CompositeExpr('neg', resolved_expr)
+                func_expr = CompositeExpr('neg', func_expr)  # func_expr 也取反，保持语义一致
         else:
             func_expr = None
             resolved_expr = None
 
         return Factor(
             alias=factor_alias,
-            func_expr=func_expr,        # 纯因子逻辑（不含对齐），给外部引用
-            _resolved_expr=resolved_expr, # 含 SignalAlign 的完整表达式
+            func_expr=func_expr,        # 纯因子逻辑（含取反，不含对齐），给外部引用
+            _resolved_expr=resolved_expr, # 含 SignalAlign + 取反 的完整表达式
             signal_freq=signal_freq,
-            is_reversed=is_reversed,
+            is_reversed=False,  # 取反已内化到表达式，不再需要 DataFrame 层取反
             family=self,
         )
 
