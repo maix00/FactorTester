@@ -311,19 +311,28 @@ class Factor(FactorExpr, UniqueObject):
                             except Exception:
                                 return
                         desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
-                    available_freqs = set(products[0].list_available_freqs())
-                    for p in products[1:]:
+                    valid_products: List[Product] = []
+                    available_freqs_set: Optional[Set[DataFreq]] = None
+                    for p in products:
                         freqs = set(p.list_available_freqs())
                         if not freqs:
-                            products.remove(p)
+                            continue
+                        valid_products.append(p)
+                        if available_freqs_set is None:
+                            available_freqs_set = freqs
                         else:
-                            available_freqs &= freqs
-                    available_freqs = sorted(available_freqs, key=lambda f: f.value)
+                            available_freqs_set &= freqs
+                    products = valid_products
+                    if available_freqs_set is None:
+                        available_freqs_set = set()
+                    available_freqs = sorted(available_freqs_set, key=lambda f: f.value)
                     if not available_freqs:
                         raise ValueError(f"{self}: 产品没有公共可用频率，无法推断数据频率")
-                    if not desired_freq:
+                    if desired_freq:
+                        max_desired = max(df.value for df in desired_freq)
+                        freq = next((af for af in available_freqs if af.value <= max_desired), available_freqs[0])
+                    else:
                         freq = available_freqs[0]
-                    freq = next((af for af in available_freqs if af.value <= max(df.value for df in desired_freq)), available_freqs[0])
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 
@@ -335,11 +344,12 @@ class Factor(FactorExpr, UniqueObject):
         preloaded: dict = {}
         column_refs = self._resolved_expr.column_refs
         columns = list(cr.column.name for cr in column_refs)
-        for p in products:
-            dm: DataMeta = getattr(p, freq.name)
-            data = dm.get_and_adjust_cols(columns, copy=False)
-            if not data.empty:
-                preloaded[(p, freq.name)] = data
+        if columns:
+            for p in products:
+                dm: DataMeta = getattr(p, freq.name)
+                data = dm.get_and_adjust_cols(columns, copy=False)
+                if not data.empty:
+                    preloaded[(p, freq.name)] = data
 
         # ── 1. 表达式求值 ──
         # _resolved_expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
@@ -367,9 +377,8 @@ class Factor(FactorExpr, UniqueObject):
         self._aligned_table = result
 
         # ── 4. 删除无贡献的列 ──
-        col_todrop = [col for col in result.columns
-                      if (droppedna := result[col].dropna()).empty
-                      or max(droppedna) == min(droppedna)]
+        nunique = result.nunique(dropna=True)
+        col_todrop = nunique[nunique <= 1].index.tolist()
         result.drop(columns=col_todrop, inplace=True)
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")

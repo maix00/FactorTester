@@ -339,20 +339,35 @@ class FactorFamily(FactorExpr, UniqueObject):
         """
         from tools.factors.FactorExpr import SignalAlign, CompositeExpr
 
-        _pl = params_list if params_list is not None else self._params_list
+        normalized_kwargs = self._normalize_param_kwargs(**kwargs) if kwargs else {}
+        if normalized_kwargs:
+            self._check_in_space(**normalized_kwargs)
+
+        if params_list is not None:
+            _pl = params_list
+        elif normalized_kwargs:
+            _pl = [{p.alias: p.default_value for p in self.params}]
+        else:
+            _pl = self._params_list
+
         factors = []
         for params in _pl:
-            factor_alias = self.get_alias(**params)
+            current_params = dict(params)
+            if normalized_kwargs:
+                for key, value in normalized_kwargs.items():
+                    current_params[key] = self.params_dict[key]._value_space.rectify(value)
+
+            factor_alias = self.get_alias(**current_params)
 
             # 提取元参数
-            signal_freq = params.pop('$F', params.pop('F', '1d'))
-            is_reversed: bool = params.pop('$Rev', params.pop('Rev', False))
+            signal_freq = current_params.get('$F', current_params.get('F', '1d'))
+            is_reversed: bool = current_params.get('$Rev', current_params.get('Rev', False))
 
             # 构建 param_values（排除已提取的元参数）
             param_values = {
-                p.alias: params[p.alias]
+                p.alias: current_params[p.alias]
                 for p in self.params
-                if p.alias in params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
+                if p.alias in current_params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
             }
 
             # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）

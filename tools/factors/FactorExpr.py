@@ -648,14 +648,42 @@ class ParamRef(FactorExpr):
 
     def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
         """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
+        from tools.parameters import DataColumnParam, FactorParam
+
+        def _strip_outer_signal_align(expr: FactorExpr) -> FactorExpr:
+            # FE 参数可直接传入已构建好的 Factor；这里剥离最外层 SignalAlign，
+            # 让 IC 在未对齐数据上计算，并尽量复用已有中间 FactorData。
+            if isinstance(expr, SignalAlign):
+                return expr.operands[0]
+            if (
+                isinstance(expr, CompositeExpr)
+                and expr.op == 'neg'
+                and len(expr.operands) == 1
+                and isinstance(expr.operands[0], SignalAlign)
+            ):
+                return CompositeExpr('neg', expr.operands[0].operands[0])
+            return expr
+
         if param_values is not None and self.param.alias in param_values:
             value = param_values[self.param.alias]
-            from tools.parameters import DataColumnParam
             if isinstance(self.param, DataColumnParam):
-                return ColumnRef(DataColumn(value))
+                resolved: FactorExpr = ColumnRef(DataColumn(value))
+            elif isinstance(self.param, FactorParam):
+                if value is None:
+                    resolved = ConstExpr(None)
+                else:
+                    candidate = getattr(value, '_resolved_expr', value)
+                    if not isinstance(candidate, FactorExpr):
+                        raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
+                    resolved = _strip_outer_signal_align(candidate)
             else:
-                return ConstExpr(value)
-        return ConstExpr(self.param.default_value)
+                resolved = ConstExpr(value)
+        else:
+            resolved = ConstExpr(self.param.default_value)
+
+        if self._is_intermediate:
+            resolved = resolved.as_intermediate(self._intermediate_name)
+        return resolved
 
     @property
     def op_name(self) -> str:
@@ -685,7 +713,7 @@ class ConstExpr(FactorExpr):
     evaluate() 直接返回 bar 数（int）。
     """
 
-    def __init__(self, value: Union[int, float, np.ndarray]):
+    def __init__(self, value: Any):
         self.value = value
 
     def evaluate(self, freq: DataFreq,
@@ -846,9 +874,18 @@ class RollingOp(OperandExpr):
         from tools.data.DataMeta import DataMeta
         dm: DataMeta = getattr(products[0], freq.name)
 
-        # 求窗口值（ConstExpr.evaluate 需要 DataMeta 来计算 day_periods）
-        window_val = self.operands[0].evaluate(products, freq, source=source,
-                                                cache=cache, preloaded=preloaded, dm=dm)
+        # 求窗口值：ConstExpr 走专用签名；其它表达式走标准 evaluate
+        window_expr = self.operands[0]
+        if isinstance(window_expr, ConstExpr):
+            window_val = window_expr.evaluate(freq, dm=dm)
+        else:
+            window_val = window_expr.evaluate(products, freq, source=source,
+                                              cache=cache, preloaded=preloaded)
+            if isinstance(window_val, ConstExpr):
+                if isinstance(window_val.value, (pd.Timedelta, DataFreq)):
+                    window_val = _resolve_window(window_val.value, freq, dm)
+                else:
+                    window_val = window_val.value
         result = self._apply_rolling(window_val, *data_vals, freq=freq)  # type: ignore[arg-type]
 
         if cache is not None:
@@ -892,8 +929,17 @@ class ShiftOp(OperandExpr):
         from tools.data.DataMeta import DataMeta
         dm: DataMeta = getattr(products[0], freq.name)
 
-        periods_val = self.operands[0].evaluate(products, freq, source=source,
-                                                  cache=cache, preloaded=preloaded, dm=dm)
+        periods_expr = self.operands[0]
+        if isinstance(periods_expr, ConstExpr):
+            periods_val = periods_expr.evaluate(freq, dm=dm)
+        else:
+            periods_val = periods_expr.evaluate(products, freq, source=source,
+                                                cache=cache, preloaded=preloaded)
+            if isinstance(periods_val, ConstExpr):
+                if isinstance(periods_val.value, (pd.Timedelta, DataFreq)):
+                    periods_val = _resolve_window(periods_val.value, freq, dm)
+                else:
+                    periods_val = periods_val.value
 
         result = operand_val.shift(periods_val)  # type: ignore[arg-type]
 
@@ -1018,11 +1064,21 @@ class CrossSectionalOp(OperandExpr):
         return self.operands[1]
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
+        vals: List[Any] = []
+        for i, val in enumerate(values):
+            opnd = self.operands[i]
+            vals.append(opnd.value if isinstance(opnd, ConstExpr) else val)
+
         if self.op == 'cs_spearman':
-            left_df, right_df = values[0], values[1]
+            left_df, right_df = vals[0], vals[1]
+            if not isinstance(left_df, pd.DataFrame) or not isinstance(right_df, pd.DataFrame):
+                raise TypeError(
+                    f"cs_spearman 需要两个 DataFrame 输入，收到 "
+                    f"{type(left_df).__name__} 与 {type(right_df).__name__}"
+                )
             return self._apply_spearman(left_df, right_df)
 
-        x = values[0]
+        x = vals[0]
         if self.op == 'cs_zscore':
             mean = x.mean(axis=1)
             std = x.std(axis=1)
@@ -1034,25 +1090,46 @@ class CrossSectionalOp(OperandExpr):
 
     @staticmethod
     def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
-        import numpy as np
         common_idx = left_df.index.intersection(right_df.index)
-        ic_values = []
-        idx_list = []
-        for idx in common_idx:
-            l = left_df.loc[idx]
-            r = right_df.loc[idx]
-            if isinstance(l, pd.DataFrame):
-                l = l.iloc[0]
-            if isinstance(r, pd.DataFrame):
-                r = r.iloc[0]
-            valid = l.notna() & r.notna()
-            if valid.sum() > 1 and l[valid].nunique() > 1 and r[valid].nunique() > 1:
-                with np.errstate(invalid='ignore'):
-                    ic_values.append(pd.Series(l[valid]).corr(r[valid], method='spearman'))
-            else:
-                ic_values.append(np.nan)
-            idx_list.append(idx)
-        result = pd.DataFrame({'IC': ic_values}, index=pd.Index(idx_list))
+        common_cols = left_df.columns.intersection(right_df.columns)
+
+        if len(common_idx) == 0 or len(common_cols) == 0:
+            empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
+            result = pd.DataFrame({'IC': []}, index=empty_idx)
+            result.index.names = left_df.index.names
+            return result
+
+        l = left_df.loc[common_idx, common_cols]
+        r = right_df.loc[common_idx, common_cols]
+
+        # Spearman = Pearson(rank(x), rank(y)); 按行（横截面）一次性向量化计算。
+        valid = l.notna() & r.notna()
+        l_rank = l.where(valid).rank(axis=1, method='average', na_option='keep')
+        r_rank = r.where(valid).rank(axis=1, method='average', na_option='keep')
+
+        x = l_rank.to_numpy(dtype=float)
+        y = r_rank.to_numpy(dtype=float)
+        mask = ~np.isnan(x) & ~np.isnan(y)
+
+        x_masked = np.where(mask, x, 0.0)
+        y_masked = np.where(mask, y, 0.0)
+
+        n = mask.sum(axis=1).astype(float)
+        sum_x = x_masked.sum(axis=1)
+        sum_y = y_masked.sum(axis=1)
+        sum_x2 = (x_masked * x_masked).sum(axis=1)
+        sum_y2 = (y_masked * y_masked).sum(axis=1)
+        sum_xy = (x_masked * y_masked).sum(axis=1)
+
+        num = n * sum_xy - sum_x * sum_y
+        den = np.sqrt((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y))
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ic = num / den
+
+        ic[(n <= 1) | (den <= 0)] = np.nan
+
+        result = pd.DataFrame({'IC': ic}, index=l.index)
         result.index.names = left_df.index.names
         return result
 

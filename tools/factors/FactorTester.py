@@ -406,15 +406,24 @@ class FactorTester(UniqueObject):
         end_date = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
         from tools.factors.FactorFamily import CrossSectionIC
-        from tools.factors.FactorExpr import DataColumn
-        from tools.parameters import DataColumnParam, TypeParam
-        from tools.parameters import WindowParam
+        from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr
 
         # ── 构建去重参数组合 ──
-        # 每个因子有唯一的 FE 表达式和频率，RE 可能共享
-        # Key: (fe_expr_key, freq_key, lag, returns_col) — 去重后用同一个 CrossSectionIC Factor
+        # Key: (fe_expr_key, freq_key, s_param, returns_col)
         ic_param_map: Dict[tuple, List[Factor]] = {}  # param_key → factors sharing it
-        param_key_info: Dict[tuple, tuple] = {}        # param_key → (fe_expr, freq, lag)
+        param_key_info: Dict[tuple, tuple] = {}        # param_key → (fe_expr, freq, s_param)
+
+        def _strip_outer_signal_align(expr: FactorExpr) -> FactorExpr:
+            if isinstance(expr, SignalAlign):
+                return expr.operands[0]
+            if (
+                isinstance(expr, CompositeExpr)
+                and expr.op == 'neg'
+                and len(expr.operands) == 1
+                and isinstance(expr.operands[0], SignalAlign)
+            ):
+                return CompositeExpr('neg', expr.operands[0].operands[0])
+            return expr
 
         for factor in factors:
             if return_freq is not None:
@@ -426,25 +435,20 @@ class FactorTester(UniqueObject):
             else:
                 raise ValueError(f"Factor {factor.alias}: 无法确定频率")
 
-            # Lag: OPEN 类型用 -1（收益率领先1期 → Lag=1），否则用 0
-            lag = 1 if returns_col.value.name.startswith('OPEN') else 0
-            fe_expr = factor.family._expr if factor.family is not None else None
-            if fe_expr is None:
+            # Returns.family_expr: (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+            # 下一期收益：OPEN -> S=0（shift -RF），CLOSE -> S=1（shift 0）
+            s_param = 0 if returns_col.value.name.startswith('OPEN') else 1
+
+            fe_expr_full = getattr(factor, '_resolved_expr', None)
+            if fe_expr_full is None:
                 raise ValueError(f"Factor {factor.alias}: 没有关联的表达式树")
-            param_key = (id(fe_expr), effective_freq.name, lag, returns_col.value.name)
+            fe_expr = _strip_outer_signal_align(fe_expr_full).as_intermediate('FE')
+
+            param_key = (str(fe_expr._structural_key()), effective_freq.name, s_param, returns_col.value.name)
             if param_key not in ic_param_map:
                 ic_param_map[param_key] = []
-                param_key_info[param_key] = (fe_expr, effective_freq, lag)
+                param_key_info[param_key] = (fe_expr, effective_freq, s_param)
             ic_param_map[param_key].append(factor)
-
-        # ── 构建 RE 表达式（共享） ──
-        # Returns: (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-        # 对于 IC，S=shift where shift=-1 for OPEN else 0
-        shift = -1 if returns_col.value.name.startswith('OPEN') else 0
-        SC = DataColumnParam('SC', default_value=returns_col.value)
-        RF = WindowParam('RF')
-        S = TypeParam('S', default_value=shift)
-        re_expr = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
 
         # ── 切换到数据源频率 ──
         sample_factor = factors[0]
@@ -466,14 +470,15 @@ class FactorTester(UniqueObject):
             param_items = list(ic_param_map.items())
 
             def _calc_one_group(param_key, factor_list):
-                fe_expr, effective_freq, lag = param_key_info[param_key]
+                fe_expr, effective_freq, s_param = param_key_info[param_key]
                 # 每次创建新的 CrossSectionIC 实例，
                 # 确保 _intermediates 不被其他线程覆盖
                 ic_family = CrossSectionIC()
                 ic_factor = ic_family.get_factor(
                     FE=fe_expr,
-                    RE=re_expr,
-                    Lag=lag,
+                    SC=returns_col.value,
+                    RF=effective_freq.value,
+                    S=s_param,
                     F=effective_freq.value,
                 )
                 # 复用主因子的 source_freq，确保索引一致
