@@ -140,9 +140,10 @@ def _estimate_factor_returns(tester, factors, freq):
             z = ((s - s.mean()) / s.std()).fillna(0)
 
             # 获取下期收益
-            if f.returns.empty or getattr(f, '_return_freq_cached', None) != freq:
+            cached_returns = tester.factor_returns.get(f, pd.DataFrame())
+            if cached_returns.empty or getattr(f, '_return_freq_cached', None) != freq:
                 f.calc_returns(next_return=True, return_freq=freq)
-            ret_df = f.returns
+            ret_df = tester.factor_returns.get(f, pd.DataFrame())
             if isinstance(ret_df, pd.DataFrame):
                 if isinstance(ret_df.index, pd.MultiIndex):
                     r_s = ret_df.mean(axis=1).groupby(level=0).mean()

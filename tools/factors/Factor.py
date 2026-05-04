@@ -20,7 +20,6 @@
 #   - source_table   : 表达式求值的原始结果（高频，未对齐）
 #   - table          : 信号对齐后的视图
 #   - source         : 数据源 DataSource
-#   - source_factor  : $F=数据源频率 的源 Factor（中间因子自动创建）
 #   - family         : 创建此 Factor 的 FactorFamily
 #   - signal_freq    : 信号频率（对齐目标频率）
 #   - is_reversed    : 是否取反
@@ -35,6 +34,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Any, Sequenc
 from tools import UniqueObject, DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, signal_align
+from tools.factors.FactorData import FactorData
 from tools.factors.Parameters import ReturnFreqParam, FactorNextPeriodReturns
 
 if TYPE_CHECKING:
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from tools.data.DataSource import DataSource
     from tools.parameters.Parameter import Parameter
     from tools.factors.FactorExpr import ColumnRef
-
 
 class Factor(FactorExpr, UniqueObject):
     """
@@ -56,10 +55,9 @@ class Factor(FactorExpr, UniqueObject):
         _resolved_expr (FactorExpr)  : 已解析的纯表达式树（无 ParamRef）
         signal_freq    (Any)         : 信号频率（如 '1d', '1h'）
         is_reversed    (bool)        : 是否取反
-        source_table   (DataFrame)   : 表达式求值的原始结果（高频，未对齐）
-        table          (DataFrame)   : 信号对齐后的视图
+        source_table   (DataFrame)   : 表达式求值的原始结果（高频，未对齐，CoW）
+        table          (DataFrame)   : 信号对齐后的结果（CoW）
         source         (DataSource)  : 数据源（含 freq）
-        source_factor  (Factor)      : 数据源频率的源 Factor，None 表示自己就是源
         family         (FactorFamily): 创建此 Factor 的 FactorFamily 实例
         products       (set)         : 参与计算的 Product 集合（从 source_table 列提取）
         freq           (DataFreq)    : 信号频率（从 table 索引的 _SIGNAL@ 层级推断）
@@ -67,12 +65,8 @@ class Factor(FactorExpr, UniqueObject):
         source_data_freq (DataFreq)  : 数据源频率（从 family 继承）
     """
 
-    # 运行时动态属性（calc / calc_ic / calc_returns 后设置）
-    returns: pd.DataFrame = pd.DataFrame()
+    # 运行时动态属性（calc 后设置）
     source_data_freq: Optional[DataFreq] = None
-    ic_series: pd.Series = pd.Series()           # calc_ic 后设置
-    ic_stats: pd.Series = pd.Series()             # calc_ic 后设置
-    report: pd.DataFrame = pd.DataFrame()         # test() 后设置
 
     def __new__(cls, alias: Optional[str] = None, *args, family=None,
                 _local_only: bool = False, **kwargs):
@@ -92,30 +86,30 @@ class Factor(FactorExpr, UniqueObject):
 
     def __init__(self, alias: Optional[str] = None,
                  _resolved_expr: Optional[FactorExpr] = None,
+                 func_expr: Optional[FactorExpr] = None,
                  signal_freq: Any = None,
                  is_reversed: bool = False,
                  family: Optional['FactorFamily'] = None,
                  source: Optional['DataSource'] = None,
                  _local_only: bool = False,
-                 _param_values: Optional[Dict[str, Any]] = None,
                  **kwargs):
         if not hasattr(self, '_initialized'):
             # FactorExpr 不需要特殊初始化（无 operands）
             FactorExpr.__init__(self)
             UniqueObject.__init__(self, alias=alias, _local_only=_local_only)
-            self._resolved_expr: Optional[FactorExpr] = _resolved_expr
+            # _resolved_expr: 含 SignalAlign 的完整表达式（求值即对齐）
+            # func_expr: 纯因子逻辑（不含 SignalAlign），供外部引用
+            # 向后兼容：若有 _resolved_expr 用它，否则用 func_expr
+            self._resolved_expr: Optional[FactorExpr] = _resolved_expr or func_expr
             self.signal_freq: Any = signal_freq
             self.is_reversed: bool = is_reversed
             self.family: Optional['FactorFamily'] = family
             self.source: Optional['DataSource'] = source
-            self.source_factor: Optional['Factor'] = None
-            self._param_values: Dict[str, Any] = _param_values or {}
 
-            # 数据存储
-            self._source_table: pd.DataFrame = pd.DataFrame()
-            self._aligned_table: pd.DataFrame = pd.DataFrame()
+            # FactorData 引用 + 对齐表（calc 后设置）
+            self._factor_data: Optional['FactorData'] = None
+            self._aligned_table: Optional[pd.DataFrame] = None
             # 动态属性初始值
-            self.returns: pd.DataFrame = pd.DataFrame()
             self.source_data_freq: Optional[DataFreq] = None
 
     # ------------------------------------------------------------------
@@ -169,50 +163,31 @@ class Factor(FactorExpr, UniqueObject):
         return result
 
     # ------------------------------------------------------------------
-    # 属性代理：活跃 FactorTester 时，数据存入 tester 字典（并发安全）
+    # 属性：source_table / table
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_active_tester() -> 'Optional[FactorTester]':
-        try:
-            from tools.factors.FactorTester import _active_tester
-            return _active_tester.get()
-        except ImportError:
-            return None
 
     @property
     def source_table(self) -> pd.DataFrame:
         """表达式求值的原始结果 — 高频，未对齐。"""
-        t = self._get_active_tester()
-        if t is not None:
-            return t.factor_source_tables.get(self, pd.DataFrame())
-        return self._source_table
+        if self._factor_data is not None:
+            return self._factor_data.source_table
+        return pd.DataFrame()
 
     @source_table.setter
     def source_table(self, value: pd.DataFrame):
-        t = self._get_active_tester()
-        if t is not None:
-            t.factor_source_tables[self] = value
-        else:
-            self._source_table = value
-        # 清除 table 视图缓存
-        self._aligned_table = pd.DataFrame()
+        if self._factor_data is not None:
+            self._factor_data.source_table = value
 
     @property
     def table(self) -> pd.DataFrame:
-        """信号对齐后的因子值。"""
-        t = self._get_active_tester()
-        if t is not None:
-            return t.factor_tables.get(self, pd.DataFrame())
-        return self._aligned_table
+        """信号对齐后的因子值（pandas 3.0 CoW 零拷贝）。"""
+        if self._aligned_table is not None:
+            return self._aligned_table
+        return pd.DataFrame()
 
     @table.setter
     def table(self, value: pd.DataFrame):
-        t = self._get_active_tester()
-        if t is not None:
-            t.factor_tables[self] = value
-        else:
-            self._aligned_table = value
+        self._aligned_table = value
 
     @property
     def products(self) -> Set['Product']:
@@ -254,31 +229,39 @@ class Factor(FactorExpr, UniqueObject):
 
     def _infer_source_freq(self, products: Sequence['Product']) -> DataFreq:
         """
-        根据参数中的 WindowParam 最小值，自动选择合适的数据源频率。
+        根据表达式中所有 ConstExpr 的 Timedelta 最小值，自动选择数据源频率。
 
         规则：
-          1. 遍历 _param_values，找所有 WindowParam 的最小窗口
+          1. 遍历 _resolved_expr，收集所有 ConstExpr.value 中的 pd.Timedelta
           2. 如果最小窗口 ≥ 1day → DAY1
           3. 如果最小窗口 ≥ 1hour → HOUR1
-          4. 否则 → MIN1（产品可用最高频）
+          4. 否则 → MIN1
           5. 从产品可用频率中选 ≥ 所需频率的最低频（降级兼容）
         """
-        # Step 1: 从 _param_values 中找到所有时间窗口参数的最小值
+        from tools.factors.FactorExpr import ConstExpr, FactorExpr
+
+        # Step 1: 遍历表达式树，收集所有 Timedelta 常量
         min_window: Optional[pd.Timedelta] = None
-        if self.family is not None:
-            from tools.parameters.WindowParam import WindowParam
-            for p in self.family.params:
-                if isinstance(p, WindowParam):
-                    val = self._param_values.get(p.alias)
-                    if val is None:
-                        val = p.default_value
-                    if isinstance(val, pd.Timedelta):
-                        if min_window is None or val < min_window:
-                            min_window = val
-                    elif isinstance(val, (int, float)):
-                        # bar 计数，保守按 1min 处理
-                        min_window = pd.Timedelta('1min')
-                        break
+        seen: set[int] = set()
+        stack: list[FactorExpr] = [self._resolved_expr]  # type: ignore[list-item]
+
+        def push_operands(expr: FactorExpr):
+            for op in getattr(expr, 'operands', []):
+                stack.append(op)
+
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            if isinstance(node, ConstExpr):
+                val = node.value
+                if isinstance(val, pd.Timedelta):
+                    if min_window is None or val < min_window:
+                        min_window = val
+            else:
+                push_operands(node)
 
         # Step 2: 根据最小窗口确定所需最低频率
         if min_window is None or min_window >= pd.Timedelta('1day'):
@@ -288,7 +271,7 @@ class Factor(FactorExpr, UniqueObject):
         else:
             desired_freq = DataFreq('MIN1')
 
-        # Step 3: 从第一个产品可用频率中选择合适的最低频
+        # Step 3: 从产品可用频率中选择合适的最低频
         if products:
             available_freqs = sorted(
                 products[0].list_available_freqs(),
@@ -297,8 +280,6 @@ class Factor(FactorExpr, UniqueObject):
             for af in available_freqs:
                 if af.value >= desired_freq.value:
                     return af
-
-            # 降级：用最高可用频率
             if available_freqs:
                 return available_freqs[-1]
 
@@ -341,20 +322,22 @@ class Factor(FactorExpr, UniqueObject):
 
     def clear(self):
         """清空所有计算结果。"""
-        self.source_table = pd.DataFrame()
-        self.returns = pd.DataFrame()
+        self._factor_data = None
+        self._aligned_table = None
 
     def calc(self, products: 'Product|List[Product]|Set[Product]',
              source_freq: Optional[DataFreq] = None) -> pd.DataFrame:
         """
         计算因子值。
 
-        流程：
-          1. 用 _resolved_expr 现场 evaluate → source_table
-          2. 通过 SignalAlign 算子对齐到信号频率 → table
-          3. 按 is_reversed 取反
-          4. 删除全 NaN 或常数列
-          5. 自动创建 source_factor（$F=数据频率的中间因子）
+        流程（SignalAlign + FactorData 架构）：
+          1. _resolved_expr.evaluate() → 已对齐的 DataFrame
+             _resolved_expr 包含 SignalAlign 节点，求值即对齐
+          2. FactorData(expr, raw_result) 去重存储（相同表达式只算一次）
+             SignalAlign 的 _structural_key 包含对齐参数 → 不同对齐不同 key
+          3. self._aligned_table = result（pandas CoW 零拷贝）
+          4. 按 is_reversed 取反
+          5. 删除全 NaN 或常数列
 
         source_freq: 可选，手动指定数据源频率。None 时自动推断。
         """
@@ -381,9 +364,6 @@ class Factor(FactorExpr, UniqueObject):
                 freq = self._infer_source_freq(products)
         self.source_data_freq = freq
 
-        # 信号频率
-        signal_freq = self.signal_freq if self.signal_freq is not None else '1d'
-
         # ── 预加载：收集需要的列，每个品种只读一次 ──
         from tools.factors.FactorExpr import ColumnRef
         from tools.data.DataMeta import DataMeta
@@ -407,39 +387,27 @@ class Factor(FactorExpr, UniqueObject):
             if not data.empty:
                 preloaded[(p, freq_name)] = data
 
-        # ── 1. 表达式求值（SignalAlign 节点自动完成对齐） ──
+        # ── 1. 表达式求值 ──
+        # _resolved_expr = SignalAlign(func_expr, ...)
+        # evaluate 返回已对齐的 DataFrame（SignalAlign._apply_op 对齐）
+        # SignalAlign._raw_data 同时保存了未对齐的原始数据
         df_cache: Dict[FactorExpr, pd.DataFrame] = {}
         result = self._resolved_expr.evaluate(
             products, freq, preloaded=preloaded, cache=df_cache)
 
-        # 自动创建中间因子：df_cache 中的 .as_intermediate() 节点（原始数据，不对齐）
-        if self.family is not None:
-            for expr, df in df_cache.items():
-                if expr is not self._resolved_expr and getattr(expr, '_is_intermediate', False):
-                    if expr not in self.family._intermediates:
-                        f = Factor(alias=expr._get_alias(), _local_only=True)
-                        f.table = df
-                        f.family = self.family
-                        self.family._intermediates[expr] = f
+        # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
+        raw_data = self._resolved_expr._raw_data if hasattr(self._resolved_expr, '_raw_data') else result
+        self._factor_data = FactorData(self._resolved_expr, raw_data)
 
-        # 自动创建 source_factor（$F=数据频率，$Rev=False）—— 全局共享
-        raw_data = (getattr(self._resolved_expr, '_raw_data', result)  # type: ignore[arg-type]
-                    if isinstance(self._resolved_expr, SignalAlign)
-                    else result)
-        self.source_factor = Factor(
-            alias=f'{self.alias}@source',
-            _resolved_expr=self._resolved_expr,
-            signal_freq=freq.name,
-            is_reversed=False,
-            family=self.family,
-        )
-        self.source_factor.table = raw_data
+        # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
+        self._aligned_table = result
 
-        # ── 2. 取反 ──
+        # ── 4. 取反 ──
         if self.is_reversed:
             result = -result
+            self._aligned_table = result
 
-        # ── 3. 删除无贡献的列 ──
+        # ── 5. 删除无贡献的列 ──
         col_todrop = [col for col in result.columns
                       if (droppedna := result[col].dropna()).empty
                       or max(droppedna) == min(droppedna)]
@@ -447,8 +415,23 @@ class Factor(FactorExpr, UniqueObject):
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
-        self.table = result
+        # ── 6. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
+        t = Factor._get_active_tester()
+        if t is not None:
+            t.factor_source_tables[self] = self._factor_data.source_table
+            t.factor_tables[self] = result
+        else:
+            self._aligned_table = result
+
         return self.table
+
+    @staticmethod
+    def _get_active_tester() -> 'Optional[FactorTester]':
+        try:
+            from tools.factors.FactorTester import _active_tester
+            return _active_tester.get()
+        except ImportError:
+            return None
 
     def calc_returns(self, next_return: bool = True, return_freq: Optional[Any] = None,
                      returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED) -> pd.DataFrame:
@@ -516,4 +499,7 @@ class Factor(FactorExpr, UniqueObject):
                 if ts.tzinfo is not None:
                     ts = ts.tz_convert('UTC').tz_localize(None)
             result = result[idx >= ts]
+        # 存入活跃 tester 的 factor_returns，保证后续访问一致性
+        if tester is not None:
+            tester.factor_returns[self] = result
         return result

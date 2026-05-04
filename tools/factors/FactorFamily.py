@@ -372,12 +372,11 @@ class FactorFamily(FactorExpr, UniqueObject):
 
         流程：
           1. 提取 $F（信号频率）和 $Rev（是否取反）
-          2. 用 _resolve_expr_params 将其他参数固化为纯表达式树
-          3. 用 SignalAlign 包裹解析后的表达式（对齐由表达式树自动完成）
-          4. 创建 Factor(alias, _resolved_expr, signal_freq, is_reversed, family)
+          2. 用 _resolve_expr_params 将其他参数固化为纯表达式树（func_expr）
+          3. 包裹 SignalAlign(func_expr, ...) → _resolved_expr
+             SignalAlign 作为表达式节点参与结构去重，不同对齐参数 = 不同表达式
+          4. Factor.calc() 直接 evaluate(_resolved_expr)，不需要额外对齐
         """
-        from tools.factors.FactorExpr import SignalAlign
-
         factor_alias = self.get_alias(**params)
 
         # 提取元参数
@@ -391,29 +390,32 @@ class FactorFamily(FactorExpr, UniqueObject):
             if p.alias in params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
         }
 
-        # 解析表达式树：将 ParamRef 替换为实际值
+        # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
+        from tools.factors.FactorExpr import SignalAlign
         if self._expr is not None:
-            resolved_expr = self._resolve_expr_params(self._expr, param_values=param_values)
-        else:
-            resolved_expr = None
-
-        # 包裹 SignalAlign 节点：信号对齐内建到表达式求值中
-        if resolved_expr is not None:
+            func_expr = self._resolve_expr_params(self._expr, param_values=param_values)
+            # 包裹 SignalAlign：对齐参数来自 family 配置
+            bp = getattr(self, 'basepoint', 'last')
+            dbp = getattr(self, 'daily_basepoint', None)
+            ess = getattr(self, 'end_session_skip', True)
+            esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
             resolved_expr = SignalAlign(
-                resolved_expr, signal_freq,
-                basepoint=self.basepoint,
-                daily_basepoint=self.daily_basepoint,
-                end_session_skip=self.end_session_skip,
-                end_session_gap=self.end_session_gap,
+                func_expr,
+                signal_freq=signal_freq if signal_freq is not None else '1d',
+                basepoint=bp, daily_basepoint=dbp,
+                end_session_skip=ess, end_session_gap=esg,
             )
+        else:
+            func_expr = None
+            resolved_expr = None
 
         return Factor(
             alias=factor_alias,
-            _resolved_expr=resolved_expr,
+            func_expr=func_expr,        # 纯因子逻辑（不含对齐），给外部引用
+            _resolved_expr=resolved_expr, # 含 SignalAlign 的完整表达式
             signal_freq=signal_freq,
             is_reversed=is_reversed,
             family=self,
-            _param_values=params,  # 所有参数的原始值（含 $F/$Rev），供 calc() 推断 source_freq
         )
 
     def test(self, categories: Optional['str|List[str]'] = None,
@@ -488,9 +490,9 @@ class FactorFamily(FactorExpr, UniqueObject):
                     'end_date': tester.end_date,
                     'sift_volume_ratio': sift_volume_ratio,
                     'categories': categories,
-                } | (factor.family.params_dict if factor.family else {}) | factor.ic_stats.to_dict() | report_dict)
+                } | (factor.family.params_dict if factor.family else {}) | tester.factor_ic_stats.get(factor, pd.Series()).to_dict() | report_dict)
                 factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
-                factor.report = factor_table
+                tester.factor_reports[factor] = factor_table
                 factor_table.to_csv(factor_cache_path, index=False)
         finally:
             _active_tester.reset(_token)
@@ -567,6 +569,13 @@ class FactorFamily(FactorExpr, UniqueObject):
                     window = param_values[window.alias]
                 else:
                     window = window.get_value(self)
+            elif isinstance(window, str) and window.startswith('$'):
+                # "$F" 之类参数别名 → 从 param_values 或参数表查找
+                alias = window
+                if param_values is not None and alias in param_values:
+                    window = param_values[alias]
+                elif alias in self.params_dict:
+                    window = self.params_dict[alias].get_value(self)
             if (all(a is b for a, b in zip(new_operands, operands))
                     and window is expr.window):
                 return expr
@@ -587,6 +596,13 @@ class FactorFamily(FactorExpr, UniqueObject):
                     periods = param_values[periods.alias]
                 else:
                     periods = periods.get_value(self)
+            elif isinstance(periods, str) and periods.startswith('$'):
+                # "$F" 之类参数别名 → 从 param_values 或参数表查找
+                alias = periods
+                if param_values is not None and alias in param_values:
+                    periods = param_values[alias]
+                elif alias in self.params_dict:
+                    periods = self.params_dict[alias].get_value(self)
             elif isinstance(periods, FactorExpr):
                 resolved_periods = self._resolve_expr_params(periods, param_values=param_values)
                 if isinstance(resolved_periods, ConstExpr):

@@ -315,16 +315,17 @@ class FactorTester(UniqueObject):
         factor_rank = self.calc_rank(factor.table)
         if returns_df is not None:
             return_df = returns_df
-            factor.returns = returns_df  # 同步写入，保证后续访问一致性
+            self.factor_returns[factor] = returns_df
         else:
             effective_freq = DataFreq(return_freq) if return_freq is not None else factor.freq
             with self._sync_lock:
                 cached_freq = self.factor_return_freqs.get(factor)
-            if factor.returns.empty or cached_freq is None or cached_freq != effective_freq:
+            cached_returns = self.factor_returns.get(factor, pd.DataFrame())
+            if cached_returns.empty or cached_freq is None or cached_freq != effective_freq:
                 factor.calc_returns(next_return=True, returns_col=returns_col, return_freq=effective_freq)
                 with self._sync_lock:
                     self.factor_return_freqs[factor] = effective_freq
-            return_df = factor.returns
+            return_df = self.factor_returns.get(factor, pd.DataFrame())
         assert not return_df.empty
         if return_rank is not None:
             rank_df = return_rank
@@ -488,7 +489,7 @@ class FactorTester(UniqueObject):
 
                 for f in factor_list:
                     if re_factor is not None:
-                        f.returns = re_factor.table.copy()
+                        self.factor_returns[f] = re_factor.table.copy()
                     if fe_factor is not None and not hasattr(f, '_ic_fe_intermediate'):
                         object.__setattr__(f, '_ic_fe_intermediate', fe_factor.table.copy())
 
@@ -512,8 +513,6 @@ class FactorTester(UniqueObject):
                             raise RuntimeError("calc_ic: IC 计算失败") from exc
                         factor_list, ic_series, stats = future.result()
                         for f in factor_list:
-                            f.ic_series = ic_series
-                            f.ic_stats = stats
                             ic_series_map[f] = ic_series
                             ic_stats_map[f] = stats
                             with self._sync_lock:
@@ -523,8 +522,6 @@ class FactorTester(UniqueObject):
                 for param_key, factor_list in tqdm(param_items, desc='Calculating IC'):
                     factor_list, ic_series, stats = _calc_one_group(param_key, factor_list)
                     for f in factor_list:
-                        f.ic_series = ic_series
-                        f.ic_stats = stats
                         ic_series_map[f] = ic_series
                         ic_stats_map[f] = stats
                         with self._sync_lock:
@@ -601,14 +598,14 @@ class FactorTester(UniqueObject):
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date   = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
-        if factor.returns.empty:
+        if self.factor_returns.get(factor, pd.DataFrame()).empty:
             factor.calc_returns(next_return=True, returns_col=returns_col)
-        assert not factor.returns.empty
+        assert not self.factor_returns.get(factor, pd.DataFrame()).empty
 
         # ---------- numpy 预计算 ----------
         # 先归一化索引（MultiIndex → DatetimeIndex），再按时间范围截取
         table_src   = factor.table
-        returns_src = factor.returns
+        returns_src = self.factor_returns[factor]
         table_src.index   = _extract_signal_index(table_src.index)
         returns_src.index = _extract_signal_index(returns_src.index)
         if start_date is not None:

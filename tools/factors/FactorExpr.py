@@ -150,6 +150,37 @@ class FactorExpr:
     def __hash__(self) -> int:
         return id(self)
 
+    # ── 结构等价（用于 FactorData 去重 key） ──
+
+    _SYMMETRIC_OPS = frozenset({
+        'add', 'mul', 'and', 'or', 'max', 'min', 'eq', 'ne',
+        'cs_spearman', 'cs_corr', 'cs_cov',
+    })
+
+    def _structural_hash(self) -> int:
+        """
+        递归计算表达式树的结构 hash。
+
+        对于对称二元运算，operand 顺序无关（先 sort operands 的 hash）。
+        对于非对称运算，按原始顺序计算。
+        """
+        return hash(self._structural_key())
+
+    def _structural_key(self) -> tuple:
+        """
+        返回表达式树的标准化元组表示，用于结构等价判断和 hash。
+
+        格式：(type_tag, ...type_specific...)
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 未实现 _structural_key()")
+
+    def _structural_eq(self, other: 'FactorExpr') -> bool:
+        """基于结构的表达式等价判断。"""
+        if type(self) is not type(other):
+            return False
+        return self._structural_key() == other._structural_key()
+
     # ── 子类必须实现的接口 ──
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
@@ -471,6 +502,33 @@ class OperandExpr(FactorExpr):
         parts = [repr(opnd) for opnd in self.operands]
         return f"{self.op}({', '.join(parts)})"
 
+    # ── 结构等价（FactorData 去重 key） ──
+
+    def _structural_key(self) -> tuple:
+        """
+        OperandExpr 的结构 key。
+
+        子类可通过覆盖 _structural_extra() 添加 op 之外的结构信息
+        （如 RollingOp 需要 window, ShiftOp 需要 periods）。
+
+        对称运算（add, mul, max, min, and, or, eq, ne,
+        cs_spearman, cs_corr, cs_cov）的 operands 排序后取 key，
+        保证 a+b ≡ b+a, max(a,b,c) ≡ max(c,a,b) 等。
+        """
+        type_tag = type(self).__name__
+        op_tag = self.op
+        op_keys_raw = [opnd._structural_key() for opnd in self._operands]
+        if op_tag in FactorExpr._SYMMETRIC_OPS:
+            op_keys = tuple(sorted(op_keys_raw, key=str))
+        else:
+            op_keys = tuple(op_keys_raw)
+        extra = self._structural_extra()
+        return (type_tag, op_tag, op_keys) + extra
+
+    def _structural_extra(self) -> tuple:
+        """子类覆盖：返回除 op + operands 外的额外结构信息。"""
+        return ()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 2: 叶子节点
@@ -577,9 +635,11 @@ class ColumnRef(FactorExpr):
     def _get_alias(self) -> str:
         return self.column.value
 
+    def _structural_key(self) -> tuple:
+        return ('ColumnRef', self.column)
+
     def __repr__(self) -> str:
         return f"ColumnRef({self.column.name})"
-
 
 class ParamRef(FactorExpr):
     """
@@ -640,6 +700,9 @@ class ParamRef(FactorExpr):
     def __repr__(self) -> str:
         return f"ParamRef({self.param.alias})"
 
+    def _structural_key(self) -> tuple:
+        return ('ParamRef', self.param.alias)
+
 class ConstExpr(FactorExpr):
     """
     常量表达式 — 标量或固定值的叶子节点。
@@ -675,6 +738,12 @@ class ConstExpr(FactorExpr):
 
     def __repr__(self) -> str:
         return f"ConstExpr({self.value})"
+
+    def _structural_key(self) -> tuple:
+        v = self.value
+        if isinstance(v, np.ndarray):
+            return ('ConstExpr', v.tobytes())
+        return ('ConstExpr', v)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -743,6 +812,14 @@ class RollingOp(OperandExpr):
 
     def __init__(self, window: Union[int, str, pd.Timedelta, 'Parameter']):
         self.window = window
+
+    # ── 结构等价：额外携带 window ──
+
+    def _structural_extra(self) -> tuple:
+        w = self.window
+        if isinstance(w, (int, float, str, pd.Timedelta)):
+            return ('window', str(w))
+        return ('window', w.alias)
 
     # ── 子类必须实现 ──
 
@@ -954,6 +1031,12 @@ class ShiftOp(OperandExpr):
         self.op = op           # 'ref'
         self.operand = operand
         self.periods = periods
+
+    def _structural_extra(self) -> tuple:
+        p = self.periods
+        if isinstance(p, (int, str, pd.Timedelta)):
+            return ('periods', str(p))
+        return ('periods', p.alias)
 
     @property
     def _operands(self) -> Sequence['FactorExpr']:
@@ -1578,6 +1661,13 @@ class SignalAlign(OperandExpr):
         self.end_session_gap = end_session_gap
         # 保存最近一次求值前的原始数据（供 source_table 使用）
         self._raw_data: pd.DataFrame | None = None
+
+    def _structural_extra(self) -> tuple:
+        return ('signal_freq', str(self.signal_freq),
+                'basepoint', str(self.basepoint),
+                'daily_basepoint', str(self.daily_basepoint),
+                'end_session_skip', self.end_session_skip,
+                'end_session_gap', str(self.end_session_gap))
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         data = values[0]

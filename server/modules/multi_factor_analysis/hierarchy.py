@@ -158,7 +158,8 @@ def run_mfa_hierarchy():
         # 如果指定了收益频率，先确保因子设置了正确的 returns
         if freq is not None:
             for f in (factor_a, factor_b):
-                if not f.returns.empty and getattr(f, '_return_freq_cached', None) != freq:
+                cached_returns = tester.factor_returns.get(f, pd.DataFrame())
+                if not cached_returns.empty and getattr(f, '_return_freq_cached', None) != freq:
                     f.calc_returns(next_return=True, return_freq=freq)
 
         # 1. 用因子 A 做第一层分组

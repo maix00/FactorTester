@@ -132,9 +132,7 @@ def run_ic_test():
                 with open(ic_cache, 'rb') as f:
                     ic_s_c, ic_st_c, prods_c, rf_c, ret_c, sd_c, ed_c = pickle.load(f)
                 if prods_c == all_products and rf_c == return_freq and sd_c == tester.start_date and ed_c == tester.end_date:
-                    factor.ic_series = ic_s_c
-                    factor.ic_stats = ic_st_c
-                    factor.returns = ret_c
+                    tester.factor_returns[factor] = ret_c
                     tester.factor_ic_series[factor] = ic_s_c
                     tester.factor_ic_stats[factor] = ic_st_c
                 else:
@@ -162,10 +160,13 @@ def run_ic_test():
             return_freq = return_freqs.get(factor, None)
             rf_str = str(return_freq) if return_freq is not None else 'N'
             ic_cache = cache_dir_ic / f"{_cache_hash(paths_hash, factor.alias, rf_str, str(tester.start_date), str(tester.end_date))}.pkl"
-            if not ic_cache.exists() and factor.ic_series is not None:
+            ic_s = tester.factor_ic_series.get(factor)
+            ic_st = tester.factor_ic_stats.get(factor)
+            returns_val = tester.factor_returns.get(factor, pd.DataFrame())
+            if not ic_cache.exists() and ic_s is not None:
                 with open(ic_cache, 'wb') as f:
-                    pickle.dump((factor.ic_series, factor.ic_stats, all_products, return_freq,
-                                 factor.returns, tester.start_date, tester.end_date), f)
+                    pickle.dump((ic_s, ic_st, all_products, return_freq,
+                                 returns_val, tester.start_date, tester.end_date), f)
 
         tester.products = all_products.copy()
         # 从 tester.factor_ic_stats 汇总（比 f.ic_stats 更可靠）
@@ -229,7 +230,7 @@ def run_ic_test():
                 return_freqs[factor] = base_freq
 
         for factor in factors:
-            ic_s = factor.ic_series.dropna()
+            ic_s = tester.factor_ic_series.get(factor, pd.Series(dtype=float)).dropna()
             if isinstance(ic_s.index, pd.MultiIndex):
                 _sig = next((str(n) for n in ic_s.index.names if str(n).startswith('_SIGNAL')), None)
                 _lvl = ic_s.index.names.index(_sig) if _sig else -1
