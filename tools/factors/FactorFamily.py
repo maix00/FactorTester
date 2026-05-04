@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence,
 
 from tools.factors.Factor import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
+from tools.factors.FactorData import FactorData
 from tools.factors.FactorExpr import (
     FactorExpr, DataColumn, DataFreq,
     ColumnRef, ConstExpr, ParamRef, UnaryOp,
@@ -206,9 +207,8 @@ class FactorFamily(FactorExpr, UniqueObject):
             self.params_dict = {param.alias: param for param in self.params}
             self.set_default_params()             # 以各参数默认值初始化 _params_list
             self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
-            # 中间因子缓存：{str名称 或 FactorExpr → Factor(_local_only=True)}
-            # 仅显式调用 _save_intermediate() 的节点（如 FE/RE）才存入
-            self._intermediates: Dict[object, Factor] = {}
+            # 中间因子：{str → FactorData}，evaluate 后由 _collect_intermediates() 填充
+            self._intermediates: Dict[str, 'FactorData'] = {}
 
     def _extract_user_prefix(self) -> Optional[str]:
         """
@@ -529,7 +529,8 @@ class FactorFamily(FactorExpr, UniqueObject):
             value = expr.resolve(self, param_values=param_values)
             # 根据参数值类型决定替换为什么
             if isinstance(value, FactorExpr):
-                return value       # 参数值本身是表达式（如 FE=某个因子表达式）
+                # 参数值本身是表达式（如 FE=某个因子表达式），需递归解析
+                return self._resolve_expr_params(value, param_values=param_values)
             if isinstance(expr.param, DataColumnParam):
                 from tools.data.DataColumn import DataColumn
                 return ColumnRef(DataColumn(value))
@@ -706,23 +707,34 @@ class FactorFamily(FactorExpr, UniqueObject):
         result = resolved.evaluate(products, freq, source=source, preloaded=preloaded,
                                  cache=df_cache)
 
-        # 自动创建用户标记的中间因子（.as_intermediate() 标记的节点）
-        for expr, df in df_cache.items():
-            if expr is not resolved and getattr(expr, '_is_intermediate', False):
-                if expr not in self._intermediates:
-                    f = Factor(alias=expr._get_alias(), _local_only=True)
-                    f.table = self._align_to_signal(df, signal_freq)
-                    f.source_table = df
-                    f.family = self
-                    self._intermediates[expr] = f
-
         # 保存未对齐的原始数据，供 Factor.source_table 使用
         self._last_raw_result = result
+
+        # ── 收集中间因子 ──
+        self._collect_intermediates(resolved)
 
         # ── 信号对齐 ──
         signal_df = self._align_to_signal(result, signal_freq)
 
         return signal_df if not is_reversed else -signal_df
+
+    def _collect_intermediates(self, resolved: 'FactorExpr') -> None:
+        """
+        遍历解析后的表达式树，收集所有 _is_intermediate 标记的节点。
+        子类可覆盖以实现自定义收集逻辑（如 CrossSectionIC 按名称收集）。
+        """
+        from tools.factors.FactorData import FactorData
+
+        # 遍历 operands（如 CrossSectionIC 的 FE, RE）
+        operands = getattr(resolved, 'operands', ())
+        for opnd in operands:
+                if opnd._is_intermediate:
+                    structural_hash = str(opnd._structural_key())
+                    fd = FactorData.get_by_hash(structural_hash)
+                    if fd is not None:
+                        name = opnd._intermediate_name
+                        if name:
+                            self._intermediates[name] = fd
 
     def _align_to_signal(self, data: pd.DataFrame, freq: Any) -> pd.DataFrame:
         """委托给 signal_align 工具函数。"""
@@ -775,179 +787,91 @@ class Returns(FactorFamily):
 
 class CrossSectionIC(FactorFamily):
     """
-    截面 IC 因子族：接受主因子表达式 FE 和收益率表达式 RE 作为参数，
+    截面 IC 因子族：接受一个因子表达式 FE，内部构建收益率表达式 RE，
     通过 factor_expr() 声明式地计算截面 Spearman 秩相关系数。
 
     参数：
-        FE  : 主因子表达式树 (FactorExpr)
-        RE  : 收益率表达式树 (FactorExpr)，默认使用 Returns 族表达式
-        Lag : IC 时滞，非负整数。0=同期IC，Lag>0=因子领先收益率Lag期
+        FE  : 被分析因子表达式 (FactorExpr)，不含 SignalAlign（由调用方剥离）
+        SC  : 收益率价格列 (DataColumn)，默认 CLOSE_ADJUSTED
+              OPEN/OPEN_ADJUSTED → basepoint='first'，Lag=1（下一期开盘收益）
+              CLOSE/CLOSE_ADJUSTED → basepoint='last'，Lag=0（同期收益）
+        RF  : 收益率计算窗口 (WindowParam)，默认 '1d'
+        S   : 收益率 shift 偏移 (TypeParam)，默认自动根据 SC 决定
         F   : 信号频率（复用 FactorFreqParam）
 
-    不再硬编码 source_freq —— 由 Factor.calc() 自动推断。
-    func() 向后兼容：无显式 source_freq 时回退 'MIN1'。
+    FE 和 RE 子表达式自动标记为 _is_intermediate，evaluate 后
+    由 _collect_intermediates() 遍历 operands 收集到 _intermediates。
     """
 
-    # _intermediates 已由 FactorFamily.__init__ 初始化为 {FactorExpr: Factor}
-    # 此处不再覆盖；func() 在 evaluate 后自动填充
+    def get_intermediate(self, key: object) -> 'FactorData | None':
+        """
+        获取中间因子数据（FactorData，含 source_table 原始数据）。
 
-    def _save_intermediate(self, key: object, factor: 'Factor') -> None:
-        """保存中间因子，供外部取用。key 可以是 FactorExpr 或字符串名称。"""
-        self._intermediates[key] = factor
+        key 支持两种形式：
+          - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
+          - FactorExpr: 按表达式结构 hash 查找 → FactorData.get_by_hash()
 
-    def get_intermediate(self, key: object) -> 'Factor | None':
-        """获取已保存的中间因子。key 可以是 FactorExpr 或字符串名称。"""
-        return self._intermediates.get(key, None)
+        中间因子在 evaluate() 时自动创建 FactorData 并存入全局去重表，
+        _collect_intermediates() 按名称收集到 self._intermediates。
+        """
+        from tools.factors.FactorData import FactorData
+
+        if isinstance(key, str):
+            return self._intermediates.get(key)
+        if hasattr(key, '_structural_key'):
+            # key 是 FactorExpr，按结构 hash 查找
+            return FactorData.get_by_hash(str(key._structural_key()))  # type: ignore[union-attr]
+        return None
 
     @staticmethod
     def factor_expr():
-        from tools.parameters import FactorParam, TypeParam
-        from tools.factors.FactorExpr import CrossSectionalBinaryOp
+        """
+        FE.cs_spearman(RE.shift(-Lag))
+
+        FE — 被分析因子（纯因子逻辑，不含 SignalAlign）
+        RE — 收益率表达式，内建：(SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+        """
+        from tools.parameters import FactorParam, DataColumnParam, WindowParam, TypeParam
+        from tools.data.DataColumn import DataColumn
+
         FE = FactorParam('FE')
-        RE = FactorParam('RE')
-        Lag = TypeParam('Lag', default_value=0, typ=int)
-        # 截面 IC = cs_spearman(FE, RE.shift(-Lag))
-        # Lag>0 表示因子领先收益率 Lag 期：用 Lag 期前的 RE 与当期 FE 计算
-        return FE.cs_spearman(RE.shift(-Lag))
+        SC = DataColumnParam('SC', default_value=DataColumn.CLOSE_ADJUSTED)
+        RF = WindowParam('RF')
+        # S: 收益率 shift 偏移
+        #   OPEN   → S = 0 → .shift(-RF) → 下一期开盘
+        #   CLOSE  → S = 1 → .shift(0)    → 同期
+        S = TypeParam('S', default_value=1, typ=int)
+        # RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+        RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+
+        # 标记 FE 和 RE 为中间因子，evaluate 后由 _collect_intermediates() 收集
+        FE = FE.as_intermediate('FE')
+        RE = RE.as_intermediate('RE')
+
+        return FE.cs_spearman(RE)
 
     def func(self, products, *args, **kwargs):
         """
-        求值 FE 和 RE 子表达式，保存中间结果，然后计算截面 IC。
+        根据 SC 参数动态设置 basepoint，然后委托父类求值。
+
+        - OPEN/OPEN_ADJUSTED → basepoint='first'
+        - CLOSE/CLOSE_ADJUSTED → basepoint='last', daily_basepoint='15:00:00'
         """
+        from tools.data.DataColumn import DataColumn
         kwargs = self._normalize_param_kwargs(**kwargs)
-        signal_freq = kwargs.get('F', pd.Timedelta('1d'))
-        is_reversed: bool = kwargs.pop('$Rev', False)
-        source = kwargs.pop('source', None)
 
-        freq = DataFreq(self._source_freq_name or 'MIN1')
-        if self._expr is None:
-            raise TypeError(f"{self.__class__.__name__}: 未定义 expr")
-
-        # 构建 FE 和 RE 子表达式
-        # factor_expr() 返回的树中，FE 和 RE 是 CrossSectionalBinaryOp 的左右子节点
-        # 但我们需要单独求值它们来保存中间结果
-        from tools.parameters import TypeParam
-        fe_param = next((p for p in self.params if p.alias == 'FE'), None)
-        re_param = next((p for p in self.params if p.alias == 'RE'), None)
-
-        param_values = {
-            p.alias: kwargs[p.alias]
-            for p in self.params if p.alias in kwargs
-        }
-
-        # 构建 FE 子表达式
-        from tools.factors.FactorExpr import ParamRef, ColumnRef
-        fe_expr = ParamRef(fe_param) if fe_param else None
-        re_expr = ParamRef(re_param) if re_param else None
-
-        # 若 RE 未提供，用内置 Returns 表达式
-        if re_expr is None or kwargs.get('RE', None) is None:
-            from tools.parameters import DataColumnParam, WindowParam
-            SC = DataColumnParam('SC', default_value=DataColumn.CLOSE)
-            RF = WindowParam('RF', default_value='1d')
-            S = TypeParam('S', default_value=0)
-            re_expr = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-            re_param = None
-
-        # 解析参数
-        fe_resolved = self._resolve_expr_params(fe_expr, param_values=param_values)  # type: ignore[arg-type]
-        if re_param is not None:
-            re_resolved = self._resolve_expr_params(re_expr, param_values=param_values)
+        SC = kwargs.get('SC', DataColumn.CLOSE_ADJUSTED)
+        if SC in (DataColumn.OPEN, DataColumn.OPEN_ADJUSTED):
+            self.basepoint = 'first'
+            self.daily_basepoint = None
         else:
-            re_resolved = re_expr  # Returns 表达式不含 ParamRef
+            self.basepoint = 'last'
+            self.daily_basepoint = '15:00:00'
 
-        # 校验：抛出具体原因，而非 AttributeError: 'ConstExpr' has no 'index'
-        from tools.factors.FactorExpr import ConstExpr
-        if isinstance(fe_resolved, ConstExpr) and fe_resolved.value is None:
-            fe_val = kwargs.get('FE', fe_param and fe_param.default_value)
-            raise ValueError(f"FE 参数未设置 (当前值: {fe_val!r})，请为 {self.name} 指定 FE 表达式。")
+        # 收益率信号频率 = RF（而非独立的 F 参数）
+        kwargs.pop('$F', None)
+        kwargs.pop('F', None)
+        if 'RF' in kwargs:
+            kwargs['F'] = kwargs['RF']
 
-        # ── 统一预加载 ──
-        from tools.data.DataMeta import DataMeta
-        fe_refs = fe_resolved.collect_column_refs()
-        re_refs = re_resolved.collect_column_refs()
-        all_refs = fe_refs | re_refs
-
-        preloaded: dict = {}
-        prod_freq_cols: dict[tuple, set] = {}
-        for cr in all_refs:
-            col_name = cr.column.name
-            for p in products:
-                key = (p, freq.name)
-                if key not in prod_freq_cols:
-                    prod_freq_cols[key] = set()
-                prod_freq_cols[key].add(col_name)
-
-        for (p, freq_name), cols in prod_freq_cols.items():
-            dm: DataMeta = getattr(p, freq_name)
-            if source is not None:
-                try:
-                    dm.set_current_source(source)
-                except ValueError:
-                    continue
-            if dm.next_available_source() is None:
-                continue
-            data = dm.get_and_adjust_cols(list(cols), copy=False)
-            if not data.empty:
-                preloaded[(p, freq_name)] = data
-
-        # ── 分别求值 FE / RE ──
-        df_cache: Dict[FactorExpr, pd.DataFrame] = {}
-        fe_raw = fe_resolved.evaluate(products, freq, preloaded=preloaded, cache=df_cache)
-        re_raw = re_resolved.evaluate(products, freq, preloaded=preloaded, cache=df_cache)
-
-        # 自动创建用户标记的中间因子（.as_intermediate() 标记的节点）
-        for expr, df in df_cache.items():
-            if getattr(expr, '_is_intermediate', False) and expr not in self._intermediates:
-                f = Factor(alias=expr._get_alias(), _local_only=True)
-                f.table = self._align_to_signal(df, signal_freq)
-                f.source_table = df
-                f.family = self
-                self._intermediates[expr] = f
-
-        # ── 信号对齐 ──
-        fe_df = self._align_to_signal(fe_raw, signal_freq)
-        re_df = self._align_to_signal(re_raw, signal_freq)
-
-        if is_reversed:
-            fe_df = -fe_df
-
-        # 保存中间因子（匿名本地 Factor）—— FE/RE 总是作为中间因子暴露
-        fe_factor = Factor(alias='FE', _local_only=True)
-        fe_factor.table = fe_df
-        fe_factor.source_table = fe_raw
-        fe_factor.family = self
-        self._save_intermediate('FE', fe_factor)
-
-        re_factor = Factor(alias='RE', _local_only=True)
-        re_factor.table = re_df
-        re_factor.source_table = re_raw
-        re_factor.family = self
-        self._save_intermediate('RE', re_factor)
-
-        # ── Lag 位移：RE.shift(-Lag)，Lag>0 时用历史 RE ──
-        lag = kwargs.get('Lag', 0)
-        if lag != 0:
-            re_df = re_df.shift(-lag)
-
-        # ── 截面 Spearman IC ──
-        from tools.factors.FactorExpr import CrossSectionalBinaryOp
-        import numpy as np
-        result = CrossSectionalBinaryOp._apply_spearman(fe_df, re_df)
-
-        # 还原为 MultiIndex
-        from tools.factors.FactorTester import _extract_signal_index as _ext_sig
-        if isinstance(fe_df.index, pd.MultiIndex):
-            fe_sig = _ext_sig(fe_df.index)
-            dt_index = result.index
-            mask = fe_sig.isin(dt_index)
-            mapping = {sig: full for sig, full in zip(fe_sig[mask], fe_df.index[mask])}
-            valid_ts = [ts for ts in dt_index if ts in mapping]
-            full_idx = pd.MultiIndex.from_tuples(
-                [mapping[ts] for ts in valid_ts],
-                names=fe_df.index.names)
-            ic_vals = [result.loc[ts, result.columns[0]] if ts in result.index else np.nan
-                       for ts in valid_ts]
-            result = pd.Series(ic_vals, index=full_idx)
-
-        return result.to_frame(name=self.name) if isinstance(result, pd.Series) else result
+        return super().func(products, *args, **kwargs)

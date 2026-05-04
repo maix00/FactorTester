@@ -139,10 +139,16 @@ class FactorExpr:
     # ── 中间因子标记 ──
 
     _is_intermediate: bool = False
+    _intermediate_name: 'str | None' = None
 
-    def as_intermediate(self) -> 'FactorExpr':
-        """标记此表达式节点为中间因子，evaluate 时自动存入 family._intermediates。"""
+    def as_intermediate(self, name: 'str | None' = None) -> 'FactorExpr':
+        """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
+
+        name: 可选名称，用于后续查询（如 'FE', 'RE'）。
+              None 表示匿名中间因子（仅创建 FactorData 不做命名映射）。
+        """
         self._is_intermediate = True
+        self._intermediate_name = name
         return self
 
     # ── 可哈希（用于 set/dict 中的依赖追踪和缓存） ──
@@ -469,6 +475,15 @@ class OperandExpr(FactorExpr):
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
                  preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
+        # ── 中间因子：先查 FactorData 全局缓存，命中则直接返回 ──
+        if self._is_intermediate:
+            from tools.factors.FactorData import FactorData
+            structural_hash = str(self._structural_key())
+            existing = FactorData.get_by_hash(structural_hash)
+            if existing is not None and existing.source_table is not None \
+                    and not existing.source_table.empty:
+                return existing.source_table
+
         if cache is not None and self in cache:
             return cache[self]
 
@@ -476,8 +491,13 @@ class OperandExpr(FactorExpr):
                   for opnd in self.operands]
         result = self._apply_op(values)
 
-        if cache is not None:
+        if self._is_intermediate:
+            # 存入 FactorData（UniqueObject 去重），不在 df_cache 留副本
+            from tools.factors.FactorData import FactorData
+            FactorData(self, result)
+        elif cache is not None:
             cache[self] = result
+
         return result
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:

@@ -400,8 +400,6 @@ class FactorTester(UniqueObject):
         from tools.parameters import DataColumnParam, TypeParam
         from tools.parameters import WindowParam
 
-        CrossSectionFamily = CrossSectionIC()
-
         # ── 构建去重参数组合 ──
         # 每个因子有唯一的 FE 表达式和频率，RE 可能共享
         # Key: (fe_expr_key, freq_key, lag, returns_col) — 去重后用同一个 CrossSectionIC Factor
@@ -459,8 +457,10 @@ class FactorTester(UniqueObject):
 
             def _calc_one_group(param_key, factor_list):
                 fe_expr, effective_freq, lag = param_key_info[param_key]
-                # 创建 CrossSectionIC Factor
-                ic_factor = CrossSectionFamily.get_factor(
+                # 每次创建新的 CrossSectionIC 实例，
+                # 确保 _intermediates 不被其他线程覆盖
+                ic_family = CrossSectionIC()
+                ic_factor = ic_family.get_factor(
                     FE=fe_expr,
                     RE=re_expr,
                     Lag=lag,
@@ -483,15 +483,15 @@ class FactorTester(UniqueObject):
                 if end_date is not None and len(ic_series) > 0:
                     ic_series = ic_series[ic_series.index.get_level_values(-1) <= end_date]
 
-                # 提取 RE/FE 中间因子 → 写入 factor
-                re_factor = CrossSectionFamily.get_intermediate('RE')
-                fe_factor = CrossSectionFamily.get_intermediate('FE')
+                # 从 ic_family 取中间因子（Evaluate 后 _collect_intermediates 已填充）
+                re_fd = ic_family.get_intermediate('RE')
+                fe_fd = ic_family.get_intermediate('FE')
 
                 for f in factor_list:
-                    if re_factor is not None:
-                        self.factor_returns[f] = re_factor.table.copy()
-                    if fe_factor is not None and not hasattr(f, '_ic_fe_intermediate'):
-                        object.__setattr__(f, '_ic_fe_intermediate', fe_factor.table.copy())
+                    if re_fd is not None:
+                        self.factor_returns[f] = re_fd.source_table.copy()
+                    if fe_fd is not None and not hasattr(f, '_ic_fe_intermediate'):
+                        object.__setattr__(f, '_ic_fe_intermediate', fe_fd.source_table.copy())
 
                 # 计算统计量
                 stats = self.ic_stats(ic_series)
