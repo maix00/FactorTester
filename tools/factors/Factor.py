@@ -396,8 +396,9 @@ class Factor(FactorExpr, UniqueObject):
             products, freq, preloaded=preloaded, cache=df_cache)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
-        raw_data = self._resolved_expr._raw_data if hasattr(self._resolved_expr, '_raw_data') else result
-        self._factor_data = FactorData(self._resolved_expr, raw_data)
+        # _raw_data 是 SignalAlign 的属性，运行时必定存在（_apply_op 已设置）
+        raw_data: pd.DataFrame = getattr(self._resolved_expr, '_raw_data', result)  # type: ignore[union-attr]
+        self._factor_data = FactorData(expr=self._resolved_expr, source_table=raw_data)
 
         # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
         self._aligned_table = result
