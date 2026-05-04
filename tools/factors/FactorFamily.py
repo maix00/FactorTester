@@ -26,8 +26,8 @@ from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorData import FactorData
 from tools.factors.FactorExpr import (
     FactorExpr, DataColumn, DataFreq,
-    ColumnRef, ConstExpr, ParamRef, UnaryOp,
-    RollingOp, ShiftOp, CrossSectionalOp, CrossSectionalBinaryOp, CompositeExpr,
+    ColumnRef, ConstExpr, ParamRef,
+    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
     OperandExpr,
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns

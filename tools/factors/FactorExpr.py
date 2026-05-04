@@ -32,20 +32,15 @@ from __future__ import annotations
 
 import pandas as pd
 import numpy as np
-from functools import partial
 from typing import (
     TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 )
-from weakref import WeakValueDictionary
 
-from tools.base.UniqueObject import UniqueObject
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 
 if TYPE_CHECKING:
     from tools.products.Product import Product
-    from tools.factors.FactorFamily import FactorFamily
-    from tools.factors.Factor import Factor
     from tools.data.DataSource import DataSource
     from tools.data.DataMeta import DataMeta
     from tools.parameters.Parameter import Parameter
@@ -325,25 +320,25 @@ class FactorExpr:
         """N 期变化量：self - self.shift(N)。"""
         return self - self.shift(period)
 
-    def log(self) -> 'UnaryOp':
+    def log(self) -> 'CompositeExpr':
         """自然对数。"""
-        return UnaryOp('log', self)
+        return CompositeExpr('log', self)
 
-    def sign(self) -> 'UnaryOp':
+    def sign(self) -> 'CompositeExpr':
         """符号函数：+1, -1, 0。"""
-        return UnaryOp('sign', self)
+        return CompositeExpr('sign', self)
 
-    def abs(self) -> 'UnaryOp':
+    def abs(self) -> 'CompositeExpr':
         """绝对值。"""
-        return UnaryOp('abs', self)
+        return CompositeExpr('abs', self)
 
-    def sqrt(self) -> 'UnaryOp':
+    def sqrt(self) -> 'CompositeExpr':
         """平方根。"""
-        return UnaryOp('sqrt', self)
+        return CompositeExpr('sqrt', self)
 
-    def neg(self) -> 'UnaryOp':
+    def neg(self) -> 'CompositeExpr':
         """取负。"""
-        return UnaryOp('neg', self)
+        return CompositeExpr('neg', self)
 
     # ── 便利方法：横截面算子 ──
 
@@ -355,9 +350,9 @@ class FactorExpr:
         """横截面排名（从小到大，0~1 归一化）。"""
         return CrossSectionalOp('cs_rank', self)
 
-    def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalBinaryOp':
+    def cs_spearman(self, other: 'FactorExpr') -> 'CrossSectionalOp':
         """截面 Spearman 秩相关系数：self 与 other 逐时间点计算。"""
-        return CrossSectionalBinaryOp('cs_spearman', self, other)
+        return CrossSectionalOp('cs_spearman', self, other)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -727,53 +722,6 @@ class ConstExpr(FactorExpr):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Layer 3: 一元算子
-# ═════════════════════════════════════════════════════════════════════════════
-
-class UnaryOp(OperandExpr):
-    """
-    一元算子：LOG, SIGN, ABS, NEG, NOT, SQRT 等。
-    """
-
-    def __init__(self, op: str, operand: FactorExpr):
-        super().__init__(op, operand)
-
-    @property
-    def operand(self) -> FactorExpr:
-        return self.operands[0]
-
-    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
-        x = values[0]
-        _OP_MAP = {
-            'log': np.log,
-            'sign': np.sign,
-            'abs': np.abs,
-            'neg': np.negative,
-            'not': np.logical_not,
-            'sqrt': np.sqrt,
-        }
-        return _OP_MAP[self.op](x)
-
-    def to_latex(self) -> str:
-        operand_latex = self.operand.to_latex()
-        _LATEX_MAP = {
-            'log': f'\\ln({operand_latex})',
-            'sign': f'\\operatorname{{sgn}}({operand_latex})',
-            'abs': f'|{operand_latex}|',
-            'neg': f'-({operand_latex})',
-            'not': f'\\neg({operand_latex})',
-            'sqrt': f'\\sqrt{{{operand_latex}}}',
-        }
-        return _LATEX_MAP.get(self.op, f'{self.op}({operand_latex})')
-
-    def _get_alias(self) -> str:
-        return f"{self.op}_{self.operand._get_alias()}"
-
-    def __repr__(self) -> str:
-        return f"{self.op}({self.operand})"
-
-
-# ═════════════════════════════════════════════════════════════════════════════
 # Layer 4: 滚动窗口算子
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1054,51 +1002,12 @@ class CrossSectionalOp(OperandExpr):
     在每个时间点对横截面（所有品种）进行聚合计算。
     """
 
-    def __init__(self, op: str, operand: FactorExpr):
-        super().__init__(op, operand)
+    def __init__(self, op: str, *operands: FactorExpr):
+        super().__init__(op, *operands)
 
     @property
     def operand(self) -> FactorExpr:
         return self.operands[0]
-
-    def _apply_op(self, values: List[Any]) -> pd.DataFrame:
-        x = values[0]
-        if self.op == 'cs_zscore':
-            mean = x.mean(axis=1)
-            std = x.std(axis=1)
-            std = std.replace(0, np.nan)
-            return x.sub(mean, axis=0).div(std, axis=0)
-        elif self.op == 'cs_rank':
-            return x.rank(axis=1, pct=True) - 0.5
-        else:
-            raise ValueError(f"Unknown cross-sectional op: {self.op}")
-
-    def to_latex(self) -> str:
-        operand_latex = self.operand.to_latex()
-        _LATEX_MAP = {
-            'cs_zscore': f'Z({operand_latex})',
-            'cs_rank': f'\\text{{Rank}}({operand_latex})',
-        }
-        return _LATEX_MAP.get(self.op, f'\\text{{{self.op}}}({operand_latex})')
-
-    def _get_alias(self) -> str:
-        return f"{self.op}_{self.operand._get_alias()}"
-
-    def __repr__(self) -> str:
-        return f"{self.op}({self.operand})"
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 二元横截面算子
-# ═════════════════════════════════════════════════════════════════════════════
-
-class CrossSectionalBinaryOp(OperandExpr):
-    """
-    二元横截面算子：cs_spearman 等。
-    """
-
-    def __init__(self, op: str, left: FactorExpr, right: FactorExpr):
-        super().__init__(op, left, right)
 
     @property
     def left(self) -> FactorExpr:
@@ -1109,10 +1018,19 @@ class CrossSectionalBinaryOp(OperandExpr):
         return self.operands[1]
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
-        left_df, right_df = values[0], values[1]
         if self.op == 'cs_spearman':
+            left_df, right_df = values[0], values[1]
             return self._apply_spearman(left_df, right_df)
-        raise ValueError(f"Unknown cross-sectional binary op: {self.op}")
+
+        x = values[0]
+        if self.op == 'cs_zscore':
+            mean = x.mean(axis=1)
+            std = x.std(axis=1)
+            std = std.replace(0, np.nan)
+            return x.sub(mean, axis=0).div(std, axis=0)
+        if self.op == 'cs_rank':
+            return x.rank(axis=1, pct=True) - 0.5
+        raise ValueError(f"Unknown cross-sectional op: {self.op}")
 
     @staticmethod
     def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
@@ -1139,17 +1057,27 @@ class CrossSectionalBinaryOp(OperandExpr):
         return result
 
     def to_latex(self) -> str:
-        left_latex = self.left.to_latex()
-        right_latex = self.right.to_latex()
         if self.op == 'cs_spearman':
+            left_latex = self.left.to_latex()
+            right_latex = self.right.to_latex()
             return f'\\rho_s({left_latex}, {right_latex})'
-        return f'\\text{{{self.op}}}({left_latex}, {right_latex})'
+
+        operand_latex = self.operand.to_latex()
+        _LATEX_MAP = {
+            'cs_zscore': f'Z({operand_latex})',
+            'cs_rank': f'\\text{{Rank}}({operand_latex})',
+        }
+        return _LATEX_MAP.get(self.op, f'\\text{{{self.op}}}({operand_latex})')
 
     def _get_alias(self) -> str:
-        return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
+        if self.op == 'cs_spearman':
+            return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}"
+        return f"{self.op}_{self.operand._get_alias()}"
 
     def __repr__(self) -> str:
-        return f"{self.op}({self.left}, {self.right})"
+        if self.op == 'cs_spearman':
+            return f"{self.op}({self.left}, {self.right})"
+        return f"{self.op}({self.operand})"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1165,7 +1093,7 @@ class CompositeExpr(OperandExpr):
       - gt, lt, ge, le, eq, ne（比较）
       - and, or（逻辑）
       - max, min, pow（多元聚合）
-      - neg, abs, not（一元）
+    - neg, abs, not, log, sign, sqrt（一元）
     """
 
     _ARITH_OPS = {
@@ -1193,6 +1121,9 @@ class CompositeExpr(OperandExpr):
         'neg': ('-', lambda a: -a),
         'abs': ('abs', lambda a: abs(a)),
         'not': ('~', lambda a: ~a),
+        'log': ('log', lambda a: np.log(a)),
+        'sign': ('sign', lambda a: np.sign(a)),
+        'sqrt': ('sqrt', lambda a: np.sqrt(a)),
     }
 
     def __init__(self, op: str, *operands: FactorExpr):
@@ -1220,6 +1151,12 @@ class CompositeExpr(OperandExpr):
                 result = -values[0]
             elif op == 'abs':
                 result = abs(values[0])
+            elif op == 'log':
+                result = np.log(values[0])
+            elif op == 'sign':
+                result = np.sign(values[0])
+            elif op == 'sqrt':
+                result = np.sqrt(values[0])
             else:
                 return None
             if isinstance(result, Parameter):
@@ -1236,6 +1173,45 @@ class CompositeExpr(OperandExpr):
         if self.op in self._UNARY_OPS:
             _, fn = self._UNARY_OPS[self.op]
             return fn(v[0])
+
+        # 多元 max/min
+        if self.op in ('max', 'min') and len(v) > 2:
+            vals: List[Any] = []
+            for i, val in enumerate(v):
+                opnd = self.operands[i]
+                if isinstance(opnd, ConstExpr):
+                    vals.append(opnd.value)
+                else:
+                    vals.append(val)
+
+            def _elemwise_max(a: Any, b: Any) -> Any:
+                if isinstance(a, pd.DataFrame):
+                    if np.isscalar(b):
+                        return a.clip(lower=b)  # type: ignore[arg-type]
+                    if isinstance(b, pd.DataFrame):
+                        return pd.DataFrame(np.maximum(a.values, b.values), index=a.index, columns=a.columns)
+                if isinstance(b, pd.DataFrame):
+                    if np.isscalar(a):
+                        return b.clip(lower=a)  # type: ignore[arg-type]
+                    return pd.DataFrame(np.maximum(a.values, b.values), index=b.index, columns=b.columns)
+                return np.maximum(a, b)
+
+            def _elemwise_min(a: Any, b: Any) -> Any:
+                if isinstance(a, pd.DataFrame):
+                    if np.isscalar(b):
+                        return a.clip(upper=b)  # type: ignore[arg-type]
+                    if isinstance(b, pd.DataFrame):
+                        return pd.DataFrame(np.minimum(a.values, b.values), index=a.index, columns=a.columns)
+                if isinstance(b, pd.DataFrame):
+                    if np.isscalar(a):
+                        return b.clip(upper=a)  # type: ignore[arg-type]
+                    return pd.DataFrame(np.minimum(a.values, b.values), index=b.index, columns=b.columns)
+                return np.minimum(a, b)
+
+            result = vals[0]
+            for item in vals[1:]:
+                result = _elemwise_max(result, item) if self.op == 'max' else _elemwise_min(result, item)
+            return result
 
         # 二元算
         a, b = v[0], v[1]
@@ -1304,8 +1280,16 @@ class CompositeExpr(OperandExpr):
 
     def to_latex(self) -> str:
         if self.op in self._UNARY_OPS:
-            symbol, _ = self._UNARY_OPS[self.op]
-            return f'{symbol}({self.operands[0].to_latex()})'
+            x = self.operands[0].to_latex()
+            _UNARY_LATEX_MAP = {
+                'neg': f'-({x})',
+                'abs': f'|{x}|',
+                'not': f'\\neg({x})',
+                'log': f'\\ln({x})',
+                'sign': f'\\operatorname{{sgn}}({x})',
+                'sqrt': f'\\sqrt{{{x}}}',
+            }
+            return _UNARY_LATEX_MAP.get(self.op, f'{self.op}({x})')
 
         left = self.operands[0].to_latex()
         right = self.operands[1].to_latex()
@@ -1325,8 +1309,12 @@ class CompositeExpr(OperandExpr):
             return f'({left} {symbol} {right})'
 
         if self.op == 'max':
+            if len(self.operands) > 2:
+                return f"\\max({', '.join(opnd.to_latex() for opnd in self.operands)})"
             return f'\\max({left}, {right})'
         if self.op == 'min':
+            if len(self.operands) > 2:
+                return f"\\min({', '.join(opnd.to_latex() for opnd in self.operands)})"
             return f'\\min({left}, {right})'
 
         if self.op == 'pow':
@@ -1341,6 +1329,7 @@ class CompositeExpr(OperandExpr):
             'eq': 'EQ', 'ne': 'NE',
             'and': 'AND', 'or': 'OR',
             'neg': 'NEG', 'abs': 'ABS', 'not': 'NOT',
+            'log': 'LOG', 'sign': 'SIGN', 'sqrt': 'SQRT',
         }
         op_alias = op_aliases.get(self.op, self.op.upper())
         parts = [opnd._get_alias() for opnd in self.operands]
@@ -1363,11 +1352,7 @@ def expr_max(*exprs: FactorExpr) -> FactorExpr:
         raise ValueError("expr_max requires at least one argument")
     if len(exprs) == 1:
         return exprs[0]
-    result = exprs[0]
-    for e in exprs[1:]:
-        # 使用复合表达式节点
-        result = _binary_max(result, e)
-    return result
+    return CompositeExpr('max', *exprs)
 
 
 def expr_min(*exprs: FactorExpr) -> FactorExpr:
@@ -1376,20 +1361,7 @@ def expr_min(*exprs: FactorExpr) -> FactorExpr:
         raise ValueError("expr_min requires at least one argument")
     if len(exprs) == 1:
         return exprs[0]
-    result = exprs[0]
-    for e in exprs[1:]:
-        result = _binary_min(result, e)
-    return result
-
-
-def _binary_max(a: FactorExpr, b: FactorExpr) -> FactorExpr:
-    """逐元素 max = (a+b+|a-b|)/2。"""
-    return (a + b + (a - b).abs()) * 0.5
-
-
-def _binary_min(a: FactorExpr, b: FactorExpr) -> FactorExpr:
-    """逐元素 min = (a+b-|a-b|)/2。"""
-    return (a + b - (a - b).abs()) * 0.5
+    return CompositeExpr('min', *exprs)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
