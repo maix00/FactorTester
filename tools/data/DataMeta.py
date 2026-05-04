@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import List, Dict, Optional, Tuple, Any
 
+import numpy as np
 import pandas as pd
 
 from tools.base.UniqueObject import UniqueObject
@@ -55,6 +56,7 @@ class DataMeta(UniqueObject):
             self.current_source: DataSource
             self.path: Any = None
             self.timezone = kwargs.get('timezone', None)  # 时区（用于时间列本地化）
+            self._day_periods: Optional[int] = None       # 缓存：每日 bar 数
 
     # ── DataSource 管理 ──
 
@@ -80,6 +82,19 @@ class DataMeta(UniqueObject):
                  raise ValueError(f"No data source available for object {self.object.name}")
             self.current_source = source
         return self.current_source
+
+    # ── day_periods 缓存 ──
+
+    @property
+    def day_periods(self) -> int:
+        """该产品+频率下每日的 bar 数量（懒计算，一次求值后缓存）。"""
+        if self._day_periods is not None:
+            return self._day_periods
+        df = self.get_data()
+        dates = pd.Series(df.index.get_level_values(-1).date)
+        day_boundaries = np.diff(np.where(dates != dates.shift(1))[0])
+        self._day_periods = int(pd.Series(day_boundaries).mode().iloc[0])
+        return self._day_periods
 
     # ── 资源 ID ──
 

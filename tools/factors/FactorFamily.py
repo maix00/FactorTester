@@ -29,7 +29,6 @@ from tools.factors.FactorExpr import (
     ColumnRef, ConstExpr, ParamRef, UnaryOp,
     RollingOp, ShiftOp, CrossSectionalOp, CrossSectionalBinaryOp, CompositeExpr,
     OperandExpr,
-    WindowOp, CorrOp,  # 向后兼容别名
 )
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools import UniqueObject, DataMeta
@@ -314,14 +313,21 @@ class FactorFamily(FactorExpr, UniqueObject):
         params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
+    def get_factor(self, **kwargs) -> Factor:
+        """根据 kwargs 中的参数值生成一个 Factor 实例（kwargs 形式同 add_params）。"""
+        factors = self.get_factors(**kwargs)
+        assert factors, "get_factors 返回了空列表，无法生成 Factor 实例"
+        return factors[0]
+
     def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
-        Factor 创建时即完成参数解析：
-          - $F → signal_freq（信号对齐频率）
-          - $Rev → is_reversed（是否取反）
-          - 其他参数 → 通过 _resolve_expr_params 固化到 _resolved_expr 中
+        流程：
+          1. 提取 $F（信号频率）和 $Rev（是否取反）
+          2. 用 resolve 将其他参数固化为纯表达式树（func_expr）
+          3. 包裹 SignalAlign(func_expr, ...) → _resolved_expr
+          4. Factor.calc() 直接 evaluate(_resolved_expr)，不需要额外对齐
 
         参数：
             return_freq      : 收益率计算频率（暂存于 tester 中）
@@ -331,96 +337,61 @@ class FactorFamily(FactorExpr, UniqueObject):
         返回：
             Factor 列表，同时写入 self.factors
         """
+        from tools.factors.FactorExpr import SignalAlign, CompositeExpr
+
         _pl = params_list if params_list is not None else self._params_list
         factors = []
         for params in _pl:
-            factor = self._create_factor(params)
+            factor_alias = self.get_alias(**params)
+
+            # 提取元参数
+            signal_freq = params.pop('$F', params.pop('F', '1d'))
+            is_reversed: bool = params.pop('$Rev', params.pop('Rev', False))
+
+            # 构建 param_values（排除已提取的元参数）
+            param_values = {
+                p.alias: params[p.alias]
+                for p in self.params
+                if p.alias in params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
+            }
+
+            # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
+            if self._expr is not None:
+                func_expr = self.resolve(self._expr, param_values=param_values).as_intermediate()
+                bp = getattr(self, 'basepoint', 'last')
+                dbp = getattr(self, 'daily_basepoint', None)
+                ess = getattr(self, 'end_session_skip', True)
+                esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
+                resolved_expr = SignalAlign(
+                    func_expr,
+                    signal_freq=signal_freq if signal_freq is not None else '1d',
+                    basepoint=bp, daily_basepoint=dbp,
+                    end_session_skip=ess, end_session_gap=esg,
+                )
+                if is_reversed:
+                    resolved_expr = CompositeExpr('neg', resolved_expr)
+                    func_expr = CompositeExpr('neg', func_expr)
+            else:
+                func_expr = None
+                resolved_expr = None
+
+            factor = Factor(
+                alias=factor_alias,
+                func_expr=func_expr,
+                _resolved_expr=resolved_expr,
+                signal_freq=signal_freq,
+                is_reversed=False,
+                family=self,
+            )
+
             if return_freq is not None:
                 t = Factor._get_active_tester()
                 if t is not None:
                     t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
+
         self.factors = factors
         return factors
-
-    def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs) -> Factor:
-        """
-        创建单个 Factor 实例（支持按 alias 复用已有实例）。
-
-        参数：
-            return_freq      : 收益率计算频率
-            start_calc_point : 计算起始点
-            **kwargs         : Parameter alias→value 键值对（未指定时取默认值）
-
-        返回：
-            Factor 实例
-        """
-        kwargs = self._normalize_param_kwargs(**kwargs)
-        self._check_in_space(**kwargs)
-        param_vals = {p: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
-        new_params = {p.alias: param_vals[p] for p in self.params}
-        factor = self._create_factor(new_params)
-        if return_freq is not None:
-            t = Factor._get_active_tester()
-            if t is not None:
-                t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
-        return factor
-
-    def _create_factor(self, params: dict) -> Factor:
-        """
-        根据参数组合创建 Factor。
-
-        流程：
-          1. 提取 $F（信号频率）和 $Rev（是否取反）
-          2. 用 _resolve_expr_params 将其他参数固化为纯表达式树（func_expr）
-          3. 包裹 SignalAlign(func_expr, ...) → _resolved_expr
-             SignalAlign 作为表达式节点参与结构去重，不同对齐参数 = 不同表达式
-          4. Factor.calc() 直接 evaluate(_resolved_expr)，不需要额外对齐
-        """
-        factor_alias = self.get_alias(**params)
-
-        # 提取元参数
-        signal_freq = params.pop('$F', params.pop('F', '1d'))
-        is_reversed: bool = params.pop('$Rev', params.pop('Rev', False))
-
-        # 构建 param_values（排除已提取的元参数）
-        param_values = {
-            p.alias: params[p.alias]
-            for p in self.params
-            if p.alias in params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
-        }
-
-        # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
-        from tools.factors.FactorExpr import SignalAlign, CompositeExpr
-        if self._expr is not None:
-            func_expr = self._resolve_expr_params(self._expr, param_values=param_values)
-            # 包裹 SignalAlign：对齐参数来自 family 配置
-            bp = getattr(self, 'basepoint', 'last')
-            dbp = getattr(self, 'daily_basepoint', None)
-            ess = getattr(self, 'end_session_skip', True)
-            esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
-            resolved_expr = SignalAlign(
-                func_expr,
-                signal_freq=signal_freq if signal_freq is not None else '1d',
-                basepoint=bp, daily_basepoint=dbp,
-                end_session_skip=ess, end_session_gap=esg,
-            )
-            # 取反：包在 SignalAlign 外层 → pos/neg 有不同 structural key
-            if is_reversed:
-                resolved_expr = CompositeExpr('neg', resolved_expr)
-                func_expr = CompositeExpr('neg', func_expr)  # func_expr 也取反，保持语义一致
-        else:
-            func_expr = None
-            resolved_expr = None
-
-        return Factor(
-            alias=factor_alias,
-            func_expr=func_expr,        # 纯因子逻辑（含取反，不含对齐），给外部引用
-            _resolved_expr=resolved_expr, # 含 SignalAlign + 取反 的完整表达式
-            signal_freq=signal_freq,
-            is_reversed=False,  # 取反已内化到表达式，不再需要 DataFrame 层取反
-            family=self,
-        )
 
     def test(self, categories: Optional['str|List[str]'] = None,
              return_freq: Optional[Any] = None,
@@ -508,137 +479,13 @@ class FactorFamily(FactorExpr, UniqueObject):
         """返回因子表达式树。"""
         return self._expr  # type: ignore[return-value]
 
-    def _resolve_expr_params(self, expr: FactorExpr, param_values: dict | None = None) -> FactorExpr:
+    @staticmethod
+    def resolve(expr: FactorExpr, param_values: dict | None = None) -> FactorExpr:
         """
-        递归解析表达式树中的参数引用。
-
-        将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型），
-        将 RollingOp/ShiftOp 中 window/periods Parameter → 实际值。
-
-        参数：
-            expr         : 表达式树
-            param_values : 参数值字典（{alias: value}），优先于注册表查找。
-                           由 func() 根据当前 Factor 的 kwargs 构建。
-
-        返回一个全新的表达式树（不修改原始树）。
+        递归解析表达式树中的参数引用
+        将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
-        from tools.parameters import DataColumnParam
-
-        # 叶子节点
-        if isinstance(expr, ParamRef):
-            value = expr.resolve(self, param_values=param_values)
-            # 根据参数值类型决定替换为什么
-            if isinstance(value, FactorExpr):
-                # 参数值本身是表达式（如 FE=某个因子表达式），需递归解析
-                return self._resolve_expr_params(value, param_values=param_values)
-            if isinstance(expr.param, DataColumnParam):
-                from tools.data.DataColumn import DataColumn
-                return ColumnRef(DataColumn(value))
-            else:
-                return ConstExpr(value)
-
-        if isinstance(expr, (ColumnRef, ConstExpr)):
-            return expr  # 不变
-
-        # ── OperandExpr 通用分发：委托给 _resolve_operand_expr ──
-        if isinstance(expr, OperandExpr):
-            resolved = self._resolve_operand_expr(expr, param_values)
-            if resolved is not None:
-                return resolved
-
-        return expr  # fallback
-
-    def _resolve_operand_expr(self, expr: 'OperandExpr', param_values: Optional[Dict[str, Any]]) -> Optional['OperandExpr']:
-        """
-        对 OperandExpr 子类进行参数解析和重建。
-
-        子类分发：
-          - RollingOp: 递归 operands + 解析 window
-          - ShiftOp: 递归 operand + 解析 periods
-          - CompositeExpr: 递归 operands + 常量折叠
-          - 其他（UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp）: 仅递归 operands
-        """
-        from tools.factors.FactorExpr import (
-            UnaryRollingOp, BinaryRollingOp, CompositeExpr, RollingOp, ShiftOp,
-            UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp,
-        )
-        from tools.parameters.Parameter import Parameter
-
-        # ── RollingOp: 递归所有 _operands，解析 window ──
-        if isinstance(expr, RollingOp):
-            operands = expr._operands
-            new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in operands)
-            window = expr.window
-            if isinstance(window, Parameter):
-                if param_values is not None and window.alias in param_values:
-                    window = param_values[window.alias]
-                else:
-                    window = window.get_value(self)
-            elif isinstance(window, str) and window.startswith('$'):
-                # "$F" 之类参数别名 → 从 param_values 或参数表查找
-                alias = window
-                if param_values is not None and alias in param_values:
-                    window = param_values[alias]
-                elif alias in self.params_dict:
-                    window = self.params_dict[alias].get_value(self)
-            if (all(a is b for a, b in zip(new_operands, operands))
-                    and window is expr.window):
-                return expr
-            if isinstance(expr, UnaryRollingOp):
-                return UnaryRollingOp(expr.op, new_operands[0], window)
-            elif isinstance(expr, BinaryRollingOp):
-                return BinaryRollingOp(expr.op, new_operands[0], new_operands[1], window)
-            else:
-                expr.window = window
-                return expr
-
-        # ── ShiftOp: 递归 operand，解析 periods ──
-        if isinstance(expr, ShiftOp):
-            new_operand = self._resolve_expr_params(expr.operand, param_values=param_values)
-            periods = expr.periods
-            if isinstance(periods, Parameter):
-                if param_values is not None and periods.alias in param_values:
-                    periods = param_values[periods.alias]
-                else:
-                    periods = periods.get_value(self)
-            elif isinstance(periods, str) and periods.startswith('$'):
-                # "$F" 之类参数别名 → 从 param_values 或参数表查找
-                alias = periods
-                if param_values is not None and alias in param_values:
-                    periods = param_values[alias]
-                elif alias in self.params_dict:
-                    periods = self.params_dict[alias].get_value(self)
-            elif isinstance(periods, FactorExpr):
-                resolved_periods = self._resolve_expr_params(periods, param_values=param_values)
-                if isinstance(resolved_periods, ConstExpr):
-                    periods = resolved_periods.value
-                else:
-                    periods = resolved_periods
-            if new_operand is expr.operand and periods is expr.periods:
-                return expr
-            return ShiftOp(expr.op, new_operand, periods)  # type: ignore[arg-type]
-
-        # ── CompositeExpr: 递归所有 operands，尝试常量折叠 ──
-        if isinstance(expr, CompositeExpr):
-            new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in expr.operands)
-            if all(a is b for a, b in zip(new_operands, expr.operands)):
-                return expr
-            if all(isinstance(opnd, ConstExpr) for opnd in new_operands):
-                try:
-                    folded = CompositeExpr._fold_const(expr.op, new_operands)  # type: ignore[arg-type]
-                    if folded is not None:
-                        return folded  # type: ignore[return-type]
-                except Exception:
-                    pass
-            return CompositeExpr(expr.op, *new_operands)
-
-        # ── 通用 OperandExpr（UnaryOp, CrossSectionalOp, CrossSectionalBinaryOp）: 仅递归 operands ──
-        operands = expr.operands
-        new_operands = tuple(self._resolve_expr_params(opnd, param_values=param_values) for opnd in operands)
-        if all(a is b for a, b in zip(new_operands, operands)):
-            return expr
-        # 用原始类型重建
-        return type(expr)(expr.op, *new_operands)
+        return expr.resolve(param_values=param_values)
 
     def func(self, products: Sequence['Product'], *args, **kwargs) -> pd.DataFrame:
         """
@@ -670,14 +517,14 @@ class FactorFamily(FactorExpr, UniqueObject):
             p.alias: kwargs[p.alias]
             for p in self.params if p.alias in kwargs
         }
-        resolved = self._resolve_expr_params(self._expr, param_values=param_values)
+        resolved = self.resolve(self._expr, param_values=param_values)
 
         # ── 预加载：收集所有需要的列，每个品种只读一次 ──
         from tools.factors.FactorExpr import ColumnRef
         from tools.data.DataMeta import DataMeta
 
         preloaded: dict = {}
-        column_refs = resolved.collect_column_refs()
+        column_refs = resolved.column_refs
         # 按 (product, freq_name) 分组，收集需要的列名
         prod_freq_cols: dict[tuple, set] = {}
         for cr in column_refs:

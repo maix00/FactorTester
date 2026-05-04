@@ -14,7 +14,21 @@ def create_app() -> Flask:
         static_folder=os.path.join(root, 'static'),
     )
 
-    app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
+    # 优先环境变量；否则从持久化文件读取固定密钥，确保热重载后 session 不丢失
+    secret_key = os.environ.get('FLASK_SECRET_KEY')
+    if not secret_key:
+        secret_file = os.path.join(root, '.flask_secret_key')
+        try:
+            if os.path.exists(secret_file):
+                with open(secret_file, 'rb') as f:
+                    secret_key = f.read()
+            else:
+                secret_key = os.urandom(24)
+                with open(secret_file, 'wb') as f:
+                    f.write(secret_key)
+        except Exception:
+            secret_key = os.urandom(24)  # fallback
+    app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
 
     from server.auth import auth_bp

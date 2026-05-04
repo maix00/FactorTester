@@ -220,79 +220,9 @@ class Factor(FactorExpr, UniqueObject):
 
     @property
     def expr(self) -> 'FactorExpr':
-        """Factor 自身就是表达式树 — 返回 self。"""
-        return self
-
-    # ------------------------------------------------------------------
-    # 数据频率自动推断
-    # ------------------------------------------------------------------
-
-    def _infer_source_freq(self, products: Sequence['Product']) -> DataFreq:
-        """
-        根据表达式中所有 ConstExpr 的 Timedelta 最小值，自动选择数据源频率。
-
-        规则：
-          1. 遍历 _resolved_expr，收集所有 ConstExpr.value 中的 pd.Timedelta
-          2. 如果最小窗口 ≥ 1day → DAY1
-          3. 如果最小窗口 ≥ 1hour → HOUR1
-          4. 否则 → MIN1
-          5. 从产品可用频率中选 ≥ 所需频率的最低频（降级兼容）
-        """
-        from tools.factors.FactorExpr import ConstExpr, FactorExpr, ShiftOp, RollingOp
-
-        # Step 1: 遍历表达式树，用 DataFreq() 统一收集所有窗口值
-        min_window: Optional[pd.Timedelta] = None
-        seen: set[int] = set()
-        stack: list[FactorExpr] = [self._resolved_expr]  # type: ignore[list-item]
-
-        def push_operands(expr: FactorExpr):
-            for op in getattr(expr, 'operands', []):
-                stack.append(op)
-
-        def try_collect(val: Any) -> None:
-            nonlocal min_window
-            try:
-                td = DataFreq(val).value
-            except Exception:
-                return
-            if min_window is None or td < min_window:
-                min_window = td
-
-        while stack:
-            node = stack.pop()
-            node_id = id(node)
-            if node_id in seen:
-                continue
-            seen.add(node_id)
-            if isinstance(node, ConstExpr):
-                try_collect(node.value)
-            elif isinstance(node, ShiftOp) and not isinstance(node.periods, FactorExpr):
-                try_collect(node.periods)
-            elif isinstance(node, RollingOp) and not isinstance(node.window, FactorExpr):
-                try_collect(node.window)
-            push_operands(node)
-
-        # Step 2: 根据最小窗口确定所需最低频率
-        if min_window is None or min_window >= pd.Timedelta('1day'):
-            desired_freq = DataFreq('DAY1')
-        elif min_window >= pd.Timedelta('1hour'):
-            desired_freq = DataFreq('HOUR1')
-        else:
-            desired_freq = DataFreq('MIN1')
-
-        # Step 3: 从产品可用频率中选择合适的最低频
-        if products:
-            available_freqs = sorted(
-                products[0].list_available_freqs(),
-                key=lambda f: f.value,
-            )
-            for af in available_freqs:
-                if af.value >= desired_freq.value:
-                    return af
-            if available_freqs:
-                return available_freqs[-1]
-
-        return DataFreq('MIN1')
+        """Factor 自身就是表达式树 — 返回 _resolved_expr。"""
+        assert self._resolved_expr is not None, f"{self}: _resolved_expr is None, cannot return expr"
+        return self._resolved_expr
 
     # ------------------------------------------------------------------
     # 用户前缀管理
@@ -371,39 +301,51 @@ class Factor(FactorExpr, UniqueObject):
             if source_freq_name is not None:
                 freq = DataFreq(source_freq_name)
             else:
-                freq = self._infer_source_freq(products)
+                if products:
+                    const_refs = self._resolved_expr.const_refs
+                    desired_freq = set()
+                    if const_refs:
+                        def get_freq(val: Any) -> Optional[DataFreq]:
+                            try:
+                                return DataFreq(val)
+                            except Exception:
+                                return
+                        desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
+                    available_freqs = set(products[0].list_available_freqs())
+                    for p in products[1:]:
+                        freqs = set(p.list_available_freqs())
+                        if not freqs:
+                            products.remove(p)
+                        else:
+                            available_freqs &= freqs
+                    available_freqs = sorted(available_freqs, key=lambda f: f.value)
+                    if not available_freqs:
+                        raise ValueError(f"{self}: 产品没有公共可用频率，无法推断数据频率")
+                    if not desired_freq:
+                        freq = available_freqs[0]
+                    freq = next((af for af in available_freqs if af.value <= max(df.value for df in desired_freq)), available_freqs[0])
+                else:
+                    raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
+
         self.source_data_freq = freq
 
         # ── 预加载：收集需要的列，每个品种只读一次 ──
-        from tools.factors.FactorExpr import ColumnRef
         from tools.data.DataMeta import DataMeta
 
         preloaded: dict = {}
-        column_refs = self._resolved_expr.collect_column_refs()
-        prod_freq_cols: dict[tuple, set] = {}
-        for cr in column_refs:
-            col_name = cr.column.name
-            for p in products:
-                key = (p, freq.name)
-                if key not in prod_freq_cols:
-                    prod_freq_cols[key] = set()
-                prod_freq_cols[key].add(col_name)
-
-        for (p, freq_name), cols in prod_freq_cols.items():
-            dm: DataMeta = getattr(p, freq_name)
-            if not dm.next_available_source():
-                continue
-            data = dm.get_and_adjust_cols(list(cols), copy=False)
+        column_refs = self._resolved_expr.column_refs
+        columns = list(cr.column.name for cr in column_refs)
+        for p in products:
+            dm: DataMeta = getattr(p, freq.name)
+            data = dm.get_and_adjust_cols(columns, copy=False)
             if not data.empty:
-                preloaded[(p, freq_name)] = data
+                preloaded[(p, freq.name)] = data
 
         # ── 1. 表达式求值 ──
         # _resolved_expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
-        df_cache: Dict[FactorExpr, pd.DataFrame] = {}
-        result = self._resolved_expr.evaluate(
-            products, freq, preloaded=preloaded, cache=df_cache)
+        result = self._resolved_expr.evaluate(products, freq, preloaded=preloaded)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data

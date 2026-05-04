@@ -34,7 +34,7 @@ import pandas as pd
 import numpy as np
 from functools import partial
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+    TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 )
 from weakref import WeakValueDictionary
 
@@ -47,71 +47,8 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.Factor import Factor
     from tools.data.DataSource import DataSource
+    from tools.data.DataMeta import DataMeta
     from tools.parameters.Parameter import Parameter
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 工具函数：sliding_window_view 向量化滚动 argmax/argmin
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _rolling_argmaxmin(
-    df: pd.DataFrame,
-    window: int,
-    op: str,
-    normalize: bool = True,
-) -> pd.DataFrame:
-    """
-    用 sliding_window_view 对 DataFrame 每列计算滚动 argmax 或 argmin。
-
-    参数
-    ----------
-    df : pd.DataFrame
-        形状 (n_rows, n_cols)，行=时间，列=品种。
-    window : int
-        滚动窗口大小（bar 数），必须 >= 2。
-    op : {'argmax', 'argmin'}
-        取最大值或最小值的位置。
-    normalize : bool
-        True 时返回值归一化到 [0, 1]，False 时返回整数索引 [0, window-1]。
-
-    返回
-    -------
-    pd.DataFrame
-        与 df 同形状，前 window-1 行为 NaN。
-    """
-    if window < 2:
-        raise ValueError(f"window must be >= 2, got {window}")
-
-    n_rows = len(df)
-    if n_rows < window:
-        # 行数不足，返回全 NaN（前 window-1 行不满，也不够产生任何一个有效窗口）
-        return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
-                            index=df.index, columns=df.columns)
-
-    arr = df.to_numpy(dtype=float)          # (n_rows, n_cols)
-    # sliding_window_view 零拷贝，NumPy 2.x 下 window 轴追加到末尾
-    # shape: (n_rows - window + 1, n_cols, window)
-    windows = np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
-
-    # 在 window 轴（最后一个轴）上取最右侧最大值/最小值的位置
-    # 反转 window 轴：原 [... t, t+1, ..., t+w-1] → [... t+w-1, ..., t+1, t]
-    # 反转后 arg=0 对应原索引 w-1（最右侧）
-    reversed_view = windows[..., ::-1]          # (n-w+1, n_cols, window)
-    if op == 'argmax':
-        pos = (window - 1) - np.argmax(reversed_view, axis=-1)
-    elif op == 'argmin':
-        pos = (window - 1) - np.argmin(reversed_view, axis=-1)
-    else:
-        raise ValueError(f"Invalid op: {op}")
-
-    pos = pos.astype(float)                     # (n_rows - window + 1, n_cols)
-    if normalize and window > 1:
-        pos = pos / (window - 1)
-
-    # 前 window-1 行填 NaN
-    nan_rows = np.full((window - 1, df.shape[1]), np.nan)
-    result = np.vstack([nan_rows, pos])
-    return pd.DataFrame(result, index=df.index, columns=df.columns)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -189,10 +126,11 @@ class FactorExpr:
 
     # ── 子类必须实现的接口 ──
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
+    def resolve(self, *args, **kwargs) -> 'FactorExpr':
+        """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
+        return self
+
+    def evaluate(self, *args, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。"""
         raise NotImplementedError
 
@@ -229,10 +167,35 @@ class FactorExpr:
         result: List['Parameter'] = []
         self._collect_params_ordered(seen, result)
         return result
+    
+    def get_ref_types(self, typ: type) -> Set[Any]:
+        """收集表达式树中的所有指定类型的引用节点。"""
+        result: Set[Any] = set()
+        seen: set[tuple] = set()  # 用 structural_key 去重
+        stack: list[FactorExpr] = [self]
 
-    def collect_column_refs(self) -> Set['ColumnRef']:
+        while stack:
+            node = stack.pop()
+            sk = node._structural_key()
+            if sk in seen:
+                continue
+            seen.add(sk)
+            if isinstance(node, typ):
+                result.add(node)
+            for op in getattr(node, '_operands', []):
+                stack.append(op)
+
+        return result
+
+    @property
+    def column_refs(self) -> Set['ColumnRef']:
         """收集表达式树中的所有 ColumnRef 叶子节点。"""
-        return set()
+        return self.get_ref_types(ColumnRef)
+
+    @property
+    def const_refs(self) -> Set['ConstExpr']:
+        """收集表达式树中的所有 ConstExpr 叶子节点"""
+        return self.get_ref_types(ConstExpr)
 
     # ── 运算符重载：自动构建 CompositeExpr ──
 
@@ -310,53 +273,53 @@ class FactorExpr:
 
     # ── 便利方法：时序算子 ──
 
-    def ma(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def ma(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动平均（简单平均）。"""
-        return UnaryRollingOp('ma', self, window)
+        return RollingOp('ma', _to_expr(window), self)
 
-    def std(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def std(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动标准差。"""
-        return UnaryRollingOp('std', self, window)
+        return RollingOp('std', _to_expr(window), self)
 
-    def var(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def var(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动方差。"""
-        return UnaryRollingOp('var', self, window)
+        return RollingOp('var', _to_expr(window), self)
 
-    def rolling_min(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def rolling_min(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动最小值。"""
-        return UnaryRollingOp('min', self, window)
+        return RollingOp('min', _to_expr(window), self)
 
-    def rolling_max(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def rolling_max(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动最大值。"""
-        return UnaryRollingOp('max', self, window)
+        return RollingOp('max', _to_expr(window), self)
 
-    def rolling_sum(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def rolling_sum(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动求和。"""
-        return UnaryRollingOp('sum', self, window)
+        return RollingOp('sum', _to_expr(window), self)
 
-    def ema(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def ema(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期指数移动平均（EMA, span=window）。"""
-        return UnaryRollingOp('ema', self, window)
+        return RollingOp('ema', _to_expr(window), self)
 
-    def corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'BinaryRollingOp':
+    def corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
-        return BinaryRollingOp('corr', self, other, window)
+        return RollingOp('corr', _to_expr(window), self, other)
 
-    def skew(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def skew(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动偏度。"""
-        return UnaryRollingOp('skew', self, window)
+        return RollingOp('skew', _to_expr(window), self)
 
-    def argmax(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def argmax(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
-        return UnaryRollingOp('argmax', self, window)
+        return RollingOp('argmax', _to_expr(window), self)
 
-    def argmin(self, window: Union[int, str, pd.Timedelta]) -> 'UnaryRollingOp':
+    def argmin(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期内最小值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
-        return UnaryRollingOp('argmin', self, window)
+        return RollingOp('argmin', _to_expr(window), self)
 
     def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
-        return ShiftOp('shift', self, periods)
+        return ShiftOp('shift', periods, self)
 
     def delta(self, period: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'CompositeExpr':
         """N 期变化量：self - self.shift(N)。"""
@@ -408,7 +371,7 @@ def _to_expr(value: Any) -> FactorExpr:
     from tools.parameters.Parameter import Parameter
     if isinstance(value, Parameter):
         return ParamRef(value)
-    return ConstExpr(value)
+    return ConstExpr(value)  # type: ignore[arg-type]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -425,7 +388,7 @@ class OperandExpr(FactorExpr):
       - evaluate() 递归求值所有子表达式 → 调用 _apply_op(values)
       - 子类只需覆盖 _apply_op() 和展示方法（op_name/to_latex/_get_alias）
 
-    dependencies / param_deps / collect_column_refs / _collect_params_ordered
+    dependencies / param_deps / _collect_params_ordered
     均从 _operands 自动派生，无需子类覆盖。
     """
 
@@ -463,18 +426,17 @@ class OperandExpr(FactorExpr):
         for opnd in self._operands:
             opnd._collect_params_ordered(seen, result)
 
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        result: Set['ColumnRef'] = set()
-        for opnd in self._operands:
-            result.update(opnd.collect_column_refs())
-        return result
+    def resolve(self, *args, **kwargs) -> 'FactorExpr':
+        resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
+        return type(self)(self.op, *resolved_operands)
 
     # ── 通用求值 ──
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None,
+                 *args, **kwargs) -> pd.DataFrame:
         # ── 中间因子：先查 FactorData 全局缓存，命中则直接返回 ──
         if self._is_intermediate:
             from tools.factors.FactorData import FactorData
@@ -594,9 +556,6 @@ class ColumnRef(FactorExpr):
         else:
             return None
 
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        return {self}
-
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
@@ -673,7 +632,7 @@ class ParamRef(FactorExpr):
 
     支持的类型：
       - DataColumnParam: 值会被 rectify 为 DataColumn 后用于列查找
-      - WindowParam: 值作为窗口参数传入 WindowOp
+      - WindowParam: 值作为窗口参数传入 RollingOp
       - 任意 Parameter: 值直接作为标量参与表达式计算
     """
 
@@ -689,22 +648,19 @@ class ParamRef(FactorExpr):
             seen.add(self.param)
             result.append(self.param)
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        # ParamRef 不能独立求值——它需要一个宿主对象来查询注册表。
-        # 求值时由 FactorFamily 在求值前将参数值替换为 ConstExpr 或 ColumnRef。
-        raise RuntimeError(
-            "ParamRef.evaluate() should not be called directly; "
-            "parameter values must be resolved by the FactorFamily before evaluation"
-        )
+    def evaluate(self, *args, **kwargs) -> pd.DataFrame:
+        raise RuntimeError("ParamRef.evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
 
-    def resolve(self, host: 'UniqueObject', param_values: dict | None = None) -> Any:
+    def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
         """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
         if param_values is not None and self.param.alias in param_values:
-            return param_values[self.param.alias]
-        return self.param.get_value(host)
+            value = param_values[self.param.alias]
+            from tools.parameters import DataColumnParam
+            if isinstance(self.param, DataColumnParam):
+                return ColumnRef(DataColumn(value))
+            else:
+                return ConstExpr(value)
+        return ConstExpr(self.param.default_value)
 
     @property
     def op_name(self) -> str:
@@ -725,23 +681,27 @@ class ParamRef(FactorExpr):
 
 class ConstExpr(FactorExpr):
     """
-    常量表达式 — 标量或固定值的叶子节点。
+    常量表达式 — 标量、固定值或窗口/位移参数的叶子节点。
 
-    示例：
-        ConstExpr(1.0)
-        ConstExpr(0.5)
+    当 value 是 int/float/ndarray 时 → 参与表达式运算，evaluate() 返回 self
+    （由 CompositeExpr._apply_op 提取 .value 后内联处理）。
+
+    当 value 是 pd.Timedelta/DataFreq 时 → 窗口/位移参数，
+    evaluate() 直接返回 bar 数（int）。
     """
 
     def __init__(self, value: Union[int, float, np.ndarray]):
         self.value = value
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        # 常量不产生 DataFrame，由 CompositeExpr._apply_op 提取 value 后内联处理
-        # 此处返回 self 作为特殊标记，不直接调用 evaluate
-        return self  # type: ignore[return-value]
+    def evaluate(self, freq: DataFreq,
+                 dm: Optional['DataMeta'] = None, *args, **kwargs
+                 ) -> pd.DataFrame:
+        if isinstance(self.value, (pd.Timedelta, DataFreq)):
+            if dm is None:
+                raise ValueError("ConstExpr 以 Timedelta/DataFreq 为 value 需要 DataMeta 以计算 day_periods")
+            return cast(pd.DataFrame, _resolve_window(self.value, freq, dm))
+        # 标量/数组常量：返回 self，由 CompositeExpr._apply_op 提取 value 后内联处理
+        return cast(pd.DataFrame, self)
 
     @property
     def op_name(self) -> str:
@@ -821,272 +781,153 @@ class RollingOp(OperandExpr):
     """
     滚动窗口算子抽象基类。
 
-    统一处理 window 参数的存储、解析、param_deps 和 _resolve_expr_params 分发。
-    子类只需声明操作数（一元/二元/多元）和核心滚动运算逻辑。
+    operands = (window, data1, data2, ...)
+    window 是第一 operand（ConstExpr 或 ParamRef），数据 operands 紧随其后。
 
-    window 参数支持：
-      - int: bar 数量
-      - str / pd.Timedelta: 时间长度
-      - Parameter (WindowParam): 运行时从 FactorFamily 注册表取值
+    子类只需声明操作数和核心滚动运算逻辑。
     """
 
-    def __init__(self, window: Union[int, str, pd.Timedelta, 'Parameter']):
-        self.window = window
+    @property
+    def window(self) -> 'FactorExpr':
+        """第一 operand：窗口参数。"""
+        return self.operands[0]
 
-    # ── 结构等价：额外携带 window ──
+    # ── 算子映射：op → lambda(*series_or_dfs, window) ──
 
-    def _structural_extra(self) -> tuple:
-        w = self.window
-        if isinstance(w, (int, float, str, pd.Timedelta)):
-            return ('window', str(w))
-        return ('window', w.alias)
+    _OP_MAP = {
+        'ma':     lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).mean(),
+        'std':    lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).std(),
+        'var':    lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).var(),
+        'min':    lambda s, w: s.rolling(w, min_periods=1).min(),
+        'max':    lambda s, w: s.rolling(w, min_periods=1).max(),
+        'sum':    lambda s, w: s.rolling(w, min_periods=1).sum(),
+        'ema':    lambda s, w: s.ewm(span=w, min_periods=max(1, w // 2)).mean(),
+        'skew':   lambda s, w: s.rolling(w, min_periods=max(1, w // 2)).skew(),
+    }
 
-    # ── 子类必须实现 ──
+    def _apply_rolling(self, window: int, *dfs: pd.DataFrame,
+                       freq: DataFreq) -> pd.DataFrame:
+        # argmax/argmin：全向量化，不依赖 rolling()
+        if self.op in ('argmax', 'argmin'):
+            return _rolling_argmaxmin(dfs[0], window, self.op)
+
+        if self.op in self._OP_MAP:
+            func = self._OP_MAP[self.op]
+            return dfs[0].apply(func, axis=0, args=(window,))
+
+        # 二元
+        if self.op in ('corr', 'cov'):
+            left_df, right_df = dfs
+            result = pd.DataFrame(index=left_df.index, columns=left_df.columns, dtype=float)
+            for col in left_df.columns:
+                if self.op == 'corr':
+                    result[col] = left_df[col].rolling(window).corr(right_df[col])
+                else:
+                    result[col] = left_df[col].rolling(window).cov(right_df[col])
+            return result
+
+        raise ValueError(f"Unknown rolling op: {self.op}")
+
+    # ── 展示方法 ──
 
     @property
-    def _operands(self) -> Sequence[FactorExpr]:
-        """返回此算子依赖的所有操作数表达式。"""
-        raise NotImplementedError
-
-    def _apply_rolling(self, dfs: Sequence[pd.DataFrame],
-                       window: int, freq: DataFreq) -> pd.DataFrame:
-        """
-        核心滚动运算。
-
-        参数：
-            dfs    : 各操作数的求值结果（与 _operands 顺序一致）
-            window : 已解析为整数 bar 数的窗口
-            freq   : 数据频率
-        返回：
-            DataFrame，列=Product，行=时间
-        """
-        raise NotImplementedError
+    def operand(self) -> FactorExpr:
+        """数据操作数（向后兼容，一元时使用）。"""
+        return self.operands[1]
 
     def _window_str(self) -> str:
         """窗口的字符串表示，用于 op_name / alias / latex。"""
         w = self.window
-        if isinstance(w, int):
-            return str(w)
+        if isinstance(w, ConstExpr):
+            return str(w.value)
         return str(w).replace(' ', '')
 
-    # ── window 参数相关（覆盖基类默认实现） ──
-
     @property
-    def param_deps(self) -> Set['Parameter']:
-        from tools.parameters.Parameter import Parameter
-        deps: Set['Parameter'] = set()
-        for opnd in self._operands:
-            deps |= opnd.param_deps
-        if isinstance(self.window, Parameter):
-            deps.add(self.window)
-        return deps
+    def op_name(self) -> str:
+        return f"{self.op.upper()}_{self._window_str()}"
 
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        from tools.parameters.Parameter import Parameter
-        for opnd in self._operands:
-            opnd._collect_params_ordered(seen, result)
-        if isinstance(self.window, Parameter) and self.window not in seen:
-            seen.add(self.window)
-            result.append(self.window)
+    def to_latex(self) -> str:
+        w_str = self._window_str()
+        if len(self.operands) == 2:
+            # 一元
+            operand_latex = self.operands[1].to_latex()
+            _LATEX_MAP = {
+                'ma': f'\\text{{MA}}_{{{w_str}}}({operand_latex})',
+                'std': f'\\sigma_{{{w_str}}}({operand_latex})',
+                'var': f'\\sigma^2_{{{w_str}}}({operand_latex})',
+                'min': f'\\min_{{{w_str}}}({operand_latex})',
+                'max': f'\\max_{{{w_str}}}({operand_latex})',
+                'sum': f'\\sum_{{{w_str}}}({operand_latex})',
+                'ema': f'\\text{{EMA}}_{{{w_str}}}({operand_latex})',
+                'skew': f'\\text{{Skew}}_{{{w_str}}}({operand_latex})',
+                'argmax': f'\\text{{ArgMax}}_{{{w_str}}}({operand_latex})',
+                'argmin': f'\\text{{ArgMin}}_{{{w_str}}}({operand_latex})',
+            }
+            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
+        else:
+            left_latex = self.operands[1].to_latex()
+            right_latex = self.operands[2].to_latex()
+            return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}({left_latex}, {right_latex})'
+
+    def _get_alias(self) -> str:
+        parts = [self.op]
+        for opnd in self.operands[1:]:
+            parts.append(opnd._get_alias())
+        parts.append(f"W{self._window_str()}")
+        return "_".join(parts)
+
+    def __repr__(self) -> str:
+        w_str = self._window_str()
+        if len(self.operands) == 2:
+            return f"{self.op}({self.operands[1]}, {w_str})"
+        else:
+            return f"{self.op}({self.operands[1]}, {self.operands[2]}, {w_str})"
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
                  preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
         if cache is not None and self in cache:
             return cache[self]
 
-        operands = self._operands
-        dfs = tuple(opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
-                    for opnd in operands)
-        window = _resolve_bars(self.window, freq)
-        result = self._apply_rolling(dfs, window, freq)
+        # 先求值数据 operands（非 window）
+        data_vals = [opnd.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
+                     for opnd in self.operands[1:]]
+
+        # 从第一个产品拿 DataMeta，用于窗口参数中的 day_periods 计算
+        from tools.data.DataMeta import DataMeta
+        dm: DataMeta = getattr(products[0], freq.name)
+
+        # 求窗口值（ConstExpr.evaluate 需要 DataMeta 来计算 day_periods）
+        window_val = self.operands[0].evaluate(products, freq, source=source,
+                                                cache=cache, preloaded=preloaded, dm=dm)
+        result = self._apply_rolling(window_val, *data_vals, freq=freq)  # type: ignore[arg-type]
 
         if cache is not None:
             cache[self] = result
         return result
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 一元滚动算子（原 WindowOp）
-# ─────────────────────────────────────────────────────────────────────────────
-
-class UnaryRollingOp(RollingOp):
-    """
-    一元滚动窗口算子：MA(N), STD(N), MIN(N), MAX(N), SUM(N), EMA(N), SKEW(N) 等。
-
-    对每个品种独立计算滚动窗口聚合。
-    """
-
-    def __init__(self, op: str, operand: FactorExpr,
-                 window: Union[int, str, pd.Timedelta, 'Parameter']):
-        super().__init__(window)
-        self.op = op           # 'ma', 'std', 'var', 'min', 'max', 'sum', 'ema', 'skew', 'argmax', 'argmin'
-        self.operand = operand
-
-    @property
-    def _operands(self) -> Sequence[FactorExpr]:
-        return (self.operand,)
-
-    def _apply_rolling(self, dfs: Sequence[pd.DataFrame],
-                       window: int, freq: DataFreq) -> pd.DataFrame:
-        x = dfs[0]
-
-        # argmax/argmin 用 sliding_window_view 全向量化（比 rolling().apply 快数倍）
-        if self.op in ('argmax', 'argmin') and len(x) >= window:
-            return _rolling_argmaxmin(x, window, self.op)
-
-        _OP_MAP = {
-            'ma': lambda s: s.rolling(window, min_periods=max(1, window // 2)).mean(),
-            'std': lambda s: s.rolling(window, min_periods=max(1, window // 2)).std(),
-            'var': lambda s: s.rolling(window, min_periods=max(1, window // 2)).var(),
-            'min': lambda s: s.rolling(window, min_periods=1).min(),
-            'max': lambda s: s.rolling(window, min_periods=1).max(),
-            'sum': lambda s: s.rolling(window, min_periods=1).sum(),
-            'ema': lambda s: s.ewm(span=window, min_periods=max(1, window // 2)).mean(),
-            'skew': lambda s: s.rolling(window, min_periods=max(1, window // 2)).skew(),
-        }
-        func = _OP_MAP[self.op]
-        return x.apply(func, axis=0)
-
-    @property
-    def op_name(self) -> str:
-        return f"{self.op.upper()}_{self._window_str()}"
-
-    def to_latex(self) -> str:
-        operand_latex = self.operand.to_latex()
-        _LATEX_MAP = {
-            'ma': f'\\text{{MA}}_{{{self.window}}}({operand_latex})',
-            'std': f'\\sigma_{{{self.window}}}({operand_latex})',
-            'var': f'\\sigma^2_{{{self.window}}}({operand_latex})',
-            'min': f'\\min_{{{self.window}}}({operand_latex})',
-            'max': f'\\max_{{{self.window}}}({operand_latex})',
-            'sum': f'\\sum_{{{self.window}}}({operand_latex})',
-            'ema': f'\\text{{EMA}}_{{{self.window}}}({operand_latex})',
-            'skew': f'\\text{{Skew}}_{{{self.window}}}({operand_latex})',
-            'argmax': f'\\text{{ArgMax}}_{{{self.window}}}({operand_latex})',
-            'argmin': f'\\text{{ArgMin}}_{{{self.window}}}({operand_latex})',
-        }
-        return _LATEX_MAP.get(self.op, f'{self.op}_{{{self.window}}}({operand_latex})')
-
-    def _get_alias(self) -> str:
-        return f"{self.op}_{self.operand._get_alias()}_W{self._window_str()}"
-
-    def __repr__(self) -> str:
-        return f"{self.op}({self.operand}, {self.window})"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 二元滚动算子（原 CorrOp）
-# ─────────────────────────────────────────────────────────────────────────────
-
-class BinaryRollingOp(RollingOp):
-    """
-    二元滚动窗口算子：CORR, COV, BETA 等。
-
-    对两个序列在相同窗口内做逐品种滚动相关/协方差/回归。
-    """
-
-    def __init__(self, op: str, left: FactorExpr, right: FactorExpr,
-                 window: Union[int, str, pd.Timedelta, 'Parameter']):
-        super().__init__(window)
-        self.op = op            # 'corr', 'cov', 'beta', ...
-        self.left = left
-        self.right = right
-
-    @property
-    def _operands(self) -> Sequence[FactorExpr]:
-        return (self.left, self.right)
-
-    def _apply_rolling(self, dfs: Sequence[pd.DataFrame],
-                       window: int, freq: DataFreq) -> pd.DataFrame:
-        left_df, right_df = dfs[0], dfs[1]
-
-        result = pd.DataFrame(index=left_df.index, columns=left_df.columns, dtype=float)
-        for col in left_df.columns:
-            if self.op == 'corr':
-                result[col] = left_df[col].rolling(window).corr(right_df[col])
-            elif self.op == 'cov':
-                result[col] = left_df[col].rolling(window).cov(right_df[col])
-            else:
-                raise ValueError(f"Unknown binary rolling op: {self.op}")
-        return result
-
-    @property
-    def op_name(self) -> str:
-        return f"{self.op.upper()}_{self._window_str()}"
-
-    def to_latex(self) -> str:
-        left_latex = self.left.to_latex()
-        right_latex = self.right.to_latex()
-        return f'\\text{{{self.op.capitalize()}}}_{{{self.window}}}({left_latex}, {right_latex})'
-
-    def _get_alias(self) -> str:
-        return f"{self.op}_{self.left._get_alias()}_{self.right._get_alias()}_W{self._window_str()}"
-
-    def __repr__(self) -> str:
-        return f"{self.op}({self.left}, {self.right}, {self.window})"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 向后兼容别名
-# ─────────────────────────────────────────────────────────────────────────────
-
-WindowOp = UnaryRollingOp   # 旧名，保持兼容
-CorrOp = BinaryRollingOp    # 旧名，保持兼容
-
 
 class ShiftOp(OperandExpr):
     """
-    位移算子：SHIFT(x, N) 即前 N 期的 x 值。
+    位移算子：SHIFT(periods, x) 即前 N 期的 x 值。
 
-    periods 参数支持：
-      - int: bar 数量
-      - str / pd.Timedelta: 时间长度
-      - Parameter (WindowParam): 运行时从 FactorFamily 注册表取值
+    operands = (periods, operand)
+    periods 是第一 operand（ConstExpr 或 ParamRef），operand 是第二 operand。
     """
 
-    def __init__(self, op: str, operand: FactorExpr,
-                 periods: Union[int, str, pd.Timedelta, 'Parameter'] = 1):
-        self.op = op           # 'ref'
-        self.operand = operand
-        self.periods = periods
-
-    def _structural_extra(self) -> tuple:
-        p = self.periods
-        if isinstance(p, (int, str, pd.Timedelta)):
-            return ('periods', str(p))
-        return ('periods', p.alias)
+    def __init__(self, op: str, periods: Union[int, str, pd.Timedelta, 'Parameter', 'FactorExpr'],
+                 operand: 'FactorExpr'):
+        super().__init__(op, _to_expr(periods), operand)
 
     @property
-    def _operands(self) -> Sequence['FactorExpr']:
-        return (self.operand,)
+    def periods(self) -> 'FactorExpr':
+        return self.operands[0]
 
     @property
-    def param_deps(self) -> Set['Parameter']:
-        from tools.parameters.Parameter import Parameter
-        deps = self.operand.param_deps.copy()
-        if isinstance(self.periods, Parameter):
-            deps.add(self.periods)
-        elif isinstance(self.periods, FactorExpr):
-            deps.update(self.periods.param_deps)
-        return deps
+    def operand(self) -> 'FactorExpr':
+        return self.operands[1]
 
-    def _collect_params_ordered(self, seen: Set['Parameter'], result: List['Parameter']):
-        from tools.parameters.Parameter import Parameter
-        self.operand._collect_params_ordered(seen, result)
-        if isinstance(self.periods, Parameter):
-            if self.periods not in seen:
-                seen.add(self.periods)
-                result.append(self.periods)
-        elif isinstance(self.periods, FactorExpr):
-            self.periods._collect_params_ordered(seen, result)
-
-    def collect_column_refs(self) -> Set['ColumnRef']:
-        result = super().collect_column_refs()
-        if isinstance(self.periods, FactorExpr):
-            result.update(self.periods.collect_column_refs())
-        return result
+    # ── evaluate：覆盖 OperandExpr 默认实现 ──
 
     def evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
@@ -1095,32 +936,38 @@ class ShiftOp(OperandExpr):
         if cache is not None and self in cache:
             return cache[self]
 
-        x = self.operand.evaluate(products, freq, source=source, cache=cache, preloaded=preloaded)
-        periods = self._resolve_periods(self.periods, freq)
-        result = x.shift(periods)
+        # 先求 operand（DataFrame）
+        operand_val = self.operands[1].evaluate(products, freq, source=source,
+                                                  cache=cache, preloaded=preloaded)
+
+        # 从第一个产品拿 DataMeta，用于 periods 参数中的 day_periods 计算
+        from tools.data.DataMeta import DataMeta
+        dm: DataMeta = getattr(products[0], freq.name)
+
+        periods_val = self.operands[0].evaluate(products, freq, source=source,
+                                                  cache=cache, preloaded=preloaded, dm=dm)
+
+        result = operand_val.shift(periods_val)  # type: ignore[arg-type]
 
         if cache is not None:
             cache[self] = result
         return result
 
-    @staticmethod
-    def _resolve_periods(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
-        """将位移参数统一转换为 bar 数量。"""
-        return _resolve_bars(periods, freq)
+    # ── 展示方法 ──
 
     @property
     def op_name(self) -> str:
-        p = self.periods if isinstance(self.periods, int) else str(self.periods)
-        return f"SHIFT_{p}"
+        p = self.periods
+        label = str(p.value) if isinstance(p, ConstExpr) else str(p)
+        return f"SHIFT_{label}"
 
     def to_latex(self) -> str:
         operand_latex = self.operand.to_latex()
-        # 将 period 参数名映射为可读形式
-        from tools.parameters.Parameter import Parameter
-        if isinstance(self.periods, Parameter):
-            p_label = self.periods.alias
+        p_expr = self.periods
+        if isinstance(p_expr, ConstExpr):
+            p_label = str(p_expr.value)
         else:
-            p_label = str(self.periods)
+            p_label = str(p_expr)
         # 如果是列/参数引用且形如 "X_{t}"，替换为自然下标 "X_{t - NS}"
         if isinstance(self.operand, (ColumnRef, ParamRef)) and operand_latex.endswith('_{t}'):
             base = operand_latex[:-3]  # 去掉 "{t}"，保留 "X_"
@@ -1128,33 +975,72 @@ class ShiftOp(OperandExpr):
         return f"\\text{{SHIFT}}_{{{p_label}}}({operand_latex})"
 
     def _get_alias(self) -> str:
-        p = self.periods if isinstance(self.periods, int) else str(self.periods).replace(' ', '')
+        p_expr = self.periods
+        p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
         return f"shift_{self.operand._get_alias()}_{p}"
 
     def __repr__(self) -> str:
         return f"shift({self.operand}, {self.periods})"
 
 
-def _resolve_bars(periods: Union[int, str, pd.Timedelta, 'Parameter'], freq: DataFreq) -> int:
-    """将 int / str / pd.Timedelta / Parameter 统一转换为 bar 数量。
+def _rolling_argmaxmin(
+    df: pd.DataFrame,
+    window: int,
+    op: str,
+    normalize: bool = True,
+) -> pd.DataFrame:
+    """用 sliding_window_view 对 DataFrame 每列计算滚动 argmax 或 argmin。"""
+    if window < 2:
+        raise ValueError(f"window must be >= 2, got {window}")
 
-    RollingOp、ShiftOp 共享此逻辑。
-    若传入 Parameter（未解析），抛出 RuntimeError——调用者应在求值前解析。
-    """
-    from tools.parameters.Parameter import Parameter
-    if isinstance(periods, Parameter):
-        raise RuntimeError(
-            f"Parameter {periods} must be resolved before evaluation"
-        )
-    if isinstance(periods, int):
-        return periods
-    if isinstance(periods, pd.Timedelta):
-        td = periods
+    n_rows = len(df)
+    if n_rows < window:
+        return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
+                            index=df.index, columns=df.columns)
+
+    arr = df.to_numpy(dtype=float)
+    windows = np.lib.stride_tricks.sliding_window_view(arr, window, axis=0)
+    reversed_view = windows[..., ::-1]
+    if op == 'argmax':
+        pos = (window - 1) - np.argmax(reversed_view, axis=-1)
+    elif op == 'argmin':
+        pos = (window - 1) - np.argmin(reversed_view, axis=-1)
     else:
-        td = pd.Timedelta(periods)
-    if td.total_seconds() % freq.value.total_seconds() != 0:
-        raise ValueError(f"{periods} not divisible by freq {freq.name}")
-    return int(td.total_seconds() / freq.value.total_seconds())
+        raise ValueError(f"Invalid op: {op}")
+
+    pos = pos.astype(float)
+    if normalize and window > 1:
+        pos = pos / (window - 1)
+
+    nan_rows = np.full((window - 1, df.shape[1]), np.nan)
+    result = np.vstack([nan_rows, pos])
+    return pd.DataFrame(result, index=df.index, columns=df.columns)
+
+
+def _resolve_window(window_val: Union[pd.Timedelta, 'DataFreq'], freq: DataFreq,
+                    dm: 'DataMeta') -> int:
+    """将时间窗口/位移参数转为 bar 数量（整数）。
+
+    规则：
+      - day-multiple 时间跨度（如 '5d'）：从 DataMeta.day_periods 缓存 × 天数
+      - 其他 Timedelta：要求整除当前数据频率，返回整数倍数
+    """
+    td = window_val if isinstance(window_val, pd.Timedelta) else window_val.value
+    total_sec = td.total_seconds()
+
+    window_freq = DataFreq(td)
+    if window_freq.is_day_multiple():
+        day_periods = dm.day_periods
+        day_count = int(total_sec / pd.Timedelta('1day').total_seconds())
+        return day_periods * day_count
+
+    freq_sec = freq.value.total_seconds()
+    if total_sec % freq_sec != 0:
+        raise ValueError(
+            f"{window_val} is not divisible by data frequency {freq.name} "
+            f"({total_sec}s vs {freq_sec}s per bar)"
+        )
+    return int(total_sec / freq_sec)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

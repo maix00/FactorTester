@@ -13,6 +13,7 @@
 #   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
 # =============================================================================
 import os
+import uuid
 import logging
 import threading
 import numpy as np
@@ -89,7 +90,14 @@ class FactorTester(UniqueObject):
         if user is not None:
             user_name = getattr(user, 'alias', str(user))
             core_alias = f"{user_name}:{core_alias}"
-        return super().__new__(cls, alias=core_alias, **kwargs)
+        # 显式构造 name = FactorTester:{user_prefix}:{core_alias}:{uuid}
+        name = f"{cls.__name__}:{core_alias}:{uuid.uuid4().hex}"
+        kwargs.pop('name', None)
+        instance = super().__new__(cls, name=name, alias=core_alias, **kwargs)
+        # 在 __new__ 中直接设置 name，防止 __init__ 调用 super().__init__(alias=...)
+        # 时因未传 name 而被 UniqueObject.__init__ 覆盖
+        instance.name = name
+        return instance
 
     def __init__(self, products: Sequence[Product],
                  alias: Optional[str] = None,
@@ -110,7 +118,9 @@ class FactorTester(UniqueObject):
             logger_console : 是否同时输出到控制台
         """
         if not hasattr(self, '_initialized'):
-            super().__init__(alias=alias)
+            # 传入 name=self.name 防止 UniqueObject.__init__ 重新生成 name
+            # （name 已在 __new__ 中格式化为 FactorTester:{user_prefix}:{core_alias}:{uuid}）
+            super().__init__(name=self.name, alias=alias)
             self.user = user  # 创建者 User 实例（None 表示无归属）
 
             # 初始化日志记录器

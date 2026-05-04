@@ -13,7 +13,7 @@ import numpy as np
 
 from tools.factors.FactorExpr import (
     FactorExpr, ColumnRef, ConstExpr, CompositeExpr, UnaryOp,
-    WindowOp, ShiftOp, CrossSectionalOp,
+    RollingOp, ShiftOp, CrossSectionalOp,
     OPEN, HIGH, LOW, CLOSE, VOLUME, OPEN_INTEREST,
     expr_max, expr_min, ParamRef,
 )
@@ -62,14 +62,14 @@ def test_window_operators():
 
     # MA
     ma_expr = CLOSE.ma(20)
-    assert isinstance(ma_expr, WindowOp)
+    assert isinstance(ma_expr, RollingOp)
     assert ma_expr.op == 'ma'
     assert ma_expr.window == 20
     print(f"  CLOSE.ma(20) = {ma_expr}")
 
     # STD
     std_expr = CLOSE.std(20)
-    assert isinstance(std_expr, WindowOp)
+    assert isinstance(std_expr, RollingOp)
     assert std_expr.op == 'std'
     print(f"  CLOSE.std(20) = {std_expr}")
 
@@ -430,13 +430,13 @@ def test_param_deps():
     assert cs_with_param.param_deps == {W}, "CrossSectionalOp should pass through param_deps"
     print(f"  Unary/Shift/CS passthrough: OK")
 
-    # 3. WindowOp — operand 的 param_deps + 自身的 Parameter window
+    # 3. RollingOp — operand 的 param_deps + 自身的 Parameter window
     ma_with_param = CLOSE.ma(W)
-    assert ma_with_param.param_deps == {W}, f"WindowOp(W) should have W, got {ma_with_param.param_deps}"
+    assert ma_with_param.param_deps == {W}, f"RollingOp(W) should have W, got {ma_with_param.param_deps}"
 
     ma_no_param = CLOSE.ma(20)
-    assert ma_no_param.param_deps == set(), "WindowOp(20) should have no param_deps"
-    print(f"  WindowOp tracking: OK")
+    assert ma_no_param.param_deps == set(), "RollingOp(20) should have no param_deps"
+    print(f"  RollingOp tracking: OK")
 
     # 4. CompositeExpr — 聚合所有 operand 的 param_deps
     simple = CLOSE - OPEN
@@ -474,9 +474,9 @@ def test_param_resolve():
 
     # 1. 解析前：window 是 Parameter
     # expr = (CLOSE - ma(CLOSE,W)) / std(CLOSE,W)
-    # operands[1] = std(CLOSE,W) 即 WindowOp —— 直接是 WindowOp
+    # operands[1] = std(CLOSE,W) 即 RollingOp —— 直接是 RollingOp
     std_op = family._expr.operands[1]
-    assert isinstance(std_op, WindowOp)
+    assert isinstance(std_op, RollingOp)
     from tools.parameters.Parameter import Parameter
     assert isinstance(std_op.window, Parameter), \
         f"Before resolve: window should be Parameter, got {type(std_op.window)}"
@@ -485,7 +485,7 @@ def test_param_resolve():
     # 2. 解析后：window 被替换为 int
     resolved = family._resolve_expr_params(family._expr)
     rw = resolved.operands[1]
-    assert isinstance(rw, WindowOp)
+    assert isinstance(rw, RollingOp)
     assert rw.window == 10, f"After resolve: window should be 10, got {rw.window}"
     assert isinstance(rw.window, int), \
         f"After resolve: window should be int, got {type(rw.window)}"
