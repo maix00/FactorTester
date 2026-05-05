@@ -127,6 +127,9 @@ class Factor(UniqueObject):
         return instance
     
     def __getattr__(self, item):
+        # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
+        if item in ('_expr', '_initialized', '_func_expr', '_source_expr', '_data', '_source_data'):
+            raise AttributeError(item)
         return getattr(self._expr, item)
 
     def evaluate(self, products: Sequence['Product']|set['Product'], 
