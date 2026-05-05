@@ -117,6 +117,8 @@ class FactorFamily(UniqueObject):
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
             if _expr is None and hasattr(cls, 'factor_expr'):
                 _expr = getattr(cls, 'factor_expr')()
+
+            cls.params = list(_expr.ordered_param_deps) if _expr is not None else []
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
             _math = math_expr if math_expr is not None else getattr(cls, 'math_expr', None)
             _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)

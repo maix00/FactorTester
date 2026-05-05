@@ -774,7 +774,10 @@ class ParamRef(FactorExpr):
 
     def to_latex(self) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
-        return f"{self.param.alias}_{{t}}"
+        from tools.parameters import FactorParam
+        if isinstance(self.param, FactorParam):
+            return f"{self.param.alias}_{{t}}"
+        return f"{self.param.alias}"
 
     def _get_alias(self) -> str:
         return f"P{self.param.alias}"
@@ -916,16 +919,16 @@ class RollingOp(OperandExpr):
             # 一元
             operand_latex = self.operands[1].to_latex()
             _LATEX_MAP = {
-                'rolling_mean': f'\\text{{RollingMean}}_{{{w_str}}}({operand_latex})',
-                'rolling_std': f'\\text{{RollingStd}}_{{{w_str}}}({operand_latex})',
-                'rolling_var': f'\\text{{RollingVar}}_{{{w_str}}}({operand_latex})',
-                'rolling_min': f'\\text{{RollingMin}}_{{{w_str}}}({operand_latex})',
-                'rolling_max': f'\\text{{RollingMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_sum': f'\\text{{RollingSum}}_{{{w_str}}}({operand_latex})',
-                'rolling_ema': f'\\text{{RollingEMA}}_{{{w_str}}}({operand_latex})',
-                'rolling_skew': f'\\text{{RollingSkew}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmax': f'\\text{{RollingArgMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmin': f'\\text{{RollingArgMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}({operand_latex})',
+                'rolling_std': f'\\text{{RStd}}_{{{w_str}}}({operand_latex})',
+                'rolling_var': f'\\text{{RVar}}_{{{w_str}}}({operand_latex})',
+                'rolling_min': f'\\text{{RMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_max': f'\\text{{RMax}}_{{{w_str}}}({operand_latex})',
+                'rolling_sum': f'\\text{{RSum}}_{{{w_str}}}({operand_latex})',
+                'rolling_ema': f'\\text{{REMA}}_{{{w_str}}}({operand_latex})',
+                'rolling_skew': f'\\text{{RSkew}}_{{{w_str}}}({operand_latex})',
+                'rolling_argmax': f'\\text{{RArgMax}}_{{{w_str}}}({operand_latex})',
+                'rolling_argmin': f'\\text{{RArgMin}}_{{{w_str}}}({operand_latex})',
             }
             return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
         else:
@@ -1039,16 +1042,11 @@ class ShiftOp(OperandExpr):
 
     def to_latex(self) -> str:
         operand_latex = self.operand.to_latex()
-        p_expr = self.periods
-        if isinstance(p_expr, ConstExpr):
-            p_label = str(p_expr.value)
-        else:
-            p_label = str(p_expr)
+        if self.periods == 0:
+            return f"{operand_latex}_{{t}}"
+        p_label = self.periods.to_latex() if isinstance(self.periods, FactorExpr) else str(self.periods)
         # 如果是列/参数引用且形如 "X_{t}"，替换为自然下标 "X_{t - NS}"
-        if isinstance(self.operand, (ColumnRef, ParamRef)) and operand_latex.endswith('_{t}'):
-            base = operand_latex[:-3]  # 去掉 "{t}"，保留 "X_"
-            return base + '{t - ' + p_label + '}'
-        return f"\\text{{SHIFT}}_{{{p_label}}}({operand_latex})"
+        return f"{operand_latex}_{{t - {p_label}}}"
 
     def _get_alias(self) -> str:
         p_expr = self.periods
@@ -1295,7 +1293,7 @@ class CompositeExpr(OperandExpr):
         'add': {'symb': '+', 'latex': '+', 'nop': 2, 'func': lambda a, b, *args: a + b},
         'sub': {'symb': '-', 'latex': '-', 'nop': 2, 'func': lambda a, b, *args: a - b},
         'mul': {'symb': '*', 'latex': '\\times', 'nop': 2, 'func': lambda a, b, *args: a * b},
-        'div': {'symb': '/', 'latex': '/', 'nop': 2, 'func': lambda a, b, *args: a / b},
+        'div': {'symb': '/', 'latex': '\\frac', 'nop': 2, 'func': lambda a, b, *args: a / b},
         'gt': {'symb': '>', 'latex': '>', 'nop': 2, 'func': lambda a, b, *args: a > b},
         'lt': {'symb': '<', 'latex': '<', 'nop': 2, 'func': lambda a, b, *args: a < b},
         'ge': {'symb': '>=', 'latex': '\\ge', 'nop': 2, 'func': lambda a, b, *args: a >= b},
@@ -1346,8 +1344,14 @@ class CompositeExpr(OperandExpr):
             elif self._Ops[self.op]['nop'] == 2:
                 left_latex = operands_latex[0]
                 right_latex = operands_latex[1]
-                if self.op in ('add', 'sub', 'mul', 'div', 'pow'):
-                    return f'(\\left({left_latex}\\right) {self._Ops[self.op]["latex"]} \\left({right_latex}\\right))'
+                left_parenthesis = isinstance(self.operands[0], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[0].op not in ('div', 'pow')
+                right_parenthesis = isinstance(self.operands[1], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[1].op not in ('div', 'pow')
+                left_latex = f'\\left({left_latex}\\right)' if left_parenthesis else left_latex
+                right_latex = f'\\left({right_latex}\\right)' if right_parenthesis else right_latex
+                if self.op in ('add', 'sub', 'mul', 'pow', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
+                    return f'{left_latex} {self._Ops[self.op]["latex"]} {right_latex}'
+                elif self.op in ('div'):
+                    return f'{self._Ops[self.op]["latex"]}{{{left_latex}}}{{{right_latex}}}'
                 else:
                     return f'{self._Ops[self.op]["latex"]}\\left({left_latex}, {right_latex}\\right)'
             else:
