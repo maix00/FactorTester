@@ -29,7 +29,6 @@ def run_ic_test():
     _token = None
     try:
         with _factor_testers_lock:
-# 使用更健壮的匹配逻辑：alias 等于 submission_id 或以 :submission_id 结尾（匹配带 user_prefix 的情况）
             target_suffix = f":{submission_id}"
             tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         assert tester is not None, "未找到对应的测试器实例"

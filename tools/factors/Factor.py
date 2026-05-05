@@ -123,7 +123,7 @@ class Factor(UniqueObject, FactorExpr):
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
             instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
             instance.family = family
-            instance._initialized = True
+            super().__init__(instance, _local_only=False)
         return instance
     
     def __getattr__(self, item):

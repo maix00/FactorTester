@@ -49,7 +49,8 @@ def get_factor_series():
     re_calc             = data.get('re_calc', False)
     try:
         with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+            target_suffix = f":{submission_id}"
+            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
         factor_family = get_factor_family_instance(factor_family_alias)
@@ -138,7 +139,8 @@ def get_return_series():
     re_calc             = data.get('re_calc', False)
     try:
         with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+            target_suffix = f":{submission_id}"
+            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         if not tester:
             return jsonify({'error': '未找到测试器实例'}), 404
         factor_family = get_factor_family_instance(factor_family_alias)

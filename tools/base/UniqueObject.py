@@ -176,7 +176,7 @@ class UniqueObject(ABC):
             # 注册到 alias 索引（支持 search）；local_only 跳过
             if not _local_only:
                 with self._alias_index_lock:
-                    self._alias_index.setdefault(self.alias, WeakValueDictionary())[id(self)] = self
+                    self._alias_index.setdefault(self.alias, WeakValueDictionary())[self.alias] = self
 
     def __reduce__(self):
         """pickle 序列化：仅保存 identity（类名 + name），反序列化时复用单例。"""
