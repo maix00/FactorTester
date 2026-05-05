@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(UniqueObject):
+class FactorFamily(FactorExpr, UniqueObject):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
