@@ -64,7 +64,8 @@ def run_group_test():
     _gt_token = None
     try:
         with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+            target_suffix = f":{submission_id}"
+            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 

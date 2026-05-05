@@ -430,8 +430,8 @@ class FactorTester(UniqueObject):
                 effective_freq = DataFreq(return_freq)
             elif factor.freq is not None:
                 effective_freq = factor.freq
-            elif factor.source_data_freq is not None:
-                effective_freq = factor.source_data_freq
+            elif factor._source_freq is not None:
+                effective_freq = factor._source_freq
             else:
                 raise ValueError(f"Factor {factor.alias}: 无法确定频率")
 
@@ -439,7 +439,7 @@ class FactorTester(UniqueObject):
             # 下一期收益：OPEN -> S=0（shift -RF），CLOSE -> S=1（shift 0）
             s_param = 0 if returns_col.value.name.startswith('OPEN') else 1
 
-            fe_expr_full = getattr(factor, '_resolved_expr', None)
+            fe_expr_full = getattr(factor, '_expr', None)
             if fe_expr_full is None:
                 raise ValueError(f"Factor {factor.alias}: 没有关联的表达式树")
             fe_expr = _strip_outer_signal_align(fe_expr_full).as_intermediate('FE')
@@ -453,12 +453,12 @@ class FactorTester(UniqueObject):
         # ── 切换到数据源频率 ──
         sample_factor = factors[0]
         old_freq_map: Dict = {}
-        if sample_factor.source_data_freq is not None and sample_factor.products:
+        if sample_factor._source_freq is not None and sample_factor.products:
             for p in sample_factor.products:
                 try:
                     old_freq_map[p] = p.get_current_freq()
-                    if sample_factor.source_data_freq in p.list_available_freqs():
-                        p.set_current_freq(sample_factor.source_data_freq)
+                    if sample_factor._source_freq in p.list_available_freqs():
+                        p.set_current_freq(sample_factor._source_freq)
                 except Exception:
                     pass
 
@@ -482,8 +482,8 @@ class FactorTester(UniqueObject):
                     F=effective_freq.value,
                 )
                 # 复用主因子的 source_freq，确保索引一致
-                ic_factor.calc(sample_factor.products,
-                               source_freq=sample_factor.source_data_freq)
+                ic_factor.evaluate(sample_factor.products,
+                               source_freq=sample_factor._source_freq)
 
                 # 提取 IC 序列
                 ic_raw = ic_factor.table
