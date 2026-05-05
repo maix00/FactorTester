@@ -49,6 +49,10 @@ class UniqueObject(ABC):
     _alias_index: 'ClassVar[Dict[str, WeakValueDictionary]]' = {}
     _alias_index_lock: 'ClassVar[threading.Lock]' = threading.Lock()
 
+    name: str
+    alias: str
+    desc: str
+
     def __init_subclass__(cls, **kwargs):
         """每个子类自动维护独立的弱引用实例池、锁和别名索引，无需显式声明。"""
         super().__init_subclass__(**kwargs)
@@ -154,6 +158,9 @@ class UniqueObject(ABC):
         instance = super().__new__(cls)
         with cls._instances_lock:
             cls._instances[name] = instance
+        instance.name = name
+        instance.alias = alias if alias else name
+        instance.desc = kwargs.pop('desc', '')
         return instance
 
     def __init__(self, name: Optional[str] = None, alias: Optional[str] = None,
@@ -161,9 +168,9 @@ class UniqueObject(ABC):
                  _local_only: bool = False, *args, **kwargs):
         """仅在首次创建时初始化，防止复用已有实例时重复初始化。"""
         if not hasattr(self, '_initialized'):
-            self.name = name if name else f"{alias or self.__class__.__name__}:{uuid.uuid4().hex}"
-            self.alias = alias if alias else self.name
-            self.desc = desc if desc else self.__doc__[:80].strip() if self.__doc__ else ''
+            # self.name = name if name else f"{alias or self.__class__.__name__}:{uuid.uuid4().hex}"
+            # self.alias = alias if alias else self.name
+            # self.desc = desc if desc else self.__doc__[:80].strip() if self.__doc__ else ''
             self._initialized = True
             self._local_only = _local_only
             # 注册到 alias 索引（支持 search）；local_only 跳过

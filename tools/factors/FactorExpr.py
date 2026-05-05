@@ -1537,13 +1537,12 @@ def signal_align(
 # 信号对齐表达式节点
 # ═════════════════════════════════════════════════════════════════════════════
 
-class SignalAlign(OperandExpr):
+class SignalAlign(CompositeExpr):
     """
-    信号对齐表达式节点。
+    信号对齐表达式节点 — 作为 CompositeExpr 的一元运算。
 
     将操作数表达式的求值结果对齐到等间隔信号时间点。
-    这是一个一元算子：接收一个子表达式，evaluate 时先求子表达式，
-    再对结果 DataFrame 做索引对齐。
+    op = 'SIGNAL_ALIGN'，operands = (func_expr,)
 
     参数：
         operand         : 被包裹的因子表达式

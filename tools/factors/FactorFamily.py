@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(FactorExpr, UniqueObject):
+class FactorFamily(UniqueObject):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
@@ -66,10 +66,15 @@ class FactorFamily(FactorExpr, UniqueObject):
         description  (str)  : 因子详细说明（Markdown）
         params       (list) : 参数对象列表（子类覆盖或从 factor_expr 自动收集）
     """
+    _runtime_ctx: threading.local
+    _source_freqs_lock: threading.Lock
+
     math_expr: str = ""
     desc: str = ""
     description: str = ""
+    factors: List[Factor] = []
     params: List[Parameter] = []
+    params_dict: Dict[str, Parameter] = {}
 
     # ── 信号对齐参数（类属性，可在子类或实例上覆盖） ──
     basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
@@ -77,19 +82,12 @@ class FactorFamily(FactorExpr, UniqueObject):
     end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
     end_session_gap: pd.Timedelta = pd.Timedelta('3hours')  # 盘间间隔阈值
 
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
-        # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
-        # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
-        core_alias = alias if alias else cls.__name__
-        user_prefix = _active_user_prefix.get()
-        if user_prefix:
-            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
-        else:
-            name = f"{core_alias}:{uuid.uuid4().hex}"
-        kwargs.pop('name', None)
-        return UniqueObject.__new__(cls, name=name, alias=core_alias, **kwargs)
+    _expr: Optional[FactorExpr] = None
+    _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
+    _source_freqs_seen: set[DataFreq] = set()
+    _intermediates: Dict[str, 'FactorData'] = {}  # evaluate 后由 _collect_intermediates() 填充
 
-    def __init__(self, alias: Optional[str] = None,
+    def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
                  desc: Optional[str] = None,
                  source_freq: Optional[str] = None,
@@ -101,41 +99,20 @@ class FactorFamily(FactorExpr, UniqueObject):
                  daily_basepoint: 'Optional[str]' = None,
                  end_session_skip: Optional[bool] = None,
                  end_session_gap: 'Optional[pd.Timedelta]' = None,
-                 **kwargs):
-        """
-        初始化 FactorFamily。
-
-        参数均可省略（省略时从类属性取默认值），支持子类无 __init__ 声明：
-            class MyFactor(FactorFamily):
-                alias = 'MyFactor'
-                expr = _expr
-                params = [...]
-                desc = '...'
-                description = '...'
-                math_expr = '...'
-
-        参数：
-            alias                : 因子族别名（默认从 cls.alias 读取）
-            expr                 : 因子表达式树（默认从 cls.expr 读取）
-            desc                 : 简短描述（默认从 cls.desc 读取）
-            source_freq          : 数据频率（默认从 cls.source_freq 读取）
-            description          : Markdown 详细说明（默认从 cls.description 读取）
-            math_expr            : LaTeX 表达式（默认从 cls.math_expr 或 expr 自动生成）
-            extra_params         : 额外参数（默认从 cls.extra_params 读取）
-            signal_freq          : 默认信号频率（默认从 cls.signal_freq 或 '1d'）
-        """
-        if not hasattr(self, '_initialized'):
-            
-            cls = self.__class__
-
-            # copy-on-write：确保子类有自己独立的 params 列表，不污染基类和其他子类
-            if cls.params is FactorFamily.params:
-                cls.params = list(cls.params)
-
-            # 从参数或类属性中取值
-            _alias = alias if alias is not None else getattr(cls, 'alias', cls.__name__)
-            super().__init__(alias=_alias, **kwargs)  # 先调用父类 __init__ 设置 name 和 alias
-
+                 *args, **kwargs):
+        # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
+        # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
+        core_alias = alias if alias else cls.__name__
+        user_prefix = _active_user_prefix.get()
+        if user_prefix:
+            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+        else:
+            name = f"{core_alias}:{uuid.uuid4().hex}"
+        name = kwargs.pop('name', name)
+        alias = kwargs.pop('alias', core_alias)
+        instance = UniqueObject.__new__(cls, name=name, alias=alias, **kwargs)
+        
+        if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
             if _expr is None and hasattr(cls, 'factor_expr'):
@@ -145,12 +122,6 @@ class FactorFamily(FactorExpr, UniqueObject):
             _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)
             _signal_freq = signal_freq if signal_freq is not None else getattr(cls, 'signal_freq', '1d')
 
-            # desc：优先参数，其次类属性
-            _desc = desc if desc is not None else getattr(cls, 'desc', '')
-
-            # description：优先参数，其次类属性
-            _desc_full = description if description is not None else getattr(cls, 'description', '')
-
             if _expr is None:
                 if hasattr(cls, 'factor_expr'):
                     # 有 factor_expr 但返回了 None — 这不应该发生
@@ -159,17 +130,15 @@ class FactorFamily(FactorExpr, UniqueObject):
 
             # 声明式因子：从表达式树自动收集参数（避免子类重复声明 params 列表）
             _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
-                                 and hasattr(cls, 'factor_expr'))
+                                    and hasattr(cls, 'factor_expr'))
             if _from_factor_expr:
                 assert _expr is not None  # _from_factor_expr 保证了 factor_expr 已被调用且成功
                 for param in _expr.ordered_param_deps:
                     if param.alias not in {p.alias for p in cls.params}:
                         cls.params.append(param)
 
-            # 需要在 super().__init__() 之前设置这些属性
-            # 因为 __init__ 会调用 set_default_params() 读取 self.params
-            self._expr = _expr
-            self._source_freq_name = _source_freq
+            instance._expr = _expr
+            instance._source_freq = _source_freq
 
             # 按需设置 params — 内置 F/Rev 已在 __init__ 注册
             # 子类通过 class-level params 声明的额外参数已在 MRO 中
@@ -179,35 +148,38 @@ class FactorFamily(FactorExpr, UniqueObject):
                     if p.alias not in existing_aliases:
                         cls.params.append(p)
 
-            self.desc = _desc
-            self.description = _desc_full
-            self.math_expr = _math or (_expr.to_latex_with_intermediates() if _expr is not None else '')
+            instance.desc = desc if desc is not None else getattr(cls, 'desc', '')
+            instance.description = description if description is not None else getattr(cls, 'description', '')
+            instance.math_expr = _math or (_expr.to_latex_with_intermediates() if _expr is not None else '')
 
             # 信号对齐参数（None 则从类属性取默认值）
-            self.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
-            self.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
-            self.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
-            self.end_session_gap = (end_session_gap if end_session_gap is not None
+            instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
+            instance.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
+            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
+            instance.end_session_gap = (end_session_gap if end_session_gap is not None
                                     else getattr(cls, 'end_session_gap', pd.Timedelta('3hours')))
 
             # 覆盖默认信号频率
             if _signal_freq != '1d':
-                self.change_param_default_value(**{'$F': _signal_freq})
+                instance.change_param_default_value(**{'$F': _signal_freq})
             
-            self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
-            self._source_freqs_lock = threading.Lock()
-            self._source_freqs_seen: set[DataFreq] = set()
+            instance._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
+            instance._source_freqs_lock = threading.Lock()
+            instance._source_freqs_seen = set()
             # 注册内置参数 — 仅在首次实例化时追加到 cls.params
             existing_aliases = {p.alias for p in cls.params}
             if '$F' not in existing_aliases:
                 cls.params.append(FactorFreqParam)
             if '$Rev' not in existing_aliases:
                 cls.params.append(ReverseParam)
-            self.params_dict = {param.alias: param for param in self.params}
-            self.set_default_params()             # 以各参数默认值初始化 _params_list
-            self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
+            instance.params_dict = {param.alias: param for param in instance.params}
+            instance.set_default_params()             # 以各参数默认值初始化 _params_list
+            instance.factors = []       # 最近一批生成的 Factor 实例
             # 中间因子：{str → FactorData}，evaluate 后由 _collect_intermediates() 填充
-            self._intermediates: Dict[str, 'FactorData'] = {}
+            instance._intermediates = {}
+            
+            instance._initialized = True
+        return instance
 
     def _extract_user_prefix(self) -> Optional[str]:
         """
@@ -390,17 +362,9 @@ class FactorFamily(FactorExpr, UniqueObject):
                     resolved_expr = CompositeExpr('neg', resolved_expr)
                     func_expr = CompositeExpr('neg', func_expr)
             else:
-                func_expr = None
-                resolved_expr = None
+                continue
 
-            factor = Factor(
-                alias=factor_alias,
-                func_expr=func_expr,
-                _resolved_expr=resolved_expr,
-                signal_freq=signal_freq,
-                is_reversed=False,
-                family=self,
-            )
+            factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
 
             if return_freq is not None:
                 t = Factor._get_active_tester()
@@ -524,7 +488,7 @@ class FactorFamily(FactorExpr, UniqueObject):
         is_reversed: bool = kwargs.pop('$Rev', False)
         source = kwargs.pop('source', None)
 
-        freq = DataFreq(self._source_freq_name or 'MIN1')
+        freq = DataFreq(self._source_freq or 'MIN1')
         if self._expr is None:
             raise TypeError(
                 f"{self.__class__.__name__}: 未定义 expr（表达式树），无法使用 FactorFamily.func()。"

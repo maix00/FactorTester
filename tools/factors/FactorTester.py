@@ -291,7 +291,7 @@ class FactorTester(UniqueObject):
             token = _active_tester.get()
             def _calc_one(factor: Factor) -> None:
                 _active_tester.set(token)
-                factor.calc(self.products)
+                factor.evaluate(self.products)
             with ThreadPoolExecutor(max_workers=min(max_workers, len(factors))) as pool:
                 futures = {pool.submit(_calc_one, f): f for f in factors}
                 for future in tqdm(as_completed(futures), total=len(futures), desc=desc):
@@ -303,7 +303,7 @@ class FactorTester(UniqueObject):
                             f"calc_factor: {futures[future].alias} 计算失败") from exc
         else:
             for factor in tqdm(factors, desc=f'Calculate factors for {len(self.products)} products'):
-                factor.calc(self.products)
+                factor.evaluate(self.products)
 
     def calc_rank(self, df: pd.DataFrame) -> pd.DataFrame:
         """对 DataFrame 按行（各信号时间点）进行百分位秩排名，只保留属于 self.products 的列。"""
