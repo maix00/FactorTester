@@ -152,7 +152,7 @@ class FactorFamily(UniqueObject):
 
             instance.desc = desc if desc is not None else getattr(cls, 'desc', '')
             instance.description = description if description is not None else getattr(cls, 'description', '')
-            instance.math_expr = _math or (_expr.to_latex_with_intermediates() if _expr is not None else '')
+            instance.math_expr = _math or (_expr.to_latex() if _expr is not None else '')
 
             # 信号对齐参数（None 则从类属性取默认值）
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')

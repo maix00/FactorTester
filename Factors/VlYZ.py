@@ -117,7 +117,7 @@ class _DynamicWeight(FactorExpr):
     def op_name(self):
         return "DYNW"
 
-    def to_latex(self):
+    def _to_latex(self, subst: dict | None = None):
         return "\\omega"
 
     def _get_alias(self):

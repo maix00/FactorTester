@@ -32,7 +32,8 @@ class MmAccRet(FactorFamily):
         P = DataColumnParam('P', default_value='CA')
         NL = WindowParam('NL', default_value='30m')
         NS = WindowParam('NS', default_value='10m')
-        return (P.shift(NS) - P.shift(NL)) / (P.shift(NL) + 1e-10)
+        PSL = P.shift(NL).as_intermediate('PSL')
+        return (P.shift(NS) - PSL) / (PSL + 1e-10)
 
     desc = '跳期累积动量'
     description = """

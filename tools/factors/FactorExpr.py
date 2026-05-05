@@ -134,29 +134,19 @@ class FactorExpr:
         """表达式操作名，用于生成别名和 LaTeX。"""
         raise NotImplementedError
 
-    def to_latex(self) -> str:
-        """生成 LaTeX 数学表达式。"""
+    def _to_latex(self, subst: dict | None = None) -> str:
+        """生成 LaTeX 数学表达式（内部，不做 intermediate 展开）。
+
+        subst: structural_key → symbol 映射，用于将 intermediate 替换为符号。
+        """
         raise NotImplementedError
 
-    @staticmethod
-    def _sanitize_latex_symbol(name: str) -> str:
-        """将名称规整为可读且稳定的 LaTeX 符号（ASCII + 下划线）。"""
-        cleaned = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(name)).strip('_')
-        return cleaned or 'I'
-
-    @classmethod
-    def _ensure_unique_symbol(cls, base: str, used: Set[str]) -> str:
-        """为 intermediate 生成不重复符号。"""
-        symbol = base
-        i = 2
-        while symbol in used:
-            symbol = f"{base}_{i}"
-            i += 1
-        used.add(symbol)
-        return symbol
-
     def _iter_intermediate_nodes(self) -> List['FactorExpr']:
-        """按先序遍历收集中间表达式节点（去重、排除自身）。"""
+        """按先序遍历收集中间表达式节点（去重、排除自身）。
+
+        Returns:
+            nodes: 按发现顺序排列的 intermediate 节点列表。
+        """
         nodes: List[FactorExpr] = []
         seen: set[tuple] = set()
         stack: list[FactorExpr] = [self]
@@ -170,6 +160,8 @@ class FactorExpr:
 
             if node is not self and node._is_intermediate:
                 nodes.append(node)
+                # intermediate 的子节点不再展开，将其内部细节隐藏
+                continue
 
             ops = list(getattr(node, '_operands', ()))
             for op in reversed(ops):
@@ -177,23 +169,26 @@ class FactorExpr:
 
         return nodes
 
-    def to_latex_with_intermediates(self, final_name: str = 'X') -> str:
+    def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
 
         当表达式树中存在 .as_intermediate() 标记节点时，输出:
                     \\begin{aligned}
-            A_t &= ... \\
-            B_t &= ... \\
-            X_t &= ...
+            A_t &:= ... \\
+            B_t &:= ... \\
+            X_t &:= ...
                     \\end{aligned}
-        否则退化为 to_latex()。
+        其中 X_t 的定义中，已定义的 intermediate 用其符号替代。
+        否则退化为 _to_latex()。
         """
         nodes = self._iter_intermediate_nodes()
         if not nodes:
-            return self.to_latex()
+            return self._to_latex()
 
+        # 1) 为每个 intermediate 分配符号，生成定义行
         used: Set[str] = set()
         name_to_sk: Dict[str, tuple] = {}
+        sk_to_sym: Dict[tuple, str] = {}   # structural_key → symbol
         lines: List[str] = []
         unnamed_idx = 1
         for node in nodes:
@@ -205,16 +200,32 @@ class FactorExpr:
                         f"Intermediate 名称冲突: {node._intermediate_name} 被用于不同表达式。"
                     )
                 name_to_sk[node._intermediate_name] = sk
-                base = self._sanitize_latex_symbol(node._intermediate_name)
+                raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(node._intermediate_name)).strip('_')
+                base = raw or 'I'
             else:
                 base = f"I{unnamed_idx}"
                 unnamed_idx += 1
-            sym = self._ensure_unique_symbol(base, used)
-            lines.append(f"{sym}_t &= {node.to_latex()}")
+            sym = base
+            i = 2
+            while sym in used:
+                sym = f"{base}_{i}"
+                i += 1
+            used.add(sym)
+            lines.append(f"{sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
+            sk_to_sym[node._structural_key()] = sym
 
-        final_base = self._sanitize_latex_symbol(final_name)
-        final_sym = self._ensure_unique_symbol(final_base, used)
-        lines.append(f"{final_sym}_t &= {self.to_latex()}")
+        # 2) 最后一行 X_t，用符号映射递归生成
+        raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(final_name)).strip('_')
+        final_base = raw or 'X'
+        final_sym = final_base
+        i = 2
+        while final_sym in used:
+            final_sym = f"{final_base}_{i}"
+            i += 1
+        used.add(final_sym)
+
+        # 递归遍历 self，遇到已映射的 intermediate 就用符号替代
+        lines.append(f"{final_sym}_t &:= {self._to_latex(subst=sk_to_sym)}.")
 
         return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
 
@@ -558,8 +569,11 @@ class OperandExpr(FactorExpr):
     def op_name(self) -> str:
         return self.op.upper()
 
-    def to_latex(self) -> str:
-        parts = [opnd.to_latex() for opnd in self.operands]
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        parts = [opnd._to_latex(subst) for opnd in self.operands]
         return f'\\text{{{self.op}}}({", ".join(parts)})'
 
     def _get_alias(self) -> str:
@@ -688,7 +702,7 @@ class ColumnRef(FactorExpr):
     def op_name(self) -> str:
         return self.column.value
 
-    def to_latex(self) -> str:
+    def _to_latex(self, subst: dict | None = None) -> str:
         col_to_latex = {
             'O': 'O_t', 'H': 'H_t', 'L': 'L_t', 'C': 'C_t',
             'OA': '\\tilde{O}_t', 'HA': '\\tilde{H}_t',
@@ -772,12 +786,13 @@ class ParamRef(FactorExpr):
     def op_name(self) -> str:
         return f"${{{self.param.alias}}}"
 
-    def to_latex(self) -> str:
+    def _to_latex(self, subst: dict | None = None) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
+        param_latex = f"{{\\color{{red}}{self.param.alias}}}"
         from tools.parameters import FactorParam
         if isinstance(self.param, FactorParam):
-            return f"{self.param.alias}_{{t}}"
-        return f"{self.param.alias}"
+            return f"{param_latex}_{{t}}"
+        return param_latex
 
     def _get_alias(self) -> str:
         return f"P{self.param.alias}"
@@ -810,7 +825,7 @@ class ConstExpr(FactorExpr):
     def op_name(self) -> str:
         return f"const({self.value})"
 
-    def to_latex(self) -> str:
+    def _to_latex(self, subst: dict | None = None) -> str:
         return str(self.value)
 
     def _get_alias(self) -> str:
@@ -913,11 +928,14 @@ class RollingOp(OperandExpr):
     def op_name(self) -> str:
         return f"{self.op.upper()}_{self._window_str()}"
 
-    def to_latex(self) -> str:
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         w_str = self._window_str()
         if len(self.operands) == 2:
             # 一元
-            operand_latex = self.operands[1].to_latex()
+            operand_latex = self.operands[1]._to_latex(subst)
             _LATEX_MAP = {
                 'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}({operand_latex})',
                 'rolling_std': f'\\text{{RStd}}_{{{w_str}}}({operand_latex})',
@@ -932,8 +950,8 @@ class RollingOp(OperandExpr):
             }
             return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
         else:
-            left_latex = self.operands[1].to_latex()
-            right_latex = self.operands[2].to_latex()
+            left_latex = self.operands[1]._to_latex(subst)
+            right_latex = self.operands[2]._to_latex(subst)
             return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}({left_latex}, {right_latex})'
 
     def _get_alias(self) -> str:
@@ -1040,11 +1058,14 @@ class ShiftOp(OperandExpr):
         label = str(p.value) if isinstance(p, ConstExpr) else str(p)
         return f"SHIFT_{label}"
 
-    def to_latex(self) -> str:
-        operand_latex = self.operand.to_latex()
-        if self.periods == 0:
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        operand_latex = self.operand._to_latex(subst)
+        if id(self.periods) == id(0):
             return f"{operand_latex}_{{t}}"
-        p_label = self.periods.to_latex() if isinstance(self.periods, FactorExpr) else str(self.periods)
+        p_label = self.periods._to_latex(subst) if isinstance(self.periods, FactorExpr) else str(self.periods)
         # 如果是列/参数引用且形如 "X_{t}"，替换为自然下标 "X_{t - NS}"
         return f"{operand_latex}_{{t - {p_label}}}"
 
@@ -1198,13 +1219,16 @@ class CrossSectionalOp(OperandExpr):
         result.index.names = left_df.index.names
         return result
 
-    def to_latex(self) -> str:
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         if self.op == 'cs_spearman':
-            left_latex = self.left.to_latex()
-            right_latex = self.right.to_latex()
+            left_latex = self.left._to_latex(subst)
+            right_latex = self.right._to_latex(subst)
             return f'\\rho_s({left_latex}, {right_latex})'
 
-        operand_latex = self.operand.to_latex()
+        operand_latex = self.operand._to_latex(subst)
         _LATEX_MAP = {
             'cs_zscore': f'Z({operand_latex})',
             'cs_rank': f'\\text{{Rank}}({operand_latex})',
@@ -1332,8 +1356,11 @@ class CompositeExpr(OperandExpr):
             return self._Ops[self.op]['symb']
         return self.op
 
-    def to_latex(self) -> str:
-        operands_latex = [opnd.to_latex() for opnd in self.operands]
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        operands_latex = [opnd._to_latex(subst) for opnd in self.operands]
         if self.op in self._biOps:
             op_latex = self._biOps[self.op]['latex']
             return f'{op_latex}\\left({operands_latex[0]}, {operands_latex[1]}\\right)'
@@ -1599,7 +1626,10 @@ class SignalAlign(CompositeExpr):
         inner = self.operands[0]._get_alias()
         return f'SIGNAL_{inner}'
 
-    def to_latex(self) -> str:
-        inner = self.operands[0].to_latex()
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        inner = self.operands[0]._to_latex(subst)
         return f'\\text{{SIGNAL}}_{{{self.signal_freq}}}({inner})'
 
