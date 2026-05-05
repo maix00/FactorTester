@@ -91,7 +91,7 @@ class FactorExpr:
     # ── 结构等价（用于 FactorData 去重 key） ──
 
     _SYMMETRIC_OPS = frozenset({
-        'add', 'mul', 'and', 'or', 'max', 'min', 'eq', 'ne',
+        'add', 'mul', 'and', 'or', 'max', 'min', 'bimax', 'bimin', 'eq', 'ne',
         'cs_spearman', 'cs_corr', 'cs_cov',
     })
 
@@ -390,12 +390,12 @@ class FactorExpr:
         return CompositeExpr('pow', self, _to_expr(other))
 
     def max(self, other: Any) -> 'CompositeExpr':
-        """逐元素最大值：fmax(self, other)。"""
-        return CompositeExpr('max', self, _to_expr(other))
+        """逐元素最大值：max(self, other)。"""
+        return CompositeExpr('bimax', self, _to_expr(other))
 
     def min(self, other: Any) -> 'CompositeExpr':
-        """逐元素最小值：fmin(self, other)。"""
-        return CompositeExpr('min', self, _to_expr(other))
+        """逐元素最小值：min(self, other)。"""
+        return CompositeExpr('bimin', self, _to_expr(other))
 
     # ── 便利方法：时序算子 ──
 
@@ -1223,6 +1223,15 @@ class CrossSectionalOp(OperandExpr):
 # Layer 6: 复合表达式（二元运算树节点）
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _reduce_biop(op: str, args: tuple) -> Any:
+    """从左到右依次用 _biOps[op] 折叠 args，正确处理 DataFrame+scalar 混合。"""
+    result = args[0]
+    bi_func = CompositeExpr._biOps[op]['func']
+    for a in args[1:]:
+        result = bi_func(result, a)
+    return result
+
+
 class CompositeExpr(OperandExpr):
     """
     复合表达式 — 元素级多元运算。
@@ -1235,231 +1244,116 @@ class CompositeExpr(OperandExpr):
     - neg, abs, not, log, sign, sqrt（一元）
     """
 
-    _ARITH_OPS = {
-        'add': ('+', lambda a, b: a + b),
-        'sub': ('-', lambda a, b: a - b),
-        'mul': ('*', lambda a, b: a * b),
-        'div': ('/', lambda a, b: a / b),
+    _biOps = {
+        'bimax': {
+            'symb': 'max',
+            'latex': '\\max',
+            'nop': 2,
+            'func': lambda a, b: (
+                np.maximum(a, b)
+                if not isinstance(a, pd.DataFrame) and not isinstance(b, pd.DataFrame)
+                else (
+                    a.clip(lower=b)  # type: ignore[arg-type]
+                    if isinstance(a, pd.DataFrame) and np.isscalar(b)
+                    else (
+                        b.clip(lower=a)  # type: ignore[arg-type]
+                        if isinstance(b, pd.DataFrame) and np.isscalar(a)
+                        else pd.DataFrame(
+                            np.maximum(a.values, b.values),
+                            index=a.index,
+                            columns=a.columns,
+                        )
+                    )
+                )
+            ),
+        },
+        'bimin': {
+            'symb': 'min',
+            'latex': '\\min',
+            'nop': 2,
+            'func': lambda a, b: (
+                np.minimum(a, b)
+                if not isinstance(a, pd.DataFrame) and not isinstance(b, pd.DataFrame)
+                else (
+                    a.clip(upper=b)  # type: ignore[arg-type]
+                    if isinstance(a, pd.DataFrame) and np.isscalar(b)
+                    else (
+                        b.clip(upper=a)  # type: ignore[arg-type]
+                        if isinstance(b, pd.DataFrame) and np.isscalar(a)
+                        else pd.DataFrame(
+                            np.minimum(a.values, b.values),
+                            index=a.index,
+                            columns=a.columns,
+                        )
+                    )
+                )
+            ),
+        },
     }
 
-    _COMPARE_OPS = {
-        'gt': ('>', lambda a, b: a > b),
-        'lt': ('<', lambda a, b: a < b),
-        'ge': ('>=', lambda a, b: a >= b),
-        'le': ('<=', lambda a, b: a <= b),
-        'eq': ('==', lambda a, b: a == b),
-        'ne': ('!=', lambda a, b: a != b),
-    }
-
-    _LOGIC_OPS = {
-        'and': ('&', lambda a, b: a & b),
-        'or': ('|', lambda a, b: a | b),
-    }
-
-    _UNARY_OPS = {
-        'neg': ('-', lambda a: -a),
-        'abs': ('abs', lambda a: abs(a)),
-        'not': ('~', lambda a: ~a),
-        'log': ('log', lambda a: np.log(a)),
-        'sign': ('sign', lambda a: np.sign(a)),
-        'sqrt': ('sqrt', lambda a: np.sqrt(a)),
+    _Ops = {
+        'add': {'symb': '+', 'latex': '+', 'nop': 2, 'func': lambda a, b, *args: a + b},
+        'sub': {'symb': '-', 'latex': '-', 'nop': 2, 'func': lambda a, b, *args: a - b},
+        'mul': {'symb': '*', 'latex': '\\times', 'nop': 2, 'func': lambda a, b, *args: a * b},
+        'div': {'symb': '/', 'latex': '/', 'nop': 2, 'func': lambda a, b, *args: a / b},
+        'gt': {'symb': '>', 'latex': '>', 'nop': 2, 'func': lambda a, b, *args: a > b},
+        'lt': {'symb': '<', 'latex': '<', 'nop': 2, 'func': lambda a, b, *args: a < b},
+        'ge': {'symb': '>=', 'latex': '\\ge', 'nop': 2, 'func': lambda a, b, *args: a >= b},
+        'le': {'symb': '<=', 'latex': '\\le', 'nop': 2, 'func': lambda a, b, *args: a <= b},
+        'eq': {'symb': '==', 'latex': '=', 'nop': 2, 'func': lambda a, b, *args: a == b},
+        'ne': {'symb': '!=', 'latex': '\\neq', 'nop': 2, 'func': lambda a, b, *args: a != b},
+        'and': {'symb': '&', 'latex': '\\wedge', 'nop': 2, 'func': lambda a, b, *args: a & b},
+        'or': {'symb': '|', 'latex': '\\vee', 'nop': 2, 'func': lambda a, b, *args: a | b},
+        'neg': {'symb': '-', 'latex': '-', 'nop': 1, 'func': lambda a, *args: -a},
+        'abs': {'symb': 'abs', 'latex': '\\mathrm{abs}', 'nop': 1, 'func': lambda a, *args: abs(a)},
+        'not': {'symb': '~', 'latex': '\\neg', 'nop': 1, 'func': lambda a, *args: ~a},
+        'log': {'symb': 'log', 'latex': '\\log', 'nop': 1, 'func': lambda a, *args: np.log(a)},
+        'sign': {'symb': 'sign', 'latex': '\\mathrm{sign}', 'nop': 1, 'func': lambda a, *args: np.sign(a)},
+        'sqrt': {'symb': 'sqrt', 'latex': '\\sqrt', 'nop': 1, 'func': lambda a, *args: np.sqrt(a)},
+        'pow': {'symb': '**', 'latex': '^', 'nop': 2, 'func': lambda a, b, *args: a ** b},
+        'max': {'symb': 'max', 'latex': '\\max', 'nop': -1, 'func': lambda *args: _reduce_biop('bimax', args)},
+        'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
 
     def __init__(self, op: str, *operands: FactorExpr):
         super().__init__(op, *operands)
 
-    @staticmethod
-    def _fold_const(op: str, operands: Tuple['ConstExpr', ...]) -> Optional['ConstExpr']:
-        """
-        常量折叠：当所有 operands 都是 ConstExpr 时，尝试直接计算。
-
-        返回 ConstExpr 或 None（无法折叠时）。
-        """
-        from tools.parameters.Parameter import Parameter
-        values = [opnd.value for opnd in operands]
-        try:
-            if op == 'add':
-                result = values[0] + values[1]
-            elif op == 'sub':
-                result = values[0] - values[1]
-            elif op == 'mul':
-                result = values[0] * values[1]
-            elif op == 'div':
-                result = values[0] / values[1]
-            elif op == 'neg':
-                result = -values[0]
-            elif op == 'abs':
-                result = abs(values[0])
-            elif op == 'log':
-                result = np.log(values[0])
-            elif op == 'sign':
-                result = np.sign(values[0])
-            elif op == 'sqrt':
-                result = np.sqrt(values[0])
-            else:
-                return None
-            if isinstance(result, Parameter):
-                return None
-            return ConstExpr(result)
-        except Exception:
-            return None
-
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         """根据 op 类型执行实际运算（由 OperandExpr.evaluate 调用）。"""
-        v = values
-
-        # 一元算
-        if self.op in self._UNARY_OPS:
-            _, fn = self._UNARY_OPS[self.op]
-            return fn(v[0])
-
-        # 多元 max/min
-        if self.op in ('max', 'min') and len(v) > 2:
-            vals: List[Any] = []
-            for i, val in enumerate(v):
-                opnd = self.operands[i]
-                if isinstance(opnd, ConstExpr):
-                    vals.append(opnd.value)
-                else:
-                    vals.append(val)
-
-            def _elemwise_max(a: Any, b: Any) -> Any:
-                if isinstance(a, pd.DataFrame):
-                    if np.isscalar(b):
-                        return a.clip(lower=b)  # type: ignore[arg-type]
-                    if isinstance(b, pd.DataFrame):
-                        return pd.DataFrame(np.maximum(a.values, b.values), index=a.index, columns=a.columns)
-                if isinstance(b, pd.DataFrame):
-                    if np.isscalar(a):
-                        return b.clip(lower=a)  # type: ignore[arg-type]
-                    return pd.DataFrame(np.maximum(a.values, b.values), index=b.index, columns=b.columns)
-                return np.maximum(a, b)
-
-            def _elemwise_min(a: Any, b: Any) -> Any:
-                if isinstance(a, pd.DataFrame):
-                    if np.isscalar(b):
-                        return a.clip(upper=b)  # type: ignore[arg-type]
-                    if isinstance(b, pd.DataFrame):
-                        return pd.DataFrame(np.minimum(a.values, b.values), index=a.index, columns=a.columns)
-                if isinstance(b, pd.DataFrame):
-                    if np.isscalar(a):
-                        return b.clip(upper=a)  # type: ignore[arg-type]
-                    return pd.DataFrame(np.minimum(a.values, b.values), index=b.index, columns=b.columns)
-                return np.minimum(a, b)
-
-            result = vals[0]
-            for item in vals[1:]:
-                result = _elemwise_max(result, item) if self.op == 'max' else _elemwise_min(result, item)
-            return result
-
-        # 二元算
-        a, b = v[0], v[1]
-
-        # 如果 b 是 ConstExpr，提取标量值
-        if isinstance(self.operands[1], ConstExpr):
-            b = self.operands[1].value
-        if isinstance(self.operands[0], ConstExpr):
-            a = self.operands[0].value
-
-        if self.op in self._ARITH_OPS:
-            _, fn = self._ARITH_OPS[self.op]
-            return fn(a, b)
-
-        if self.op in self._COMPARE_OPS:
-            _, fn = self._COMPARE_OPS[self.op]
-            return fn(a, b)
-
-        if self.op in self._LOGIC_OPS:
-            _, fn = self._LOGIC_OPS[self.op]
-            return fn(a, b)
-
-        # 非 DataFrame 回退（仅当 ConstExpr 标量被提取后两个都是标量时触发）
-        if not isinstance(a, pd.DataFrame):
-            if self.op == 'max':
-                return np.maximum(a, b)  # type: ignore[return-value]
-            if self.op == 'min':
-                return np.minimum(a, b)  # type: ignore[return-value]
-            if self.op == 'pow':
-                return a ** b  # type: ignore[return-value]
-            raise ValueError(f"Unknown op: {self.op}")
-
-        # 经过上面的 isinstance 守卫后，a 必定是 DataFrame
-        a_df: pd.DataFrame = a
-
-        if self.op == 'max':
-            if np.isscalar(b):
-                return a_df.clip(lower=b)  # type: ignore[arg-type]
-            return pd.DataFrame(np.maximum(a_df.values, b.values),  # type: ignore[union-attr]
-                                index=a_df.index, columns=a_df.columns)
-
-        if self.op == 'min':
-            if np.isscalar(b):
-                return a_df.clip(upper=b)  # type: ignore[arg-type]
-            return pd.DataFrame(np.minimum(a_df.values, b.values),  # type: ignore[union-attr]
-                                index=a_df.index, columns=a_df.columns)
-
-        if self.op == 'pow':
-            return a_df ** b  # type: ignore[return-value]
-
+        if self.op in self._biOps:
+            return self._biOps[self.op]['func'](*values)
+        if self.op in self._Ops:
+            return self._Ops[self.op]['func'](*values)
         raise ValueError(f"Unknown op: {self.op}")
 
     @property
     def op_name(self) -> str:
-        if self.op in self._ARITH_OPS:
-            return self._ARITH_OPS[self.op][0]
-        if self.op in self._COMPARE_OPS:
-            return self._COMPARE_OPS[self.op][0]
-        if self.op in self._LOGIC_OPS:
-            return self._LOGIC_OPS[self.op][0]
-        if self.op in self._UNARY_OPS:
-            return self._UNARY_OPS[self.op][0]
-        if self.op in ('max', 'min'):
-            return self.op
+        if self.op in self._biOps:
+            return self._biOps[self.op]['symb']
+        if self.op in self._Ops:
+            return self._Ops[self.op]['symb']
         return self.op
 
     def to_latex(self) -> str:
-        if self.op in self._UNARY_OPS:
-            x = self.operands[0].to_latex()
-            _UNARY_LATEX_MAP = {
-                'neg': f'-({x})',
-                'abs': f'|{x}|',
-                'not': f'\\neg({x})',
-                'log': f'\\ln({x})',
-                'sign': f'\\operatorname{{sgn}}({x})',
-                'sqrt': f'\\sqrt{{{x}}}',
-            }
-            return _UNARY_LATEX_MAP.get(self.op, f'{self.op}({x})')
-
-        left = self.operands[0].to_latex()
-        right = self.operands[1].to_latex()
-
-        if self.op in self._ARITH_OPS:
-            symbol = self._ARITH_OPS[self.op][0]
-            if self.op == 'div':
-                return f'\\frac{{{left}}}{{{right}}}'
-            return f'({left} {symbol} {right})'
-
-        if self.op in self._COMPARE_OPS:
-            symbol = self._COMPARE_OPS[self.op][0]
-            return f'({left} {symbol} {right})'
-
-        if self.op in self._LOGIC_OPS:
-            symbol = self._LOGIC_OPS[self.op][0]
-            return f'({left} {symbol} {right})'
-
-        if self.op == 'max':
-            if len(self.operands) > 2:
-                return f"\\max({', '.join(opnd.to_latex() for opnd in self.operands)})"
-            return f'\\max({left}, {right})'
-        if self.op == 'min':
-            if len(self.operands) > 2:
-                return f"\\min({', '.join(opnd.to_latex() for opnd in self.operands)})"
-            return f'\\min({left}, {right})'
-
-        if self.op == 'pow':
-            return f'{{{left}}}^{{{right}}}'
-
-        return f'{self.op}({left}, {right})'
+        operands_latex = [opnd.to_latex() for opnd in self.operands]
+        if self.op in self._biOps:
+            op_latex = self._biOps[self.op]['latex']
+            return f'{op_latex}\\left({operands_latex[0]}, {operands_latex[1]}\\right)'
+        if self.op in self._Ops:
+            if self._Ops[self.op]['nop'] == 1:
+                operand_latex = operands_latex[0]
+                return f"{self._Ops[self.op]['latex']}\\left({operand_latex}\\right)"
+            elif self._Ops[self.op]['nop'] == 2:
+                left_latex = operands_latex[0]
+                right_latex = operands_latex[1]
+                if self.op in ('add', 'sub', 'mul', 'div', 'pow'):
+                    return f'(\\left({left_latex}\\right) {self._Ops[self.op]["latex"]} \\left({right_latex}\\right))'
+                else:
+                    return f'{self._Ops[self.op]["latex"]}\\left({left_latex}, {right_latex}\\right)'
+            else:
+                return f'{self._Ops[self.op]["latex"]}\\left({", ".join(operands_latex)}\\right)'
+        else:
+            return f'\\text{{{self.op.capitalize()}}}\\left({", ".join(operands_latex)}\\right)'
 
     def _get_alias(self) -> str:
         op_aliases = {
@@ -1469,6 +1363,7 @@ class CompositeExpr(OperandExpr):
             'and': 'AND', 'or': 'OR',
             'neg': 'NEG', 'abs': 'ABS', 'not': 'NOT',
             'log': 'LOG', 'sign': 'SIGN', 'sqrt': 'SQRT',
+            'bimax': 'MAX', 'bimin': 'MIN',
         }
         op_alias = op_aliases.get(self.op, self.op.upper())
         parts = [opnd._get_alias() for opnd in self.operands]
