@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
     from tools.factors.FactorTester import FactorTester
 
-class Factor(FactorExpr, UniqueObject):
+class Factor(UniqueObject, FactorExpr):
     """
     量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
 

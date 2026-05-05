@@ -293,12 +293,6 @@ def get_factor_main_section_html(factor_family_alias):
         math_expr = getattr(ff, 'math_expr', '')
         chinese_name = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
         description = getattr(ff, 'description', '') or ''
-        # 向后兼容：若无 description，尝试从 description_sections 转换
-        if not description:
-            ds = getattr(ff, 'description_sections', [])
-            if ds and not isinstance(ds, property):
-                from tools.factors.FactorFamily import FactorFamily
-                description = FactorFamily._sections_to_markdown(ds)
         params = ff.params
         param_aliases = [p.alias for p in params]
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))

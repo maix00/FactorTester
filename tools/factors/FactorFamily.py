@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
 from tools.factors.FactorTester import _active_tester, _active_user_prefix
 
-class FactorFamily(FactorExpr, UniqueObject):
+class FactorFamily(UniqueObject, FactorExpr):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
@@ -272,9 +272,9 @@ class FactorFamily(FactorExpr, UniqueObject):
         若无参数则直接返回家族别名。
         """
         normalized = self._normalize_param_kwargs(**params)
-        ordered_keys = [p.alias for p in self._expr.ordered_param_deps] if self._expr is not None else sorted(
+        ordered_keys = sorted(
             (k for k in normalized.keys() if k in self.params_dict),
-            key=lambda k: (type(self.params_dict[k]).__name__, self.params_dict[k].alias),
+            key=lambda k: (k.startswith('$'), type(self.params_dict[k]).__name__, self.params_dict[k].alias),
         )
 
         parts = []
@@ -367,6 +367,8 @@ class FactorFamily(FactorExpr, UniqueObject):
                 continue
 
             factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+            for key, value in current_params.items():
+                self.params_dict[key].register(factor, value)
 
             if return_freq is not None:
                 t = Factor._get_active_tester()
