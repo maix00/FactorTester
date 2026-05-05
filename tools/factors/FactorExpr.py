@@ -138,6 +138,86 @@ class FactorExpr:
         """生成 LaTeX 数学表达式。"""
         raise NotImplementedError
 
+    @staticmethod
+    def _sanitize_latex_symbol(name: str) -> str:
+        """将名称规整为可读且稳定的 LaTeX 符号（ASCII + 下划线）。"""
+        cleaned = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(name)).strip('_')
+        return cleaned or 'I'
+
+    @classmethod
+    def _ensure_unique_symbol(cls, base: str, used: Set[str]) -> str:
+        """为 intermediate 生成不重复符号。"""
+        symbol = base
+        i = 2
+        while symbol in used:
+            symbol = f"{base}_{i}"
+            i += 1
+        used.add(symbol)
+        return symbol
+
+    def _iter_intermediate_nodes(self) -> List['FactorExpr']:
+        """按先序遍历收集中间表达式节点（去重、排除自身）。"""
+        nodes: List[FactorExpr] = []
+        seen: set[tuple] = set()
+        stack: list[FactorExpr] = [self]
+
+        while stack:
+            node = stack.pop()
+            sk = node._structural_key()
+            if sk in seen:
+                continue
+            seen.add(sk)
+
+            if node is not self and node._is_intermediate:
+                nodes.append(node)
+
+            ops = list(getattr(node, '_operands', ()))
+            for op in reversed(ops):
+                stack.append(op)
+
+        return nodes
+
+    def to_latex_with_intermediates(self, final_name: str = 'X') -> str:
+        """生成含 intermediate 分行定义的 LaTeX。
+
+        当表达式树中存在 .as_intermediate() 标记节点时，输出:
+                    \\begin{aligned}
+            A_t &= ... \\
+            B_t &= ... \\
+            X_t &= ...
+                    \\end{aligned}
+        否则退化为 to_latex()。
+        """
+        nodes = self._iter_intermediate_nodes()
+        if not nodes:
+            return self.to_latex()
+
+        used: Set[str] = set()
+        name_to_sk: Dict[str, tuple] = {}
+        lines: List[str] = []
+        unnamed_idx = 1
+        for node in nodes:
+            if node._intermediate_name:
+                sk = node._structural_key()
+                prev_sk = name_to_sk.get(node._intermediate_name)
+                if prev_sk is not None and prev_sk != sk:
+                    raise ValueError(
+                        f"Intermediate 名称冲突: {node._intermediate_name} 被用于不同表达式。"
+                    )
+                name_to_sk[node._intermediate_name] = sk
+                base = self._sanitize_latex_symbol(node._intermediate_name)
+            else:
+                base = f"I{unnamed_idx}"
+                unnamed_idx += 1
+            sym = self._ensure_unique_symbol(base, used)
+            lines.append(f"{sym}_t &= {node.to_latex()}")
+
+        final_base = self._sanitize_latex_symbol(final_name)
+        final_sym = self._ensure_unique_symbol(final_base, used)
+        lines.append(f"{final_sym}_t &= {self.to_latex()}")
+
+        return "\\begin{aligned}\n" + " \\\\\n".join(lines) + "\n\\end{aligned}"
+
     def _get_alias(self) -> str:
         """生成唯一别名，用于 Factor 注册。"""
         raise NotImplementedError
@@ -347,9 +427,9 @@ class FactorExpr:
         """N 期指数移动平均（EMA, span=window）。"""
         return RollingOp('rolling_ema', _to_expr(window), self)
 
-    def corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
-        return RollingOp('corr', _to_expr(window), self, other)
+        return RollingOp('rolling_corr', _to_expr(window), self, other)
 
     def rolling_skew(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期滚动偏度。"""
@@ -720,17 +800,8 @@ class ConstExpr(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
-    def evaluate(self, *, freq: DataFreq,
-                 dm: Optional['DataMeta'] = None, **kwargs) -> pd.DataFrame:
-
-        if isinstance(self.value, (pd.Timedelta, DataFreq)):
-            if freq is None:
-                raise ValueError("ConstExpr 以 Timedelta/DataFreq 为 value 需要 DataFreq 参数")
-            if dm is None:
-                raise ValueError("ConstExpr 以 Timedelta/DataFreq 为 value 需要 DataMeta 以计算 day_periods")
-            return cast(pd.DataFrame, _resolve_window(self.value, freq, dm))
-        # 标量/数组常量：返回 self，由 CompositeExpr._apply_op 提取 value 后内联处理
-        return cast(pd.DataFrame, self)
+    def evaluate(self, **kwargs) -> Any:
+        return self.value
 
     @property
     def op_name(self) -> str:
@@ -809,11 +880,11 @@ class RollingOp(OperandExpr):
             return dfs[0].apply(func, axis=0, args=(window,))
 
         # 二元
-        if self.op in ('corr', 'cov'):
+        if self.op in ('rolling_corr', 'rolling_cov'):
             left_df, right_df = dfs
             result = pd.DataFrame(index=left_df.index, columns=left_df.columns, dtype=float)
             for col in left_df.columns:
-                if self.op == 'corr':
+                if self.op == 'rolling_corr':
                     result[col] = left_df[col].rolling(window).corr(right_df[col])
                 else:
                     result[col] = left_df[col].rolling(window).cov(right_df[col])
@@ -880,24 +951,25 @@ class RollingOp(OperandExpr):
         data_vals = [opnd.evaluate(products=products, freq=freq, source=source,
                        cache=cache, preloaded=preloaded)
                      for opnd in self.operands[1:]]
-
-        # 从第一个产品拿 DataMeta，用于窗口参数中的 day_periods 计算
-        from tools.data.DataMeta import DataMeta
-        dm: DataMeta = getattr(products[0], freq.name)
-
-        # 求窗口值：ConstExpr 走专用签名；其它表达式走标准 evaluate
-        window_expr = self.operands[0]
-        if isinstance(window_expr, ConstExpr):
-            window_val = window_expr.evaluate(freq=freq, dm=dm)
+        
+        periods_expr = self.operands[0]
+        if not isinstance(periods_expr, ConstExpr):
+            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source, cache=cache, preloaded=preloaded)
+            assert isinstance(periods_val, ConstExpr)
+            periods_val = periods_val.value
         else:
-            window_val = window_expr.evaluate(products=products, freq=freq, source=source,
-                                              cache=cache, preloaded=preloaded)
-            if isinstance(window_val, ConstExpr):
-                if isinstance(window_val.value, (pd.Timedelta, DataFreq)):
-                    window_val = _resolve_window(window_val.value, freq, dm)
-                else:
-                    window_val = window_val.value
-        result = self._apply_rolling(window_val, *data_vals, freq=freq)  # type: ignore[arg-type]
+            periods_val = periods_expr.value
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=products)
+        if common:
+            result = self._apply_rolling(common_periods, *data_vals, freq=freq)  # type: ignore[arg-type]
+        else:
+            # 按照有相同的 periods 的产品分组，分别 shift 后再合并
+            unique_periods = set(product_periods.values())
+            periods_products_map = {p: [product for product, period in product_periods.items() if period == p] for p in unique_periods}
+            result_parts = []
+            for p, products_group in periods_products_map.items():
+                result_parts.append(self._apply_rolling(p, *[operand_val[products_group]], freq=freq))  # type: ignore[arg-type]
+            result = pd.concat(result_parts, axis=1)
 
         if cache is not None:
             cache[self] = result
@@ -936,23 +1008,22 @@ class ShiftOp(OperandExpr):
         operand_val = self.operands[1].evaluate(products=products, freq=freq, source=source,
                             cache=cache, preloaded=preloaded)
 
-        # 从第一个产品拿 DataMeta，用于 periods 参数中的 day_periods 计算
-        from tools.data.DataMeta import DataMeta
-        dm: DataMeta = getattr(products[0], freq.name)
-
         periods_expr = self.operands[0]
-        if isinstance(periods_expr, ConstExpr):
-            periods_val = periods_expr.evaluate(freq=freq, dm=dm)
+        if not isinstance(periods_expr, ConstExpr):
+            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source, cache=cache, preloaded=preloaded)
         else:
-            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source,
-                                                cache=cache, preloaded=preloaded)
-            if isinstance(periods_val, ConstExpr):
-                if isinstance(periods_val.value, (pd.Timedelta, DataFreq)):
-                    periods_val = _resolve_window(periods_val.value, freq, dm)
-                else:
-                    periods_val = periods_val.value
-
-        result = operand_val.shift(periods_val)  # type: ignore[arg-type]
+            periods_val = periods_expr.value
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=products)
+        if common:
+            result = operand_val.shift(int(common_periods))
+        else:
+            # 按照有相同的 periods 的产品分组，分别 shift 后再合并
+            unique_periods = set(product_periods.values())
+            periods_products_map = {p: [product for product, period in product_periods.items() if period == p] for p in unique_periods}
+            result_parts = []
+            for p, products_group in periods_products_map.items():
+                result_parts.append(operand_val[products_group].shift(int(p)))
+            result = pd.concat(result_parts, axis=1)
 
         if cache is not None:
             cache[self] = result
@@ -1018,31 +1089,19 @@ def _rolling_argmaxmin(
     result = np.vstack([nan_rows, pos])
     return pd.DataFrame(result, index=df.index, columns=df.columns)
 
-
-def _resolve_window(window_val: Union[pd.Timedelta, 'DataFreq'], freq: DataFreq,
-                    dm: 'DataMeta') -> int:
-    """将时间窗口/位移参数转为 bar 数量（整数）。
-
-    规则：
-      - day-multiple 时间跨度（如 '5d'）：从 DataMeta.day_periods 缓存 × 天数
-      - 其他 Timedelta：要求整除当前数据频率，返回整数倍数
-    """
-    td = window_val if isinstance(window_val, pd.Timedelta) else window_val.value
-    total_sec = td.total_seconds()
-
-    window_freq = DataFreq(td)
-    if window_freq.is_day_multiple():
-        day_periods = dm.day_periods
-        day_count = int(total_sec / pd.Timedelta('1day').total_seconds())
-        return day_periods * day_count
-
-    freq_sec = freq.value.total_seconds()
-    if total_sec % freq_sec != 0:
-        raise ValueError(
-            f"{window_val} is not divisible by data frequency {freq.name} "
-            f"({total_sec}s vs {freq_sec}s per bar)"
-        )
-    return int(total_sec / freq_sec)
+def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tuple[bool, int, Dict[Product, int]]:
+    """将 DataFreq 类型的窗口参数转为 bar 数量（整数）。"""
+    window = DataFreq(window)
+    freq = DataFreq(freq)
+    days = window.days
+    subday_periods = int(window.subday.total_seconds() / freq.subday.total_seconds())
+    if days == 0:
+        return True, subday_periods, {}
+    else:
+        product_periods = {product: int(subday_periods + days * getattr(product, freq.name).day_periods) for product in products}
+        if product_periods.values() and len(set(product_periods.values())) == 1:
+            return True, next(iter(product_periods.values())), {}
+        return False, 0, product_periods
 
 
 # ═════════════════════════════════════════════════════════════════════════════

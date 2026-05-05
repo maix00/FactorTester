@@ -181,7 +181,7 @@ class FactorFamily(FactorExpr, UniqueObject):
 
             self.desc = _desc
             self.description = _desc_full
-            self.math_expr = _math or (_expr.to_latex() if _expr is not None else '')
+            self.math_expr = _math or (_expr.to_latex_with_intermediates() if _expr is not None else '')
 
             # 信号对齐参数（None 则从类属性取默认值）
             self.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
@@ -298,7 +298,7 @@ class FactorFamily(FactorExpr, UniqueObject):
         若无参数则直接返回家族别名。
         """
         normalized = self._normalize_param_kwargs(**params)
-        ordered_keys = sorted(
+        ordered_keys = [p.alias for p in self._expr.ordered_param_deps] if self._expr is not None else sorted(
             (k for k in normalized.keys() if k in self.params_dict),
             key=lambda k: (type(self.params_dict[k]).__name__, self.params_dict[k].alias),
         )
@@ -585,21 +585,41 @@ class FactorFamily(FactorExpr, UniqueObject):
 
     def _collect_intermediates(self, resolved: 'FactorExpr') -> None:
         """
-        遍历解析后的表达式树，收集所有 _is_intermediate 标记的节点。
+        遍历解析后的整棵表达式树，收集所有 _is_intermediate 标记的节点。
         子类可覆盖以实现自定义收集逻辑（如 CrossSectionIC 按名称收集）。
         """
         from tools.factors.FactorData import FactorData
 
-        # 遍历 operands（如 CrossSectionIC 的 FE, RE）
-        operands = getattr(resolved, 'operands', ())
-        for opnd in operands:
-                if opnd._is_intermediate:
-                    structural_hash = str(opnd._structural_key())
-                    fd = FactorData.get_by_hash(structural_hash)
-                    if fd is not None:
-                        name = opnd._intermediate_name
-                        if name:
-                            self._intermediates[name] = fd
+        self._intermediates.clear()
+        name_to_sk: Dict[str, tuple] = {}
+
+        seen: Set[tuple] = set()
+        stack: List[FactorExpr] = [resolved]
+
+        while stack:
+            node = stack.pop()
+            sk = node._structural_key()
+            if sk in seen:
+                continue
+            seen.add(sk)
+
+            if getattr(node, '_is_intermediate', False):
+                structural_hash = str(sk)
+                fd = FactorData.get_by_hash(structural_hash)
+                if fd is not None:
+                    name = getattr(node, '_intermediate_name', None)
+                    if name:
+                        prev_sk = name_to_sk.get(name)
+                        if prev_sk is not None and prev_sk != sk:
+                            raise ValueError(
+                                f"Intermediate 名称冲突: {name} 被用于不同表达式。"
+                                "请为不同子表达式使用不同 as_intermediate(name)。"
+                            )
+                        name_to_sk[name] = sk
+                        self._intermediates[name] = fd
+
+            for opnd in reversed(list(getattr(node, '_operands', ()))):
+                stack.append(opnd)
 
     def _align_to_signal(self, data: pd.DataFrame, freq: Any) -> pd.DataFrame:
         """委托给 signal_align 工具函数。"""

@@ -45,14 +45,14 @@ class VlYZ(FactorFamily):
         rs_bar = hc * ho + lc * lo
 
         # Rolling variances
-        sig_o2 = log_oc_prev.rolling_var(N)
-        sig_c2 = log_co.rolling_var(N)
-        sig_rs2 = rs_bar.rolling_mean(N).max(0.0)
+        sig_o2 = log_oc_prev.rolling_var(N).as_intermediate('SIG_O2')
+        sig_c2 = log_co.rolling_var(N).as_intermediate('SIG_C2')
+        sig_rs2 = rs_bar.rolling_mean(N).max(0.0).as_intermediate('SIG_RS2')
 
         # Weight: w = 0.34 / (1.34 + (n+1)/(n-1)), n = int(N/1d)
         # w is computed during evaluation because it depends on N/1d ratio
         # We use a DynamicWeight expression
-        yz_var = sig_o2 + _DynamicWeight(N) * sig_c2 + (1.0 - _DynamicWeight(N)) * sig_rs2
+        yz_var = (sig_o2 + _DynamicWeight(N) * sig_c2 + (1.0 - _DynamicWeight(N)) * sig_rs2).as_intermediate('SIG_YZ2')
         return yz_var.max(0.0).sqrt()
 
     desc = 'Yang-Zhang 波动率'

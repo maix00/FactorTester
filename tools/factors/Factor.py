@@ -325,14 +325,13 @@ class Factor(FactorExpr, UniqueObject):
                     products = valid_products
                     if available_freqs_set is None:
                         available_freqs_set = set()
-                    available_freqs = sorted(available_freqs_set, key=lambda f: f.value)
+                    available_freqs = sorted(available_freqs_set, key=lambda f: f.value, reverse=True)
                     if not available_freqs:
-                        raise ValueError(f"{self}: 产品没有公共可用频率，无法推断数据频率")
+                        raise ValueError(f"{self}: 产品数据没有公共可用频率，无法确定数据频率")
                     if desired_freq:
-                        max_desired = max(df.value for df in desired_freq)
-                        freq = next((af for af in available_freqs if af.value <= max_desired), available_freqs[0])
+                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), available_freqs[-1])
                     else:
-                        freq = available_freqs[0]
+                        freq = available_freqs[-1]
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 

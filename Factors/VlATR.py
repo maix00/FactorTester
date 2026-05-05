@@ -27,7 +27,7 @@ class VlATR(FactorFamily):
         tr1 = h - l
         tr2 = (h - prev_c).abs()
         tr3 = (l - prev_c).abs()
-        tr = tr1.max(tr2).max(tr3)
+        tr = tr1.max(tr2).max(tr3).as_intermediate('TR')
         return tr.rolling_mean(N) / (c + 1e-10)
 
     desc = '真实波幅'

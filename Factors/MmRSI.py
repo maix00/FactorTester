@@ -21,9 +21,9 @@ class MmRSI(FactorFamily):
         N = WindowParam('N', default_value='14d')
         RF = WindowParam('RF', default_value='1d')
         r = P.delta(RF) / P.shift(RF)
-        gain = ((r + r.abs()) / 2.0).rolling_mean(N)
-        loss = ((r.abs() - r) / 2.0).rolling_mean(N)
-        rs = gain / (loss + 1e-10)
+        gain = ((r + r.abs()) / 2.0).rolling_mean(N).as_intermediate('GAIN')
+        loss = ((r.abs() - r) / 2.0).rolling_mean(N).as_intermediate('LOSS')
+        rs = (gain / (loss + 1e-10)).as_intermediate('RS')
         return rs / (1.0 + rs)
 
     desc = '相对强弱指数'

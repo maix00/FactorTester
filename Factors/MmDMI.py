@@ -38,9 +38,9 @@ class MmDMI(FactorFamily):
         pdm = ((up_move + up_move.abs()) / 2.0) * (up_move > down_move)
         ndm = ((down_move + down_move.abs()) / 2.0) * (down_move > up_move)
         # +DI / -DI
-        tr_sum = tr.rolling_sum(N)
-        pdi = pdm.rolling_sum(N) / (tr_sum + 1e-10)
-        ndi = ndm.rolling_sum(N) / (tr_sum + 1e-10)
+        tr_sum = tr.rolling_sum(N).as_intermediate('TR_SUM')
+        pdi = (pdm.rolling_sum(N) / (tr_sum + 1e-10)).as_intermediate('PDI')
+        ndi = (ndm.rolling_sum(N) / (tr_sum + 1e-10)).as_intermediate('NDI')
         # DX
         return (pdi - ndi) / (pdi + ndi + 1e-10)
 
