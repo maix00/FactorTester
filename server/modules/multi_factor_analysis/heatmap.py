@@ -8,7 +8,7 @@ import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
-from tools.factors.Factors import Factor, CrossSectionIC
+from tools.factors import Factor, CrossSectionIC
 from tools.factors.Parameters import FactorNextPeriodReturns
 from . import mfa_bp
 from server.shared import (

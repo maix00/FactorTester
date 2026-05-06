@@ -10,7 +10,7 @@ import pandas as pd
 import traceback
 from types import SimpleNamespace
 from flask import request, jsonify
-from server.shared import get_factor_family_instance, _get_session_params, _factor_testers_lock
+from server.shared import get_factor_family_instance, _get_session_params, get_factor_tester
 import server.shared as shared
 from . import shared_bp
 
@@ -87,11 +87,7 @@ def get_factor_series():
     factor_alias        = data.get('factor_alias')
     product_name        = data.get('product')
     try:
-        with _factor_testers_lock:
-            target_suffix = f":{submission_id}"
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_factor_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         target_factor = _find_factor(factors, factor_name, factor_alias)
@@ -164,11 +160,7 @@ def get_return_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        with _factor_testers_lock:
-            target_suffix = f":{submission_id}"
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_return_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         factor = _find_factor(factors, factor_name, factor_alias)
@@ -234,10 +226,7 @@ def get_price_series():
     factor_name         = data.get('factor_name')
     factor_alias        = data.get('factor_alias')
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_price_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         factor = _find_factor(factors, factor_name, factor_alias)
@@ -338,10 +327,7 @@ def get_factor_distribution():
     product_name        = data.get('product')    # 当前选中产品名，用于高亮
     try:
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_factor_distribution')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
         target_factor = _find_factor(factors, factor_name, factor_alias)
