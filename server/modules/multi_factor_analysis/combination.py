@@ -11,6 +11,7 @@ from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from tools.factors.Factors import Factor
+from tools.factors.Parameters import FactorNextPeriodReturns
 from . import mfa_bp
 from server.shared import (
     get_factor_family_instance, _get_session_params,
@@ -210,10 +211,13 @@ def run_mfa_combination():
             # --- 原有静态权重 ------------------------------------------------
             ic_means = {}
             ir_vals_dict = {}
+            returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
             for f in factors:
                 try:
-                    ic_df, _ = tester.calc_ic(factors=f, return_freq=freq)
-                    ic_s = ic_df.iloc[:, 0].dropna()
+                    ic_family = CrossSectionIC()
+                    ic_factor = ic_family.get_factor(FE=f, SC=returns_col, RF=freq)
+                    ic_factor.evaluate(tester.products, source_freq=f._source_freq)
+                    ic_s = ic_factor.table['IC'].dropna()
                     m_val = float(ic_s.mean()) if len(ic_s) > 0 else 0.0
                     s_val = float(ic_s.std()) if len(ic_s) > 0 else 1.0
                     ic_means[f.alias] = m_val

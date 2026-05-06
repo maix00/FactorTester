@@ -47,32 +47,11 @@ def _find_factor(factors, factor_name: str | None, factor_alias: str | None):
     return None
 
 
-def _is_neg_expr(expr) -> bool:
-    op = getattr(expr, 'op', None)
-    operands = getattr(expr, 'operands', ())
-    return op == 'neg' and hasattr(operands, '__len__') and len(operands) == 1
-
-
 def _resolve_fe_table(tester_factor) -> pd.DataFrame | None:
-    """解析 IC 因子值表（含 Neg 语义），优先级：_ic_fe_intermediate > FactorData(_func_expr) > source_table(+Neg 补偿)。"""
+    """从 IC 测试阶段写入的 _ic_fe_intermediate 获取因子暴露表。"""
     fe_table = getattr(tester_factor, '_ic_fe_intermediate', None)
     if isinstance(fe_table, pd.DataFrame) and not fe_table.empty:
         return fe_table
-
-    func_expr = getattr(tester_factor, '_func_expr', None)
-    if func_expr is not None:
-        try:
-            from tools.factors.FactorData import FactorData
-            fd = FactorData.get_by_hash(str(func_expr._structural_key()))
-            if fd is not None and isinstance(fd.source_table, pd.DataFrame) and not fd.source_table.empty:
-                return fd.source_table
-        except Exception:
-            pass
-
-    src = getattr(tester_factor, 'source_table', None)
-    if isinstance(src, pd.DataFrame) and not src.empty:
-        # Factor.source_table 在外层是 neg(SignalAlign(...)) 时通常是未取反的 raw_data，这里补上符号。
-        return -src if _is_neg_expr(func_expr) else src
     return None
 
 

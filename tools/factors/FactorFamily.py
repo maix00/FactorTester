@@ -7,7 +7,6 @@
 #   2. 命令式：直接传入 expr= 表达式树和 extra_params= 额外参数
 #
 # 功能：
-#   - func()            — 表达式批量求值 + 信号对齐
 #   - get_factor() / get_factors() — 创建 Factor 实例
 #   - test()            — 一键运行 IC / 分组收益测试并持久化结果
 #   - 内置 Returns — 收益率因子族
@@ -19,11 +18,10 @@ import os
 import threading
 import uuid
 import pandas as pd
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
-from tools.factors.FactorData import FactorData
 from tools.factors.FactorExpr import (
     FactorExpr, DataColumn, DataFreq,
     ColumnRef, ConstExpr, ParamRef,
@@ -85,7 +83,6 @@ class FactorFamily(UniqueObject, FactorExpr):
     _expr: Optional[FactorExpr] = None
     _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
     _source_freqs_seen: set[DataFreq] = set()
-    _intermediates: Dict[str, 'FactorData'] = {}  # evaluate 后由 _collect_intermediates() 填充
 
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
@@ -177,9 +174,6 @@ class FactorFamily(UniqueObject, FactorExpr):
             instance.params_dict = {param.alias: param for param in instance.params}
             instance.set_default_params()             # 以各参数默认值初始化 _params_list
             instance.factors = []       # 最近一批生成的 Factor 实例
-            # 中间因子：{str → FactorData}，evaluate 后由 _collect_intermediates() 填充
-            instance._intermediates = {}
-            
             instance._initialized = True
         return instance
 
@@ -378,87 +372,6 @@ class FactorFamily(UniqueObject, FactorExpr):
 
         self.factors = factors
         return factors
-
-    def test(self, categories: Optional['str|List[str]'] = None,
-             return_freq: Optional[Any] = None,
-             start_calc_point: Optional[Any] = None,
-             ic_test_time_range: Optional[Tuple] = None,
-             sift_volume_ratio: float = sift_volume_ratio, **kwargs) -> FactorTester:
-        """
-        一键运行完整测试流程：因子计算 → IC 测试 → 分组收益测试 → 结果持久化。
-
-        流程：
-          1. 加载（或新建）因子信息缓存 CSV
-          2. 创建 FactorTester，设置时间范围
-          3. 调用 calc_factor、calc_ic
-          4. 对每个 Factor 调用 test_by_group，并将结果追加写入 CSV
-
-        参数：
-            categories       : 品种分类过滤（字符串或列表），None 表示不过滤
-            return_freq      : 收益率计算频率
-            start_calc_point : 计算起始点
-            ic_test_time_range: (start, end)，覆盖全局默认区间
-            sift_volume_ratio: 按成交量筛选品种的比例（0~1）
-
-        返回：
-            FactorTester 对象（含完整测试结果）
-        """
-        factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
-        if not os.path.exists(factor_info_path):
-            os.makedirs(factor_info_path)
-        if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
-            factor_table = pd.read_csv(factor_cache_path)
-        else:
-            factor_table = pd.DataFrame()
-
-        start_date = ic_test_time_range[0] if ic_test_time_range is not None else default_test_start_date
-        end_date = ic_test_time_range[1] if ic_test_time_range is not None else default_test_end_date
-        tester = get_factor_tester(time_range=(start_date, end_date))
-        # start_calc_point 通过 tester.start_calc_point（带时区 Timestamp）统一访问
-        if start_calc_point is not None:
-            tester.start_calc_point = pd.Timestamp(start_calc_point)
-
-        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED  # 默认使用次日开盘→开盘收益
-
-        _token = _active_tester.set(tester)
-        try:
-            factors = self.get_factors(return_freq=return_freq, **kwargs)
-            tester.calc_factor(factors)
-            tester.calc_ic(returns_col=returns_col)
-
-            for factor in factors:
-
-                _, _, report_df, _, _ = tester.test_by_group(factor, returns_col=returns_col,
-                    plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
-                    plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
-                    )
-
-                # 将分组回测结果拼入发布报告行
-                report_dict = {}
-                for col in report_df.columns:
-                    key_0 = f"{col} {report_df.index[0]}"
-                    report_dict[key_0] = report_df.loc[report_df.index[0], col]
-                for col in report_df.columns:
-                    key_1 = f"{col} {report_df.index[1]}"
-                    report_dict[key_1] = report_df.loc[report_df.index[1], col]
-
-                new_row = pd.Series({
-                    'factor_stem': self.alias,
-                    'serial_num': pd.Timestamp.now(),
-                    'factor_name': factor.alias,
-                    'factor_freq': factor.freq,
-                    'start_date': tester.start_date,
-                    'end_date': tester.end_date,
-                    'sift_volume_ratio': sift_volume_ratio,
-                    'categories': categories,
-                } | (factor.family.params_dict if factor.family else {}) | tester.factor_ic_stats.get(factor, pd.Series()).to_dict() | report_dict)
-                factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
-                tester.factor_reports[factor] = factor_table
-                factor_table.to_csv(factor_cache_path, index=False)
-        finally:
-            _active_tester.reset(_token)
-
-        return tester
     
     @property
     def expr(self) -> FactorExpr:
@@ -472,133 +385,6 @@ class FactorFamily(UniqueObject, FactorExpr):
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
         return expr.resolve(param_values=param_values, **kwargs)
-
-    def func(self, products: Sequence['Product'], *args, **kwargs) -> pd.DataFrame:
-        """
-        重写 func()：直接通过表达式求值批量计算所有品种的信号。
-
-        比默认 func() 更高效：一次性构建全品种 DataFrame，
-        避免逐品种循环和 concat。
-
-        流程：
-          1. 表达式求值 → DataFrame（列=Product，行=时间MultiIndex）
-          2. 根据 basepoint/end_session_skip 构建信号索引，一次性对齐
-          3. 应用反转（如有）
-        """
-        kwargs = self._normalize_param_kwargs(**kwargs)
-        if '$F' in kwargs and 'F' not in kwargs:
-            kwargs['F'] = kwargs['$F']
-        signal_freq = kwargs.get('F', pd.Timedelta('1d'))
-        is_reversed: bool = kwargs.pop('$Rev', False)
-        source = kwargs.pop('source', None)
-
-        freq = DataFreq(self._source_freq or 'MIN1')
-        if self._expr is None:
-            raise TypeError(
-                f"{self.__class__.__name__}: 未定义 expr（表达式树），无法使用 FactorFamily.func()。"
-                f"请覆盖 func() 方法或定义 factor_expr() / expression 类属性。")
-        # 构建 param_values：从 kwargs 中提取属于本 family 参数的值
-        # （排除 F、$F、$Rev、source 等已处理的键）
-        param_values = {
-            p.alias: kwargs[p.alias]
-            for p in self.params if p.alias in kwargs
-        }
-        resolved = self.resolve(self._expr, param_values=param_values)
-
-        # ── 预加载：收集所有需要的列，每个品种只读一次 ──
-        from tools.factors.FactorExpr import ColumnRef
-        from tools.data.DataMeta import DataMeta
-
-        preloaded: dict = {}
-        column_refs = resolved.column_refs
-        # 按 (product, freq_name) 分组，收集需要的列名
-        prod_freq_cols: dict[tuple, set] = {}
-        for cr in column_refs:
-            col_name = cr.column.name
-            for p in products:
-                key = (p, freq.name)
-                if key not in prod_freq_cols:
-                    prod_freq_cols[key] = set()
-                prod_freq_cols[key].add(col_name)
-
-        for (p, freq_name), cols in prod_freq_cols.items():
-            dm: DataMeta = getattr(p, freq_name)
-            if source is not None:
-                try:
-                    dm.set_current_source(source)
-                except ValueError:
-                    continue
-            if dm.next_available_source() is None:
-                continue
-            # 一次性读取该品种的所有需要的列
-            data = dm.get_and_adjust_cols(list(cols), copy=False)
-            if not data.empty:
-                preloaded[(p, freq_name)] = data
-
-        # evaluate cache：{FactorExpr → DataFrame}，递归求值时避免重复计算
-        df_cache: Dict[FactorExpr, pd.DataFrame] = {}
-        result = resolved.evaluate(products=products, freq=freq, source=source, preloaded=preloaded,
-                                 cache=df_cache)
-
-        # 保存未对齐的原始数据，供 Factor.source_table 使用
-        self._last_raw_result = result
-
-        # ── 收集中间因子 ──
-        self._collect_intermediates(resolved)
-
-        # ── 信号对齐 ──
-        signal_df = self._align_to_signal(result, signal_freq)
-
-        return signal_df if not is_reversed else -signal_df
-
-    def _collect_intermediates(self, resolved: 'FactorExpr') -> None:
-        """
-        遍历解析后的整棵表达式树，收集所有 _is_intermediate 标记的节点。
-        子类可覆盖以实现自定义收集逻辑（如 CrossSectionIC 按名称收集）。
-        """
-        from tools.factors.FactorData import FactorData
-
-        self._intermediates.clear()
-        name_to_sk: Dict[str, tuple] = {}
-
-        seen: Set[tuple] = set()
-        stack: List[FactorExpr] = [resolved]
-
-        while stack:
-            node = stack.pop()
-            sk = node._structural_key()
-            if sk in seen:
-                continue
-            seen.add(sk)
-
-            if getattr(node, '_is_intermediate', False):
-                structural_hash = str(sk)
-                fd = FactorData.get_by_hash(structural_hash)
-                if fd is not None:
-                    name = getattr(node, '_intermediate_name', None)
-                    if name:
-                        prev_sk = name_to_sk.get(name)
-                        if prev_sk is not None and prev_sk != sk:
-                            raise ValueError(
-                                f"Intermediate 名称冲突: {name} 被用于不同表达式。"
-                                "请为不同子表达式使用不同 as_intermediate(name)。"
-                            )
-                        name_to_sk[name] = sk
-                        self._intermediates[name] = fd
-
-            for opnd in reversed(list(getattr(node, '_operands', ()))):
-                stack.append(opnd)
-
-    def _align_to_signal(self, data: pd.DataFrame, freq: Any) -> pd.DataFrame:
-        """委托给 signal_align 工具函数。"""
-        from tools.factors.FactorExpr import signal_align
-        return signal_align(
-            data, freq,
-            basepoint=self.basepoint,
-            daily_basepoint=self.daily_basepoint,
-            end_session_skip=self.end_session_skip,
-            end_session_gap=self.end_session_gap,
-        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -621,28 +407,8 @@ class CrossSectionIC(FactorFamily):
         F   : 信号频率（复用 FactorFreqParam）
 
     FE 和 RE 子表达式自动标记为 _is_intermediate，evaluate 后
-    由 _collect_intermediates() 遍历 operands 收集到 _intermediates。
+    中间数据可通过 Factor.get_intermediate(name) 获取。
     """
-
-    def get_intermediate(self, key: object) -> 'FactorData | None':
-        """
-        获取中间因子数据（FactorData，含 source_table 原始数据）。
-
-        key 支持两种形式：
-          - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
-          - FactorExpr: 按表达式结构 hash 查找 → FactorData.get_by_hash()
-
-        中间因子在 evaluate() 时自动创建 FactorData 并存入全局去重表，
-        _collect_intermediates() 按名称收集到 self._intermediates。
-        """
-        from tools.factors.FactorData import FactorData
-
-        if isinstance(key, str):
-            return self._intermediates.get(key)
-        if hasattr(key, '_structural_key'):
-            # key 是 FactorExpr，按结构 hash 查找
-            return FactorData.get_by_hash(str(key._structural_key()))  # type: ignore[union-attr]
-        return None
 
     @staticmethod
     def factor_expr():
@@ -664,36 +430,11 @@ class CrossSectionIC(FactorFamily):
         S = TypeParam('S', default_value=1, typ=int)
         Lag = TypeParam('Lag', default_value=0, typ=int)
         # RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-        RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+        # OPEN 时 S=0，RE 位于 first 位置，需额外 shift(1) 挪到 last 位置与 FE 对齐
+        RE = (SC.delta(RF) / SC.shift(RF)).shift(-RF).shift(S - 1)
 
-        # 标记 FE 和 RE 为中间因子，evaluate 后由 _collect_intermediates() 收集
+        # 标记 FE 和 RE 为中间因子，evaluate 后通过 Factor.get_intermediate() 获取
         FE = FE.as_intermediate('FE')
         RE = RE.as_intermediate('RE')
 
         return FE.cs_spearman(RE.shift(-Lag * RF))
-
-    def func(self, products, *args, **kwargs):
-        """
-        根据 SC 参数动态设置 basepoint，然后委托父类求值。
-
-        - OPEN/OPEN_ADJUSTED → basepoint='first'
-        - CLOSE/CLOSE_ADJUSTED → basepoint='last', daily_basepoint='15:00:00'
-        """
-        from tools.data.DataColumn import DataColumn
-        kwargs = self._normalize_param_kwargs(**kwargs)
-
-        SC = kwargs.get('SC', DataColumn.CLOSE_ADJUSTED)
-        if SC in (DataColumn.OPEN, DataColumn.OPEN_ADJUSTED):
-            self.basepoint = 'first'
-            self.daily_basepoint = None
-        else:
-            self.basepoint = 'last'
-            self.daily_basepoint = '15:00:00'
-
-        # 收益率信号频率 = RF（而非独立的 F 参数）
-        kwargs.pop('$F', None)
-        kwargs.pop('F', None)
-        if 'RF' in kwargs:
-            kwargs['F'] = kwargs['RF']
-
-        return super().func(products, *args, **kwargs)

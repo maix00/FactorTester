@@ -73,7 +73,6 @@ class FactorExpr:
     _is_intermediate: bool = False
     _intermediate_name: 'str | None' = None
     _intermediate_factor: Optional[FactorExpr] = None
-    _intermediate_factor_data: Any = {}
 
     def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
         """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
@@ -1084,6 +1083,8 @@ def _rolling_argmaxmin(
 
 def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tuple[bool, int, Dict[Product, int]]:
     """将 DataFreq 类型的窗口参数转为 bar 数量（整数）。"""
+    if isinstance(window, int):
+        return True, window, {}
     window = DataFreq(window)
     freq = DataFreq(freq)
     days = window.days

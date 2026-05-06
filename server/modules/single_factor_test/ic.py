@@ -144,12 +144,12 @@ def run_ic_test():
             if tester.end_date is not None and len(ic_series) > 0:
                 ic_series = ic_series[ic_series.index.get_level_values(-1) <= pd.Timestamp(tester.end_date)]
 
-            re_fd = ic_family.get_intermediate('RE')
-            fe_fd = ic_family.get_intermediate('FE')
+            re_table = ic_factor.get_intermediate('RE')
+            fe_table = ic_factor.get_intermediate('FE')
             stats = tester.ic_stats(ic_series)
 
-            re_table = re_fd.source_table.copy() if re_fd is not None else pd.DataFrame()
-            fe_table = fe_fd.source_table.copy() if fe_fd is not None else pd.DataFrame()
+            re_table = re_table.copy() if re_table is not None else pd.DataFrame()
+            fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
 
             return factor_list, ic_series, stats, re_table, fe_table
 

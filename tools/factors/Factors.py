@@ -29,12 +29,11 @@
 import numpy as np
 import pandas as pd
 import uuid
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Any, Sequence
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence
 
 from tools import UniqueObject, DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr
-from tools.factors.FactorData import FactorData
 
 if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily
@@ -67,8 +66,10 @@ class Factor(UniqueObject, FactorExpr):
     _source_expr: FactorExpr
     _freq: Optional[DataFreq] = None
     _source_freq: Optional[DataFreq] = None
-    _source_data: Optional[FactorData] = None
-    _data: Optional[pd.DataFrame] = None
+    _source_data: Optional[pd.DataFrame] = None  # 未对齐的原始数据 (原 FactorData.source_table)
+    _data: Optional[pd.DataFrame] = None          # 信号对齐后的结果
+    _intermediate_factor_data: Dict[Tuple, pd.DataFrame]
+    _intermediate_alias_index: Dict[str, Tuple]
     family: Optional[FactorFamily] = None
 
     def clear(self):
@@ -76,7 +77,8 @@ class Factor(UniqueObject, FactorExpr):
         self._source_freq = None
         self._source_data = None
         self._data = None
-        self._intermediate_factor_data = {}
+        self._intermediate_factor_data.clear()
+        self._intermediate_alias_index.clear()
 
     def _strip_outer_and_set_freq(self, expr: FactorExpr, preserve_neg: bool, set_freq: bool = False) -> FactorExpr:
         """剥离表达式外层的 SignalAlign 和 Neg (如果存在)"""
@@ -125,6 +127,7 @@ class Factor(UniqueObject, FactorExpr):
             instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
             instance.family = family
             instance._intermediate_factor_data = {}
+            instance._intermediate_alias_index = {}
             super().__init__(instance, _local_only=False)
         return instance
     
@@ -264,7 +267,7 @@ class Factor(UniqueObject, FactorExpr):
                 node = operands[0]
             else:
                 break
-        self._source_data = FactorData(expr=self._expr, source_table=raw_data)
+        self._source_data = raw_data
 
         # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
         self._data = result
@@ -284,7 +287,49 @@ class Factor(UniqueObject, FactorExpr):
         else:
             self._data = result
 
+        # ── 6. 收集中间因子别名索引 ──
+        self._collect_intermediates_from_cache()
+
         return self.table
+    
+    def _collect_intermediates_from_cache(self) -> None:
+        """遍历表达式树，将 _intermediate_factor_data 中的 sk 映射到别名。"""
+        self._intermediate_alias_index.clear()
+        seen: Set[Tuple] = set()
+        stack: List[FactorExpr] = [self._expr]
+
+        while stack:
+            node = stack.pop()
+            sk = node._structural_key()
+            if sk in seen:
+                continue
+            seen.add(sk)
+
+            if getattr(node, '_is_intermediate', False):
+                name = getattr(node, '_intermediate_name', None)
+                if name and sk in self._intermediate_factor_data:
+                    self._intermediate_alias_index[name] = sk
+
+            for opnd in reversed(list(getattr(node, '_operands', ()))):
+                stack.append(opnd)
+    
+    def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
+        """
+        获取中间因子数据（原始未对齐 DataFrame）。
+
+        key 支持两种形式：
+          - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
+          - Tuple (structural_key): 按表达式结构 key 直接查找
+
+        返回 DataFrame 或 None。
+        """
+        if isinstance(key, str):
+            sk = self._intermediate_alias_index.get(key)
+            if sk is not None:
+                return self._intermediate_factor_data.get(sk)
+            return None
+        # key 是 structural_key (tuple)
+        return self._intermediate_factor_data.get(key)
     
     @property
     def freq(self) -> DataFreq:
@@ -307,7 +352,7 @@ class Factor(UniqueObject, FactorExpr):
     @property
     def source_table(self) -> pd.DataFrame:
         if self._source_data is not None:
-            return self._source_data.source_table
+            return self._source_data
         return pd.DataFrame()
 
     @property
