@@ -2,7 +2,7 @@
 # tools/base/UniqueObject.py
 # 唯一对象基类模块
 #
-# 提供全局唯一对象标识机制：同一类中 name 相同的实例会返回同一个对象（单例模式）。
+# 提供进程内唯一对象标识机制：同一类中 name 相同的实例会返回同一个对象（单例模式）。
 # 所有核心业务对象（Product、DataSource、Factor、Parameter 等）均继承自此类。
 #
 # 对象命名规则：
@@ -13,35 +13,27 @@
 #   - search=True  创建时调用：按 alias 在同类的已有实例中查找并复用
 #   - UniqueObject.get('ClassName:alias:uuid') 调试时调用：按 name 精确查找
 #
-# 支持可插拔存储后端（单机 / 分布式）：
-#   - 默认使用弱引用字典（WeakValueDictionary）做本地缓存
-#   - 通过 UniqueObject.set_backend(storage_backend) 切换到 Redis 等分布式后端
-#   - 未设置后端时自动回退到 LocalStorageBackend
+# 缓存机制：
+#   - WeakValueDictionary 本地弱引用缓存（同进程快速路径）
+#   - 数据级缓存由 IdleResourceManager 管理（按 (namespace, path) 缓存 DataFrame）
 # =============================================================================
 from abc import ABC
 import threading
 import uuid
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
 from weakref import WeakValueDictionary
-
-if TYPE_CHECKING:
-    from tools.base.StorageBackend import StorageBackend
 
 class UniqueObject(ABC):
     '''
     唯一对象基类。
 
     设计原则：
-      - 以 (类名, name) 为 key，通过可插拔的 StorageBackend 实现跨进程/单机缓存。
+      - 以 (name, structural_key) 为 key，通过 WeakValueDictionary 实现进程内去重。
       - name = {alias}:{uuid}，所有对象统一用 uuid，不再使用序列号。
-      - 默认使用 WeakValueDictionary 本地缓存；可通过 set_backend() 切换到分布式后端。
+      - 数据级缓存由 IdleResourceManager 管理（按路径缓存 DataFrame + 自动回收）。
     '''
 
-    # ── 类级别存储后端（所有子类共享） ──
-    _backend: 'ClassVar[Optional[StorageBackend]]' = None
-    _backend_lock: 'ClassVar[threading.Lock]' = threading.Lock()
-
-    # ── 本地弱引用缓存（始终保留，作为第一层查询加速 + 兜底） ──
+    # ── 本地弱引用缓存 ──
     _instances: 'ClassVar[WeakValueDictionary]' = WeakValueDictionary()
     _instances_lock: 'ClassVar[threading.Lock]' = threading.Lock()
 
@@ -73,28 +65,6 @@ class UniqueObject(ABC):
         cls._instances_lock = threading.Lock()
         cls._alias_index = {}
         cls._alias_index_lock = threading.Lock()
-
-    # ── 后端管理 ──
-
-    @classmethod
-    def set_backend(cls, backend: 'StorageBackend') -> None:
-        """设置全局存储后端（所有 UniqueObject 子类共享）。"""
-        with cls._backend_lock:
-            UniqueObject._backend = backend
-
-    @classmethod
-    def _ensure_backend(cls) -> 'StorageBackend':
-        """确保后端已初始化；未设置时自动回退到 LocalStorageBackend。"""
-        backend = UniqueObject._backend
-        if backend is not None:
-            return backend
-        with cls._backend_lock:
-            backend = UniqueObject._backend
-            if backend is None:
-                from tools.base.StorageBackend import LocalStorageBackend
-                backend = LocalStorageBackend()
-                UniqueObject._backend = backend
-        return backend
 
     # ── 调试用查找 ──
 
@@ -166,19 +136,12 @@ class UniqueObject(ABC):
         key_2d = (name, sk)
         alias = alias if alias else name
 
-        # 第一层：本地弱引用缓存（同进程快速路径）
+        # 本地弱引用缓存（同进程快速路径）
         with cls._instances_lock:
             if key_2d in cls._instances:
                 return cls._instances[key_2d]
-        
-        if not _local_only:
-            # 第二层：后端原子创建（跨进程协调）
-            backend = cls._ensure_backend()
-            backend_key = f"{cls.__name__}:{name}"
-            backend.set_if_absent(backend_key)
-            
 
-        # 无论是否创建成功，本进程都需要构造实例
+        # 构造新实例
         instance = super().__new__(cls)
         with cls._instances_lock:
             cls._instances[key_2d] = instance
@@ -222,19 +185,10 @@ class UniqueObject(ABC):
         return self.name
 
     def delete(self):
-        """从全局缓存和后端存储中移除该实例，使其可被垃圾回收。"""
-        if getattr(self, '_local_only', False):
-            return  # 本地临时对象，无需清理全局状态
+        """从本地缓存中移除该实例，使其可被垃圾回收。"""
         key_2d = getattr(self, '_key_2d', (self.name, None))
         cls = self.__class__
-        backend_key = f"{cls.__name__}:{self.name}"
         with cls._instances_lock:
             cls._instances.pop(key_2d, None)
         with cls._alias_index_lock:
             cls._alias_index.get((self.alias, self._structural_key()), {}).pop((self.alias, self._structural_key()), None)
-        try:
-            backend = UniqueObject._backend
-            if backend is not None:
-                backend.delete(backend_key)
-        except Exception:
-            pass
