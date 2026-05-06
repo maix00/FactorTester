@@ -76,6 +76,7 @@ class Factor(UniqueObject, FactorExpr):
         self._source_freq = None
         self._source_data = None
         self._data = None
+        self._intermediate_factor_data = {}
 
     def _strip_outer_and_set_freq(self, expr: FactorExpr, preserve_neg: bool, set_freq: bool = False) -> FactorExpr:
         """剥离表达式外层的 SignalAlign 和 Neg (如果存在)"""
@@ -117,18 +118,43 @@ class Factor(UniqueObject, FactorExpr):
             name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
         else:
             name = f"{core_alias}:{uuid.uuid4().hex}"
-        instance = super().__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', core_alias), search=kwargs.pop('search', True), **kwargs)
+        instance = UniqueObject.__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', core_alias), search=kwargs.pop('search', True), **kwargs)
         if not hasattr(instance, '_initialized'):
             instance._expr = expr
             instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
             instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
             instance.family = family
+            instance._intermediate_factor_data = {}
             super().__init__(instance, _local_only=False)
         return instance
     
+    def _structural_key(self) -> Tuple:
+        return self._expr._structural_key()
+    
+    def _structural_eq(self, other) -> bool:
+        """桥接 UniqueObject._structural_eq 和 FactorExpr._structural_eq。"""
+        from tools.factors.FactorExpr import FactorExpr as FE
+        if isinstance(other, FE):
+            return self._expr._structural_eq(other)
+        return False
+
+    # 显式覆盖 __eq__/__hash__，避免 FactorExpr.__eq__（返回 CompositeExpr）干扰 dict key 协议
+    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
+        if type(self) is not type(other):
+            return False
+        return self._structural_eq(other)
+
+    def __hash__(self) -> int:
+        sk = self._structural_key()
+        if sk is not None:
+            return hash((self.name, sk))
+        return hash(self.name)
+
     def __getattr__(self, item):
         # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
-        if item in ('_expr', '_initialized', '_func_expr', '_source_expr', '_data', '_source_data'):
+        # __eq__/__hash__ 不可代理 — FactorExpr.__eq__ 返回 CompositeExpr 破坏 dict key 协议
+        if item in ('_expr', '_initialized', '_func_expr', '_source_expr', '_data',
+                     '_source_data', '__eq__', '__hash__'):
             raise AttributeError(item)
         return getattr(self._expr, item)
 
@@ -222,7 +248,7 @@ class Factor(UniqueObject, FactorExpr):
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
-        result = self._expr.evaluate(products, freq, preloaded=preloaded)
+        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded, cache=self._intermediate_factor_data)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data

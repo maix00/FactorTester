@@ -25,7 +25,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tools.factors.Factor import Factor
+from tools.factors.Factors import Factor
 from tools.products.Product import Product
 from tools import UniqueObject, DataColumn, DataFreq
 from tools.base.User import User

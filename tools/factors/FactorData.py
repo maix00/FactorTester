@@ -32,9 +32,7 @@ from typing import Optional, TYPE_CHECKING, cast
 import pandas as pd
 
 from tools.base.UniqueObject import UniqueObject
-
-if TYPE_CHECKING:
-    from tools.factors.FactorExpr import FactorExpr
+from tools.factors import FactorExpr
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -57,41 +55,45 @@ class FactorData(UniqueObject):
       fd = FactorData.get_by_hash(structural_hash)    # 按 hash 查找已有实例
     """
 
-    __slots__ = ('_source_table',)
+    __slots__ = ('_source_table', '_expr_sk')
 
-    def __new__(cls, expr: 'Optional[FactorExpr]' = None,
-                source_table: pd.DataFrame = pd.DataFrame(),
+    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None,
                 *args, **kwargs):
-        """预先计算 structural_key 作为 name，确保 __new__ 阶段即可去重。"""
-        from tools.factors.FactorExpr import FactorExpr
-
-        if expr is not None:
-            structural_key = str(expr._structural_key())
-        else:
-            structural_key = kwargs.get('name', kwargs.get('alias', 'unknown'))
-        return super().__new__(cls, name=structural_key, alias=structural_key, *args, **kwargs)
+        """预先计算 structural_key，传入 UniqueObject.__new__ 构造 2D key。"""
+        if alias is None:
+            if expr._is_intermediate and hasattr(expr, '_intermediate_name') and expr._intermediate_name is not None:
+                from tools.factors import Factor
+                if hasattr(expr, '_intermediate_factor') and expr._intermediate_factor is not None and isinstance(expr._intermediate_factor, Factor):
+                    alias = f"{expr._intermediate_name}:{expr._intermediate_factor.alias}"
+                else:
+                    alias = expr._intermediate_name
+            else:
+                alias = 'AnonymousFactorData'
+        name = f"{alias}:{expr._structural_hash()}"
+        sk = expr._structural_key()
+        return super().__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', alias), _structural_key=sk, *args, **kwargs)
 
     def __init__(self, expr: 'Optional[FactorExpr]' = None,
-                 source_table: pd.DataFrame = pd.DataFrame(),
-                 *args, **kwargs):
-        """
-        创建或复用 FactorData。
-
-        expr 为 None 时从 kwargs 的 name 重建（pickle / 反序列化路径）。
-        """
-        from tools.factors.FactorExpr import FactorExpr
-
+                 source_table: Optional[pd.DataFrame] = None, *args, **kwargs):
+        """创建或复用 FactorData。"""
         if not hasattr(self, '_initialized'):
             # 首次初始化 —— name/alias 已在 __new__ 中设置
             self._initialized = True
             self._source_table = source_table
+            # 保存表达式结构 key，供 _structural_key() 使用
+            self._expr_sk = expr._structural_key() if expr is not None else None
+        self._source_table = source_table if source_table is not None else pd.DataFrame()  # 确保 _source_table 不为 None   
 
     # ── 工厂方法 ──
 
     @classmethod
     def get_by_hash(cls, structural_hash: str) -> 'Optional[FactorData]':
-        """按结构 hash 查找已有 FactorData（跨进程可能找不到）。"""
-        return cast('Optional[FactorData]', cls.get(structural_hash))
+        """按结构 hash 字符串查找已有 FactorData（遍历 name 匹配）。"""
+        with cls._instances_lock:
+            for (name, sk), inst in cls._instances.items():
+                if name == structural_hash and inst is not None:
+                    return cast('Optional[FactorData]', inst)
+        return None
 
     @classmethod
     def clear_all(cls):
@@ -103,6 +105,16 @@ class FactorData(UniqueObject):
         with cls._alias_index_lock:
             cls._alias_index.clear()
 
+    # ── 结构 key（覆盖 UniqueObject，用于 2D key 去重） ──
+
+    def _structural_key(self):
+        """返回表达式结构 key（与创建时传入的 expr._structural_key() 一致）。"""
+        return getattr(self, '_expr_sk', None)
+    
+    def _structural_eq(self, other: 'FactorData') -> bool:
+        """结构等价比较（基于表达式结构 key）。"""
+        return self._structural_key() == other._structural_key()
+
     # ── 属性 ──
 
     @property
@@ -113,6 +125,7 @@ class FactorData(UniqueObject):
     @property
     def source_table(self) -> pd.DataFrame:
         """未对齐的原始数据。"""
+        assert self._source_table is not None, "FactorData.source_table 不得为 None"
         return self._source_table
 
     @source_table.setter

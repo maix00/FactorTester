@@ -72,16 +72,24 @@ class FactorExpr:
 
     _is_intermediate: bool = False
     _intermediate_name: 'str | None' = None
+    _intermediate_factor: Optional[FactorExpr] = None
+    _intermediate_factor_data: Any = {}
 
-    def as_intermediate(self, name: 'str | None' = None) -> 'FactorExpr':
+    def as_intermediate(self, name: 'str | None' = None, factor: Optional['FactorExpr'] = None) -> 'FactorExpr':
         """标记此表达式节点为中间因子，evaluate 时自动创建 FactorData。
 
         name: 可选名称，用于后续查询（如 'FE', 'RE'）。
               None 表示匿名中间因子（仅创建 FactorData 不做命名映射）。
         """
-        self._is_intermediate = True
-        self._intermediate_name = name
-        return self
+        factor = factor or self
+        if isinstance(self, OperandExpr) and self.op == 'neg':
+            self._is_intermediate = False
+            return CompositeExpr('neg', self.operands[0].as_intermediate(name, factor))
+        else:
+            self._is_intermediate = True
+            self._intermediate_name = name
+            self._intermediate_factor = factor
+            return self
 
     # ── 可哈希（用于 set/dict 中的依赖追踪和缓存） ──
 
@@ -126,6 +134,17 @@ class FactorExpr:
         return self
 
     def evaluate(self, *args, **kwargs) -> pd.DataFrame:
+        """求值：对给定品种集合和数据频率，计算因子值。"""
+        cache = kwargs.get('cache', None)
+        sk = self._structural_key()
+        if self._is_intermediate and cache is not None and sk in cache:
+            return cache[sk]
+        result = self._evaluate(*args, **kwargs)
+        if self._is_intermediate and cache is not None:
+            cache[sk] = result
+        return result
+    
+    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。"""
         raise NotImplementedError
 
@@ -336,75 +355,75 @@ class FactorExpr:
 
     # ── 运算符重载：自动构建 CompositeExpr ──
 
-    def __add__(self, other: Any) -> 'CompositeExpr':
+    def __add__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('add', self, _to_expr(other))
 
-    def __radd__(self, other: Any) -> 'CompositeExpr':
+    def __radd__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('add', _to_expr(other), self)
 
-    def __sub__(self, other: Any) -> 'CompositeExpr':
+    def __sub__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('sub', self, _to_expr(other))
 
-    def __rsub__(self, other: Any) -> 'CompositeExpr':
+    def __rsub__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('sub', _to_expr(other), self)
 
-    def __mul__(self, other: Any) -> 'CompositeExpr':
+    def __mul__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('mul', self, _to_expr(other))
 
-    def __rmul__(self, other: Any) -> 'CompositeExpr':
+    def __rmul__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('mul', _to_expr(other), self)
 
-    def __truediv__(self, other: Any) -> 'CompositeExpr':
+    def __truediv__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('div', self, _to_expr(other))
 
-    def __rtruediv__(self, other: Any) -> 'CompositeExpr':
+    def __rtruediv__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('div', _to_expr(other), self)
 
-    def __neg__(self) -> 'CompositeExpr':
+    def __neg__(self) -> 'FactorExpr':
         return CompositeExpr('neg', self)
 
     def __pos__(self) -> 'FactorExpr':
         return self
 
-    def __abs__(self) -> 'CompositeExpr':
+    def __abs__(self) -> 'FactorExpr':
         return CompositeExpr('abs', self)
 
-    def __gt__(self, other: Any) -> 'CompositeExpr':
+    def __gt__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('gt', self, _to_expr(other))
 
-    def __lt__(self, other: Any) -> 'CompositeExpr':
+    def __lt__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('lt', self, _to_expr(other))
 
-    def __ge__(self, other: Any) -> 'CompositeExpr':
+    def __ge__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('ge', self, _to_expr(other))
 
-    def __le__(self, other: Any) -> 'CompositeExpr':
+    def __le__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('le', self, _to_expr(other))
 
-    def __eq__(self, other: Any) -> 'CompositeExpr':  # type: ignore[override]
+    def __eq__(self, other: Any) -> 'FactorExpr':  # type: ignore[override]
         return CompositeExpr('eq', self, _to_expr(other))
 
-    def __ne__(self, other: Any) -> 'CompositeExpr':  # type: ignore[override]
+    def __ne__(self, other: Any) -> 'FactorExpr':  # type: ignore[override]
         return CompositeExpr('ne', self, _to_expr(other))
 
-    def __and__(self, other: Any) -> 'CompositeExpr':
+    def __and__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('and', self, _to_expr(other))
 
-    def __or__(self, other: Any) -> 'CompositeExpr':
+    def __or__(self, other: Any) -> 'FactorExpr':
         return CompositeExpr('or', self, _to_expr(other))
 
-    def __invert__(self) -> 'CompositeExpr':
+    def __invert__(self) -> 'FactorExpr':
         return CompositeExpr('not', self)
 
-    def __pow__(self, other: Any) -> 'CompositeExpr':
+    def __pow__(self, other: Any) -> 'FactorExpr':
         """幂运算：self ** other。"""
         return CompositeExpr('pow', self, _to_expr(other))
 
-    def max(self, other: Any) -> 'CompositeExpr':
+    def max(self, other: Any) -> 'FactorExpr':
         """逐元素最大值：max(self, other)。"""
         return CompositeExpr('bimax', self, _to_expr(other))
 
-    def min(self, other: Any) -> 'CompositeExpr':
+    def min(self, other: Any) -> 'FactorExpr':
         """逐元素最小值：min(self, other)。"""
         return CompositeExpr('bimin', self, _to_expr(other))
 
@@ -458,27 +477,27 @@ class FactorExpr:
         """前 N 期值：x.shift(1) 即昨天值。"""
         return ShiftOp('shift', periods, self)
 
-    def delta(self, period: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'CompositeExpr':
+    def delta(self, period: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'FactorExpr':
         """N 期变化量：self - self.shift(N)。"""
         return self - self.shift(period)
 
-    def log(self) -> 'CompositeExpr':
+    def log(self) -> 'FactorExpr':
         """自然对数。"""
         return CompositeExpr('log', self)
 
-    def sign(self) -> 'CompositeExpr':
+    def sign(self) -> 'FactorExpr':
         """符号函数：+1, -1, 0。"""
         return CompositeExpr('sign', self)
 
-    def abs(self) -> 'CompositeExpr':
+    def abs(self) -> 'FactorExpr':
         """绝对值。"""
         return CompositeExpr('abs', self)
 
-    def sqrt(self) -> 'CompositeExpr':
+    def sqrt(self) -> 'FactorExpr':
         """平方根。"""
         return CompositeExpr('sqrt', self)
 
-    def neg(self) -> 'CompositeExpr':
+    def neg(self) -> 'FactorExpr':
         """取负。"""
         return CompositeExpr('neg', self)
 
@@ -524,40 +543,16 @@ class OperandExpr(FactorExpr):
 
     def resolve(self, *args, **kwargs) -> 'FactorExpr':
         resolved_operands = [opnd.resolve(*args, **kwargs) for opnd in self._operands]
-        return type(self)(self.op, *resolved_operands)
+        resolved = type(self)(self.op, *resolved_operands)
+        if self._is_intermediate:
+            resolved = resolved.as_intermediate(self._intermediate_name, factor=kwargs.get('caller', None))
+        return resolved
 
     # ── 通用求值 ──
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None,
-                 *args, **kwargs) -> pd.DataFrame:
-        # ── 中间因子：先查 FactorData 全局缓存，命中则直接返回 ──
-        if self._is_intermediate:
-            from tools.factors.FactorData import FactorData
-            structural_hash = str(self._structural_key())
-            existing = FactorData.get_by_hash(structural_hash)
-            if existing is not None and existing.source_table is not None \
-                    and not existing.source_table.empty:
-                return existing.source_table
-
-        if cache is not None and self in cache:
-            return cache[self]
-
-        values = [opnd.evaluate(products=products, freq=freq, source=source,
-                    cache=cache, preloaded=preloaded)
-                  for opnd in self.operands]
-        result = self._apply_op(values)
-
-        if self._is_intermediate:
-            # 存入 FactorData（UniqueObject 去重），不在 df_cache 留副本
-            from tools.factors.FactorData import FactorData
-            FactorData(self, result)
-        elif cache is not None:
-            cache[self] = result
-
-        return result
+    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
+        values = [opnd.evaluate(*args, **kwargs) for opnd in self.operands]
+        return self._apply_op(values)
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         """子类覆盖：对已求值的 operands DataFrame 执行核心运算。"""
@@ -656,12 +651,10 @@ class ColumnRef(FactorExpr):
         else:
             return None
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
 
         from tools.data.DataMeta import DataMeta
 
@@ -694,8 +687,6 @@ class ColumnRef(FactorExpr):
         result = pd.concat(series_dict, axis=1)
         result.columns = list(series_dict.keys())
 
-        if cache is not None:
-            cache[self] = result
         return result
 
     @property
@@ -740,26 +731,14 @@ class ParamRef(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
-    def evaluate(self, *args, **kwargs) -> pd.DataFrame:
-        raise RuntimeError("ParamRef.evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
+    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
+        raise RuntimeError("ParamRef._evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
 
     def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
         """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
         from tools.parameters import DataColumnParam, FactorParam
-
-        def _strip_outer_signal_align(expr: FactorExpr) -> FactorExpr:
-            # FE 参数可直接传入已构建好的 Factor；这里剥离最外层 SignalAlign，
-            # 让 IC 在未对齐数据上计算，并尽量复用已有中间 FactorData。
-            if isinstance(expr, SignalAlign):
-                return expr.operands[0]
-            if (
-                isinstance(expr, CompositeExpr)
-                and expr.op == 'neg'
-                and len(expr.operands) == 1
-                and isinstance(expr.operands[0], SignalAlign)
-            ):
-                return CompositeExpr('neg', expr.operands[0].operands[0])
-            return expr
+        from tools.factors import Factor
+        factor: Optional['Factor'] = None
 
         if param_values is not None and self.param.alias in param_values:
             value = param_values[self.param.alias]
@@ -769,17 +748,20 @@ class ParamRef(FactorExpr):
                 if value is None:
                     resolved = ConstExpr(None)
                 else:
-                    candidate = getattr(value, '_resolved_expr', value)
-                    if not isinstance(candidate, FactorExpr):
+                    if isinstance(value, Factor):
+                        resolved = value._func_expr
+                        factor = value
+                    else:
+                        resolved = value
+                    if not isinstance(resolved, FactorExpr):
                         raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
-                    resolved = _strip_outer_signal_align(candidate)
             else:
                 resolved = ConstExpr(value)
         else:
             resolved = ConstExpr(self.param.default_value)
 
         if self._is_intermediate:
-            resolved = resolved.as_intermediate(self._intermediate_name)
+            resolved = resolved.as_intermediate(self._intermediate_name, factor=factor)
         return resolved
 
     @property
@@ -818,7 +800,7 @@ class ConstExpr(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
-    def evaluate(self, **kwargs) -> Any:
+    def _evaluate(self, **kwargs) -> Any:
         return self.value
 
     @property
@@ -961,12 +943,10 @@ class RollingOp(OperandExpr):
         parts.append(f"W{self._window_str()}")
         return "_".join(parts)
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
 
         # 先求值数据 operands（非 window）
         data_vals = [opnd.evaluate(products=products, freq=freq, source=source,
@@ -992,8 +972,6 @@ class RollingOp(OperandExpr):
                 result_parts.append(self._apply_rolling(p, *[operand_val[products_group]], freq=freq))  # type: ignore[arg-type]
             result = pd.concat(result_parts, axis=1)
 
-        if cache is not None:
-            cache[self] = result
         return result
 
 class ShiftOp(OperandExpr):
@@ -1018,12 +996,10 @@ class ShiftOp(OperandExpr):
 
     # ── evaluate：覆盖 OperandExpr 默认实现 ──
 
-    def evaluate(self, products: Sequence['Product'], freq: DataFreq,
+    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
                  source: Optional['DataSource'] = None,
                  cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None) -> pd.DataFrame:
-        if cache is not None and self in cache:
-            return cache[self]
+                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
 
         # 先求 operand（DataFrame）
         operand_val = self.operands[1].evaluate(products=products, freq=freq, source=source,
@@ -1046,8 +1022,6 @@ class ShiftOp(OperandExpr):
                 result_parts.append(operand_val[products_group].shift(int(p)))
             result = pd.concat(result_parts, axis=1)
 
-        if cache is not None:
-            cache[self] = result
         return result
 
     # ── 展示方法 ──
@@ -1337,6 +1311,87 @@ class CompositeExpr(OperandExpr):
         'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
 
+    def __new__(cls, op: str, *operands: FactorExpr, **kwargs) -> 'FactorExpr':
+        """表达式规范化：常量折叠 + 等价化简，在构造前归并。
+
+        常量折叠：所有 operand 为 ConstExpr → 直接求值为 ConstExpr。
+        等价化简：
+          - neg(neg(a))         → a
+          - neg(sub(a, b))      → sub(b, a)
+          - add(a, Const(0))    → a
+          - sub(a, Const(0))    → a
+          - mul(a, Const(1))    → a
+          - mul(a, Const(0))    → Const(0)
+          - div(a, Const(1))    → a
+          - pow(a, Const(1))    → a
+          - pow(a, Const(0))    → Const(1)
+          - sub(a, Const(c))    → add(a, Const(-c))
+          - div(a, Const(c))    → mul(a, Const(1/c))
+        """
+        # ── 常量折叠 ──
+        if operands and all(isinstance(opnd, ConstExpr) for opnd in operands):
+            values = [cast(ConstExpr, opnd).value for opnd in operands]
+            if op in cls._Ops:
+                result = cls._Ops[op]['func'](*values)
+                return ConstExpr(result)
+            if op in cls._biOps:
+                result = cls._biOps[op]['func'](*values)
+                return ConstExpr(result)
+
+        # ── 等价化简 ──
+        if op == 'neg' and len(operands) == 1:
+            inner = operands[0]
+            if isinstance(inner, CompositeExpr):
+                # neg(neg(a)) → a
+                if inner.op == 'neg':
+                    return inner.operands[0]
+                # neg(sub(a, b)) → sub(b, a)
+                if inner.op == 'sub':
+                    return CompositeExpr('sub', inner.operands[1], inner.operands[0])
+
+        # ── 身份消元 / 常量优化 ──
+        if len(operands) == 2 and isinstance(operands[1], ConstExpr):
+            c = cast(ConstExpr, operands[1]).value
+            a = operands[0]
+            if op == 'add' and c == 0:
+                return a
+            if op == 'sub' and c == 0:
+                return a
+            if op == 'mul':
+                if c == 1:
+                    return a
+                if c == 0:
+                    return ConstExpr(0)
+            if op == 'div' and c == 1:
+                return a
+            if op == 'pow':
+                if c == 1:
+                    return a
+                if c == 0:
+                    return ConstExpr(1)
+
+        # sub(a, Const(c)) → add(a, Const(-c))
+        if op == 'sub' and len(operands) == 2:
+            if isinstance(operands[1], ConstExpr):
+                v = cast(ConstExpr, operands[1]).value
+                try:
+                    neg_v = -v
+                    return cls.__new__(cls, 'add', operands[0], ConstExpr(neg_v))
+                except (TypeError, ValueError):
+                    pass
+
+        # div(a, Const(c)) → mul(a, Const(1/c))
+        if op == 'div' and len(operands) == 2:
+            if isinstance(operands[1], ConstExpr):
+                v = cast(ConstExpr, operands[1]).value
+                try:
+                    inv_v = 1.0 / v
+                    return cls.__new__(cls, 'mul', operands[0], ConstExpr(inv_v))
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+        return super().__new__(cls)
+
     def __init__(self, op: str, *operands: FactorExpr):
         super().__init__(op, *operands)
 
@@ -1583,6 +1638,9 @@ class SignalAlign(CompositeExpr):
         end_session_skip: 是否跳过盘间间隔（仅子日频生效），默认 True
         end_session_gap : 盘间间隔阈值，默认 3hours
     """
+
+    def __new__(cls, operand: FactorExpr, *args, **kwargs):
+        return super().__new__(cls, 'SIGNAL_ALIGN', operand)
 
     def __init__(self, operand: FactorExpr, signal_freq: Any,
                  basepoint: 'str|Callable' = 'last',

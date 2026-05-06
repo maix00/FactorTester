@@ -21,7 +21,7 @@ import uuid
 import pandas as pd
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple, Set
 
-from tools.factors.Factor import Factor
+from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
 from tools.factors.FactorData import FactorData
 from tools.factors.FactorExpr import (
@@ -349,13 +349,13 @@ class FactorFamily(UniqueObject, FactorExpr):
 
             # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
             if self._expr is not None:
-                func_expr = self.resolve(self._expr, param_values=param_values).as_intermediate()
+                func_expr = self.resolve(self._expr, param_values=param_values, caller=self).as_intermediate()
                 bp = getattr(self, 'basepoint', 'last')
                 dbp = getattr(self, 'daily_basepoint', None)
                 ess = getattr(self, 'end_session_skip', True)
                 esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
                 resolved_expr = SignalAlign(
-                    func_expr,
+                    operand=func_expr,
                     signal_freq=signal_freq if signal_freq is not None else '1d',
                     basepoint=bp, daily_basepoint=dbp,
                     end_session_skip=ess, end_session_gap=esg,
@@ -466,12 +466,12 @@ class FactorFamily(UniqueObject, FactorExpr):
         return self._expr  # type: ignore[return-value]
 
     @staticmethod
-    def resolve(expr: FactorExpr, param_values: dict | None = None) -> FactorExpr:
+    def resolve(expr: FactorExpr, param_values: dict | None = None, **kwargs) -> FactorExpr:
         """
         递归解析表达式树中的参数引用
         将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
-        return expr.resolve(param_values=param_values)
+        return expr.resolve(param_values=param_values, **kwargs)
 
     def func(self, products: Sequence['Product'], *args, **kwargs) -> pd.DataFrame:
         """
@@ -537,7 +537,7 @@ class FactorFamily(UniqueObject, FactorExpr):
 
         # evaluate cache：{FactorExpr → DataFrame}，递归求值时避免重复计算
         df_cache: Dict[FactorExpr, pd.DataFrame] = {}
-        result = resolved.evaluate(products, freq, source=source, preloaded=preloaded,
+        result = resolved.evaluate(products=products, freq=freq, source=source, preloaded=preloaded,
                                  cache=df_cache)
 
         # 保存未对齐的原始数据，供 Factor.source_table 使用
@@ -600,39 +600,6 @@ class FactorFamily(UniqueObject, FactorExpr):
             end_session_gap=self.end_session_gap,
         )
 
-class Returns(FactorFamily):
-    """
-    内置收益率因子族。
-
-    不再硬编码 source_freq —— 由 Factor.calc() 自动推断
-    或在 calc() 调用时通过 source_freq 参数显式指定。
-    """
-
-    @staticmethod
-    def factor_expr():
-        from tools.parameters import DataColumnParam, WindowParam, TypeParam
-        SC = DataColumnParam('SC', default_value=DataColumn.CLOSE)
-        RF = WindowParam('RF')
-        S = TypeParam('S', default_value=0)
-        return (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
-
-    def func(self, products, *args, **kwargs):
-        kwargs = self._normalize_param_kwargs(**kwargs)
-        SC = kwargs.get('SC', DataColumn.CLOSE)
-        # 根据价格列自动确定 basepoint
-        if SC in (DataColumn.OPEN, DataColumn.OPEN_ADJUSTED):
-            self.basepoint = 'first'
-        else:
-            self.basepoint = 'last'
-            self.daily_basepoint = '15:00:00'
-        # 收益率信号频率 = RF（而非独立的 F 参数）
-        # 移除可能冲突的 F/$F，用 RF 的值替代（Returns 不需要独立的 F 参数）
-        kwargs.pop('$F', None)
-        kwargs.pop('F', None)
-        if 'RF' in kwargs:
-            kwargs['F'] = kwargs['RF']
-        return super().func(products, *args, **kwargs)
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CrossSectionIC —— 统一截面 IC 因子族
@@ -650,6 +617,7 @@ class CrossSectionIC(FactorFamily):
               CLOSE/CLOSE_ADJUSTED → basepoint='last'，Lag=0（同期收益）
         RF  : 收益率计算窗口 (WindowParam)，默认 '1d'
         S   : 收益率 shift 偏移 (TypeParam)，默认自动根据 SC 决定
+        Lag : 额外 IC 对齐滞后倍数 (TypeParam, int)，默认 0
         F   : 信号频率（复用 FactorFreqParam）
 
     FE 和 RE 子表达式自动标记为 _is_intermediate，evaluate 后
@@ -679,7 +647,7 @@ class CrossSectionIC(FactorFamily):
     @staticmethod
     def factor_expr():
         """
-        FE.cs_spearman(RE.shift(-Lag))
+        FE.cs_spearman(RE.shift(-Lag * RF))
 
         FE — 被分析因子（纯因子逻辑，不含 SignalAlign）
         RE — 收益率表达式，内建：(SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
@@ -694,6 +662,7 @@ class CrossSectionIC(FactorFamily):
         #   OPEN   → S = 0 → .shift(-RF) → 下一期开盘
         #   CLOSE  → S = 1 → .shift(0)    → 同期
         S = TypeParam('S', default_value=1, typ=int)
+        Lag = TypeParam('Lag', default_value=0, typ=int)
         # RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
         RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
 
@@ -701,7 +670,7 @@ class CrossSectionIC(FactorFamily):
         FE = FE.as_intermediate('FE')
         RE = RE.as_intermediate('RE')
 
-        return FE.cs_spearman(RE)
+        return FE.cs_spearman(RE.shift(-Lag * RF))
 
     def func(self, products, *args, **kwargs):
         """

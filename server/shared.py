@@ -2,6 +2,7 @@
 Shared global state and utility functions used across all server blueprints.
 No Flask routes live here – only state, helpers, and the login_required decorator.
 """
+from typing import TYPE_CHECKING, Any, Optional
 import sys, os, importlib.util, threading, time, uuid, hashlib, hmac, secrets, re, json as _json
 from functools import wraps
 from flask import request, jsonify, render_template, session, redirect
@@ -17,6 +18,9 @@ import Settings as Settings
 import pandas as pd
 from tools import DataColumn  # noqa: F401 – side-effect import used elsewhere
 
+if TYPE_CHECKING:
+    from tools.factors import FactorTester
+
 # ─── FactorFamily singleton cache ─────────────────────────────────────────────
 _factor_family_cache: dict = {}
 _factor_family_cache_lock = threading.Lock()
@@ -24,6 +28,12 @@ _factor_family_cache_lock = threading.Lock()
 # ─── Submission list (FactorTester instances) ─────────────────────────────────
 factor_testers: list = []
 _factor_testers_lock = threading.Lock()
+def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
+    with _factor_testers_lock:
+        target_suffix = f":{alias}"
+        tester = next((t for t in factor_testers if t.alias == str(alias) or t.alias.endswith(target_suffix)), None)
+    assert tester is not None, f"{str(caller) + ': ' if caller is not None else ''}未找到对应的测试器实例"
+    return tester
 
 # ─── Global time range (updated by set_time_range route) ─────────────────────
 start_point = None
