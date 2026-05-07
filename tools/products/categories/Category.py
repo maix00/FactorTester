@@ -92,7 +92,7 @@ class Category(FinRangeParam):
                 return catname
         return 'Others'
 
-    def __mul__(self, other: 'Category', all_objects: List[UniqueObject] = []) -> 'Category':
+    def __mul__(self, other: 'Category', all_objects: List[UniqueObject] = []) -> 'Category': #type: ignore
         if isinstance(other, Category):
             all_objects = all_objects if all_objects is not None else list(set(self.objs) & set(other.objs))
             if all_objects and self.whether_contained_in(other, all_objects):
