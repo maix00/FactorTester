@@ -295,161 +295,51 @@ def get_factor_family_instance(module_name, username: str | None = None):
         cf = get_custom_factor_instance(username, module_name)
         if cf is not None:
             return cf
-        # 2b. 遍历所有自定义因子，按 name 字段匹配
+        # 2b. 遍历所有自定义因子 .py，按 class 名匹配
         cf_dir = os.path.join(_user_data_dir(username), 'custom_factors')
         if os.path.isdir(cf_dir):
             for fname in os.listdir(cf_dir):
-                if fname.endswith('.json'):
-                    try:
-                        cf_path = os.path.join(cf_dir, fname)
-                        with open(cf_path, 'r', encoding='utf-8') as f:
-                            cf_data = _json.load(f)
-                        if cf_data.get('name') == module_name:
-                            factor_id = os.path.splitext(fname)[0]
-                            cf = get_custom_factor_instance(username, factor_id)
-                            if cf is not None:
-                                return cf
-                    except Exception:
-                        pass
+                if not fname.endswith('.py'):
+                    continue
+                factor_id = os.path.splitext(fname)[0]
+                cf = get_custom_factor_instance(username, factor_id)
+                if cf is not None and cf.__class__.__name__ == module_name:
+                    return cf
 
     raise ImportError(f"Cannot load factor '{module_name}' from '{module_path}'")
 
 
 def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:
     """
-    从用户自定义因子数据动态构建一个 FactorFamily 实例。
+    从用户自定义因子 .py 文件直接 import 构建 FactorFamily 实例。
 
-    读取 data/users/{username}/custom_factors/{factor_id}.json，
-    解析 func_expr 和 params，动态创建子类。
+    读取 data/users/{username}/custom_factors/{factor_id}.py，
+    用 importlib 加载模块并实例化 FactorFamily 子类。
     """
-    # 延迟导入避免循环
-    from tools.parameters import Parameter, DataColumnParam, WindowParam, ValueSpace
-    from tools.factors.FactorExpr import FactorExpr, ColumnRef, ConstExpr, ParamRef
-    import pandas as pd
-
     cf_dir = os.path.join(_user_data_dir(username), 'custom_factors')
-    cf_path = os.path.join(cf_dir, f'{factor_id}.json')
+    cf_path = os.path.join(cf_dir, f'{factor_id}.py')
     if not os.path.exists(cf_path):
         return None
 
-    with open(cf_path, 'r', encoding='utf-8') as f:
-        cf_data = _json.load(f)
-
-    func_expr = cf_data.get('func_expr', '').strip()
-    cf_params = cf_data.get('params', [])
-    chinese_name = cf_data.get('chinese_name', '')
-    description = cf_data.get('description', '')
-    category = cf_data.get('category', '自编')
-
-    # 构建参数实例列表
-    params_list = []
-    for p_def in cf_params:
-        alias = p_def.get('alias', '')
-        p_type = p_def.get('type', '')
-        default_val = p_def.get('default')
-        p_name = p_def.get('name', alias)
-
-        if p_type == 'DataColumn':
-            from tools.data.DataColumn import DataColumn
-            # 验证 default_val 是否为有效的数据列
-            valid_dc = default_val
-            if default_val:
-                try:
-                    DataColumn(default_val)
-                except Exception:
-                    valid_dc = 'CA'  # 无效值回退到默认
-            param = DataColumnParam(alias, default_value=valid_dc or 'CA')
-        elif p_type == 'Timedelta':
-            td_space = ValueSpace.timedelta('pos')
-            param = Parameter(
-                alias=alias,
-                value_space=td_space,
-                default_value=pd.Timedelta(default_val) if default_val else pd.Timedelta('5d'),
-                desc=p_name,
-            )
-        elif p_type == 'int':
-            param = Parameter(
-                alias=alias,
-                value_space=ValueSpace.any_type(int),
-                default_value=int(default_val) if default_val is not None else 20,
-                desc=p_name,
-            )
-        elif p_type == 'float':
-            param = Parameter(
-                alias=alias,
-                value_space=ValueSpace.any_type(float),
-                default_value=float(default_val) if default_val is not None else 0.5,
-                desc=p_name,
-            )
-        elif p_type == 'bool':
-            param = Parameter(
-                alias=alias,
-                value_space=ValueSpace.any_type(bool),
-                default_value=bool(default_val) if default_val is not None else False,
-                desc=p_name,
-            )
-        elif p_type == 'str':
-            param = Parameter(
-                alias=alias,
-                value_space=ValueSpace.any_type(str),
-                default_value=str(default_val) if default_val else '',
-                desc=p_name,
-            )
-        else:
-            # 兜底：普通 Parameter
-            param = Parameter(
-                alias=alias,
-                value_space=ValueSpace.any_type(object),
-                default_value=default_val,
-                desc=p_name,
-            )
-        params_list.append(param)
-
-    # 如果 func_expr 非空，尝试 eval 构建表达式树
-    expr = None
-    if func_expr:
-        try:
-            # 安全编译并解析为表达式树
-            # 注入 ParamRef / ColumnRef 等常用名
-            ns = {
-                'ParamRef': ParamRef,
-                'ColumnRef': ColumnRef,
-                'ConstExpr': ConstExpr,
-            }
-            # 把参数别名映射为对应的 ParamRef (包装 Parameter 对象)
-            for p in params_list:
-                key = p.alias.replace('$', '')
-                ns[key] = ParamRef(p)
-                ns[p.alias] = ParamRef(p)
-            # 给 func_expr 一个默认的 'P' (如果参数中有 $P，会被覆盖)
-            if 'P' not in ns:
-                from tools.data.DataColumn import DataColumn as DC
-                ns['P'] = ParamRef(params_list[0]) if params_list else ColumnRef(DC('CA'))
-
-            compiled = compile(func_expr, '<custom_factor>', 'eval')
-            expr = eval(compiled, ns)
-        except Exception as e:
-            # func_expr 解析失败，expr 为 None，因子将无法计算但可以展示元信息
-            pass
-
-    # 动态创建 FactorFamily 子类
-    custom_cls_name = f'_Custom_{factor_id}'
-    custom_cls = type(
-        custom_cls_name,
-        (FactorFamily,),
-        {
-            'desc': chinese_name or cf_data.get('name', ''),
-            'description': description,
-            'math_expr': func_expr,
-            'params': params_list,
-            'category': category,
-            '_custom_factor_id': factor_id,
-        }
-    )
+    module_name = f'_cf_{username}_{factor_id}'
     try:
-        instance = custom_cls(alias=cf_data.get('name'), extra_params=params_list, expr=expr)
-        instance._custom_factor_data = cf_data  # type: ignore[attr-defined]
-        return instance
+        spec = importlib.util.spec_from_file_location(module_name, cf_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # 找到模块中的 FactorFamily 子类
+        factor_cls = None
+        for attr_name in dir(module):
+            obj = getattr(module, attr_name)
+            if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
+                factor_cls = obj
+                break
+        if factor_cls is None:
+            return None
+
+        return factor_cls()
     except Exception:
         return None
 

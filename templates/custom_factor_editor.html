@@ -155,6 +155,17 @@
         .toast.error { background: #d40000; }
         @keyframes toastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
 
+        /* ── tree-repr popup overlay ── */
+        .tree-repr-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .tree-repr-content {
+            background: #fff; border-radius: 10px; padding: 20px 24px;
+            max-width: 700px; max-height: 70vh; overflow: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        }
+
         /* ── 可视化模式 ── */
         .visual-layout { display: flex; flex: 1; overflow: hidden; }
         .op-palette {
@@ -253,7 +264,6 @@
                 <div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>
             </div>
             <div class="editor-footer" id="editor-footer" style="display:none">
-                <button class="btn-validate" id="btn-validate" onclick="validateExpr()">校验表达式</button>
                 <div style="flex:1"></div>
                 <button class="btn-cancel" onclick="discardEdit()">取消</button>
                 <button class="btn-save" onclick="saveFactor()">保存</button>
@@ -283,6 +293,8 @@
             await loadFactorList();
         }
 
+        let _isAdmin = false;
+
         async function loadFactorList() {
             try {
                 const res = await fetch('/custom-factors/api/list');
@@ -291,6 +303,7 @@
                 const publicF = (data.public_factors || []).map(f => ({...f, type: 'public'}));
                 _allFactors = [...custom, ...publicF];
                 _groupedFactors = groupByCamel(_allFactors);
+                _isAdmin = !!data.is_admin;
                 renderFactorList();
             } catch(e) {
                 document.getElementById('factor-list').innerHTML =
@@ -420,36 +433,55 @@
                 } catch(e) {}
                 if (!factor) return;
             } else {
-                factor = _allFactors.find(f => f.id === factorId && f.type === 'custom');
+                // 自定义因子：fetch 详情获取 source_code
+                try {
+                    const res = await fetch(`/custom-factors/api/get/${encodeURIComponent(factorId)}`);
+                    const data = await res.json();
+                    if (data.success && data.factor) {
+                        factor = data.factor;
+                        factor.type = 'custom';
+                    }
+                } catch(e) {}
                 if (!factor) return;
+            }
+            // 合并列表中的额外字段
+            const listFactor = _allFactors.find(f => f.id === factorId && f.type === _currentFactorType);
+            if (listFactor) {
+                factor.chinese_name = factor.chinese_name || listFactor.chinese_name;
+                factor.category = factor.category || listFactor.category;
+                factor.updated_at = factor.updated_at || listFactor.updated_at;
             }
             _currentFactorId = factorId;
             _isNew = false;
             _dirty = false;
             renderFactorList();
-            if (_currentFactorType === 'public') {
-                renderPublicFactorView(factor);
-            } else {
-                renderCodeEditor(factor);
-            }
+            // 自定义和公共因子都默认使用只读视图
+            renderFactorReadonlyView(factor);
         }
 
-        function renderPublicFactorView(factor) {
-            // 公共因子只读视图：左侧只读代码编辑器 + 右侧参数信息
-            document.getElementById('editor-title').textContent = `${factor.name}（公共因子 - 只读）`;
-            document.getElementById('editor-footer').style.display = '';
+        // ═══════════════════════════════════════════════════════════
+        // 因子只读视图（公共 + 自定义通用）
+        // ═══════════════════════════════════════════════════════════
+        function renderFactorReadonlyView(factor) {
+            const isPublic = factor.type === 'public';
+            const typeLabel = isPublic ? '公共因子' : '自定义因子';
+            document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel} — 只读）`;
+            document.getElementById('editor-footer').style.display = 'none';
+            const sourceCode = factor.source_code || '';
+            const descMd = factor.description || '';
+            const canDelete = !isPublic && _isAdmin;
             document.getElementById('editor-body').innerHTML = `
                 <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
                     <div class="code-area" style="display:flex; flex-direction:column;">
                         <div style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
-                            <span style="font-size:13px; color:#888;">源码 (${factor.name}.py) — 只读</span>
-                            <button class="btn-validate" id="btn-validate-public" onclick="validatePublicExpr('${escAttr(factor.name)}')"
+                            <span style="font-size:13px; color:#888;">源码 (${escHtml(factor.name)}.py) — 只读</span>
+                            <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic})"
                                 style="font-size:12px; padding:4px 12px;">校验表达式树</button>
                         </div>
-                        <textarea readonly style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
+                        <textarea readonly id="code-source-readonly" style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
                             padding:12px; font-family:'SF Mono','Fira Code',monospace; font-size:12px;
-                            line-height:1.5; resize:none; background:#fafbfc; color:#555;">${escHtml(factor.func_expr || '')}</textarea>
-                        <div id="public-tree-repr" style="margin-top:6px; display:none; background:#f0f4f8; border:1px solid #e2e8f0;
+                            line-height:1.5; resize:none; background:#fafbfc; color:#555;">${escHtml(sourceCode)}</textarea>
+                        <div id="readonly-tree-repr" style="margin-top:6px; display:none; background:#f0f4f8; border:1px solid #e2e8f0;
                             border-radius:6px; padding:10px 14px; font-family:'SF Mono','Fira Code',monospace;
                             font-size:12px; color:#333; max-height:180px; overflow:auto; white-space:pre; line-height:1.5;"></div>
                     </div>
@@ -457,8 +489,9 @@
                 <div class="config-pane">
                     <div class="config-section">
                         <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
-                        ${factor.description ? `<p style="color:#666;font-size:13px;margin-top:4px;">${escHtml(factor.description)}</p>` : ''}
+                        ${descMd ? `<div class="markdown-desc" style="color:#555;font-size:13px;margin-top:4px;line-height:1.6;">${renderMarkdownInline(descMd)}</div>` : ''}
                     </div>
+                    ${(factor.params && factor.params.length > 0) ? `
                     <div class="config-section">
                         <h3>参数列表</h3>
                         <table style="width:100%; border-collapse:collapse;">
@@ -468,7 +501,7 @@
                                 <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">默认值</th>
                             </tr></thead>
                             <tbody>
-                                ${(factor.params || []).map(p => `
+                                ${factor.params.map(p => `
                                     <tr>
                                         <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(p.alias)}</td>
                                         <td style="padding:6px;border-bottom:1px solid #eee;color:#888;">${escHtml(p.type || '—')}</td>
@@ -478,27 +511,51 @@
                             </tbody>
                         </table>
                     </div>
+                    ` : ''}
                     <div class="config-section">
                         <button class="btn-validate" onclick="openParamConfigDrawer('${escAttr(factor.name)}')"
                             style="width:100%; padding:8px; font-size:13px;">⚙️ 参数配置</button>
                     </div>
-                    <p style="margin-top:12px;color:#999;font-size:12px;">
-                        💡 公共因子不可编辑。可以使用「参数配置」管理该因子的参数预设。
-                    </p>
+                    <div style="margin-top:12px;">
+                        ${(!isPublic || _isAdmin) ? `<button class="btn-edit-public" onclick="enterEditMode('${escAttr(factor.name)}', ${isPublic})"
+                            style="width:100%; padding:8px; font-size:13px; background:#4a90d9; color:#fff; border:none; border-radius:6px; cursor:pointer;">✏️ 编辑源码</button>` : ''}
+                        ${canDelete ? `<button class="btn-delete-factor" onclick="deleteFactor('${escAttr(factor.id)}')"
+                            style="width:100%; padding:8px; font-size:13px; background:#d40000; color:#fff; border:none; border-radius:6px; cursor:pointer; margin-top:6px;">🗑 删除因子</button>` : ''}
+                        ${isPublic ? '<p style="margin-top:8px;color:#999;font-size:12px;">💡 公共因子不可删除。</p>' : ''}
+                    </div>
                 </div>
             `;
         }
 
-        // 公共因子表达式树校验
-        async function validatePublicExpr(factorName) {
+        // 进入编辑模式（从只读视图切到代码编辑器）
+        function enterEditMode(factorName, isPublic) {
+            // 直接进入编辑器：已有 factor 在 _currentFactorId 中，fetch 最新源码
+            const fetchUrl = isPublic
+                ? `/custom-factors/api/public-factor/${encodeURIComponent(factorName)}`
+                : `/custom-factors/api/get/${encodeURIComponent(_currentFactorId)}`;
+            fetch(fetchUrl)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.factor) {
+                        data.factor.type = isPublic ? 'public' : 'custom';
+                        // 如果是公共因子，允许管理员保存为自定义副本（不能覆盖公共）
+                        renderCodeEditor(data.factor);
+                        document.getElementById('editor-title').textContent =
+                            `${factorName}（${isPublic ? '公共因子' : '自定义因子'} — 编辑模式）`;
+                    }
+                });
+        }
+
+        // 只读视图的校验
+        async function validateReadonlyExpr(factorName, isPublic) {
             const btn = document.getElementById('btn-validate-public');
-            const treeDiv = document.getElementById('public-tree-repr');
+            const treeDiv = document.getElementById('readonly-tree-repr');
             btn.textContent = '校验中...';
             btn.className = 'btn-validate';
             try {
                 const res = await fetch('/custom-factors/api/validate', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ factor_name: factorName, is_public: true })
+                    body: JSON.stringify({ factor_name: factorName, is_public: isPublic })
                 });
                 const data = await res.json();
                 if (data.valid && data.tree_repr) {
@@ -517,6 +574,46 @@
             }
         }
 
+        // 删除自定义因子
+        async function deleteFactor(factorId) {
+            if (!confirm('确定删除此因子？此操作不可恢复！')) return;
+            try {
+                const res = await fetch('/custom-factors/api/delete/' + factorId, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('因子已删除', 'success');
+                    _currentFactorId = null;
+                    _isNew = false;
+                    _dirty = false;
+                    await loadFactorList();
+                    document.getElementById('editor-body').innerHTML =
+                        '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
+                    document.getElementById('editor-footer').style.display = 'none';
+                    document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch(e) {
+                showToast('网络错误', 'error');
+            }
+        }
+
+        // 简易 Markdown → HTML 内联转换
+        function renderMarkdownInline(md) {
+            if (!md) return '';
+            let html = escHtml(md);
+            // 粗体 **text**
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            // 斜体 *text*
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            // 行内代码 `code`
+            html = html.replace(/`(.+?)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-family:monospace;">$1</code>');
+            // 换行 → <br>
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = html.replace(/\n/g, '<br>');
+            return '<p>' + html + '</p>';
+        }
+
         function createNew() {
             _currentFactorId = null;
             _isNew = true;
@@ -524,7 +621,7 @@
             renderFactorList();
             renderCodeEditor({
                 name: '', chinese_name: '', description: '', category: '自编',
-                func_expr: '', params: [], base_on: ''
+                source_code: '', type: 'custom'
             });
         }
 
@@ -552,127 +649,160 @@
             const body = document.getElementById('editor-body');
             const footer = document.getElementById('editor-footer');
             const title = document.getElementById('editor-title');
-            title.textContent = _isNew ? '新建因子' : (factor.name || '未命名因子');
+            const isPublic = factor.type === 'public';
+            if (isPublic) {
+                title.textContent = `${factor.name}（公共因子 — 编辑模式）`;
+            } else {
+                title.textContent = _isNew ? '新建因子' : (factor.name || '未命名因子');
+            }
             footer.style.display = '';
             _currentMode = 'code';
 
-
-            const params = factor.params || [];
+            const sourceCode = factor.source_code || '';
+            const desc = factor.description || '';
+            const cn = factor.chinese_name || '';
+            const cat = factor.category || '自编';
 
             body.innerHTML = `
-                <div class="code-pane">
-                    <div class="code-area">
-                        <textarea id="code-expr" placeholder="输入 func_expr...&#10;&#10;例: P.delta('$F') / P.shift('$F')&#10;     P * (1 + cs_rank(REF(DELTA($F))))"
-                            oninput="_dirty=true">${escHtml(factor.func_expr || '')}</textarea>
+                <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
+                    <div class="code-area" style="display:flex; flex-direction:column;">
+                        <div style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:13px; color:#888;">Python 源码编辑器</span>
+                            <div>
+                                <button class="btn-validate" id="btn-validate-custom" onclick="validateCustomExpr('${escAttr(factor.name || factor.id)}')"
+                                    style="font-size:12px; padding:4px 12px; margin-right:4px;">校验表达式树</button>
+                                <button class="btn-validate" onclick="insertTemplate('factor_class')"
+                                    style="font-size:12px; padding:4px 8px;">📋 模板</button>
+                            </div>
+                        </div>
+                        <textarea id="code-source" placeholder="输入完整 Python class 源码..." oninput="_dirty=true"
+                            style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
+                            padding:12px; font-family:'SF Mono','Fira Code',monospace; font-size:12px;
+                            line-height:1.5; resize:none; background:#fff;">${escHtml(sourceCode)}</textarea>
                     </div>
                 </div>
                 <div class="config-pane">
                     <div class="config-section">
                         <h3>基本信息</h3>
                         <div class="field">
-                            <label>因子名称（英文）</label>
-                            <input type="text" id="cfg-name" value="${escHtml(factor.name || '')}" placeholder="如 MyMomentum" oninput="_dirty=true">
-                        </div>
-                        <div class="field">
                             <label>中文名称</label>
-                            <input type="text" id="cfg-cn" value="${escHtml(factor.chinese_name || '')}" placeholder="如 我的动量因子" oninput="_dirty=true">
+                            <input type="text" id="cfg-cn" value="${escHtml(cn)}" placeholder="如 我的动量因子" oninput="_dirty=true">
                         </div>
                         <div class="field">
                             <label>分类</label>
-                            <input type="text" id="cfg-cat" value="${escHtml(factor.category || '自编')}" placeholder="如 动量" oninput="_dirty=true">
+                            <input type="text" id="cfg-cat" value="${escHtml(cat)}" placeholder="如 动量" oninput="_dirty=true">
                         </div>
                         <div class="field">
                             <label>描述 (Markdown)</label>
-                            <textarea id="cfg-desc" oninput="_dirty=true">${escHtml(factor.description || '')}</textarea>
+                            <textarea id="cfg-desc" oninput="_dirty=true">${escHtml(desc)}</textarea>
                         </div>
                     </div>
 
                     <div class="config-section">
-                        <h3>参数定义</h3>
-                        <div id="params-container"></div>
-                        <button class="btn-add-param" onclick="addParam()">+ 添加参数</button>
+                        <h3>算子/参数面板</h3>
+                        <p style="font-size:11px; color:#999; margin-bottom:8px;">点击插入到源码末尾</p>
+                        ${renderOperatorPalette()}
+                    </div>
+
+                    <div class="config-section" style="margin-top:8px;">
+                        <button class="btn-validate" onclick="openParamConfigDrawer('${escAttr(factor.name || factor.id)}')"
+                            style="width:100%; padding:8px; font-size:13px;">⚙️ 参数配置</button>
                     </div>
                 </div>
             `;
 
-            // 渲染参数列表
-            renderParams(params);
-
-            // 更新校验按钮
-            document.getElementById('btn-validate').className = 'btn-validate';
-            document.getElementById('btn-validate').textContent = '校验表达式';
-        }
-
-        function renderParams(params) {
-            const container = document.getElementById('params-container');
-            if (!container) return;
-            container.innerHTML = '';
-            params.forEach((p, i) => {
-                const row = document.createElement('div');
-                row.className = 'param-row';
-                row.innerHTML = `
-                    <input type="text" value="${escHtml(p.alias || '')}" placeholder="别名" style="width:70px" data-idx="${i}" data-field="alias" oninput="_dirty=true">
-                    <input type="text" value="${escHtml(p.name || '')}" placeholder="参数名" style="flex:1" data-idx="${i}" data-field="name" oninput="_dirty=true">
-                    <select data-idx="${i}" data-field="type" oninput="_dirty=true; updateParamDefault(${i})">
-                        <option value="DataColumn" ${p.type==='DataColumn'?'selected':''}>数据列</option>
-                        <option value="Timedelta" ${p.type==='Timedelta'?'selected':''}>时间窗口</option>
-                        <option value="int" ${p.type==='int'?'selected':''}>整数</option>
-                        <option value="float" ${p.type==='float'?'selected':''}>浮点数</option>
-                        <option value="bool" ${p.type==='bool'?'selected':''}>布尔</option>
-                        <option value="str" ${p.type==='str'?'selected':''}>字符串</option>
-                    </select>
-                    <input type="text" value="${escHtml(String(p.default ?? ''))}" placeholder="默认值" style="width:80px" data-idx="${i}" data-field="default" oninput="_dirty=true">
-                    <button class="btn-remove-param" onclick="removeParam(${i})" title="删除">×</button>
-                `;
-                container.appendChild(row);
-            });
-        }
-
-        function getCurrentParams() {
-            const container = document.getElementById('params-container');
-            if (!container) return [];
-            const params = [];
-            const rows = container.querySelectorAll('.param-row');
-            rows.forEach(row => {
-                const alias = row.querySelector('[data-field="alias"]')?.value || '';
-                const name = row.querySelector('[data-field="name"]')?.value || '';
-                const type = row.querySelector('[data-field="type"]')?.value || 'str';
-                const defVal = row.querySelector('[data-field="default"]')?.value || '';
-                params.push({ alias, name, type, default: coerceDefault(defVal, type) });
-            });
-            return params;
-        }
-
-        function coerceDefault(val, type) {
-            if (val === '' || val === undefined) return null;
-            if (type === 'int') return parseInt(val) || 0;
-            if (type === 'float') return parseFloat(val) || 0.0;
-            if (type === 'bool') return val === 'true' || val === 'True' || val === '1';
-            if (type === 'DataColumn') {
-                return /^[A-Z]{1,2}$/.test(val) ? val.toUpperCase() : 'CA';
+            // 重置自定义校验按钮
+            const btnCustom = document.getElementById('btn-validate-custom');
+            if (btnCustom) {
+                btnCustom.className = 'btn-validate';
+                btnCustom.textContent = '校验表达式树';
             }
-            return val;
         }
 
-        function updateParamDefault(idx) {
-            // placeholders for future use
+        // ═══════════════════════════════════════════════════════════
+        // 算子/参数面板
+        // ═══════════════════════════════════════════════════════════
+        function renderOperatorPalette() {
+            const categories = [
+                {
+                    title: '📦 导入语句',
+                    items: [
+                        { label: '基础导入', code: 'from tools.factors import FactorFamily\nfrom tools.factors import FactorExpr' },
+                        { label: '完整导入', code: 'from tools.factors import FactorExpr, FactorFamily\nfrom tools.factors.parameters import DataColumnParam, WindowParam' },
+                    ]
+                },
+                {
+                    title: '🔧 参数定义模板',
+                    items: [
+                        { label: 'DataColumn 参数', code: '# $F: 标的字段\n# $N: 窗口参数\nF = DataColumnParam("$F")\nN = WindowParam("$N")' },
+                        { label: '窗口参数', code: 'N = WindowParam("$N", default=20)' },
+                        { label: '多参数模板', code: '# 参数定义\nF = DataColumnParam("$F")\nN1 = WindowParam("$N1", default=5)\nN2 = WindowParam("$N2", default=20)' },
+                    ]
+                },
+                {
+                    title: '⏱ 时序算子',
+                    items: [
+                        { label: 'MA - 移动平均', code: 'res = MA(P, N)' },
+                        { label: 'STD - 标准差', code: 'res = STD(P, N)' },
+                        { label: 'REF - 前移', code: 'res = REF(P, N)' },
+                        { label: 'DELTA - 差分', code: 'res = DELTA(P, N)' },
+                        { label: 'LOG - 对数', code: 'res = LOG(P)' },
+                        { label: 'ABS - 绝对值', code: 'res = ABS(P)' },
+                        { label: 'RANK - 时序排名', code: 'res = RANK(P, N)' },
+                        { label: 'MAX - 滚动最大值', code: 'res = MAX(P, N)' },
+                        { label: 'MIN - 滚动最小值', code: 'res = MIN(P, N)' },
+                        { label: 'SUM - 滚动求和', code: 'res = SUM(P, N)' },
+                        { label: 'PROD - 滚动乘积', code: 'res = PROD(P, N)' },
+                        { label: 'EMA - 指数移动平均', code: 'res = EMA(P, N)' },
+                    ]
+                },
+                {
+                    title: '📊 截面算子',
+                    items: [
+                        { label: 'CS_RANK - 截面排名', code: 'res = CS_RANK(P)' },
+                        { label: 'CS_ZSCORE - 截面标准化', code: 'res = CS_ZSCORE(P)' },
+                        { label: 'CS_DEMEAN - 截面去均值', code: 'res = CS_DEMEAN(P)' },
+                        { label: 'CS_NORM - 截面归一化', code: 'res = CS_NORM(P)' },
+                    ]
+                },
+                {
+                    title: '🔗 组合/辅助',
+                    items: [
+                        { label: 'as_intermediate', code: '.as_intermediate()' },
+                        { label: 'return 语句', code: 'return res' },
+                        { label: '运算表达式', code: 'res = (P.delta("$F") / P.shift("$F")) * (1 + cs_rank(REF(DELTA($F))))' },
+                    ]
+                },
+            ];
+
+            let html = '';
+            categories.forEach(cat => {
+                html += `<div style="margin-bottom:8px;">
+                    <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:#555;">${cat.title}</div>`;
+                cat.items.forEach(item => {
+                    html += `<button class="btn-palette-item" onclick="insertSnippet(\`${escAttr(item.code)}\`)"
+                        style="display:block; width:100%; text-align:left; padding:4px 8px; margin-bottom:2px;
+                        border:1px solid #e2e8f0; border-radius:4px; background:#fff; cursor:pointer;
+                        font-size:11px; font-family:monospace; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+                        title="${escHtml(item.code)}">${escHtml(item.label)}</button>`;
+                });
+                html += `</div>`;
+            });
+            return html;
         }
 
-        function addParam() {
-            const container = document.getElementById('params-container');
-            if (!container) return;
-            const params = getCurrentParams();
-            params.push({ alias: '$P' + (params.length+1), name: '', type: 'Timedelta', default: '5d' });
-            renderParams(params);
-            _dirty = true;
-        }
-
-        function removeParam(idx) {
-            const container = document.getElementById('params-container');
-            if (!container) return;
-            const params = getCurrentParams();
-            params.splice(idx, 1);
-            renderParams(params);
+        function insertSnippet(code) {
+            const ta = document.getElementById('code-source');
+            if (!ta) return;
+            // 在光标位置插入，或追加到末尾
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const before = ta.value.substring(0, start);
+            const after = ta.value.substring(end);
+            const needsNewline = before.length > 0 && !before.endsWith('\n');
+            ta.value = before + (needsNewline ? '\n' : '') + code + after;
+            ta.focus();
+            ta.selectionStart = ta.selectionEnd = start + (needsNewline ? 1 : 0) + code.length;
             _dirty = true;
         }
 
@@ -680,20 +810,24 @@
         // 校验 / 保存 / 取消
         // ═══════════════════════════════════════════════════════════
 
-        async function validateExpr() {
-            const funcExpr = document.getElementById('code-expr')?.value || '';
-            const btn = document.getElementById('btn-validate');
+        async function validateCustomExpr(factorName) {
+            const sourceCode = document.getElementById('code-source')?.value || '';
+            const btn = document.getElementById('btn-validate-custom');
+            if (!btn) return;
             btn.textContent = '校验中...';
             btn.className = 'btn-validate';
             try {
                 const res = await fetch('/custom-factors/api/validate', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ func_expr: funcExpr })
+                    body: JSON.stringify({ source_code: sourceCode, factor_name: factorName })
                 });
                 const data = await res.json();
                 if (data.valid) {
-                    btn.textContent = '✓ 表达式语法正确';
+                    btn.textContent = '✓ 校验通过';
                     btn.className = 'btn-validate ok';
+                    if (data.tree_repr) {
+                        showTreeReprPopup(factorName, data.tree_repr);
+                    }
                 } else {
                     btn.textContent = '✗ ' + (data.error || '无效');
                     btn.className = 'btn-validate err';
@@ -704,17 +838,26 @@
             }
         }
 
+        function showTreeReprPopup(factorName, treeRepr) {
+            // 移除旧的
+            const old = document.querySelector('.tree-repr-overlay');
+            if (old) old.remove();
+            const overlay = document.createElement('div');
+            overlay.className = 'tree-repr-overlay';
+            overlay.innerHTML = `<div class="tree-repr-content"><pre style="white-space:pre-wrap; font-size:13px; line-height:1.6;">${escHtml(treeRepr)}</pre><button style="margin-top:10px; padding:6px 16px;" onclick="this.closest('.tree-repr-overlay').remove()">关闭</button></div>`;
+            overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+            document.body.appendChild(overlay);
+        }
+
         async function saveFactor() {
-            const name = document.getElementById('cfg-name')?.value?.trim() || '';
             const chinese_name = document.getElementById('cfg-cn')?.value?.trim() || '';
             const description = document.getElementById('cfg-desc')?.value?.trim() || '';
             const category = document.getElementById('cfg-cat')?.value?.trim() || '自编';
-            const func_expr = document.getElementById('code-expr')?.value?.trim() || '';
-            const params = getCurrentParams();
+            const source_code = document.getElementById('code-source')?.value?.trim() || '';
 
-            if (!name) { showToast('请输入因子名称', 'error'); return; }
+            if (!source_code) { showToast('请输入源码', 'error'); return; }
 
-            const payload = { name, chinese_name, description, category, func_expr, params };
+            const payload = { source_code, chinese_name, description, category };
 
             try {
                 let res;
@@ -736,7 +879,9 @@
                     _isNew = false;
                     showToast('保存成功', 'success');
                     await loadFactorList();
-                    renderCodeEditor(data.factor);
+                    // 重新 fetch 因子数据并渲染编辑器
+                    const factor = data.factor;
+                    renderCodeEditor(factor);
                 } else {
                     showToast(data.error || '保存失败', 'error');
                 }
@@ -1093,16 +1238,19 @@
         // ═══════════════════════════════════════════════════════════
 
         let _paramConfigFFAlias = '';
-        let _paramConfigTplId = null;        // 当前选中的模板 ID
-        let _paramConfigTplName = '';        // 当前选中模板名称
-        let _paramConfigParams = [];         // [{alias, value}, ...]
-        let _paramConfigTemplates = [];      // 全部模板列表
+        let _paramConfigParamAliases = [];    // 因子定义的参数别名（列头），如 ['P','N','RF']
+        let _paramConfigRows = [];            // [{alias: value, ...}, ...] 每个对象是一个因子实例
+        let _paramConfigTplId = null;         // 当前选中的模板 ID
+        let _paramConfigTplName = '';         // 当前选中模板名称
+        let _paramConfigTemplates = [];       // 全部模板列表
+        let _paramConfigDragSrcIdx = null;    // 拖拽源索引
 
         function openParamConfigDrawer(factorName) {
             _paramConfigFFAlias = factorName;
             _paramConfigTplId = null;
             _paramConfigTplName = '';
-            _paramConfigParams = [];
+            _paramConfigParamAliases = [];
+            _paramConfigRows = [];
             document.getElementById('param-config-ff-name').textContent = '因子: ' + factorName;
             document.getElementById('param-config-drawer').classList.add('open');
             document.getElementById('user-badge').style.display = 'none';
@@ -1121,9 +1269,45 @@
             document.getElementById('param-config-tpl-select').value = '';
             document.getElementById('param-config-tpl-status').textContent = '';
             document.getElementById('param-config-tbody').innerHTML = '';
+            document.getElementById('param-config-thead').innerHTML = '';
+        }
+
+        // 从因子列表获取参数别名和默认行
+        function getFactorDef(factorName) {
+            if (!_allFactors) return null;
+            // 先查找公共因子，再查找自定义因子
+            let pf = _allFactors.find(f => f.id === factorName && f.type === 'public');
+            if (!pf) pf = _allFactors.find(f => f.id === factorName && f.type === 'custom');
+            return pf || null;
+        }
+
+        function loadParamConfigParamAliases() {
+            const def = getFactorDef(_paramConfigFFAlias);
+            if (def && def.params && def.params.length) {
+                _paramConfigParamAliases = def.params.map(p => p.alias);
+            } else {
+                _paramConfigParamAliases = [];
+            }
+            _paramConfigRows = [];
+        }
+
+        function getDefaultRow() {
+            const def = getFactorDef(_paramConfigFFAlias);
+            const row = {};
+            _paramConfigParamAliases.forEach(alias => {
+                if (def && def.params) {
+                    const pd = def.params.find(p => p.alias === alias);
+                    row[alias] = pd ? String(pd.default ?? '') : '';
+                } else {
+                    row[alias] = '';
+                }
+            });
+            return row;
         }
 
         async function loadParamConfigTemplates() {
+            loadParamConfigParamAliases();
+            _paramConfigRows = [];
             try {
                 const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias));
                 const data = await resp.json();
@@ -1132,52 +1316,43 @@
                     const sel = document.getElementById('param-config-tpl-select');
                     sel.innerHTML = '<option value="">— 选择模板 —</option>' +
                         data.templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
-                    loadParamConfigDefaultParams();
-                } else {
-                    loadParamConfigDefaultParams();
                 }
             } catch(e) {
                 console.error('加载模板列表失败:', e);
-                loadParamConfigDefaultParams();
             }
-        }
-
-        // 从当前因子获取默认参数
-        async function loadParamConfigDefaultParams() {
-            try {
-                let params = [];
-                if (_allFactors) {
-                    const pf = _allFactors.find(f => f.id === _paramConfigFFAlias && f.type === 'public');
-                    if (pf && pf.params) {
-                        params = pf.params.map(p => ({ alias: p.alias, value: String(p.default ?? '') }));
-                    }
-                }
-                _paramConfigParams = params;
-                renderParamConfigTable();
-            } catch(e) {
-                _paramConfigParams = [];
-                renderParamConfigTable();
-            }
+            renderParamConfigTable();
         }
 
         function renderParamConfigTable() {
+            const thead = document.getElementById('param-config-thead');
             const tbody = document.getElementById('param-config-tbody');
+
+            // 构建表头
+            thead.innerHTML = '<tr>' +
+                '<th style="min-width:100px;">因子(家族)名</th>' +
+                _paramConfigParamAliases.map(a => `<th>${escHtml(a)}</th>`).join('') +
+                '<th style="min-width:80px;">操作</th>' +
+                '</tr>';
+
+            // 构建行
             tbody.innerHTML = '';
-            _paramConfigParams.forEach((p, i) => {
+            _paramConfigRows.forEach((row, i) => {
                 const tr = document.createElement('tr');
                 tr.draggable = true;
                 tr.dataset.idx = i;
-                tr.innerHTML = `
-                    <td style="padding:6px; font-family:monospace; text-align:center;">${escHtml(p.alias)}</td>
-                    <td style="padding:6px; text-align:center;">
-                        <input type="text" value="${escHtml(p.value)}" data-idx="${i}" data-field="value"
-                            style="width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:4px; font-size:13px; text-align:center; box-sizing:border-box;"
-                            oninput="updateParamConfigValue(${i}, this.value)">
-                    </td>
-                    <td style="padding:6px; text-align:center;">
-                        <button class="param-btn param-btn-danger" style="padding:2px 8px; font-size:12px;" onclick="deleteParamConfigRow(${i})">删除</button>
-                    </td>
-                `;
+                let cells = `<td>${escHtml(_paramConfigFFAlias)}</td>`;
+                _paramConfigParamAliases.forEach(alias => {
+                    const val = row[alias] !== undefined ? row[alias] : '';
+                    cells += `<td style="padding:0;">
+                        <input type="text" value="${escHtml(val)}" data-idx="${i}" data-alias="${escHtml(alias)}"
+                            style="width:100%; min-width:50px; max-width:140px; padding:8px 6px; border:1px solid #ccc; border-radius:4px; font-size:13px; text-align:center; box-sizing:border-box;"
+                            oninput="updateParamConfigCell(${i}, '${escAttr(alias)}', this.value)">
+                    </td>`;
+                });
+                cells += `<td style="padding:6px; text-align:center;">
+                    <button class="param-btn param-btn-danger" style="padding:2px 8px; font-size:12px;" onclick="deleteParamConfigRow(${i})">删除</button>
+                </td>`;
+                tr.innerHTML = cells;
                 // 拖拽事件
                 tr.addEventListener('dragstart', onParamConfigDragStart);
                 tr.addEventListener('dragover', onParamConfigDragOver);
@@ -1186,57 +1361,87 @@
                 tr.addEventListener('dragend', onParamConfigDragEnd);
                 tbody.appendChild(tr);
             });
+
+            // 底部新增行
+            const addTr = document.createElement('tr');
+            addTr.id = 'param-config-add-row';
+            let addCells = `<td>${escHtml(_paramConfigFFAlias)}</td>`;
+            _paramConfigParamAliases.forEach(alias => {
+                addCells += `<td style="padding:0;">
+                    <input type="text" id="param-config-add-${escHtml(alias)}"
+                        style="width:100%; min-width:50px; max-width:140px; padding:8px 6px; border:1px solid #ccc; border-radius:4px; font-size:13px; text-align:center; box-sizing:border-box;"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();addParamConfigRow()}">
+                </td>`;
+            });
+            addCells += `<td style="padding:6px; text-align:center;">
+                <button class="param-btn" style="padding:2px 12px; font-size:12px;" onclick="addParamConfigRow()">新增</button>
+            </td>`;
+            addTr.innerHTML = addCells;
+            tbody.appendChild(addTr);
         }
 
-        function updateParamConfigValue(idx, val) {
-            if (_paramConfigParams[idx]) {
-                _paramConfigParams[idx].value = val;
+        function updateParamConfigCell(idx, alias, val) {
+            if (_paramConfigRows[idx] !== undefined) {
+                _paramConfigRows[idx][alias] = val;
             }
         }
 
         function addParamConfigRow() {
-            const alias = prompt('参数别名（如 P、F、N）:');
-            if (!alias) return;
-            _paramConfigParams.push({ alias: alias.replace(/\s+/g, ''), value: '' });
+            const row = {};
+            _paramConfigParamAliases.forEach(alias => {
+                const input = document.getElementById('param-config-add-' + alias);
+                row[alias] = input ? input.value : '';
+            });
+            _paramConfigRows.push(row);
+            // 清空新增行输入框
+            _paramConfigParamAliases.forEach(alias => {
+                const input = document.getElementById('param-config-add-' + alias);
+                if (input) input.value = '';
+            });
             renderParamConfigTable();
         }
 
         function deleteParamConfigRow(idx) {
-            _paramConfigParams.splice(idx, 1);
+            _paramConfigRows.splice(idx, 1);
             renderParamConfigTable();
         }
 
         // ── 拖拽 ──
-        let _paramConfigDragSrcIdx = null;
-
         function onParamConfigDragStart(e) {
             _paramConfigDragSrcIdx = parseInt(e.currentTarget.dataset.idx);
             e.dataTransfer.effectAllowed = 'move';
         }
-
         function onParamConfigDragOver(e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             e.currentTarget.classList.add('drag-over');
         }
-
         function onParamConfigDragLeave(e) {
             e.currentTarget.classList.remove('drag-over');
         }
-
         function onParamConfigDrop(e) {
             e.preventDefault();
             e.currentTarget.classList.remove('drag-over');
             const dstIdx = parseInt(e.currentTarget.dataset.idx);
             if (_paramConfigDragSrcIdx !== null && _paramConfigDragSrcIdx !== dstIdx) {
-                const item = _paramConfigParams.splice(_paramConfigDragSrcIdx, 1)[0];
-                _paramConfigParams.splice(dstIdx, 0, item);
+                const item = _paramConfigRows.splice(_paramConfigDragSrcIdx, 1)[0];
+                _paramConfigRows.splice(dstIdx, 0, item);
                 renderParamConfigTable();
             }
         }
-
         function onParamConfigDragEnd(e) {
             _paramConfigDragSrcIdx = null;
+        }
+
+        // ── 构建 params_list (供模板保存使用) ──
+        function buildParamConfigParamsList() {
+            return _paramConfigRows.map(row => {
+                const params = {};
+                _paramConfigParamAliases.forEach(alias => {
+                    params[alias] = row[alias] !== undefined ? row[alias] : '';
+                });
+                return params;
+            });
         }
 
         // ── 模板按钮事件 ──
@@ -1270,7 +1475,11 @@
                 const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId);
                 const data = await resp.json();
                 if (data.success && data.template && data.template.params_list) {
-                    _paramConfigParams = data.template.params_list.map(p => ({ alias: p.alias, value: String(p.value ?? '') }));
+                    _paramConfigRows = data.template.params_list.map(obj => {
+                        const row = {};
+                        _paramConfigParamAliases.forEach(alias => { row[alias] = obj[alias] !== undefined ? String(obj[alias]) : ''; });
+                        return row;
+                    });
                     renderParamConfigTable();
                     document.getElementById('param-config-tpl-status').textContent = '✓ 已加载';
                 }
@@ -1287,7 +1496,7 @@
                 const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name, params_list: _paramConfigParams })
+                    body: JSON.stringify({ name: name, params_list: buildParamConfigParamsList() })
                 });
                 const data = await resp.json();
                 if (data.success) {
@@ -1312,7 +1521,7 @@
                 const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ params_list: _paramConfigParams })
+                    body: JSON.stringify({ params_list: buildParamConfigParamsList() })
                 });
                 const data = await resp.json();
                 if (data.success) {
@@ -1367,7 +1576,7 @@
                         const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: newName, params_list: _paramConfigParams })
+                            body: JSON.stringify({ name: newName, params_list: buildParamConfigParamsList() })
                         });
                         if ((await resp.json()).success) {
                             _paramConfigTplName = newName;
@@ -1387,42 +1596,38 @@
         <div class="settings-drawer-panel">
             <button class="drawer-close-btn" onclick="closeParamConfigDrawer()">✕ 关闭</button>
             <div id="param-config-content">
-                <div class="section-title" style="font-size:15px; font-weight:600; margin-bottom:12px;">⚙️ 参数配置</div>
+                <div class="section-title" style="font-size:15px; font-weight:600; margin-bottom:0;">⚙️ 参数配置</div>
+                <div style="font-size:13px; color:#888; margin-bottom:12px;" id="param-config-ff-name"></div>
+
+                <!-- 模板管理区（无导入模板部件） -->
                 <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
-                    <span style="font-size:13px; color:#555;" id="param-config-ff-name"></span>
                     <select id="param-config-tpl-select" style="flex:1; min-width:120px; font-size:13px; padding:3px 6px; border:1px solid #ddd; border-radius:5px;">
                         <option value="">— 选择模板 —</option>
                     </select>
                 </div>
-                <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px; flex-wrap:wrap;">
-                    <span id="param-config-tpl-name-label" title="双击重命名" style="display:none; font-size:13px; color:#0078d4; cursor:pointer; padding:2px 4px; border-radius:4px; border:1px dashed transparent; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
+                    <span id="param-config-tpl-name-label" title="双击重命名" style="display:none; font-size:13px; color:#0078d4; cursor:pointer; padding:2px 6px; border-radius:4px; border:1px dashed transparent; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
                         ondblclick="renameParamConfigTpl()"
                         onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
-                    <input id="param-config-tpl-name-input" type="text" style="display:none; font-size:13px; padding:2px 6px; border:1px solid #0078d4; border-radius:4px; width:140px;">
+                    <input id="param-config-tpl-name-input" type="text" style="display:none; font-size:13px; padding:2px 6px; border:1px solid #0078d4; border-radius:4px; width:150px;">
                     <button id="param-config-tpl-load-btn" style="font-size:12px; padding:3px 10px; background:#0078d4; color:#fff; border:none; border-radius:5px; cursor:pointer;">加载</button>
                     <button id="param-config-tpl-save-btn" style="font-size:12px; padding:3px 10px; background:#28a745; color:#fff; border:none; border-radius:5px; cursor:pointer;">另存为…</button>
                     <button id="param-config-tpl-update-btn" style="font-size:12px; padding:3px 10px; background:#fd7e14; color:#fff; border:none; border-radius:5px; cursor:pointer;">更新</button>
                     <button id="param-config-tpl-delete-btn" style="font-size:12px; padding:3px 10px; background:transparent; color:#d00; border:1px solid #faa; border-radius:5px; cursor:pointer;">删除</button>
                     <span id="param-config-tpl-status" style="font-size:12px; white-space:nowrap;"></span>
                 </div>
-                <div class="param-table-container" style="overflow-x:auto; max-width:100%; margin-bottom:16px;">
-                    <table class="param-table" id="param-config-table" style="border-collapse:collapse; width:100%; font-size:14px; border:1px solid #e1e4e8; border-radius:6px;">
-                        <thead>
-                            <tr>
-                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8; min-width:100px;">参数名</th>
-                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8;">值</th>
-                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8; min-width:80px;">操作</th>
-                            </tr>
+
+                <!-- 表格：与 parameter_module 相同结构 -->
+                <div class="param-table-container" style="overflow-x:auto; max-width:100%; margin-bottom:12px;">
+                    <table class="param-table" id="param-config-table" style="border-collapse:collapse; width:auto; max-width:100%; margin:0 auto; font-size:14px; border:1px solid #e1e4e8; border-radius:6px;">
+                        <thead id="param-config-thead">
                         </thead>
                         <tbody id="param-config-tbody">
                         </tbody>
                     </table>
                 </div>
-                <div style="display:flex; gap:6px; margin-bottom:8px;">
-                    <button class="param-btn" onclick="addParamConfigRow()">+ 新增参数</button>
-                </div>
-                <div class="param-hint" style="margin-top:4px; color:#586069; font-size:13px;">
-                    💡 拖拽可排序；点击「加载」应用模板参数组合。
+                <div class="param-hint">
+                    💡 提示：可以拖拽排序；表格过宽时可横向滚动。
                 </div>
             </div>
         </div>
