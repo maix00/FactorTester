@@ -27,15 +27,33 @@
             border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;
         }
         .btn-new:hover { background: #357abd; }
+        .sidebar-filter { margin-top: 8px; }
+        .sidebar-filter input {
+            width: 100%; padding: 6px 10px; border: 1px solid #e2e8f0;
+            border-radius: 4px; font-size: 13px;
+        }
+        .sidebar-filter input:focus { outline: none; border-color: #4a90d9; }
         .factor-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+        .factor-group-header {
+            padding: 8px 20px 4px;
+            font-size: 12px; color: #999; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
         .factor-list-item {
-            padding: 12px 20px; cursor: pointer; border-left: 3px solid transparent;
-            transition: background 0.12s;
+            padding: 10px 20px; cursor: pointer; border-left: 3px solid transparent;
+            transition: background 0.12s; display: flex; align-items: center; gap: 6px;
         }
         .factor-list-item:hover { background: #f0f4f8; }
         .factor-list-item.active { background: #e8f0fe; border-left-color: #4a90d9; }
-        .factor-list-item .name { font-size: 14px; font-weight: 600; }
-        .factor-list-item .meta { font-size: 12px; color: #888; margin-top: 2px; }
+        .factor-list-item .info { flex: 1; min-width: 0; }
+        .factor-list-item .name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
+        .factor-list-item .meta { font-size: 12px; color: #888; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .factor-list-item .source-tag {
+            font-size: 10px; padding: 1px 5px; border-radius: 3px;
+            flex-shrink: 0;
+        }
+        .source-tag.custom { color: #d47a00; background: #fff8f0; border: 1px solid #f0c78a; }
+        .source-tag.public { color: #888; background: #f8f8f8; border: 1px solid #e0e0e0; }
         .factor-list-empty { padding: 40px 20px; text-align: center; color: #aaa; font-size: 14px; }
 
         /* ── 主编辑区 ── */
@@ -58,16 +76,16 @@
         }
 
         /* ── 代码模式 ── */
-        .code-pane { flex: 1; display: flex; flex-direction: column; }
-        .code-area { flex: 1; padding: 16px; }
+        .code-pane { flex: 0 0 42%; display: flex; flex-direction: column; overflow: hidden; }
+        .code-area { flex: 1; padding: 12px; }
         .code-area textarea {
             width: 100%; height: 100%; border: 1px solid #e2e8f0; border-radius: 6px;
-            padding: 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
-            line-height: 1.6; resize: none; background: #fafbfc; color: #1a1a1a;
+            padding: 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px;
+            line-height: 1.5; resize: none; background: #fafbfc; color: #1a1a1a;
         }
         .code-area textarea:focus { outline: none; border-color: #4a90d9; background: #fff; }
         .config-pane {
-            width: 340px; border-left: 1px solid #e2e8f0; padding: 16px 20px;
+            flex: 1; min-width: 340px; border-left: 1px solid #e2e8f0; padding: 16px 20px;
             overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
         }
         .config-section h3 {
@@ -87,12 +105,16 @@
         .param-row {
             display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
             padding: 6px 8px; background: #f8fafc; border-radius: 4px; border: 1px solid #e2e8f0;
+            flex-wrap: wrap; max-width: 100%; overflow: hidden;
         }
-        .param-row input, .param-row select { font-size: 12px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; }
-        .param-row input { flex: 1; }
-        .param-row select { width: 90px; }
+        .param-row input, .param-row select { font-size: 12px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; min-width: 0; }
+        .param-row input { flex: 1; max-width: 120px; }
+        .param-row input[data-field="alias"] { flex: 0 0 60px; }
+        .param-row input[data-field="name"] { flex: 1; max-width: 100px; }
+        .param-row input[data-field="default"] { flex: 1; max-width: 70px; }
+        .param-row select { width: 80px; flex-shrink: 0; }
         .param-row .btn-remove-param {
-            background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px;
+            background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px; flex-shrink: 0;
         }
         .param-row .btn-remove-param:hover { color: #d40000; }
         .btn-add-param {
@@ -204,11 +226,14 @@
         <!-- 左侧：因子列表 -->
         <div class="sidebar">
             <div class="sidebar-header">
-                <h2>我的因子</h2>
+                <h2>因子库</h2>
                 <a href="/" class="btn-back">← 返回首页</a>
             </div>
             <div class="sidebar-actions">
                 <button class="btn-new" onclick="createNew()">+ 新建因子</button>
+                <div class="sidebar-filter">
+                    <input type="text" id="factor-filter" placeholder="搜索因子..." oninput="filterFactorList()">
+                </div>
             </div>
             <div class="factor-list" id="factor-list">
                 <div class="factor-list-empty">加载中...</div>
@@ -245,9 +270,11 @@
         // ═══════════════════════════════════════════════════════════
         let _currentMode = 'code';
         let _currentFactorId = null;   // 正在编辑的因子 ID（null = 无）
+        let _currentFactorType = 'custom'; // 'custom' | 'public'
         let _isNew = false;            // 是否为新建
         let _dirty = false;
-        let _allCustomFactors = [];
+        let _allFactors = [];  // {name, id, type:'custom'|'public', chinese_name, category, updated_at, is_public, params, ...}
+        let _groupedFactors = {};  // {group: [...]}
 
         // ═══════════════════════════════════════════════════════════
         // 初始化
@@ -260,7 +287,10 @@
             try {
                 const res = await fetch('/custom-factors/api/list');
                 const data = await res.json();
-                _allCustomFactors = data.custom_factors || [];
+                const custom = (data.custom_factors || []).map(f => ({...f, type: 'custom'}));
+                const publicF = (data.public_factors || []).map(f => ({...f, type: 'public'}));
+                _allFactors = [...custom, ...publicF];
+                _groupedFactors = groupByCamel(_allFactors);
                 renderFactorList();
             } catch(e) {
                 document.getElementById('factor-list').innerHTML =
@@ -268,22 +298,97 @@
             }
         }
 
+        function getGroup(name) {
+            let group = '';
+            let upperCount = 0;
+            for (const c of name) {
+                if (c === c.toUpperCase() && c !== c.toLowerCase()) {
+                    upperCount++;
+                    if (upperCount === 1) group += c;
+                    else if (upperCount === 2) break;
+                    else group += c;
+                } else {
+                    if (upperCount === 1) group += c;
+                }
+            }
+            return group || name;
+        }
+
+        function groupByCamel(factors) {
+            const groups = {};
+            for (const f of factors) {
+                const g = getGroup(f.name || f.id);
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(f);
+            }
+            // 每组内排序：自定义优先，然后按 name 字典序
+            for (const g in groups) {
+                groups[g].sort((a, b) => {
+                    const typeOrder = {custom: 0, public: 1};
+                    const ta = typeOrder[a.type] ?? 1;
+                    const tb = typeOrder[b.type] ?? 1;
+                    if (ta !== tb) return ta - tb;
+                    return (a.name || '').localeCompare(b.name || '');
+                });
+            }
+            return groups;
+        }
+
+        function filterFactorList() {
+            renderFactorList();
+        }
+
         function renderFactorList() {
             const list = document.getElementById('factor-list');
-            if (_allCustomFactors.length === 0) {
-                list.innerHTML = '<div class="factor-list-empty">暂无自定义因子<br><br>点击上方按钮创建</div>';
+            const filterText = (document.getElementById('factor-filter')?.value || '').toLowerCase();
+
+            // 收集所有因子并按分组过滤
+            const filtered = {};
+            const groupKeys = Object.keys(_groupedFactors).sort();
+            for (const g of groupKeys) {
+                const items = _groupedFactors[g].filter(f => {
+                    if (!filterText) return true;
+                    const name = (f.name || '').toLowerCase();
+                    const cn = (f.chinese_name || '').toLowerCase();
+                    return name.includes(filterText) || cn.includes(filterText);
+                });
+                if (items.length > 0) filtered[g] = items;
+            }
+
+            if (Object.keys(filtered).length === 0) {
+                list.innerHTML = '<div class="factor-list-empty">' +
+                    (filterText ? '无匹配因子' : '暂无因子<br><br>点击上方按钮创建自定义因子') +
+                    '</div>';
                 return;
             }
-            list.innerHTML = _allCustomFactors.map(f => {
-                const active = f.id === _currentFactorId ? ' active' : '';
-                const cn = f.chinese_name || f.name;
-                const time = (f.updated_at || '').slice(0, 16);
-                const cat = f.category || '自编';
-                return `<div class="factor-list-item${active}" onclick="selectFactor('${f.id}')">
-                    <div class="name">${escHtml(f.name)}</div>
-                    <div class="meta">${escHtml(cn)} · ${escHtml(cat)} · ${escHtml(time)}</div>
-                </div>`;
-            }).join('');
+
+            let html = '';
+            for (const g of Object.keys(filtered).sort()) {
+                html += `<div class="factor-group-header">${escHtml(g)}</div>`;
+                for (const f of filtered[g]) {
+                    const active = (f.id === _currentFactorId && f.type === (_currentFactorType || 'custom')) ? ' active' : '';
+                    const name = escHtml(f.name || f.id);
+                    const cn = escHtml(f.chinese_name || '');
+                    const cat = f.type === 'custom'
+                        ? escHtml(f.category || '自编')
+                        : '公共';
+                    const metaParts = [cn, cat];
+                    if (f.type === 'custom' && f.updated_at) {
+                        metaParts.push(escHtml((f.updated_at || '').slice(0, 16)));
+                    }
+                    const meta = metaParts.filter(Boolean).join(' · ');
+                    const sourceTag = f.type === 'custom'
+                        ? '<span class="source-tag custom">⭐我</span>'
+                        : '<span class="source-tag public">公共</span>';
+                    html += `<div class="factor-list-item${active}" onclick="selectFactor('${f.id}', '${f.type}')">
+                        <div class="info">
+                            <div class="name">${name}${sourceTag}</div>
+                            <div class="meta">${meta}</div>
+                        </div>
+                    </div>`;
+                }
+            }
+            list.innerHTML = html;
         }
 
         function escHtml(s) {
@@ -292,18 +397,124 @@
             return d.innerHTML;
         }
 
+        function escAttr(s) {
+            return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         // ═══════════════════════════════════════════════════════════
         // 因子选择 / 新建 / 模式切换
         // ═══════════════════════════════════════════════════════════
 
-        async function selectFactor(factorId) {
-            const factor = _allCustomFactors.find(f => f.id === factorId);
-            if (!factor) return;
+        async function selectFactor(factorId, factorType) {
+            _currentFactorType = factorType || 'custom';
+            let factor;
+            if (_currentFactorType === 'public') {
+                // 公共因子：fetch 详情
+                try {
+                    const res = await fetch(`/custom-factors/api/public-factor/${encodeURIComponent(factorId)}`);
+                    const data = await res.json();
+                    if (data.success && data.factor) {
+                        factor = data.factor;
+                        factor.type = 'public';
+                    }
+                } catch(e) {}
+                if (!factor) return;
+            } else {
+                factor = _allFactors.find(f => f.id === factorId && f.type === 'custom');
+                if (!factor) return;
+            }
             _currentFactorId = factorId;
             _isNew = false;
             _dirty = false;
             renderFactorList();
-            renderCodeEditor(factor);
+            if (_currentFactorType === 'public') {
+                renderPublicFactorView(factor);
+            } else {
+                renderCodeEditor(factor);
+            }
+        }
+
+        function renderPublicFactorView(factor) {
+            // 公共因子只读视图：左侧只读代码编辑器 + 右侧参数信息
+            document.getElementById('editor-title').textContent = `${factor.name}（公共因子 - 只读）`;
+            document.getElementById('editor-footer').style.display = '';
+            document.getElementById('editor-body').innerHTML = `
+                <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
+                    <div class="code-area" style="display:flex; flex-direction:column;">
+                        <div style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:13px; color:#888;">源码 (${factor.name}.py) — 只读</span>
+                            <button class="btn-validate" id="btn-validate-public" onclick="validatePublicExpr('${escAttr(factor.name)}')"
+                                style="font-size:12px; padding:4px 12px;">校验表达式树</button>
+                        </div>
+                        <textarea readonly style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
+                            padding:12px; font-family:'SF Mono','Fira Code',monospace; font-size:12px;
+                            line-height:1.5; resize:none; background:#fafbfc; color:#555;">${escHtml(factor.func_expr || '')}</textarea>
+                        <div id="public-tree-repr" style="margin-top:6px; display:none; background:#f0f4f8; border:1px solid #e2e8f0;
+                            border-radius:6px; padding:10px 14px; font-family:'SF Mono','Fira Code',monospace;
+                            font-size:12px; color:#333; max-height:180px; overflow:auto; white-space:pre; line-height:1.5;"></div>
+                    </div>
+                </div>
+                <div class="config-pane">
+                    <div class="config-section">
+                        <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
+                        ${factor.description ? `<p style="color:#666;font-size:13px;margin-top:4px;">${escHtml(factor.description)}</p>` : ''}
+                    </div>
+                    <div class="config-section">
+                        <h3>参数列表</h3>
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead><tr>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">别名</th>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">类型</th>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">默认值</th>
+                            </tr></thead>
+                            <tbody>
+                                ${(factor.params || []).map(p => `
+                                    <tr>
+                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(p.alias)}</td>
+                                        <td style="padding:6px;border-bottom:1px solid #eee;color:#888;">${escHtml(p.type || '—')}</td>
+                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(String(p.default ?? ''))}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="config-section">
+                        <button class="btn-validate" onclick="openParamConfigDrawer('${escAttr(factor.name)}')"
+                            style="width:100%; padding:8px; font-size:13px;">⚙️ 参数配置</button>
+                    </div>
+                    <p style="margin-top:12px;color:#999;font-size:12px;">
+                        💡 公共因子不可编辑。可以使用「参数配置」管理该因子的参数预设。
+                    </p>
+                </div>
+            `;
+        }
+
+        // 公共因子表达式树校验
+        async function validatePublicExpr(factorName) {
+            const btn = document.getElementById('btn-validate-public');
+            const treeDiv = document.getElementById('public-tree-repr');
+            btn.textContent = '校验中...';
+            btn.className = 'btn-validate';
+            try {
+                const res = await fetch('/custom-factors/api/validate', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ factor_name: factorName, is_public: true })
+                });
+                const data = await res.json();
+                if (data.valid && data.tree_repr) {
+                    btn.textContent = '✓ 表达式树';
+                    btn.className = 'btn-validate ok';
+                    treeDiv.style.display = 'block';
+                    treeDiv.textContent = data.tree_repr;
+                } else {
+                    btn.textContent = '✗ ' + (data.error || '校验失败');
+                    btn.className = 'btn-validate err';
+                    treeDiv.style.display = 'none';
+                }
+            } catch(e) {
+                btn.textContent = '校验失败';
+                btn.className = 'btn-validate err';
+            }
         }
 
         function createNew() {
@@ -322,8 +533,8 @@
             document.querySelectorAll('.mode-tab').forEach(t => {
                 t.classList.toggle('active', t.textContent.includes(mode === 'code' ? '代码' : '可视'));
             });
-            if (_currentFactorId) {
-                const factor = _allCustomFactors.find(f => f.id === _currentFactorId);
+            if (_currentFactorId && _currentFactorType === 'custom') {
+                const factor = _allFactors.find(f => f.id === _currentFactorId && f.type === 'custom');
                 if (factor) {
                     if (mode === 'code') renderCodeEditor(factor);
                     else renderVisualEditor(factor);
@@ -876,6 +1087,345 @@
 
         // startup
         init();
+
+        // ═══════════════════════════════════════════════════════════
+        // 参数配置抽屉 (单模板参数管理器)
+        // ═══════════════════════════════════════════════════════════
+
+        let _paramConfigFFAlias = '';
+        let _paramConfigTplId = null;        // 当前选中的模板 ID
+        let _paramConfigTplName = '';        // 当前选中模板名称
+        let _paramConfigParams = [];         // [{alias, value}, ...]
+        let _paramConfigTemplates = [];      // 全部模板列表
+
+        function openParamConfigDrawer(factorName) {
+            _paramConfigFFAlias = factorName;
+            _paramConfigTplId = null;
+            _paramConfigTplName = '';
+            _paramConfigParams = [];
+            document.getElementById('param-config-ff-name').textContent = '因子: ' + factorName;
+            document.getElementById('param-config-drawer').classList.add('open');
+            document.getElementById('user-badge').style.display = 'none';
+            resetParamConfigUI();
+            loadParamConfigTemplates();
+        }
+
+        function closeParamConfigDrawer() {
+            document.getElementById('param-config-drawer').classList.remove('open');
+            document.getElementById('user-badge').style.display = '';
+        }
+
+        function resetParamConfigUI() {
+            document.getElementById('param-config-tpl-name-label').style.display = 'none';
+            document.getElementById('param-config-tpl-name-input').style.display = 'none';
+            document.getElementById('param-config-tpl-select').value = '';
+            document.getElementById('param-config-tpl-status').textContent = '';
+            document.getElementById('param-config-tbody').innerHTML = '';
+        }
+
+        async function loadParamConfigTemplates() {
+            try {
+                const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias));
+                const data = await resp.json();
+                if (data.success && data.templates) {
+                    _paramConfigTemplates = data.templates;
+                    const sel = document.getElementById('param-config-tpl-select');
+                    sel.innerHTML = '<option value="">— 选择模板 —</option>' +
+                        data.templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
+                    loadParamConfigDefaultParams();
+                } else {
+                    loadParamConfigDefaultParams();
+                }
+            } catch(e) {
+                console.error('加载模板列表失败:', e);
+                loadParamConfigDefaultParams();
+            }
+        }
+
+        // 从当前因子获取默认参数
+        async function loadParamConfigDefaultParams() {
+            try {
+                let params = [];
+                if (_allFactors) {
+                    const pf = _allFactors.find(f => f.id === _paramConfigFFAlias && f.type === 'public');
+                    if (pf && pf.params) {
+                        params = pf.params.map(p => ({ alias: p.alias, value: String(p.default ?? '') }));
+                    }
+                }
+                _paramConfigParams = params;
+                renderParamConfigTable();
+            } catch(e) {
+                _paramConfigParams = [];
+                renderParamConfigTable();
+            }
+        }
+
+        function renderParamConfigTable() {
+            const tbody = document.getElementById('param-config-tbody');
+            tbody.innerHTML = '';
+            _paramConfigParams.forEach((p, i) => {
+                const tr = document.createElement('tr');
+                tr.draggable = true;
+                tr.dataset.idx = i;
+                tr.innerHTML = `
+                    <td style="padding:6px; font-family:monospace; text-align:center;">${escHtml(p.alias)}</td>
+                    <td style="padding:6px; text-align:center;">
+                        <input type="text" value="${escHtml(p.value)}" data-idx="${i}" data-field="value"
+                            style="width:100%; padding:4px 6px; border:1px solid #ccc; border-radius:4px; font-size:13px; text-align:center; box-sizing:border-box;"
+                            oninput="updateParamConfigValue(${i}, this.value)">
+                    </td>
+                    <td style="padding:6px; text-align:center;">
+                        <button class="param-btn param-btn-danger" style="padding:2px 8px; font-size:12px;" onclick="deleteParamConfigRow(${i})">删除</button>
+                    </td>
+                `;
+                // 拖拽事件
+                tr.addEventListener('dragstart', onParamConfigDragStart);
+                tr.addEventListener('dragover', onParamConfigDragOver);
+                tr.addEventListener('dragleave', onParamConfigDragLeave);
+                tr.addEventListener('drop', onParamConfigDrop);
+                tr.addEventListener('dragend', onParamConfigDragEnd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        function updateParamConfigValue(idx, val) {
+            if (_paramConfigParams[idx]) {
+                _paramConfigParams[idx].value = val;
+            }
+        }
+
+        function addParamConfigRow() {
+            const alias = prompt('参数别名（如 P、F、N）:');
+            if (!alias) return;
+            _paramConfigParams.push({ alias: alias.replace(/\s+/g, ''), value: '' });
+            renderParamConfigTable();
+        }
+
+        function deleteParamConfigRow(idx) {
+            _paramConfigParams.splice(idx, 1);
+            renderParamConfigTable();
+        }
+
+        // ── 拖拽 ──
+        let _paramConfigDragSrcIdx = null;
+
+        function onParamConfigDragStart(e) {
+            _paramConfigDragSrcIdx = parseInt(e.currentTarget.dataset.idx);
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function onParamConfigDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function onParamConfigDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function onParamConfigDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            const dstIdx = parseInt(e.currentTarget.dataset.idx);
+            if (_paramConfigDragSrcIdx !== null && _paramConfigDragSrcIdx !== dstIdx) {
+                const item = _paramConfigParams.splice(_paramConfigDragSrcIdx, 1)[0];
+                _paramConfigParams.splice(dstIdx, 0, item);
+                renderParamConfigTable();
+            }
+        }
+
+        function onParamConfigDragEnd(e) {
+            _paramConfigDragSrcIdx = null;
+        }
+
+        // ── 模板按钮事件 ──
+        document.getElementById('param-config-tpl-select').addEventListener('change', function() {
+            const id = this.value;
+            if (!id) {
+                _paramConfigTplId = null;
+                _paramConfigTplName = '';
+                document.getElementById('param-config-tpl-name-label').style.display = 'none';
+                document.getElementById('param-config-tpl-name-input').style.display = 'none';
+                document.getElementById('param-config-tpl-status').textContent = '';
+                return;
+            }
+            const tpl = _paramConfigTemplates.find(t => t.id === id);
+            if (tpl) {
+                _paramConfigTplId = tpl.id;
+                _paramConfigTplName = tpl.name;
+                const label = document.getElementById('param-config-tpl-name-label');
+                label.textContent = tpl.name;
+                label.style.display = 'inline-block';
+                document.getElementById('param-config-tpl-status').textContent = '';
+            }
+        });
+
+        document.getElementById('param-config-tpl-load-btn').addEventListener('click', async function() {
+            if (!_paramConfigTplId) {
+                document.getElementById('param-config-tpl-status').textContent = '请先选择模板';
+                return;
+            }
+            try {
+                const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId);
+                const data = await resp.json();
+                if (data.success && data.template && data.template.params_list) {
+                    _paramConfigParams = data.template.params_list.map(p => ({ alias: p.alias, value: String(p.value ?? '') }));
+                    renderParamConfigTable();
+                    document.getElementById('param-config-tpl-status').textContent = '✓ 已加载';
+                }
+            } catch(e) {
+                document.getElementById('param-config-tpl-status').textContent = '加载失败';
+            }
+        });
+
+        document.getElementById('param-config-tpl-save-btn').addEventListener('click', async function() {
+            const name = prompt('模板名称:');
+            if (!name) return;
+            document.getElementById('param-config-tpl-status').textContent = '保存中...';
+            try {
+                const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, params_list: _paramConfigParams })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    document.getElementById('param-config-tpl-status').textContent = '✓ 已保存';
+                    await loadParamConfigTemplates();
+                    document.getElementById('param-config-tpl-select').value = data.template_id || '';
+                } else {
+                    document.getElementById('param-config-tpl-status').textContent = '保存失败: ' + (data.error || '');
+                }
+            } catch(e) {
+                document.getElementById('param-config-tpl-status').textContent = '网络错误';
+            }
+        });
+
+        document.getElementById('param-config-tpl-update-btn').addEventListener('click', async function() {
+            if (!_paramConfigTplId) {
+                document.getElementById('param-config-tpl-status').textContent = '请先选择模板';
+                return;
+            }
+            document.getElementById('param-config-tpl-status').textContent = '更新中...';
+            try {
+                const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ params_list: _paramConfigParams })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    document.getElementById('param-config-tpl-status').textContent = '✓ 已更新';
+                } else {
+                    document.getElementById('param-config-tpl-status').textContent = '更新失败: ' + (data.error || '');
+                }
+            } catch(e) {
+                document.getElementById('param-config-tpl-status').textContent = '网络错误';
+            }
+        });
+
+        document.getElementById('param-config-tpl-delete-btn').addEventListener('click', async function() {
+            if (!_paramConfigTplId) {
+                document.getElementById('param-config-tpl-status').textContent = '请先选择模板';
+                return;
+            }
+            if (!confirm('确定删除模板「' + _paramConfigTplName + '」？')) return;
+            try {
+                const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId, {
+                    method: 'DELETE'
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    document.getElementById('param-config-tpl-status').textContent = '✓ 已删除';
+                    _paramConfigTplId = null;
+                    _paramConfigTplName = '';
+                    await loadParamConfigTemplates();
+                }
+            } catch(e) {
+                document.getElementById('param-config-tpl-status').textContent = '删除失败';
+            }
+        });
+
+        function renameParamConfigTpl() {
+            const label = document.getElementById('param-config-tpl-name-label');
+            const input = document.getElementById('param-config-tpl-name-input');
+            label.style.display = 'none';
+            input.style.display = 'inline-block';
+            input.value = _paramConfigTplName;
+            input.focus();
+            input.onblur = input.onkeydown = null;
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') input.blur();
+            };
+            input.onblur = async function() {
+                const newName = input.value.trim();
+                input.style.display = 'none';
+                label.style.display = 'inline-block';
+                if (newName && newName !== _paramConfigTplName && _paramConfigTplId) {
+                    try {
+                        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramConfigFFAlias) + '/' + _paramConfigTplId, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newName, params_list: _paramConfigParams })
+                        });
+                        if ((await resp.json()).success) {
+                            _paramConfigTplName = newName;
+                            label.textContent = newName;
+                            await loadParamConfigTemplates();
+                        }
+                    } catch(e) {}
+                }
+                label.textContent = _paramConfigTplName;
+            };
+        }
     </script>
+
+    <!-- 参数配置抽屉 (单模板参数管理器，用于因子管理页) -->
+    <div class="settings-drawer-overlay" id="param-config-drawer"
+         onclick="if(event.target===this){closeParamConfigDrawer()}">
+        <div class="settings-drawer-panel">
+            <button class="drawer-close-btn" onclick="closeParamConfigDrawer()">✕ 关闭</button>
+            <div id="param-config-content">
+                <div class="section-title" style="font-size:15px; font-weight:600; margin-bottom:12px;">⚙️ 参数配置</div>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
+                    <span style="font-size:13px; color:#555;" id="param-config-ff-name"></span>
+                    <select id="param-config-tpl-select" style="flex:1; min-width:120px; font-size:13px; padding:3px 6px; border:1px solid #ddd; border-radius:5px;">
+                        <option value="">— 选择模板 —</option>
+                    </select>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px; flex-wrap:wrap;">
+                    <span id="param-config-tpl-name-label" title="双击重命名" style="display:none; font-size:13px; color:#0078d4; cursor:pointer; padding:2px 4px; border-radius:4px; border:1px dashed transparent; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                        ondblclick="renameParamConfigTpl()"
+                        onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
+                    <input id="param-config-tpl-name-input" type="text" style="display:none; font-size:13px; padding:2px 6px; border:1px solid #0078d4; border-radius:4px; width:140px;">
+                    <button id="param-config-tpl-load-btn" style="font-size:12px; padding:3px 10px; background:#0078d4; color:#fff; border:none; border-radius:5px; cursor:pointer;">加载</button>
+                    <button id="param-config-tpl-save-btn" style="font-size:12px; padding:3px 10px; background:#28a745; color:#fff; border:none; border-radius:5px; cursor:pointer;">另存为…</button>
+                    <button id="param-config-tpl-update-btn" style="font-size:12px; padding:3px 10px; background:#fd7e14; color:#fff; border:none; border-radius:5px; cursor:pointer;">更新</button>
+                    <button id="param-config-tpl-delete-btn" style="font-size:12px; padding:3px 10px; background:transparent; color:#d00; border:1px solid #faa; border-radius:5px; cursor:pointer;">删除</button>
+                    <span id="param-config-tpl-status" style="font-size:12px; white-space:nowrap;"></span>
+                </div>
+                <div class="param-table-container" style="overflow-x:auto; max-width:100%; margin-bottom:16px;">
+                    <table class="param-table" id="param-config-table" style="border-collapse:collapse; width:100%; font-size:14px; border:1px solid #e1e4e8; border-radius:6px;">
+                        <thead>
+                            <tr>
+                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8; min-width:100px;">参数名</th>
+                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8;">值</th>
+                                <th style="padding:8px 12px; background:#f6f8fa; border-bottom:2px solid #e1e4e8; min-width:80px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="param-config-tbody">
+                        </tbody>
+                    </table>
+                </div>
+                <div style="display:flex; gap:6px; margin-bottom:8px;">
+                    <button class="param-btn" onclick="addParamConfigRow()">+ 新增参数</button>
+                </div>
+                <div class="param-hint" style="margin-top:4px; color:#586069; font-size:13px;">
+                    💡 拖拽可排序；点击「加载」应用模板参数组合。
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

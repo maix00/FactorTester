@@ -530,43 +530,90 @@ def get_factor_groups(factors_dir):
     return groups, factor_names
 
 def build_group_html(groups, chinese_names: dict | None = None, custom_factors: list | None = None):
+    """构建侧边栏因子列表 HTML。
+    
+    自定义因子与公共因子按驼峰首段混合分组：
+    - 自定义因子排在每组公共因子之前
+    - 组内按字典序排列
+    - 自定义因子有 ⭐ 标记，公共因子无标记
+    """
     if not groups and not custom_factors:
         return '<div style="color:#888;">无匹配因子</div>'
     chinese_names = chinese_names or {}
     custom_factors = custom_factors or []
+
+    def get_group(name):
+        """驼峰首段分组：取第一个大写字母+后续小写字母"""
+        group = ""
+        upper_count = 0
+        for c in name:
+            if c.isupper():
+                upper_count += 1
+                if upper_count == 1:
+                    group += c
+                elif upper_count == 2:
+                    break
+            else:
+                if upper_count == 1:
+                    group += c
+        return group if group else name
+
+    # ── 1. 公共因子分组（已有） + 自定义因子也按驼峰分组 ──
+    merged_groups = {}  # {group: [{'name':..., 'type':'public'|'custom', 'id':..., 'chinese_name':...}, ...]}
+
+    # 公共因子
+    for group, names in groups.items():
+        for name in sorted(names):
+            cn = chinese_names.get(name, '')
+            merged_groups.setdefault(group, []).append({
+                'name': name,
+                'type': 'public',
+                'id': name,
+                'chinese_name': cn,
+            })
+
+    # 自定义因子
+    for cf in custom_factors:
+        cf_name = cf.get('name', '') or cf.get('id', '')
+        cf_group = get_group(cf_name)
+        merged_groups.setdefault(cf_group, []).append({
+            'name': cf_name,
+            'type': 'custom',
+            'id': cf.get('id', ''),
+            'chinese_name': cf.get('chinese_name', '') or cf_name,
+            'category': cf.get('category', ''),
+        })
+
+    # ── 2. 每组内排序：自定义优先，然后按 name 字典序 ──
+    for grp in merged_groups:
+        merged_groups[grp].sort(key=lambda x: (0 if x['type'] == 'custom' else 1, x['name']))
+
+    # ── 3. 生成 HTML ──
     group_html = ""
-
-    # ── 我的因子区域 ──
-    if custom_factors:
-        group_html += '<div class="factor-group">'
-        group_html += '<div class="factor-group-title" style="color:#d47a00;">⭐ 我的因子</div>'
-        group_html += '<ul class="factor-list">'
-        for cf in custom_factors:
-            cf_id = cf.get('id', '')
-            cf_name = cf.get('name', '')
-            cf_cn = cf.get('chinese_name', '') or cf_name
-            cf_cat = cf.get('category', '')
-            cat_tag = f' <span style="color:#999;font-size:11px;">[{cf_cat}]</span>' if cf_cat else ''
-            label = f'{cf_name} <span class="factor-cn-name">{cf_cn}</span>{cat_tag}'
-            group_html += f'<li><a href="?factor={cf_id}&amp;type=custom">{label}</a></li>'
-        group_html += '</ul>'
-        group_html += '</div>'
-
-        # 分隔线（当两类都存在时）
-        if groups:
-            group_html += '<div style="border-top:1px dashed #ddd;margin: 4px 0 8px;"></div>'
-
-    # ── 公共因子区域 ──
-    for group, names in sorted(groups.items()):
+    for group in sorted(merged_groups.keys()):
+        items = merged_groups[group]
         group_html += f'<div class="factor-group">'
         group_html += f'<div class="factor-group-title">{group}</div>'
         group_html += '<ul class="factor-list">'
-        for name in sorted(names):
-            cn = chinese_names.get(name, '')
-            label = f'{name} <span class="factor-cn-name">{cn}</span>' if cn else name
-            group_html += f'<li><a href="?factor={name}">{label}</a></li>'
+        for item in items:
+            is_custom = (item['type'] == 'custom')
+            if is_custom:
+                href = f'?factor={item["id"]}&amp;type=custom'
+            else:
+                href = f'?factor={item["id"]}'
+            cn = item.get('chinese_name', '')
+            source_tag = ' <span class="factor-source-tag factor-source-custom">⭐我</span>' if is_custom else ''
+            cat_tag = ''
+            if is_custom and item.get('category'):
+                cat_tag = f' <span style="color:#999;font-size:11px;">[{item["category"]}]</span>'
+            if cn:
+                label = f'{item["name"]}{source_tag} <span class="factor-cn-name">{cn}</span>{cat_tag}'
+            else:
+                label = f'{item["name"]}{source_tag}{cat_tag}'
+            group_html += f'<li><a href="{href}">{label}</a></li>'
         group_html += '</ul>'
         group_html += '</div>'
+
     return group_html
 
 def get_factor_main_section_html(factor_family_alias):

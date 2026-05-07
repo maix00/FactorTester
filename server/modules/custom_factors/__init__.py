@@ -100,7 +100,7 @@ def _list_public_factors() -> list:
                 'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'params': [
-                    {'alias': p.alias, 'name': getattr(p, 'name', p.alias), 'default': _serialize_default(p)}
+                    {'alias': p.alias, 'name': p.alias, 'default': _serialize_default(p)}
                     for p in ff.params
                 ],
                 'is_public': True,
@@ -139,18 +139,37 @@ def _serialize_default(param):
 # ── 公共因子只读详情 ──────────────────────────────────────────────────────────
 
 def _get_public_factor_detail(factor_name: str) -> dict | None:
-    """获取公共因子的详细信息（包括 available_params 列表）。"""
+    """获取公共因子的详细信息（包括 func_expr 源码和 tree_repr）。"""
     try:
         ff = get_factor_family_instance(factor_name)
+
+        # 读取对应的 .py 源文件作为 func_expr
+        factors_dir = os.path.join(os.getcwd(), 'Factors')
+        src_path = os.path.join(factors_dir, f'{factor_name}.py')
+        func_expr = ''
+        if os.path.exists(src_path):
+            with open(src_path, 'r', encoding='utf-8') as f:
+                func_expr = f.read()
+
+        # 获取表达式树的 tree_repr
+        tree_repr = ''
+        try:
+            if ff.expr is not None:
+                tree_repr = ff.expr.tree_repr()
+        except Exception:
+            pass
+
         return {
             'id': factor_name,
             'name': factor_name,
             'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
             'description': getattr(ff, 'description', '') or '',
+            'func_expr': func_expr,
+            'tree_repr': tree_repr,
             'params': [
                 {
                     'alias': p.alias,
-                    'name': getattr(p, 'name', p.alias),
+                    'name': p.alias,
                     'default': _serialize_default(p),
                     'type': type(p).__name__,
                 }
@@ -359,20 +378,52 @@ def api_validate_expr():
     """
     校验 func_expr 是否合法。
 
-    请求体：
+    请求体（自定义因子）：
     {
         "func_expr": "P.delta('$F') / P.shift('$F')",
         "params": [...]
+    }
+    请求体（公共因子，仅用于获取 tree_repr）：
+    {
+        "factor_name": "MmRSI",
+        "is_public": true
     }
 
     响应：
     {
         "success": true,
         "valid": true,
-        "error": null
+        "error": null,
+        "tree_repr": "..."      // 表达式树文本（公共因子校验时返回）
     }
     """
     data = request.get_json(silent=True) or {}
+
+    # 公共因子校验：从 FactorFamily 获取 tree_repr
+    if data.get('is_public') and data.get('factor_name'):
+        factor_name = data['factor_name']
+        try:
+            ff = get_factor_family_instance(factor_name)
+            tree_repr = ''
+            if ff.expr is not None:
+                tree_repr = ff.expr.tree_repr()
+            return jsonify({
+                'success': True,
+                'valid': True,
+                'error': None,
+                'tree_repr': tree_repr,
+                'desc': getattr(ff, 'desc', '') or '',
+                'description': getattr(ff, 'description', '') or '',
+            })
+        except Exception as e:
+            return jsonify({
+                'success': True,
+                'valid': False,
+                'error': f'因子加载失败: {str(e)}',
+                'tree_repr': '',
+            })
+
+    # 自定义因子：语法校验
     func_expr = (data.get('func_expr') or '').strip()
 
     if not func_expr:
