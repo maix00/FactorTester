@@ -35,9 +35,9 @@
                 const outEl = document.getElementById('pm-desc-rendered');
                 if (rawEl && outEl) {
                     try {
-                        outEl.innerHTML = marked.parse(rawEl.textContent);
+                        outEl.innerHTML = marked.parse(JSON.parse(rawEl.textContent));
                     } catch(e) {
-                        outEl.innerHTML = '<pre>' + rawEl.textContent + '<\/pre>';
+                        outEl.textContent = rawEl.textContent;
                     }
                 }
             })();

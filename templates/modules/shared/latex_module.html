@@ -23,12 +23,12 @@
         <script>
         (function() {
             const rawEl = document.getElementById('latex-description-md');
-            const outEl = document.getElementById('latex-description-rendered');
-            if (rawEl && outEl) {
+                const outEl = document.getElementById('latex-description-rendered');
+                if (rawEl && outEl) {
                 try {
-                    outEl.innerHTML = marked.parse(rawEl.textContent);
+                    outEl.innerHTML = marked.parse(JSON.parse(rawEl.textContent));
                 } catch(e) {
-                    outEl.innerHTML = '<pre>' + rawEl.textContent + '</pre>';
+                    outEl.textContent = rawEl.textContent;
                 }
             }
         })();

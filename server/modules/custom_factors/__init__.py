@@ -120,7 +120,7 @@ def _list_custom_factors(username: str) -> list:
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
                 'params': [
-                    {'alias': p.alias, 'name': p.alias, 'default': _serialize_default(p)}
+                    {'alias': p.alias, 'name': p.alias, 'default_value': _serialize_default(p)}
                     for p in ff.params
                 ],
                 'is_public': False,
@@ -175,7 +175,7 @@ def _list_public_factors() -> list:
                 'description': getattr(ff, 'description', '') or '',
                 'math_expr': getattr(ff, 'math_expr', '') or '',
                 'params': [
-                    {'alias': p.alias, 'name': p.alias, 'default': _serialize_default(p)}
+                    {'alias': p.alias, 'name': p.alias, 'default_value': _serialize_default(p)}
                     for p in ff.params
                 ],
                 'is_public': True,
@@ -200,7 +200,11 @@ def _list_public_factors() -> list:
 def _serialize_default(param):
     """序列化参数的默认值，处理 Timedelta / Timestamp 等特殊类型。"""
     try:
-        dv = param.default
+        dv = param.default_value
+        try:
+            dv = param.get_value_alias(dv)
+        except Exception:
+            pass
     except Exception:
         return None
     if dv is None:
@@ -421,7 +425,7 @@ def _get_public_factor_detail(factor_name: str) -> dict | None:
                 {
                     'alias': p.alias,
                     'name': p.alias,
-                    'default': _serialize_default(p),
+                    'default_value': _serialize_default(p),
                     'type': type(p).__name__,
                 }
                 for p in ff.params

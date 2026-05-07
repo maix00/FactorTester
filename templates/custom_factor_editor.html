@@ -654,7 +654,7 @@
                 <div class="config-pane">
                     <div class="config-section">
                         <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
-                        ${descMd ? `<div class="markdown-desc" style="color:#555;font-size:13px;margin-top:4px;line-height:1.6;">${renderMarkdownInline(descMd)}</div>` : ''}
+                        ${descMd ? `<div class="markdown-desc" style="color:#555;font-size:13px;margin-top:4px;line-height:1.6;">${renderMarkdown(descMd)}</div>` : ''}
                     </div>
                     ${(factor.params && factor.params.length > 0) ? `
                     <div class="config-section">
@@ -670,7 +670,7 @@
                                     <tr>
                                         <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(p.alias)}</td>
                                         <td style="padding:6px;border-bottom:1px solid #eee;color:#888;">${escHtml(p.type || '—')}</td>
-                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(String(p.default ?? ''))}</td>
+                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(getParamDefaultValue(p))}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -763,20 +763,19 @@
             }
         }
 
-        // 简易 Markdown → HTML 内联转换
-        function renderMarkdownInline(md) {
+        function renderMarkdown(md) {
             if (!md) return '';
-            let html = escHtml(md);
-            // 粗体 **text**
-            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            // 斜体 *text*
-            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-            // 行内代码 `code`
-            html = html.replace(/`(.+?)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;font-family:monospace;">$1</code>');
-            // 换行 → <br>
-            html = html.replace(/\n\n/g, '</p><p>');
-            html = html.replace(/\n/g, '<br>');
-            return '<p>' + html + '</p>';
+            try {
+                return (typeof marked !== 'undefined') ? marked.parse(String(md)) : '<pre>' + escHtml(md) + '</pre>';
+            } catch(e) {
+                return '<pre>' + escHtml(md) + '</pre>';
+            }
+        }
+
+        function getParamDefaultValue(paramDef) {
+            if (!paramDef) return '';
+            const value = paramDef.default_value ?? '';
+            return value === null || value === undefined ? '' : String(value);
         }
 
         function createNew() {
@@ -1466,7 +1465,7 @@
             _paramAliases.forEach(alias => {
                 if (def && def.params) {
                     const pd = def.params.find(p => p.alias === alias);
-                    row[alias] = pd ? String(pd.default ?? '') : '';
+                    row[alias] = pd ? getParamDefaultValue(pd) : '';
                 } else {
                     row[alias] = '';
                 }
@@ -1483,14 +1482,16 @@
             const thead = document.getElementById('param-table-head');
             if (thead) {
                 thead.innerHTML = '<tr>' +
+                    '<th style="min-width:100px;">因子(家族)名</th>' +
                     _paramAliases.map(a => '<th>' + escHtml(a) + '</th>').join('') +
-                    '<th style="width:50px;">操作</th>' +
+                    '<th style="min-width:80px;">操作</th>' +
                     '</tr>';
             }
 
             let html = '';
             _paramRows.forEach((row, i) => {
                 html += '<tr class="param-row" draggable="true" data-idx="' + i + '" ondragstart="onParamDragStart(event,' + i + ')" ondragover="onParamDragOver(event)" ondrop="onParamDrop(event,' + i + ')" ondragend="onParamDragEnd()">';
+                html += '<td>' + escHtml(_paramFFAlias) + '</td>';
                 _paramAliases.forEach(alias => {
                     const val = row[alias] !== undefined ? row[alias] : '';
                     html += '<td><input type="text" value="' + escHtml(val) + '" ' +
@@ -1504,6 +1505,7 @@
 
             // 新增行（默认值填入 value，而非 placeholder）
             html += '<tr>';
+            html += '<td>' + escHtml(_paramFFAlias) + '</td>';
             _paramAliases.forEach(alias => {
                 const defVal = escHtml(getDefaultParamRow()[alias] || '');
                 html += '<td><input type="text" id="param-new-' + escHtml(alias) + '" ' +
