@@ -1088,7 +1088,11 @@ def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tup
     window = DataFreq(window)
     freq = DataFreq(freq)
     days = window.days
-    subday_periods = int(window.subday.total_seconds() / freq.subday.total_seconds())
+    freq_subday_sec = freq.subday.total_seconds()
+    if freq_subday_sec == 0:
+        subday_periods = 0
+    else:
+        subday_periods = int(window.subday.total_seconds() / freq_subday_sec)
     if days == 0:
         return True, subday_periods, {}
     else:
