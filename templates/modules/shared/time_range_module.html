@@ -78,18 +78,27 @@
     </div>
     
     <!-- 时间模板区 -->
-    <div id="time-template-bar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
-        <select id="time-tpl-select" style="flex:1;min-width:120px;max-width:180px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
-            <option value="">— 选择模板 —</option>
-        </select>
-        <span id="time-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;"
-            onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
-        <input id="time-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
-        <button id="time-tpl-load-btn" title="加载选中模板的时间设置" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
-        <button id="time-tpl-save-btn" title="将当前时间设置保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
-        <button id="time-tpl-update-btn" title="用当前时间设置覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
-        <button id="time-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
-        <span id="time-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
+    <div id="time-template-bar" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
+        <!-- 第一行：下拉选择 -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <select id="time-tpl-select" style="flex:1;min-width:120px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
+                <option value="">— 选择模板 —</option>
+            </select>
+        </div>
+        <!-- 第二行：名称标签 + 编辑框 -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <span id="time-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
+            <input id="time-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
+        </div>
+        <!-- 第三行：按钮组 -->
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <button id="time-tpl-load-btn" title="加载选中模板的时间设置" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
+            <button id="time-tpl-save-btn" title="将当前时间设置保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
+            <button id="time-tpl-update-btn" title="用当前时间设置覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
+            <button id="time-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
+            <span id="time-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
+        </div>
     </div>
 
     <!-- 操作按钮 -->

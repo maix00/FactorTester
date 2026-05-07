@@ -55,21 +55,21 @@
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
             html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
-            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8;">';
+            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 36px 8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8; min-height:52px;">';
             var labelHtml = sub.label
-                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:13px;">' + sub.label + '</span>'
+                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + sub.label + '</span>'
                 : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
-            var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">';
+            var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;vertical-align:middle;">';
             // 信息行：序号 + 序列号 + 时间
-            html += '    <div style="font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">'
+            html += '    <div style="font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:4px;">'
                 + '<i class="fas fa-grip-vertical" style="color:#888; flex-shrink:0;"></i>'
                 + '<strong style="flex-shrink:0;">#' + (index+1) + '</strong>'
                 + '<span style="flex-shrink:0;margin:0 4px;">' + sub.factor_tester_serial + '</span>'
                 + '<span style="color:#888;font-size:12px;flex-shrink:0;">(' + sub.timestamp + ')</span>'
                 + (sub.count_desc ? ' <span style="color:#d00;flex-shrink:0;">' + sub.count_desc + '</span>' : '')
                 + '</div>';
-            // 标签名称行
-            html += '    <div style="display:flex;align-items:center;margin-top:4px;">' + labelHtml + labelInput + '</div>';
+            // 标签名称行：span 和 input 同行，inline-block 避免抖动
+            html += '    <div style="line-height:24px; min-height:24px;">' + labelHtml + labelInput + '</div>';
             // 删除按钮放在 header 右下角
             html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
             html += '  </div>';
@@ -226,7 +226,7 @@
             // Update display without full re-render
             var $lbl = $('.sub-label-text[data-index="' + idx + '"], .sub-label-add[data-index="' + idx + '"]');
             if (val) {
-                $lbl.replaceWith('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;margin-right:4px;">' + val + '</span>');
+                $lbl.replaceWith('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;margin-right:4px;">' + val + '</span>');
             } else {
                 $lbl.replaceWith('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
             }
@@ -249,7 +249,7 @@
                 $(this).hide();
                 var val = submissions[idx] ? (submissions[idx].label || '') : '';
                 var $lbl = val
-                    ? $('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;margin-right:4px;">' + val + '</span>')
+                    ? $('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;margin-right:4px;">' + val + '</span>')
                     : $('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
                 $(this).before($lbl);
             }
