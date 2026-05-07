@@ -437,6 +437,9 @@
             if (type === 'int') return parseInt(val) || 0;
             if (type === 'float') return parseFloat(val) || 0.0;
             if (type === 'bool') return val === 'true' || val === 'True' || val === '1';
+            if (type === 'DataColumn') {
+                return /^[A-Z]{1,2}$/.test(val) ? val.toUpperCase() : 'CA';
+            }
             return val;
         }
 

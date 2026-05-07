@@ -374,17 +374,19 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
             # 安全编译并解析为表达式树
             # 注入 ParamRef / ColumnRef 等常用名
             ns = {
-                'P': ParamRef('$P'),
                 'ParamRef': ParamRef,
                 'ColumnRef': ColumnRef,
                 'ConstExpr': ConstExpr,
-                **{p.alias.replace('$', ''): ParamRef(p.alias) for p in params_list if p.alias.startswith('$')},
             }
-            # 把所有 $X 形式的参数别名映射为 ParamRef
+            # 把参数别名映射为对应的 ParamRef (包装 Parameter 对象)
             for p in params_list:
                 key = p.alias.replace('$', '')
-                ns[key] = ParamRef(p.alias)
-                ns[p.alias] = ParamRef(p.alias)
+                ns[key] = ParamRef(p)
+                ns[p.alias] = ParamRef(p)
+            # 给 func_expr 一个默认的 'P' (如果参数中有 $P，会被覆盖)
+            if 'P' not in ns:
+                from tools.data.DataColumn import DataColumn as DC
+                ns['P'] = ParamRef(params_list[0]) if params_list else ColumnRef(DC('CA'))
 
             compiled = compile(func_expr, '<custom_factor>', 'eval')
             expr = eval(compiled, ns)
@@ -408,7 +410,7 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
     )
     try:
         instance = custom_cls(extra_params=params_list, expr=expr)
-        instance._custom_factor_data = cf_data
+        instance._custom_factor_data = cf_data  # type: ignore[attr-defined]
         return instance
     except Exception:
         return None
@@ -432,7 +434,7 @@ def get_custom_factor_instance(username: str, factor_id: str) -> FactorFamily | 
     return instance
 
 
-def invalidate_custom_factor_cache(username: str, factor_id: str = None):
+def invalidate_custom_factor_cache(username: str, factor_id: str | None = None):
     """清除自定义因子缓存（更新/删除后调用）。"""
     with _custom_factor_cache_lock:
         if factor_id is not None:
