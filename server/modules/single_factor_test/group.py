@@ -104,7 +104,11 @@ def run_group_test():
                     freq = DataFreq(rf_str) if rf_str else None
                 except Exception:
                     freq = None
-                factor.calc_returns(next_return=True, return_freq=freq)
+                if freq is not None:
+                    tester.factor_return_freqs[factor] = freq
+                else:
+                    tester.factor_return_freqs.pop(factor, None)
+                tester.factor_returns.pop(factor, None)
                 from tools.factors.FactorTester import _signal_time
                 _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
                     factors=factor, n_groups=n_groups, time_range=time_range,

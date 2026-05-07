@@ -369,6 +369,109 @@ class FactorTester(UniqueObject):
         })
         return stats_df
 
+    def _ensure_factor_returns(self, factor: 'Factor',
+                               returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED) -> pd.DataFrame:
+        """确保 factor_returns 中有原始 RE 收益宽表。
+
+        calc_returns 已不再是收益生成入口；这里复用/生成 CrossSectionIC 的 RE
+        intermediate。分组测试需要信号时点收益时再临时 signal_align。
+        """
+        desired_freq = self.factor_return_freqs.get(factor)
+        if desired_freq is None:
+            desired_freq = factor.freq
+        desired_key = getattr(desired_freq, 'name', None) or str(desired_freq)
+        returns_col_key = returns_col.value.name if isinstance(returns_col, FactorNextPeriodReturns) else str(returns_col)
+
+        cached = self.factor_returns.get(factor, pd.DataFrame())
+        cached_freq = getattr(factor, '_return_freq_cached', None)
+        cached_col = getattr(factor, '_return_col_cached', None)
+        freq_matches = cached_freq == desired_key or (cached_freq is None and factor not in self.factor_return_freqs)
+        col_matches = cached_col == returns_col_key or cached_col is None
+        if (
+            isinstance(cached, pd.DataFrame) and not cached.empty
+            and freq_matches
+            and col_matches
+        ):
+            object.__setattr__(factor, '_return_freq_cached', desired_key)
+            object.__setattr__(factor, '_return_col_cached', returns_col_key)
+            return cached
+
+        if factor.table is None or factor.table.empty:
+            factor.evaluate(self.products)
+
+        from tools.factors.FactorFamily import CrossSectionIC
+
+        try:
+            rf_value = desired_freq.value if isinstance(desired_freq, DataFreq) else desired_freq
+        except Exception:
+            rf_value = factor.freq.value
+
+        data_col = returns_col.value if isinstance(returns_col, FactorNextPeriodReturns) else returns_col
+        shift = 0 if data_col.name.startswith('OPEN') else 1
+
+        ic_family = CrossSectionIC()
+        ic_factor = ic_family.get_factor(
+            FE=factor,
+            SC=data_col,
+            RF=rf_value,
+            S=shift,
+            Lag=0,
+            F=factor.freq.value,
+        )
+        ic_factor.clear()
+        ic_factor.evaluate(self.products, freq=factor._source_freq)
+
+        raw_returns = ic_factor.get_intermediate('RE')
+        if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
+            raise ValueError(f"{factor.alias}: 无法生成收益率数据")
+        self.factor_returns[factor] = raw_returns
+        object.__setattr__(factor, '_return_freq_cached', desired_key)
+        object.__setattr__(factor, '_return_col_cached', returns_col_key)
+        return raw_returns
+
+    def _align_returns_for_group(self, factor: 'Factor', raw_returns: pd.DataFrame) -> pd.DataFrame:
+        """临时将原始收益表投影到 factor 的信号时点；不写入长期缓存。"""
+        return self._align_table_for_group(factor, raw_returns)
+
+    def _align_table_for_group(self, factor: 'Factor', raw_table: pd.DataFrame) -> pd.DataFrame:
+        """临时将原始表投影到 factor 的信号时点；不写入长期缓存。"""
+        from tools.factors.FactorExpr import SignalAlign, signal_align
+
+        def _find_signal_align(node: Any) -> Optional[SignalAlign]:
+            if isinstance(node, SignalAlign):
+                return node
+            for child in getattr(node, '_operands', ()):
+                found = _find_signal_align(child)
+                if found is not None:
+                    return found
+            return None
+
+        signal_node = _find_signal_align(factor._expr)
+        if signal_node is None:
+            return raw_table.copy(deep=False)
+        return signal_align(
+            raw_table,
+            signal_node.signal_freq,
+            basepoint=signal_node.basepoint,
+            daily_basepoint=signal_node.daily_basepoint,
+            end_session_skip=signal_node.end_session_skip,
+            end_session_gap=signal_node.end_session_gap,
+        )
+
+    def _get_factor_table_for_group(self, factor: 'Factor') -> pd.DataFrame:
+        """获取分组测试使用的因子信号表，优先复用 IC 的原始 FE 再临时对齐。"""
+        raw_fe = getattr(factor, '_ic_fe_intermediate', None)
+        if not isinstance(raw_fe, pd.DataFrame) or raw_fe.empty:
+            raw_fe = self.factor_tables.get(factor)
+        if isinstance(raw_fe, pd.DataFrame) and not raw_fe.empty:
+            if isinstance(raw_fe.index, pd.MultiIndex) and any(str(n).startswith('_SIGNAL') for n in raw_fe.index.names):
+                return raw_fe.copy(deep=False)
+            return self._align_table_for_group(factor, raw_fe)
+
+        if factor.table is None or factor.table.empty:
+            factor.evaluate(self.products)
+        return factor.table.copy(deep=False)
+
     def _test_by_group_single_factor(self, factor: 'Factor',
                                      returns_col: FactorNextPeriodReturns,
                                      n_groups: int, n_groups_name: Dict[int, str],
@@ -383,14 +486,14 @@ class FactorTester(UniqueObject):
         start_date = pd.to_datetime(time_range[0]) if time_range is not None else self.start_date
         end_date   = pd.to_datetime(time_range[1]) if time_range is not None else self.end_date
 
-        if self.factor_returns.get(factor, pd.DataFrame()).empty:
-            factor.calc_returns(next_return=True, returns_col=returns_col)
-        assert not self.factor_returns.get(factor, pd.DataFrame()).empty
+        raw_returns = self._ensure_factor_returns(factor, returns_col=returns_col)
+        returns_for_group = self._align_returns_for_group(factor, raw_returns)
+        assert not returns_for_group.empty
 
         # ---------- numpy 预计算 ----------
         # 先归一化索引（MultiIndex → DatetimeIndex），再按时间范围截取
-        table_src   = factor.table
-        returns_src = self.factor_returns[factor]
+        table_src   = self._get_factor_table_for_group(factor).copy(deep=False)
+        returns_src = returns_for_group.copy(deep=False)
         table_src.index   = _extract_signal_index(table_src.index)
         returns_src.index = _extract_signal_index(returns_src.index)
         if start_date is not None:
@@ -406,6 +509,16 @@ class FactorTester(UniqueObject):
 
         # 对齐两个 DataFrame 的索引（factor.returns 因 shift 可能比 factor.table 少最后一行）
         common_index = table_src.index.intersection(returns_src.index)
+        if len(common_index) == 0:
+            def _idx_span(idx: pd.Index) -> str:
+                if len(idx) == 0:
+                    return 'empty'
+                return f"{idx[0]} -> {idx[-1]} ({len(idx)} rows)"
+
+            raise ValueError(
+                f"{factor.alias}: 因子表和收益表没有共同时间索引；"
+                f"factor={_idx_span(table_src.index)}, returns={_idx_span(returns_src.index)}"
+            )
         table_src    = table_src.loc[common_index]
         returns_src  = returns_src.loc[common_index]
 
@@ -415,6 +528,11 @@ class FactorTester(UniqueObject):
         ret_cols  = list(returns_src.columns)
         # 只取交集（有 returns 的品种）
         valid_cols = [c for c in all_cols if c in set(ret_cols)]
+        if not valid_cols:
+            raise ValueError(
+                f"{factor.alias}: 因子表和收益表没有共同品种列；"
+                f"factor_cols={len(all_cols)}, returns_cols={len(ret_cols)}"
+            )
 
         table_np  = table_src[valid_cols].to_numpy(dtype=float)   # shape (T, P)
         returns_np = returns_src[valid_cols].to_numpy(dtype=float) # shape (T, P)
