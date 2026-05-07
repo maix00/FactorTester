@@ -318,6 +318,9 @@
         .setting-summary-value { color: #888; }
         .setting-summary-arrow { margin-left: auto; color: #bbb; font-size: 13px; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>window.MathJax = { tex: { packages: {'[+]': ['color']}, inlineMath: [['$','$'],['\\(','\\)']] }, options: { skipHtmlTags: ['script','noscript','style','textarea'] } };</script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
     <!-- 全因子概览弹窗 -->
@@ -340,6 +343,22 @@
          onclick="if(event.target===this)closeParamDrawer()">
         <div class="settings-drawer-panel">
             <button class="drawer-close-btn" onclick="closeParamDrawer()">✕ 关闭</button>
+
+            <!-- 数学公式 -->
+            <div id="cfe-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;"></div>
+
+            <!-- 因子说明 -->
+            <div id="cfe-desc-block" style="display:none;margin:12px 24px 0;">
+                <div class="setting-summary-row" onclick="(function(c,b){var isOpen=c.style.display!=='none';c.style.display=isOpen?'none':'';b.textContent=isOpen?'\u25bc \u5c55\u5f00':'\u25b2 \u6536\u8d77';})(document.getElementById('cfe-desc-content'),this.querySelector('.cfe-desc-toggle'))">
+                    <span class="setting-summary-label">📖 因子说明</span>
+                    <span class="setting-summary-value">有说明</span>
+                    <span class="cfe-desc-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+                </div>
+                <div id="cfe-desc-content" style="display:none;margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+                    <div id="cfe-desc-rendered" style="font-size:14px;line-height:1.75;color:#374151;"></div>
+                </div>
+            </div>
+
             <div class="module">
                 <div class="section-title" id="param-drawer-title">参数配置</div>
 
@@ -1416,7 +1435,39 @@
             document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';
             renderParamTable();
             loadParamTemplatesIntoSelect(); // 加载该因子的模板列表
+
+            // 数学公式
+            const mathBlock = document.getElementById('cfe-math-block');
+            if (mathBlock) {
+                const mathExpr = (def.math_expr || '').trim();
+                if (mathExpr) {
+                    mathBlock.textContent = '$$ ' + mathExpr + ' $$';
+                    mathBlock.style.display = '';
+                } else {
+                    mathBlock.style.display = 'none';
+                }
+            }
+            // 因子说明
+            const descBlock = document.getElementById('cfe-desc-block');
+            if (descBlock) {
+                const desc = (def.description || '').trim();
+                if (desc) {
+                    const rendered = document.getElementById('cfe-desc-rendered');
+                    if (rendered) {
+                        try { rendered.innerHTML = (typeof marked !== 'undefined') ? marked.parse(desc) : desc; }
+                        catch(e) { rendered.textContent = desc; }
+                    }
+                    document.getElementById('cfe-desc-content').style.display = 'none';
+                    descBlock.style.display = '';
+                } else {
+                    descBlock.style.display = 'none';
+                }
+            }
+
             drawer.classList.add('open');
+            if (window.MathJax && mathBlock && mathBlock.style.display !== 'none') {
+                MathJax.typesetPromise([mathBlock]).catch(function() {});
+            }
         }
 
         function closeParamDrawer() {

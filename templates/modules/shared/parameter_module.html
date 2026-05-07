@@ -1,5 +1,5 @@
 <!-- 参数设置摘要行 -->
-<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.MathJax)MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean))">
     <span class="setting-summary-label">⚙️ 参数设置</span>
     <span class="setting-summary-value multiline" id="param-summary-text">加载中…</span>
     <span class="setting-summary-arrow">编辑 ▶</span>
@@ -11,6 +11,42 @@
     <div class="settings-drawer-panel">
         <button class="drawer-close-btn"
                 onclick="document.getElementById('param-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
+
+{% if math_expr %}
+<div id="pm-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;">
+    $$ {{ math_expr }} $$
+</div>
+{% endif %}
+
+<!-- 因子说明折叠区 -->
+<div style="margin:12px 24px 0;">
+    <div class="setting-summary-row" onclick="(function(c,b){var isOpen=c.style.display!=='none';c.style.display=isOpen?'none':'';b.textContent=isOpen?'\u25bc \u5c55\u5f00':'\u25b2 \u6536\u8d77';})(document.getElementById('pm-desc-content'),this.querySelector('.pm-desc-toggle'))">
+        <span class="setting-summary-label">📖 因子说明</span>
+        <span class="setting-summary-value">{% if description %}有说明{% else %}-{% endif %}</span>
+        <span class="pm-desc-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+    </div>
+    <div id="pm-desc-content" style="display:none;margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+        {% if description %}
+            <div id="pm-desc-raw" style="display:none;">{{ description | tojson }}</div>
+            <div id="pm-desc-rendered" style="font-size:14px;line-height:1.75;color:#374151;"></div>
+            <script>
+            (function() {
+                const rawEl = document.getElementById('pm-desc-raw');
+                const outEl = document.getElementById('pm-desc-rendered');
+                if (rawEl && outEl) {
+                    try {
+                        outEl.innerHTML = marked.parse(rawEl.textContent);
+                    } catch(e) {
+                        outEl.innerHTML = '<pre>' + rawEl.textContent + '<\/pre>';
+                    }
+                }
+            })();
+            </script>
+        {% else %}
+            <span style="color:#888;">该因子暂未提供说明</span>
+        {% endif %}
+    </div>
+</div>
 
 <div class="module" id="parameter_module"
      data-factor-alias="{{ factor_family_alias }}"
