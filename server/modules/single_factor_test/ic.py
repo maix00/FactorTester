@@ -12,6 +12,7 @@ from flask import jsonify, request
 
 from tools.factors import CrossSectionIC, Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
+from tools.factors.FactorTester import _align_ts
 from tools.factors.Parameters import FactorNextPeriodReturns
 
 from . import sft_bp
@@ -140,9 +141,13 @@ def run_ic_test():
             ic_series = cast(pd.Series, ic_factor.table['IC'])
 
             if tester.start_date is not None and len(ic_series) > 0:
-                ic_series = ic_series[ic_series.index.get_level_values(-1) >= pd.Timestamp(tester.start_date)]
+                idx_ts = ic_series.index.get_level_values(-1)
+                ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
+                ic_series = ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)]
             if tester.end_date is not None and len(ic_series) > 0:
-                ic_series = ic_series[ic_series.index.get_level_values(-1) <= pd.Timestamp(tester.end_date)]
+                idx_ts = ic_series.index.get_level_values(-1)
+                ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
+                ic_series = ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)]
 
             re_table = ic_factor.get_intermediate('RE')
             fe_table = ic_factor.get_intermediate('FE')
