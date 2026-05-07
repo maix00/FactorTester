@@ -1,0 +1,390 @@
+# =============================================================================
+# tools/factors/Factor.py
+# 因子对象模块
+#
+# Factor = 已解析的 FactorExpr + 信号对齐参数 + DataFrame 缓存 + 全局唯一标识。
+#
+# 继承链：FactorExpr → 纯表达式树（运算、求值、LaTeX）
+#         UniqueObject → 全局唯一实例（按 alias 复用）
+#         Factor → 多重继承两者 = 不含 Parameter 的已绑定表达式 + 数据
+#
+# Factor 是「不含 Parameter 的 FactorExpr」：
+#   - 所有 ParamRef 已由 FactorFamily._resolve_expr_params 解析为 ConstExpr/ColumnRef
+#   - 持有 _resolved_expr（纯表达式树）+ signal_freq + is_reversed
+#   - calc() 时现场 evaluate → SignalAlign（信号对齐）→ 取反
+#   - evaluate() 直接返回 source_table（不走表达式求值，已缓存）
+#   - 运算符重载（+, -, *, / 等）来自 FactorExpr，返回 CompositeExpr
+#
+# 数据存储：
+#   - _resolved_expr : 已解析的纯表达式树（无 ParamRef）
+#   - source_table   : 表达式求值的原始结果（高频，未对齐）
+#   - table          : 信号对齐后的视图
+#   - source         : 数据源 DataSource
+#   - family         : 创建此 Factor 的 FactorFamily
+#   - signal_freq    : 信号频率（对齐目标频率）
+#   - is_reversed    : 是否取反
+#
+# 由 FactorFamily.get_factor() / get_factors() 创建。
+# =============================================================================
+import numpy as np
+import pandas as pd
+import uuid
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence
+
+from tools import UniqueObject, DataFreq
+from tools.products.Product import Product
+from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr
+
+if TYPE_CHECKING:
+    from tools.factors.FactorFamily import FactorFamily
+    from tools.factors.FactorTester import FactorTester
+
+class Factor(UniqueObject, FactorExpr):
+    """
+    量化因子 = 已解析的 FactorExpr（无 ParamRef）+ 信号对齐 + DataFrame 缓存。
+
+    继承 FactorExpr → 是一个表达式节点，可参与表达式组合（+, -, cs_rank 等）。
+    继承 UniqueObject → 同一 alias 全局唯一实例。
+
+    属性：
+        _resolved_expr (FactorExpr)  : 已解析的纯表达式树（无 ParamRef）
+        signal_freq    (Any)         : 信号频率（如 '1d', '1h'）
+        is_reversed    (bool)        : 是否取反
+        source_table   (DataFrame)   : 表达式求值的原始结果（高频，未对齐，CoW）
+        table          (DataFrame)   : 信号对齐后的结果（CoW）
+        source         (DataSource)  : 数据源（含 freq）
+        family         (FactorFamily): 创建此 Factor 的 FactorFamily 实例
+        products       (set)         : 参与计算的 Product 集合（从 source_table 列提取）
+        freq           (DataFreq)    : 信号频率（从 table 索引的 _SIGNAL@ 层级推断）
+        returns        (DataFrame)   : 因子对应的收益率序列（calc_returns 后设置）
+        source_data_freq (DataFreq)  : 数据源频率（从 family 继承）
+    """
+
+    # 运行时动态属性（calc 后设置）
+    _expr: FactorExpr
+    _func_expr: FactorExpr
+    _source_expr: FactorExpr
+    _freq: Optional[DataFreq] = None
+    _source_freq: Optional[DataFreq] = None
+    _source_data: Optional[pd.DataFrame] = None  # 未对齐的原始数据 (原 FactorData.source_table)
+    _data: Optional[pd.DataFrame] = None          # 信号对齐后的结果
+    _intermediate_factor_data: Dict[Tuple, pd.DataFrame]
+    _intermediate_alias_index: Dict[str, Tuple]
+    family: Optional[FactorFamily] = None
+
+    def clear(self):
+        """清空所有计算结果。"""
+        self._source_freq = None
+        self._source_data = None
+        self._data = None
+        self._intermediate_factor_data.clear()
+        self._intermediate_alias_index.clear()
+
+    def _strip_outer_and_set_freq(self, expr: FactorExpr, preserve_neg: bool, set_freq: bool = False) -> FactorExpr:
+        """剥离表达式外层的 SignalAlign 和 Neg (如果存在)"""
+        if isinstance(expr, SignalAlign):
+            if set_freq:
+                self._freq = DataFreq(expr.signal_freq)
+            return expr.operands[0]
+        if (
+            isinstance(expr, CompositeExpr)
+            and expr.op == 'neg'
+            and len(expr.operands) == 1
+            and isinstance(expr.operands[0], SignalAlign)
+        ):
+            if set_freq:
+                self._freq = DataFreq(expr.operands[0].signal_freq)
+            return expr.operands[0].operands[0] if not preserve_neg else \
+                CompositeExpr('neg', expr.operands[0].operands[0])
+        return expr
+
+    @staticmethod
+    def _get_user_prefix(family: Optional['FactorFamily'] = None) -> Optional[str]:
+        """从 family.name 中提取用户前缀 'username@serial' 或 '$COMMON'。"""
+        if family is not None:
+            return family.name.split(':')[0]
+        try:
+            from tools.factors.FactorTester import _active_user_prefix
+            return _active_user_prefix.get()
+        except ImportError:
+            pass
+        return '$COMMON'
+
+    def __new__(cls, expr: FactorExpr, alias: Optional[str] = None, 
+                family: Optional[FactorFamily] = None, *args, **kwargs):
+        if expr.param_deps:
+            raise ValueError(f"Factor 表达式不能包含未解析的参数引用：{expr.param_deps}")
+        core_alias = alias or cls.__name__
+        user_prefix = cls._get_user_prefix(family)
+        if user_prefix:
+            name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
+        else:
+            name = f"{core_alias}:{uuid.uuid4().hex}"
+        instance = UniqueObject.__new__(cls, name=kwargs.pop('name', name), alias=kwargs.pop('alias', core_alias), search=kwargs.pop('search', True), **kwargs)
+        if not hasattr(instance, '_initialized'):
+            instance._expr = expr
+            instance._func_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=True, set_freq=True)
+            instance._source_expr = instance._strip_outer_and_set_freq(expr, preserve_neg=False)
+            instance.family = family
+            instance._intermediate_factor_data = {}
+            instance._intermediate_alias_index = {}
+            super().__init__(instance, _local_only=False)
+        return instance
+    
+    def _structural_key(self) -> Tuple:
+        return self._expr._structural_key()
+    
+    def _structural_eq(self, other) -> bool:
+        """桥接 UniqueObject._structural_eq 和 FactorExpr._structural_eq。"""
+        if self is other:
+            return True
+        from tools.factors.FactorExpr import FactorExpr as FE
+        if isinstance(other, Factor):
+            return self._expr._structural_eq(other._expr)
+        if isinstance(other, FE):
+            return self._expr._structural_eq(other)
+        return False
+
+    # 显式覆盖 __eq__/__hash__，避免 FactorExpr.__eq__（返回 CompositeExpr）干扰 dict key 协议
+    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
+        if type(self) is not type(other):
+            return False
+        return self._structural_eq(other)
+
+    def __hash__(self) -> int:
+        sk = self._structural_key()
+        if sk is not None:
+            return hash((self.name, sk))
+        return hash(self.name)
+
+    def __getattr__(self, item):
+        # 内部属性不可代理，避免 __new__ 中 hasattr() 调用触发的无限递归
+        # __eq__/__hash__ 不可代理 — FactorExpr.__eq__ 返回 CompositeExpr 破坏 dict key 协议
+        if item in ('_expr', '_initialized', '_func_expr', '_source_expr', '_data',
+                     '_source_data', '__eq__', '__hash__'):
+            raise AttributeError(item)
+        return getattr(self._expr, item)
+
+    def evaluate(self, products: Sequence['Product']|set['Product'], 
+                 freq: Optional[DataFreq] = None, *args, **kwargs) -> pd.DataFrame:
+        """
+        计算因子值。
+
+        流程（SignalAlign + FactorData 架构）：
+          1. _expr.evaluate() → 已对齐（且可能取反）的 DataFrame
+             _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
+             取反已内化到表达式层 → pos/neg 因子有不同 structural key
+          2. FactorData(expr, raw_result) 去重存储（相同表达式只算一次）
+             SignalAlign 的 _structural_key 包含对齐参数 → 不同对齐不同 key
+             neg() 包裹 → pos/neg 不同 key
+          3. self._aligned_table = result（pandas CoW 零拷贝）
+          4. 删除全 NaN 或常数列
+
+        freq: 可选，手动指定数据源频率。None 时自动推断。
+        """
+        if isinstance(products, Product):
+            products = [products]
+        products = list(products)
+        if not products:
+            raise ValueError(f"{self}: 无法计算，因为没有提供产品")
+
+        if self._expr is None:
+            raise ValueError(f"{self}: 没有 _expr，无法计算。"
+                             f"请通过 FactorFamily.get_factor() 创建。")
+        if self.family is None:
+            raise ValueError(f"{self}: 没有关联的 FactorFamily，无法计算。")
+
+        # 数据源频率 —— 外部指定 > 显式配置 > 自动推断
+        if freq is not None:
+            freq = freq
+        else:
+            freq_name = getattr(self.family, '_freq_name', None)
+            if freq_name is not None:
+                freq = DataFreq(freq_name)
+            else:
+                if products:
+                    const_refs = self._expr.const_refs
+                    desired_freq = set()
+                    if const_refs:
+                        def get_freq(val: Any) -> Optional[DataFreq]:
+                            try:
+                                return DataFreq(val)
+                            except Exception:
+                                return
+                        desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
+                    valid_products: List[Product] = []
+                    available_freqs_set: Optional[Set[DataFreq]] = None
+                    for p in products:
+                        freqs = set(p.list_available_freqs())
+                        if not freqs:
+                            continue
+                        valid_products.append(p)
+                        if available_freqs_set is None:
+                            available_freqs_set = freqs
+                        else:
+                            available_freqs_set &= freqs
+                    products = valid_products
+                    if available_freqs_set is None:
+                        available_freqs_set = set()
+                    available_freqs = sorted(available_freqs_set, key=lambda f: f.value, reverse=True)
+                    if not available_freqs:
+                        raise ValueError(f"{self}: 产品数据没有公共可用频率，无法确定数据频率")
+                    if desired_freq:
+                        freq = next((af for af in available_freqs if all(df.value.total_seconds() % af.value.total_seconds() == 0 for df in desired_freq)), available_freqs[-1])
+                    else:
+                        freq = available_freqs[-1]
+                else:
+                    raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
+
+        self._source_freq = freq
+
+        # ── 预加载：收集需要的列，每个品种只读一次 ──
+        from tools.data.DataMeta import DataMeta
+
+        preloaded: dict = {}
+        column_refs = self._expr.column_refs
+        columns = list(cr.column.name for cr in column_refs)
+        if columns:
+            for p in products:
+                dm: DataMeta = getattr(p, freq.name)
+                data = dm.get_and_adjust_cols(columns, copy=False)
+                if not data.empty:
+                    preloaded[(p, freq.name)] = data
+
+        # ── 1. 表达式求值 ──
+        # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
+        # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
+        # SignalAlign._raw_data 同时保存了未对齐的原始数据
+        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded, cache=self._intermediate_factor_data)
+
+        # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
+        # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
+        raw_data: pd.DataFrame = result  # fallback
+        node = self._expr
+        while True:
+            if isinstance(node, SignalAlign):
+                raw_data = node._raw_data  # type: ignore[assignment]
+                break
+            # CompositeExpr('neg', ...) → 穿透
+            operands = getattr(node, 'operands', None) or getattr(node, '_operands', None)
+            if operands and len(operands) == 1:
+                node = operands[0]
+            else:
+                break
+        self._source_data = raw_data
+
+        # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
+        self._data = result
+
+        # ── 4. 删除无贡献的列 ──
+        nunique = result.nunique(dropna=True)
+        col_todrop = nunique[nunique <= 1].index.tolist()
+        result.drop(columns=col_todrop, inplace=True)
+        if result.empty:
+            raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
+
+        # ── 5. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
+        t = Factor._get_active_tester()
+        if t is not None:
+            t.factor_source_tables[self] = self.source_table
+            t.factor_tables[self] = result
+        else:
+            self._data = result
+
+        # ── 6. 收集中间因子别名索引 ──
+        self._collect_intermediates_from_cache()
+
+        return self.table
+    
+    def _collect_intermediates_from_cache(self) -> None:
+        """遍历表达式树，将 _intermediate_factor_data 中的 sk 映射到别名。"""
+        self._intermediate_alias_index.clear()
+        seen: Set[Tuple] = set()
+        stack: List[FactorExpr] = [self._expr]
+
+        while stack:
+            node = stack.pop()
+            sk = node._structural_key()
+            if sk in seen:
+                continue
+            seen.add(sk)
+
+            if getattr(node, '_is_intermediate', False):
+                name = getattr(node, '_intermediate_name', None)
+                if name and sk in self._intermediate_factor_data:
+                    self._intermediate_alias_index[name] = sk
+
+            for opnd in reversed(list(getattr(node, '_operands', ()))):
+                stack.append(opnd)
+    
+    def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
+        """
+        获取中间因子数据（原始未对齐 DataFrame）。
+
+        key 支持两种形式：
+          - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
+          - Tuple (structural_key): 按表达式结构 key 直接查找
+
+        返回 DataFrame 或 None。
+        """
+        if isinstance(key, str):
+            sk = self._intermediate_alias_index.get(key)
+            if sk is not None:
+                return self._intermediate_factor_data.get(sk)
+            return None
+        # key 是 structural_key (tuple)
+        return self._intermediate_factor_data.get(key)
+    
+    @property
+    def freq(self) -> DataFreq:
+        if self._freq is not None:
+            return self._freq
+        t = self.table
+        if t is None or t.empty:
+            raise ValueError(f"{self}: 因子频率未能推断")
+        idx = t.index
+        if isinstance(idx, pd.MultiIndex):
+            signal_name = next((n for n in idx.names if n and str(n).startswith('_SIGNAL')), None)
+            if signal_name is not None:
+                freq_str = str(signal_name).split('@', 1)[-1] if '@' in str(signal_name) else str(signal_name)
+                try:
+                    return DataFreq(freq_str)
+                except Exception:
+                    pass
+        raise ValueError(f"{self}: 因子频率未能推断")
+    
+    @property
+    def source_table(self) -> pd.DataFrame:
+        if self._source_data is not None:
+            return self._source_data
+        return pd.DataFrame()
+
+    @property
+    def table(self) -> pd.DataFrame:
+        if self._data is not None:
+            return self._data
+        return pd.DataFrame()
+
+    @table.setter
+    def table(self, value: pd.DataFrame):
+        self._data = value
+
+    @property
+    def products(self) -> Set['Product']:
+        """参与计算的 Product 集合，从 source_table 的列名提取。"""
+        st = self.source_table
+        if st.empty:
+            return set()
+        return {col for col in st.columns if isinstance(col, Product)}
+
+    @property
+    def expr(self) -> 'FactorExpr':
+        return self._expr
+
+    @staticmethod
+    def _get_active_tester() -> 'Optional[FactorTester]':
+        try:
+            from tools.factors.FactorTester import _active_tester
+            return _active_tester.get()
+        except ImportError:
+            return None

@@ -78,7 +78,7 @@
         data.submissions.forEach(s => {
           const opt = document.createElement('option');
           opt.value = s.id;
-          opt.textContent = `提交 ${s.id} — ${s.product || ''}`;
+          opt.textContent = `#${s.id} (${s.product_count} 个产品)`;
           submissionSel.appendChild(opt);
         });
       }

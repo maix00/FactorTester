@@ -1,122 +1,181 @@
 # =============================================================================
 # tools/factors/FactorFamily.py
-# 因子族模块
+# 因子族模块 — 基于表达式树的统一因子族框架
 #
-# FactorFamily 是因子系统的核心基类，负责：
-#   1. func()            — 遍历品种列表并汇总时序信号（支持多线程）
-#   2. func_timeseries() — 子类实现，计算单品种因子时序
-#   3. sync_signal()     — 将数据对齐到等间隔信号时间点（核心对齐逻辑）
-#   4. _get_sync_signal_index() — 构建全局信号索引（复杂边界处理）
-#   5. get_factor() / get_factors() — 创建 Factor 实例
-#   6. test()            — 一键运行 IC / 分组收益测试并持久化结果
+# FactorFamily 支持两种使用方式：
+#   1. 声明式（推荐）：定义 factor_expr() 静态方法，自动从表达式树收集参数
+#   2. 命令式：直接传入 expr= 表达式树和 extra_params= 额外参数
 #
-# 内置子类：
-#   Returns — 计算下期/当期收益率（OPEN-to-OPEN 或 CLOSE-to-CLOSE）
+# 功能：
+#   - get_factor() / get_factors() — 创建 Factor 实例
+#   - test()            — 一键运行 IC / 分组收益测试并持久化结果
+#   - 内置 Returns — 收益率因子族
+#
 # =============================================================================
+from __future__ import annotations
+
 import os
 import threading
 import uuid
 import pandas as pd
-from functools import partial
-from weakref import WeakValueDictionary
-from contextvars import ContextVar
-from typing import TYPE_CHECKING, List, Optional, Sequence, Any, Tuple, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
-from tqdm import tqdm
-
-from tools.factors.Factor import Factor
-from tools.products.Product import Product
+from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
-from tools import UniqueObject, DataFreq, DataMeta, DataColumn
-from tools.parameters import Parameter, WindowParam, DataColumnParam, TypeParam
-from tools.factors.Parameters import StartCalcPointParam, FactorFreqParam, FactorNextPeriodReturns, ReverseParam
+from tools.factors.FactorExpr import (
+    FactorExpr, DataColumn, DataFreq,
+    ColumnRef, ConstExpr, ParamRef,
+    RollingOp, ShiftOp, CrossSectionalOp, CompositeExpr,
+    OperandExpr,
+)
+from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
+from tools import UniqueObject, DataMeta
+from tools.parameters import Parameter
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
-# 每个执行上下文（线程/协程）的活跃 FactorTester，由 test() 或服务端路由设置。
-# 通过 ContextVar 保证并发安全：每个请求线程拥有独立的值，互不干扰。
-_active_tester: ContextVar[Optional['FactorTester']] = ContextVar('_active_tester', default=None)
-# 活跃用户前缀，如 '$COMMON' 或 '张三@1'。由 FactorFamily 创建时注入，
-# 传递给所有子对象（Factor、非$开头 Parameter）以构建用户名前缀命名。
-_active_user_prefix: ContextVar[str] = ContextVar('_active_user_prefix', default='$COMMON')
+if TYPE_CHECKING:
+    from tools.products.Product import Product
 
-class FactorFamily(UniqueObject):
+# ── 从 FactorTester 导入运行时上下文（避免循环导入） ──
+# _active_tester / _active_user_prefix 在 FactorTester.py 模块级定义
+from tools.factors.FactorTester import _active_tester, _active_user_prefix
+
+class FactorFamily(UniqueObject, FactorExpr):
     """
-    因子族基类。
+    因子族基类 — 含参数的表达式模板 + 信号对齐。
 
-    每个子类对应一种因子计算逻辑，通过重写 func_timeseries 实现单品种信号。
-    FactorFamily 负责：
-      - 批量调用 func_timeseries 汇总多品种 DataFrame（func）
-      - 管理参数集合（params / _params_list）
-      - 构建信号时间索引（_get_sync_signal_index）并对数据对齐（sync_signal）
-      - 创建 Factor 实例（get_factor / get_factors）
-      - 驱动完整的 IC + 分组收益测试流程（test）
+    FactorFamily 继承 FactorExpr（它是带 ParamRef 的表达式树）
+    和 UniqueObject（全局唯一命名对象）。
+
+    支持两种使用方式：
+        1. 声明式（推荐）— 子类定义 factor_expr() 静态方法，自动从表达式树收集参数
+        2. 命令式 — 直接传入 expr= 表达式树和 extra_params=
+
+    功能：
+      - func() — 表达式批量求值 + 信号对齐
+      - get_factor() / get_factors() — 创建 Factor 实例（已解析，无参数）
+      - test()  — 一键 IC / 分组收益测试并持久化
+      - 中间因子管理 — evaluate() 时自动缓存子表达式结果
 
     类属性：
-        math_expr            (str)  : 因子公式的 LaTeX 字符串，供前端展示
-        description_sections (list) : 因子结构化说明，供前端展示
-        params               (list) : 本族使用的参数对象列表（子类应覆盖）
+        math_expr    (str)  : 因子公式的 LaTeX 字符串
+        desc         (str)  : 因子简短描述
+        description  (str)  : 因子详细说明（Markdown）
+        params       (list) : 参数对象列表（子类覆盖或从 factor_expr 自动收集）
     """
-    math_expr: str = ""       # 子类可覆盖，填写 LaTeX 格式的数学表达式
-    chinese_name: str = ""    # 子类可覆盖，填写因子中文名称，供前端显示和搜索
-    description_sections: List[dict] = []
-    _serial_map = {}
+    _runtime_ctx: threading.local
+    _source_freqs_lock: threading.Lock
+
+    math_expr: str = ""
+    desc: str = ""
+    description: str = ""
+    factors: List[Factor] = []
     params: List[Parameter] = []
+    params_dict: Dict[str, Parameter] = {}
 
-    @staticmethod
-    def _series_max2(a: Any, b: Any) -> Any:
-        """逐元素两两最大值，兼容 DataMeta / Series / 标量。"""
-        return (a + b + (a - b).abs()) * 0.5
+    # ── 信号对齐参数（类属性，可在子类或实例上覆盖） ──
+    basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
+    daily_basepoint: 'str|None' = None       # 日倍频基准点（时间字符串，如 '15:00:00'），None 则用 basepoint
+    end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
+    end_session_gap: pd.Timedelta = pd.Timedelta('3hours')  # 盘间间隔阈值
 
-    @staticmethod
-    def _series_min2(a: Any, b: Any) -> Any:
-        """逐元素两两最小值，兼容 DataMeta / Series / 标量。"""
-        return (a + b - (a - b).abs()) * 0.5
+    _expr: Optional[FactorExpr] = None
+    _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
+    _source_freqs_seen: set[DataFreq] = set()
 
-    def series_max(self, *xs: Any) -> Any:
-        """逐元素最大值（可变参数版），至少传入一个序列。"""
-        if len(xs) == 0:
-            raise ValueError("series_max requires at least one argument")
-        res = xs[0]
-        for x in xs[1:]:
-            res = self._series_max2(res, x)
-        return res
-
-    def series_min(self, *xs: Any) -> Any:
-        """逐元素最小值（可变参数版），至少传入一个序列。"""
-        if len(xs) == 0:
-            raise ValueError("series_min requires at least one argument")
-        res = xs[0]
-        for x in xs[1:]:
-            res = self._series_min2(res, x)
-        return res
-
-    def __new__(cls, alias: Optional[str] = None, *args, **kwargs):
+    def __new__(cls, alias: Optional[str] = None, 
+                 expr: Optional[FactorExpr] = None,
+                 desc: Optional[str] = None,
+                 source_freq: Optional[str] = None,
+                 description: Optional[str] = None,
+                 math_expr: Optional[str] = None,
+                 extra_params: Optional[List[Parameter]] = None,
+                 signal_freq: Optional[str] = None,
+                 basepoint: 'Optional[str|Callable]' = None,
+                 daily_basepoint: 'Optional[str]' = None,
+                 end_session_skip: Optional[bool] = None,
+                 end_session_gap: 'Optional[pd.Timedelta]' = None,
+                 *args, **kwargs):
         # alias 保持纯净（类名），name = {user_prefix}:{alias}:{uuid}
+        # 直接调用 UniqueObject.__new__（跳过 FactorExpr 的 object.__new__）
         core_alias = alias if alias else cls.__name__
         user_prefix = _active_user_prefix.get()
         if user_prefix:
             name = f"{user_prefix}:{core_alias}:{uuid.uuid4().hex}"
         else:
             name = f"{core_alias}:{uuid.uuid4().hex}"
-        kwargs.pop('name', None)
-        return super().__new__(cls, name=name, alias=core_alias, **kwargs)
+        name = kwargs.pop('name', name)
+        alias = kwargs.pop('alias', core_alias)
+        instance = UniqueObject.__new__(cls, name=name, alias=alias, **kwargs)
+        
+        if not hasattr(instance, '_initialized'):
+            _expr = expr if expr is not None else getattr(cls, 'expression', None)
+            # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
+            if _expr is None and hasattr(cls, 'factor_expr'):
+                _expr = getattr(cls, 'factor_expr')()
 
-    def __init__(self, alias: Optional[str] = None):
-        """
-        初始化 FactorFamily。alias 为纯净类名，不包含用户前缀。
-        """
-        if not hasattr(self, '_initialized'):
-            super().__init__(alias=alias if alias else self.__class__.__name__)
-            self._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
-            self._source_freqs_lock = threading.Lock()
-            self._source_freqs_seen: set[DataFreq] = set()
-            self._last_source_data_freq: Optional[DataFreq] = None
-            self.params.append(FactorFreqParam)   # 所有子类默认包含信号频率参数 F
-            self.params.append(ReverseParam)       # 所有子类默认包含反转参数 $Rev（1/True=-反向；0/False=正向）
-            self.params_dict = {param.alias: param for param in self.params}
-            self.set_default_params()             # 以各参数默认值初始化 _params_list
-            self.factors: List[Factor] = []       # 最近一批生成的 Factor 实例
+            cls.params = list(_expr.ordered_param_deps) if _expr is not None else []
+            _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
+            _math = math_expr if math_expr is not None else getattr(cls, 'math_expr', None)
+            _extra = extra_params if extra_params is not None else getattr(cls, 'extra_params', None)
+            _signal_freq = signal_freq if signal_freq is not None else getattr(cls, 'signal_freq', '1d')
+
+            if _expr is None:
+                if hasattr(cls, 'factor_expr'):
+                    # 有 factor_expr 但返回了 None — 这不应该发生
+                    raise ValueError(f"{cls.__name__}.factor_expr() 返回了 None")
+                # 否则：旧式因子，手动实现 func()/params，不需要 expr，允许继续
+
+            # 声明式因子：从表达式树自动收集参数（避免子类重复声明 params 列表）
+            _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
+                                    and hasattr(cls, 'factor_expr'))
+            if _from_factor_expr:
+                assert _expr is not None  # _from_factor_expr 保证了 factor_expr 已被调用且成功
+                for param in _expr.ordered_param_deps:
+                    if param.alias not in {p.alias for p in cls.params}:
+                        cls.params.append(param)
+
+            instance._expr = _expr
+            instance._source_freq = _source_freq
+
+            # 按需设置 params — 内置 F/Rev 已在 __init__ 注册
+            # 子类通过 class-level params 声明的额外参数已在 MRO 中
+            if _extra:
+                existing_aliases = {p.alias for p in cls.params}
+                for p in _extra:
+                    if p.alias not in existing_aliases:
+                        cls.params.append(p)
+
+            instance.desc = desc if desc is not None else getattr(cls, 'desc', '')
+            instance.description = description if description is not None else getattr(cls, 'description', '')
+            instance.math_expr = _math or (_expr.to_latex() if _expr is not None else '')
+
+            # 信号对齐参数（None 则从类属性取默认值）
+            instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
+            instance.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
+            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
+            instance.end_session_gap = (end_session_gap if end_session_gap is not None
+                                    else getattr(cls, 'end_session_gap', pd.Timedelta('3hours')))
+
+            # 覆盖默认信号频率
+            if _signal_freq != '1d':
+                instance.change_param_default_value(**{'$F': _signal_freq})
+            
+            instance._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
+            instance._source_freqs_lock = threading.Lock()
+            instance._source_freqs_seen = set()
+            # 注册内置参数 — 仅在首次实例化时追加到 cls.params
+            existing_aliases = {p.alias for p in cls.params}
+            if '$F' not in existing_aliases:
+                cls.params.append(FactorFreqParam)
+            if '$Rev' not in existing_aliases:
+                cls.params.append(ReverseParam)
+            instance.params_dict = {param.alias: param for param in instance.params}
+            instance.set_default_params()             # 以各参数默认值初始化 _params_list
+            instance.factors = []       # 最近一批生成的 Factor 实例
+            instance._initialized = True
+        return instance
 
     def _extract_user_prefix(self) -> Optional[str]:
         """
@@ -131,131 +190,6 @@ class FactorFamily(UniqueObject):
             if prefix == '$COMMON' or ('@' in prefix and prefix.rsplit('@', 1)[-1].isdigit()):
                 return prefix
         return None
-
-    def func(self, products: Sequence[Product], *args, **kwargs) -> pd.DataFrame:
-        """
-        批量计算因子信号，返回多品种 DataFrame。
-
-        流程：
-          1. 品种数 ≤200 时串行调用 func_timeseries（带进度条）
-          2. 品种数 >200 时用 ThreadPoolExecutor(8) 并行计算
-          3. 按列 concat 合并各品种 Series
-          4. 若信号频率为日度倍数，不同品种的交易结束时间可能不同（如 15:00 vs 15:15），
-             concat 后同一日期会出现多行 → 自动合并：数据列取第一个非 NaN，子日精度索引取最大值
-
-        参数：
-            products : 品种列表
-            **kwargs : 转发给 func_timeseries 的参数键值对（即各 Parameter 的 alias→value）
-
-        返回：
-            DataFrame，列为 Product，索引为 MultiIndex（信号层 + 精度层）
-        """
-        # 运行时参数归一化：支持 F/Rev 与 $F/$Rev 混用输入
-        kwargs = self._normalize_param_kwargs(**kwargs)
-        # 多数因子方法签名使用 F，这里将 $F 映射为 F 供 func_timeseries 使用
-        if '$F' in kwargs and 'F' not in kwargs:
-            kwargs['F'] = kwargs['$F']
-        signal_freq = kwargs.get('F', pd.Timedelta('1d'))
-        # 提取反转参数，不转发给 func_timeseries（统一使用 $Rev）
-        is_reversed: bool = kwargs.pop('$Rev', False)
-        with self._source_freqs_lock:
-            self._source_freqs_seen.clear()
-            self._last_source_data_freq = None
-        try:
-            # 过滤无数据品种（停牌、尚未上市等），避免 func_timeseries 里得到空索引
-            valid_products = [p for p in products if not p.get_some_data(copy=False).empty]
-            if not valid_products:
-                raise ValueError("No products with valid data")
-            # 更新活跃 tester 的有效品种集，并使同步索引缓存失效。
-            # 每次 func 调用都临时切换到当前计算品种，计算结束后恢复原值，
-            # 避免辅助族（如 Returns）永久覆盖用户选定的品种集。
-            tester = _active_tester.get()
-            _prev_products = None
-            if tester is not None:
-                _prev_products = tester.products  # 保存以便恢复
-                tester.products = set(valid_products)
-                tester.sync_signal_index = None
-                tester.sync_signal_index_replaced = None
-            factors = {}
-            try:
-                if len(valid_products) <= 200:
-                    for product in tqdm(valid_products, desc=f"Calculating factor signals"):
-                        DataMeta.begin_cleanup_scope()
-                        try:
-                            self._runtime_ctx.signal_freq = signal_freq
-                            factors[product] = self.func_timeseries(product, *args, **kwargs)
-                        finally:
-                            DataMeta.end_cleanup_scope()
-                else:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    def compute_factor(product, *args, **kwargs):
-                        DataMeta.begin_cleanup_scope()
-                        try:
-                            self._runtime_ctx.signal_freq = signal_freq
-                            return product, self.func_timeseries(product, *args, **kwargs)
-                        finally:
-                            DataMeta.end_cleanup_scope()
-                    with ThreadPoolExecutor(max_workers=8) as executor:
-                        futures = {executor.submit(compute_factor, product, *args, **kwargs): product for product in valid_products}
-                        for future in tqdm(as_completed(futures), total=len(valid_products), desc="Calculating factor signals"):
-                            product, factor = future.result(); factors[product] = factor
-            finally:
-                # 辅助族计算结束后，将 tester.products 恢复为调用前的品种集
-                if tester is not None and _prev_products is not None:
-                    tester.products = _prev_products
-                    tester.sync_signal_index = None
-                    tester.sync_signal_index_replaced = None
-            # 假设所有 df 的 MultiIndex 具有相同的 level 名称和顺序
-            # 先取并集
-            all_index = factors[list(factors.keys())[0]].index
-            for df in list(factors.values())[1:]:
-                all_index = all_index.union(df.index)
-            # 然后 reindex 并 concat
-            result = pd.concat({k: df.reindex(all_index) for k, df in factors.items()}, axis=1)
-            # 日度倍数信号：不同品种交易截止时间不同（如 15:00 vs 15:15），
-            # concat 后同一日期会出现多行，需合并为单行
-            # 数据列取第一个非 NaN，子日精度索引取最大值
-            signal_level_name = next((str(n) for n in result.index.names if str(n).startswith('_SIGNAL@')), None)
-            if signal_level_name is not None:
-                sub_day_names = [str(n) for n in result.index.names if str(n) != signal_level_name]
-                if DataFreq(signal_level_name).is_day_multiple() and sub_day_names:
-                    date_key = result.index.get_level_values(signal_level_name)
-                    if date_key.duplicated().any():
-                        merged = result.groupby(level=signal_level_name).first()
-                        sub_arrays = [
-                            pd.DatetimeIndex(
-                                pd.Series(result.index.get_level_values(n), index=date_key)
-                                .groupby(level=0).max().loc[merged.index]
-                            )
-                            for n in sub_day_names
-                        ]
-                        merged.index = pd.MultiIndex.from_arrays(
-                            [merged.index.values] + sub_arrays,
-                            names=[signal_level_name] + sub_day_names
-                        )
-                        result = merged
-            if is_reversed:
-                result = -result
-            with self._source_freqs_lock:
-                if self._source_freqs_seen:
-                    # 若存在多个频率，记录最细粒度（最小 timedelta）作为收益计算频率。
-                    self._last_source_data_freq = min(self._source_freqs_seen, key=lambda f: f.value)
-            return result
-        except Exception as e:
-            raise e
-    
-    def func_timeseries(self, product: Product, *args, **kwargs) -> Any:
-        """
-        【子类必须重写】计算单品种的因子时序。
-
-        参数：
-            product : 品种对象
-            **kwargs: 因子参数键值对（由 func 转发）
-
-        返回：
-            pd.Series，索引为 MultiIndex，与 func 汇总时保持一致
-        """
-        raise NotImplementedError("请在子类中实现 `func_timeseries` 方法")
 
     def set_default_params(self):
         """用各参数默认值初始化 _params_list（仅一组默认参数组合）。"""
@@ -331,12 +265,15 @@ class FactorFamily(UniqueObject):
         值别名为空字符串的参数会被跳过，不出现在名称中。
         若无参数则直接返回家族别名。
         """
+        normalized = self._normalize_param_kwargs(**params)
+        ordered_keys = sorted(
+            (k for k in normalized.keys() if k in self.params_dict),
+            key=lambda k: (k.startswith('$'), type(self.params_dict[k]).__name__, self.params_dict[k].alias),
+        )
+
         parts = []
-        for key, value in params.items():
-            # $ 前缀标准化：与 _normalize_param_kwargs 保持一致
-            if key not in self.params_dict:
-                if not key.startswith('$') and f'${key}' in self.params_dict:
-                    key = f'${key}'
+        for key in ordered_keys:
+            value = normalized[key]
             val_alias = self.params_dict[key]._value_space.alias(value)
             if val_alias:
                 if key == '$Rev':
@@ -347,523 +284,157 @@ class FactorFamily(UniqueObject):
         params_str = '|'.join(parts)
         return f"{self.alias}|{params_str}" if params_str else self.alias
 
+    def get_factor(self, **kwargs) -> Factor:
+        """根据 kwargs 中的参数值生成一个 Factor 实例（kwargs 形式同 add_params）。"""
+        factors = self.get_factors(**kwargs)
+        assert factors, "get_factors 返回了空列表，无法生成 Factor 实例"
+        return factors[0]
+
     def get_factors(self, return_freq: Optional[Any] = None, params_list: Optional[list] = None, **kwargs) -> List[Factor]:
         """
         按 _params_list 中的所有参数组合批量创建 Factor 实例。
 
+        流程：
+          1. 提取 $F（信号频率）和 $Rev（是否取反）
+          2. 用 resolve 将其他参数固化为纯表达式树（func_expr）
+          3. 包裹 SignalAlign(func_expr, ...) → _resolved_expr
+          4. Factor.calc() 直接 evaluate(_resolved_expr)，不需要额外对齐
+
         参数：
-            return_freq      : 收益率计算频率（覆盖 Factor 默认值）
+            return_freq      : 收益率计算频率（暂存于 tester 中）
             params_list      : 若提供，则使用此列表代替 self._params_list（用于 per-user 隔离）
             **kwargs         : 额外参数（如 timezone）
 
         返回：
             Factor 列表，同时写入 self.factors
         """
-        _pl = params_list if params_list is not None else self._params_list
+        from tools.factors.FactorExpr import SignalAlign, CompositeExpr
+
+        normalized_kwargs = self._normalize_param_kwargs(**kwargs) if kwargs else {}
+        if normalized_kwargs:
+            self._check_in_space(**normalized_kwargs)
+
+        if params_list is not None:
+            _pl = params_list
+        elif normalized_kwargs:
+            _pl = [{p.alias: p.default_value for p in self.params}]
+        else:
+            _pl = self._params_list
+
         factors = []
         for params in _pl:
-            factor_alias = self.get_alias(**params)
-            factor_func = partial(self.func, **params)
-            factor = Factor(alias=factor_alias, func=factor_func, family=self)
-            # 注册参数值：使用 factor 自己的 params_dict（非$参数已为独立的副本）
-            for param_alias, value in params.items():
-                # $ 前缀标准化
-                actual_alias = param_alias
-                if param_alias not in factor.params_dict:
-                    if not param_alias.startswith('$') and f'${param_alias}' in factor.params_dict:
-                        actual_alias = f'${param_alias}'
-                factor.params_dict[actual_alias].register(factor, value)
+            current_params = dict(params)
+            if normalized_kwargs:
+                for key, value in normalized_kwargs.items():
+                    current_params[key] = self.params_dict[key]._value_space.rectify(value)
+
+            factor_alias = self.get_alias(**current_params)
+
+            # 提取元参数
+            signal_freq = current_params.get('$F', current_params.get('F', '1d'))
+            is_reversed: bool = current_params.get('$Rev', current_params.get('Rev', False))
+
+            # 构建 param_values（排除已提取的元参数）
+            param_values = {
+                p.alias: current_params[p.alias]
+                for p in self.params
+                if p.alias in current_params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
+            }
+
+            # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
+            if self._expr is not None:
+                func_expr = self.resolve(self._expr, param_values=param_values, caller=self).as_intermediate()
+                bp = getattr(self, 'basepoint', 'last')
+                dbp = getattr(self, 'daily_basepoint', None)
+                ess = getattr(self, 'end_session_skip', True)
+                esg = getattr(self, 'end_session_gap', pd.Timedelta('3hours'))
+                resolved_expr = SignalAlign(
+                    operand=func_expr,
+                    signal_freq=signal_freq if signal_freq is not None else '1d',
+                    basepoint=bp, daily_basepoint=dbp,
+                    end_session_skip=ess, end_session_gap=esg,
+                )
+                if is_reversed:
+                    resolved_expr = CompositeExpr('neg', resolved_expr)
+                    func_expr = CompositeExpr('neg', func_expr)
+            else:
+                continue
+
+            factor = Factor(expr=resolved_expr, alias=factor_alias, signal_freq=signal_freq, family=self)
+            for key, value in current_params.items():
+                self.params_dict[key].register(factor, value)
+
             if return_freq is not None:
-                factor.change_current_return_freq(return_freq)
+                t = Factor._get_active_tester()
+                if t is not None:
+                    t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
+
+        self.factors = factors
         return factors
-
-    def get_factor(self, return_freq: Optional[Any] = None, start_calc_point: Optional[Any] = None, **kwargs) -> Factor:
-        """
-        创建单个 Factor 实例（支持按 alias 复用已有实例）。
-
-        参数：
-            return_freq      : 收益率计算频率
-            start_calc_point : 计算起始点
-            **kwargs         : Parameter alias→value 键值对（未指定时取默认值）
-
-        返回：
-            Factor 实例
-        """
-        kwargs = self._normalize_param_kwargs(**kwargs)
-        self._check_in_space(**kwargs)
-        param_vals = {p: p._value_space.rectify(kwargs[p.alias]) if p.alias in kwargs else p.default_value for p in self.params}
-        new_params = {p.alias: param_vals[p] for p in self.params}
-        factor_alias = self.get_alias(**new_params)
-        factor_func = partial(self.func, **new_params)
-        factor = Factor(alias=factor_alias, func=factor_func, param_vals=param_vals, family=self)
-        if return_freq is not None:
-            factor.change_current_return_freq(return_freq)
-        return factor
-
-    def test(self, categories: Optional['str|List[str]'] = None,
-             return_freq: Optional[Any] = None,
-             start_calc_point: Optional[Any] = None,
-             ic_test_time_range: Optional[Tuple] = None,
-             sift_volume_ratio: float = sift_volume_ratio, **kwargs) -> FactorTester:
-        """
-        一键运行完整测试流程：因子计算 → IC 测试 → 分组收益测试 → 结果持久化。
-
-        流程：
-          1. 加载（或新建）因子信息缓存 CSV
-          2. 创建 FactorTester，设置时间范围
-          3. 调用 calc_factor、calc_ic
-          4. 对每个 Factor 调用 test_by_group，并将结果追加写入 CSV
-
-        参数：
-            categories       : 品种分类过滤（字符串或列表），None 表示不过滤
-            return_freq      : 收益率计算频率
-            start_calc_point : 计算起始点
-            ic_test_time_range: (start, end)，覆盖全局默认区间
-            sift_volume_ratio: 按成交量筛选品种的比例（0~1）
-
-        返回：
-            FactorTester 对象（含完整测试结果）
-        """
-        factor_cache_path = os.path.join(factor_info_path, self.alias, self.alias + '.csv')
-        if not os.path.exists(factor_info_path):
-            os.makedirs(factor_info_path)
-        if os.path.exists(factor_cache_path) and os.path.isfile(factor_cache_path):
-            factor_table = pd.read_csv(factor_cache_path)
-        else:
-            factor_table = pd.DataFrame()
-
-        start_date = ic_test_time_range[0] if ic_test_time_range is not None else default_test_start_date
-        end_date = ic_test_time_range[1] if ic_test_time_range is not None else default_test_end_date
-        tester = get_factor_tester(time_range=(start_date, end_date))
-        # start_calc_point 通过 tester.start_calc_point（带时区 Timestamp）统一访问
-        if start_calc_point is not None:
-            tester.start_calc_point = pd.Timestamp(start_calc_point)
-
-        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED  # 默认使用次日开盘→开盘收益
-
-        _token = _active_tester.set(tester)
-        try:
-            factors = self.get_factors(return_freq=return_freq, **kwargs)
-            tester.calc_factor(factors)
-            tester.calc_ic(returns_col=returns_col)
-
-            for factor in factors:
-
-                _, _, report_df, _, _ = tester.test_by_group(factor, returns_col=returns_col,
-                    plot_flag=True, time_range=(default_plot_test_start_date, default_plot_test_end_date),
-                    plot_show=False, plot_remark_str=','.join(categories) if categories else None, **kwargs
-                    )
-
-                # 将分组回测结果拼入发布报告行
-                report_dict = {}
-                for col in report_df.columns:
-                    key_0 = f"{col} {report_df.index[0]}"
-                    report_dict[key_0] = report_df.loc[report_df.index[0], col]
-                for col in report_df.columns:
-                    key_1 = f"{col} {report_df.index[1]}"
-                    report_dict[key_1] = report_df.loc[report_df.index[1], col]
-
-                new_row = pd.Series({
-                    'factor_stem': self.alias,
-                    'serial_num': pd.Timestamp.now(),
-                    'factor_name': factor.alias,
-                    'factor_freq': factor.freq,
-                    'start_date': tester.start_date,
-                    'end_date': tester.end_date,
-                    'sift_volume_ratio': sift_volume_ratio,
-                    'categories': categories,
-                } | factor.params_dict | factor.ic_stats.to_dict() | report_dict)
-                factor_table = pd.concat([factor_table, new_row.to_frame().T], ignore_index=True)
-                factor.report = factor_table
-                factor_table.to_csv(factor_cache_path, index=False)
-        finally:
-            _active_tester.reset(_token)
-
-        return tester
     
-    def _get_sync_signal_index(self, freq: Any, end_session_skip: bool = True,
-                    end_session_gap: pd.Timedelta = pd.Timedelta('3hours'),
-                    basepoint: 'str|Callable' = 'last',  # 'last', 'first', '09:01:00'
-                    **kwargs) -> pd.Index:
+    @property
+    def expr(self) -> FactorExpr:
+        """返回因子表达式树。"""
+        return self._expr  # type: ignore[return-value]
+
+    @staticmethod
+    def resolve(expr: FactorExpr, param_values: dict | None = None, **kwargs) -> FactorExpr:
         """
-        构建全局信号时间索引。
-
-        该方法确定在给定频率 freq 下，所有品种共享的「应该产生信号」的时间点集合。
-        结果被缓存到 current_sync_signal_index，后续 sync_signal 直接复用。
-
-        算法概述：
-          1. 从 current_factor_tester 或 self.products 获取品种列表
-          2. 只保留上市时间最早的品种（排除新上市品种造成的索引偏差）
-          3. 按 basepoint 策略（last/first/时间字符串/可调用函数）确定每日/每周期的基准 bar
-          4. 每隔 multiple 个基准 bar 取一个信号点（实现 freq 下采样）
-          5. 若 end_session_skip=True，跨交易时段的信号点会被排除（防止节假日后首 bar 被误纳入上周期）
-          6. 对于日度倍数频率，按 session 结束时间分组选代表品种，取各组信号索引的并集
-
-        参数：
-            freq             : 信号频率 (DataFreq 或可解析字符串)
-            end_session_skip : 是否跳过跨 session 的信号点（默认 True）
-            end_session_gap  : 判断 session 间隔的最小时间差（默认 3 小时）
-            basepoint        : 信号基准点策略：
-                                'last'  - 每个周期的最后一根 bar（最常用）
-                                'first' - 每个周期的第一根 bar
-                                '09:01:00' - 指定时刻的 bar
-                                callable - 接收 GroupBy 对象，返回布尔 Series
-
-        返回：
-            pd.MultiIndex，名称形如 ['_SIGNAL@{freq}', 'bar_timestamp', ...]
+        递归解析表达式树中的参数引用
+        将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）
         """
-        tester = _active_tester.get()
-        if tester is not None:
-            products = tester.products
-        else:
-            raise ValueError("No active tester set in context - _get_sync_signal_index requires an active FactorTester via _active_tester ContextVar.")
-        data_dict = {product: product.get_some_data() for product in products}
-        assert data_dict, "无法确定交易时间，因为没有产品具有交易数据"
+        return expr.resolve(param_values=param_values, **kwargs)
 
-        # 只保留上市时间最早的品种，排除新上市品种对索引造成的偏差
-        first_trade_time = {p: data_dict[p].index.get_level_values(-1).date.min() for p in data_dict}  # type: ignore
-        min_first_trade_time = min(first_trade_time.values())
-        candidates = {p: data_dict[p] for p, t in first_trade_time.items() if t == min_first_trade_time}
-        assert candidates, "无法确定最早的交易时间，因为没有产品具有交易数据"
 
-        index_name_stem: str = '_SIGNAL'
-        assert freq is not None, "Frequency must be provided"
-        freq = DataFreq(freq)
+# ═════════════════════════════════════════════════════════════════════════════
+# CrossSectionIC —— 统一截面 IC 因子族
+# ═════════════════════════════════════════════════════════════════════════════
 
-        # 对于日度倍数频率，不同品种收盘时间可能不同（如 15:00 vs 15:15）
-        # 按 session 结束时间分组，每组选数据最长的代表品种，取索引并集以覆盖全部 session 类型
-        _sample = next(iter(candidates.values()))
-        _sample_freqs = [DataFreq(l) for l in _sample.index.names]
-        _mult_idx = next((i for i, f in enumerate(_sample_freqs)
-                          if freq.value.total_seconds() % f.value.total_seconds() == 0), None)
-
-        if freq.is_day_multiple() and isinstance(basepoint, str) and _mult_idx is not None:
-            bp = basepoint.lower()
-            _date_col = str(_sample.index.names[_mult_idx])
-            is_last = (bp == 'last')
-            # 按 mode 收盘/开盘时间分组，每组选数据量最大的代表品种
-            time_to_rep: dict = {}
-            for p in candidates:
-                rows = candidates[p].groupby(_date_col, group_keys=False)
-                bars = rows.tail(1) if is_last else rows.head(1)
-                mode_t = bars.index.get_level_values(-1).to_series().mode()[0]
-                if mode_t not in time_to_rep or len(candidates[p]) > len(candidates[time_to_rep[mode_t]]):
-                    time_to_rep[mode_t] = p
-            representative_products = list(time_to_rep.values())
-        else:
-            # 子日频或可调用 basepoint：单一代表品种（数据量最大）
-            representative_products = [max(candidates.keys(), key=lambda p: len(candidates[p]))]
-
-        del data_dict
-
-        def _signal_index_for(data: pd.DataFrame) -> pd.Index:
-            """为单品种数据构建信号索引（内部辅助函数）。"""
-            index_data_freq = [DataFreq(level) for level in data.index.names]
-            # 找到 freq 是其整数倍的第一个索引层级
-            index_map_of_multiple = [freq.value.total_seconds() % idx_freq.value.total_seconds() == 0 for idx_freq in index_data_freq]
-            first_true_idx = next((i for i, is_multiple in enumerate(index_map_of_multiple) if is_multiple), None)
-            assert first_true_idx is not None, f"Frequency {freq} is not a multiple of any existing index frequency"
-            multiple = int(freq.value.total_seconds() / index_data_freq[first_true_idx].value.total_seconds())
-            first_true_series = data.index.get_level_values(str(data.index.names[first_true_idx])).to_series().reset_index(drop=True)
-
-            bp = basepoint
-            if isinstance(bp, str):
-                bp = bp.lower()
-                if bp == 'last':
-                    series = data.groupby(str(data.index.names[first_true_idx])).cumcount(ascending=False) == 0
-                elif bp == 'first':
-                    series = data.groupby(str(data.index.names[first_true_idx])).cumcount() == 0
-                else:
-                    try:
-                        base_time = pd.Timestamp(bp).time()
-                        series = data.groupby(str(data.index.names[first_true_idx])).transform(lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
-                    except Exception:
-                        raise ValueError("Invalid basepoint value. Must be 'last', 'first', or a valid time string like '09:01:00'")
-            else:
-                series = bp(data.groupby(str(data.index.names[first_true_idx])))
-
-            if not any(series):
-                series = data.groupby(str(data.index.names[first_true_idx])).cumcount(ascending=False) == 0
-            assert isinstance(series, pd.Series) and series.dtype == bool, "basepoint function must return a boolean Series"
-
-            first_true_change_pos = series.reset_index(drop=True).index[series]
-            if end_session_skip and freq.value < pd.Timedelta('1day'):
-                last_col_series = data.index.get_level_values(str(data.index.names[-1])).to_series().reset_index(drop=True)
-                end_session_pos = last_col_series[last_col_series.shift(-1) - last_col_series >= end_session_gap].index
-                signal_map_mask = first_true_change_pos.isin({i for start, end in zip([0] + (end_session_pos[:-1].values + 1).tolist(), end_session_pos) for i in range(start + multiple - 1, end + 1, multiple) if start + multiple - 1 <= end})
-            else:
-                idx = first_true_change_pos.to_series().reset_index(drop=True).index
-                signal_map_mask = (idx % multiple == multiple - 1)
-
-            signal_pos = first_true_change_pos[signal_map_mask]
-            signal_map = first_true_series.index.isin(signal_pos)
-            signal_series = first_true_series.where(signal_map)
-
-            left_indices = data.index.names[:first_true_idx]
-            right_indices = data.index.names[first_true_idx+1:]
-            index_arrays = [data.index.get_level_values(str(idx)).to_series().where(signal_map) for idx in left_indices] \
-                            + [signal_series] \
-                            + [data.index.get_level_values(str(idx)).to_series() for idx in right_indices]
-            index_names = [str(idx).split('@')[-1] for idx in left_indices] \
-                        + [index_name_stem + '@' + freq.name] \
-                        + [str(idx).split('@')[-1] for idx in right_indices]
-            return pd.MultiIndex.from_arrays(index_arrays, names=index_names).dropna()
-
-        sub_indices = [_signal_index_for(candidates[p]) for p in representative_products]
-        result = sub_indices[0]
-        for idx in sub_indices[1:]:
-            result = result.union(idx)
-        return result
-    
-    def sync_signal(self, data: Any, freq: Any = None,
-                    basepoint: 'str|Callable' = 'last',
-                    replace_basepoint: 'Optional[str|Callable]' = None,
-                    **kwargs) -> pd.Series:
-        """
-        将原始数据对齐到等间隔信号时间点，是因子时序计算的最后一步。
-
-        核心逻辑：
-          - 根据 freq 和 basepoint 构建信号索引（首次调用时计算并缓存）
-          - 从 data 中筛选出落在信号索引上的行
-          - 可选地用 replace_basepoint 重建索引层（如将 first-bar 索引替换为 last-bar 时间，
-            避免因子与收益时间戳对齐错误）
-
-        特殊情况（日度倍数 + basepoint='first'）：
-          - 直接从各品种自己的数据取每日第一根 bar（避免不同品种开盘时间差异）
-          - 若提供 replace_basepoint，将每日第一 bar 的时间戳替换为对应的 last-bar 时间戳
-
-        参数：
-            data             : 原始 pd.DataFrame 或 DataMeta，MultiIndex 行索引
-            freq             : 目标信号频率
-            basepoint        : 信号基准点（'last'、'first'、时间字符串或 callable）
-            replace_basepoint: 替换后的基准点，用于修改输出索引时间戳（可选）
-
-        返回：
-            对齐后的 pd.DataFrame 或 pd.Series，索引层名已重命名为 _SIGNAL@{freq}
-        """
-        if freq is None:
-            freq = getattr(self._runtime_ctx, 'signal_freq', pd.Timedelta('1d'))
-        freq_dc = DataFreq(freq)
-        if isinstance(data, DataMeta):
-            data = data.data
-
-        # 记录本次因子计算实际使用的数据源频率（按最细粒度识别）。
-        try:
-            if isinstance(data.index, pd.MultiIndex):
-                idx_freqs = []
-                for n in data.index.names:
-                    try:
-                        idx_freqs.append(DataFreq(str(n).split('@')[-1]))
-                    except Exception:
-                        continue
-                if idx_freqs:
-                    with self._source_freqs_lock:
-                        self._source_freqs_seen.add(min(idx_freqs, key=lambda f: f.value))
-            else:
-                if getattr(data.index, 'name', None) is not None:
-                    try:
-                        one_freq = DataFreq(str(data.index.name).split('@')[-1])
-                        with self._source_freqs_lock:
-                            self._source_freqs_seen.add(one_freq)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        tester = _active_tester.get()
-        assert tester is not None, \
-            "sync_signal must be called within an active test context (set _active_tester via test() or the server route)"
-
-        # 日度倍数 + first：各品种开盘时间不同，直接用品种自身数据取第一 bar
-        if freq_dc.is_day_multiple() and isinstance(basepoint, str) and basepoint.lower() == 'first':
-            if replace_basepoint is not None and tester.sync_signal_index_replaced is None:
-                with tester._sync_lock:
-                    if tester.sync_signal_index_replaced is None:
-                        tester.sync_signal_index_replaced = self._get_sync_signal_index(
-                            freq_dc, basepoint=replace_basepoint, **kwargs)
-            # 找到 freq 对应的日期层级索引位置
-            _idx_freqs = [DataFreq(l) for l in data.index.names]
-            _mult_idx = next((i for i, f in enumerate(_idx_freqs)
-                              if freq_dc.value.total_seconds() % f.value.total_seconds() == 0), None)
-            assert _mult_idx is not None, f"Frequency {freq_dc} is not a multiple of any data index frequency"
-            _date_col = str(data.index.names[_mult_idx])
-            # 每日第一根 bar
-            data = data[data.groupby(_date_col).cumcount() == 0].copy()
-            # 重命名索引层级以匹配信号命名规范 _SIGNAL@{freq}
-            signal_name = '_SIGNAL@' + freq_dc.name
-            data.index.names = [signal_name if i == _mult_idx else str(n).split('@')[-1]
-                                 for i, n in enumerate(data.index.names)]
-            # 将每日 first-bar 时间戳替换为 last-bar 时间戳（保持与收益对齐）
-            if tester.sync_signal_index_replaced is not None:
-                replaced_idx = tester.sync_signal_index_replaced
-                sig_col_r = next(str(n) for n in replaced_idx.names if str(n).startswith('_SIGNAL@'))
-                sig_pos_r = list(replaced_idx.names).index(sig_col_r)
-                right_cols_r = [str(n) for n in replaced_idx.names[sig_pos_r + 1:]]
-                replaced_frame = replaced_idx.to_frame(index=False)
-                signal_vals = data.index.get_level_values(signal_name)
-                new_arrays = [data.index.get_level_values(n) for n in data.index.names]
-                for col in right_cols_r:
-                    # 用 pandas Series 保留时区信息
-                    mapping = dict(zip(replaced_frame[sig_col_r], replaced_frame[col]))
-                    new_arrays[list(data.index.names).index(col)] = pd.DatetimeIndex(
-                        [mapping.get(d, pd.NaT) for d in signal_vals])
-                data.index = pd.MultiIndex.from_arrays(new_arrays, names=data.index.names)
-                # 删除替换时间戳未找到（NaT）的行
-                if right_cols_r:
-                    data = data[pd.notna(data.index.get_level_values(right_cols_r[0]))]
-            return data
-
-        # 标准情况（last、子日频、或可调用 basepoint）
-        if tester.sync_signal_index is None:
-            with tester._sync_lock:
-                if tester.sync_signal_index is None:
-                    tester.sync_signal_index = self._get_sync_signal_index(
-                        freq_dc, basepoint=basepoint, **kwargs)
-        if replace_basepoint is not None and tester.sync_signal_index_replaced is None:
-            with tester._sync_lock:
-                if tester.sync_signal_index_replaced is None:
-                    tester.sync_signal_index_replaced = self._get_sync_signal_index(
-                        freq_dc, basepoint=replace_basepoint, **kwargs)
-        assert tester.sync_signal_index is not None
-        signal_index = tester.sync_signal_index
-
-        def _pick_signal_level(idx: pd.Index, target_freq: DataFreq) -> int:
-            """Select best level for signal alignment.
-
-            Priority:
-              1) explicit _SIGNAL@{target_freq}
-              2) any level whose name parses to target_freq
-              3) rightmost datetime-like level
-              4) last level (MultiIndex) / only level (Index)
-            """
-            if isinstance(idx, pd.MultiIndex):
-                names = [str(n) for n in idx.names]
-
-                exact_signal = f"_SIGNAL@{target_freq.name}"
-                if exact_signal in names:
-                    return names.index(exact_signal)
-
-                for i, n in enumerate(names):
-                    base = n.split('@')[-1]
-                    try:
-                        if DataFreq(base) == target_freq:
-                            return i
-                    except Exception:
-                        continue
-
-                for i in range(idx.nlevels - 1, -1, -1):
-                    if pd.api.types.is_datetime64_any_dtype(idx.get_level_values(i).dtype):
-                        return i
-                return idx.nlevels - 1
-
-            return 0
-
-        data_level = _pick_signal_level(data.index, freq_dc)
-        signal_level = _pick_signal_level(signal_index, freq_dc)
-
-        data_time = data.index.get_level_values(data_level)
-        signal_time = signal_index.get_level_values(signal_level)
-        data_mask = data_time.isin(signal_time)
-
-        # 按“最细时间层”筛选信号点，兼容单层与多层索引。
-        data = data[data_mask].copy()
-
-        # 保留完整 MultiIndex，仅将信号层重命名为 _SIGNAL@{freq}，其他层去掉 @xxx 后缀
-        signal_level_name = signal_index.names[signal_level] if signal_index.names else f"_SIGNAL@{freq_dc.name}"
-        if isinstance(data.index, pd.MultiIndex):
-            data.index.names = [signal_level_name if i == data_level else str(n).split('@')[-1]
-                                 for i, n in enumerate(data.index.names)]
-        else:
-            data.index.name = signal_level_name
-
-        # 若有 replace_basepoint，仅替换信号层的时间戳，其余层保持不变。
-        if tester.sync_signal_index_replaced is not None:
-            replaced_idx = tester.sync_signal_index_replaced
-            replaced_level = _pick_signal_level(replaced_idx, freq_dc)
-            sig_vals = signal_index.get_level_values(signal_level)
-            rep_vals = replaced_idx.get_level_values(replaced_level)
-            mapping = dict(zip(sig_vals, rep_vals))
-
-            if isinstance(data.index, pd.MultiIndex):
-                arrays = [data.index.get_level_values(i) for i in range(data.index.nlevels)]
-                arrays[data_level] = pd.DatetimeIndex(
-                    [mapping.get(t, pd.NaT) for t in arrays[data_level]])
-                data.index = pd.MultiIndex.from_arrays(arrays, names=data.index.names)
-                data = data[pd.notna(data.index.get_level_values(data_level))]
-            else:
-                new_time = pd.DatetimeIndex([mapping.get(t, pd.NaT) for t in data.index], name=data.index.name)
-                data.index = new_time
-                data = data[pd.notna(data.index)]
-        return data
-
-class Returns(FactorFamily):
+class CrossSectionIC(FactorFamily):
     """
-    内置收益率因子族。
-
-    计算品种在指定频率和价格列下的下期/当期收益率。
-    支持 OPEN-to-OPEN 和 CLOSE-to-CLOSE 两种模式。
+    截面 IC 因子族：接受一个因子表达式 FE，内部构建收益率表达式 RE，
+    通过 factor_expr() 声明式地计算截面 Spearman 秩相关系数。
 
     参数：
-        RF  (Timedelta) : 收益率计算频率，如 '1d'、'1h'
-        SC  (DataColumn): 收益起始价格列，默认 CLOSE
-        EC  (DataColumn): 收益终止价格列，默认 CLOSE
-        S   (int)       : 移位量，1 表示下期收益（shift(-1)），0 表示当期
+        FE  : 被分析因子表达式 (FactorExpr)，不含 SignalAlign（由调用方剥离）
+        SC  : 收益率价格列 (DataColumn)，默认 CLOSE_ADJUSTED
+              OPEN/OPEN_ADJUSTED → basepoint='first'，Lag=1（下一期开盘收益）
+              CLOSE/CLOSE_ADJUSTED → basepoint='last'，Lag=0（同期收益）
+        RF  : 收益率计算窗口 (WindowParam)，默认 '1d'
+        S   : 收益率 shift 偏移 (TypeParam)，默认自动根据 SC 决定
+        Lag : 额外 IC 对齐滞后倍数 (TypeParam, int)，默认 0
+        F   : 信号频率（复用 FactorFreqParam）
+
+    FE 和 RE 子表达式自动标记为 _is_intermediate，evaluate 后
+    中间数据可通过 Factor.get_intermediate(name) 获取。
     """
 
-    params = [
-        WindowParam('RF'),  # 收益率计算频率，如 '1d'、'1h'、'30min'
-        DataColumnParam('SC', default_value=DataColumn.CLOSE),  # 收益起始列
-        DataColumnParam('EC', default_value=DataColumn.CLOSE),  # 收益终止列
-        TypeParam('S', default_value=1),  # 移位量：1=下期，0=当期，-1=上期
-    ]
-
-    description_sections = [
-        {
-            'title': '这是什么',
-            'body': 'Returns 是系统内置的收益率序列生成因子，用于构造下一期或当期收益，通常作为 IC、分组测试和其他因子评估的目标变量。',
-        },
-        {
-            'title': '它在看什么',
-            'body': '它本身不是一个用于预测的 alpha，而是定义“你到底在预测哪个收益口径”。不同的收益频率、收益起点和是否使用下一期收益，会直接改变测试结论。',
-        },
-        {
-            'title': '为什么这个因子可能行得通',
-            'body': '严格来说，它不是“为什么有效”的问题，而是“为什么定义准确很重要”。如果目标收益定义错了，再好的预测因子也会被错误地评估。',
-        },
-        {
-            'title': '使用提醒',
-            'body': '回测中应优先确认收益频率、对齐方式和是否前视，再比较不同 alpha 的优劣。',
-        }
-    ]
-
-    def func_timeseries(self, product: Product, RF: pd.Timedelta, SC: DataColumn, EC: DataColumn, S: int, *args, **kwargs) -> pd.Series:
+    @staticmethod
+    def factor_expr():
         """
-        计算单品种收益率时序。
+        FE.cs_spearman(RE.shift(-Lag * RF))
 
-        当 SC == EC 时（同一价格列）：
-          - OPEN 系列：pct_change(RF) + shift(RF*S)，basepoint='first'（开盘对开盘）
-          - CLOSE 系列：pct_change(RF) + shift(RF*S)，basepoint='last'（收盘对收盘）
-          - 使用 replace_basepoint='last' 将开盘时间戳替换为收盘时间戳以对齐因子
-
-        参数：
-            RF : 收益频率
-            SC : 起始列（与 EC 相同时生效）
-            EC : 终止列
-            S  : 移位步数
+        FE — 被分析因子（纯因子逻辑，不含 SignalAlign）
+        RE — 收益率表达式，内建：(SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
         """
-        data_freq = product.get_current_freq()
-        data = getattr(product, data_freq.name)
-        assert isinstance(data, DataMeta)
-        if SC == EC:
-            day_basepoint = 'last'
-            if SC in [DataColumn.OPEN, DataColumn.OPEN_ADJUSTED]:
-                day_basepoint = 'first'
-                ret = data[SC].pct_change(RF).shift(RF*(S-1))
-            elif SC in [DataColumn.CLOSE, DataColumn.CLOSE_ADJUSTED]:
-                ret = data[SC].pct_change(RF).shift(RF*(S-1))
-            else:
-                raise ValueError("不支持的价格列，请选择 OPEN、OPEN_ADJUSTED、CLOSE 或 CLOSE_ADJUSTED")
-            return self.sync_signal(ret, RF, basepoint=day_basepoint, replace_basepoint='last')
-        else:
-            raise NotImplementedError("计算不同起止列的收益率尚未实现")
+        from tools.parameters import FactorParam, DataColumnParam, WindowParam, TypeParam
+        from tools.data.DataColumn import DataColumn
+
+        FE = FactorParam('FE')
+        SC = DataColumnParam('SC', default_value=DataColumn.CLOSE_ADJUSTED)
+        RF = WindowParam('RF')
+        # S: 收益率 shift 偏移
+        #   OPEN   → S = 0 → .shift(-RF) → 下一期开盘
+        #   CLOSE  → S = 1 → .shift(0)    → 同期
+        S = TypeParam('S', default_value=1, typ=int)
+        Lag = TypeParam('Lag', default_value=0, typ=int)
+        # RE = (SC.delta(RF) / SC.shift(RF)).shift((S - 1) * RF)
+        # OPEN 时 S=0，RE 位于 first 位置，需额外 shift(1) 挪到 last 位置与 FE 对齐
+        RE = (SC.delta(RF) / SC.shift(RF)).shift(-RF).shift(S - 1)
+
+        # 标记 FE 和 RE 为中间因子，evaluate 后通过 Factor.get_intermediate() 获取
+        FE = FE.as_intermediate('FE')
+        RE = RE.as_intermediate('RE')
+
+        return FE.cs_spearman(RE.shift(-Lag * RF))

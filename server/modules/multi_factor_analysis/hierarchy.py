@@ -6,7 +6,7 @@ import math, traceback
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from . import mfa_bp
@@ -158,7 +158,8 @@ def run_mfa_hierarchy():
         # 如果指定了收益频率，先确保因子设置了正确的 returns
         if freq is not None:
             for f in (factor_a, factor_b):
-                if not f.returns.empty and getattr(f, '_return_freq_cached', None) != freq:
+                cached_returns = tester.factor_returns.get(f, pd.DataFrame())
+                if not cached_returns.empty and getattr(f, '_return_freq_cached', None) != freq:
                     f.calc_returns(next_return=True, return_freq=freq)
 
         # 1. 用因子 A 做第一层分组

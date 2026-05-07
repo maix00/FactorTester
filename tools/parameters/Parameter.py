@@ -66,7 +66,7 @@ class ValueSpace:
     # ── 工厂方法 ──
 
     @classmethod
-    def any_type(cls, typ: type) -> 'ValueSpace':
+    def any_type(cls, typ: type | tuple[type, ...]) -> 'ValueSpace':
         return cls(contains=lambda v: isinstance(v, typ))
 
     @classmethod
@@ -172,6 +172,45 @@ class Parameter(UniqueObject):
     def get_value(self, obj: UniqueObject) -> Any:
         return self._registry.get(obj, self.default_value)
 
+    # ── 表达式树代理 ──
+    # Parameter 实例可通过 .shift(N) / .rolling_mean(N) 等方法直接参与表达式构建，
+    # 内部创建 ParamRef(self) 代理所有 FactorExpr 上的方法。
+
+    def __getattr__(self, name: str):
+        # 避免在 __init__ 期间提前触发 ParamRef 导入
+        if name.startswith('_'):
+            raise AttributeError(name)
+        from tools.factors.FactorExpr import ParamRef
+        return getattr(ParamRef(self), name)
+
+    # ── 运算符代理 ──
+    # Python 运算符不经过 __getattr__，需要显式代理到 ParamRef。
+
+    def _ref(self):
+        from tools.factors.FactorExpr import ParamRef
+        return ParamRef(self)
+
+    @staticmethod
+    def _to_expr_arg(x):
+        """若 x 是 Parameter，转成 ParamRef，否则原样返回。"""
+        if isinstance(x, Parameter):
+            from tools.factors.FactorExpr import ParamRef
+            return ParamRef(x)
+        return x
+
+    def __add__(self, other): return self._ref().__add__(self._to_expr_arg(other))
+    def __radd__(self, other): return self._ref().__radd__(self._to_expr_arg(other))
+    def __sub__(self, other): return self._ref().__sub__(self._to_expr_arg(other))
+    def __rsub__(self, other): return self._ref().__rsub__(self._to_expr_arg(other))
+    def __mul__(self, other): return self._ref().__mul__(self._to_expr_arg(other))
+    def __rmul__(self, other): return self._ref().__rmul__(self._to_expr_arg(other))
+    def __truediv__(self, other): return self._ref().__truediv__(self._to_expr_arg(other))
+    def __rtruediv__(self, other): return self._ref().__rtruediv__(self._to_expr_arg(other))
+    def __neg__(self): return self._ref().__neg__()
+    def __pos__(self): return self._ref().__pos__()
+    def __abs__(self): return self._ref().__abs__()
+    def __invert__(self): return self._ref().__invert__()
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 子类 —— 利用 ValueSpace 工厂方法的语法糖
@@ -181,9 +220,11 @@ class TypeParam(Parameter):
     """
     类型约束参数：只接受指定 Python 类型的值。
     示例：TypeParam('S', default_value=1) 只接受 int。
+    
+    typ 可以是单个 type 或 type 的 tuple（表示多类型联合）。
     """
     def __init__(self, alias: Optional[str] = None, default_value: Any = None, 
-                 typ: Optional[type] = None, *args, **kwargs):
+                 typ: Optional[type | tuple[type, ...]] = None, *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
         if typ is None:
@@ -193,11 +234,23 @@ class TypeParam(Parameter):
         super().__init__(alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
+class FactorParam(TypeParam):
+    """
+    因子表达式参数：接受 FactorExpr 或其子类实例（允许 None 作为默认值）。
+
+    等价于 TypeParam(..., typ=(FactorExpr, type(None)))，但自动导入 FactorExpr。
+    示例：FactorParam('FE') — 接受任意 FactorExpr 或 None。
+    """
+    def __init__(self, alias: Optional[str] = None, default_value: Any = None,
+                 *args, **kwargs):
+        if hasattr(self, '_initialized'):
+            return
+        from tools.factors.FactorExpr import FactorExpr
+        super().__init__(alias=alias, default_value=default_value,
+                         typ=(FactorExpr, type(None)), *args, **kwargs)
+
+
 class FinRangeParam(Parameter):
-    """
-    有限枚举集参数：只接受给定列表中的值。
-    示例：FinRangeParam('SC', ['open', 'close'])
-    """
     def __init__(self, alias: Optional[str] = None, value_space: Optional[List[Any]] = None, 
                  default_value: Any = None, *args, **kwargs):
         if hasattr(self, '_initialized'):

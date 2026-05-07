@@ -224,6 +224,8 @@ def update_params_template(ff_alias, tpl_id):
             name = data['name'].strip()
             if not name:
                 return jsonify({'success': False, 'error': '模板名称不能为空'})
+            if tpl['name'].startswith('__global_'):
+                return jsonify({'success': False, 'error': '全局模板不允许重命名'})
             tpl['name'] = name
         if 'params_list' in data:
             if not isinstance(data['params_list'], list) or len(data['params_list']) == 0:

@@ -39,7 +39,7 @@ class DataFreqMeta(ABCMeta):
         """f in DataFreq 语法支持。"""
         return item in cls._instances.values()
     
-    def __getattr__(cls, name):
+    def __getattr__(cls, name) -> DataFreq:
         """
         DataFreq.MIN1 / DataFreq.DAY1 等属性访问：
         如果属性名未在元类中直接定义，用它作为频率字符串创建 DataFreq。
@@ -84,28 +84,54 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
             return freq  # 已是 DataFreq，直接返回
         if isinstance(freq, str) or isinstance(freq, pd.Timedelta):
             try:
-                # 尝试直接解析为 pd.Timedelta，并转为标准名称
-                value = pd.Timedelta(freq)
-                name = ''.join(f"{units[k]}{v}" for k, v in value.components._asdict().items() if v > 0) or '0'
+                import warnings
+                from pandas.errors import Pandas4Warning
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=Pandas4Warning)
+                    # 尝试直接解析为 pd.Timedelta，并转为标准名称
+                    value = pd.Timedelta(freq)
+                    if value == pd.Timedelta(0):
+                        name = '0'
+                    elif value > pd.Timedelta(0):
+                        name = ''.join(f"{units[k]}{v}" for k, v in value.components._asdict().items() if v > 0)
+                    else:
+                        name = '-' + ''.join(f"{units[k]}{v}" for k, v in (-value).components._asdict().items() if v > 0)
             except:
                 # 如果无法直接解析，尝试按 DataFreq 名称格式解析，如 'MIN30' → '30min'
                 assert isinstance(freq, str)
-                name = freq.removeprefix('DataFreq.').split('@')[-1].upper()
+                name = freq.removeprefix('DataFreq.').removeprefix('DataFreq:').split('@')[-1].upper()
                 # 正则提取单位+数字对，拼接为 Timedelta 可识别字符串
-                value = ''.join(f"{num}{reverse_map.get(unit, unit)}" for unit, num in findall(r'([A-Z]+)(\d+)', name))
-                value = pd.Timedelta(value)
+                values = [pd.Timedelta(f"{num}{reverse_map.get(unit, unit)}") for unit, num in findall(r'\-?([A-Z]+)(\d+)', name)]
+                value = sum(values, pd.Timedelta(0))
+                if name.startswith('-'):
+                    value = -value
             finally:
                 instance = super().__new__(cls, name=name)
             if not hasattr(instance, '_initialized'):
                 # 首次创建时写入属性
                 instance.value = value
                 instance.name = name
-                instance.alias = 'DataFreq.' + name
+                instance.alias = 'DataFreq:' + name
                 instance._initialized = True
             return instance
         else:
             raise ValueError("Invalid frequency format")
-            
+
+    @property    
+    def days(self) -> int:
+        """以天为单位的频率表示(向下取整), 如 90min → 0d, 36h → 1d, -36h → -2d"""
+        return self.value.days if self.value >= pd.Timedelta(0) else self.value.days + 1
+    
+    @property
+    def subday(self) -> pd.Timedelta:
+        """小于一天的频率部分, 如 90min → 1min, 36h → 12h, -36h → 12h"""
+        return self.value - pd.Timedelta(days=self.days)
+    
+    @property
+    def is_multiples_of_day(self) -> bool:
+        """判断该频率是否为 整日数倍数（即是 1天的整数倍）。"""
+        return self.is_day_multiple()
+    
     def is_day_multiple(self) -> bool:
         """
         判断该频率是否为 整日数倍数（即 >= 1天且是 1天的整数倍）。
@@ -124,3 +150,4 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
     
 if __name__ == '__main__':
     DataFreq.MIN1
+    print(DataFreq('-1d3m').days, DataFreq('-1d3m').subday)

@@ -5,7 +5,7 @@ import math, traceback
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 from server.shared import _factor_testers_lock
@@ -64,7 +64,8 @@ def run_group_test():
     _gt_token = None
     try:
         with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+            target_suffix = f":{submission_id}"
+            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 
@@ -103,7 +104,11 @@ def run_group_test():
                     freq = DataFreq(rf_str) if rf_str else None
                 except Exception:
                     freq = None
-                factor.calc_returns(next_return=True, return_freq=freq)
+                if freq is not None:
+                    tester.factor_return_freqs[factor] = freq
+                else:
+                    tester.factor_return_freqs.pop(factor, None)
+                tester.factor_returns.pop(factor, None)
                 from tools.factors.FactorTester import _signal_time
                 _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
                     factors=factor, n_groups=n_groups, time_range=time_range,

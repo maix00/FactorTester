@@ -116,18 +116,27 @@
     </style>
 
     <!-- 参数模板区 -->
-    <div id="params-template-bar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
-        <select id="params-tpl-select" style="flex:1;min-width:120px;max-width:180px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
-            <option value="">— 选择模板 —</option>
-        </select>
-        <span id="params-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;"
-            onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
-        <input id="params-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
-        <button id="params-tpl-load-btn" title="加载选中模板的参数组合" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
-        <button id="params-tpl-save-btn" title="将当前参数列表保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
-        <button id="params-tpl-update-btn" title="用当前参数列表覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
-        <button id="params-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
-        <span id="params-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
+    <div id="params-template-bar" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
+        <!-- 第一行：下拉选择 -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <select id="params-tpl-select" style="flex:1;min-width:120px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
+                <option value="">— 选择模板 —</option>
+            </select>
+        </div>
+        <!-- 第二行：名称标签 + 编辑框 -->
+        <div style="display:flex;align-items:center;gap:6px;">
+            <span id="params-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
+            <input id="params-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
+        </div>
+        <!-- 第三行：按钮组 -->
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <button id="params-tpl-load-btn" title="加载选中模板的参数组合" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
+            <button id="params-tpl-save-btn" title="将当前参数列表保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
+            <button id="params-tpl-update-btn" title="用当前参数列表覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
+            <button id="params-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
+            <span id="params-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
+        </div>
     </div>
 
     <div class="param-table-container" id="param_table_scroll">
@@ -159,7 +168,7 @@
                 <tr draggable="true" data-factor-idx="{{ loop.index0 }}">
                     <td>{{ factor.alias }}</td>
                     {% for param in params %}
-                        <td>{{ factor.params_dict[param.alias].get_value_alias(factor.params_dict[param.alias].get_value(factor)) }}</td>
+                        <td>{{ factor.family.params_dict[param.alias].get_value_alias(factor.family.params_dict[param.alias].get_value(factor)) }}</td>
                     {% endfor %}
                     <td>
                         <button class="param-btn param-btn-danger delete_factor_btn" 

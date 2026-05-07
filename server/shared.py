@@ -2,6 +2,7 @@
 Shared global state and utility functions used across all server blueprints.
 No Flask routes live here – only state, helpers, and the login_required decorator.
 """
+from typing import TYPE_CHECKING, Any, Optional
 import sys, os, importlib.util, threading, time, uuid, hashlib, hmac, secrets, re, json as _json
 from functools import wraps
 from flask import request, jsonify, render_template, session, redirect
@@ -17,6 +18,9 @@ import Settings as Settings
 import pandas as pd
 from tools import DataColumn  # noqa: F401 – side-effect import used elsewhere
 
+if TYPE_CHECKING:
+    from tools.factors import FactorTester
+
 # ─── FactorFamily singleton cache ─────────────────────────────────────────────
 _factor_family_cache: dict = {}
 _factor_family_cache_lock = threading.Lock()
@@ -24,6 +28,12 @@ _factor_family_cache_lock = threading.Lock()
 # ─── Submission list (FactorTester instances) ─────────────────────────────────
 factor_testers: list = []
 _factor_testers_lock = threading.Lock()
+def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
+    with _factor_testers_lock:
+        target_suffix = f":{alias}"
+        tester = next((t for t in factor_testers if t.alias == str(alias) or t.alias.endswith(target_suffix)), None)
+    assert tester is not None, f"{str(caller) + ': ' if caller is not None else ''}未找到对应的测试器实例"
+    return tester
 
 # ─── Global time range (updated by set_time_range route) ─────────────────────
 start_point = None
@@ -231,7 +241,7 @@ def _load_chinese_names(factors_dir):
         name = os.path.splitext(fname)[0]
         try:
             ff = get_factor_family_instance(name)
-            cn = getattr(ff, 'chinese_name', '') or ''
+            cn = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
             result[name] = cn
         except Exception:
             result[name] = ''
@@ -291,8 +301,8 @@ def get_factor_main_section_html(factor_family_alias):
     try:
         ff = get_factor_family_instance(factor_family_alias)
         math_expr = getattr(ff, 'math_expr', '')
-        chinese_name = getattr(ff, 'chinese_name', '') or ''
-        description_sections = getattr(ff, 'description_sections', [])
+        chinese_name = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
+        description = getattr(ff, 'description', '') or ''
         params = ff.params
         param_aliases = [p.alias for p in params]
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
@@ -307,7 +317,7 @@ def get_factor_main_section_html(factor_family_alias):
             factor_family_alias=factor_family_alias,
             chinese_name=chinese_name,
             math_expr=math_expr,
-            description_sections=description_sections,
+            description=description,
             params=params,
             param_aliases=param_aliases,
             factors=factors,
@@ -389,6 +399,9 @@ def find_node_by_path(tree_dict, path_parts):
     current = tree_dict
     for part in path_parts:
         found = None
+        if len(current) == 1 and '$OBJECTS$' in current:
+            flag = True
+            break
         for key, value in current.items():
             key_str = str(key) if not isinstance(key, type) else key.__name__
             if key_str == part:

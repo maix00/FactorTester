@@ -1,252 +1,360 @@
 """
 IC test endpoint: /run_ic_test
 """
-import pickle, hashlib, traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+import traceback
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from flask import request, jsonify
+from flask import jsonify, request
+
+from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
-from tools.products.Product import Product
-from tools.data.DataFreq import DataFreq
+from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.ic import run_ic_for_factor
+
 from . import sft_bp
-from server.shared import (
-    get_factor_family_instance, _get_session_params,
-    _factor_testers_lock,
-)
-import server.shared as shared
+from server.shared import get_factor_family_instance, get_factor_tester, _get_session_params
+
+
+def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
+    if isinstance(idx, pd.MultiIndex):
+        signal_name = next((n for n in idx.names if n and str(n).startswith('_SIGNAL')), None)
+        level = idx.names.index(signal_name) if signal_name is not None else -1
+        return pd.DatetimeIndex(idx.get_level_values(level), name=idx.names[level])
+    return pd.DatetimeIndex(idx)
+
+
+def _safe_round(v: Any, ndigits: int = 6) -> Any:
+    if v is None:
+        return None
+    try:
+        fv = float(v)
+    except Exception:
+        return None
+    if np.isnan(fv) or np.isinf(fv):
+        return None
+    return round(fv, ndigits)
+
+
+def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
+    names: List[str] = []
+    seen: set[str] = set()
+    for table in tables:
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            continue
+        for col in table.columns:
+            c_name = str(getattr(col, 'name', col))
+            if c_name and c_name not in seen:
+                seen.add(c_name)
+                names.append(c_name)
+    return names
 
 
 @sft_bp.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     submission_id = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_alias_return_freq = data.get('factors', [])
     paths = data.get('paths', [])
-    re_calc = data.get('re_calc', False)
+
+    ic_decay_lags = data.get('ic_decay_lags', None)
+    rolling_window = data.get('rolling_window', None)
+    ic_lag_raw = data.get('ic_lag', data.get('lag', 0))
+    ic_lags_raw = data.get('ic_lags', None)
+
     _token = None
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        assert tester is not None, "未找到对应的测试器实例"
+        if submission_id in (None, ''):
+            return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
+        if factor_family_alias in (None, ''):
+            return jsonify({'success': False, 'error': '缺少 factor_family_alias'}), 400
+
+        raw_lags = (
+            ic_lags_raw
+            if isinstance(ic_lags_raw, list)
+            else [ic_lags_raw] if ic_lags_raw is not None else [ic_lag_raw]
+        )
+        ic_lags: List[int] = []
+        for raw in raw_lags:
+            try:
+                lag_i = int(raw)
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'error': f'ic_lag 非法: {raw}，必须是整数'}), 400
+            if lag_i < 0:
+                return jsonify({'success': False, 'error': 'ic_lag 不能小于 0'}), 400
+            if lag_i not in ic_lags:
+                ic_lags.append(lag_i)
+        if not ic_lags:
+            ic_lags = [0]
+        primary_ic_lag = ic_lags[0]
+
+        submission_id = str(submission_id)
+        factor_family_alias = str(factor_family_alias)
+
+        tester = get_factor_tester(submission_id, caller='run_ic_test')
 
         factor_family = get_factor_family_instance(factor_family_alias)
-        assert isinstance(factor_family, FactorFamily), "未找到对应的因子家族实例"
+        assert isinstance(factor_family, FactorFamily), '未找到对应的因子家族实例'
 
         tester.sync_signal_index = None
         tester.sync_signal_index_replaced = None
         _token = _active_tester.set(tester)
 
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
-        # 过滤：只保留在当前因子家族中实际存在的因子
-        matched_factors = []
-        matched_items = []
+        all_factors = factor_family.get_factors(
+            params_list=_get_session_params(factor_family_alias, factor_family)
+        )
+
+        matched_factors: List[Factor] = []
         for item in factor_alias_return_freq:
-            f = next((f for f in factors if f.alias == item['alias']), None)
+            f = next((x for x in all_factors if x.alias == item.get('alias')), None)
             if f is not None:
                 matched_factors.append(f)
-                matched_items.append(item)
+
         if not matched_factors:
-            return jsonify({'error': '没有找到匹配的因子，请检查收益率频率设置中的因子是否属于当前因子家族'}), 400
+            return jsonify({
+                'success': False,
+                'error': '没有找到匹配的因子，请检查收益率频率设置中的因子是否属于当前因子家族',
+            }), 400
+
         factors = matched_factors
-        factor_alias_return_freq = matched_items
-        return_freqs = {
-            factor: (None if item.get('return_freq') in (None, '', 'N') else item.get('return_freq'))
-            for factor, item in zip(factors, factor_alias_return_freq)
-        }
 
-        # 新功能参数
-        ic_decay_lags = data.get('ic_decay_lags', None)      # [1, 2, 3, 5, 10, 20] 或 None 表示不计算
-        rolling_window = data.get('rolling_window', None)     # 如 60、120、252，None 表示不计算滚动 IC
+        paths_hash = hashlib.md5(str(sorted(paths)).encode()).hexdigest()
 
-        cache_dir_ic     = Path('../data/cache/ic')
-        cache_dir_factor = Path('../data/cache/factor')
-        cache_dir_ic.mkdir(parents=True, exist_ok=True)
-        cache_dir_factor.mkdir(parents=True, exist_ok=True)
-
-        sorted_paths = sorted(paths)
-        paths_hash = hashlib.md5(str(sorted_paths).encode()).hexdigest()
-        scp_str = str(shared.start_calc_point).replace(':', '-').replace(' ', '_') if shared.start_calc_point else 'latest'
-        start_date_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
-        end_date_str   = str(tester.end_date).replace(':', '-').replace(' ', '_')
         all_products = tester.products.copy()
+        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
+
+        ic_param_map: Dict[tuple, List[Factor]] = {}
+        param_payloads: Dict[tuple, Dict[str, Any]] = {}
+        series_by_factor_lag: Dict[Factor, Dict[int, pd.Series]] = {}
+        stats_by_factor_lag: Dict[Factor, Dict[int, pd.Series]] = {}
+        selected_product_names: List[str] = []
+
+        shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
         for factor in factors:
-            run_products = all_products.copy()
-            factor.clear()
-            return_freq = return_freqs.get(factor, None)
-            factor_series_cache = cache_dir_factor / f"{factor.alias}_{scp_str}.pkl"
-            factor_ic_cache     = cache_dir_ic     / f"{paths_hash}_{factor.alias}_{return_freq}_{start_date_str}_{end_date_str}.pkl"
+            effective_freq = factor.freq
+            if effective_freq is None:
+                raise ValueError(f'Factor {factor.alias}: 无法确定收益率频率')
 
-            table = None
-            if not re_calc and factor_series_cache.exists():
-                with open(factor_series_cache, 'rb') as f:
-                    table, scp_cache = pickle.load(f)
-                if shared.start_calc_point == scp_cache:
-                    run_products = set(p for p in tester.products if p not in table.columns)
-                else:
-                    table = None
-            if run_products:
-                try:
-                    tester.products = run_products.copy()
-                    tester.calc_factor(factors=factor)
-                except Exception:
-                    pass
-                finally:
-                    tester.products = all_products.copy()
-                    if factor.table is None or factor.table.empty:
-                        run_products = set()
-            if table is None and (factor.table is None or factor.table.empty):
-                raise ValueError("/run_ic_test: 无法计算因子数据，且缓存中无数据可用")
-            if table is not None:
-                if factor.table is None or factor.table.empty:
-                    factor.table = table
-                else:
-                    for col in table.columns:
-                        assert col not in factor.table.columns, f"/run_ic_test: 列名冲突: {col}"
-                    factor.table = pd.concat([table, factor.table], axis=1)
-            if factor.table is not None and not factor.table.empty:
-                if not hasattr(factor, 'freq') or factor.freq is None:
-                    factor.freq = factor.get_freq()
-                factor._set_products()
-            if run_products:
-                with open(factor_series_cache, 'wb') as f:
-                    pickle.dump((factor.table, shared.start_calc_point), f)
-            run_products = all_products.copy()
+            for lag_i in ic_lags:
+                key = (
+                    str(factor._structural_key()),
+                    effective_freq.name,
+                    shift,
+                    returns_col.value.name,
+                    lag_i,
+                )
+                if key not in ic_param_map:
+                    ic_param_map[key] = []
+                    param_payloads[key] = {
+                        'FE': factor,
+                        'SC': returns_col.value,
+                        'RF': effective_freq.value,
+                        'S': shift,
+                        'Lag': lag_i,
+                        'F': effective_freq.value,
+                    }
+                ic_param_map[key].append(factor)
 
-            ic_series = None
-            ic_stats  = None
-            returns_table = pd.DataFrame()
-            if not re_calc and factor_ic_cache.exists():
-                with open(factor_ic_cache, 'rb') as f:
-                    ic_s_c, ic_st_c, prods_c, rf_c, ret_c, sd_c, ed_c = pickle.load(f)
-                if prods_c == run_products and rf_c == return_freq and sd_c == tester.start_date and ed_c == tester.end_date:
-                    ic_series, ic_stats, returns_table, run_products = ic_s_c, ic_st_c, ret_c, set()
-            if run_products:
-                try:
-                    ic_s_df, ic_st_df = tester.calc_ic(factors=factor, return_freq=return_freq)
-                    returns_table = factor.returns
-                    ic_series = ic_s_df.iloc[:, 0]
-                    ic_stats  = ic_st_df.iloc[:, 0]
-                except Exception:
-                    pass
-            assert ic_series is not None and ic_stats is not None and not returns_table.empty, \
-                "/run_ic_test: 无法计算IC数据，且缓存中无数据可用"
-            factor.ic_series = ic_series
-            factor.ic_stats  = ic_stats
-            if run_products:
-                with open(factor_ic_cache, 'wb') as f:
-                    pickle.dump((factor.ic_series, factor.ic_stats, all_products, return_freq,
-                                 returns_table, tester.start_date, tester.end_date), f)
+        try:
+            tester.products = all_products.copy()
+            param_items = list(ic_param_map.items())
 
-        tester.products = all_products.copy()
-        ic_stats_all = pd.concat([f.ic_stats for f in factors], axis=1)
-        ic_stats_all.rename(columns=lambda x: x.alias if hasattr(x, 'alias') else str(x), inplace=True)
+            def _calc_one_group(item: Tuple[tuple, List[Factor]]):
+                key, factor_list = item
+                result = run_ic_for_factor(tester, param_payloads[key], factor_list)
+                return key, result
+
+            if len(param_items) > 1:
+                token = _active_tester.get()
+
+                def _worker(item: Tuple[tuple, List[Factor]]):
+                    _active_tester.set(token)
+                    return _calc_one_group(item)
+
+                with ThreadPoolExecutor(max_workers=min(8, len(param_items))) as pool:
+                    futures = {pool.submit(_worker, item): item for item in param_items}
+                    for future in as_completed(futures):
+                        key, result = future.result()
+                        lag_i = int(key[-1])
+                        factor_list, ic_series, stats, re_table, fe_table = result
+                        for factor in factor_list:
+                            series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
+                            stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+
+                            if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
+                                object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
+
+                            if lag_i == primary_ic_lag:
+                                tester.factor_ic_series[factor] = ic_series.copy()
+                                tester.factor_ic_stats[factor] = stats.copy()
+                                if not re_table.empty:
+                                    tester.factor_returns[factor] = re_table.copy()
+                                if not fe_table.empty:
+                                    tester.factor_tables[factor] = fe_table.copy()
+                                    object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
+
+                                p_names = _extract_product_names(fe_table, re_table)
+                                if p_names:
+                                    for p_name in p_names:
+                                        if p_name not in selected_product_names:
+                                            selected_product_names.append(p_name)
+            else:
+                for key, factor_list in param_items:
+                    lag_i = int(key[-1])
+                    _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
+                    for factor in factor_list:
+                        series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
+                        stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+
+                        if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
+                            object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
+
+                        if lag_i == primary_ic_lag:
+                            tester.factor_ic_series[factor] = ic_series.copy()
+                            tester.factor_ic_stats[factor] = stats.copy()
+                            if not re_table.empty:
+                                tester.factor_returns[factor] = re_table.copy()
+                            if not fe_table.empty:
+                                tester.factor_tables[factor] = fe_table.copy()
+                                object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
+
+                            p_names = _extract_product_names(fe_table, re_table)
+                            if p_names:
+                                for p_name in p_names:
+                                    if p_name not in selected_product_names:
+                                        selected_product_names.append(p_name)
+        except Exception as e:
+            tester.products = all_products.copy()
+            return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+        product_map: Dict[str, Any] = {}
+        alias_map: Dict[str, Any] = {}
+        for p in all_products:
+            p_name = str(getattr(p, 'name', p))
+            p_alias = str(getattr(p, 'alias', p_name))
+            product_map[p_name] = p
+            alias_map[p_alias] = p
+
+        resolved_products: set[Any] = set()
+        resolved_seen: set[int] = set()
+        for p_name in selected_product_names:
+            p_obj = product_map.get(p_name) or alias_map.get(p_name)
+            if p_obj is None:
+                continue
+            obj_id = id(p_obj)
+            if obj_id in resolved_seen:
+                continue
+            resolved_seen.add(obj_id)
+            resolved_products.add(p_obj)
+
+        tester.products = resolved_products if resolved_products else all_products.copy()
+
+        ic_stats_all = pd.DataFrame({
+            f.alias: tester.factor_ic_stats.get(f, pd.Series(dtype=float)) for f in factors
+        })
         columns = ic_stats_all.columns.tolist()
-        rows    = ic_stats_all.to_dict(orient='records')
+        rows = ic_stats_all.to_dict(orient='records')
         indices = ic_stats_all.index.tolist()
         for i, row in enumerate(rows):
             row['index'] = indices[i]
 
+        ic_decay_results: Dict[str, List[dict]] = {}
+        if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
+            for factor in factors:
+                base_ic = tester.factor_ic_series.get(factor, pd.Series(dtype=float)).dropna()
+                decay_list: List[dict] = []
+                for lag in ic_decay_lags:
+                    try:
+                        lag_i = int(lag)
+                    except Exception:
+                        continue
+                    if lag_i <= 0:
+                        continue
+                    s = base_ic.iloc[::lag_i].dropna()
+                    if len(s) > 1:
+                        mean_val = float(s.mean())
+                        std_val = float(s.std())
+                        ir_val = (mean_val / std_val) if std_val != 0 else None
+                        n_val = len(s)
+                        t_val = (mean_val / (std_val / np.sqrt(n_val))) if std_val != 0 and n_val > 1 else None
+                        decay_list.append({
+                            'lag': lag_i,
+                            'mean': _safe_round(mean_val),
+                            'std': _safe_round(std_val),
+                            'ir': _safe_round(ir_val),
+                            't_stat': _safe_round(t_val),
+                            'n': n_val,
+                        })
+                    else:
+                        decay_list.append({
+                            'lag': lag_i,
+                            'mean': None,
+                            'std': None,
+                            'ir': None,
+                            't_stat': None,
+                            'n': 0,
+                        })
+                ic_decay_results[factor.alias] = decay_list
+
         response: dict = {
             'success': True,
             'paths_hash': paths_hash,
+            'ic_lags': ic_lags,
+            'primary_ic_lag': primary_ic_lag,
             'ic_stats': {'columns': ['index'] + columns, 'rows': rows},
             'factors': [],
         }
 
-        # ─── IC 衰减分析（多周期 IC decay）───
-        ic_decay_results = {}  # factor.alias → [{'lag': 1, 'mean':..., 'ir':..., 't_stat':...}, ...]
-        if ic_decay_lags and isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
-            base_freqs = return_freqs.copy()
-            for factor in factors:
-                base_freq = base_freqs.get(factor, None)
-                # 基准频率（用于计算 lag 步长）
-                if base_freq is None:
-                    base_freq_str = '1d'  # 默认日频
-                else:
-                    base_freq_str = base_freq
-                try:
-                    base_td = pd.Timedelta(base_freq_str)
-                except Exception:
-                    base_td = pd.Timedelta('1d')
-                decay_list = []
-                for lag in ic_decay_lags:
-                    try:
-                        lag_td = base_td * int(lag)
-                        ic_s_df_lag, ic_st_df_lag = tester.calc_ic(
-                            factors=factor, return_freq=DataFreq(lag_td)
-                        )
-                        ic_s_lag = ic_s_df_lag.iloc[:, 0].dropna()
-                        if len(ic_s_lag) > 1:
-                            mean_val = float(ic_s_lag.mean())
-                            std_val = float(ic_s_lag.std())
-                            ir_val = mean_val / std_val if std_val != 0 else None
-                            n_val = len(ic_s_lag)
-                            t_stat_val = (mean_val / (std_val / np.sqrt(n_val))) if std_val != 0 and n_val > 1 else None
-                            decay_list.append({
-                                'lag': int(lag),
-                                'mean': round(mean_val, 6),
-                                'std': round(std_val, 6),
-                                'ir': round(ir_val, 6) if ir_val is not None else None,
-                                't_stat': round(t_stat_val, 6) if t_stat_val is not None else None,
-                                'n': n_val,
-                            })
-                        else:
-                            decay_list.append({'lag': int(lag), 'mean': None, 'std': None, 'ir': None, 't_stat': None, 'n': 0})
-                    except Exception:
-                        decay_list.append({'lag': int(lag), 'mean': None, 'std': None, 'ir': None, 't_stat': None, 'n': 0})
-                ic_decay_results[factor.alias] = decay_list
-                # 恢复原始 base 频率（后续代码依赖）
-                return_freqs[factor] = base_freq
-
         for factor in factors:
-            ic_s = factor.ic_series.dropna()
-            if isinstance(ic_s.index, pd.MultiIndex):
-                _sig = next((str(n) for n in ic_s.index.names if str(n).startswith('_SIGNAL')), None)
-                _lvl = ic_s.index.names.index(_sig) if _sig else -1
-                signal_ts = pd.DatetimeIndex(ic_s.index.get_level_values(_lvl))
-            else:
-                signal_ts = pd.DatetimeIndex(ic_s.index)
-            _daily = factor.freq is not None and factor.freq.is_day_multiple()
-            dates = [ts.strftime('%Y-%m-%d') for ts in signal_ts] if _daily else (signal_ts.view(np.int64) // 10**6).tolist()
-            vals  = [None if (isinstance(v, float) and (pd.isna(v) or pd.isnull(v))) else v for v in ic_s.values.tolist()]
+            ic_s = tester.factor_ic_series.get(factor, pd.Series(dtype=float)).dropna()
+            signal_ts = _extract_signal_index(ic_s.index) if len(ic_s) > 0 else pd.DatetimeIndex([])
+            is_daily = factor.freq is not None and factor.freq.is_day_multiple()
+            dates = (
+                [ts.strftime('%Y-%m-%d') for ts in signal_ts]
+                if is_daily
+                else (signal_ts.view(np.int64) // 10**6).tolist()
+            )
+            vals = [
+                None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
+                for v in ic_s.values.tolist()
+            ]
 
-            # 自相关衰减序列 (lag 1~min(20, len/2-1))
             autocorr = None
-            s = ic_s.dropna()
-            if len(s) > 2:
-                from statsmodels.tsa.stattools import acf
+            if len(ic_s) > 2:
                 try:
-                    nlags = min(20, max(1, len(s) // 2 - 1))
-                    acf_vals = acf(s.values, nlags=nlags, fft=False)
-                    # 从 lag=1 开始，返回 [{'lag': 1, 'ac': ...}, ...]
-                    autocorr = [{'lag': i, 'ac': round(float(v), 6)} for i, v in enumerate(acf_vals[1:], start=1)]
+                    from statsmodels.tsa.stattools import acf
+                    nlags = min(20, max(1, len(ic_s) // 2 - 1))
+                    acf_vals = acf(ic_s.values, nlags=nlags, fft=False)
+                    autocorr = [
+                        {'lag': i, 'ac': round(float(v), 6)}
+                        for i, v in enumerate(acf_vals[1:], start=1)
+                    ]
                 except Exception:
-                    pass
+                    autocorr = None
 
-            # ─── 滚动窗口 IC ───
             rolling_ic = None
-            if rolling_window and isinstance(rolling_window, (int, float)) and rolling_window > 1:
+            if isinstance(rolling_window, (int, float)) and rolling_window > 1:
                 win = int(rolling_window)
-                s_vals = ic_s.dropna().values
-                s_idx = ic_s.dropna().index
+                s_vals = np.asarray(ic_s.values, dtype=float)
                 if len(s_vals) >= win:
-                    # 滚动计算每窗的 mean/IR
                     r_mean = []
                     r_ir = []
                     r_dates = []
                     for i in range(win - 1, len(s_vals)):
-                        win_slice = s_vals[i - win + 1 : i + 1]
+                        win_slice = np.asarray(s_vals[i - win + 1:i + 1], dtype=float)
                         m = float(np.mean(win_slice))
                         std_win = float(np.std(win_slice))
-                        r = m / std_win if std_win != 0 else None
-                        r_mean.append(round(m, 6))
-                        r_ir.append(round(r, 6) if r is not None else None)
-                        ts_i = s_idx[i]
+                        r = (m / std_win) if std_win != 0 else None
+                        r_mean.append(_safe_round(m))
+                        r_ir.append(_safe_round(r))
+                        ts_i = signal_ts[i]
                         if hasattr(ts_i, 'strftime'):
-                            r_dates.append(ts_i.strftime('%Y-%m-%d') if _daily else int(ts_i.value // 10**6))
+                            r_dates.append(ts_i.strftime('%Y-%m-%d') if is_daily else int(ts_i.value // 10**6))
                         else:
                             r_dates.append(str(ts_i))
                     rolling_ic = {
@@ -256,34 +364,67 @@ def run_ic_test():
                         'ir': r_ir,
                     }
 
+            fe_table = getattr(factor, '_ic_fe_intermediate', None)
+            products = []
+            for p in sorted(tester.products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
+                p_name = str(getattr(p, 'name', p))
+                p_desc = str(getattr(p, 'desc', p_name))
+                products.append({'name': p_name, 'desc': p_desc})
+
             factor_data = {
-                'name': factor.name, 'alias': factor.alias,
+                'name': factor.name,
+                'alias': factor.alias,
                 'ic_series': {'dates': dates, 'values': vals},
                 'autocorr': autocorr,
-                'products': [
-                    {'name': p.name, 'desc': getattr(p, 'desc', p.name)}
-                    for p in (factor.table.columns if factor.table is not None else [])
-                    if p in tester.products and isinstance(p, Product)
-                ],
+                'products': products,
             }
-            # 附加衰减和滚动结果
+
+            if len(ic_lags) > 1:
+                lag_series_list = []
+                lag_stats_dict: Dict[str, Dict[str, Any]] = {}
+                for lag_i in ic_lags:
+                    lag_series = series_by_factor_lag.get(factor, {}).get(lag_i, pd.Series(dtype=float)).dropna()
+                    lag_ts = _extract_signal_index(lag_series.index) if len(lag_series) > 0 else pd.DatetimeIndex([])
+                    lag_dates = (
+                        [ts.strftime('%Y-%m-%d') for ts in lag_ts]
+                        if is_daily
+                        else (lag_ts.view(np.int64) // 10**6).tolist()
+                    )
+                    lag_vals = [
+                        None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
+                        for v in lag_series.values.tolist()
+                    ]
+                    lag_series_list.append({'lag': lag_i, 'dates': lag_dates, 'values': lag_vals})
+
+                    lag_stat_s = stats_by_factor_lag.get(factor, {}).get(lag_i)
+                    if isinstance(lag_stat_s, pd.Series):
+                        lag_stats_dict[str(lag_i)] = {
+                            str(k): _safe_round(v) for k, v in lag_stat_s.to_dict().items()
+                        }
+
+                factor_data['ic_series_by_lag'] = lag_series_list
+                factor_data['ic_stats_by_lag'] = lag_stats_dict
+
             if ic_decay_results:
                 factor_data['ic_decay'] = ic_decay_results.get(factor.alias, [])
             if rolling_ic:
                 factor_data['rolling_ic'] = rolling_ic
+
             response['factors'].append(factor_data)
 
-        # Merge into tester.factors
         existing = {f.alias for f in tester.factors}
         for f in factors:
             if f.alias not in existing:
-                tester.factors.append(f); existing.add(f.alias)
+                tester.factors.append(f)
+                existing.add(f.alias)
             else:
                 for i, ef in enumerate(tester.factors):
                     if ef.alias == f.alias:
-                        tester.factors[i] = f; break
+                        tester.factors[i] = f
+                        break
 
         return jsonify(response)
+
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:

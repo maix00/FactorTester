@@ -16,9 +16,12 @@ def add_params():
     params = data.get('params', {})
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        ff._check_in_space(**params)
+        # 用 FactorFamily 的 normalize + check + rectified new_params 构建，
+        # 不污染 ff._params_list（共享实例，多用户不安全）
+        normalized = ff._normalize_param_kwargs(**params)
+        ff._check_in_space(**normalized)
         new_params = {
-            p.alias: p._value_space.rectify(params[p.alias]) if p.alias in params else p.default_value
+            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
             for p in ff.params
         }
         pl = _get_session_params(factor_family_alias, ff)

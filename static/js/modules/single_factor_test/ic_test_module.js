@@ -33,7 +33,7 @@
         }
     }
 
-    function drawComparisonChart(containerId, priceData, factorData, returnData, productName, factorName, subId, product) {
+    function drawComparisonChart(containerId, priceData, factorData, returnData, productName, factorName, factorAlias, subId, product) {
         if (typeof Highcharts === 'undefined') return;
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -177,7 +177,7 @@
                         events: {
                             click: function() {
                                 if (this.series.options.id === 'factor') {
-                                    openFactorDistribution(subId, factorName, this.x, product);
+                                    openFactorDistribution(subId, factorName, factorAlias, this.x, product);
                                 }
                             }
                         }
@@ -224,11 +224,11 @@
         const cacheKey = `${subId}-${idx}`;
         const cache = window._icComparisonCache && window._icComparisonCache[cacheKey];
         if (!cache) return;
-        const { priceData, factorData, returnData, product, factorName } = cache;
+        const { priceData, factorData, returnData, product, factorName, factorAlias } = cache;
         const chartDiv = document.getElementById(`factor-chart-${subId}-${idx}`);
         if (chartDiv) {
             chartDiv.style.height = '800px';
-            drawComparisonChart(`factor-chart-${subId}-${idx}`, priceData, factorData, returnData, product, factorName, subId, product);
+            drawComparisonChart(`factor-chart-${subId}-${idx}`, priceData, factorData, returnData, product, factorName, factorAlias, subId, product);
         }
     };
 
@@ -401,7 +401,10 @@
         }
         let html = '<div class="ic-table-wrap"><table class="ic-table"><thead><tr>';
         data.ic_stats.columns.forEach((col, i) => {
-            html += '<th class="' + (i === 0 ? 'idx-col' : '') + '">' + col + '</th>';
+            const isIdx = i === 0;
+            const draggable = !isIdx ? ' draggable="true"' : '';
+            const dataColIdx = !isIdx ? ' data-col-idx="' + (i - 1) + '"' : '';
+            html += '<th class="' + (isIdx ? 'idx-col' : 'draggable-col') + '"' + draggable + dataColIdx + '>' + col + '</th>';
         });
         html += '</tr></thead><tbody>';
         data.ic_stats.rows.forEach(row => {
@@ -424,6 +427,63 @@
         });
         html += '</tbody></table></div>';
         return html;
+    }
+
+    // 本地重排表格列和因子选项卡（不重新请求后端数据）
+    // fromIdx/toIdx 是相对于因子列（不含 index 列）的索引
+    function reorderTableColumns(table, fromIdx, toIdx, subId) {
+        // ── 1. 重排表格列 ──
+        const rows = table.querySelectorAll('tr');
+        rows.forEach(row => {
+            const cells = Array.from(row.children);
+            // cells[0] = index 列，cells[1..] = 因子列
+            const factorCells = cells.slice(1);
+            const moved = factorCells.splice(fromIdx, 1)[0];
+            factorCells.splice(toIdx, 0, moved);
+            // 更新 data-col-idx
+            factorCells.forEach((cell, i) => {
+                cell.setAttribute('data-col-idx', i);
+            });
+            // 清空并重新插入
+            while (row.children.length > 1) row.removeChild(row.lastChild);
+            factorCells.forEach(cell => row.appendChild(cell));
+        });
+
+        // ── 2. 重排因子选项卡 ──
+        const tabsContainer = document.getElementById(`factor-tabs-${subId}`);
+        if (!tabsContainer) return;
+        // 重排 tab 按钮
+        const tabList = tabsContainer.querySelector('ul.nav-tabs');
+        if (tabList) {
+            const tabs = Array.from(tabList.children);
+            const movedTab = tabs.splice(fromIdx, 1)[0];
+            tabs.splice(toIdx, 0, movedTab);
+            tabs.forEach(tab => tabList.appendChild(tab));
+        }
+        // 重排 tab-pane
+        const tabContent = tabsContainer.querySelector('.tab-content');
+        if (tabContent) {
+            const panes = Array.from(tabContent.children);
+            const movedPane = panes.splice(fromIdx, 1)[0];
+            panes.splice(toIdx, 0, movedPane);
+            panes.forEach(pane => tabContent.appendChild(pane));
+        }
+        // 保持第一个 tab 为 active
+        if (tabList) {
+            const allTabs = tabList.querySelectorAll('.nav-link');
+            allTabs.forEach((t, i) => {
+                t.id = `factor-tab-${subId}-${i}`;
+                t.setAttribute('data-bs-target', `#factor-pane-${subId}-${i}`);
+                if (i === 0) t.classList.add('active'); else t.classList.remove('active');
+            });
+        }
+        if (tabContent) {
+            const allPanes = tabContent.querySelectorAll('.tab-pane');
+            allPanes.forEach((p, i) => {
+                p.id = `factor-pane-${subId}-${i}`;
+                if (i === 0) { p.classList.add('show', 'active'); } else { p.classList.remove('show', 'active'); }
+            });
+        }
     }
 
     // 渲染因子次级选项卡（IC 结果下方）
@@ -464,7 +524,7 @@
                     <div style="margin-top:16px;">
                         <label>选择产品：</label>
                         <select id="product-select-${subId}-${idx}" class="form-select" style="width:200px; display:inline-block; margin-left:8px;">${productOptions}</select>
-                        <button class="btn btn-sm btn-outline-primary" data-sub="${subId}" data-idx="${idx}" data-factor-name="${factor.name}">加载因子和收益</button>
+                        <button class="btn btn-sm btn-outline-primary" data-sub="${subId}" data-idx="${idx}" data-factor-name="${factor.name}" data-factor-alias="${factor.alias}">加载因子和收益</button>
                         <label style="margin-left:12px;">
                             <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
                         </label>
@@ -518,12 +578,17 @@
             const sub = e.currentTarget.getAttribute('data-sub');
             const idx = e.currentTarget.getAttribute('data-idx');
             const factorName = e.currentTarget.getAttribute('data-factor-name');
-            await loadFactorAndReturn(sub, idx, factorName);
+            const factorAlias = e.currentTarget.getAttribute('data-factor-alias');
+            try {
+                await loadFactorAndReturn(sub, idx, factorName, factorAlias);
+            } catch (err) {
+                console.error('loadFactorAndReturn 失败:', err);
+            }
         }
     }
 
     // 加载因子值和收益率并绘图
-    async function loadFactorAndReturn(subId, factorIdx, factorName) {
+    async function loadFactorAndReturn(subId, factorIdx, factorName, factorAlias) {
         const select = document.getElementById(`product-select-${subId}-${factorIdx}`);
         const product = select ? select.value : null;
         if (!product || product === '') { alert('请选择一个产品'); return; }
@@ -539,7 +604,7 @@
             return; 
         }
 
-        const factorInfo = factorList.find(f => f.name === factorName);
+        const factorInfo = factorList.find(f => f.alias === factorAlias) || factorList.find(f => f.name === factorName);
         const freq = (factorInfo && factorInfo.freq !== 'N') ? factorInfo.freq : '1D';
 
         const _safeJson = async (r, label) => {
@@ -555,6 +620,7 @@
                         submission_id: subId,
                         factor_family_alias: factorFamilyAlias,
                         factor_name: factorName,
+                        factor_alias: factorAlias,
                         product: product
                     })
                 }).then(r => _safeJson(r, 'get_factor_series')),
@@ -563,6 +629,7 @@
                     body: JSON.stringify({
                         submission_id: subId,
                         factor_name: factorName,
+                        factor_alias: factorAlias,
                         factor_family_alias: factorFamilyAlias,
                         product: product,
                         paths: submission.paths
@@ -600,6 +667,7 @@
                     product: product,
                     factor_family_alias: factorFamilyAlias,
                     factor_name: factorName,
+                    factor_alias: factorAlias,
                     factor_dates: factorDatesMs,
                     adjusted: adjusted,
                     start_date: submission.start_date,
@@ -621,9 +689,9 @@
                 // 缓存数据以便 Volume/OI 复选框切换时重绘
                 const cacheKey = `${subId}-${factorIdx}`;
                 window._icComparisonCache = window._icComparisonCache || {};
-                window._icComparisonCache[cacheKey] = { priceData, factorData, returnData, product, factorName };
+                window._icComparisonCache[cacheKey] = { priceData, factorData, returnData, product, factorName, factorAlias };
                 factorChartDiv.style.height = '800px';
-                drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName, subId, product);
+                drawComparisonChart(`factor-chart-${subId}-${factorIdx}`, priceData, factorData, returnData, product, factorName, factorAlias, subId, product);
             } else {
                 factorChartDiv.innerHTML = '<div style="color:#d00; text-align:center;">价格、因子或收益率数据无效</div>';
             }
@@ -639,10 +707,6 @@
         const statusSpan = document.getElementById(`ic-status-${subId}`);
         const resultDiv = document.getElementById(`ic-result-${subId}`);
         if (!btn || !statusSpan || !resultDiv) return;
-
-        // 获取强制重新计算复选框的状态
-        const recalcCheckbox = document.getElementById(`recalc-checkbox-${subId}`);
-        const re_calc = recalcCheckbox ? recalcCheckbox.checked : false;
 
         // 收集选中的因子及频率（从全局抽屉读取）
         const selectedFactors = [];
@@ -693,7 +757,6 @@
                     factor_family_alias: factorFamilyAlias,
                     paths: submission.paths,
                     factors: selectedFactors,  // 发送因子列表
-                    re_calc: re_calc,
                     ic_decay_lags: ic_decay_lags,
                     rolling_window: rolling_window
                 })
@@ -720,17 +783,92 @@
             tabsContainer.className = 'factor-tabs-container';
             resultDiv.appendChild(tabsContainer);
             renderFactorTabs(subId, data.factors);
-            // 表格列头点击切换到对应因子选项卡
+            // 表格列头点击切换到对应因子选项卡 + 拖拽排序
             const table = resultDiv.querySelector('.ic-table');
             if (table) {
+                const theadRow = table.querySelector('thead tr');
                 const headers = table.querySelectorAll('thead th:not(.idx-col)');
-                headers.forEach((th, index) => {
+
+                // ── 拖拽排序 ──
+                let dragStartColIdx = null;
+                let dragOverColIdx = null;
+
+                headers.forEach(th => {
+                    // 点击切换到对应因子选项卡
                     th.style.cursor = 'pointer';
                     th.addEventListener('click', () => {
-                        const tabId = `factor-tab-${subId}-${index}`;
-                        const tabTrigger = document.getElementById(tabId);
-                        if (tabTrigger && typeof bootstrap !== 'undefined') {
-                            bootstrap.Tab.getOrCreateInstance(tabTrigger).show();
+                        const colIdx = parseInt(th.getAttribute('data-col-idx'));
+                        if (!isNaN(colIdx)) {
+                            const tabId = `factor-tab-${subId}-${colIdx}`;
+                            const tabTrigger = document.getElementById(tabId);
+                            if (tabTrigger && typeof bootstrap !== 'undefined') {
+                                bootstrap.Tab.getOrCreateInstance(tabTrigger).show();
+                            }
+                        }
+                    });
+
+                    // 拖拽开始
+                    th.addEventListener('dragstart', function(e) {
+                        const colIdx = parseInt(this.getAttribute('data-col-idx'));
+                        if (isNaN(colIdx)) return;
+                        dragStartColIdx = colIdx;
+                        this.style.opacity = '0.5';
+                        e.dataTransfer.effectAllowed = 'move';
+                    });
+
+                    // 拖拽结束
+                    th.addEventListener('dragend', function(e) {
+                        this.style.opacity = '';
+                        dragStartColIdx = null;
+                        dragOverColIdx = null;
+                    });
+
+                    // 拖拽经过
+                    th.addEventListener('dragover', function(e) {
+                        const colIdx = parseInt(this.getAttribute('data-col-idx'));
+                        if (isNaN(colIdx) || dragStartColIdx === null) return;
+                        e.preventDefault();
+                        dragOverColIdx = colIdx;
+                        this.classList.add('drag-over');
+                    });
+
+                    th.addEventListener('dragleave', function(e) {
+                        this.classList.remove('drag-over');
+                    });
+
+                    // 放下
+                    th.addEventListener('drop', function(e) {
+                        e.preventDefault();
+                        this.classList.remove('drag-over');
+                        const colIdx = parseInt(this.getAttribute('data-col-idx'));
+                        if (isNaN(colIdx)) return;
+                        if (dragStartColIdx !== null && dragOverColIdx !== null && dragStartColIdx !== dragOverColIdx) {
+                            // 先在本地重排表格列和因子选项卡（瞬时的前端操作，无需重新计算）
+                            reorderTableColumns(table, dragStartColIdx, dragOverColIdx, subId);
+
+                            // 同步后端 session 参数顺序
+                            fetch('/reorder_params', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    factor_family_alias: factorFamilyAlias,
+                                    from_idx: dragStartColIdx,
+                                    to_idx: dragOverColIdx
+                                })
+                            })
+                            .then(res => res.json())
+                            .then(resData => {
+                                if (resData.success) {
+                                    // 只刷新参数模块（不重新跑 IC 测试）
+                                    if (typeof window.reloadParamModule === 'function') {
+                                        window.reloadParamModule();
+                                    }
+                                    // 同步更新因子列表缓存
+                                    fetchFactorList();
+                                } else {
+                                    alert('排序失败: ' + (resData.error || '未知错误'));
+                                }
+                            });
                         }
                     });
                 });
@@ -837,23 +975,20 @@
                     <div class="ic-card">
                         <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
                             <button class="btn btn-primary btn-sm" id="run-ic-btn-${sub.id}" onclick="runIC('${sub.id}')">运行IC测试</button>
-                            <label style="font-size: 13px;">
-                                <input type="checkbox" id="recalc-checkbox-${sub.id}"> 强制重新计算（忽略缓存）
-                            </label>
                             <span id="ic-status-${sub.id}" class="ic-status"></span>
                         </div>
                         <!-- IC 衰减 & 滚动窗口 参数 -->
-                        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
+                        <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
                             <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
-                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 IC衰减滞后期
                                 <input type="text" id="ic-decay-lags-${sub.id}" value="" placeholder="1,2,3,5,10,20"
-                                       style="width:110px; font-size:12px; padding:2px 6px;" title="逗号分隔的滞后期数，计算各周期IC统计量">
+                                       style="width:110px; font-size:12px; padding:2px 6px; vertical-align:center; margin:0;" title="逗号分隔的滞后期数，计算各周期IC统计量">
                             </label>
-                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 滚动窗口
                                 <input type="number" id="ic-rolling-window-${sub.id}" value="" placeholder="如60"
-                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
+                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px; vertical-align:center;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
                             </label>
                         </div>
                         <div id="ic-result-${sub.id}"></div>
@@ -922,7 +1057,7 @@
 
     // ========== 因子截面分布可视化 ==========
 
-    async function openFactorDistribution(subId, factorName, tsMs, product) {
+    async function openFactorDistribution(subId, factorName, factorAlias, tsMs, product) {
         const drawer = document.getElementById('factor-dist-drawer');
         const title  = document.getElementById('dist-drawer-title');
         const chartContainer = document.getElementById('dist-chart-container');
@@ -941,6 +1076,7 @@
                     submission_id: String(subId),
                     factor_family_alias: factorFamilyAlias,
                     factor_name: factorName,
+                    factor_alias: factorAlias,
                     timestamp: tsMs,
                     product: product || null,
                 }),

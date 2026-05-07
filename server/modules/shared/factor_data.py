@@ -8,10 +8,51 @@ Shared factor data-query routes (any test module can use):
 import numpy as np
 import pandas as pd
 import traceback
+from types import SimpleNamespace
 from flask import request, jsonify
-from server.shared import get_factor_family_instance, _get_session_params, _factor_testers_lock
+from server.shared import get_factor_family_instance, _get_session_params, get_factor_tester
 import server.shared as shared
 from . import shared_bp
+
+
+def _match_product_column(table: pd.DataFrame | None, product) -> object | None:
+    """在表格列中匹配产品对象，兼容列为 Product 或字符串名称。"""
+    if not isinstance(table, pd.DataFrame) or table.empty:
+        return None
+    if product in table.columns:
+        return product
+    target_name = getattr(product, 'name', str(product))
+    target_alias = getattr(product, 'alias', target_name)
+    for col in table.columns:
+        col_name = getattr(col, 'name', str(col))
+        col_alias = getattr(col, 'alias', col_name)
+        if str(col_name) == str(target_name) or str(col_alias) == str(target_alias):
+            return col
+    return None
+
+
+def _column_names(table: pd.DataFrame | None) -> list[str]:
+    if not isinstance(table, pd.DataFrame) or table.empty:
+        return []
+    return [str(getattr(c, 'name', c)) for c in table.columns]
+
+
+def _find_factor(factors, factor_name: str | None, factor_alias: str | None):
+    if factor_alias not in (None, ''):
+        by_alias = next((f for f in factors if f.alias == factor_alias), None)
+        if by_alias is not None:
+            return by_alias
+    if factor_name not in (None, ''):
+        return next((f for f in factors if f.name == factor_name or f.alias == factor_name), None)
+    return None
+
+
+def _resolve_fe_table(tester_factor) -> pd.DataFrame | None:
+    """从 IC 测试阶段写入的 _ic_fe_intermediate 获取因子暴露表。"""
+    fe_table = getattr(tester_factor, '_ic_fe_intermediate', None)
+    if isinstance(fe_table, pd.DataFrame) and not fe_table.empty:
+        return fe_table
+    return None
 
 
 @shared_bp.route('/api/factor_list')
@@ -24,7 +65,7 @@ def factor_list():
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         factor_data = []
         for f in factors:
-            factor_freq_param = f.params_dict.get('$F')
+            factor_freq_param = f.family.params_dict.get('$F') if f.family else None
             factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
             factor_freq_str = (
                 factor_freq_param._value_space.alias(factor_freq_value)
@@ -39,65 +80,51 @@ def factor_list():
 
 @shared_bp.route('/get_factor_series', methods=['POST'])
 def get_factor_series():
-    import pickle
-    from pathlib import Path
     data = request.get_json()
     submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
+    factor_alias        = data.get('factor_alias')
     product_name        = data.get('product')
-    re_calc             = data.get('re_calc', False)
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_factor_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
-        target_factor = next((f for f in factors if f.name == factor_name), None)
+        target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
+        tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
         product = next((p for p in tester.products if p.name == product_name), None)
         if not product:
-            return jsonify({'error': '未找到产品'}), 404
+            product = SimpleNamespace(name=product_name, alias=product_name)
 
-        cache_dir = Path('../data/cache/factor')
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        scp_str = str(shared.start_calc_point).replace(':', '-').replace(' ', '_') if shared.start_calc_point else 'latest'
-        cache1 = cache_dir / f"{target_factor.alias}_{scp_str}.pkl"
-        cache2 = cache_dir / f"{target_factor.alias}_{product.alias}_{scp_str}.pkl"
+        # 优先使用 IC 测试阶段的 FE intermediate；若缺失，则按 _func_expr/source_table 回退并保持 Neg 语义。
+        fe_table = _resolve_fe_table(tester_factor)
+        fe_col = _match_product_column(fe_table, product)
 
         series = None
-        if not re_calc and cache1.exists():
-            with open(cache1, 'rb') as f:
-                table, scp_cache = pickle.load(f)
-            if product in table.columns and scp_cache == shared.start_calc_point:
-                series = table[product].dropna()
+        if fe_col is not None and isinstance(fe_table, pd.DataFrame):
+            series = fe_table[fe_col].dropna()
+        else:
+            factor_table = tester.factor_tables.get(tester_factor)
+            if factor_table is None:
+                factor_table = next(
+                    (v for k, v in tester.factor_tables.items() if getattr(k, 'alias', None) == target_factor.alias),
+                    None,
+                )
+            fb_col = _match_product_column(factor_table, product)
+            if fb_col is not None and isinstance(factor_table, pd.DataFrame):
+                series = factor_table[fb_col].dropna()
             else:
-                re_calc = True
-        elif not re_calc and cache2.exists():
-            with open(cache2, 'rb') as f:
-                table, scp_cache = pickle.load(f)
-            if scp_cache == shared.start_calc_point:
-                series = (table[product].dropna() if hasattr(table, 'columns') and product in table.columns
-                          else table.dropna())
-            else:
-                re_calc = True
-        if re_calc or series is None:
-            orig = tester.products.copy()
-            tester.products = [product]
-            target_factor.clear()
-            try:
-                tester.calc_factor(factors=target_factor)
-                if target_factor.table is None or target_factor.table.empty:
-                    raise ValueError("因子计算无结果")
-                series = target_factor.table[product].dropna()
-                with open(cache2, 'wb') as f:
-                    pickle.dump((target_factor.table, shared.start_calc_point), f)
-            finally:
-                tester.products = orig
+                available = _column_names(fe_table)[:10]
+                return jsonify({
+                    'error': '未找到可用的因子截面数据，请先运行 IC 测试后再加载',
+                    'available_products': available,
+                }), 400
 
         assert series is not None
+        if series.empty:
+            return jsonify({'error': '该产品在当前时间范围内无因子数据'}), 404
 
         def _get_idx(s):
             return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
@@ -114,7 +141,7 @@ def get_factor_series():
         if tester.end_date is not None:
             series = series[idx <= _loc(pd.Timestamp(tester.end_date), idx)]
         idx = _get_idx(series)
-        _daily = target_factor.freq is not None and target_factor.freq.is_day_multiple()
+        _daily = tester_factor.freq is not None and tester_factor.freq.is_day_multiple()
         dates_out = ([ts.strftime('%Y-%m-%d') for ts in idx] if _daily
                      else (idx.view(np.int64) // 10**6).tolist())
         values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
@@ -126,66 +153,42 @@ def get_factor_series():
 
 @shared_bp.route('/get_return_series', methods=['POST'])
 def get_return_series():
-    import pickle, hashlib
-    from pathlib import Path
     data = request.get_json()
     submission_id       = data.get('submission_id')
     product_name        = data.get('product')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
-    return_freq         = data.get('return_freq', None)
-    paths               = data.get('paths', [])
-    re_calc             = data.get('re_calc', False)
+    factor_alias        = data.get('factor_alias')
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_return_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
-        factor = next((f for f in factors if f.name == factor_name), None)
+        factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
+        tester_factor = next((f for f in tester.factors if f.alias == factor.alias), factor)
         product = next((p for p in tester.products if p.name == product_name), None)
         if not product:
-            return jsonify({'error': '未找到产品'}), 404
+            product = SimpleNamespace(name=product_name, alias=product_name)
 
-        cache_ic  = Path('../data/cache/ic')
-        cache_ret = Path('../data/cache/return')
-        cache_ret.mkdir(parents=True, exist_ok=True)
-        start_str = str(tester.start_date).replace(':', '-').replace(' ', '_')
-        end_str   = str(tester.end_date).replace(':', '-').replace(' ', '_')
-        ph = hashlib.md5(str(sorted(paths)).encode()).hexdigest()
-        c1 = cache_ic  / f"{ph}_{factor.alias}_{return_freq}_{start_str}_{end_str}.pkl"
-        c2 = cache_ret / f"{product.alias}_{return_freq}_{start_str}_{end_str}.pkl"
-
-        series = None
-        if not re_calc and c1.exists():
-            with open(c1, 'rb') as f:
-                _, _, _, rf_c, returns_table, sd_c, ed_c = pickle.load(f)
-            if rf_c == return_freq and sd_c == tester.start_date and ed_c == tester.end_date:
-                series = returns_table[product].dropna()
-            else:
-                re_calc = True
-        elif not re_calc and c2.exists():
-            with open(c2, 'rb') as f:
-                returns_table, rf_c, sd_c, ed_c = pickle.load(f)
-            if rf_c == return_freq and sd_c == tester.start_date and ed_c == tester.end_date:
-                series = (returns_table[product].dropna()
-                          if hasattr(returns_table, 'columns') and product in returns_table.columns
-                          else returns_table.dropna())
-            else:
-                re_calc = True
-        if re_calc or series is None:
-            factor.clear()
-            factor.products = set([product])
-            returns_df = factor.calc_returns(return_freq=(None if return_freq == 'N' else return_freq))
-            series = (returns_df[product].dropna()
-                      if isinstance(returns_df, pd.DataFrame) and product in returns_df.columns
-                      else (returns_df.iloc[:, 0].dropna()
-                            if isinstance(returns_df, pd.DataFrame) else returns_df.dropna()))
-            with open(c2, 'wb') as f:
-                pickle.dump((series, return_freq, tester.start_date, tester.end_date), f)
+        # 优先使用 IC 测试阶段由 intermediate(RE) 回填的数据
+        returns_table = tester.factor_returns.get(tester_factor)
+        if returns_table is None:
+            returns_table = next(
+                (v for k, v in tester.factor_returns.items() if getattr(k, 'alias', None) == factor.alias),
+                None,
+            )
+        ret_col = _match_product_column(returns_table, product)
+        if ret_col is not None and isinstance(returns_table, pd.DataFrame):
+            series = returns_table[ret_col].dropna()
+        else:
+            available = _column_names(returns_table)[:10]
+            return jsonify({
+                'error': '未找到可用的收益率数据，请先运行 IC 测试后再加载',
+                'available_products': available,
+            }), 400
+        if series.empty:
+            return jsonify({'error': '该产品在当前时间范围内无收益率数据'}), 404
 
         def _get_idx(s):
             return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
@@ -202,7 +205,7 @@ def get_return_series():
         if tester.end_date is not None:
             series = series[idx <= _loc(pd.Timestamp(tester.end_date), idx)]
         idx = _get_idx(series)
-        _daily = factor.freq is not None and factor.freq.is_day_multiple()
+        _daily = tester_factor.freq is not None and tester_factor.freq.is_day_multiple()
         dates_out = ([ts.strftime('%Y-%m-%d') for ts in idx] if _daily
                      else (idx.view(np.int64) // 10**6).tolist())
         values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
@@ -221,14 +224,12 @@ def get_price_series():
     adjusted            = data.get('adjusted', False)
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
+    factor_alias        = data.get('factor_alias')
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_price_series')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
-        factor = next((f for f in factors if f.name == factor_name), None)
+        factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
         product = next((p for p in tester.products if p.name == product_name), None)
@@ -317,54 +318,32 @@ def get_price_series():
 @shared_bp.route('/get_factor_distribution', methods=['POST'])
 def get_factor_distribution():
     """返回某个时间点所有品种的因子截面分布值。"""
-    import pickle
-    from pathlib import Path
     data = request.get_json()
     submission_id       = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
     factor_name         = data.get('factor_name')
+    factor_alias        = data.get('factor_alias')
     timestamp_ms        = data.get('timestamp')  # 毫秒时间戳
     product_name        = data.get('product')    # 当前选中产品名，用于高亮
     try:
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
-        if not tester:
-            return jsonify({'error': '未找到测试器实例'}), 404
+        tester = get_factor_tester(submission_id, caller='get_factor_distribution')
         factor_family = get_factor_family_instance(factor_family_alias)
         factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
-        target_factor = next((f for f in factors if f.name == factor_name), None)
+        target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
 
-        cache_dir = Path('../data/cache/factor')
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        scp_str = str(shared.start_calc_point).replace(':', '-').replace(' ', '_') if shared.start_calc_point else 'latest'
-        cache = cache_dir / f"{target_factor.alias}_{scp_str}.pkl"
-
-        table = None
-        if cache.exists():
-            with open(cache, 'rb') as f:
-                table, scp_cache = pickle.load(f)
-            if scp_cache != shared.start_calc_point:
-                table = None
-        if table is None:
-            orig_products = tester.products.copy()
-            try:
-                target_factor.clear()
-                tester.calc_factor(factors=target_factor)
-                table = target_factor.table
-            finally:
-                tester.products = orig_products
-
-        if table is None or table.empty:
-            return jsonify({'error': '因子数据为空'}), 404
+        tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
+        table = _resolve_fe_table(tester_factor)
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            return jsonify({'error': '未找到可用的因子截面数据，请先运行 IC 测试后再查看分布'}), 400
 
         idx = table.index.get_level_values(-1) if isinstance(table.index, pd.MultiIndex) else table.index
         tz = getattr(idx, 'tz', None)
         ts_compare = ts.tz_localize(tz) if tz and ts.tzinfo is None else (
             ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
-        diffs = np.abs(idx - ts_compare)
+        diffs = np.abs(idx - ts_compare)  # type: ignore[operator]
         nearest_i = diffs.argmin()
         nearest_diff = diffs[nearest_i]
         if nearest_diff > pd.Timedelta(days=2):
@@ -387,8 +366,8 @@ def get_factor_distribution():
         std  = float(np.std(arr, ddof=0)) if n > 1 else None
         mn   = float(np.min(arr))  if n > 0 else None
         mx   = float(np.max(arr))  if n > 0 else None
-        skew = float(pd.Series(arr).skew()) if n > 2 else None
-        kurt = float(pd.Series(arr).kurtosis()) if n > 3 else None
+        skew = float(pd.Series(arr).skew()) if n > 2 else None  # type: ignore[arg-type]
+        kurt = float(pd.Series(arr).kurtosis()) if n > 3 else None  # type: ignore[arg-type]
         pcts = {}
         for pct in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
             pcts[str(pct)] = round(float(np.percentile(arr, pct)), 6) if n > 0 else None
@@ -403,7 +382,7 @@ def get_factor_distribution():
 
         return jsonify({
             'success': True,
-            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
+            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,  # type: ignore[union-attr]
             'n': n,
             'stats': {'mean': mean, 'std': std, 'min': mn, 'max': mx, 'skewness': skew, 'kurtosis': kurt, 'percentiles': pcts},
             'values': sorted(values, key=lambda v: v['value']),

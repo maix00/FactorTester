@@ -70,13 +70,16 @@
     .ic-table thead th {
         position: sticky;
         top: 0;
-        z-index: 2;
+        z-index: 3;
         background: #f7fbff;
         color: #0f4c81;
         font-weight: 600;
         border-bottom: 1px solid #dbe7f3;
-        padding: 10px 12px;
-        white-space: nowrap;
+        padding: 8px 10px;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        min-width: 70px;
     }
     .ic-table thead th:not(.idx-col) {
         cursor: pointer;
@@ -99,10 +102,21 @@
     .ic-table .idx-col {
         position: sticky;
         left: 0;
-        background: inherit;
         z-index: 1;
+        background: #fafcff;
         font-weight: 600;
         color: #334155;
+    }
+    .ic-table tbody tr:nth-child(even) .idx-col {
+        background: #f2f5f9;
+    }
+    .ic-table thead th.idx-col {
+        position: sticky;
+        top: 0;
+        left: 0;
+        z-index: 4;
+        background: #edf3fa;
+        box-shadow: 2px 0 4px rgba(0,0,0,0.06);
     }
     .ic-empty {
         margin-top: 12px;

@@ -6,8 +6,10 @@ import math, traceback
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
+from tools.factors import Factor, CrossSectionIC
+from tools.factors.Parameters import FactorNextPeriodReturns
 from . import mfa_bp
 from server.shared import (
     get_factor_family_instance, _get_session_params,
@@ -85,10 +87,13 @@ def run_mfa_heatmap():
 
         # 计算每个因子的 IC 序列
         factor_ic = {}
+        returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
         for f in factors:
             try:
-                ic_df, _ = tester.calc_ic(factors=f, return_freq=freq)
-                ic_s = ic_df.iloc[:, 0].dropna()
+                ic_family = CrossSectionIC()
+                ic_factor = ic_family.get_factor(FE=f, SC=returns_col, RF=freq)
+                ic_factor.evaluate(tester.products, source_freq=f._source_freq)
+                ic_s = ic_factor.table['IC'].dropna()
                 if len(ic_s) > 0:
                     factor_ic[f.alias] = ic_s
             except Exception:

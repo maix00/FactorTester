@@ -51,7 +51,7 @@ class Product(UniqueObject):
 
     def list_available_freqs(self) -> List[DataFreq]:
         """列出本产品在所有已注册 DataSource 中可用的数据频率。"""
-        return [source.freq for source in DataSource if source.if_object_is_in_source(self)]
+        return [source.freq for source in DataSource if self in source]
     
     def set_current_freq(self, freq: Any) -> DataFreq:
         """设置本产品当前默认数据频率，必须是可用频率。"""

@@ -7,10 +7,11 @@ import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from scipy.optimize import minimize
-from tools.factors.FactorFamily import _active_tester
+from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
-from tools.factors.Factor import Factor
+from tools.factors.Factors import Factor
+from tools.factors.Parameters import FactorNextPeriodReturns
 from . import mfa_bp
 from server.shared import (
     get_factor_family_instance, _get_session_params,
@@ -140,9 +141,10 @@ def _estimate_factor_returns(tester, factors, freq):
             z = ((s - s.mean()) / s.std()).fillna(0)
 
             # 获取下期收益
-            if f.returns.empty or getattr(f, '_return_freq_cached', None) != freq:
+            cached_returns = tester.factor_returns.get(f, pd.DataFrame())
+            if cached_returns.empty or getattr(f, '_return_freq_cached', None) != freq:
                 f.calc_returns(next_return=True, return_freq=freq)
-            ret_df = f.returns
+            ret_df = tester.factor_returns.get(f, pd.DataFrame())
             if isinstance(ret_df, pd.DataFrame):
                 if isinstance(ret_df.index, pd.MultiIndex):
                     r_s = ret_df.mean(axis=1).groupby(level=0).mean()
@@ -209,10 +211,13 @@ def run_mfa_combination():
             # --- 原有静态权重 ------------------------------------------------
             ic_means = {}
             ir_vals_dict = {}
+            returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
             for f in factors:
                 try:
-                    ic_df, _ = tester.calc_ic(factors=f, return_freq=freq)
-                    ic_s = ic_df.iloc[:, 0].dropna()
+                    ic_family = CrossSectionIC()
+                    ic_factor = ic_family.get_factor(FE=f, SC=returns_col, RF=freq)
+                    ic_factor.evaluate(tester.products, source_freq=f._source_freq)
+                    ic_s = ic_factor.table['IC'].dropna()
                     m_val = float(ic_s.mean()) if len(ic_s) > 0 else 0.0
                     s_val = float(ic_s.std()) if len(ic_s) > 0 else 1.0
                     ic_means[f.alias] = m_val
@@ -268,7 +273,6 @@ def run_mfa_combination():
         # 4. 分组回测
         composite_factor = Factor(name='composite', family=factor_family)
         composite_factor.table = composite.to_frame(name='_COMPOSITE_')
-        composite_factor._set_products()
         composite_factor.freq = factors[0].freq if factors[0].freq else factor_family.get_default_freq()
         composite_factor.calc_returns(next_return=True, return_freq=freq)
 
