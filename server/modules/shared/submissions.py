@@ -175,17 +175,29 @@ def delete_submission():
 
 @shared_bp.route('/clear_all_submissions', methods=['POST'])
 def clear_all_submissions():
+    """清除当前页面（page_uuid）关联的 tester。
+
+    接收 page_uuid，只清除 _page_uuid 匹配的 tester；
+    同时清除无 _page_uuid 的旧 tester（向后兼容）。
+    """
+    data = request.get_json()
+    page_uuid = data.get('page_uuid', '').strip() or None if data else None
     try:
         with _factor_testers_lock:
             for tester in shared.factor_testers:
-                try:
-                    tester.delete()
-                except Exception:
-                    pass
-            shared.factor_testers = []
+                tester_puuid = getattr(tester, '_page_uuid', None)
+                if tester_puuid is None or tester_puuid == page_uuid:
+                    try:
+                        tester.delete()
+                    except Exception:
+                        pass
+            shared.factor_testers = [
+                t for t in shared.factor_testers
+                if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
+            ]
         return jsonify({
             'success':     True,
-            'submissions': [],
+            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
