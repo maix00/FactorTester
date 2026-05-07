@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function confirmTimeRange() {
             const data = {
                 factor_family_alias: document.querySelector('.section').getAttribute('data-factor-alias'),
+                page_uuid: window._pageUuid || '',
                 start_date: startDate.value,
                 start_time: document.getElementById('start_time')?.value || '00:00',
                 end_date: endDate.value,
@@ -51,6 +52,9 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(result => {
                 if (statusSpan) {
                     if (result.success) {
+                        if (result.page_uuid) {
+                            window._pageUuid = result.page_uuid;
+                        }
                         window._confirmedTimeData = data;  // 记录已确认的时间，供新增因子自动应用
                         statusSpan.innerText = '✓ 已保存，时间范围已更新';
                         statusSpan.style.color = '#28a745';

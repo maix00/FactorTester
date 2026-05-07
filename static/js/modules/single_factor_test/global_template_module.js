@@ -259,6 +259,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         factor_family_alias: FF_ALIAS,
+                        page_uuid: window._pageUuid || '',
                         start_date: td.start_date || '',
                         start_time: td.start_time || '09:00',
                         end_date: td.end_date || '',
@@ -268,6 +269,8 @@
                         is_cn_futures_night: td.is_cn_futures_night || false,
                         timezone: td.timezone || 'Asia/Shanghai'
                     })
+                }).then(res => res.json()).then(res => {
+                    if (res.page_uuid) { window._pageUuid = res.page_uuid; }
                 });
             } catch (e) {
                 console.error('恢复时间范围失败:', e);
@@ -306,9 +309,9 @@
 
         // 3. 清除旧 tester，为每个 submission 重新提交以重建后端 tester
         if (snapshot.submissions && snapshot.submissions.length > 0) {
-            // 先清空后端旧 tester
+            // 先清空后端旧 tester（仅清除当前页面的）
             try {
-                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
             } catch (e) {
                 console.error('清空旧测试器失败:', e);
             }
@@ -317,14 +320,16 @@
             for (var i = 0; i < snapshot.submissions.length; i++) {
                 var sub = snapshot.submissions[i];
                 if (!sub.paths || sub.paths.length === 0) continue;
-                var id_time = (sub.id !== undefined && sub.id !== null) ? sub.id : Date.now() + i;
+                // 注意：不使用模板中的旧 id，而是生成新的，避免不同窗口的 tester 碰撞
+                var id_time = Date.now() + i;
                 try {
                     var resp = await fetch('/submit_selected_products', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             selected_paths: sub.paths,
-                            id_time: id_time
+                            id_time: id_time,
+                            page_uuid: window._pageUuid || ''
                         })
                     });
                     var result = await resp.json();

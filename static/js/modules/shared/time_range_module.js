@@ -157,6 +157,7 @@
     function confirmTimeRange() {
         const data = {
             factor_family_alias: factorFamilyAlias,
+            page_uuid: window._pageUuid || '',  // 已有则传回，首次为空后端生成
             start_date: `${startYear.value}-${pad(startMonth.value)}-${pad(startDay.value)}`,
             start_time: `${pad(startHour.value)}:${pad(startMinute.value)}`,
             end_date: `${endYear.value}-${pad(endMonth.value)}-${pad(endDay.value)}`,
@@ -178,6 +179,10 @@
         .then(res => res.json())
         .then(res => {
             if (res.success) {
+                // 存储后端返回的 page_uuid，后续请求传回
+                if (res.page_uuid) {
+                    window._pageUuid = res.page_uuid;
+                }
                 let msg = '✓ 已保存';
                 if (res.start_calc_param_val) {
                     msg += '，因子起始计算时间更新为: ' + res.start_calc_param_val;

@@ -335,7 +335,8 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 selected_paths: selectedPaths,
-                id_time: id_time
+                id_time: id_time,
+                page_uuid: window._pageUuid || ''
             })
         })
         .then(r => r.json())
@@ -484,7 +485,7 @@
                     var tplSubs = data.template.submissions;
                     if (!tplSubs || tplSubs.length === 0) { tplStatus('该模板没有提交记录', false); return; }
                     // 清空后端
-                    var clr = await fetch('/clear_all_submissions', { method: 'POST' });
+                    var clr = await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
                     var clrData = await clr.json();
                     if (!clrData.success) { tplStatus('清空失败: ' + clrData.error, false); return; }
                     // 清空前端
@@ -499,7 +500,7 @@
                             var res = await fetch('/submit_selected_products', {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time })
+                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time, page_uuid: window._pageUuid || '' })
                             }).then(r => r.json());
                             if (!res.success) { tplStatus('提交失败: ' + res.error, false); continue; }
                             submissions.push({
