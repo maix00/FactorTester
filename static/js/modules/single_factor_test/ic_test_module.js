@@ -978,17 +978,17 @@
                             <span id="ic-status-${sub.id}" class="ic-status"></span>
                         </div>
                         <!-- IC 衰减 & 滚动窗口 参数 -->
-                        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
+                        <div style="display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; padding:8px 12px; background:#f8fafc; border-radius:6px; border:1px solid #e5e7eb;">
                             <span style="font-size:12px; font-weight:600; color:#555;">扩展分析:</span>
-                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 IC衰减滞后期
                                 <input type="text" id="ic-decay-lags-${sub.id}" value="" placeholder="1,2,3,5,10,20"
-                                       style="width:110px; font-size:12px; padding:2px 6px;" title="逗号分隔的滞后期数，计算各周期IC统计量">
+                                       style="width:110px; font-size:12px; padding:2px 6px; vertical-align:center; margin:0;" title="逗号分隔的滞后期数，计算各周期IC统计量">
                             </label>
-                            <label style="font-size:12px; margin-bottom:0; display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:12px; margin:0; white-space:nowrap;">
                                 滚动窗口
                                 <input type="number" id="ic-rolling-window-${sub.id}" value="" placeholder="如60"
-                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
+                                       min="2" max="1000" style="width:70px; font-size:12px; padding:2px 6px; vertical-align:center;" title="滚动窗口大小（期数），计算每窗 IC Mean 和 IR">
                             </label>
                         </div>
                         <div id="ic-result-${sub.id}"></div>

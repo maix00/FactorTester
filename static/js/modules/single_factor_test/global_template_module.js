@@ -499,36 +499,37 @@
 
                 html += `
                 <div class="tpl-row" style="border-bottom:1px solid #eef2f7;">
-                    <div class="tpl-row-header" data-tpl-id="${tplId}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;cursor:pointer;gap:8px;">
-                        <div style="flex:1;min-width:0;">
+                    <div class="tpl-row-header" data-tpl-id="${tplId}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;gap:8px;">
+                        <div style="flex:1;min-width:0;cursor:pointer;" onclick="event.stopPropagation(); this.parentElement.nextElementSibling.style.display = this.parentElement.nextElementSibling.style.display === 'none' ? 'block' : 'none'; var icon = this.parentElement.querySelector('.tpl-expand-icon'); icon.style.transform = icon.style.transform === 'rotate(180deg)' ? 'rotate(0deg)' : 'rotate(180deg)';">
                             <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(tpl.name)}</div>
                             <div style="font-size:11px;color:#888;">${escapeHtml(tpl.ff_alias || '')}</div>
                         </div>
-                        <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;">▼</span>
+                        <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;cursor:pointer;">▼</span>
+                        <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
+                        <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
                     <div class="tpl-row-detail" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
                         ${summaryHtml}
-                        <div style="margin-top:8px;display:flex;gap:6px;">
-                            <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}">加载</button>
-                            <button class="btn btn-sm btn-outline-danger global-tpl-delete-btn" data-tpl-id="${tplId}" style="color:#d40000;border-color:#d40000;">删除</button>
-                        </div>
                     </div>
                 </div>`;
             });
             listEl.innerHTML = html;
-            // 绑定展开/收起
+            // 展开/收起：点击名称区域或展开图标
             listEl.querySelectorAll('.tpl-row-header').forEach(function(header) {
-                header.addEventListener('click', function() {
+                var nameArea = header.querySelector('div[style*="cursor:pointer"]');
+                var expandIcon = header.querySelector('.tpl-expand-icon');
+                function toggleDetail() {
                     var detail = header.nextElementSibling;
-                    var icon = header.querySelector('.tpl-expand-icon');
                     if (detail.style.display === 'none') {
                         detail.style.display = 'block';
-                        icon.style.transform = 'rotate(180deg)';
+                        expandIcon.style.transform = 'rotate(180deg)';
                     } else {
                         detail.style.display = 'none';
-                        icon.style.transform = 'rotate(0deg)';
+                        expandIcon.style.transform = 'rotate(0deg)';
                     }
-                });
+                }
+                if (nameArea) nameArea.addEventListener('click', toggleDetail);
+                if (expandIcon) expandIcon.addEventListener('click', toggleDetail);
             });
             // 绑定加载按钮（阻止冒泡，避免触发展开/收起）
             listEl.querySelectorAll('.global-tpl-load-btn').forEach(btn => {
