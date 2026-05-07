@@ -303,12 +303,15 @@ def replace_params():
 
 # ── 全局模板 ──────────────────────────────────────────────────────────────────
 
-@templates_bp.route('/api/global_templates', methods=['GET'])
+# ── 全局模板 ──────────────────────────────────────────────────────────────────
+# scope_key: 隔离键，当前用因子家族 alias 作为值，后续可扩展为其他维度
+
+@templates_bp.route('/api/global_templates/<scope_key>', methods=['GET'])
 @login_required
-def list_global_templates():
+def list_global_templates(scope_key):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
     result = []
     for t in templates:
         snap = t.get('snapshot', {})
@@ -318,6 +321,7 @@ def list_global_templates():
             'id': t['id'],
             'name': t['name'],
             'ff_alias': t.get('ff_alias', ''),
+            'scope_key': scope_key,
             'summary': summary,
         })
     return jsonify({'success': True, 'templates': result})
@@ -437,9 +441,9 @@ def _build_snapshot_summary(snap: dict) -> dict:
     return summary
 
 
-@templates_bp.route('/api/global_templates', methods=['POST'])
+@templates_bp.route('/api/global_templates/<scope_key>', methods=['POST'])
 @login_required
-def save_global_template():
+def save_global_template(scope_key):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     ff_alias = (data.get('ff_alias') or '').strip()
@@ -450,37 +454,37 @@ def save_global_template():
         return jsonify({'success': False, 'error': '因子家族不能为空'})
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         new_id = _new_tpl_id()
         templates.append({
             'id': new_id,
             'name': name,
             'ff_alias': ff_alias,
-            'snapshot': snapshot,  # { params_list, time_data, submissions, return_freqs, group_settings }
+            'snapshot': snapshot,
         })
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True, 'id': new_id})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['GET'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['GET'])
 @login_required
-def get_global_template(tpl_id):
+def get_global_template(scope_key, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
     return jsonify({'success': True, 'template': tpl})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['PUT'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['PUT'])
 @login_required
-def update_global_template(tpl_id):
+def update_global_template(scope_key, tpl_id):
     data = request.get_json()
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
@@ -491,19 +495,19 @@ def update_global_template(tpl_id):
             tpl['name'] = name
         if 'snapshot' in data:
             tpl['snapshot'] = data['snapshot']
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['DELETE'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['DELETE'])
 @login_required
-def delete_global_template(tpl_id):
+def delete_global_template(scope_key, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
         if len(templates) == before:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True})

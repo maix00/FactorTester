@@ -420,7 +420,7 @@
         statusEl.textContent = '保存中...';
         statusEl.style.color = '#0078d4';
         try {
-            const resp = await fetch('/api/global_templates', {
+            const resp = await fetch('/api/global_templates/' + encodeURIComponent(FF_ALIAS), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -461,7 +461,7 @@
         const listEl = document.getElementById('global-tpl-list');
         if (!listEl) return;
         try {
-            const resp = await fetch('/api/global_templates');
+            const resp = await fetch('/api/global_templates/' + encodeURIComponent(FF_ALIAS));
             const data = await resp.json();
             if (!data.success || !data.templates || data.templates.length === 0) {
                 listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px;">暂无已保存的模板</div>';
@@ -561,7 +561,7 @@
         statusEl.textContent = '加载中...';
         statusEl.style.color = '#0078d4';
         try {
-            const resp = await fetch('/api/global_templates/' + tplId);
+            const resp = await fetch('/api/global_templates/' + encodeURIComponent(FF_ALIAS) + '/' + tplId);
             const data = await resp.json();
             if (!data.success) {
                 statusEl.textContent = '✗ 加载失败: ' + (data.error || '未知错误');
@@ -587,7 +587,7 @@
         if (!confirm('确定要删除此模板吗？')) return;
         const statusEl = document.getElementById('global-tpl-load-status');
         try {
-            const resp = await fetch('/api/global_templates/' + tplId, { method: 'DELETE' });
+            const resp = await fetch('/api/global_templates/' + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
                 // 同时删除该全局模板关联的参数模板

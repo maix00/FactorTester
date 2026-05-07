@@ -218,16 +218,25 @@ def _user_data_dir(username: str) -> str:
     os.makedirs(d, exist_ok=True)
     return d
 
-def _user_tpl_path(username: str, kind: str, ff_alias: str | None = None) -> str:
+def _user_tpl_path(username: str, kind: str, ff_alias: str | None = None, scope_key: str | None = None) -> str:
+    """返回模板文件路径。
+    
+    - 如果提供了 scope_key，模板按 scope_key 隔离存储到 {kind}_templates/{scope_key}.json
+    - 否则兼容旧行为：ff_alias 仅对 params 类型有效，其他类型存到 {kind}_templates.json
+    """
     d = _user_data_dir(username)
+    if scope_key:
+        d = os.path.join(d, f'{kind}_templates')
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, f'{scope_key}.json')
     if kind == 'params' and ff_alias:
         d = os.path.join(d, 'params_templates')
         os.makedirs(d, exist_ok=True)
         return os.path.join(d, f'{ff_alias}.json')
     return os.path.join(d, f'{kind}_templates.json')
 
-def _load_user_tpls(username: str, kind: str, ff_alias: str | None = None) -> list:
-    path = _user_tpl_path(username, kind, ff_alias)
+def _load_user_tpls(username: str, kind: str, ff_alias: str | None = None, scope_key: str | None = None) -> list:
+    path = _user_tpl_path(username, kind, ff_alias, scope_key=scope_key)
     try:
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as f:
@@ -238,8 +247,8 @@ def _load_user_tpls(username: str, kind: str, ff_alias: str | None = None) -> li
         pass
     return []
 
-def _save_user_tpls(username: str, kind: str, templates: list, ff_alias: str | None = None):
-    path = _user_tpl_path(username, kind, ff_alias)
+def _save_user_tpls(username: str, kind: str, templates: list, ff_alias: str | None = None, scope_key: str | None = None):
+    path = _user_tpl_path(username, kind, ff_alias, scope_key=scope_key)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         _json.dump(templates, f, ensure_ascii=False, indent=2)
