@@ -17,6 +17,7 @@ auth_bp = Blueprint('auth', __name__)
 @auth_bp.before_app_request
 def _check_login():
     PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login', 'auth.logout', 'core.home', 'core.docs', 'core.docs_tools', 'core.docs_tool_detail', 'core.price_viewer', 'static',
+                        'custom_factors.editor_page',
                         'shared.list_product_names', 'shared.get_product_tree', 'shared.get_price_data', 'shared.get_products'}
     ep = request.endpoint
     # 公开端点不要求登录，但已登录用户需更新活动时间

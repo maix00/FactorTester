@@ -276,6 +276,172 @@ def get_factor_family_instance(module_name):
     else:
         raise ImportError(f"Cannot load module '{module_name}' from '{module_path}'")
 
+
+def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:
+    """
+    从用户自定义因子数据动态构建一个 FactorFamily 实例。
+
+    读取 data/users/{username}/custom_factors/{factor_id}.json，
+    解析 func_expr 和 params，动态创建子类。
+    """
+    # 延迟导入避免循环
+    from tools.parameters import Parameter, DataColumnParam, WindowParam, ValueSpace
+    from tools.factors.FactorExpr import FactorExpr, ColumnRef, ConstExpr, ParamRef
+    import pandas as pd
+
+    cf_dir = os.path.join(_user_data_dir(username), 'custom_factors')
+    cf_path = os.path.join(cf_dir, f'{factor_id}.json')
+    if not os.path.exists(cf_path):
+        return None
+
+    with open(cf_path, 'r', encoding='utf-8') as f:
+        cf_data = _json.load(f)
+
+    func_expr = cf_data.get('func_expr', '').strip()
+    cf_params = cf_data.get('params', [])
+    chinese_name = cf_data.get('chinese_name', '')
+    description = cf_data.get('description', '')
+    category = cf_data.get('category', '自编')
+
+    # 构建参数实例列表
+    params_list = []
+    for p_def in cf_params:
+        alias = p_def.get('alias', '')
+        p_type = p_def.get('type', '')
+        default_val = p_def.get('default')
+        p_name = p_def.get('name', alias)
+
+        if p_type == 'DataColumn':
+            from tools.data.DataColumn import DataColumn
+            # 验证 default_val 是否为有效的数据列
+            valid_dc = default_val
+            if default_val:
+                try:
+                    DataColumn(default_val)
+                except Exception:
+                    valid_dc = 'CA'  # 无效值回退到默认
+            param = DataColumnParam(alias, default_value=valid_dc or 'CA')
+        elif p_type == 'Timedelta':
+            td_space = ValueSpace.timedelta('pos')
+            param = Parameter(
+                alias=alias,
+                value_space=td_space,
+                default_value=pd.Timedelta(default_val) if default_val else pd.Timedelta('5d'),
+                desc=p_name,
+            )
+        elif p_type == 'int':
+            param = Parameter(
+                alias=alias,
+                value_space=ValueSpace.any_type(int),
+                default_value=int(default_val) if default_val is not None else 20,
+                desc=p_name,
+            )
+        elif p_type == 'float':
+            param = Parameter(
+                alias=alias,
+                value_space=ValueSpace.any_type(float),
+                default_value=float(default_val) if default_val is not None else 0.5,
+                desc=p_name,
+            )
+        elif p_type == 'bool':
+            param = Parameter(
+                alias=alias,
+                value_space=ValueSpace.any_type(bool),
+                default_value=bool(default_val) if default_val is not None else False,
+                desc=p_name,
+            )
+        elif p_type == 'str':
+            param = Parameter(
+                alias=alias,
+                value_space=ValueSpace.any_type(str),
+                default_value=str(default_val) if default_val else '',
+                desc=p_name,
+            )
+        else:
+            # 兜底：普通 Parameter
+            param = Parameter(
+                alias=alias,
+                value_space=ValueSpace.any_type(object),
+                default_value=default_val,
+                desc=p_name,
+            )
+        params_list.append(param)
+
+    # 如果 func_expr 非空，尝试 eval 构建表达式树
+    expr = None
+    if func_expr:
+        try:
+            # 安全编译并解析为表达式树
+            # 注入 ParamRef / ColumnRef 等常用名
+            ns = {
+                'P': ParamRef('$P'),
+                'ParamRef': ParamRef,
+                'ColumnRef': ColumnRef,
+                'ConstExpr': ConstExpr,
+                **{p.alias.replace('$', ''): ParamRef(p.alias) for p in params_list if p.alias.startswith('$')},
+            }
+            # 把所有 $X 形式的参数别名映射为 ParamRef
+            for p in params_list:
+                key = p.alias.replace('$', '')
+                ns[key] = ParamRef(p.alias)
+                ns[p.alias] = ParamRef(p.alias)
+
+            compiled = compile(func_expr, '<custom_factor>', 'eval')
+            expr = eval(compiled, ns)
+        except Exception as e:
+            # func_expr 解析失败，expr 为 None，因子将无法计算但可以展示元信息
+            pass
+
+    # 动态创建 FactorFamily 子类
+    custom_cls_name = f'_Custom_{factor_id}'
+    custom_cls = type(
+        custom_cls_name,
+        (FactorFamily,),
+        {
+            'desc': chinese_name or cf_data.get('name', ''),
+            'description': description,
+            'math_expr': func_expr,
+            'params': params_list,
+            'category': category,
+            '_custom_factor_id': factor_id,
+        }
+    )
+    try:
+        instance = custom_cls(extra_params=params_list, expr=expr)
+        instance._custom_factor_data = cf_data
+        return instance
+    except Exception:
+        return None
+
+
+# 自定义因子实例缓存（按 (username, factor_id) 缓存）
+_custom_factor_cache: dict = {}
+_custom_factor_cache_lock = threading.Lock()
+
+
+def get_custom_factor_instance(username: str, factor_id: str) -> FactorFamily | None:
+    """获取自定义因子实例（带缓存）。"""
+    cache_key = (username, factor_id)
+    with _custom_factor_cache_lock:
+        if cache_key in _custom_factor_cache:
+            return _custom_factor_cache[cache_key]
+    instance = _build_custom_factor_family(username, factor_id)
+    if instance is not None:
+        with _custom_factor_cache_lock:
+            _custom_factor_cache[cache_key] = instance
+    return instance
+
+
+def invalidate_custom_factor_cache(username: str, factor_id: str = None):
+    """清除自定义因子缓存（更新/删除后调用）。"""
+    with _custom_factor_cache_lock:
+        if factor_id is not None:
+            _custom_factor_cache.pop((username, factor_id), None)
+        else:
+            keys_to_remove = [k for k in _custom_factor_cache if k[0] == username]
+            for k in keys_to_remove:
+                _custom_factor_cache.pop(k, None)
+
 def _load_chinese_names(factors_dir):
     result = {}
     for fname in os.listdir(factors_dir):
@@ -323,11 +489,34 @@ def get_factor_groups(factors_dir):
         groups.setdefault(group, []).append(name)
     return groups, factor_names
 
-def build_group_html(groups, chinese_names: dict | None = None):
-    if not groups:
+def build_group_html(groups, chinese_names: dict | None = None, custom_factors: list | None = None):
+    if not groups and not custom_factors:
         return '<div style="color:#888;">无匹配因子</div>'
     chinese_names = chinese_names or {}
+    custom_factors = custom_factors or []
     group_html = ""
+
+    # ── 我的因子区域 ──
+    if custom_factors:
+        group_html += '<div class="factor-group">'
+        group_html += '<div class="factor-group-title" style="color:#d47a00;">⭐ 我的因子</div>'
+        group_html += '<ul class="factor-list">'
+        for cf in custom_factors:
+            cf_id = cf.get('id', '')
+            cf_name = cf.get('name', '')
+            cf_cn = cf.get('chinese_name', '') or cf_name
+            cf_cat = cf.get('category', '')
+            cat_tag = f' <span style="color:#999;font-size:11px;">[{cf_cat}]</span>' if cf_cat else ''
+            label = f'{cf_name} <span class="factor-cn-name">{cf_cn}</span>{cat_tag}'
+            group_html += f'<li><a href="?factor={cf_id}&amp;type=custom">{label}</a></li>'
+        group_html += '</ul>'
+        group_html += '</div>'
+
+        # 分隔线（当两类都存在时）
+        if groups:
+            group_html += '<div style="border-top:1px dashed #ddd;margin: 4px 0 8px;"></div>'
+
+    # ── 公共因子区域 ──
     for group, names in sorted(groups.items()):
         group_html += f'<div class="factor-group">'
         group_html += f'<div class="factor-group-title">{group}</div>'

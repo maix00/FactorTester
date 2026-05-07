@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>因子管理</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #222; }
+        .app { display: flex; height: 100vh; }
+
+        /* ── 左侧面板 ── */
+        .sidebar {
+            width: 360px; min-width: 360px; background: #fff;
+            border-right: 1px solid #e2e8f0; display: flex; flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 16px 20px; border-bottom: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .sidebar-header h2 { font-size: 18px; color: #1a1a1a; }
+        .btn-back { font-size: 13px; color: #4a90d9; text-decoration: none; }
+        .btn-back:hover { text-decoration: underline; }
+        .sidebar-actions { padding: 12px 20px; border-bottom: 1px solid #f0f0f0; }
+        .btn-new {
+            width: 100%; padding: 10px; background: #4a90d9; color: #fff;
+            border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;
+        }
+        .btn-new:hover { background: #357abd; }
+        .factor-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+        .factor-list-item {
+            padding: 12px 20px; cursor: pointer; border-left: 3px solid transparent;
+            transition: background 0.12s;
+        }
+        .factor-list-item:hover { background: #f0f4f8; }
+        .factor-list-item.active { background: #e8f0fe; border-left-color: #4a90d9; }
+        .factor-list-item .name { font-size: 14px; font-weight: 600; }
+        .factor-list-item .meta { font-size: 12px; color: #888; margin-top: 2px; }
+        .factor-list-empty { padding: 40px 20px; text-align: center; color: #aaa; font-size: 14px; }
+
+        /* ── 主编辑区 ── */
+        .editor { flex: 1; display: flex; flex-direction: column; background: #fff; }
+        .editor-header {
+            padding: 14px 24px; border-bottom: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .editor-title { font-size: 16px; font-weight: 600; }
+        .mode-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 8px; padding: 3px; }
+        .mode-tab {
+            padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;
+            border: none; background: transparent; color: #666;
+        }
+        .mode-tab.active { background: #fff; color: #1a1a1a; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .editor-body { flex: 1; display: flex; overflow: hidden; }
+        .editor-placeholder {
+            flex:1; display:flex; align-items:center; justify-content:center;
+            color: #bbb; font-size: 16px;
+        }
+
+        /* ── 代码模式 ── */
+        .code-pane { flex: 1; display: flex; flex-direction: column; }
+        .code-area { flex: 1; padding: 16px; }
+        .code-area textarea {
+            width: 100%; height: 100%; border: 1px solid #e2e8f0; border-radius: 6px;
+            padding: 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
+            line-height: 1.6; resize: none; background: #fafbfc; color: #1a1a1a;
+        }
+        .code-area textarea:focus { outline: none; border-color: #4a90d9; background: #fff; }
+        .config-pane {
+            width: 340px; border-left: 1px solid #e2e8f0; padding: 16px 20px;
+            overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+        }
+        .config-section h3 {
+            font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .config-section .field { margin-bottom: 10px; }
+        .config-section .field label { display: block; font-size: 12px; color: #777; margin-bottom: 3px; }
+        .config-section .field input, .config-section .field textarea, .config-section .field select {
+            width: 100%; padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px;
+            font-size: 13px; font-family: inherit;
+        }
+        .config-section .field textarea { resize: vertical; min-height: 60px; }
+        .config-section .field input:focus, .config-section .field textarea:focus { outline: none; border-color: #4a90d9; }
+
+        /* ── 参数列表 ── */
+        .param-row {
+            display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+            padding: 6px 8px; background: #f8fafc; border-radius: 4px; border: 1px solid #e2e8f0;
+        }
+        .param-row input, .param-row select { font-size: 12px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; }
+        .param-row input { flex: 1; }
+        .param-row select { width: 90px; }
+        .param-row .btn-remove-param {
+            background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px;
+        }
+        .param-row .btn-remove-param:hover { color: #d40000; }
+        .btn-add-param {
+            padding: 6px 14px; background: #f0f4f8; border: 1px dashed #ccc;
+            border-radius: 4px; font-size: 12px; cursor: pointer; color: #666;
+        }
+        .btn-add-param:hover { background: #e2e8f0; }
+
+        /* ── 底部操作栏 ── */
+        .editor-footer {
+            padding: 12px 24px; border-top: 1px solid #e2e8f0;
+            display: flex; gap: 10px; justify-content: flex-end;
+        }
+        .btn-save {
+            padding: 8px 24px; background: #4a90d9; color: #fff; border: none;
+            border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;
+        }
+        .btn-save:hover { background: #357abd; }
+        .btn-cancel {
+            padding: 8px 20px; background: #fff; color: #666; border: 1px solid #ddd;
+            border-radius: 6px; font-size: 14px; cursor: pointer;
+        }
+        .btn-validate {
+            padding: 8px 16px; background: #f0f4f8; color: #555; border: 1px solid #ddd;
+            border-radius: 6px; font-size: 13px; cursor: pointer;
+        }
+        .btn-validate:hover { background: #e2e8f0; }
+        .btn-validate.ok { color: #1b8a3d; border-color: #1b8a3d; }
+        .btn-validate.err { color: #d40000; border-color: #d40000; }
+
+        /* ── toast ── */
+        .toast {
+            position: fixed; top: 20px; right: 20px; z-index: 9999;
+            padding: 10px 20px; border-radius: 6px; font-size: 14px; color: #fff;
+            animation: toastIn 0.25s ease;
+        }
+        .toast.success { background: #1b8a3d; }
+        .toast.error { background: #d40000; }
+        @keyframes toastIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+        /* ── 可视化模式 ── */
+        .visual-layout { display: flex; flex: 1; overflow: hidden; }
+        .op-palette {
+            width: 200px; border-right: 1px solid #e2e8f0;
+            background: #fafbfc; overflow-y: auto; padding: 12px;
+        }
+        .op-palette h3 { font-size: 12px; color: #888; margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .op-palette h3:first-child { margin-top: 0; }
+        .op-block {
+            display: block; padding: 8px 12px; margin-bottom: 4px; background: #fff;
+            border: 1px solid #e2e8f0; border-radius: 4px; font-size: 13px;
+            cursor: grab; user-select: none; transition: box-shadow 0.12s;
+        }
+        .op-block:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.08); border-color: #4a90d9; }
+        .op-block.leaf { border-left: 3px solid #4a90d9; }
+        .op-block.ts { border-left: 3px solid #d47a00; }
+        .op-block.cs { border-left: 3px solid #1b8a3d; }
+        .op-block.arith { border-left: 3px solid #8b5cf6; }
+        .op-block .op-desc { font-size: 11px; color: #aaa; margin-top: 1px; }
+
+        .visual-canvas-wrap {
+            flex: 1; overflow: auto; position: relative;
+            background: #fdfdfd;
+            background-image:
+                linear-gradient(#f0f0f0 1px, transparent 1px),
+                linear-gradient(90deg, #f0f0f0 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        .visual-canvas {
+            position: relative; width: 4000px; height: 4000px;
+            min-width: 100%; min-height: 100%;
+        }
+        .vis-node {
+            position: absolute; min-width: 100px; background: #fff;
+            border: 2px solid #d0d5dd; border-radius: 8px;
+            padding: 8px 14px; font-size: 13px; cursor: move;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            user-select: none; z-index: 1;
+        }
+        .vis-node.selected { border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.15); }
+        .vis-node .node-label { font-weight: 600; }
+        .vis-node .node-sub { font-size: 11px; color: #888; }
+        .vis-node .node-inputs { margin-top: 4px; }
+        .vis-node .node-input {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #4a90d9; margin-right: 4px; cursor: pointer;
+        }
+        .vis-node .node-output {
+            position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
+            width: 12px; height: 12px; border-radius: 50%; background: #1b8a3d; cursor: pointer;
+        }
+        .vis-node .btn-delete-node {
+            position: absolute; top: -8px; right: -8px; width: 18px; height: 18px;
+            border-radius: 50%; background: #d40000; color: #fff; border: none;
+            font-size: 11px; line-height: 18px; text-align: center; cursor: pointer; display: none;
+        }
+        .vis-node:hover .btn-delete-node { display: block; }
+
+        .visual-config-pane {
+            width: 280px; border-left: 1px solid #e2e8f0; padding: 14px 16px;
+            overflow-y: auto; background: #fafbfc;
+        }
+
+        svg.vis-edges { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- 左侧：因子列表 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>我的因子</h2>
+                <a href="/" class="btn-back">← 返回首页</a>
+            </div>
+            <div class="sidebar-actions">
+                <button class="btn-new" onclick="createNew()">+ 新建因子</button>
+            </div>
+            <div class="factor-list" id="factor-list">
+                <div class="factor-list-empty">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 右侧：编辑器 -->
+        <div class="editor" id="editor">
+            <div class="editor-header">
+                <div class="editor-title" id="editor-title">选择一个因子开始编辑</div>
+                <div class="mode-tabs">
+                    <button class="mode-tab active" onclick="switchMode('code')">代码模式</button>
+                    <button class="mode-tab" onclick="switchMode('visual')">可视化模式</button>
+                </div>
+            </div>
+            <div class="editor-body" id="editor-body">
+                <div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>
+            </div>
+            <div class="editor-footer" id="editor-footer" style="display:none">
+                <button class="btn-validate" id="btn-validate" onclick="validateExpr()">校验表达式</button>
+                <div style="flex:1"></div>
+                <button class="btn-cancel" onclick="discardEdit()">取消</button>
+                <button class="btn-save" onclick="saveFactor()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- toast 容器 -->
+    <div id="toast-container"></div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════
+        // 全局状态
+        // ═══════════════════════════════════════════════════════════
+        let _currentMode = 'code';
+        let _currentFactorId = null;   // 正在编辑的因子 ID（null = 无）
+        let _isNew = false;            // 是否为新建
+        let _dirty = false;
+        let _allCustomFactors = [];
+
+        // ═══════════════════════════════════════════════════════════
+        // 初始化
+        // ═══════════════════════════════════════════════════════════
+        async function init() {
+            await loadFactorList();
+        }
+
+        async function loadFactorList() {
+            try {
+                const res = await fetch('/custom-factors/api/list');
+                const data = await res.json();
+                _allCustomFactors = data.custom_factors || [];
+                renderFactorList();
+            } catch(e) {
+                document.getElementById('factor-list').innerHTML =
+                    '<div class="factor-list-empty" style="color:#d40000">加载失败</div>';
+            }
+        }
+
+        function renderFactorList() {
+            const list = document.getElementById('factor-list');
+            if (_allCustomFactors.length === 0) {
+                list.innerHTML = '<div class="factor-list-empty">暂无自定义因子<br><br>点击上方按钮创建</div>';
+                return;
+            }
+            list.innerHTML = _allCustomFactors.map(f => {
+                const active = f.id === _currentFactorId ? ' active' : '';
+                const cn = f.chinese_name || f.name;
+                const time = (f.updated_at || '').slice(0, 16);
+                const cat = f.category || '自编';
+                return `<div class="factor-list-item${active}" onclick="selectFactor('${f.id}')">
+                    <div class="name">${escHtml(f.name)}</div>
+                    <div class="meta">${escHtml(cn)} · ${escHtml(cat)} · ${escHtml(time)}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 因子选择 / 新建 / 模式切换
+        // ═══════════════════════════════════════════════════════════
+
+        async function selectFactor(factorId) {
+            const factor = _allCustomFactors.find(f => f.id === factorId);
+            if (!factor) return;
+            _currentFactorId = factorId;
+            _isNew = false;
+            _dirty = false;
+            renderFactorList();
+            renderCodeEditor(factor);
+        }
+
+        function createNew() {
+            _currentFactorId = null;
+            _isNew = true;
+            _dirty = false;
+            renderFactorList();
+            renderCodeEditor({
+                name: '', chinese_name: '', description: '', category: '自编',
+                func_expr: '', params: [], base_on: ''
+            });
+        }
+
+        function switchMode(mode) {
+            _currentMode = mode;
+            document.querySelectorAll('.mode-tab').forEach(t => {
+                t.classList.toggle('active', t.textContent.includes(mode === 'code' ? '代码' : '可视'));
+            });
+            if (_currentFactorId) {
+                const factor = _allCustomFactors.find(f => f.id === _currentFactorId);
+                if (factor) {
+                    if (mode === 'code') renderCodeEditor(factor);
+                    else renderVisualEditor(factor);
+                    return;
+                }
+            }
+            if (_isNew) createNew();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 代码编辑器模式
+        // ═══════════════════════════════════════════════════════════
+
+        function renderCodeEditor(factor) {
+            const body = document.getElementById('editor-body');
+            const footer = document.getElementById('editor-footer');
+            const title = document.getElementById('editor-title');
+            title.textContent = _isNew ? '新建因子' : (factor.name || '未命名因子');
+            footer.style.display = '';
+            _currentMode = 'code';
+
+
+            const params = factor.params || [];
+
+            body.innerHTML = `
+                <div class="code-pane">
+                    <div class="code-area">
+                        <textarea id="code-expr" placeholder="输入 func_expr...&#10;&#10;例: P.delta('$F') / P.shift('$F')&#10;     P * (1 + cs_rank(REF(DELTA($F))))"
+                            oninput="_dirty=true">${escHtml(factor.func_expr || '')}</textarea>
+                    </div>
+                </div>
+                <div class="config-pane">
+                    <div class="config-section">
+                        <h3>基本信息</h3>
+                        <div class="field">
+                            <label>因子名称（英文）</label>
+                            <input type="text" id="cfg-name" value="${escHtml(factor.name || '')}" placeholder="如 MyMomentum" oninput="_dirty=true">
+                        </div>
+                        <div class="field">
+                            <label>中文名称</label>
+                            <input type="text" id="cfg-cn" value="${escHtml(factor.chinese_name || '')}" placeholder="如 我的动量因子" oninput="_dirty=true">
+                        </div>
+                        <div class="field">
+                            <label>分类</label>
+                            <input type="text" id="cfg-cat" value="${escHtml(factor.category || '自编')}" placeholder="如 动量" oninput="_dirty=true">
+                        </div>
+                        <div class="field">
+                            <label>描述 (Markdown)</label>
+                            <textarea id="cfg-desc" oninput="_dirty=true">${escHtml(factor.description || '')}</textarea>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <h3>参数定义</h3>
+                        <div id="params-container"></div>
+                        <button class="btn-add-param" onclick="addParam()">+ 添加参数</button>
+                    </div>
+                </div>
+            `;
+
+            // 渲染参数列表
+            renderParams(params);
+
+            // 更新校验按钮
+            document.getElementById('btn-validate').className = 'btn-validate';
+            document.getElementById('btn-validate').textContent = '校验表达式';
+        }
+
+        function renderParams(params) {
+            const container = document.getElementById('params-container');
+            if (!container) return;
+            container.innerHTML = '';
+            params.forEach((p, i) => {
+                const row = document.createElement('div');
+                row.className = 'param-row';
+                row.innerHTML = `
+                    <input type="text" value="${escHtml(p.alias || '')}" placeholder="别名" style="width:70px" data-idx="${i}" data-field="alias" oninput="_dirty=true">
+                    <input type="text" value="${escHtml(p.name || '')}" placeholder="参数名" style="flex:1" data-idx="${i}" data-field="name" oninput="_dirty=true">
+                    <select data-idx="${i}" data-field="type" oninput="_dirty=true; updateParamDefault(${i})">
+                        <option value="DataColumn" ${p.type==='DataColumn'?'selected':''}>数据列</option>
+                        <option value="Timedelta" ${p.type==='Timedelta'?'selected':''}>时间窗口</option>
+                        <option value="int" ${p.type==='int'?'selected':''}>整数</option>
+                        <option value="float" ${p.type==='float'?'selected':''}>浮点数</option>
+                        <option value="bool" ${p.type==='bool'?'selected':''}>布尔</option>
+                        <option value="str" ${p.type==='str'?'selected':''}>字符串</option>
+                    </select>
+                    <input type="text" value="${escHtml(String(p.default ?? ''))}" placeholder="默认值" style="width:80px" data-idx="${i}" data-field="default" oninput="_dirty=true">
+                    <button class="btn-remove-param" onclick="removeParam(${i})" title="删除">×</button>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function getCurrentParams() {
+            const container = document.getElementById('params-container');
+            if (!container) return [];
+            const params = [];
+            const rows = container.querySelectorAll('.param-row');
+            rows.forEach(row => {
+                const alias = row.querySelector('[data-field="alias"]')?.value || '';
+                const name = row.querySelector('[data-field="name"]')?.value || '';
+                const type = row.querySelector('[data-field="type"]')?.value || 'str';
+                const defVal = row.querySelector('[data-field="default"]')?.value || '';
+                params.push({ alias, name, type, default: coerceDefault(defVal, type) });
+            });
+            return params;
+        }
+
+        function coerceDefault(val, type) {
+            if (val === '' || val === undefined) return null;
+            if (type === 'int') return parseInt(val) || 0;
+            if (type === 'float') return parseFloat(val) || 0.0;
+            if (type === 'bool') return val === 'true' || val === 'True' || val === '1';
+            return val;
+        }
+
+        function updateParamDefault(idx) {
+            // placeholders for future use
+        }
+
+        function addParam() {
+            const container = document.getElementById('params-container');
+            if (!container) return;
+            const params = getCurrentParams();
+            params.push({ alias: '$P' + (params.length+1), name: '', type: 'Timedelta', default: '5d' });
+            renderParams(params);
+            _dirty = true;
+        }
+
+        function removeParam(idx) {
+            const container = document.getElementById('params-container');
+            if (!container) return;
+            const params = getCurrentParams();
+            params.splice(idx, 1);
+            renderParams(params);
+            _dirty = true;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 校验 / 保存 / 取消
+        // ═══════════════════════════════════════════════════════════
+
+        async function validateExpr() {
+            const funcExpr = document.getElementById('code-expr')?.value || '';
+            const btn = document.getElementById('btn-validate');
+            btn.textContent = '校验中...';
+            btn.className = 'btn-validate';
+            try {
+                const res = await fetch('/custom-factors/api/validate', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ func_expr: funcExpr })
+                });
+                const data = await res.json();
+                if (data.valid) {
+                    btn.textContent = '✓ 表达式语法正确';
+                    btn.className = 'btn-validate ok';
+                } else {
+                    btn.textContent = '✗ ' + (data.error || '无效');
+                    btn.className = 'btn-validate err';
+                }
+            } catch(e) {
+                btn.textContent = '校验失败';
+                btn.className = 'btn-validate err';
+            }
+        }
+
+        async function saveFactor() {
+            const name = document.getElementById('cfg-name')?.value?.trim() || '';
+            const chinese_name = document.getElementById('cfg-cn')?.value?.trim() || '';
+            const description = document.getElementById('cfg-desc')?.value?.trim() || '';
+            const category = document.getElementById('cfg-cat')?.value?.trim() || '自编';
+            const func_expr = document.getElementById('code-expr')?.value?.trim() || '';
+            const params = getCurrentParams();
+
+            if (!name) { showToast('请输入因子名称', 'error'); return; }
+
+            const payload = { name, chinese_name, description, category, func_expr, params };
+
+            try {
+                let res;
+                if (_isNew || !_currentFactorId) {
+                    res = await fetch('/custom-factors/api/create', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    res = await fetch('/custom-factors/api/update/' + _currentFactorId, {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                }
+                const data = await res.json();
+                if (data.success) {
+                    _dirty = false;
+                    _currentFactorId = data.factor.id;
+                    _isNew = false;
+                    showToast('保存成功', 'success');
+                    await loadFactorList();
+                    renderCodeEditor(data.factor);
+                } else {
+                    showToast(data.error || '保存失败', 'error');
+                }
+            } catch(e) {
+                showToast('网络错误', 'error');
+            }
+        }
+
+        function discardEdit() {
+            if (_dirty && !confirm('有未保存的修改，确定放弃？')) return;
+            _currentFactorId = null;
+            _isNew = false;
+            _dirty = false;
+            renderFactorList();
+            const body = document.getElementById('editor-body');
+            body.innerHTML = '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
+            document.getElementById('editor-footer').style.display = 'none';
+            document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 可视化编辑器模式 — 算子面板 + 拖放画布
+        // ═══════════════════════════════════════════════════════════
+
+        // 算子定义
+        const OP_PALETTE = {
+            leaf: [
+                { key:'OPEN', label:'OPEN', desc:'开盘价' },
+                { key:'HIGH', label:'HIGH', desc:'最高价' },
+                { key:'LOW', label:'LOW', desc:'最低价' },
+                { key:'CLOSE', label:'CLOSE', desc:'收盘价' },
+                { key:'CLOSE_ADJUSTED', label:'CLOSE_ADJ', desc:'复权收盘价' },
+                { key:'VOLUME', label:'VOLUME', desc:'成交量' },
+                { key:'AMOUNT', label:'AMOUNT', desc:'成交额' },
+            ],
+            ts: [
+                { key:'MA($X,$N)', label:'MA', desc:'移动平均 MA(X,N)' },
+                { key:'STD($X,$N)', label:'STD', desc:'标准差 STD(X,N)' },
+                { key:'REF($X,$N)', label:'REF', desc:'前移 REF(X,N)' },
+                { key:'DELTA($X,$N)', label:'DELTA', desc:'差分 DELTA(X,N)' },
+                { key:'LOG($X)', label:'LOG', desc:'对数 LOG(X)' },
+                { key:'ABS($X)', label:'ABS', desc:'绝对值 ABS(X)' },
+            ],
+            cs: [
+                { key:'CS_RANK($X)', label:'CS_RANK', desc:'横截面排名' },
+                { key:'CS_ZSCORE($X)', label:'CS_ZSCORE', desc:'横截面标准化' },
+            ],
+            arith: [
+                { key:'+', label:'+', desc:'加法' },
+                { key:'-', label:'-', desc:'减法' },
+                { key:'*', label:'*', desc:'乘法' },
+                { key:'/', label:'/', desc:'除法' },
+            ]
+        };
+
+        // 画布上的节点
+        let _visNodes = [];
+        let _visNextId = 1;
+        let _visSelectedNodeId = null;
+        let _visDragging = null;  // { nodeId, startX, startY, mouseX, mouseY }
+
+        function renderVisualEditor(factor) {
+            _currentMode = 'visual';
+            const body = document.getElementById('editor-body');
+            const footer = document.getElementById('editor-footer');
+            const title = document.getElementById('editor-title');
+            title.textContent = _isNew ? '新建因子（可视化）' : (factor.name || '未命名因子（可视化）');
+            footer.style.display = '';
+
+            // 尝试从 func_expr 回解析出节点
+            _visNodes = [];
+            _visNextId = 1;
+            _visSelectedNodeId = null;
+            if (factor.func_expr) {
+                // 简化为从头开始（回解析太复杂）
+            }
+
+            body.innerHTML = `
+                <div class="visual-layout">
+                    <div class="op-palette" id="op-palette">
+                        ${renderPalette()}
+                    </div>
+                    <div class="visual-canvas-wrap" id="visual-canvas-wrap"
+                         ondragover="event.preventDefault()"
+                         ondrop="onCanvasDrop(event)"
+                         onclick="onCanvasClick(event)">
+                        <div class="visual-canvas" id="visual-canvas">
+                            <svg class="vis-edges" id="vis-edges"></svg>
+                        </div>
+                    </div>
+                    <div class="visual-config-pane">
+                        <div class="config-section">
+                            <h3>节点属性</h3>
+                            <div id="node-props" style="font-size:12px;color:#888;">点击画布上的节点查看属性</div>
+                        </div>
+                        <div class="config-section" style="margin-top:16px;">
+                            <h3>基本信息</h3>
+                            <div class="field">
+                                <label>因子名称</label>
+                                <input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" oninput="_dirty=true">
+                            </div>
+                            <div class="field">
+                                <label>中文名称</label>
+                                <input type="text" id="cfg-cn-vis" value="${escHtml(factor.chinese_name || '')}" oninput="_dirty=true">
+                            </div>
+                            <div class="field">
+                                <label>分类</label>
+                                <input type="text" id="cfg-cat-vis" value="${escHtml(factor.category || '自编')}" oninput="_dirty=true">
+                            </div>
+                        </div>
+                        <div style="margin-top:12px;">
+                            <button class="btn-validate" onclick="visualToExpr()" style="width:100%">🔄 生成表达式</button>
+                        </div>
+                        <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-expr-preview"></div>
+                    </div>
+                </div>
+            `;
+
+            // 让算子面板中的元素可拖拽
+            initPaletteDrag();
+        }
+
+        function renderPalette() {
+            const labels = { leaf:'📊 数据列', ts:'⏱ 时序算子', cs:'📐 横截面算子', arith:'➕ 算术运算' };
+            let html = '';
+            for (const [cat, ops] of Object.entries(OP_PALETTE)) {
+                html += `<h3>${labels[cat]}</h3>`;
+                for (const op of ops) {
+                    html += `<div class="op-block ${cat}" draggable="true"
+                        data-op-key="${escHtml(op.key)}" data-op-cat="${cat}"
+                        ondragstart="onOpDragStart(event)">
+                        <strong>${escHtml(op.label)}</strong>
+                        <div class="op-desc">${escHtml(op.desc)}</div>
+                    </div>`;
+                }
+            }
+            return html;
+        }
+
+        function initPaletteDrag() {
+            document.querySelectorAll('.op-block').forEach(el => {
+                el.addEventListener('dragstart', onOpDragStart);
+            });
+        }
+
+        function onOpDragStart(e) {
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                key: e.target.closest('.op-block').dataset.opKey,
+                cat: e.target.closest('.op-block').dataset.opCat,
+            }));
+            e.dataTransfer.effectAllowed = 'copy';
+        }
+
+        function onCanvasDrop(e) {
+            e.preventDefault();
+            const raw = e.dataTransfer.getData('text/plain');
+            if (!raw) return;
+            const op = JSON.parse(raw);
+            const wrap = document.getElementById('visual-canvas-wrap');
+            const rect = wrap.getBoundingClientRect();
+            const x = e.clientX - rect.left + wrap.scrollLeft - 50;
+            const y = e.clientY - rect.top + wrap.scrollTop - 18;
+
+            const node = {
+                id: _visNextId++,
+                key: op.key,
+                cat: op.cat,
+                label: op.key,
+                x: Math.max(0, x),
+                y: Math.max(0, y),
+                params: {},
+            };
+            _visNodes.push(node);
+            renderAllVisNodes();
+            _dirty = true;
+            selectVisNode(node.id);
+        }
+
+        function onCanvasClick(e) {
+            if (e.target.closest('.vis-node')) return;
+            _visSelectedNodeId = null;
+            renderAllVisNodes();
+            document.getElementById('node-props').innerHTML =
+                '<span style="color:#888;">点击画布上的节点查看属性</span>';
+            document.getElementById('visual-expr-preview').textContent = '';
+        }
+
+        function renderAllVisNodes() {
+            const canvas = document.getElementById('visual-canvas');
+            // remove old nodes
+            canvas.querySelectorAll('.vis-node').forEach(n => n.remove());
+
+            for (const node of _visNodes) {
+                const el = document.createElement('div');
+                el.className = 'vis-node' + (node.id === _visSelectedNodeId ? ' selected' : '');
+                el.style.left = node.x + 'px';
+                el.style.top = node.y + 'px';
+                el.dataset.nodeId = node.id;
+                el.innerHTML = `
+                    <button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>
+                    <div class="node-label">${escHtml(node.label)}</div>
+                    <div class="node-sub">${escHtml(node.key)}</div>
+                `;
+                el.addEventListener('mousedown', (e) => onVisNodeMouseDown(e, node.id));
+                el.addEventListener('click', (e) => { e.stopPropagation(); selectVisNode(node.id); });
+                canvas.appendChild(el);
+            }
+        }
+
+        function onVisNodeMouseDown(e, nodeId) {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = _visNodes.find(n => n.id === nodeId);
+            if (!node) return;
+            _visDragging = {
+                nodeId,
+                startX: node.x,
+                startY: node.y,
+                mouseX: e.clientX,
+                mouseY: e.clientY,
+            };
+            document.addEventListener('mousemove', onVisMouseMove);
+            document.addEventListener('mouseup', onVisMouseUp);
+        }
+
+        function onVisMouseMove(e) {
+            if (!_visDragging) return;
+            const node = _visNodes.find(n => n.id === _visDragging.nodeId);
+            if (!node) return;
+            const dx = e.clientX - _visDragging.mouseX;
+            const dy = e.clientY - _visDragging.mouseY;
+            node.x = Math.max(0, _visDragging.startX + dx);
+            node.y = Math.max(0, _visDragging.startY + dy);
+            renderAllVisNodes();
+            _dirty = true;
+        }
+
+        function onVisMouseUp() {
+            _visDragging = null;
+            document.removeEventListener('mousemove', onVisMouseMove);
+            document.removeEventListener('mouseup', onVisMouseUp);
+        }
+
+        function selectVisNode(nodeId) {
+            _visSelectedNodeId = nodeId;
+            renderAllVisNodes();
+            const node = _visNodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            // 显示节点属性面板
+            const props = document.getElementById('node-props');
+            const catNames = { leaf:'数据列', ts:'时序算子', cs:'横截面算子', arith:'算术' };
+            props.innerHTML = `
+                <div class="field"><label>类型</label><span>${catNames[node.cat] || node.cat}</span></div>
+                <div class="field"><label>算子</label><span>${escHtml(node.key)}</span></div>
+                <div class="field"><label>标签</label><input type="text" id="vis-node-label" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>
+            `;
+
+            updateVisualExprPreview();
+        }
+
+        function updateVisNodeLabel(nodeId, newLabel) {
+            const node = _visNodes.find(n => n.id === nodeId);
+            if (node) { node.label = newLabel; renderAllVisNodes(); _dirty = true; }
+        }
+
+        function deleteVisNode(nodeId) {
+            _visNodes = _visNodes.filter(n => n.id !== nodeId);
+            if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
+            renderAllVisNodes();
+            _dirty = true;
+            updateVisualExprPreview();
+        }
+
+        // 从可视化节点生成 func_expr 字符串
+        function visualToExpr() {
+            if (_visNodes.length === 0) {
+                document.getElementById('visual-expr-preview').textContent = '（无节点）';
+                return '';
+            }
+            // 简单串行连接：按拓扑？这里先用最后一个节点作为根
+            // 实际复杂的树状连接需要连线，先做简单版：把所有节点按 key 拼接
+            const root = _visNodes[_visNodes.length - 1];
+            const expr = buildExprFromNode(root);
+            document.getElementById('visual-expr-preview').textContent = expr || '（无法生成表达式）';
+            return expr;
+        }
+
+        function buildExprFromNode(node) {
+            return node.key;  // 简化版直接返回 key
+        }
+
+        function updateVisualExprPreview() {
+            const expr = visualToExpr();
+            document.getElementById('visual-expr-preview').textContent = expr || '';
+        }
+
+        // 覆盖保存：可视化模式也收集 func_expr
+        // saveFactor 中读取 code-expr，可视化模式需要从 _visNodes 生成
+        // 我们修改 saveFactor 的判断逻辑
+        const _origSaveFactor = saveFactor;
+        saveFactor = async function() {
+            if (_currentMode === 'visual') {
+                const expr = visualToExpr();
+                // 把可视化表达式写入隐藏字段，让原来的保存逻辑拿得到
+                const codeTextarea = document.getElementById('code-expr');
+                if (!codeTextarea) {
+                    // 创建临时 textarea
+                    const tmp = document.createElement('textarea');
+                    tmp.id = 'code-expr';
+                    tmp.style.display = 'none';
+                    tmp.value = expr;
+                    document.getElementById('editor-body').appendChild(tmp);
+                } else {
+                    codeTextarea.value = expr;
+                }
+                // 可视化模式下用 visual 表单的字段
+                const nameEl = document.getElementById('cfg-name-vis');
+                const cnEl = document.getElementById('cfg-cn-vis');
+                const catEl = document.getElementById('cfg-cat-vis');
+                if (nameEl && !document.getElementById('cfg-name')) {
+                    // 创建隐藏的 code 字段
+                    ['cfg-name','cfg-cn','cfg-cat','cfg-desc'].forEach(id => {
+                        const vis = document.getElementById(id + '-vis');
+                        if (vis && !document.getElementById(id)) {
+                            const h = document.createElement('input');
+                            h.type = 'hidden'; h.id = id; h.value = vis.value;
+                            document.getElementById('editor-body').appendChild(h);
+                        }
+                    });
+                }
+            }
+            return await _origSaveFactor();
+        };
+
+        // ═══════════════════════════════════════════════════════════
+        // Toast
+        // ═══════════════════════════════════════════════════════════
+
+        function showToast(msg, type) {
+            const c = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = 'toast ' + type;
+            el.textContent = msg;
+            c.appendChild(el);
+            setTimeout(() => el.remove(), 2000);
+        }
+
+        // startup
+        init();
+    </script>
+</body>
+</html>
