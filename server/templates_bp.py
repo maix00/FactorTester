@@ -511,3 +511,76 @@ def delete_global_template(scope_key, tpl_id):
             return jsonify({'success': False, 'error': '模板不存在'}), 404
         _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True})
+
+
+# ── scope 下模板覆盖的因子列表（按因子家族分组） ─────────────────────────
+
+@templates_bp.route('/api/global_templates/<scope_key>/factors', methods=['GET'])
+@login_required
+def list_scope_factors(scope_key):
+    """列出 scope_key 下所有全局模板覆盖的因子，
+    从模板的 ff_alias 映射到实际的公共/自定义因子详情，按 factor_family 分组。"""
+    u = _require_user()
+    with _get_user_file_lock(u):
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+
+    # 收集所有 ff_alias
+    ff_aliases = set()
+    for t in templates:
+        ff_alias = t.get('ff_alias', '').strip()
+        if ff_alias:
+            ff_aliases.add(ff_alias)
+
+    # 构建因子映射：分别从公共因子和自定义因子中查找
+    from .modules.custom_factors import _list_public_factors, _list_custom_factors
+    public_factors = {f['id']: f for f in _list_public_factors()}
+    custom_factors = {f['id']: f for f in _list_custom_factors(u)}
+
+    # 按 factor_family 分组
+    groups: dict[str, list] = {}
+    for alias in sorted(ff_aliases):
+        factor_info = None
+        source = None
+        if alias in public_factors:
+            factor_info = public_factors[alias]
+            source = 'public'
+        elif alias in custom_factors:
+            factor_info = custom_factors[alias]
+            source = 'custom'
+
+        if factor_info:
+            family = factor_info.get('factor_family', 'FactorFamily')
+            entry = {
+                'id': alias,
+                'name': factor_info.get('name', alias),
+                'chinese_name': factor_info.get('chinese_name', ''),
+                'category': factor_info.get('category', ''),
+                'source': source,
+                'updated_at': factor_info.get('updated_at', ''),
+                'params_count': len(factor_info.get('params', [])),
+                'description': factor_info.get('description', '')[:120] + ('...' if len(factor_info.get('description', '')) > 120 else ''),
+            }
+        else:
+            family = 'FactorFamily'
+            entry = {
+                'id': alias,
+                'name': alias,
+                'chinese_name': '',
+                'category': '',
+                'source': 'unknown',
+                'updated_at': '',
+                'params_count': 0,
+                'description': '',
+            }
+
+        groups.setdefault(family, []).append(entry)
+
+    # 转为有序列表
+    grouped = [{'family': k, 'factors': v} for k, v in sorted(groups.items())]
+
+    return jsonify({
+        'success': True,
+        'scope_key': scope_key,
+        'groups': grouped,
+        'total_factors': sum(len(g['factors']) for g in grouped),
+    })

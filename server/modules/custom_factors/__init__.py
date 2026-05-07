@@ -104,10 +104,18 @@ def _list_custom_factors(username: str) -> list:
                 continue
 
             ff = factor_cls()
+            # 因子家族
+            bases = factor_cls.__bases__
+            family = 'FactorFamily'
+            for b in bases:
+                if b is not FactorFamily and issubclass(b, FactorFamily):
+                    family = b.__name__
+                    break
             factors.append({
                 'id': factor_id,
                 'name': factor_cls.__name__,
                 'category': getattr(ff, 'category', '') or '自编',
+                'factor_family': family,
                 'chinese_name': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'params': [
@@ -122,6 +130,8 @@ def _list_custom_factors(username: str) -> list:
             factors.append({
                 'id': factor_id,
                 'name': factor_id,
+                'category': '自编',
+                'factor_family': 'FactorFamily',
                 'chinese_name': '',
                 'description': '',
                 'params': [],
@@ -145,10 +155,21 @@ def _list_public_factors() -> list:
         name = os.path.splitext(fname)[0]
         try:
             ff = get_factor_family_instance(name)
+            # 因子家族：取父类链中紧邻 FactorFamily 之上的类名（如果有中间家族类），
+            # 否则用 FactorFamily 作为默认家族
+            bases = ff.__class__.__bases__
+            family = 'FactorFamily'
+            for b in bases:
+                if b is not FactorFamily and issubclass(b, FactorFamily):
+                    family = b.__name__
+                    break
+            mtime = os.path.getmtime(os.path.join(factors_dir, fname))
+            updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
             result.append({
                 'id': name,
                 'name': name,
-                'category': ff.__class__.__bases__[0].__name__ if ff.__class__.__bases__ else 'FactorFamily',
+                'category': getattr(ff, 'category', '') or family,
+                'factor_family': family,
                 'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
                 'description': getattr(ff, 'description', '') or '',
                 'params': [
@@ -156,15 +177,19 @@ def _list_public_factors() -> list:
                     for p in ff.params
                 ],
                 'is_public': True,
+                'updated_at': updated_at,
             })
         except Exception:
             result.append({
                 'id': name,
                 'name': name,
+                'category': '',
+                'factor_family': 'FactorFamily',
                 'chinese_name': '',
                 'description': '',
                 'params': [],
                 'is_public': True,
+                'updated_at': '',
                 'load_error': True,
             })
     return result
@@ -358,76 +383,6 @@ def _strip_meta(source_code: str) -> str:
             continue
         stripped.append(line)
     return '\n'.join(stripped)
-    """从 Python 源码中提取指定方法的函数体。
-
-    去掉公共缩进，去掉参数定义行（XxxParam(...)），去掉 return 关键字，
-    使输出格式与用户自定义因子的 func_expr 保持一致。
-    """
-    import re
-
-    # 匹配 def method_name(...): 开始的方法
-    pattern = rf'^\s*def\s+{re.escape(method_name)}\s*\([^)]*\)\s*:\s*$'
-    lines = source.split('\n')
-    start = None
-    indent = None
-
-    for i, line in enumerate(lines):
-        if start is None:
-            if re.match(pattern, line):
-                start = i + 1
-                continue
-        else:
-            stripped = line.rstrip('\n\r')
-            if indent is None:
-                if stripped and not stripped.strip().startswith('#'):
-                    indent = len(stripped) - len(stripped.lstrip(' '))
-                elif stripped.strip().startswith('#'):
-                    indent = len(stripped) - len(stripped.lstrip(' '))
-            if stripped:
-                line_indent = len(stripped) - len(stripped.lstrip(' '))
-                if indent and line_indent < indent and stripped.strip() != '':
-                    break
-                if re.match(r'^\s{0,4}(def\s|class\s)', stripped) and stripped.strip().startswith(('def ', 'class ')):
-                    if indent and line_indent <= indent:
-                        break
-            if stripped and indent and line_indent == 0 and not stripped.startswith(' '):
-                break
-
-    if start is None or indent is None:
-        return ''
-
-    # 收集函数体行
-    body_lines = []
-    for i in range(start, len(lines)):
-        stripped = lines[i].rstrip('\n\r')
-        line_indent = len(stripped) - len(stripped.lstrip(' ')) if stripped else indent
-        if stripped and line_indent < indent:
-            break
-        if re.match(r'^\s{0,4}(def\s|class\s)', stripped) and stripped.strip().startswith(('def ', 'class ')):
-            if line_indent <= indent:
-                break
-        if stripped:
-            body_lines.append(stripped[indent:] if len(stripped) >= indent else stripped.lstrip())
-        else:
-            body_lines.append('')
-
-    # ── 后处理：去掉参数定义行和 return ──
-    # 参数定义行形如：P = DataColumnParam('P', ...) 或 oi = WindowParam(...)
-    _param_class_re = re.compile(r'^\s*(\w+)\s*=\s*(DataColumnParam|WindowParam|DateOrTimeParam)\s*\(')
-
-    cleaned = []
-    for line in body_lines:
-        # 跳过参数定义行
-        if _param_class_re.match(line):
-            continue
-        # 去掉 return 关键字及前面的空白
-        stripped_line = line.strip()
-        if stripped_line.startswith('return '):
-            cleaned.append(stripped_line[7:])  # 'return ' 之后的表达式
-        else:
-            cleaned.append(line)
-
-    return '\n'.join(cleaned).rstrip('\n')
 
 
 # ── 公共因子只读详情 ──────────────────────────────────────────────────────────
