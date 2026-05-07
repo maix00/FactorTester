@@ -392,7 +392,7 @@ def run_ic_test():
 
             fe_table = getattr(factor, '_ic_fe_intermediate', None)
             products = []
-            for p in tester.products:
+            for p in sorted(tester.products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
                 p_name = str(getattr(p, 'name', p))
                 p_desc = str(getattr(p, 'desc', p_name))
                 products.append({'name': p_name, 'desc': p_desc})
