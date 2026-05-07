@@ -21,6 +21,7 @@ from server.shared import (
     login_required, _current_user, _user_data_dir, _load_accounts,
     _factor_family_cache_lock, get_factor_family_instance,
     invalidate_custom_factor_cache,
+    _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
 )
 from server.param_meta import serialize_param_meta
 from tools.factors import FactorFamily
@@ -142,6 +143,24 @@ def _list_custom_factors(username: str) -> list:
                 'load_error': True,
             })
     factors.sort(key=lambda f: f.get('updated_at', ''), reverse=True)
+    return factors
+
+
+def _list_visible_custom_factors(username: str) -> list:
+    factors = []
+    for acct in _visible_accounts_for(username, include_self=True):
+        owner_username = acct.get('username')
+        if not owner_username:
+            continue
+        owner_alias = _account_display_name(acct)
+        for factor in _list_custom_factors(owner_username):
+            item = dict(factor)
+            item['owner_username'] = owner_username
+            item['owner_alias'] = owner_alias
+            item['owner_organization_id'] = acct.get('organization_id') or ''
+            item['owner_organization_name'] = acct.get('organization_name') or ''
+            item['can_edit'] = owner_username == username
+            factors.append(item)
     return factors
 
 
@@ -441,7 +460,18 @@ def api_list_factors():
     """
     username = _current_user()
     public = _list_public_factors()
-    custom = _list_custom_factors(username)
+    include_subordinates = request.args.get('include_subordinates') == '1'
+    if include_subordinates:
+        custom = _list_visible_custom_factors(username)
+    else:
+        custom = _list_custom_factors(username)
+        acct = _get_account(username) or {}
+        for factor in custom:
+            factor['owner_username'] = username
+            factor['owner_alias'] = '我'
+            factor['owner_organization_id'] = acct.get('organization_id') or ''
+            factor['owner_organization_name'] = acct.get('organization_name') or ''
+            factor['can_edit'] = True
     # 检查是否管理员
     is_admin = False
     if username:
@@ -454,6 +484,7 @@ def api_list_factors():
         'success': True,
         'public_factors': public,
         'custom_factors': custom,
+        'current_username': username,
         'is_admin': is_admin,
     })
 
@@ -649,7 +680,10 @@ def api_get_factor(factor_id):
     - chinese_name / description: 从文件中解析出的元信息（给右侧面板）
     """
     username = _current_user()
-    source = _load_factor(username, factor_id)
+    owner_username = (request.args.get('owner_username') or username).strip()
+    if not _can_view_user_scope(username, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户因子'}), 403
+    source = _load_factor(owner_username, factor_id)
     if source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
@@ -664,6 +698,8 @@ def api_get_factor(factor_id):
             'category': meta.get('category', '自编'),
             'source_code': _strip_meta(source),
             'is_public': False,
+            'owner_username': owner_username,
+            'can_edit': owner_username == username,
         }
     })
 

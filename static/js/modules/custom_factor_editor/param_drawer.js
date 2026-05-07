@@ -55,10 +55,23 @@ function closeParamDrawer() {
     drawer.classList.remove('open');
 }
 
+function escAttr(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function getFactorFamilyDef(factorFamilyName) {
     if (!getFactorFamilies()) return null;
-    let pf = getFactorFamilies().find(f => f.id === factorFamilyName && f.type === 'public');
-    if (!pf) pf = getFactorFamilies().find(f => f.id === factorFamilyName && f.type === 'custom');
+    if (_currentFactorFamilySource === 'public') {
+        return getFactorFamilies().find(f => f.id === factorFamilyName && f.type === 'public') || null;
+    }
+    let pf = getFactorFamilies().find(f =>
+            f.name === factorFamilyName
+            && f.type === (_currentFactorFamilySource || 'custom')
+            && ((f.owner_username || '') === (_currentFactorFamilyOwner || ''))
+    );
+    if (!pf) {
+        pf = getFactorFamilies().find(f => f.id === factorFamilyName && f.type === 'custom');
+    }
     return pf || null;
 }
 
@@ -195,13 +208,16 @@ async function loadParamTemplatesIntoSelect() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel) return;
-    sel.innerHTML = '<option value="">— 选择模板 —</option>';
+    sel.innerHTML = '<option value="">— 选择参数配置 —</option>';
     try {
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias));
+        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '?include_visible=1');
         const data = await resp.json();
         if (data.success && data.templates) {
             data.templates.forEach(t => {
-                sel.innerHTML += '<option value="' + t.id + '">' + escHtml(t.name) + '</option>';
+                const owner = t.owner_alias ? `${t.owner_alias} / ` : '';
+                const editable = t.editable ? '1' : '0';
+                sel.innerHTML += '<option value="' + escAttr(t.id) + '" data-owner="' + escAttr(t.owner_username || '') + '" data-editable="' + editable + '">' +
+                    escHtml(owner + t.name + (t.editable ? '' : '（只读）')) + '</option>';
             });
         }
     } catch(e) {
@@ -213,14 +229,16 @@ async function loadParamTemplate() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择模板';
+        if (status) status.textContent = '请先选择参数配置';
         return;
     }
     const tplId = sel.value;
     const tplName = sel.options[sel.selectedIndex].text;
+    const ownerUsername = sel.options[sel.selectedIndex].dataset.owner || '';
     if (status) status.textContent = '加载中...';
     try {
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId);
+        const ownerParam = ownerUsername ? '?owner_username=' + encodeURIComponent(ownerUsername) : '';
+        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId + ownerParam);
         const data = await resp.json();
         if (data.success && data.template && data.template.params_list) {
             _paramRows = data.template.params_list.map(obj => {
@@ -229,7 +247,7 @@ async function loadParamTemplate() {
                 return row;
             });
             renderParamTable();
-            if (status) status.textContent = '✓ 已加载: ' + tplName;
+            if (status) status.textContent = '✓ 已查看配置: ' + tplName;
             document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';
         } else {
             if (status) status.textContent = '加载失败';
@@ -240,7 +258,7 @@ async function loadParamTemplate() {
 }
 
 async function saveParamTemplate() {
-    const name = prompt('模板名称 (用于保存当前参数配置):');
+    const name = prompt('配置名称 (用于保存当前参数配置):');
     if (!name) return;
     const status = document.getElementById('param-tpl-status');
     if (status) status.textContent = '保存中...';
@@ -266,11 +284,16 @@ async function updateParamTemplate() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择模板';
+        if (status) status.textContent = '请先选择参数配置';
         return;
     }
     const tplId = sel.value;
     const tplName = sel.options[sel.selectedIndex].text;
+    const editable = sel.options[sel.selectedIndex].dataset.editable === '1';
+    if (!editable) {
+        if (status) status.textContent = '下级用户的配置只能查看，不能更新';
+        return;
+    }
     if (status) status.textContent = '更新中...';
     try {
         const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId, {
@@ -293,12 +316,17 @@ async function deleteParamTemplate() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择模板';
+        if (status) status.textContent = '请先选择参数配置';
         return;
     }
     const tplId = sel.value;
     const tplName = sel.options[sel.selectedIndex].text;
-    if (!confirm('确定删除模板「' + tplName + '」？')) return;
+    const editable = sel.options[sel.selectedIndex].dataset.editable === '1';
+    if (!editable) {
+        if (status) status.textContent = '下级用户的配置只能查看，不能删除';
+        return;
+    }
+    if (!confirm('确定删除参数配置「' + tplName + '」？')) return;
     if (status) status.textContent = '删除中...';
     try {
         const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId, {

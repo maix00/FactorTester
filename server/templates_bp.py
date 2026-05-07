@@ -8,6 +8,7 @@ from .shared import (
     _load_user_tpls, _save_user_tpls, _new_tpl_id,
     login_required,
     get_factor_family_instance, _get_session_params, _save_session_params,
+    _visible_accounts_for, _can_view_user_scope, _account_display_name,
 )
 
 templates_bp = Blueprint('templates', __name__)
@@ -174,9 +175,24 @@ def delete_time_template(tpl_id):
 @login_required
 def list_params_templates(ff_alias):
     u = _require_user()
-    with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'params', ff_alias)
-    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
+    include_visible = request.args.get('include_visible') == '1'
+    accounts = _visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
+    result = []
+    for acct in accounts:
+        owner = acct.get('username')
+        if not owner:
+            continue
+        with _get_user_file_lock(owner):
+            templates = _load_user_tpls(owner, 'params', ff_alias)
+        for t in templates:
+            result.append({
+                'id': t['id'],
+                'name': t['name'],
+                'owner_username': owner,
+                'owner_alias': _account_display_name(acct),
+                'editable': owner == u,
+            })
+    return jsonify({'success': True, 'templates': result})
 
 
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['POST'])
@@ -202,11 +218,17 @@ def save_params_template(ff_alias):
 @login_required
 def get_params_template(ff_alias, tpl_id):
     u = _require_user()
-    with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'params', ff_alias)
+    owner_username = (request.args.get('owner_username') or u).strip()
+    if not _can_view_user_scope(u, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
+    with _get_user_file_lock(owner_username):
+        templates = _load_user_tpls(owner_username, 'params', ff_alias)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
+    tpl = dict(tpl)
+    tpl['owner_username'] = owner_username
+    tpl['editable'] = owner_username == u
     return jsonify({'success': True, 'template': tpl})
 
 

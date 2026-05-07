@@ -4,6 +4,7 @@
 let _currentMode = 'code';
 let _currentFactorFamilyId = null;   // 正在编辑的因子家族 ID（null = 无）
 let _currentFactorFamilySource = 'custom'; // 'custom' | 'public'
+let _currentFactorFamilyOwner = null;
 let _isNew = false;            // 是否为新建
 let _dirty = false;
 let _factorFamilies = [];  // {name, id, type:'custom'|'public', chinese_name, category, updated_at, is_public, params, ...}
@@ -20,7 +21,8 @@ let _isAdmin = false;
 
 async function loadFactorFamilyList() {
     try {
-        const res = await fetch('/custom-factors/api/list');
+        const includeSubordinates = document.getElementById('include-subordinate-factors')?.checked;
+        const res = await fetch('/custom-factors/api/list' + (includeSubordinates ? '?include_subordinates=1' : ''));
         const data = await res.json();
         const custom = (data.custom_factors || []).map(f => ({...f, type: 'custom'}));
         const publicF = (data.public_factors || []).map(f => ({...f, type: 'public'}));
@@ -100,31 +102,84 @@ function renderFactorFamilyList() {
 
     let html = '';
     for (const g of Object.keys(filtered).sort()) {
-        html += `<div class="factor-group-header">${escHtml(g)}</div>`;
-        for (const f of filtered[g]) {
-            const active = (f.id === _currentFactorFamilyId && f.type === (_currentFactorFamilySource || 'custom')) ? ' active' : '';
+        const groupItems = filtered[g].slice().sort(compareFactorFamiliesForDisplay);
+        const ownerGroups = {};
+        groupItems.forEach(f => {
+            const ownerKey = getFactorFamilyOwnerSortKey(f);
+            if (!ownerGroups[ownerKey]) ownerGroups[ownerKey] = [];
+            ownerGroups[ownerKey].push(f);
+        });
+        html += `<div class="collapsible-factor-node collapsible-factor-group">
+            <button class="collapsible-factor-header" type="button">
+                <span class="caret">▶</span>
+                <span class="collapsible-factor-title">${escHtml(g)}</span>
+                <span class="collapsible-factor-count">${groupItems.length}</span>
+            </button>
+            <div class="collapsible-factor-body">`;
+        for (const ownerKey of Object.keys(ownerGroups).sort()) {
+            const ownerItems = ownerGroups[ownerKey];
+            html += `<div class="collapsible-factor-node collapsible-factor-owner">
+                <button class="collapsible-factor-header" type="button">
+                    <span class="caret">▶</span>
+                    <span class="collapsible-factor-title">${escHtml(getFactorFamilyOwnerLabel(ownerItems[0]))}</span>
+                    <span class="collapsible-factor-count">${ownerItems.length}</span>
+                </button>
+                <div class="collapsible-factor-body">`;
+            for (const f of ownerItems) {
+            const ownerUsername = f.owner_username || '';
+            const active = (
+                f.id === _currentFactorFamilyId
+                && f.type === (_currentFactorFamilySource || 'custom')
+                && (f.type === 'public' || ownerUsername === (_currentFactorFamilyOwner || ''))
+            ) ? ' active' : '';
             const name = escHtml(f.name || f.id);
             const cn = escHtml(f.chinese_name || '');
             const cat = f.type === 'custom'
                 ? escHtml(f.category || '自编')
                 : '公共';
             const metaParts = [cn, cat];
+            if (f.type === 'custom' && f.owner_alias) {
+                metaParts.push(f.can_edit ? '我的因子' : `来自 ${escHtml(f.owner_alias)}`);
+            }
             if (f.type === 'custom' && f.updated_at) {
                 metaParts.push(escHtml((f.updated_at || '').slice(0, 16)));
             }
             const meta = metaParts.filter(Boolean).join(' · ');
             const sourceTag = f.type === 'custom'
-                ? '<span class="source-tag custom">⭐我</span>'
+                ? `<span class="source-tag custom">${f.can_edit ? '我' : escHtml(f.owner_alias || '下级')}</span>`
                 : '<span class="source-tag public">公共</span>';
-            html += `<div class="factor-family-list-item${active}" onclick="selectFactorFamily('${f.id}', '${f.type}')">
+                html += `<div class="factor-family-list-item${active}" onclick="selectFactorFamily('${escAttr(f.id)}', '${escAttr(f.type)}', '${escAttr(ownerUsername)}')">
                 <div class="info">
                     <div class="name">${name}${sourceTag}</div>
                     <div class="meta">${meta}</div>
                 </div>
             </div>`;
+            }
+            html += '</div></div>';
         }
+        html += '</div></div>';
     }
     list.innerHTML = html;
+    if (typeof bindCollapsibleFactorLists === 'function') bindCollapsibleFactorLists(list);
+}
+
+function getFactorFamilyOwnerSortKey(f) {
+    if (f.type === 'public') return '公共';
+    return `${f.owner_organization_name || f.owner_organization_id || '未分机构'}/${f.owner_alias || f.owner_username || '未知用户'}`;
+}
+
+function getFactorFamilyOwnerLabel(f) {
+    if (f.type === 'public') return '公共';
+    if (f.can_edit) return '我的因子';
+    return `${f.owner_organization_name || f.owner_organization_id || '未分机构'} / ${f.owner_alias || f.owner_username || '未知用户'}`;
+}
+
+function compareFactorFamiliesForDisplay(a, b) {
+    return (
+        getGroup(a.name || a.id).localeCompare(getGroup(b.name || b.id)) ||
+        getFactorFamilyOwnerSortKey(a).localeCompare(getFactorFamilyOwnerSortKey(b)) ||
+        (a.name || a.id || '').localeCompare(b.name || b.id || '')
+    );
 }
 
 function escHtml(s) {
@@ -145,8 +200,9 @@ function getFactorFamilies() {
 // 因子家族选择 / 新建 / 模式切换
 // ═══════════════════════════════════════════════════════════
 
-async function selectFactorFamily(factorFamilyId, factorFamilySource) {
+async function selectFactorFamily(factorFamilyId, factorFamilySource, ownerUsername) {
     _currentFactorFamilySource = factorFamilySource || 'custom';
+    _currentFactorFamilyOwner = ownerUsername || '';
     let factor;
     if (_currentFactorFamilySource === 'public') {
         // 公共因子家族：fetch 详情
@@ -162,7 +218,8 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource) {
     } else {
         // 自定义因子家族：fetch 详情获取 source_code
         try {
-            const res = await fetch(`/custom-factors/api/get/${encodeURIComponent(factorFamilyId)}`);
+            const ownerParam = _currentFactorFamilyOwner ? `?owner_username=${encodeURIComponent(_currentFactorFamilyOwner)}` : '';
+            const res = await fetch(`/custom-factors/api/get/${encodeURIComponent(factorFamilyId)}${ownerParam}`);
             const data = await res.json();
             if (data.success && data.factor) {
                 factor = data.factor;
@@ -172,7 +229,11 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource) {
         if (!factor) return;
     }
     // 合并列表中的额外字段
-    const listFactorFamily = _factorFamilies.find(f => f.id === factorFamilyId && f.type === _currentFactorFamilySource);
+    const listFactorFamily = _factorFamilies.find(f =>
+        f.id === factorFamilyId
+        && f.type === _currentFactorFamilySource
+        && (f.type === 'public' || (f.owner_username || '') === (_currentFactorFamilyOwner || ''))
+    );
     if (listFactorFamily) {
         factor.chinese_name = factor.chinese_name || listFactorFamily.chinese_name;
         factor.category = factor.category || listFactorFamily.category;
@@ -180,6 +241,9 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource) {
         factor.description = factor.description || listFactorFamily.description;
         factor.math_expr = factor.math_expr || listFactorFamily.math_expr;
         factor.params = (factor.params && factor.params.length) ? factor.params : listFactorFamily.params;
+        factor.owner_username = factor.owner_username || listFactorFamily.owner_username;
+        factor.owner_alias = factor.owner_alias || listFactorFamily.owner_alias;
+        factor.can_edit = factor.can_edit || listFactorFamily.can_edit;
     }
     _currentFactorFamilyId = factorFamilyId;
     _isNew = false;
@@ -195,10 +259,12 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource) {
 function renderFactorFamilyReadonlyView(factor) {
     const isPublic = factor.type === 'public';
     const typeLabel = isPublic ? '公共因子' : '自定义因子';
-    document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel} — 只读）`;
+    const ownerText = !isPublic && factor.owner_alias ? ` / ${factor.owner_alias}` : '';
+    document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel}${ownerText} — 只读）`;
     document.getElementById('editor-footer').style.display = 'none';
     const sourceCode = factor.source_code || '';
-    const canDelete = !isPublic && _isAdmin;
+    const canEditSource = (!isPublic && factor.can_edit) || (isPublic && _isAdmin);
+    const canDelete = !isPublic && factor.can_edit && _isAdmin;
     document.getElementById('editor-body').innerHTML = `
         <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
             <div class="code-area" style="display:flex; flex-direction:column;">
@@ -256,7 +322,7 @@ function renderFactorFamilyReadonlyView(factor) {
                     style="width:100%; padding:8px; font-size:13px;">⚙️ 参数配置</button>
             </div>
             <div style="margin-top:12px;">
-                ${(!isPublic || _isAdmin) ? `<button class="btn-edit-public" onclick="enterEditMode('${escAttr(factor.name)}', ${isPublic})"
+                ${canEditSource ? `<button class="btn-edit-public" onclick="enterEditMode('${escAttr(factor.name)}', ${isPublic})"
                     style="width:100%; padding:8px; font-size:13px; background:#4a90d9; color:#fff; border:none; border-radius:6px; cursor:pointer;">✏️ 编辑源码</button>` : ''}
                 ${canDelete ? `<button class="btn-delete-factor" onclick="deleteFactor('${escAttr(factor.id)}')"
                     style="width:100%; padding:8px; font-size:13px; background:#d40000; color:#fff; border:none; border-radius:6px; cursor:pointer; margin-top:6px;">🗑 删除因子</button>` : ''}

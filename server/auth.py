@@ -10,13 +10,17 @@ from .shared import (
     _current_user, secrets,
     _touch_session_activity, _check_session_idle, _cleanup_session_resource,
     _current_user_obj, _factor_testers_lock, factor_testers,
+    _normalize_account, _serialize_account_public,
+    DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
+    ROLE_SUPER_ADMIN, ROLE_USER,
+    _list_organizations_with_default, _next_account_username,
 )
 
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.before_app_request
 def _check_login():
-    PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login', 'auth.logout', 'core.home', 'core.docs', 'core.docs_tools', 'core.docs_tool_detail', 'core.price_viewer', 'static',
+    PUBLIC_ENDPOINTS = {'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login', 'auth.api_public_organizations', 'auth.logout', 'core.home', 'core.docs', 'core.docs_tools', 'core.docs_tool_detail', 'core.price_viewer', 'static',
                         'custom_factors.editor_page',
                         'shared.list_product_names', 'shared.get_product_tree', 'shared.get_price_data', 'shared.get_products'}
     ep = request.endpoint
@@ -76,7 +80,16 @@ def login():
     # 默认不保持登录（用户可登录后手动勾选）
     session['keep_login'] = False
     _touch_session_activity()
-    return jsonify({'success': True, 'username': acct['username'], 'alias': acct.get('alias', acct['username']), 'is_admin': bool(acct.get('is_admin', False))})
+    acct = _normalize_account(acct)
+    return jsonify({
+        'success': True,
+        'username': acct['username'],
+        'alias': acct.get('alias', acct['username']),
+        'role': acct.get('role', ROLE_USER),
+        'organization_id': acct.get('organization_id', DEFAULT_ORGANIZATION_ID),
+        'organization_name': acct.get('organization_name', DEFAULT_ORGANIZATION_NAME),
+        'is_admin': acct.get('role') == ROLE_SUPER_ADMIN,
+    })
 
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
@@ -98,40 +111,63 @@ def register():
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
+    organization_id = (data.get('organization_id') or DEFAULT_ORGANIZATION_ID).strip()
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
     if not re.match(r'^[A-Za-z0-9_\u4e00-\u9fff]{1,32}$', username):
         return jsonify({'success': False, 'error': '用户名只能包含字母、数字、下划线或汉字，且不超过32字符'}), 400
-    if '$' in username:
-        return jsonify({'success': False, 'error': '用户名不能包含 $ 符号'}), 400
     if len(password) < 6:
         return jsonify({'success': False, 'error': '密码至少6位'}), 400
+    org = next((o for o in _list_organizations_with_default() if o.get('id') == organization_id), None)
+    if not org:
+        return jsonify({'success': False, 'error': '机构不存在'}), 400
     with _accts_lock:
         accounts = _load_accounts()
-        # 同名用户自动分配序列号：username@serial
-        same_name = [a for a in accounts if a.get('alias', a['username']) == username]
-        serial = max((int(a['username'].rsplit('@', 1)[1]) for a in same_name if '@' in a['username'] and a['username'].rsplit('@', 1)[1].isdigit()), default=0) + 1
-        full_name = f'{username}@{serial}'
+        # 新账号 id 格式为 {organization_id}${alias}@{serial}
+        full_name = _next_account_username(accounts, organization_id, username)
         salt = secrets.token_hex(16)
-        is_admin = len(accounts) == 0  # 第一个注册的用户自动成为管理员
-        accounts.append({'username': full_name, 'alias': username, 'salt': salt, 'hash': _hash_password(password, salt), 'is_admin': is_admin})
+        role = ROLE_SUPER_ADMIN if len(accounts) == 0 else ROLE_USER
+        is_admin = role == ROLE_SUPER_ADMIN  # 第一个注册的用户自动成为超级管理员
+        accounts.append({
+            'username': full_name,
+            'alias': username,
+            'salt': salt,
+            'hash': _hash_password(password, salt),
+            'role': role,
+            'is_admin': is_admin,
+            'organization_id': organization_id,
+            'organization_name': org.get('name') or DEFAULT_ORGANIZATION_NAME,
+            'parent_username': '',
+        })
         _save_accounts(accounts)
     session.permanent = True
     session['username'] = full_name
-    return jsonify({'success': True, 'username': full_name, 'alias': username, 'is_admin': is_admin})
+    return jsonify({'success': True, 'username': full_name, 'alias': username, 'role': role, 'is_admin': is_admin})
+
+@auth_bp.route('/api/organizations')
+def api_public_organizations():
+    """Registration-time organization lookup. Creation remains admin-only."""
+    orgs = _list_organizations_with_default()
+    return jsonify({'success': True, 'organizations': orgs})
 
 @auth_bp.route('/api/me')
 def api_me():
     username = _current_user()
-    is_admin = False
-    alias = None
+    acct_public = None
     if username:
         with _accts_lock:
             accounts = _load_accounts()
         acct = next((a for a in accounts if a['username'] == username), None)
-        is_admin = bool(acct and acct.get('is_admin', False))
-        alias = (acct.get('alias') if acct else None) or username
-    return jsonify({'username': username, 'alias': alias, 'is_admin': is_admin, 'keep_login': bool(session.get('keep_login'))})
+        acct_public = _serialize_account_public(acct, current_username=username) if acct else None
+    return jsonify({
+        'username': username,
+        'alias': (acct_public or {}).get('alias') if acct_public else None,
+        'role': (acct_public or {}).get('role'),
+        'organization_id': (acct_public or {}).get('organization_id'),
+        'organization_name': (acct_public or {}).get('organization_name'),
+        'is_admin': bool((acct_public or {}).get('is_admin')),
+        'keep_login': bool(session.get('keep_login')),
+    })
 
 @auth_bp.route('/api/keep_login', methods=['POST'])
 def api_keep_login():

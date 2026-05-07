@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>用户与机构管理</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; background: #f5f7fb; color: #1f2937; font-family: "Avenir Next", "PingFang SC", sans-serif; }
+        .page { max-width: 1180px; margin: 34px auto; padding: 0 24px; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+        .topbar h1 { margin: 0; font-size: 24px; }
+        .back { color: #2563eb; text-decoration: none; font-size: 13px; }
+        .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15,23,42,.06); padding: 18px; }
+        .card h2 { margin: 0 0 14px; font-size: 16px; }
+        label { display: block; margin-top: 10px; font-size: 12px; color: #6b7280; }
+        input, select { width: 100%; box-sizing: border-box; margin-top: 4px; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
+        button { border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+        .primary { background: #2563eb; color: #fff; }
+        .secondary { background: #eef2ff; color: #3730a3; }
+        .status { min-height: 18px; margin-top: 10px; color: #6b7280; font-size: 12px; }
+        .role-note { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; font-size: 12px; line-height: 1.7; color: #4b5563; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+        th, td { border-bottom: 1px solid #eef2f7; padding: 10px 8px; text-align: left; vertical-align: middle; }
+        th { color: #6b7280; font-weight: 600; background: #fafafa; }
+        th:nth-child(1), td:nth-child(1) { width: 22%; }
+        th:nth-child(2), td:nth-child(2) { width: 14%; }
+        th:nth-child(3), td:nth-child(3) { width: 14%; }
+        th:nth-child(4), td:nth-child(4) { width: 1%; white-space: nowrap; }
+        th:nth-child(5), td:nth-child(5) { width: 49%; }
+        td { overflow: hidden; text-overflow: ellipsis; }
+        .pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: 12px; }
+        .muted { color: #9ca3af; }
+        .row-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
+        .row-actions > * { min-width: 0; }
+        .row-actions select { width: 100%; margin: 0; padding: 6px 8px; }
+        .row-actions button { width: 100%; padding: 6px 8px; }
+        .org-row td { background: #f8fafc; padding: 0; }
+        .org-toggle {
+            width: 100%; display: flex; align-items: center; gap: 8px;
+            background: transparent; color: #344054; font-weight: 650;
+            padding: 10px 8px; text-align: left;
+        }
+        .org-toggle .caret { color: #98a2b3; font-size: 10px; width: 12px; }
+        .org-toggle .count { margin-left: auto; color: #98a2b3; font-weight: 500; font-size: 12px; }
+        .org-user-row.collapsed { display: none; }
+        .org-row.open .caret { transform: rotate(90deg); }
+        @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <h1>用户与机构管理</h1>
+            <a class="back" href="/">返回首页</a>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h2>新建用户</h2>
+                <label>用户名</label>
+                <input id="new-alias" placeholder="例如：研究员A">
+                <label>初始密码</label>
+                <input id="new-password" type="password" placeholder="至少 6 位">
+                <label>角色</label>
+                <select id="new-role"></select>
+                <label>所属机构</label>
+                <select id="new-org"></select>
+                <label>上级用户</label>
+                <select id="new-parent"></select>
+                <button class="primary" style="margin-top:14px;width:100%;" onclick="createUser()">创建用户</button>
+                <div class="status" id="user-status"></div>
+
+                <div id="org-create-box" style="display:none;margin-top:22px;">
+                    <h2>新建机构</h2>
+                    <label>机构名称</label>
+                    <input id="new-org-name" placeholder="例如：量化一部">
+                    <label>说明</label>
+                    <input id="new-org-desc" placeholder="可选">
+                    <button class="secondary" style="margin-top:14px;width:100%;" onclick="createOrganization()">创建机构</button>
+                    <div class="status" id="org-status"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>权限边界</h2>
+                <div class="role-note" id="role-note"></div>
+                <h2 style="margin-top:18px;">用户列表</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用户</th>
+                            <th>机构</th>
+                            <th>上级</th>
+                            <th>角色</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-body">
+                        <tr><td colspan="5" class="muted">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ctx = null;
+        const roleOrder = ['super_admin', 'org_admin', 'level_admin', 'user'];
+
+        async function loadContext() {
+            const data = await fetch('/admin/api/context').then(r => r.json());
+            if (!data.success) {
+                document.body.innerHTML = '<p style="padding:40px;color:#b91c1c;">' + (data.error || '无权访问') + '</p>';
+                return;
+            }
+            ctx = data;
+            renderControls();
+            renderUsers();
+        }
+
+        function allowedRoles() {
+            const role = ctx.current_user.role;
+            if (role === 'super_admin') return roleOrder;
+            if (role === 'org_admin') return ['org_admin', 'level_admin', 'user'];
+            if (role === 'level_admin') return ['level_admin', 'user'];
+            return ['user'];
+        }
+
+        function renderControls() {
+            const roles = allowedRoles();
+            document.getElementById('new-role').innerHTML = roles.map(r => `<option value="${r}">${ctx.role_labels[r] || r}</option>`).join('');
+            document.getElementById('new-org').innerHTML = ctx.organizations.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
+            document.getElementById('new-parent').innerHTML =
+                '<option value="">无上级</option>' + ctx.users.map(u => `<option value="${esc(u.username)}">${esc(u.alias)} (${esc(u.username)})</option>`).join('');
+            document.getElementById('org-create-box').style.display = ctx.current_user.role === 'super_admin' ? '' : 'none';
+            document.getElementById('role-note').innerHTML =
+                '超级管理员：管理全部机构与用户，并保留系统级权限。<br>' +
+                '机构管理员：管理本机构用户，可设置机构内层级。<br>' +
+                '层级管理员：管理自己的直接下级。<br>' +
+                '普通用户：不进入管理界面，但可在因子库查看自己与直接下级的因子配置。';
+        }
+
+        function renderUsers() {
+            const body = document.getElementById('users-body');
+            const rows = [];
+            const users = ctx.current_user.role === 'super_admin' ? groupUsersByOrganization(ctx.users) : [{key: '', label: '', users: ctx.users}];
+            users.forEach(group => {
+                const groupId = 'org-group-' + group.key.replace(/[^a-zA-Z0-9_-]/g, '_');
+                if (ctx.current_user.role === 'super_admin') {
+                    const isDefaultOpen = group.key === 'default';
+                    rows.push(`<tr class="org-row ${isDefaultOpen ? 'open' : ''}" id="${escAttr(groupId)}"><td colspan="5">
+                        <button class="org-toggle" onclick="toggleOrgGroup('${escAttr(groupId)}')">
+                            <span class="caret">▶</span><span>${esc(group.label)}</span><span class="count">${group.users.length}</span>
+                        </button>
+                    </td></tr>`);
+                }
+                group.users.forEach(u => {
+                const roleOptions = allowedRoles().map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ctx.role_labels[r] || r}</option>`).join('');
+                const orgOptions = ctx.organizations.map(o => `<option value="${esc(o.id)}" ${u.organization_id === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+                const parentOptions = '<option value="">无上级</option>' + ctx.users
+                    .filter(p => p.username !== u.username)
+                    .map(p => `<option value="${esc(p.username)}" ${u.parent_username === p.username ? 'selected' : ''}>${esc(p.alias)}</option>`).join('');
+                rows.push(`<tr class="${ctx.current_user.role === 'super_admin' ? 'org-user-row ' + (group.key === 'default' ? '' : 'collapsed ') + escAttr(groupId) : ''}">
+                    <td><strong>${esc(u.alias)}</strong><br><span class="muted">${esc(u.username)}</span></td>
+                    <td>${esc(u.organization_name || '')}</td>
+                    <td>${u.parent_username ? esc(u.parent_username) : '<span class="muted">无</span>'}</td>
+                    <td><span class="pill">${esc(ctx.role_labels[u.role] || u.role)}</span></td>
+                    <td>${u.can_manage ? `<div class="row-actions">
+                        <select id="role-${escAttr(u.username)}">${roleOptions}</select>
+                        <select id="org-${escAttr(u.username)}">${orgOptions}</select>
+                        <select id="parent-${escAttr(u.username)}">${parentOptions}</select>
+                        <button class="secondary" onclick="updateUser('${escAttr(u.username)}')">保存</button>
+                        <button style="background:#fee2e2;color:#991b1b;" onclick="deleteUser('${escAttr(u.username)}', '${escAttr(u.alias)}')">删除</button>
+                    </div>` : '<span class="muted">不可管理</span>'}</td>
+                </tr>`);
+                });
+            });
+            body.innerHTML = rows.join('');
+        }
+
+        function groupUsersByOrganization(users) {
+            const groups = {};
+            users.forEach(u => {
+                const key = u.organization_id || 'unknown';
+                if (!groups[key]) {
+                    groups[key] = {
+                        key,
+                        label: (u.organization_name || '未分机构') + ' (' + key + ')',
+                        users: [],
+                    };
+                }
+                groups[key].users.push(u);
+            });
+            return Object.values(groups).sort((a, b) => a.label.localeCompare(b.label));
+        }
+
+        function toggleOrgGroup(groupId) {
+            const header = document.getElementById(groupId);
+            const open = !header.classList.contains('open');
+            header.classList.toggle('open', open);
+            document.querySelectorAll('.org-user-row.' + groupId).forEach(row => {
+                row.classList.toggle('collapsed', !open);
+            });
+        }
+
+        async function createOrganization() {
+            const name = document.getElementById('new-org-name').value.trim();
+            const description = document.getElementById('new-org-desc').value.trim();
+            const status = document.getElementById('org-status');
+            status.textContent = '创建中...';
+            const data = await fetch('/admin/api/organizations', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, description}),
+            }).then(r => r.json());
+            status.textContent = data.success ? '已创建机构' : (data.error || '创建失败');
+            if (data.success) loadContext();
+        }
+
+        async function createUser() {
+            const payload = {
+                alias: document.getElementById('new-alias').value.trim(),
+                password: document.getElementById('new-password').value,
+                role: document.getElementById('new-role').value,
+                organization_id: document.getElementById('new-org').value,
+                parent_username: document.getElementById('new-parent').value,
+            };
+            const status = document.getElementById('user-status');
+            status.textContent = '创建中...';
+            const data = await fetch('/admin/api/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            }).then(r => r.json());
+            status.textContent = data.success ? '已创建用户' : (data.error || '创建失败');
+            if (data.success) {
+                document.getElementById('new-password').value = '';
+                loadContext();
+            }
+        }
+
+        async function updateUser(username) {
+            const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    role: document.getElementById('role-' + username).value,
+                    organization_id: document.getElementById('org-' + username).value,
+                    parent_username: document.getElementById('parent-' + username).value,
+                }),
+            }).then(r => r.json());
+            alert(data.success ? '已保存' : (data.error || '保存失败'));
+            if (data.success) loadContext();
+        }
+
+        async function deleteUser(username, alias) {
+            if (!confirm('确定删除用户「' + alias + '」？账号会被移除，但该用户的数据目录会保留。')) return;
+            const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
+                method: 'DELETE',
+            }).then(r => r.json());
+            alert(data.success ? '已删除用户' : (data.error || '删除失败'));
+            if (data.success) loadContext();
+        }
+
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+        function escAttr(s) { return String(s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+        loadContext();
+    </script>
+</body>
+</html>
