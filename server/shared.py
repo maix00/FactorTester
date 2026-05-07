@@ -513,6 +513,8 @@ def get_factor_main_section_html(factor_family_alias):
         chinese_name = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
         description = getattr(ff, 'description', '') or ''
         params = ff.params
+        from server.param_meta import serialize_param_meta
+        param_metas = [serialize_param_meta(p) for p in params]
         param_aliases = [p.alias for p in params]
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
         start_date = getattr(Settings, 'default_test_start_date', '2020-01-01')
@@ -528,6 +530,7 @@ def get_factor_main_section_html(factor_family_alias):
             math_expr=math_expr,
             description=description,
             params=params,
+            param_metas=param_metas,
             param_aliases=param_aliases,
             factors=factors,
             start_date=start_date,

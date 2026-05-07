@@ -94,6 +94,8 @@ def index():
                     desc = cf_data.get('chinese_name', '') or getattr(ff, 'desc', '')
                     description = cf_data.get('description', '') or ''
                     params = ff.params
+                    from server.param_meta import serialize_param_meta
+                    param_metas = [serialize_param_meta(p) for p in params]
                     param_aliases = [p.alias for p in params]
                     # 使用 session 中保存的参数列表（与公共因子行为一致）
                     from server.shared import _get_session_params
@@ -114,6 +116,7 @@ def index():
                         math_expr=math_expr,
                         description=description,
                         params=params,
+                        param_metas=param_metas,
                         param_aliases=param_aliases,
                         factors=factors,
                         start_date=start_date,

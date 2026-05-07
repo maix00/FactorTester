@@ -96,6 +96,22 @@
         }
     }
 
+    function getSharedRuntimeTimeRange() {
+        return {
+            page_uuid: window._pageUuid || '',
+            start_date: `${startYear.value}-${pad(startMonth.value)}-${pad(startDay.value)}`,
+            start_time: `${pad(startHour.value)}:${pad(startMinute.value)}`,
+            end_date: `${endYear.value}-${pad(endMonth.value)}-${pad(endDay.value)}`,
+            end_time: `${pad(endHour.value)}:${pad(endMinute.value)}`,
+            is_trading_day: isTradingDayCheck.checked,
+            is_cn_futures_day: isCnFuturesDayCheck.checked,
+            is_cn_futures_night: isCnFuturesNightCheck.checked,
+            timezone: timezoneInput.value
+        };
+    }
+
+    window.getSharedRuntimeTimeRange = getSharedRuntimeTimeRange;
+
     // ---------- 交易日/期货切换 ----------
     function toggleTradingDay() {
         const isTradingDay = isTradingDayCheck.checked;
@@ -155,18 +171,7 @@
 
     // ---------- 提交时间范围 ----------
     function confirmTimeRange() {
-        const data = {
-            factor_family_alias: factorFamilyAlias,
-            page_uuid: window._pageUuid || '',  // 已有则传回，首次为空后端生成
-            start_date: `${startYear.value}-${pad(startMonth.value)}-${pad(startDay.value)}`,
-            start_time: `${pad(startHour.value)}:${pad(startMinute.value)}`,
-            end_date: `${endYear.value}-${pad(endMonth.value)}-${pad(endDay.value)}`,
-            end_time: `${pad(endHour.value)}:${pad(endMinute.value)}`,
-            is_trading_day: isTradingDayCheck.checked,
-            is_cn_futures_day: isCnFuturesDayCheck.checked,
-            is_cn_futures_night: isCnFuturesNightCheck.checked,
-            timezone: timezoneInput.value
-        };
+        const data = Object.assign({ factor_family_alias: factorFamilyAlias }, getSharedRuntimeTimeRange());
 
         statusSpan.innerText = '保存中...';
         statusSpan.style.color = '#0078d4';

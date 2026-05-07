@@ -6,7 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/param_drawer.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/param_info_table.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    {% include 'modules/shared/mathjax_setup.html' %}
     {% block extra_css %}{% endblock %}
 </head>
 <body>
