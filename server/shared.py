@@ -35,10 +35,53 @@ def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester
     assert tester is not None, f"{str(caller) + ': ' if caller is not None else ''}未找到对应的测试器实例"
     return tester
 
-# ─── Global time range (updated by set_time_range route) ─────────────────────
-start_point = None
-end_point = None
-start_calc_point = None
+# ─── Per-page time range store ────────────────────────────────────────────────
+# 按 page_uuid 隔离时间范围，避免同一用户的不同 tab 互相覆盖。
+# key = page_uuid (前端在 set_time_range 时获取，后续 submit 时传回)
+# value = (start, end, start_calc) 三元组
+_MAX_PAGE_UUIDS = 500  # 每个 session 的 page_uuid 上限
+
+_page_time_store: dict = {}  # page_uuid → (start, end, start_calc)
+_page_time_store_lock = threading.Lock()
+
+
+def get_default_time():
+    """从 Settings 获取默认时间范围。永远可用，不依赖用户操作。"""
+    start = Settings.default_test_start_date
+    end   = Settings.default_test_end_date
+    if start is None:
+        start = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
+    if end is None:
+        end = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
+    return start, end
+
+
+def get_current_time(page_uuid: Optional[str] = None):
+    """获取当前页面绑定的运行时时间范围。
+
+    如果 page_uuid 有效且之前通过 set_time_range 设置过，返回该页面的时间；
+    否则返回 Settings 默认值。
+    """
+    if page_uuid:
+        with _page_time_store_lock:
+            entry = _page_time_store.get(page_uuid)
+            if entry is not None:
+                return entry  # (start, end, start_calc)
+    start, end = get_default_time()
+    return start, end, start
+
+
+def _set_runtime_time(page_uuid: str, start, end, start_calc=None):
+    """写入 page_uuid 对应的运行时时间范围（由 set_time_range 路由调用）。"""
+    if start_calc is None:
+        start_calc = start
+    with _page_time_store_lock:
+        if page_uuid not in _page_time_store and len(_page_time_store) >= _MAX_PAGE_UUIDS:
+            # 超过上限：清理最旧的一半
+            keys_to_remove = list(_page_time_store.keys())[:len(_page_time_store) // 2]
+            for k in keys_to_remove:
+                _page_time_store.pop(k, None)
+        _page_time_store[page_uuid] = (start, end, start_calc)
 
 # ─── Per-session params store ─────────────────────────────────────────────────
 _params_store: dict = {}  # key: (session_id, ff_alias) → list of param dicts

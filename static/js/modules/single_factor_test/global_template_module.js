@@ -259,6 +259,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         factor_family_alias: FF_ALIAS,
+                        page_uuid: window._pageUuid || '',
                         start_date: td.start_date || '',
                         start_time: td.start_time || '09:00',
                         end_date: td.end_date || '',
@@ -268,6 +269,8 @@
                         is_cn_futures_night: td.is_cn_futures_night || false,
                         timezone: td.timezone || 'Asia/Shanghai'
                     })
+                }).then(res => res.json()).then(res => {
+                    if (res.page_uuid) { window._pageUuid = res.page_uuid; }
                 });
             } catch (e) {
                 console.error('恢复时间范围失败:', e);
@@ -324,7 +327,8 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             selected_paths: sub.paths,
-                            id_time: id_time
+                            id_time: id_time,
+                            page_uuid: window._pageUuid || ''
                         })
                     });
                     var result = await resp.json();

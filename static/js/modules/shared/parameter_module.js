@@ -82,10 +82,12 @@
                             }
                             // 若已确认过时间，自动为新因子应用同一时间范围
                             if (window._confirmedTimeData) {
+                                var timeData = Object.assign({}, window._confirmedTimeData);
+                                timeData.page_uuid = window._pageUuid || '';
                                 fetch('/set_time_range', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(window._confirmedTimeData)
+                                    body: JSON.stringify(timeData)
                                 }).catch(function() {});
                             }
                         });

@@ -335,7 +335,8 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 selected_paths: selectedPaths,
-                id_time: id_time
+                id_time: id_time,
+                page_uuid: window._pageUuid || ''
             })
         })
         .then(r => r.json())
@@ -499,7 +500,7 @@
                             var res = await fetch('/submit_selected_products', {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time })
+                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time, page_uuid: window._pageUuid || '' })
                             }).then(r => r.json());
                             if (!res.success) { tplStatus('提交失败: ' + res.error, false); continue; }
                             submissions.push({
