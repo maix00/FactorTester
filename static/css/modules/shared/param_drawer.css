@@ -1,0 +1,93 @@
+/* ── 参数抽屉公共样式 (shared by parameter_module.html & custom_factor_editor.html) ── */
+
+.param-table-container {
+    overflow-x: auto;
+    max-width: 100%;
+    margin-bottom: 16px;
+    text-align: center;
+    background: transparent;
+}
+.param-table {
+    border-collapse: collapse;
+    width: auto;
+    max-width: 100%;
+    margin: 0 auto;
+    font-size: 14px;
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.param-table th,
+.param-table td {
+    padding: 8px 12px;
+    text-align: center;
+    border-bottom: 1px solid #e1e4e8;
+    white-space: normal;
+    word-break: break-word;
+    vertical-align: middle;
+    max-width: 150px;
+    min-width: 60px;
+}
+.param-table th {
+    background: #f6f8fa;
+    font-weight: 600;
+    color: #24292e;
+    border-bottom: 2px solid #e1e4e8;
+    min-width: 60px;
+}
+.param-table td:first-child,
+.param-table th:first-child {
+    min-width: 100px;
+}
+.param-table input {
+    width: 100%;
+    min-width: 50px;
+    max-width: 140px;
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+    text-align: center;
+    box-sizing: border-box;
+    margin: 0;
+}
+.param-table td:not(:has(input)) {
+    word-break: break-word;
+    white-space: normal;
+}
+.param-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.param-btn {
+    background: #0078d4;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+.param-btn:hover {
+    background: #005a9e;
+}
+.param-btn-danger {
+    background: #d40000;
+}
+.param-btn-danger:hover {
+    background: #a80000;
+}
+.param-hint {
+    margin-top: 4px;
+    color: #586069;
+    font-size: 13px;
+    text-align: left;
+}
+.param-table tr[draggable="true"]:active {
+    cursor: grabbing;
+}
+.param-table .drag-over {
+    background: #e6f7ff !important;
+}

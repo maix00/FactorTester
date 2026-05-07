@@ -318,9 +318,11 @@
         .setting-summary-value { color: #888; }
         .setting-summary-arrow { margin-left: auto; color: #bbb; font-size: 13px; }
     </style>
+    <link rel="stylesheet" href="/static/css/modules/shared/param_drawer.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>window.MathJax = { tex: { packages: {'[+]': ['color']}, inlineMath: [['$','$'],['\\(','\\)']] }, options: { skipHtmlTags: ['script','noscript','style','textarea'] } };</script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+    <script src="/static/js/modules/shared/param_drawer_utils.js"></script>
 </head>
 <body>
     <!-- 全因子概览弹窗 -->
@@ -381,16 +383,16 @@
                 <div id="param-tpl-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
 
                 <!-- 参数表格 -->
-                <div style="overflow-x:auto; max-width:100%; border:1px solid #e2e8f0; border-radius:8px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <div class="param-table-container" id="param-table-wrapper">
+                    <table class="param-table">
                         <thead id="param-table-head">
-                            <tr><th style="padding:8px;text-align:center;color:#999;" colspan="2">选择因子后可配置参数</th></tr>
+                            <tr><th colspan="2">选择因子后可配置参数</th></tr>
                         </thead>
                         <tbody id="param-table-body">
                         </tbody>
                     </table>
                 </div>
-                <p style="font-size:11px;color:#999;margin-top:6px;">💡 表格过宽可横向滚动 · 拖拽行可重排序 · 参数值留空则使用默认值</p>
+                <p class="param-hint">💡 表格过宽可横向滚动 · 拖拽行可重排序 · 参数值留空则使用默认值</p>
             </div>
         </div>
     </div>
@@ -1436,38 +1438,14 @@
             renderParamTable();
             loadParamTemplatesIntoSelect(); // 加载该因子的模板列表
 
-            // 数学公式
+            // 数学公式 + 因子说明（共享 util）
             const mathBlock = document.getElementById('cfe-math-block');
-            if (mathBlock) {
-                const mathExpr = (def.math_expr || '').trim();
-                if (mathExpr) {
-                    mathBlock.textContent = '$$ ' + mathExpr + ' $$';
-                    mathBlock.style.display = '';
-                } else {
-                    mathBlock.style.display = 'none';
-                }
-            }
-            // 因子说明
             const descBlock = document.getElementById('cfe-desc-block');
-            if (descBlock) {
-                const desc = (def.description || '').trim();
-                if (desc) {
-                    const rendered = document.getElementById('cfe-desc-rendered');
-                    if (rendered) {
-                        try { rendered.innerHTML = (typeof marked !== 'undefined') ? marked.parse(desc) : desc; }
-                        catch(e) { rendered.textContent = desc; }
-                    }
-                    document.getElementById('cfe-desc-content').style.display = 'none';
-                    descBlock.style.display = '';
-                } else {
-                    descBlock.style.display = 'none';
-                }
-            }
+            const descRendered = document.getElementById('cfe-desc-rendered');
+            if (descBlock) document.getElementById('cfe-desc-content').style.display = 'none';
+            renderDrawerMathAndDesc(def.math_expr, def.description, mathBlock, descBlock, descRendered);
 
             drawer.classList.add('open');
-            if (window.MathJax && mathBlock && mathBlock.style.display !== 'none') {
-                MathJax.typesetPromise([mathBlock]).catch(function() {});
-            }
         }
 
         function closeParamDrawer() {
@@ -1505,8 +1483,8 @@
             const thead = document.getElementById('param-table-head');
             if (thead) {
                 thead.innerHTML = '<tr>' +
-                    _paramAliases.map(a => '<th style="padding:6px 8px; text-align:center; border-bottom:2px solid #e2e8f0;">' + escHtml(a) + '</th>').join('') +
-                    '<th style="padding:6px 8px; text-align:center; border-bottom:2px solid #e2e8f0; width:50px;">操作</th>' +
+                    _paramAliases.map(a => '<th>' + escHtml(a) + '</th>').join('') +
+                    '<th style="width:50px;">操作</th>' +
                     '</tr>';
             }
 
@@ -1515,26 +1493,26 @@
                 html += '<tr class="param-row" draggable="true" data-idx="' + i + '" ondragstart="onParamDragStart(event,' + i + ')" ondragover="onParamDragOver(event)" ondrop="onParamDrop(event,' + i + ')" ondragend="onParamDragEnd()">';
                 _paramAliases.forEach(alias => {
                     const val = row[alias] !== undefined ? row[alias] : '';
-                    html += '<td style="padding:4px;"><input type="text" value="' + escHtml(val) + '" ' +
-                        'onchange="updateParamCell(' + i + ',\'' + escAttr(alias) + '\',this.value)" ' +
-                        'style="width:100%; padding:6px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; text-align:center;"></td>';
+                    html += '<td><input type="text" value="' + escHtml(val) + '" ' +
+                        'onchange="updateParamCell(' + i + ',\'' + escAttr(alias) + '\',this.value)"></td>';
                 });
-                html += '<td style="padding:4px; text-align:center;">' +
-                    '<button onclick="deleteParamRow(' + i + ')" style="font-size:12px; padding:3px 8px; background:#ef4444; color:#fff; border:none; border-radius:4px; cursor:pointer;">✕</button>' +
+                html += '<td style="text-align:center;">' +
+                    '<button class="param-btn param-btn-danger" onclick="deleteParamRow(' + i + ')">✕</button>' +
                     '</td>';
                 html += '</tr>';
             });
 
-            // 新增行
+            // 新增行（默认值填入 value，而非 placeholder）
             html += '<tr>';
             _paramAliases.forEach(alias => {
-                html += '<td style="padding:4px;"><input type="text" id="param-new-' + escHtml(alias) + '" ' +
-                    'placeholder="默认' + escHtml(getDefaultParamRow()[alias] || '') + '" ' +
+                const defVal = escHtml(getDefaultParamRow()[alias] || '');
+                html += '<td><input type="text" id="param-new-' + escHtml(alias) + '" ' +
+                    'value="' + defVal + '" ' +
                     'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addParamRow()}" ' +
-                    'style="width:100%; padding:6px; border:1px solid #d0d5dd; border-radius:4px; font-size:13px; text-align:center;"></td>';
+                    '></td>';
             });
-            html += '<td style="padding:4px; text-align:center;">' +
-                '<button onclick="addParamRow()" style="font-size:13px; padding:4px 10px; background:#10b981; color:#fff; border:none; border-radius:4px; cursor:pointer;">+</button>' +
+            html += '<td style="text-align:center;">' +
+                '<button class="param-btn" onclick="addParamRow()">＋</button>' +
                 '</td>';
             html += '</tr>';
 

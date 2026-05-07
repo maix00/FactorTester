@@ -118,6 +118,7 @@ def _list_custom_factors(username: str) -> list:
                 'factor_family': family,
                 'chinese_name': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
+                'math_expr': getattr(ff, 'math_expr', '') or '',
                 'params': [
                     {'alias': p.alias, 'name': p.alias, 'default': _serialize_default(p)}
                     for p in ff.params
@@ -172,6 +173,7 @@ def _list_public_factors() -> list:
                 'factor_family': family,
                 'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
                 'description': getattr(ff, 'description', '') or '',
+                'math_expr': getattr(ff, 'math_expr', '') or '',
                 'params': [
                     {'alias': p.alias, 'name': p.alias, 'default': _serialize_default(p)}
                     for p in ff.params
