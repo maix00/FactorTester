@@ -399,6 +399,9 @@ def find_node_by_path(tree_dict, path_parts):
     current = tree_dict
     for part in path_parts:
         found = None
+        if len(current) == 1 and '$OBJECTS$' in current:
+            flag = True
+            break
         for key, value in current.items():
             key_str = str(key) if not isinstance(key, type) else key.__name__
             if key_str == part:
