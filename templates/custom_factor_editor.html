@@ -292,7 +292,7 @@
             opacity: 1; pointer-events: auto;
         }
         .settings-drawer-panel {
-            width: 520px; max-width: 90vw; height: 100vh;
+            width: min(860px, 96vw); max-width: 96vw; height: 100vh;
             background: #fff; box-shadow: -4px 0 30px rgba(0,0,0,0.15);
             display: flex; flex-direction: column; overflow-y: auto; padding: 0;
             position: relative;
@@ -624,6 +624,9 @@
                 factor.chinese_name = factor.chinese_name || listFactor.chinese_name;
                 factor.category = factor.category || listFactor.category;
                 factor.updated_at = factor.updated_at || listFactor.updated_at;
+                factor.description = factor.description || listFactor.description;
+                factor.math_expr = factor.math_expr || listFactor.math_expr;
+                factor.params = (factor.params && factor.params.length) ? factor.params : listFactor.params;
             }
             _currentFactorId = factorId;
             _isNew = false;
@@ -642,7 +645,6 @@
             document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel} — 只读）`;
             document.getElementById('editor-footer').style.display = 'none';
             const sourceCode = factor.source_code || '';
-            const descMd = factor.description || '';
             const canDelete = !isPublic && _isAdmin;
             document.getElementById('editor-body').innerHTML = `
                 <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
@@ -663,23 +665,33 @@
                 <div class="config-pane">
                     <div class="config-section">
                         <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
-                        ${descMd ? `<div class="markdown-desc" style="color:#555;font-size:13px;margin-top:4px;line-height:1.6;">${renderMarkdown(descMd)}</div>` : ''}
+                        <div id="readonly-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:8px 0 12px;text-align:center;"></div>
+                        <div id="readonly-desc-block" style="display:none;margin-top:8px;">
+                            <div class="setting-summary-row" onclick="toggleReadonlyDesc()">
+                                <span class="setting-summary-label">📖 因子说明</span>
+                                <span class="setting-summary-value">有说明</span>
+                                <span class="readonly-desc-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+                            </div>
+                            <div id="readonly-desc-content" style="display:none;margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+                                <div id="readonly-desc-rendered" style="font-size:14px;line-height:1.75;color:#374151;"></div>
+                            </div>
+                        </div>
                     </div>
                     ${(factor.params && factor.params.length > 0) ? `
                     <div class="config-section">
                         <h3>参数列表</h3>
-                        <table style="width:100%; border-collapse:collapse;">
+                        <table class="readonly-param-table" style="width:100%; border-collapse:collapse;font-family:monospace;font-size:13px;">
                             <thead><tr>
-                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">别名</th>
-                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">类型</th>
-                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;">默认值</th>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;font-size:13px;font-weight:600;">别名</th>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;font-size:13px;font-weight:600;">类型</th>
+                                <th style="text-align:left;padding:6px;border-bottom:1px solid #ddd;font-size:13px;font-weight:600;">默认值</th>
                             </tr></thead>
                             <tbody>
                                 ${factor.params.map(p => `
                                     <tr>
-                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(p.alias)}</td>
-                                        <td style="padding:6px;border-bottom:1px solid #eee;color:#888;">${escHtml(p.type || '—')}</td>
-                                        <td style="padding:6px;border-bottom:1px solid #eee;font-family:monospace;">${escHtml(getParamDefaultValue(p))}</td>
+                                        <td title="${escAttr(getParamAliasTitle(p))}" style="padding:6px;border-bottom:1px solid #eee;">${escHtml(p.alias)}</td>
+                                        <td title="${escAttr(p.value_space_desc || '')}" style="padding:6px;border-bottom:1px solid #eee;color:#666;">${escHtml(p.type || '—')}</td>
+                                        <td style="padding:6px;border-bottom:1px solid #eee;">${escHtml(getParamDefaultValue(p))}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -699,6 +711,27 @@
                     </div>
                 </div>
             `;
+            renderReadonlyMathAndDesc(factor);
+        }
+
+        function renderReadonlyMathAndDesc(factor) {
+            const mathBlock = document.getElementById('readonly-math-block');
+            const descBlock = document.getElementById('readonly-desc-block');
+            const descContent = document.getElementById('readonly-desc-content');
+            const descRendered = document.getElementById('readonly-desc-rendered');
+            if (descContent) descContent.style.display = 'none';
+            if (typeof renderDrawerMathAndDesc === 'function') {
+                renderDrawerMathAndDesc(factor.math_expr, factor.description, mathBlock, descBlock, descRendered);
+            }
+        }
+
+        function toggleReadonlyDesc() {
+            const content = document.getElementById('readonly-desc-content');
+            const toggle = document.querySelector('.readonly-desc-toggle');
+            if (!content) return;
+            const isOpen = content.style.display !== 'none';
+            content.style.display = isOpen ? 'none' : '';
+            if (toggle) toggle.textContent = isOpen ? '▼ 展开' : '▲ 收起';
         }
 
         // 进入编辑模式（从只读视图切到代码编辑器）
@@ -785,6 +818,13 @@
             if (!paramDef) return '';
             const value = paramDef.default_value ?? '';
             return value === null || value === undefined ? '' : String(value);
+        }
+
+        function getParamAliasTitle(paramDef) {
+            if (!paramDef) return '';
+            const name = paramDef.name || paramDef.alias || '';
+            const desc = paramDef.desc || '';
+            return desc && desc !== name ? name + '\n' + desc : name;
         }
 
         function createNew() {
