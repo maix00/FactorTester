@@ -769,7 +769,7 @@ class ParamRef(FactorExpr):
 
     def _to_latex(self, subst: dict | None = None) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
-        param_latex = f"{{\\color{{red}}{self.param.alias}}}"
+        param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
         from tools.parameters import FactorParam
         if isinstance(self.param, FactorParam):
             return f"{param_latex}_{{t}}"
@@ -1695,4 +1695,3 @@ class SignalAlign(CompositeExpr):
             return f"{subst[sk]}_t"
         inner = self.operands[0]._to_latex(subst)
         return f'\\text{{SIGNAL}}_{{{self.signal_freq}}}({inner})'
-
