@@ -4,16 +4,16 @@ IC test endpoint: /run_ic_test
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import traceback
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from flask import jsonify, request
 
-from tools.factors import CrossSectionIC, Factor
+from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
-from tools.factors.FactorTester import _align_ts
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.ic import run_ic_for_factor
 
 from . import sft_bp
 from server.shared import get_factor_family_instance, get_factor_tester, _get_session_params
@@ -127,37 +127,6 @@ def run_ic_test():
         all_products = tester.products.copy()
         returns_col = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED
 
-        def run_ic_for_factor(
-            params: Dict[str, Any], factor_list: List[Factor]
-        ) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame]:
-            """关键逻辑：CrossSectionIC 计算 + 从 intermediate 提取 RE/FE。"""
-            ic_family = CrossSectionIC()
-            ic_factor = ic_family.get_factor(**params)
-            ic_factor.clear()
-
-            sample_factor = factor_list[0]
-            ic_factor.evaluate(tester.products, source_freq=sample_factor._source_freq)
-
-            ic_series = cast(pd.Series, ic_factor.table['IC'])
-
-            if tester.start_date is not None and len(ic_series) > 0:
-                idx_ts = ic_series.index.get_level_values(-1)
-                ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
-                ic_series = ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)]
-            if tester.end_date is not None and len(ic_series) > 0:
-                idx_ts = ic_series.index.get_level_values(-1)
-                ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
-                ic_series = ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)]
-
-            re_table = ic_factor.get_intermediate('RE')
-            fe_table = ic_factor.get_intermediate('FE')
-            stats = tester.ic_stats(ic_series)
-
-            re_table = re_table.copy() if re_table is not None else pd.DataFrame()
-            fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
-
-            return factor_list, ic_series, stats, re_table, fe_table
-
         ic_param_map: Dict[tuple, List[Factor]] = {}
         param_payloads: Dict[tuple, Dict[str, Any]] = {}
         series_by_factor_lag: Dict[Factor, Dict[int, pd.Series]] = {}
@@ -197,7 +166,7 @@ def run_ic_test():
 
             def _calc_one_group(item: Tuple[tuple, List[Factor]]):
                 key, factor_list = item
-                result = run_ic_for_factor(param_payloads[key], factor_list)
+                result = run_ic_for_factor(tester, param_payloads[key], factor_list)
                 return key, result
 
             if len(param_items) > 1:
@@ -237,7 +206,7 @@ def run_ic_test():
             else:
                 for key, factor_list in param_items:
                     lag_i = int(key[-1])
-                    _, ic_series, stats, re_table, fe_table = run_ic_for_factor(param_payloads[key], factor_list)
+                    _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
                     for factor in factor_list:
                         series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
                         stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
