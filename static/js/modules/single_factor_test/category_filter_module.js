@@ -9,33 +9,72 @@
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var treeInstance = null;
 
+    // 用后端列表同步本地 submissions
+    function syncFromServer(serverSubmissions) {
+        // 保留下标映射：用 id 作为 key
+        var oldMap = {};
+        submissions.forEach(function(sub, i) {
+            oldMap[sub.id] = { index: i, data: sub };
+        });
+        var newSubs = serverSubmissions.map(function(s) {
+            var old = oldMap[s.id];
+            if (old) {
+                // 保留本地字段（paths, pathsDescMap, timestamp 等前端特有状态）
+                var merged = old.data;
+                merged.product_count = s.product_count;
+                merged.factor_tester_serial = s.factor_tester_serial;
+                merged.selected_paths = s.selected_paths;
+                merged.paths = s.selected_paths || merged.paths;
+                return merged;
+            }
+            // 新提交：用后端 selected_paths 作为 paths
+            var paths = s.selected_paths || [];
+            return {
+                id: s.id,
+                paths: paths,
+                pathsDescMap: {},
+                factor_tester_name: s.name,
+                factor_tester_serial: s.factor_tester_serial,
+                product_count: s.product_count,
+                count_desc: s.product_count + ' 个产品',
+                timestamp: new Date().toLocaleTimeString(),
+                start_date: '',
+                end_date: '',
+                start_time: '',
+                end_time: ''
+            };
+        });
+        submissions = newSubs;
+        window.submissions = submissions;
+        renderHistory();
+    }
+
     // 辅助函数：渲染右侧历史记录
     function renderHistory() {
         var html = '';
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
             html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
-            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; display:flex; flex-direction:column; gap:4px; border-bottom:1px solid #e1e4e8;">';
+            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8;">';
             var labelHtml = sub.label
                 ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:13px;">' + sub.label + '</span>'
                 : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
             var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">';
-            // 第一行：序号 + 序列号 + 时间 + 删除按钮
-            html += '    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">';
-            html += '      <span style="font-size:13px;display:flex;align-items:center;gap:4px;">'
-                + '<i class="fas fa-grip-vertical" style="margin-right:6px; color:#888; flex-shrink:0;"></i>'
+            // 信息行：序号 + 序列号 + 时间
+            html += '    <div style="font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">'
+                + '<i class="fas fa-grip-vertical" style="color:#888; flex-shrink:0;"></i>'
                 + '<strong style="flex-shrink:0;">#' + (index+1) + '</strong>'
                 + '<span style="flex-shrink:0;margin:0 4px;">' + sub.factor_tester_serial + '</span>'
                 + '<span style="color:#888;font-size:12px;flex-shrink:0;">(' + sub.timestamp + ')</span>'
                 + (sub.count_desc ? ' <span style="color:#d00;flex-shrink:0;">' + sub.count_desc + '</span>' : '')
-                + '</span>';
-            html += '      <button class="delete-submission" data-index="' + index + '" style="background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
-            html += '    </div>';
-            // 第二行：标签名称
-            html += '    <div style="display:flex;align-items:center;">' + labelHtml + labelInput + '</div>';
+                + '</div>';
+            // 标签名称行
+            html += '    <div style="display:flex;align-items:center;margin-top:4px;">' + labelHtml + labelInput + '</div>';
+            // 删除按钮放在 header 右下角
+            html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
             html += '  </div>';
-            html += '  <div style="padding:8px 12px;">';
-            html += '    <table style="width:100%; border-collapse:collapse;">';
+            html += '  <div style="padding:8px 12px; overflow-x:auto;">';
+            html += '    <table style="width:100%; border-collapse:collapse; table-layout:fixed;">';
             sub.paths.forEach(function(path, pathIdx) {
                 var rowId = 'path-' + index + '-' + pathIdx;
                 var expanded = isExpanded[path] || false;
@@ -44,10 +83,10 @@
                     pathDisplay = path + ' <span style="color:#888;font-size:12px;">' + sub.pathsDescMap[path] + '</span>';
                 }
                 html += '      <tr class="path-row" data-path="' + path.replace(/"/g, '&quot;') + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
-                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0;">';
-                html += '          <div style="display:flex;align-items:center;">';
-                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px;">' + pathDisplay + '</span>';
-                html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="margin-left:auto; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>';
+                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; word-break:break-all;">';
+                html += '          <div style="display:flex;align-items:flex-start;">';
+                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1;">' + pathDisplay + '</span>';
+                html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>';
                 html += '          </div>';
                 html += '        </td>';
                 html += '      </tr>';
@@ -108,7 +147,7 @@
             .then(data => {
                 var statusElem = $('#submission_change_status');
                 if (data.success) {
-                    statusElem.html('✓ 路径已删除').css('color', '#28a745');
+                    statusElem.html('<div>✓ 路径已删除</div>').css('color', '#28a745');
                     // 本地更新
                     submissions[subIndex].paths = newPaths;
                     if (newPaths.length === 0) {
@@ -122,9 +161,9 @@
                         .then(data2 => {
                             if (data2.success) {
                                 submissions.splice(subIndex, 1);
-                                statusElem.html('✓ 提交已删除').css('color', '#28a745');
+                                statusElem.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
                             } else {
-                                statusElem.html('✗ 删除提交失败: ' + data2.error).css('color', '#d40000');
+                                statusElem.html('<div>✗ 删除提交失败: ' + data2.error + '</div>').css('color', '#d40000');
                             }
                             renderHistory();
                             setTimeout(function() { statusElem.html(''); }, 3000);
@@ -134,7 +173,7 @@
                         setTimeout(function() { statusElem.html(''); }, 3000);
                     }
                 } else {
-                    statusElem.html('✗ 删除失败: ' + data.error).css('color', '#d40000');
+                    statusElem.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
                     setTimeout(function() { statusElem.html(''); }, 3000);
                 }
             });
@@ -154,12 +193,17 @@
             .then(data => {
                 var statusElem = $('#submission_change_status');
                 if (data.success) {
-                    statusElem.html('✓ 提交已删除').css('color', '#28a745');
-                    submissions.splice(index, 1);
-                    renderHistory();
+                    statusElem.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
+                    // 用后端返回的列表同步本地
+                    if (data.submissions) {
+                        syncFromServer(data.submissions);
+                    } else {
+                        submissions.splice(index, 1);
+                        renderHistory();
+                    }
                     setTimeout(function() { statusElem.html(''); }, 3000);
                 } else {
-                    statusElem.html('✗ 删除失败: ' + data.error).css('color', '#d40000');
+                    statusElem.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
                     setTimeout(function() { statusElem.html(''); }, 3000);
                 }
             });
@@ -306,25 +350,9 @@
                 });
                 // 添加到历史
                 if (data.selected_paths && data.selected_paths.length > 0) {
-                    var timeRange = getCurrentTimeRange();
-                    var newSubmission = {
-                        id: id_time,
-                        paths: data.selected_paths.slice(),
-                        pathsDescMap: pathToDescMap,
-                        factor_tester_name: data.factor_tester_name,
-                        factor_tester_serial: data.factor_tester_serial,
-                        count_desc: data.count_desc,
-                        timestamp: timeStr,
-                        start_date: timeRange.start_date,   // 新增
-                        end_date: timeRange.end_date,       // 新增
-                        start_time: timeRange.start_time,   // 可选
-                        end_time: timeRange.end_time        // 可选
-                    };
-                    submissions.push(newSubmission);
-                    renderHistory();
-                    // 通知 IC 模块更新
-                    if (typeof window.renderICTabs === 'function') {
-                        window.renderICTabs(submissions);
+                    // 用后端返回的 submissions 同步
+                    if (data.submissions) {
+                        syncFromServer(data.submissions);
                     }
                 }
             } else {

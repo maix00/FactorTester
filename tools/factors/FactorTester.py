@@ -144,6 +144,7 @@ class FactorTester(UniqueObject):
 
             self.products = set(products)       # 当前测试品种集（可经筛选减少）
             self.all_products = set(products)   # 原始全量品种集
+            self.selected_paths: list = []     # 提交时选取的路径列表（前端显示用）
             self.sift_product_by_empty_data_bool = False  # 记录是否已执行空数据过滤
             self.factors = []
             # 信号同步索引缓存（per-run，避免跨并发请求共享）

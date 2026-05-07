@@ -17,11 +17,44 @@ import server.shared as shared
 from . import shared_bp
 
 
+def _tester_to_dict(t):
+    """将 FactorTester 转为前端需要的字典。"""
+    # alias 格式为 user_name:core_id，提取纯 id
+    core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+    return {
+        'id':                   core_id,
+        'name':                 t.name,
+        'product_count':        len(t.products) if hasattr(t, 'products') and t.products else 0,
+        'selected_paths':       getattr(t, 'selected_paths', []) or [],
+        'factor_tester_name':   t.name,
+        'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
+    }
+
+
+def _valid_testers():
+    """返回当前有效（未被销毁）的 tester 列表。"""
+    with _factor_testers_lock:
+        return [t for t in shared.factor_testers if t.products and len(t.products) > 0]
+
+
 @shared_bp.route('/api/tree-data')
 def get_tree_data():
     if shared._fancytree_cache is None:
         shared._fancytree_cache = convert_to_fancytree(tree, checkbox_default=True)
     return jsonify(shared._fancytree_cache)
+
+
+@shared_bp.route('/api/list_submissions')
+def list_submissions():
+    """返回当前全部有效的 FactorTester 列表（前端同步用）。"""
+    try:
+        testers = _valid_testers()
+        return jsonify({
+            'success':     True,
+            'submissions': [_tester_to_dict(t) for t in testers],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @shared_bp.route('/get_products')
@@ -83,6 +116,7 @@ def submit_selected_products():
             _start, _end = default_test_start_date, default_test_end_date
         user = shared._current_user_obj()
         factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
+        factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
         if user is not None:
             user.add_tester(factor_tester)
         with _factor_testers_lock:
@@ -94,8 +128,9 @@ def submit_selected_products():
             'selected_products':   [str(p) for p in selected_products],
             'selected_paths':      selected_paths,
             'factor_tester_name':   factor_tester.name,
-            'factor_tester_serial': factor_tester.alias,
+            'factor_tester_serial': f"#{id_time}",
             'count_desc':          f"{len(selected_products)} 个产品",
+            'submissions':         [_tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -119,16 +154,21 @@ def reorder_submissions():
 @shared_bp.route('/delete_submission', methods=['POST'])
 def delete_submission():
     data = request.get_json()
-    id_time = data.get('id_time')
+    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
     try:
         with _factor_testers_lock:
             n = len(shared.factor_testers)
-            tester = next((t for t in shared.factor_testers if t.alias == str(id_time)), None)
+            # alias 格式为 user_name:core_id，匹配尾部 id
+            tester = next((t for t in shared.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
             assert tester is not None, "Submission not found"
             tester.delete()
-            shared.factor_testers = [t for t in shared.factor_testers if t.alias != str(id_time)]
+            shared.factor_testers = [t for t in shared.factor_testers if not (t.alias.endswith(':' + id_time) or t.alias == id_time)]
             assert len(shared.factor_testers) == n - 1, "No submission deleted"
-        return jsonify({'success': True})
+        return jsonify({
+            'success':     True,
+            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -143,7 +183,10 @@ def clear_all_submissions():
                 except Exception:
                     pass
             shared.factor_testers = []
-        return jsonify({'success': True})
+        return jsonify({
+            'success':     True,
+            'submissions': [],
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -151,11 +194,12 @@ def clear_all_submissions():
 @shared_bp.route('/delete_path_of_submission', methods=['POST'])
 def delete_path_of_submission():
     data = request.get_json()
-    id_time   = data.get('id_time')
+    id_time   = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
     new_paths = data.get('new_paths')
     try:
         with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(id_time)), None)
+            tester = next((t for t in shared.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
         assert tester is not None, "Submission not found"
         selected_paths = get_minimal_paths(new_paths)
         selected_products = []
@@ -166,6 +210,9 @@ def delete_path_of_submission():
             else:
                 selected_products.append(node)
         tester.products = sorted(list(set(selected_products)))
-        return jsonify({'success': True})
+        return jsonify({
+            'success':     True,
+            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
