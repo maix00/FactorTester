@@ -88,8 +88,11 @@ def index():
                 if ff is not None:
                     from tools.factors.Parameters import FactorFreqParam, ReverseParam
                     math_expr = getattr(ff, 'math_expr', '')
-                    desc = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
-                    description = getattr(ff, 'description', '') or ''
+                    cf_data = getattr(ff, '_custom_factor_data', {})
+                    # 展示用的名称：用户自定义的 name，而非 UUID
+                    display_alias = cf_data.get('name', '') or selected_name
+                    desc = cf_data.get('chinese_name', '') or getattr(ff, 'desc', '')
+                    description = cf_data.get('description', '') or ''
                     params = ff.params
                     param_aliases = [p.alias for p in params]
                     factors = ff.get_factors(params_list=[])
@@ -104,7 +107,7 @@ def index():
                     end_time = getattr(Settings, 'default_day_end_time', '15:00')
                     main_content = render_template(
                         'factor_main.html',
-                        factor_family_alias=selected_name,
+                        factor_family_alias=display_alias,
                         chinese_name=desc,
                         math_expr=math_expr,
                         description=description,

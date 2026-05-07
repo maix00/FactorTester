@@ -258,23 +258,52 @@ def login_required(f):
     return decorated
 
 # ─── FactorFamily utilities ───────────────────────────────────────────────────
-def get_factor_family_instance(module_name):
+def get_factor_family_instance(module_name, username: str | None = None):
+    """获取因子族实例。优先从 Factors/ 目录加载公共因子，若找不到则尝试从用户自定义因子加载。"""
     with _factor_family_cache_lock:
         if module_name in _factor_family_cache:
             return _factor_family_cache[module_name]
+
+    # ── 1. 尝试从公共 Factors/ 目录加载 ──
     factors_dir = os.path.join(os.getcwd(), "Factors")
     module_path = os.path.join(factors_dir, f"{module_name}.py")
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is not None and spec.loader is not None:
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        ff = getattr(module, module_name)()
-        assert isinstance(ff, FactorFamily)
-        with _factor_family_cache_lock:
-            _factor_family_cache[module_name] = ff
-        return ff
-    else:
-        raise ImportError(f"Cannot load module '{module_name}' from '{module_path}'")
+    if os.path.exists(module_path):
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            ff = getattr(module, module_name)()
+            assert isinstance(ff, FactorFamily)
+            with _factor_family_cache_lock:
+                _factor_family_cache[module_name] = ff
+            return ff
+
+    # ── 2. 尝试从用户自定义因子加载（先按 factor_id 查，再按 name 遍历匹配） ──
+    if username is None:
+        username = _current_user()
+    if username:
+        # 2a. 直接用 module_name 作为 factor_id 查找
+        cf = get_custom_factor_instance(username, module_name)
+        if cf is not None:
+            return cf
+        # 2b. 遍历所有自定义因子，按 name 字段匹配
+        cf_dir = os.path.join(_user_data_dir(username), 'custom_factors')
+        if os.path.isdir(cf_dir):
+            for fname in os.listdir(cf_dir):
+                if fname.endswith('.json'):
+                    try:
+                        cf_path = os.path.join(cf_dir, fname)
+                        with open(cf_path, 'r', encoding='utf-8') as f:
+                            cf_data = _json.load(f)
+                        if cf_data.get('name') == module_name:
+                            factor_id = os.path.splitext(fname)[0]
+                            cf = get_custom_factor_instance(username, factor_id)
+                            if cf is not None:
+                                return cf
+                    except Exception:
+                        pass
+
+    raise ImportError(f"Cannot load factor '{module_name}' from '{module_path}'")
 
 
 def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:

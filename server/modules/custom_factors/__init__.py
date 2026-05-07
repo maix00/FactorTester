@@ -20,6 +20,7 @@ from flask import Blueprint, request, jsonify, render_template
 from server.shared import (
     login_required, _current_user, _user_data_dir,
     _factor_family_cache_lock, get_factor_family_instance,
+    invalidate_custom_factor_cache,
 )
 from tools.factors import FactorFamily
 
@@ -305,6 +306,9 @@ def api_update_factor(factor_id):
     _save_factor(username, factor_id, existing)
     existing['id'] = factor_id
 
+    # 清除缓存，确保下次加载时使用最新数据
+    invalidate_custom_factor_cache(username, factor_id)
+
     return jsonify({'success': True, 'factor': existing})
 
 
@@ -318,6 +322,10 @@ def api_delete_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     _delete_factor_file(username, factor_id)
+
+    # 清除缓存
+    invalidate_custom_factor_cache(username, factor_id)
+
     return jsonify({'success': True, 'message': f'因子 "{existing["name"]}" 已删除'})
 
 
