@@ -428,6 +428,7 @@ def test_by_group(
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Run group test for one or more factors."""
     factors = [factors] if isinstance(factors, Factor) else (factors if factors is not None else tester.factors)
+    assert isinstance(factors, list), f"factors must be a list, got {type(factors)}"
 
     if plot_flag and plot_n_group_list is not None:
         plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
