@@ -48,6 +48,12 @@ def _signal_time(obj: Any) -> Any:
 
 def _align_ts(lhs: Any, rhs: Any) -> Any:
     """将 lhs 时区对齐到 rhs；若任一非 Timestamp 则原样返回 lhs。"""
+    rhs = _signal_time(rhs)
+    if not isinstance(rhs, pd.Timestamp):
+        try:
+            rhs = pd.Timestamp(rhs)
+        except Exception:
+            return lhs
     if isinstance(lhs, pd.Timestamp) and isinstance(rhs, pd.Timestamp):
         if lhs.tzinfo is None and rhs.tzinfo is not None:
             return lhs.tz_localize(rhs.tz)
@@ -56,6 +62,17 @@ def _align_ts(lhs: Any, rhs: Any) -> Any:
         if lhs.tzinfo is not None and rhs.tzinfo is not None:
             return lhs.tz_convert(rhs.tz)
     return lhs
+
+
+def _align_ts_to_index(ts: Any, idx: pd.Index) -> pd.Timestamp:
+    """将时间戳的时区规整到 DatetimeIndex，避免 tz-aware/naive 比较错误。"""
+    ts = pd.Timestamp(ts)
+    idx = _extract_signal_index(idx)
+    if idx.tz is None:
+        return ts.tz_localize(None) if ts.tzinfo is not None else ts
+    if ts.tzinfo is None:
+        return ts.tz_localize(idx.tz)
+    return ts.tz_convert(idx.tz)
 
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
@@ -377,14 +394,14 @@ class FactorTester(UniqueObject):
         table_src.index   = _extract_signal_index(table_src.index)
         returns_src.index = _extract_signal_index(returns_src.index)
         if start_date is not None:
-            _sd = _align_ts(pd.Timestamp(start_date), table_src.index[0]) if len(table_src) > 0 else pd.Timestamp(start_date)
+            _sd = _align_ts_to_index(start_date, table_src.index)
             table_src   = table_src[table_src.index >= _sd]
-            _sd = _align_ts(pd.Timestamp(start_date), returns_src.index[0]) if len(returns_src) > 0 else pd.Timestamp(start_date)
+            _sd = _align_ts_to_index(start_date, returns_src.index)
             returns_src = returns_src[returns_src.index >= _sd]
         if end_date is not None:
-            _ed = _align_ts(pd.Timestamp(end_date), table_src.index[0]) if len(table_src) > 0 else pd.Timestamp(end_date)
+            _ed = _align_ts_to_index(end_date, table_src.index)
             table_src   = table_src[table_src.index <= _ed]
-            _ed = _align_ts(pd.Timestamp(end_date), returns_src.index[0]) if len(returns_src) > 0 else pd.Timestamp(end_date)
+            _ed = _align_ts_to_index(end_date, returns_src.index)
             returns_src = returns_src[returns_src.index <= _ed]
 
         # 对齐两个 DataFrame 的索引（factor.returns 因 shift 可能比 factor.table 少最后一行）
@@ -573,12 +590,11 @@ class FactorTester(UniqueObject):
         # ---------- 汇总指标（向量化） ----------
         # 构建时间戳数组，用于日期过滤
         signal_times = pd.DatetimeIndex(index_list)   # already flat after _extract_signal_index
-        _ref = signal_times[0] if T > 0 else pd.Timestamp('2000-01-01')
         mask_report = np.ones(T, dtype=bool)
         if start_date is not None:
-            mask_report &= (signal_times >= _align_ts(pd.Timestamp(start_date), _ref))
+            mask_report &= (signal_times >= _align_ts_to_index(start_date, signal_times))
         if end_date is not None:
-            mask_report &= (signal_times <= _align_ts(pd.Timestamp(end_date), _ref))
+            mask_report &= (signal_times <= _align_ts_to_index(end_date, signal_times))
 
         report_groups = {}
         for idx in range(n_groups):
@@ -626,9 +642,9 @@ class FactorTester(UniqueObject):
             _end_date   = end_date   if end_date   is not None else self.end_date
             plot_mask = np.ones(T, dtype=bool)
             if _start_date is not None:
-                plot_mask &= (signal_times >= _align_ts(pd.Timestamp(_start_date), _ref))
+                plot_mask &= (signal_times >= _align_ts_to_index(_start_date, signal_times))
             if _end_date is not None:
-                plot_mask &= (signal_times <= _align_ts(pd.Timestamp(_end_date), _ref))
+                plot_mask &= (signal_times <= _align_ts_to_index(_end_date, signal_times))
             plot_index = [index_list[t] for t in range(T) if plot_mask[t]]
             dates = plot_index
             for idx in range(n_groups):
