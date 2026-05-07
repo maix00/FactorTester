@@ -320,7 +320,16 @@
     </style>
     <link rel="stylesheet" href="/static/css/modules/shared/param_drawer.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script>window.MathJax = { tex: { packages: {'[+]': ['color']}, inlineMath: [['$','$'],['\\(','\\)']] }, options: { skipHtmlTags: ['script','noscript','style','textarea'] } };</script>
+    <script>
+        window.MathJax = {
+            loader: { load: ['[tex]/colorv2'] },
+            tex: {
+                packages: {'[+]': ['colorv2']},
+                inlineMath: [['$','$'],['\\(','\\)']]
+            },
+            options: { skipHtmlTags: ['script','noscript','style','textarea'] }
+        };
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
     <script src="/static/js/modules/shared/param_drawer_utils.js"></script>
 </head>
@@ -1420,7 +1429,7 @@
             _paramAliases = (def.params && def.params.length)
                 ? def.params.map(p => p.alias)
                 : [];
-            // 初始加载已有参数行（如有），否则给一行默认值
+            // 初始加载已有参数行；默认值只放在顶部新增行里，和单因子测试抽屉一致。
             if (def.existing_params && def.existing_params.length) {
                 _paramRows = def.existing_params.map(obj => {
                     const row = {};
@@ -1428,7 +1437,7 @@
                     return row;
                 });
             } else {
-                _paramRows = [getDefaultParamRow()];
+                _paramRows = [];
             }
 
             // 更新抽屉信息
@@ -1489,22 +1498,9 @@
             }
 
             let html = '';
-            _paramRows.forEach((row, i) => {
-                html += '<tr class="param-row" draggable="true" data-idx="' + i + '" ondragstart="onParamDragStart(event,' + i + ')" ondragover="onParamDragOver(event)" ondrop="onParamDrop(event,' + i + ')" ondragend="onParamDragEnd()">';
-                html += '<td>' + escHtml(_paramFFAlias) + '</td>';
-                _paramAliases.forEach(alias => {
-                    const val = row[alias] !== undefined ? row[alias] : '';
-                    html += '<td><input type="text" value="' + escHtml(val) + '" ' +
-                        'onchange="updateParamCell(' + i + ',\'' + escAttr(alias) + '\',this.value)"></td>';
-                });
-                html += '<td style="text-align:center;">' +
-                    '<button class="param-btn param-btn-danger" onclick="deleteParamRow(' + i + ')">✕</button>' +
-                    '</td>';
-                html += '</tr>';
-            });
 
-            // 新增行（默认值填入 value，而非 placeholder）
-            html += '<tr>';
+            // 新增行（对齐单因子测试参数抽屉：默认值填入 value，新增行置顶）
+            html += '<tr id="add_row">';
             html += '<td>' + escHtml(_paramFFAlias) + '</td>';
             _paramAliases.forEach(alias => {
                 const defVal = escHtml(getDefaultParamRow()[alias] || '');
@@ -1514,9 +1510,22 @@
                     '></td>';
             });
             html += '<td style="text-align:center;">' +
-                '<button class="param-btn" onclick="addParamRow()">＋</button>' +
+                '<button class="param-btn" onclick="addParamRow()">新增</button>' +
                 '</td>';
             html += '</tr>';
+
+            _paramRows.forEach((row, i) => {
+                html += '<tr class="param-row" draggable="true" data-idx="' + i + '" ondragstart="onParamDragStart(event,' + i + ')" ondragover="onParamDragOver(event)" ondrop="onParamDrop(event,' + i + ')" ondragend="onParamDragEnd()">';
+                html += '<td>' + escHtml(buildParamRowAlias(row)) + '</td>';
+                _paramAliases.forEach(alias => {
+                    const val = row[alias] !== undefined ? row[alias] : '';
+                    html += '<td>' + escHtml(val) + '</td>';
+                });
+                html += '<td style="text-align:center;">' +
+                    '<button class="param-btn param-btn-danger" onclick="deleteParamRow(' + i + ')">删除</button>' +
+                    '</td>';
+                html += '</tr>';
+            });
 
             tbody.innerHTML = html;
 
@@ -1528,6 +1537,15 @@
             if (_paramRows[idx] !== undefined) {
                 _paramRows[idx][alias] = val;
             }
+        }
+
+        function buildParamRowAlias(row) {
+            const parts = [];
+            _paramAliases.forEach(alias => {
+                const val = row[alias] !== undefined ? String(row[alias]) : '';
+                if (val !== '') parts.push(alias + '_' + val);
+            });
+            return parts.length ? _paramFFAlias + '|' + parts.join('|') : _paramFFAlias;
         }
 
         function addParamRow() {
@@ -1542,9 +1560,6 @@
 
         function deleteParamRow(idx) {
             _paramRows.splice(idx, 1);
-            if (_paramRows.length === 0) {
-                _paramRows = [getDefaultParamRow()];
-            }
             renderParamTable();
         }
 
@@ -1619,7 +1634,6 @@
                         _paramAliases.forEach(a => { row[a] = obj[a] !== undefined ? String(obj[a]) : ''; });
                         return row;
                     });
-                    if (_paramRows.length === 0) _paramRows = [getDefaultParamRow()];
                     renderParamTable();
                     if (status) status.textContent = '✓ 已加载: ' + tplName;
                     document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';

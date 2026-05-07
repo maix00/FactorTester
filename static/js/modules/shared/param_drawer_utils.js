@@ -51,10 +51,16 @@ window.renderDrawerMathAndDesc = function(mathExpr, description, mathBlockEl, de
         var typeset = function() {
             attempts += 1;
             if (window.MathJax && window.MathJax.typesetPromise) {
+                if (window.MathJax.typesetClear) {
+                    MathJax.typesetClear([mathBlockEl]);
+                }
                 MathJax.typesetPromise([mathBlockEl]).catch(function() {});
             } else if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
                 // MathJax 已配置但尚未完成初始化（async 加载期间）
                 window.MathJax.startup.promise.then(function() {
+                    if (window.MathJax.typesetClear) {
+                        MathJax.typesetClear([mathBlockEl]);
+                    }
                     MathJax.typesetPromise([mathBlockEl]).catch(function() {});
                 });
             } else if (attempts < 20) {
