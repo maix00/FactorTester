@@ -136,7 +136,11 @@ class Factor(UniqueObject, FactorExpr):
     
     def _structural_eq(self, other) -> bool:
         """桥接 UniqueObject._structural_eq 和 FactorExpr._structural_eq。"""
+        if self is other:
+            return True
         from tools.factors.FactorExpr import FactorExpr as FE
+        if isinstance(other, Factor):
+            return self._expr._structural_eq(other._expr)
         if isinstance(other, FE):
             return self._expr._structural_eq(other)
         return False
