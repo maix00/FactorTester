@@ -959,7 +959,7 @@ class RollingOp(OperandExpr):
             periods_val = periods_val.value
         else:
             periods_val = periods_expr.value
-        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=products)
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=[p for p in products if p in data_vals[0].columns])
         if common:
             result = self._apply_rolling(common_periods, *data_vals, freq=freq)  # type: ignore[arg-type]
         else:
@@ -968,7 +968,7 @@ class RollingOp(OperandExpr):
             periods_products_map = {p: [product for product, period in product_periods.items() if period == p] for p in unique_periods}
             result_parts = []
             for p, products_group in periods_products_map.items():
-                result_parts.append(self._apply_rolling(p, *[operand_val[products_group]], freq=freq))  # type: ignore[arg-type]
+                result_parts.append(self._apply_rolling(p, *[dv[products_group] for dv in data_vals], freq=freq))  # type: ignore[arg-type]
             result = pd.concat(result_parts, axis=1)
 
         return result
@@ -1009,7 +1009,7 @@ class ShiftOp(OperandExpr):
             periods_val = periods_expr.evaluate(products=products, freq=freq, source=source, cache=cache, preloaded=preloaded)
         else:
             periods_val = periods_expr.value
-        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=products)
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=[p for p in products if p in operand_val.columns])
         if common:
             result = operand_val.shift(int(common_periods))
         else:
