@@ -259,7 +259,9 @@
 
         $pLbl.addEventListener('dblclick', function() {
             var id = $pSel.value; if (!id) return;
-            $pInp.value = $pLbl.textContent;
+            var name = $pLbl.textContent;
+            if (name.indexOf('__global_') === 0) { pTplStatus('全局模板不允许重命名', false); return; }
+            $pInp.value = name;
             $pInp.style.display = ''; $pInp.focus();
             $pLbl.style.display = 'none';
         });
@@ -268,6 +270,10 @@
             if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== 'Escape') return;
             if (e.key === 'Escape') { $pInp.style.display = 'none'; $pLbl.style.display = ''; return; }
             var id = $pSel.value; if (!id) { $pInp.style.display = 'none'; return; }
+            if (($pLbl.textContent || '').indexOf('__global_') === 0) {
+                $pInp.style.display = 'none'; $pLbl.style.display = '';
+                pTplStatus('全局模板不允许重命名', false); return;
+            }
             var newName = $pInp.value.trim();
             if (!newName) { $pInp.style.display = 'none'; $pLbl.style.display = ''; return; }
             fetch('/api/params_templates/' + encodeURIComponent(factorAlias) + '/' + id, {
