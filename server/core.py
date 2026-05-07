@@ -6,7 +6,7 @@ import os, traceback
 from flask import Blueprint, request, jsonify, render_template, session
 from .shared import (
     get_factor_groups, get_chinese_names, build_group_html, get_factor_main_section_html,
-    get_custom_factor_instance, _current_user, _user_data_dir,
+    get_factor_family_instance, get_custom_factor_instance, _current_user, _user_data_dir,
 )
 
 core_bp = Blueprint('core', __name__)
@@ -82,9 +82,9 @@ def index():
 
     if selected_name:
         if factor_type == 'custom' and username:
-            # 加载自定义因子
+            # 加载自定义因子（用统一入口，支持 name 和 id 双查找）
             try:
-                ff = get_custom_factor_instance(username, selected_name)
+                ff = get_factor_family_instance(selected_name, username=username)
                 if ff is not None:
                     from tools.factors.Parameters import FactorFreqParam, ReverseParam
                     math_expr = getattr(ff, 'math_expr', '')
@@ -95,8 +95,10 @@ def index():
                     description = cf_data.get('description', '') or ''
                     params = ff.params
                     param_aliases = [p.alias for p in params]
-                    factors = ff.get_factors(params_list=[])
+                    # 使用 session 中保存的参数列表（与公共因子行为一致）
                     from server.shared import _get_session_params
+                    session_params = _get_session_params(display_alias, ff)
+                    factors = ff.get_factors(params_list=session_params)
                     start_date = getattr(__import__('Settings'), 'default_test_start_date', '2025-01-02')
                     end_date = getattr(__import__('Settings'), 'default_test_end_date', '2025-05-31')
                     import pandas as pd

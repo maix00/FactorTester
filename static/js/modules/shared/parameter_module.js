@@ -4,9 +4,14 @@
  */
 
 (function() {
-    document.addEventListener('DOMContentLoaded', function() {
+    // DOM 可能已经就绪，先检查再决定如何初始化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            initParameterModule();
+        });
+    } else {
         initParameterModule();
-    });
+    }
 
     window.initParameterModule = function() {
         const moduleElem = document.getElementById('parameter_module');
@@ -14,7 +19,8 @@
 
         const tbody = document.getElementById('factor_table_body');
         const factorAlias = moduleElem.getAttribute('data-factor-alias');
-        
+        const factorType = moduleElem.getAttribute('data-factor-type') || 'public';
+
         let paramAliases = [];
         const aliasesAttr = moduleElem.getAttribute('data-param-aliases');
         if (aliasesAttr) {
@@ -25,9 +31,18 @@
             }
         }
 
+        // 构建 URL 查询参数
+        function _buildFactorUrl(alias) {
+            var params = '?factor=' + encodeURIComponent(alias);
+            if (factorType === 'custom') {
+                params += '&type=custom';
+            }
+            return params;
+        }
+
         // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
         window.reloadParamModule = function reloadParamModule(callback) {
-            return fetch(window.location.pathname + '?factor=' + encodeURIComponent(factorAlias))
+            return fetch(window.location.pathname + _buildFactorUrl(factorAlias))
                 .then(res => res.text())
                 .then(html => {
                     const parser = new DOMParser();

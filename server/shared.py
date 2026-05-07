@@ -438,7 +438,7 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
         }
     )
     try:
-        instance = custom_cls(extra_params=params_list, expr=expr)
+        instance = custom_cls(alias=cf_data.get('name'), extra_params=params_list, expr=expr)
         instance._custom_factor_data = cf_data  # type: ignore[attr-defined]
         return instance
     except Exception:

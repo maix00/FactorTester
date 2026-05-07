@@ -295,6 +295,7 @@ def api_update_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     data = request.get_json(silent=True) or {}
+    old_name = existing.get('name', '')
 
     updatable_fields = ['name', 'chinese_name', 'description', 'category', 'func_expr', 'params', 'base_on']
     for field in updatable_fields:
@@ -308,8 +309,11 @@ def api_update_factor(factor_id):
 
     # 清除缓存，确保下次加载时使用最新数据
     invalidate_custom_factor_cache(username, factor_id)
-
-    return jsonify({'success': True, 'factor': existing})
+    # 如果改了 name，也清除旧 name 在公共缓存中的条目
+    new_name = existing.get('name', '')
+    if old_name and old_name != new_name:
+        with _factor_family_cache_lock:
+            _factor_family_cache.pop(old_name, None)
 
 
 @cf_bp.route('/api/delete/<factor_id>', methods=['POST'])
@@ -321,10 +325,14 @@ def api_delete_factor(factor_id):
     if existing is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
+    old_name = existing.get('name', '')
     _delete_factor_file(username, factor_id)
 
     # 清除缓存
     invalidate_custom_factor_cache(username, factor_id)
+    if old_name:
+        with _factor_family_cache_lock:
+            _factor_family_cache.pop(old_name, None)
 
     return jsonify({'success': True, 'message': f'因子 "{existing["name"]}" 已删除'})
 
