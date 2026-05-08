@@ -263,6 +263,7 @@ function renderFactorFamilyReadonlyView(factor) {
     const isPublic = factor.type === 'public';
     const typeLabel = isPublic ? '公共因子' : '自定义因子';
     const ownerText = !isPublic && factor.owner_alias ? ` / ${factor.owner_alias}` : '';
+    setEditorModeTabsVisible(false);
     document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel}${ownerText} — 只读）`;
     document.getElementById('editor-footer').style.display = 'none';
     const sourceCode = factor.source_code || '';
@@ -273,7 +274,7 @@ function renderFactorFamilyReadonlyView(factor) {
             <div class="code-area" style="display:flex; flex-direction:column;">
                 <div style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                     <span style="font-size:13px; color:#888;">源码 (${escHtml(factor.name)}.py) — 只读</span>
-                    <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic})"
+                    <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic}, '${escAttr(factor.id || '')}', '${escAttr(factor.owner_username || '')}')"
                         style="font-size:12px; padding:4px 12px;">校验表达式树</button>
                 </div>
                 <div class="code-editor-shell readonly">
@@ -363,9 +364,10 @@ function toggleReadonlyDesc() {
 // 进入编辑模式（从只读视图切到代码编辑器）
 function enterEditMode(factorName, isPublic) {
     // 直接进入编辑器：已有 factor family id 在 _currentFactorFamilyId 中，fetch 最新源码
+    const ownerParam = !isPublic && _currentFactorFamilyOwner ? `?owner_username=${encodeURIComponent(_currentFactorFamilyOwner)}` : '';
     const fetchUrl = isPublic
         ? `/custom-factors/api/public-factor/${encodeURIComponent(factorName)}`
-        : `/custom-factors/api/get/${encodeURIComponent(_currentFactorFamilyId)}`;
+        : `/custom-factors/api/get/${encodeURIComponent(_currentFactorFamilyId)}${ownerParam}`;
     fetch(fetchUrl)
         .then(r => r.json())
         .then(data => {
@@ -380,7 +382,7 @@ function enterEditMode(factorName, isPublic) {
 }
 
 // 只读视图的校验
-async function validateReadonlyExpr(factorName, isPublic) {
+async function validateReadonlyExpr(factorName, isPublic, factorId = '', ownerUsername = '') {
     const btn = document.getElementById('btn-validate-public');
     const treeDiv = document.getElementById('readonly-tree-repr');
     btn.textContent = '校验中...';
@@ -388,7 +390,12 @@ async function validateReadonlyExpr(factorName, isPublic) {
     try {
         const res = await fetch('/custom-factors/api/validate', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ factor_name: factorName, is_public: isPublic })
+            body: JSON.stringify({
+                factor_name: factorName,
+                is_public: isPublic,
+                factor_id: factorId,
+                owner_username: ownerUsername,
+            })
         });
         const data = await res.json();
         if (data.valid && data.tree_repr) {
@@ -423,6 +430,7 @@ async function deleteFactor(factorFamilyId) {
                 '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
             document.getElementById('editor-footer').style.display = 'none';
             document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+            setEditorModeTabsVisible(false);
         } else {
             showToast(data.error || '删除失败', 'error');
         }
@@ -464,11 +472,53 @@ function createNew() {
     });
 }
 
-function switchMode(mode) {
-    _currentMode = mode;
+function setEditorModeTabsVisible(visible) {
+    const tabs = document.querySelector('.mode-tabs');
+    if (tabs) tabs.style.display = visible ? 'flex' : 'none';
+}
+
+function setActiveEditorModeTab(mode) {
     document.querySelectorAll('.mode-tab').forEach(t => {
         t.classList.toggle('active', t.textContent.includes(mode === 'code' ? '代码' : '可视'));
     });
+}
+
+function getCurrentEditorFactorDraft() {
+    return {
+        id: _currentFactorFamilyId || '',
+        name: document.getElementById('cfg-name-vis')?.value?.trim()
+            || extractClassNameFromSource(document.getElementById('code-source')?.value || '')
+            || _currentFactorFamilyId
+            || '',
+        chinese_name: document.getElementById('cfg-cn')?.value || document.getElementById('cfg-cn-vis')?.value || '',
+        description: document.getElementById('cfg-desc')?.value || document.getElementById('cfg-desc-vis')?.value || '',
+        category: document.getElementById('cfg-cat')?.value || document.getElementById('cfg-cat-vis')?.value || '自编',
+        source_code: getCurrentEditorSource(),
+        type: 'custom',
+    };
+}
+
+function getCurrentEditorSource() {
+    if (_currentMode === 'visual') return visualToSource({silent: true});
+    return document.getElementById('code-source')?.value || '';
+}
+
+function extractClassNameFromSource(source) {
+    const match = String(source || '').match(/^\s*class\s+(\w+)\s*\(/m);
+    return match ? match[1] : '';
+}
+
+function switchMode(mode) {
+    if (document.getElementById('editor-footer')?.style.display === 'none') return;
+    const draft = getCurrentEditorFactorDraft();
+    _currentMode = mode;
+    setEditorModeTabsVisible(true);
+    setActiveEditorModeTab(mode);
+    if (draft.source_code || mode === 'visual') {
+        if (mode === 'code') renderCodeEditor(draft);
+        else renderVisualEditor(draft);
+        return;
+    }
     if (_currentFactorFamilyId && _currentFactorFamilySource === 'custom') {
         const factor = _factorFamilies.find(f => f.id === _currentFactorFamilyId && f.type === 'custom');
         if (factor) {
@@ -494,6 +544,8 @@ function renderCodeEditor(factor) {
     } else {
         title.textContent = _isNew ? '新建因子' : (factor.name || '未命名因子');
     }
+    setEditorModeTabsVisible(true);
+    setActiveEditorModeTab('code');
     footer.style.display = '';
     _currentMode = 'code';
 
@@ -622,14 +674,14 @@ function upsertValidatedFactorFamilyDef(factorName, params) {
     }
     def.name = factorName;
     def.params = params;
-    def.description = document.getElementById('cfg-desc')?.value || def.description || '';
-    def.chinese_name = document.getElementById('cfg-cn')?.value || def.chinese_name || '';
-    def.category = document.getElementById('cfg-cat')?.value || def.category || '自编';
+    def.description = document.getElementById('cfg-desc')?.value || document.getElementById('cfg-desc-vis')?.value || def.description || '';
+    def.chinese_name = document.getElementById('cfg-cn')?.value || document.getElementById('cfg-cn-vis')?.value || def.chinese_name || '';
+    def.category = document.getElementById('cfg-cat')?.value || document.getElementById('cfg-cat-vis')?.value || def.category || '自编';
     return def;
 }
 
 function openValidatedParamDrawer() {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     if (!_validatedFactorDraft || sourceCode !== _validatedSourceSnapshot) {
         showToast('请先校验当前源码，再配置参数', 'error');
         invalidateCodeValidation();
@@ -639,7 +691,7 @@ function openValidatedParamDrawer() {
 }
 
 async function openOrValidateParamDrawer(factorName) {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     if (_validatedFactorDraft && sourceCode === _validatedSourceSnapshot) {
         openValidatedParamDrawer();
         return;
@@ -975,7 +1027,7 @@ function insertSnippet(code) {
 // ═══════════════════════════════════════════════════════════
 
 async function validateCustomExpr(factorName, options = {}) {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     const btn = document.getElementById('btn-validate-custom');
     if (!btn) return;
     btn.textContent = '校验中...';
@@ -983,7 +1035,12 @@ async function validateCustomExpr(factorName, options = {}) {
     try {
         const res = await fetch('/custom-factors/api/validate', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ source_code: sourceCode, factor_name: factorName })
+            body: JSON.stringify({
+                source_code: sourceCode,
+                factor_name: factorName,
+                chinese_name: (document.getElementById('cfg-cn') || document.getElementById('cfg-cn-vis'))?.value || '',
+                description: (document.getElementById('cfg-desc') || document.getElementById('cfg-desc-vis'))?.value || '',
+            })
         });
         const data = await res.json();
         if (data.valid) {
@@ -1023,10 +1080,10 @@ function showTreeReprPopup(factorName, treeRepr) {
 }
 
 async function saveFactor() {
-    const chinese_name = document.getElementById('cfg-cn')?.value?.trim() || '';
-    const description = document.getElementById('cfg-desc')?.value?.trim() || '';
-    const category = document.getElementById('cfg-cat')?.value?.trim() || '自编';
-    const source_code = document.getElementById('code-source')?.value?.trim() || '';
+    const chinese_name = (document.getElementById('cfg-cn') || document.getElementById('cfg-cn-vis'))?.value?.trim() || '';
+    const description = (document.getElementById('cfg-desc') || document.getElementById('cfg-desc-vis'))?.value?.trim() || '';
+    const category = (document.getElementById('cfg-cat') || document.getElementById('cfg-cat-vis'))?.value?.trim() || '自编';
+    const source_code = getCurrentEditorSource().trim();
 
     if (!source_code) { showToast('请输入源码', 'error'); return; }
 
@@ -1073,6 +1130,7 @@ function discardEdit() {
     body.innerHTML = '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
     document.getElementById('editor-footer').style.display = 'none';
     document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+    setEditorModeTabsVisible(false);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1082,39 +1140,36 @@ function discardEdit() {
 // 算子定义
 const OP_PALETTE = {
     leaf: [
-        { key:'OPEN', label:'OPEN', desc:'开盘价' },
-        { key:'HIGH', label:'HIGH', desc:'最高价' },
-        { key:'LOW', label:'LOW', desc:'最低价' },
-        { key:'CLOSE', label:'CLOSE', desc:'收盘价' },
-        { key:'CLOSE_ADJUSTED', label:'CLOSE_ADJ', desc:'复权收盘价' },
-        { key:'VOLUME', label:'VOLUME', desc:'成交量' },
-        { key:'AMOUNT', label:'AMOUNT', desc:'成交额' },
+        { key: 'DataColumnParam', label: '参数', desc: '数据列/窗口/时间参数', arity: 0 },
+        { key: 'Constant', label: '常数', desc: '数值常量', arity: 0 },
     ],
     ts: [
-        { key:'MA($X,$N)', label:'MA', desc:'移动平均 MA(X,N)' },
-        { key:'STD($X,$N)', label:'STD', desc:'标准差 STD(X,N)' },
-        { key:'REF($X,$N)', label:'REF', desc:'前移 REF(X,N)' },
-        { key:'DELTA($X,$N)', label:'DELTA', desc:'差分 DELTA(X,N)' },
-        { key:'LOG($X)', label:'LOG', desc:'对数 LOG(X)' },
-        { key:'ABS($X)', label:'ABS', desc:'绝对值 ABS(X)' },
+        { key: 'rolling_mean', label: '均值', desc: 'X.rolling_mean(N)', arity: 2 },
+        { key: 'rolling_std', label: '标准差', desc: 'X.rolling_std(N)', arity: 2 },
+        { key: 'rolling_min', label: '最小值', desc: 'X.rolling_min(N)', arity: 2 },
+        { key: 'rolling_max', label: '最大值', desc: 'X.rolling_max(N)', arity: 2 },
+        { key: 'shift', label: '平移', desc: 'X.shift(N)', arity: 2 },
+        { key: 'delta', label: '差分', desc: 'X.delta(N)', arity: 2 },
+        { key: 'log', label: '对数', desc: 'X.log()', arity: 1 },
+        { key: 'abs', label: '绝对值', desc: 'X.abs()', arity: 1 },
     ],
     cs: [
-        { key:'CS_RANK($X)', label:'CS_RANK', desc:'横截面排名' },
-        { key:'CS_ZSCORE($X)', label:'CS_ZSCORE', desc:'横截面标准化' },
+        { key: 'cs_rank', label: '截面排名', desc: 'X.cs_rank()', arity: 1 },
+        { key: 'cs_zscore', label: '截面标准化', desc: 'X.cs_zscore()', arity: 1 },
     ],
     arith: [
-        { key:'+', label:'+', desc:'加法' },
-        { key:'-', label:'-', desc:'减法' },
-        { key:'*', label:'*', desc:'乘法' },
-        { key:'/', label:'/', desc:'除法' },
+        { key: '+', label: '+', desc: 'A + B', arity: 2 },
+        { key: '-', label: '-', desc: 'A - B', arity: 2 },
+        { key: '*', label: '*', desc: 'A * B', arity: 2 },
+        { key: '/', label: '/', desc: 'A / B', arity: 2 },
     ]
 };
 
-// 画布上的节点
 let _visNodes = [];
 let _visNextId = 1;
 let _visSelectedNodeId = null;
-let _visDragging = null;  // { nodeId, startX, startY, mouseX, mouseY }
+let _visDragging = null;
+let _visSourceFallback = '';
 
 function renderVisualEditor(factor) {
     _currentMode = 'visual';
@@ -1122,25 +1177,17 @@ function renderVisualEditor(factor) {
     const footer = document.getElementById('editor-footer');
     const title = document.getElementById('editor-title');
     title.textContent = _isNew ? '新建因子（可视化）' : (factor.name || '未命名因子（可视化）');
+    setEditorModeTabsVisible(true);
+    setActiveEditorModeTab('visual');
     footer.style.display = '';
-
-    // 尝试从 func_expr 回解析出节点
-    _visNodes = [];
-    _visNextId = 1;
-    _visSelectedNodeId = null;
-    if (factor.func_expr) {
-        // 简化为从头开始（回解析太复杂）
-    }
+    _visSourceFallback = factor.source_code || '';
+    loadVisualNodesFromSource(_visSourceFallback);
 
     body.innerHTML = `
         <div class="visual-layout">
-            <div class="op-palette" id="op-palette">
-                ${renderPalette()}
-            </div>
+            <div class="op-palette" id="op-palette">${renderPalette()}</div>
             <div class="visual-canvas-wrap" id="visual-canvas-wrap"
-                 ondragover="event.preventDefault()"
-                 ondrop="onCanvasDrop(event)"
-                 onclick="onCanvasClick(event)">
+                 ondragover="event.preventDefault()" ondrop="onCanvasDrop(event)" onclick="onCanvasClick(event)">
                 <div class="visual-canvas" id="visual-canvas">
                     <svg class="vis-edges" id="vis-edges"></svg>
                 </div>
@@ -1151,43 +1198,42 @@ function renderVisualEditor(factor) {
                     <div id="node-props" style="font-size:12px;color:#888;">点击画布上的节点查看属性</div>
                 </div>
                 <div class="config-section" style="margin-top:16px;">
+                    <button class="btn-validate" id="btn-validate-custom" onclick="validateCustomExpr('${escAttr(factor.name || factor.id || '')}')"
+                        style="width:100%; padding:8px; font-size:13px;">校验表达式树</button>
+                    <button class="btn-validate" id="btn-param-config" onclick="openOrValidateParamDrawer('${escAttr(factor.name || factor.id || '')}')"
+                        style="width:100%; padding:8px; font-size:13px; margin-top:8px;">校验后配置参数</button>
+                    <div id="param-config-status" style="font-size:12px;color:#999;margin-top:6px;">请先校验表达式树</div>
+                </div>
+                <div class="config-section" style="margin-top:16px;">
                     <h3>基本信息</h3>
-                    <div class="field">
-                        <label>因子名称</label>
-                        <input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" oninput="_dirty=true">
-                    </div>
-                    <div class="field">
-                        <label>中文名称</label>
-                        <input type="text" id="cfg-cn-vis" value="${escHtml(factor.chinese_name || '')}" oninput="_dirty=true">
-                    </div>
-                    <div class="field">
-                        <label>分类</label>
-                        <input type="text" id="cfg-cat-vis" value="${escHtml(factor.category || '自编')}" oninput="_dirty=true">
-                    </div>
+                    <div class="field"><label>类名</label><input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" placeholder="如 MyFactor" oninput="_dirty=true"></div>
+                    <div class="field"><label>中文名称</label><input type="text" id="cfg-cn-vis" value="${escHtml(factor.chinese_name || '')}" oninput="_dirty=true"></div>
+                    <div class="field"><label>分类</label><input type="text" id="cfg-cat-vis" value="${escHtml(factor.category || '自编')}" oninput="_dirty=true"></div>
+                    <div class="field"><label>描述 (Markdown)</label><textarea id="cfg-desc-vis" oninput="_dirty=true">${escHtml(factor.description || '')}</textarea></div>
                 </div>
                 <div style="margin-top:12px;">
-                    <button class="btn-validate" onclick="visualToExpr()" style="width:100%">🔄 生成表达式</button>
+                    <button class="btn-validate" onclick="visualToExpr()" style="width:100%">生成表达式</button>
                 </div>
                 <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-expr-preview"></div>
             </div>
         </div>
     `;
 
-    // 让算子面板中的元素可拖拽
     initPaletteDrag();
+    renderAllVisNodes();
+    updateVisualExprPreview();
+    invalidateCodeValidation();
 }
 
 function renderPalette() {
-    const labels = { leaf:'📊 数据列', ts:'⏱ 时序算子', cs:'📐 横截面算子', arith:'➕ 算术运算' };
+    const labels = { leaf: '参数/常数', ts: '时序算子', cs: '横截面算子', arith: '算术运算' };
     let html = '';
     for (const [cat, ops] of Object.entries(OP_PALETTE)) {
         html += `<h3>${labels[cat]}</h3>`;
         for (const op of ops) {
             html += `<div class="op-block ${cat}" draggable="true"
-                data-op-key="${escHtml(op.key)}" data-op-cat="${cat}"
-                ondragstart="onOpDragStart(event)">
-                <strong>${escHtml(op.label)}</strong>
-                <div class="op-desc">${escHtml(op.desc)}</div>
+                data-op-key="${escHtml(op.key)}" data-op-cat="${cat}" ondragstart="onOpDragStart(event)">
+                <strong>${escHtml(op.label)}</strong><div class="op-desc">${escHtml(op.desc)}</div>
             </div>`;
         }
     }
@@ -1195,16 +1241,12 @@ function renderPalette() {
 }
 
 function initPaletteDrag() {
-    document.querySelectorAll('.op-block').forEach(el => {
-        el.addEventListener('dragstart', onOpDragStart);
-    });
+    document.querySelectorAll('.op-block').forEach(el => el.addEventListener('dragstart', onOpDragStart));
 }
 
 function onOpDragStart(e) {
-    e.dataTransfer.setData('text/plain', JSON.stringify({
-        key: e.target.closest('.op-block').dataset.opKey,
-        cat: e.target.closest('.op-block').dataset.opCat,
-    }));
+    const block = e.target.closest('.op-block');
+    e.dataTransfer.setData('text/plain', JSON.stringify({ key: block.dataset.opKey, cat: block.dataset.opCat }));
     e.dataTransfer.effectAllowed = 'copy';
 }
 
@@ -1217,19 +1259,21 @@ function onCanvasDrop(e) {
     const rect = wrap.getBoundingClientRect();
     const x = e.clientX - rect.left + wrap.scrollLeft - 50;
     const y = e.clientY - rect.top + wrap.scrollTop - 18;
-
+    const params = defaultVisualNodeParams(op);
     const node = {
         id: _visNextId++,
         key: op.key,
         cat: op.cat,
-        label: op.key,
+        label: params.alias || params.value || op.key,
         x: Math.max(0, x),
         y: Math.max(0, y),
-        params: {},
+        inputs: [],
+        params,
     };
     _visNodes.push(node);
-    renderAllVisNodes();
     _dirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
     selectVisNode(node.id);
 }
 
@@ -1237,16 +1281,15 @@ function onCanvasClick(e) {
     if (e.target.closest('.vis-node')) return;
     _visSelectedNodeId = null;
     renderAllVisNodes();
-    document.getElementById('node-props').innerHTML =
-        '<span style="color:#888;">点击画布上的节点查看属性</span>';
+    document.getElementById('node-props').innerHTML = '<span style="color:#888;">点击画布上的节点查看属性</span>';
     document.getElementById('visual-expr-preview').textContent = '';
 }
 
 function renderAllVisNodes() {
     const canvas = document.getElementById('visual-canvas');
-    // remove old nodes
+    const svg = document.getElementById('vis-edges');
+    if (!canvas) return;
     canvas.querySelectorAll('.vis-node').forEach(n => n.remove());
-
     for (const node of _visNodes) {
         const el = document.createElement('div');
         el.className = 'vis-node' + (node.id === _visSelectedNodeId ? ' selected' : '');
@@ -1256,26 +1299,22 @@ function renderAllVisNodes() {
         el.innerHTML = `
             <button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>
             <div class="node-label">${escHtml(node.label)}</div>
-            <div class="node-sub">${escHtml(node.key)}</div>
+            <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
         `;
-        el.addEventListener('mousedown', (e) => onVisNodeMouseDown(e, node.id));
-        el.addEventListener('click', (e) => { e.stopPropagation(); selectVisNode(node.id); });
+        el.addEventListener('mousedown', (event) => onVisNodeMouseDown(event, node.id));
+        el.addEventListener('click', (event) => { event.stopPropagation(); selectVisNode(node.id); });
         canvas.appendChild(el);
     }
+    if (svg) renderVisEdges(svg);
 }
 
 function onVisNodeMouseDown(e, nodeId) {
+    if (e.target.closest('button')) return;
     e.preventDefault();
     e.stopPropagation();
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
-    _visDragging = {
-        nodeId,
-        startX: node.x,
-        startY: node.y,
-        mouseX: e.clientX,
-        mouseY: e.clientY,
-    };
+    _visDragging = { nodeId, startX: node.x, startY: node.y, mouseX: e.clientX, mouseY: e.clientY };
     document.addEventListener('mousemove', onVisMouseMove);
     document.addEventListener('mouseup', onVisMouseUp);
 }
@@ -1284,10 +1323,8 @@ function onVisMouseMove(e) {
     if (!_visDragging) return;
     const node = _visNodes.find(n => n.id === _visDragging.nodeId);
     if (!node) return;
-    const dx = e.clientX - _visDragging.mouseX;
-    const dy = e.clientY - _visDragging.mouseY;
-    node.x = Math.max(0, _visDragging.startX + dx);
-    node.y = Math.max(0, _visDragging.startY + dy);
+    node.x = Math.max(0, _visDragging.startX + e.clientX - _visDragging.mouseX);
+    node.y = Math.max(0, _visDragging.startY + e.clientY - _visDragging.mouseY);
     renderAllVisNodes();
     _dirty = true;
 }
@@ -1303,92 +1340,373 @@ function selectVisNode(nodeId) {
     renderAllVisNodes();
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
-
-    // 显示节点属性面板
     const props = document.getElementById('node-props');
-    const catNames = { leaf:'数据列', ts:'时序算子', cs:'横截面算子', arith:'算术' };
+    const catNames = { leaf: '参数/常数', ts: '时序算子', cs: '横截面算子', arith: '算术' };
     props.innerHTML = `
         <div class="field"><label>类型</label><span>${catNames[node.cat] || node.cat}</span></div>
         <div class="field"><label>算子</label><span>${escHtml(node.key)}</span></div>
-        <div class="field"><label>标签</label><input type="text" id="vis-node-label" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>
+        <div class="field"><label>标签</label><input type="text" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>
+        ${renderVisualNodeParamControls(node)}
+        ${renderVisualInputSelectors(node)}
     `;
-
     updateVisualExprPreview();
 }
 
 function updateVisNodeLabel(nodeId, newLabel) {
     const node = _visNodes.find(n => n.id === nodeId);
-    if (node) { node.label = newLabel; renderAllVisNodes(); _dirty = true; }
+    if (!node) return;
+    node.label = newLabel;
+    if (node.key === 'DataColumnParam') node.params.alias = newLabel;
+    if (node.key === 'Constant') node.params.value = newLabel;
+    renderAllVisNodes();
+    updateVisualExprPreview();
+    _dirty = true;
 }
 
 function deleteVisNode(nodeId) {
     _visNodes = _visNodes.filter(n => n.id !== nodeId);
+    _visNodes.forEach(node => { node.inputs = (node.inputs || []).filter(id => id !== nodeId); });
     if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
     renderAllVisNodes();
     _dirty = true;
     updateVisualExprPreview();
 }
 
-// 从可视化节点生成 func_expr 字符串
 function visualToExpr() {
     if (_visNodes.length === 0) {
         document.getElementById('visual-expr-preview').textContent = '（无节点）';
         return '';
     }
-    // 简单串行连接：按拓扑？这里先用最后一个节点作为根
-    // 实际复杂的树状连接需要连线，先做简单版：把所有节点按 key 拼接
-    const root = _visNodes[_visNodes.length - 1];
-    const expr = buildExprFromNode(root);
+    const root = getVisualRootNode();
+    const expr = root ? buildExprFromNode(root, new Set()) : '';
     document.getElementById('visual-expr-preview').textContent = expr || '（无法生成表达式）';
     return expr;
 }
 
-function buildExprFromNode(node) {
-    return node.key;  // 简化版直接返回 key
+function buildExprFromNode(node, seen) {
+    if (!node || seen.has(node.id)) return '';
+    seen.add(node.id);
+    if (node.key === 'DataColumnParam') return node.params?.alias || node.label || 'P';
+    if (node.key === 'Constant') return node.params?.value || node.label || '0';
+    const inputs = (node.inputs || []).map(id => _visNodes.find(n => n.id === id));
+    const exprs = inputs.map(child => buildExprFromNode(child, new Set(seen))).filter(Boolean);
+    if (node.cat === 'arith') return exprs.length >= 2 ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
+    if (node.cat === 'ts' || node.cat === 'cs') {
+        if (!exprs.length) return '';
+        const rest = exprs.slice(1).join(', ');
+        return `${exprs[0]}.${node.key}(${rest})`;
+    }
+    return '';
 }
 
 function updateVisualExprPreview() {
-    const expr = visualToExpr();
-    document.getElementById('visual-expr-preview').textContent = expr || '';
+    const preview = document.getElementById('visual-expr-preview');
+    if (!preview) return;
+    preview.textContent = visualToExpr() || '';
 }
 
-// 覆盖保存：可视化模式也收集 func_expr
-// saveFactor 中读取 code-expr，可视化模式需要从 _visNodes 生成
-// 我们修改 saveFactor 的判断逻辑
-const _origSaveFactor = saveFactor;
-saveFactor = async function() {
-    if (_currentMode === 'visual') {
-        const expr = visualToExpr();
-        // 把可视化表达式写入隐藏字段，让原来的保存逻辑拿得到
-        const codeTextarea = document.getElementById('code-expr');
-        if (!codeTextarea) {
-            // 创建临时 textarea
-            const tmp = document.createElement('textarea');
-            tmp.id = 'code-expr';
-            tmp.style.display = 'none';
-            tmp.value = expr;
-            document.getElementById('editor-body').appendChild(tmp);
-        } else {
-            codeTextarea.value = expr;
-        }
-        // 可视化模式下用 visual 表单的字段
-        const nameEl = document.getElementById('cfg-name-vis');
-        const cnEl = document.getElementById('cfg-cn-vis');
-        const catEl = document.getElementById('cfg-cat-vis');
-        if (nameEl && !document.getElementById('cfg-name')) {
-            // 创建隐藏的 code 字段
-            ['cfg-name','cfg-cn','cfg-cat','cfg-desc'].forEach(id => {
-                const vis = document.getElementById(id + '-vis');
-                if (vis && !document.getElementById(id)) {
-                    const h = document.createElement('input');
-                    h.type = 'hidden'; h.id = id; h.value = vis.value;
-                    document.getElementById('editor-body').appendChild(h);
-                }
-            });
+function defaultVisualNodeParams(op) {
+    if (op.key === 'DataColumnParam') return { alias: 'P', type: 'DataColumnParam', default_value: 'CA' };
+    if (op.key === 'Constant') return { value: '1' };
+    return {};
+}
+
+function getVisualNodeSubtitle(node) {
+    if (node.key === 'DataColumnParam') return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
+    if (node.key === 'Constant') return node.params?.value || '';
+    return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
+}
+
+function getVisualOperatorArity(node) {
+    return Object.values(OP_PALETTE).flat().find(op => op.key === node.key && op.cat === node.cat)?.arity || 0;
+}
+
+function renderVisualInputSelectors(node) {
+    const arity = getVisualOperatorArity(node);
+    if (!arity) return '';
+    const labels = node.cat === 'arith' ? ['左输入', '右输入'] : ['主输入', '参数/窗口'];
+    let html = '<div class="field"><label>输入连接</label>';
+    for (let i = 0; i < arity; i++) {
+        const current = (node.inputs || [])[i] || '';
+        html += `<select onchange="updateVisualNodeInput(${node.id}, ${i}, this.value)">
+            <option value="">选择${labels[i] || `输入 ${i + 1}`}</option>
+            ${_visNodes.filter(n => n.id !== node.id).map(n => `
+                <option value="${n.id}" ${String(current) === String(n.id) ? 'selected' : ''}>${escHtml(n.label)} #${n.id}</option>
+            `).join('')}
+        </select>`;
+    }
+    return html + '</div>';
+}
+
+function renderVisualNodeParamControls(node) {
+    if (node.key === 'DataColumnParam') {
+        return `
+            <div class="field"><label>参数别名</label><input value="${escHtml(node.params?.alias || node.label || 'P')}" oninput="updateVisualParam(${node.id}, 'alias', this.value)"></div>
+            <div class="field"><label>参数类型</label>
+                <select onchange="updateVisualParam(${node.id}, 'type', this.value)">
+                    ${['DataColumnParam', 'WindowParam', 'DateOrTimeParam'].map(t => `<option value="${t}" ${node.params?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                </select>
+            </div>
+            <div class="field"><label>默认值</label><input value="${escHtml(node.params?.default_value || '')}" oninput="updateVisualParam(${node.id}, 'default_value', this.value)"></div>
+        `;
+    }
+    if (node.key === 'Constant') {
+        return `<div class="field"><label>常数值</label><input value="${escHtml(node.params?.value || node.label || '0')}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>`;
+    }
+    return '';
+}
+
+function updateVisualNodeInput(nodeId, index, value) {
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node) return;
+    node.inputs = node.inputs || [];
+    node.inputs[index] = value ? Number(value) : null;
+    node.inputs = node.inputs.filter(Boolean);
+    _dirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    selectVisNode(nodeId);
+}
+
+function updateVisualParam(nodeId, key, value) {
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node) return;
+    node.params = node.params || {};
+    node.params[key] = value;
+    if (key === 'alias' || key === 'value') node.label = value;
+    _dirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    updateVisualExprPreview();
+}
+
+function getVisualRootNode() {
+    const referenced = new Set(_visNodes.flatMap(node => node.inputs || []));
+    return [..._visNodes].reverse().find(node => !referenced.has(node.id)) || _visNodes[_visNodes.length - 1];
+}
+
+function renderVisEdges(svg) {
+    svg.innerHTML = '';
+    for (const node of _visNodes) {
+        for (const inputId of (node.inputs || [])) {
+            const from = _visNodes.find(n => n.id === inputId);
+            if (!from) continue;
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const x1 = from.x + 120;
+            const y1 = from.y + 28;
+            const x2 = node.x;
+            const y2 = node.y + 28;
+            const mid = (x1 + x2) / 2;
+            path.setAttribute('d', `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
+            path.setAttribute('stroke', '#94a3b8');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            svg.appendChild(path);
         }
     }
-    return await _origSaveFactor();
-};
+}
+
+function visualToSource(options = {}) {
+    if (_currentMode !== 'visual') return document.getElementById('code-source')?.value || '';
+    const expr = visualToExpr();
+    if (!expr) {
+        if (!options.silent) showToast('请先完成可视化表达式连接', 'error');
+        return '';
+    }
+    const className = document.getElementById('cfg-name-vis')?.value?.trim() || extractClassNameFromSource(_visSourceFallback) || 'MyFactor';
+    const paramNodes = _visNodes.filter(n => n.key === 'DataColumnParam');
+    const paramTypes = [...new Set(paramNodes.map(n => n.params?.type || 'DataColumnParam'))];
+    const imports = [
+        'from tools.factors import FactorFamily',
+        paramTypes.length ? `from tools.parameters import ${paramTypes.join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+    const paramLines = paramNodes.map(n => {
+        const alias = n.params?.alias || n.label || 'P';
+        const type = n.params?.type || 'DataColumnParam';
+        const dv = n.params?.default_value || '';
+        return `        ${alias} = ${type}('${alias}', default_value=${JSON.stringify(dv)})`;
+    }).join('\n');
+    return `${imports}\n\n\nclass ${className}(FactorFamily):\n    @staticmethod\n    def factor_expr():\n${paramLines || "        P = DataColumnParam('P', default_value='CA')"}\n        return ${expr}\n`;
+}
+
+function loadVisualNodesFromSource(source) {
+    _visNodes = [];
+    _visNextId = 1;
+    _visSelectedNodeId = null;
+    const params = parseParamNodesFromSource(source);
+    const nodeByAlias = new Map();
+    params.forEach((param, index) => {
+        const node = {
+            id: _visNextId++,
+            key: 'DataColumnParam',
+            cat: 'leaf',
+            label: param.alias,
+            x: 60,
+            y: 60 + index * 78,
+            inputs: [],
+            params: param,
+        };
+        _visNodes.push(node);
+        nodeByAlias.set(param.alias, node.id);
+    });
+    if (!_visNodes.length) {
+        const node = {
+            id: _visNextId++,
+            key: 'DataColumnParam',
+            cat: 'leaf',
+            label: 'P',
+            x: 60,
+            y: 80,
+            inputs: [],
+            params: { alias: 'P', type: 'DataColumnParam', default_value: 'CA' },
+        };
+        _visNodes.push(node);
+        nodeByAlias.set('P', node.id);
+    }
+    const returnExpr = parseReturnExprFromSource(source);
+    const assignments = parseAssignmentsFromSource(source);
+    if (returnExpr) {
+        buildVisualGraphFromExpression(returnExpr, assignments, nodeByAlias, 320, 90);
+    }
+}
+
+function parseParamNodesFromSource(source) {
+    const params = [];
+    const regex = /^\s*(\w+)\s*=\s*(DataColumnParam|WindowParam|DateOrTimeParam)\(\s*['"]([^'"]+)['"]\s*,\s*default_value\s*=\s*([^)\n]+)\)/gm;
+    let match;
+    while ((match = regex.exec(source || '')) !== null) {
+        params.push({
+            alias: match[1] || match[3],
+            type: match[2],
+            default_value: String(match[4] || '').trim().replace(/^['"]|['"]$/g, ''),
+        });
+    }
+    return params;
+}
+
+function parseReturnExprFromSource(source) {
+    const match = String(source || '').match(/^\s*return\s+(.+)$/m);
+    return match ? match[1].trim() : '';
+}
+
+function parseAssignmentsFromSource(source) {
+    const assignments = new Map();
+    const regex = /^\s*(\w+)\s*=\s*(.+)$/gm;
+    let match;
+    while ((match = regex.exec(source || '')) !== null) {
+        if (/Param\s*\(/.test(match[2])) continue;
+        assignments.set(match[1], match[2].trim());
+    }
+    return assignments;
+}
+
+function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y) {
+    const trimmed = stripOuterParens(String(expr || '').trim());
+    if (!trimmed) return null;
+    if (nodeByAlias.has(trimmed)) return nodeByAlias.get(trimmed);
+    if (assignments.has(trimmed)) {
+        return buildVisualGraphFromExpression(assignments.get(trimmed), assignments, nodeByAlias, x, y);
+    }
+    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(trimmed)) {
+        return addVisualNodeFromParsed('Constant', 'leaf', trimmed, x, y, [], { value: trimmed });
+    }
+
+    const method = parseMethodExpression(trimmed);
+    if (method) {
+        const baseId = buildVisualGraphFromExpression(method.base, assignments, nodeByAlias, x - 220, y);
+        const inputIds = baseId ? [baseId] : [];
+        if (method.arg) {
+            const argId = buildVisualGraphFromExpression(method.arg, assignments, nodeByAlias, x - 220, y + 90);
+            if (argId) inputIds.push(argId);
+        }
+        const cat = OP_PALETTE.cs.some(op => op.key === method.name) ? 'cs' : 'ts';
+        return addVisualNodeFromParsed(method.name, cat, method.name, x, y, inputIds);
+    }
+
+    const binary = parseBinaryExpression(trimmed);
+    if (binary) {
+        const leftId = buildVisualGraphFromExpression(binary.left, assignments, nodeByAlias, x - 220, y - 60);
+        const rightId = buildVisualGraphFromExpression(binary.right, assignments, nodeByAlias, x - 220, y + 60);
+        return addVisualNodeFromParsed(binary.op, 'arith', binary.op, x, y, [leftId, rightId].filter(Boolean));
+    }
+
+    return addVisualNodeFromParsed('Constant', 'leaf', trimmed, x, y, [], { value: trimmed });
+}
+
+function addVisualNodeFromParsed(key, cat, label, x, y, inputs = [], params = {}) {
+    const node = {
+        id: _visNextId++,
+        key,
+        cat,
+        label,
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        inputs,
+        params,
+    };
+    _visNodes.push(node);
+    return node.id;
+}
+
+function parseMethodExpression(expr) {
+    const match = expr.match(/^(.+)\.(rolling_mean|rolling_std|rolling_min|rolling_max|shift|delta|log|abs|cs_rank|cs_zscore)\((.*)\)$/);
+    if (!match) return null;
+    const args = splitTopLevelArgs(match[3]);
+    return { base: match[1].trim(), name: match[2], arg: args[0] || '' };
+}
+
+function parseBinaryExpression(expr) {
+    for (const ops of [['+', '-'], ['*', '/']]) {
+        let depth = 0;
+        for (let i = expr.length - 1; i >= 0; i--) {
+            const ch = expr[i];
+            if (ch === ')') depth++;
+            if (ch === '(') depth--;
+            if (depth === 0 && ops.includes(ch) && i > 0) {
+                if ((ch === '+' || ch === '-') && /[eE]/.test(expr[i - 1] || '')) continue;
+                return { left: expr.slice(0, i).trim(), op: ch, right: expr.slice(i + 1).trim() };
+            }
+        }
+    }
+    return null;
+}
+
+function splitTopLevelArgs(argText) {
+    const args = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < argText.length; i++) {
+        const ch = argText[i];
+        if (ch === '(') depth++;
+        if (ch === ')') depth--;
+        if (ch === ',' && depth === 0) {
+            args.push(argText.slice(start, i).trim());
+            start = i + 1;
+        }
+    }
+    const tail = argText.slice(start).trim();
+    if (tail) args.push(tail);
+    return args;
+}
+
+function stripOuterParens(expr) {
+    let text = expr;
+    while (text.startsWith('(') && text.endsWith(')')) {
+        let depth = 0;
+        let wraps = true;
+        for (let i = 0; i < text.length; i++) {
+            if (text[i] === '(') depth++;
+            if (text[i] === ')') depth--;
+            if (depth === 0 && i < text.length - 1) {
+                wraps = false;
+                break;
+            }
+        }
+        if (!wraps) break;
+        text = text.slice(1, -1).trim();
+    }
+    return text;
+}
 
 // ═══════════════════════════════════════════════════════════
 // Toast

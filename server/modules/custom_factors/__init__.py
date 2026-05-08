@@ -31,6 +31,11 @@ from server.modules.custom_factors.param_config_store import (
     delete_param_config,
     list_param_config_aliases,
 )
+from server.modules.custom_factors.source_helpers import (
+    assemble_factor_source as _assemble_py,
+    parse_class_meta as _parse_class_meta,
+    strip_factor_meta as _strip_meta,
+)
 from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
@@ -305,178 +310,6 @@ def _build_factor_library_config_factors(current_username: str, owner_acct: dict
         except Exception:
             continue
     return factors
-
-
-def _parse_class_meta(source_code: str) -> dict:
-    """从 Python 源码中提取 class 元信息：name, chinese_name(desc), description, category。"""
-    import re
-    result = {'name': '', 'chinese_name': '', 'description': '', 'category': ''}
-
-    # 提取 class 名称
-    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
-    if class_match:
-        result['name'] = class_match.group(1)
-
-    # 提取 desc = '...'
-    desc_match = re.search(r"""^\s*desc\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if desc_match:
-        result['chinese_name'] = desc_match.group(1)
-
-    # 提取 description = """...""" 或 '''...'''
-    desc_long_match = re.search(
-        r'^\s*description\s*=\s*("""|\'\'\')(.*?)\1',
-        source_code, re.MULTILINE | re.DOTALL
-    )
-    if not desc_long_match:
-        # 尝试单行 description
-        desc_long_match = re.search(r"""^\s*description\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if desc_long_match:
-        result['description'] = desc_long_match.group(2) if desc_long_match.lastindex >= 2 else desc_long_match.group(1)
-
-    # 提取 category
-    cat_match = re.search(r"""^\s*category\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if cat_match:
-        result['category'] = cat_match.group(1)
-
-    return result
-
-
-def _assemble_py(source_code: str, chinese_name: str = '', description: str = '',
-                 category: str = '自编') -> str:
-    """将用户编写的源码片段拼装为完整的 .py 文件。
-
-    用户 source_code 只需包含 import 行 + class 头部 + factor_expr() 方法体。
-    desc / description 由本函数拼入，缩进统一使用 4 空格。
-    """
-    import re
-
-    lines = source_code.split('\n')
-
-    # ── 收集 import 行（class 定义之前的所有行） ──
-    import_lines = []
-    class_start = 0
-    for i, line in enumerate(lines):
-        if re.match(r'^\s*class\s+\w+\s*\(', line):
-            class_start = i
-            break
-        import_lines.append(line)
-    for i in range(len(lines)):
-        if re.match(r'^\s*class\s+\w+\s*\(', lines[i]):
-            class_start = i
-            break
-    import_lines = lines[:class_start]
-
-    # ── 提取 class 名称 ──
-    class_match = re.search(r'^\s*class\s+(\w+)\s*\((.*?)\)\s*$', lines[class_start])
-    class_name = class_match.group(1) if class_match else 'MyFactor'
-    base_class = class_match.group(2).strip() if class_match else 'FactorFamily'
-
-    # ── 提取 factor_expr 方法体（def factor_expr ... return ...） ──
-    # 从 class 行之后的所有行中提取
-    body_lines = []
-    in_factor_expr = False
-    factor_expr_indent = ''
-    for line in lines[class_start + 1:]:
-        if re.match(r'^\s*(@staticmethod\s*$|def\s+factor_expr\s*\()', line):
-            in_factor_expr = True
-            factor_expr_indent = line[:len(line) - len(line.lstrip())]
-            continue
-        if in_factor_expr:
-            # 遇到非空行且缩进 <= 方法缩进，说明出了方法体
-            stripped = line.strip()
-            if stripped:
-                line_indent = line[:len(line) - len(line.lstrip())]
-                if len(line_indent) <= len(factor_expr_indent):
-                    break
-                # 跳过已有的 desc / description / category 行
-                if re.match(r'^\s*(desc|description|category)\s*=', line):
-                    continue
-            body_lines.append(line)
-
-    # ── 拼装 ──
-    indent = '    '  # class 体内缩进
-
-    parts = []
-    # 头部注释
-    parts.append(f'# -*- coding: utf-8 -*-')
-    parts.append(f'# Custom Factor: {class_name}')
-    parts.append('')
-
-    # import 行（不过滤，保持用户手写）
-    for il in import_lines:
-        parts.append(il)
-    # 确保有基础 import
-    parts.append('from tools.factors import FactorFamily')
-    parts.append('from tools.parameters import WindowParam, DataColumnParam, DateOrTimeParam')
-    parts.append('')
-
-    # class 定义
-    parts.append(f'class {class_name}({base_class}):')
-    if not any(l.strip().startswith('"""') or l.strip().startswith("'''") or l.strip().startswith('#') for l in body_lines[:2]):
-        parts.append(f'{indent}"""')
-        parts.append(f'{indent}{chinese_name or class_name}')
-        parts.append(f'{indent}"""')
-
-    # factor_expr 方法
-    parts.append('')
-    parts.append(f'{indent}@staticmethod')
-    parts.append(f'{indent}def factor_expr():')
-    for bl in body_lines:
-        parts.append(bl if bl.startswith(indent) else indent + bl)
-
-    # desc
-    if chinese_name:
-        parts.append('')
-        parts.append(f'{indent}desc = {repr(chinese_name)}')
-
-    # description（多行时用三引号）
-    if description:
-        parts.append('')
-        if '\n' in description:
-            parts.append(f'{indent}description = """')
-            for dl in description.split('\n'):
-                parts.append(f'{indent}{dl}')
-            parts.append(f'{indent}"""')
-        else:
-            parts.append(f'{indent}description = {repr(description)}')
-
-    # category
-    if category:
-        parts.append(f'{indent}category = {repr(category)}')
-
-    parts.append('')
-
-    return '\n'.join(parts)
-
-
-def _strip_meta(source_code: str) -> str:
-    """从完整 .py 源码中移除 desc/description/category 类属性行。
-
-    返回编辑区用的纯源码（import + class + factor_expr），
-    不含用户通过右侧表单编辑的元信息。
-    正确处理 description = \"\"\"...\"\"\" 多行块。
-    """
-    import re
-    lines = source_code.split('\n')
-    stripped = []
-    in_multiline_desc = False
-    for line in lines:
-        # 进入多行 description =
-        if re.match(r'^\s*description\s*=\s*("""|\'\'\')', line):
-            in_multiline_desc = True
-            # 如果同行闭合（单行三引号），不算多行
-            if line.count('"""') + line.count("'''") >= 2:
-                in_multiline_desc = False
-            continue
-        if in_multiline_desc:
-            if '"""' in line or "'''" in line:
-                in_multiline_desc = False
-            continue
-        # 跳过单行 desc / description / category
-        if re.match(r'^\s*(desc|description|category)\s*=', line):
-            continue
-        stripped.append(line)
-    return '\n'.join(stripped)
 
 
 # ── 公共因子只读详情 ──────────────────────────────────────────────────────────
@@ -825,6 +658,7 @@ def api_create_factor():
             'chinese_name': chinese_name,
             'description': description,
             'category': (data.get('category') or '自编').strip(),
+            'source_code': _strip_meta(full_source),
             'is_public': False,
         }
     })
@@ -899,6 +733,7 @@ def api_update_factor(factor_id):
             'chinese_name': new_meta.get('chinese_name', ''),
             'description': new_meta.get('description', ''),
             'category': new_meta.get('category', '自编'),
+            'source_code': _strip_meta(full_source),
             'is_public': False,
         }
     })
@@ -1021,10 +856,14 @@ def api_validate_expr():
     # ── 自定义因子：编译源码 → exec → 获取 tree_repr ──
     source_code = (data.get('source_code') or '').strip()
     factor_id = (data.get('factor_id') or '').strip()
+    owner_username = (data.get('owner_username') or username).strip()
 
     if not source_code and factor_id:
+        if not _can_view_user_scope(username, owner_username):
+            return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
         # 从已保存文件加载
-        source_code = _load_factor(username, factor_id) or ''
+        loaded_source = _load_factor(owner_username, factor_id) or ''
+        source_code = _strip_meta(loaded_source) if loaded_source else ''
 
     if not source_code:
         return jsonify({'success': True, 'valid': False, 'error': '源码不能为空'})
