@@ -1,14 +1,16 @@
 // ── 全因子概览 ──
 let _scopeFactorsData = null;
 let _allFactorsIncludeSubordinates = true;
-let _allFactorsOwnerFilter = '';
+let _allFactorsOrgFilter = '';
+let _allFactorsUserFilter = '';
 
 async function openAllFactorsOverlay() {
     document.getElementById('all-factors-overlay').classList.add('open');
     const body = document.getElementById('all-factors-body');
     body.innerHTML = '<p style="color:#888;">加载中...</p>';
     _allFactorsIncludeSubordinates = true;
-    _allFactorsOwnerFilter = '';
+    _allFactorsOrgFilter = '';
+    _allFactorsUserFilter = '';
     await loadAllFactorsOverview();
 }
 
@@ -19,7 +21,12 @@ async function loadAllFactorsOverview() {
         const data = await resp.json();
         if (data.success) {
             const factors = (data.factors || []).sort(compareAllFactorsForDisplay);
-            _scopeFactorsData = {success: true, factors, errors: data.errors || []};
+            _scopeFactorsData = {
+                success: true,
+                factors,
+                errors: data.errors || [],
+                canFilterOrganization: !!data.can_filter_organization,
+            };
             renderScopeFactorsOverview();
         } else {
             body.innerHTML = '<p style="color:#999;">加载失败: ' + (data.error || '未知错误') + '</p>';
@@ -117,50 +124,72 @@ function renderScopeFactorsOverview() {
 }
 
 function renderAllFactorsControls() {
-    const ownerOptions = buildAllFactorOwnerOptions();
+    const orgOptions = buildAllFactorOrgOptions();
     let html = '<div class="all-factors-controls">';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#667085;cursor:pointer;">' +
         '<input type="checkbox" onchange="toggleAllFactorsSubordinates(this.checked)" ' +
         (_allFactorsIncludeSubordinates ? 'checked' : '') + ' style="width:auto;margin:0;">包含下级用户的参数配置因子</label>';
-    html += '<label class="all-factors-owner-filter">所有者 ';
-    html += '<select onchange="setAllFactorsOwnerFilter(this.value)">';
-    html += '<option value="">全部所有者</option>';
-    ownerOptions.forEach(opt => {
-        html += '<option value="' + escAttr(opt.value) + '"' + (opt.value === _allFactorsOwnerFilter ? ' selected' : '') + '>' + escHtml(opt.label) + '</option>';
-    });
-    html += '</select></label></div>';
+    if (_scopeFactorsData?.canFilterOrganization) {
+        html += '<label class="all-factors-owner-filter">机构 ';
+        html += '<select onchange="setAllFactorsOrgFilter(this.value)">';
+        html += '<option value="">全部机构</option>';
+        orgOptions.forEach(opt => {
+            html += '<option value="' + escAttr(opt.value) + '"' + (opt.value === _allFactorsOrgFilter ? ' selected' : '') + '>' + escHtml(opt.label) + '</option>';
+        });
+        html += '</select></label>';
+    }
+    html += '<label class="all-factors-owner-filter">用户 ';
+    html += '<input id="all-factors-user-filter" type="search" value="' + escAttr(_allFactorsUserFilter) + '" placeholder="搜索用户名/别名" oninput="setAllFactorsUserFilter(this.value)">';
+    html += '</label></div>';
     return html;
 }
 
 async function toggleAllFactorsSubordinates(checked) {
     _allFactorsIncludeSubordinates = !!checked;
-    _allFactorsOwnerFilter = '';
+    _allFactorsOrgFilter = '';
+    _allFactorsUserFilter = '';
     document.getElementById('all-factors-body').innerHTML = renderAllFactorsControls() + '<p style="color:#888;">加载中...</p>';
     await loadAllFactorsOverview();
 }
 
-function setAllFactorsOwnerFilter(value) {
-    _allFactorsOwnerFilter = value || '';
+function setAllFactorsOrgFilter(value) {
+    _allFactorsOrgFilter = value || '';
     renderScopeFactorsOverview();
 }
 
-function buildAllFactorOwnerOptions() {
+function setAllFactorsUserFilter(value) {
+    _allFactorsUserFilter = value || '';
+    renderScopeFactorsOverview();
+    setTimeout(() => {
+        const input = document.getElementById('all-factors-user-filter');
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+}
+
+function buildAllFactorOrgOptions() {
     const factors = (_scopeFactorsData && _scopeFactorsData.factors) || [];
-    const owners = new Map();
+    const orgs = new Map();
     factors.forEach(f => {
-        const key = f.owner_username || '';
-        if (!key || owners.has(key)) return;
-        owners.set(key, {
+        const key = f.owner_organization_id || '';
+        if (!key || orgs.has(key)) return;
+        orgs.set(key, {
             value: key,
-            label: getAllFactorOwnerLabel(f),
+            label: f.owner_organization_name || key,
         });
     });
-    return [...owners.values()].sort((a, b) => a.label.localeCompare(b.label));
+    return [...orgs.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function filterAllFactorsByOwner(factors) {
-    if (!_allFactorsOwnerFilter) return factors;
-    return factors.filter(f => (f.owner_username || '') === _allFactorsOwnerFilter);
+    const userFilter = _allFactorsUserFilter.trim().toLowerCase();
+    return factors.filter(f => {
+        if (_allFactorsOrgFilter && (f.owner_organization_id || '') !== _allFactorsOrgFilter) return false;
+        if (!userFilter) return true;
+        const haystack = `${f.owner_username || ''} ${f.owner_alias || ''}`.toLowerCase();
+        return haystack.includes(userFilter);
+    });
 }
 
 function getGroup(name) {

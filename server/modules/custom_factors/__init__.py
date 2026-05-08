@@ -603,6 +603,8 @@ def api_param_factor_overview():
     username = _current_user()
     include_subordinates = request.args.get('include_subordinates') == '1'
     accounts = _visible_accounts_for(username, include_self=True) if include_subordinates else [_get_account(username) or {'username': username}]
+    current_acct = _get_account(username) or {}
+    can_filter_organization = bool(current_acct.get('role') == 'super_admin' or current_acct.get('is_admin'))
     public_by_alias = {}
     for factor in _list_public_factors():
         public_by_alias[factor.get('id')] = factor
@@ -654,6 +656,44 @@ def api_param_factor_overview():
         'errors': errors,
         'include_subordinates': include_subordinates,
         'current_username': username,
+        'can_filter_organization': can_filter_organization,
+    })
+
+
+@cf_bp.route('/api/param-configs/<ff_alias>', methods=['GET'])
+@login_required
+def api_param_configs(ff_alias):
+    """因子库参数配置列表：按可见用户索引，不复用单因子测试的模板导入列表语义。"""
+    username = _current_user()
+    accounts = _visible_accounts_for(username, include_self=True)
+    current_acct = _get_account(username) or {}
+    can_filter_organization = bool(current_acct.get('role') == 'super_admin' or current_acct.get('is_admin'))
+    users = []
+    for acct in accounts:
+        owner = acct.get('username')
+        if not owner:
+            continue
+        with _get_user_file_lock(owner):
+            templates = _load_user_tpls(owner, 'params', ff_alias)
+        users.append({
+            'owner_username': owner,
+            'owner_alias': _account_display_name(acct),
+            'owner_organization_id': acct.get('organization_id') or '',
+            'owner_organization_name': acct.get('organization_name') or '',
+            'editable': owner == username,
+            'templates': [
+                {
+                    'id': tpl.get('id'),
+                    'name': tpl.get('name') or '未命名配置',
+                    'updated_at': _template_time_from_id(tpl),
+                }
+                for tpl in templates
+            ],
+        })
+    return jsonify({
+        'success': True,
+        'users': users,
+        'can_filter_organization': can_filter_organization,
     })
 
 

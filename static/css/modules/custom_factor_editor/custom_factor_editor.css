@@ -339,7 +339,8 @@ svg.vis-edges { position: absolute; top:0; left:0; width:100%; height:100%; poin
 .all-factors-owner-filter {
     display: flex; align-items: center; gap: 6px; font-size: 13px; color: #667085;
 }
-.all-factors-owner-filter select {
+.all-factors-owner-filter select,
+.all-factors-owner-filter input {
     min-width: 180px; padding: 4px 8px; border: 1px solid #d0d7de;
     border-radius: 6px; background: #fff; font-size: 13px;
 }

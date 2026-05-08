@@ -7,6 +7,8 @@ let _paramFamilyDef = null;              // 因子家族定义（含 params 数�
 let _paramAliases = [];              // 参数别名列表（列头）
 let _paramRows = [];                 // 参数行数据 [{alias: value}, ...]
 let _paramTemplates = [];             // 当前因子家族可见的参数配置（自己 + 下级只读）
+let _paramConfigUsers = [];           // 因子库参数配置按用户索引返回
+let _paramTemplateCanFilterOrganization = false;
 
 // 打开因子家族参数抽屉
 function openFactorFamilyParamDrawer(factorFamilyName) {
@@ -40,6 +42,11 @@ function openFactorFamilyParamDrawer(factorFamilyName) {
     if (ownerFilter) {
         ownerFilter.value = '';
         ownerFilter.oninput = filterParamTemplatesByOwner;
+    }
+    const orgFilter = document.getElementById('param-tpl-org-filter');
+    if (orgFilter) {
+        orgFilter.value = '';
+        orgFilter.onchange = filterParamTemplatesByOwner;
     }
     loadParamTemplatesIntoSelect(); // 加载该因子家族的模板列表
 
@@ -180,13 +187,17 @@ async function loadParamTemplatesIntoSelect() {
     if (!sel) return;
     sel.onchange = updateParamTemplateNameLabel;
     _paramTemplates = [];
+    _paramConfigUsers = [];
+    _paramTemplateCanFilterOrganization = false;
     renderParamTemplateOptions();
     try {
         // 因子库这里的 scope 是“当前用户配置 + 可见下级用户只读配置”，不是单因子测试的模板导入。
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '?include_visible=1');
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias));
         const data = await resp.json();
-        if (data.success && data.templates) {
-            _paramTemplates = data.templates;
+        if (data.success && data.users) {
+            _paramConfigUsers = data.users;
+            _paramTemplates = flattenParamConfigUsers(data.users);
+            _paramTemplateCanFilterOrganization = !!data.can_filter_organization;
         }
         renderParamTemplateOptions();
     } catch(e) {
@@ -196,14 +207,19 @@ async function loadParamTemplatesIntoSelect() {
 
 function renderParamTemplateOptions() {
     const sel = document.getElementById('param-tpl-select');
-    const filter = (document.getElementById('param-tpl-owner-filter')?.value || '').trim().toLowerCase();
+    const orgSel = document.getElementById('param-tpl-org-filter');
+    const orgRow = document.getElementById('param-tpl-org-filter-row');
+    const orgFilter = orgSel?.value || '';
+    const userFilter = (document.getElementById('param-tpl-owner-filter')?.value || '').trim().toLowerCase();
     if (!sel) return;
     const selected = sel.value;
-    sel.innerHTML = '<option value="">— 选择参数配置 —</option>';
+    renderParamTemplateOrgOptions(orgSel, orgRow, orgFilter);
+    sel.innerHTML = '<option value="">— 选择该用户的参数配置 —</option>';
     _paramTemplates.forEach(t => {
-        const ownerText = `${t.owner_alias || ''} ${t.owner_username || ''} ${t.owner_organization_name || ''}`;
-        const haystack = `${ownerText} ${t.name || ''}`.toLowerCase();
-        if (filter && !haystack.includes(filter)) return;
+        if (orgFilter && (t.owner_organization_id || '') !== orgFilter) return;
+        const ownerText = `${t.owner_alias || ''} ${t.owner_username || ''}`;
+        const haystack = ownerText.toLowerCase();
+        if (userFilter && !haystack.includes(userFilter)) return;
         const owner = t.owner_alias ? `${t.owner_alias} / ` : '';
         const editable = t.editable ? '1' : '0';
         sel.innerHTML += '<option value="' + escAttr(t.id) + '" data-owner="' + escAttr(t.owner_username || '') + '" data-editable="' + editable + '">' +
@@ -213,6 +229,47 @@ function renderParamTemplateOptions() {
         sel.value = selected;
     }
     updateParamTemplateNameLabel();
+}
+
+function flattenParamConfigUsers(users) {
+    const result = [];
+    users.forEach(user => {
+        (user.templates || []).forEach(tpl => {
+            result.push({
+                id: tpl.id,
+                name: tpl.name,
+                updated_at: tpl.updated_at || '',
+                owner_username: user.owner_username || '',
+                owner_alias: user.owner_alias || user.owner_username || '',
+                owner_organization_id: user.owner_organization_id || '',
+                owner_organization_name: user.owner_organization_name || '',
+                editable: !!user.editable,
+            });
+        });
+    });
+    return result;
+}
+
+function renderParamTemplateOrgOptions(orgSel, orgRow, selectedOrg) {
+    if (!orgSel || !orgRow) return;
+    orgRow.style.display = _paramTemplateCanFilterOrganization ? '' : 'none';
+    if (!_paramTemplateCanFilterOrganization) {
+        orgSel.value = '';
+        return;
+    }
+    const orgs = new Map();
+    _paramTemplates.forEach(t => {
+        const id = t.owner_organization_id || '';
+        if (!id || orgs.has(id)) return;
+        orgs.set(id, t.owner_organization_name || id);
+    });
+    orgSel.innerHTML = '<option value="">全部机构</option>' + [...orgs.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, name]) => '<option value="' + escAttr(id) + '">' + escHtml(name) + '</option>')
+        .join('');
+    if ([...orgSel.options].some(opt => opt.value === selectedOrg)) {
+        orgSel.value = selectedOrg;
+    }
 }
 
 function filterParamTemplatesByOwner() {

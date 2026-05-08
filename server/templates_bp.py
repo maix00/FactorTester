@@ -177,6 +177,8 @@ def list_params_templates(ff_alias):
     u = _require_user()
     include_visible = request.args.get('include_visible') == '1'
     accounts = _visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
+    current_acct = next((a for a in accounts if a.get('username') == u), None) or {}
+    can_filter_organization = bool(current_acct.get('role') == 'super_admin' or current_acct.get('is_admin'))
     result = []
     for acct in accounts:
         owner = acct.get('username')
@@ -194,7 +196,11 @@ def list_params_templates(ff_alias):
                 'owner_organization_name': acct.get('organization_name') or '',
                 'editable': owner == u,
             })
-    return jsonify({'success': True, 'templates': result})
+    return jsonify({
+        'success': True,
+        'templates': result,
+        'can_filter_organization': can_filter_organization,
+    })
 
 
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['POST'])

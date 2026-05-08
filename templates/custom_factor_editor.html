@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-{% from 'modules/shared/param_config_bar.html' import render_param_config_bar %}
 <html>
 <head>
     <title>因子管理</title>
@@ -60,24 +59,38 @@
                     <span class="setting-summary-value" id="param-drawer-summary-text">—</span>
                 </div>
 
-                <!-- 用户参数配置区：复用单因子测试三行抽屉布局；这里的 scope 是用户配置 + 下级只读配置 -->
-                {{ render_param_config_bar(
-                    bar_id='params-template-bar',
-                    select_id='param-tpl-select',
-                    select_placeholder='— 选择参数配置 —',
-                    label_id='param-tpl-name-label',
-                    status_id='param-tpl-status',
-                    search_id='param-tpl-owner-filter',
-                    search_placeholder='搜索所有者/用户名/机构/配置名',
-                    label_title='当前参数配置',
-                    label_max_width='240px',
-                    buttons=[
-                        {'text': '查看', 'title': '查看选中的参数配置', 'onclick': 'loadParamTemplate()', 'variant': 'param-template-btn-primary'},
-                        {'text': '另存为…', 'title': '将当前参数列表保存为自己的新配置', 'onclick': 'saveParamTemplate()', 'variant': 'param-template-btn-success'},
-                        {'text': '更新', 'title': '用当前参数列表覆盖自己的选中配置', 'onclick': 'updateParamTemplate()', 'variant': 'param-template-btn-warning'},
-                        {'text': '删除', 'title': '删除自己的选中配置', 'onclick': 'deleteParamTemplate()', 'variant': 'param-template-btn-danger'}
-                    ]
-                ) }}
+                <!-- 因子库参数配置区：按用户索引配置，不复用单因子测试的模板下拉语义 -->
+                <div class="factor-config-browser" id="params-template-bar">
+                    <div class="param-template-row" id="param-tpl-org-filter-row" style="display:none;">
+                        <select id="param-tpl-org-filter" class="param-template-select">
+                            <option value="">全部机构</option>
+                        </select>
+                    </div>
+                    <div class="param-template-row">
+                        <input id="param-tpl-owner-filter"
+                               type="search"
+                               class="param-template-search"
+                               placeholder="搜索用户名/别名">
+                    </div>
+                    <div class="param-template-row">
+                        <select id="param-tpl-select" class="param-template-select">
+                            <option value="">— 选择该用户的参数配置 —</option>
+                        </select>
+                    </div>
+                    <div class="param-template-row">
+                        <span id="param-tpl-name-label"
+                              class="param-template-name-label"
+                              title="当前参数配置"
+                              style="display:none;max-width:240px;"></span>
+                    </div>
+                    <div class="param-template-row param-template-actions">
+                        <button onclick="loadParamTemplate()" title="查看选中的参数配置" class="param-template-btn param-template-btn-primary">查看</button>
+                        <button onclick="saveParamTemplate()" title="将当前参数列表保存为自己的新配置" class="param-template-btn param-template-btn-success">另存为…</button>
+                        <button onclick="updateParamTemplate()" title="用当前参数列表覆盖自己的选中配置" class="param-template-btn param-template-btn-warning">更新</button>
+                        <button onclick="deleteParamTemplate()" title="删除自己的选中配置" class="param-template-btn param-template-btn-danger">删除</button>
+                        <span id="param-tpl-status" class="param-template-status"></span>
+                    </div>
+                </div>
 
                 <!-- 参数表格 -->
                 <div class="param-table-container" id="param_table_scroll">

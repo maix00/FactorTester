@@ -5,6 +5,7 @@
     label_id,
     status_id,
     input_id='',
+    org_select_id='',
     search_id='',
     search_placeholder='',
     label_title='当前配置',
@@ -18,6 +19,13 @@
             <option value="">{{ select_placeholder }}</option>
         </select>
     </div>
+    {% if org_select_id %}
+    <div class="param-template-row" id="{{ org_select_id }}-row" style="display:none;">
+        <select id="{{ org_select_id }}" class="param-template-select">
+            <option value="">全部机构</option>
+        </select>
+    </div>
+    {% endif %}
     {% if search_id %}
     <div class="param-template-row">
         <input id="{{ search_id }}"
