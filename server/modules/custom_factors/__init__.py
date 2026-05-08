@@ -25,6 +25,7 @@ from server.shared import (
     _get_user_file_lock, get_custom_factor_instance,
 )
 from server.param_meta import serialize_param_meta
+from server.modules.shared.param_config import build_param_factor_item, normalize_param_rows
 from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
@@ -284,21 +285,6 @@ def _template_time_from_id(tpl: dict) -> str:
         return ''
 
 
-def _normalize_param_config_rows(username: str, ff_alias: str, params_list: list) -> list:
-    ff = get_factor_family_instance(ff_alias, username=username)
-    normalized_rows = []
-    for params in params_list:
-        if not isinstance(params, dict):
-            raise ValueError('参数行必须是对象')
-        normalized = ff._normalize_param_kwargs(**params)
-        ff._check_in_space(**normalized)
-        normalized_rows.append({
-            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-            for p in ff.params
-        })
-    return normalized_rows
-
-
 def _factor_group_key(name: str | None) -> str:
     group = ''
     upper_count = 0
@@ -342,46 +328,9 @@ def _build_param_factor_item(current_username: str, owner_acct: dict, ff_alias: 
                              row: dict, row_idx: int, public_by_alias: dict, custom_by_alias: dict) -> dict:
     owner_username = owner_acct.get('username') or ''
     ff, meta = _resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
-    normalized = ff._normalize_param_kwargs(**(row or {}))
-    ff._check_in_space(**normalized)
-    full_params = {
-        p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-        for p in ff.params
-    }
-    params_display = []
-    for p in ff.params:
-        value = full_params.get(p.alias)
-        try:
-            value_alias = p._value_space.alias(value)
-        except Exception:
-            value_alias = str(value) if value is not None else ''
-        params_display.append({
-            'alias': p.alias,
-            'value': value_alias,
-        })
-    source = meta.get('source') or 'unknown'
-    return {
-        'id': f"{owner_username}:{ff_alias}:{tpl.get('id')}:{row_idx}",
-        'factor_alias': ff.get_alias(**full_params),
-        'factor_family_alias': getattr(ff, 'alias', None) or meta.get('name') or ff_alias,
-        'factor_family_id': meta.get('id') or ff_alias,
-        'factor_family_name': meta.get('name') or ff_alias,
-        'chinese_name': meta.get('chinese_name') or '',
-        'category': meta.get('category') or '',
-        'source': source,
-        'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),
-        'template_id': tpl.get('id') or '',
-        'template_name': tpl.get('name') or '未命名配置',
-        'template_row_index': row_idx,
-        'params': params_display,
-        'params_count': len(params_display),
-        'owner_username': owner_username,
-        'owner_alias': _account_display_name(owner_acct),
-        'owner_organization_id': owner_acct.get('organization_id') or '',
-        'owner_organization_name': owner_acct.get('organization_name') or '',
-        'can_edit': owner_username == current_username,
-        'updated_at': _template_time_from_id(tpl),
-    }
+    acct = dict(owner_acct)
+    acct['alias'] = _account_display_name(owner_acct)
+    return build_param_factor_item(ff, row or {}, row_idx, acct, current_username, meta=meta, config=tpl)
 
 
 def _build_factor_library_config_factors(current_username: str, owner_acct: dict, ff_alias: str, config: dict) -> list:
@@ -789,6 +738,7 @@ def api_param_configs(ff_alias):
                 'name': tpl.get('name') if tpl else owner,
                 'updated_at': _template_time_from_id(tpl) if tpl else '',
                 'factor_count': len(tpl.get('params_list') or []) if tpl else 0,
+                'params_list': tpl.get('params_list') if tpl else [],
             } if tpl else None,
             'factors': factors,
         })
@@ -823,7 +773,8 @@ def api_save_param_config(ff_alias):
     if not isinstance(params_list, list) or len(params_list) == 0:
         return jsonify({'success': False, 'error': '参数列表不能为空'})
     try:
-        normalized_rows = _normalize_param_config_rows(username, ff_alias, params_list)
+        ff = get_factor_family_instance(ff_alias, username=username)
+        normalized_rows = normalize_param_rows(ff, params_list)
         with _get_user_file_lock(username):
             config = _save_factor_library_param_config(username, ff_alias, normalized_rows)
         acct = _get_account(username) or {'username': username}
