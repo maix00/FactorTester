@@ -17,6 +17,7 @@ let _editingOriginalParamAliases = '';
 // 初始化
 // ═══════════════════════════════════════════════════════════
 async function init() {
+    await loadVisualOperatorRegistry();
     await loadFactorFamilyList();
 }
 
@@ -1143,7 +1144,8 @@ function discardEdit() {
 // ═══════════════════════════════════════════════════════════
 
 // 算子定义
-const OP_PALETTE = {
+let _visualOperatorGroups = [];
+let OP_PALETTE = {
     leaf: [
         { key: 'DataColumnParam', label: '参数', desc: '数据列/窗口/时间参数', arity: 0 },
         { key: 'Constant', label: '常数', desc: '数值常量', arity: 0 },
@@ -1178,6 +1180,24 @@ let _visSelectedNodeId = null;
 let _visDragging = null;
 let _visSourceFallback = '';
 let _visGraphDirty = false;
+
+async function loadVisualOperatorRegistry() {
+    try {
+        const res = await fetch('/custom-factors/api/visual-operators');
+        const data = await res.json();
+        if (data.success && Array.isArray(data.groups)) {
+            _visualOperatorGroups = data.groups;
+            OP_PALETTE = Object.fromEntries(
+                data.groups.map(group => [group.key, [
+                    ...(Array.isArray(group.operators) ? group.operators : []),
+                    ...(Array.isArray(group.more_operators) ? group.more_operators : []),
+                ]])
+            );
+        }
+    } catch(e) {
+        _visualOperatorGroups = [];
+    }
+}
 
 function renderVisualEditor(factor) {
     _currentMode = 'visual';
@@ -1235,18 +1255,41 @@ function renderVisualEditor(factor) {
 }
 
 function renderPalette() {
-    const labels = { leaf: '参数/常数', ts: '时序算子', cs: '横截面算子', arith: '算术运算' };
+    const fallbackLabels = { leaf: '参数/常数', ts: '时序算子', cs: '横截面算子', arith: '算术运算' };
+    const groups = getVisualOperatorGroupsForRender();
     let html = '';
-    for (const [cat, ops] of Object.entries(OP_PALETTE)) {
-        html += `<h3>${labels[cat]}</h3>`;
-        for (const op of ops) {
-            html += `<div class="op-block ${cat}" draggable="true"
-                data-op-key="${escHtml(op.key)}" data-op-cat="${cat}" ondragstart="onOpDragStart(event)">
-                <strong>${escHtml(op.label)}</strong><div class="op-desc">${escHtml(op.desc)}</div>
-            </div>`;
+    for (const group of groups) {
+        const cat = group.key;
+        const ops = group.operators || [];
+        html += `<details class="visual-op-group" ${group.collapsed ? '' : 'open'}>
+            <summary>${escHtml(group.label || fallbackLabels[cat] || cat)}</summary>`;
+        html += renderVisualOperatorBlocks(cat, ops);
+        if (Array.isArray(group.more_operators) && group.more_operators.length) {
+            html += `<details class="visual-op-more">
+                <summary>${escHtml(group.more_label || '更多')}</summary>
+                ${renderVisualOperatorBlocks(cat, group.more_operators)}
+            </details>`;
         }
+        html += '</details>';
     }
     return html;
+}
+
+function renderVisualOperatorBlocks(cat, ops) {
+    return (ops || []).map(op => `<div class="op-block ${cat}" draggable="true"
+        data-op-key="${escHtml(op.key)}" data-op-cat="${escHtml(cat)}" ondragstart="onOpDragStart(event)">
+        <strong>${escHtml(op.label)}</strong><div class="op-desc">${escHtml(op.desc)}</div>
+    </div>`).join('');
+}
+
+function getVisualOperatorGroupsForRender() {
+    if (_visualOperatorGroups.length) return _visualOperatorGroups;
+    return Object.entries(OP_PALETTE).map(([key, operators]) => ({
+        key,
+        label: key,
+        collapsed: false,
+        operators,
+    }));
 }
 
 function initPaletteDrag() {
@@ -1408,8 +1451,15 @@ function buildExprFromNode(node, seen) {
     const inputs = (node.inputs || []).map(id => _visNodes.find(n => n.id === id));
     const exprs = inputs.map(child => buildExprFromNode(child, new Set(seen))).filter(Boolean);
     let expr = '';
-    if (node.cat === 'arith') expr = exprs.length >= 2 ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
-    if (node.cat === 'ts' || node.cat === 'cs') {
+    if (isVisualInfixOperator(node)) {
+        expr = exprs.length >= getVisualOperatorArity(node) ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
+    } else if (node.key === '~') {
+        expr = exprs.length >= 1 ? `(~${exprs[0]})` : '';
+    } else if (node.key === 'max' || node.key === 'min') {
+        expr = exprs.length >= 2 ? `${exprs[0]}.${node.key}(${exprs[1]})` : '';
+    } else if (node.key === 'rolling_corr') {
+        expr = exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
+    } else {
         if (!exprs.length) return '';
         const rest = exprs.slice(1).join(', ');
         expr = `${exprs[0]}.${node.key}(${rest})`;
@@ -1451,23 +1501,23 @@ function renderVisualNodeSlots(node) {
 }
 
 function getVisualSlotLabels(node) {
-    if (node.cat === 'arith') {
-        if (node.key === '-') return ['被减数', '减数'];
-        if (node.key === '/') return ['分子', '分母'];
-        if (node.key === '*') return ['左因子', '右因子'];
-        return ['左项', '右项'];
-    }
-    if (node.cat === 'ts') {
-        if (['rolling_mean', 'rolling_std', 'rolling_min', 'rolling_max'].includes(node.key)) return ['序列 X', '窗口 N'];
-        if (['shift', 'delta'].includes(node.key)) return ['序列 X', '步长 N'];
-        return ['序列 X'];
-    }
-    if (node.cat === 'cs') return ['序列 X'];
-    return [];
+    return getVisualOperatorDef(node)?.slots || [];
 }
 
 function getVisualOperatorArity(node) {
-    return Object.values(OP_PALETTE).flat().find(op => op.key === node.key && op.cat === node.cat)?.arity || 0;
+    return getVisualOperatorDef(node)?.arity || 0;
+}
+
+function getVisualOperatorDef(node) {
+    return Object.entries(OP_PALETTE).flatMap(([cat, ops]) => ops.map(op => ({...op, cat})))
+        .find(op => op.key === node.key && op.cat === node.cat)
+        || Object.entries(OP_PALETTE).flatMap(([cat, ops]) => ops.map(op => ({...op, cat})))
+            .find(op => op.key === node.key)
+        || null;
+}
+
+function isVisualInfixOperator(node) {
+    return getVisualOperatorDef(node)?.syntax === 'infix';
 }
 
 function renderVisualInputSelectors(node) {
@@ -1687,11 +1737,11 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y, la
     if (method) {
         const baseId = buildVisualGraphFromExpression(method.base, assignments, nodeByAlias, x - 220, y);
         const inputIds = baseId ? [baseId] : [];
-        if (method.arg) {
-            const argId = buildVisualGraphFromExpression(method.arg, assignments, nodeByAlias, x - 220, y + 90);
+        method.args.forEach((arg, index) => {
+            const argId = buildVisualGraphFromExpression(arg, assignments, nodeByAlias, x - 220, y + (index + 1) * 90);
             if (argId) inputIds.push(argId);
-        }
-        const cat = OP_PALETTE.cs.some(op => op.key === method.name) ? 'cs' : 'ts';
+        });
+        const cat = getVisualOperatorCatByKey(method.name) || 'ts';
         return addVisualNodeFromParsed(method.name, cat, labelHint || method.name, x, y, inputIds);
     }
 
@@ -1734,26 +1784,46 @@ function parseIntermediateExpression(expr) {
 }
 
 function parseMethodExpression(expr) {
-    const match = expr.match(/^(.+)\.(rolling_mean|rolling_std|rolling_min|rolling_max|shift|delta|log|abs|cs_rank|cs_zscore)\((.*)\)$/);
+    const methodKeys = Object.values(OP_PALETTE).flat()
+        .filter(op => !op.syntax && !['DataColumnParam', 'Constant'].includes(op.key))
+        .map(op => op.key)
+        .sort((a, b) => b.length - a.length)
+        .map(escapeRegExp)
+        .join('|');
+    const match = expr.match(new RegExp(`^(.+)\\.(${methodKeys})\\((.*)\\)$`));
     if (!match) return null;
     const args = splitTopLevelArgs(match[3]);
-    return { base: match[1].trim(), name: match[2], arg: args[0] || '' };
+    return { base: match[1].trim(), name: match[2], args };
 }
 
 function parseBinaryExpression(expr) {
-    for (const ops of [['+', '-'], ['*', '/']]) {
+    for (const ops of [['|'], ['&'], ['==', '!=', '>=', '<=', '>', '<'], ['+', '-'], ['*', '/'], ['**']]) {
         let depth = 0;
         for (let i = expr.length - 1; i >= 0; i--) {
             const ch = expr[i];
             if (ch === ')') depth++;
             if (ch === '(') depth--;
-            if (depth === 0 && ops.includes(ch) && i > 0) {
-                if ((ch === '+' || ch === '-') && /[eE]/.test(expr[i - 1] || '')) continue;
-                return { left: expr.slice(0, i).trim(), op: ch, right: expr.slice(i + 1).trim() };
+            if (depth !== 0 || i <= 0) continue;
+            for (const op of ops) {
+                const start = i - op.length + 1;
+                if (start <= 0 || expr.slice(start, i + 1) !== op) continue;
+                if ((op === '+' || op === '-') && /[eE]/.test(expr[start - 1] || '')) continue;
+                return { left: expr.slice(0, start).trim(), op, right: expr.slice(i + 1).trim() };
             }
         }
     }
     return null;
+}
+
+function getVisualOperatorCatByKey(key) {
+    for (const [cat, ops] of Object.entries(OP_PALETTE)) {
+        if (ops.some(op => op.key === key)) return cat;
+    }
+    return '';
+}
+
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function splitTopLevelArgs(argText) {

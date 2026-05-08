@@ -46,6 +46,108 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+VISUAL_OPERATOR_GROUPS = [
+    {
+        'key': 'leaf',
+        'label': '参数/常数',
+        'collapsed': False,
+        'operators': [
+            {'key': 'DataColumnParam', 'label': '参数', 'desc': '数据列/窗口/时间参数', 'arity': 0, 'slots': []},
+            {'key': 'Constant', 'label': '常数', 'desc': '数值常量', 'arity': 0, 'slots': []},
+        ],
+    },
+    {
+        'key': 'ts',
+        'label': '时序算子',
+        'collapsed': False,
+        'operators': [
+            {'key': 'rolling_mean', 'label': '均值', 'desc': 'X.rolling_mean(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_std', 'label': '标准差', 'desc': 'X.rolling_std(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_min', 'label': '最小值', 'desc': 'X.rolling_min(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_max', 'label': '最大值', 'desc': 'X.rolling_max(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'shift', 'label': '平移', 'desc': 'X.shift(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
+            {'key': 'delta', 'label': '差分', 'desc': 'X.delta(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
+        ],
+        'more_label': '更多时序算子',
+        'more_operators': [
+            {'key': 'rolling_var', 'label': '方差', 'desc': 'X.rolling_var(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_sum', 'label': '求和', 'desc': 'X.rolling_sum(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_ema', 'label': 'EMA', 'desc': 'X.rolling_ema(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_corr', 'label': '滚动相关', 'desc': 'X.rolling_corr(Y, N)', 'arity': 3, 'slots': ['序列 X', '序列 Y', '窗口 N']},
+            {'key': 'rolling_skew', 'label': '偏度', 'desc': 'X.rolling_skew(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_argmax', 'label': '最大位置', 'desc': 'X.rolling_argmax(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_argmin', 'label': '最小位置', 'desc': 'X.rolling_argmin(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+        ],
+    },
+    {
+        'key': 'unary',
+        'label': '单目算子',
+        'collapsed': False,
+        'operators': [
+            {'key': 'log', 'label': '对数', 'desc': 'X.log()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'abs', 'label': '绝对值', 'desc': 'X.abs()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+        'more_label': '更多单目算子',
+        'more_operators': [
+            {'key': 'sqrt', 'label': '平方根', 'desc': 'X.sqrt()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'sign', 'label': '符号', 'desc': 'X.sign()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'neg', 'label': '取负', 'desc': 'X.neg()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+    },
+    {
+        'key': 'cs',
+        'label': '截面算子',
+        'collapsed': False,
+        'operators': [
+            {'key': 'cs_rank', 'label': '截面排名', 'desc': 'X.cs_rank()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'cs_zscore', 'label': '截面标准化', 'desc': 'X.cs_zscore()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+        'more_label': '更多截面算子',
+        'more_operators': [
+            {'key': 'cs_spearman', 'label': 'Spearman', 'desc': 'X.cs_spearman(Y)', 'arity': 2, 'slots': ['序列 X', '序列 Y']},
+        ],
+    },
+    {
+        'key': 'arith',
+        'label': '算术算子',
+        'collapsed': False,
+        'operators': [
+            {'key': '+', 'label': '+', 'desc': 'A + B', 'arity': 2, 'slots': ['左项', '右项'], 'syntax': 'infix'},
+            {'key': '-', 'label': '-', 'desc': 'A - B', 'arity': 2, 'slots': ['被减数', '减数'], 'syntax': 'infix'},
+            {'key': '*', 'label': '*', 'desc': 'A * B', 'arity': 2, 'slots': ['左因子', '右因子'], 'syntax': 'infix'},
+            {'key': '/', 'label': '/', 'desc': 'A / B', 'arity': 2, 'slots': ['分子', '分母'], 'syntax': 'infix'},
+        ],
+        'more_label': '更多算术算子',
+        'more_operators': [
+            {'key': '**', 'label': '**', 'desc': 'A ** B', 'arity': 2, 'slots': ['底数', '指数'], 'syntax': 'infix'},
+            {'key': 'max', 'label': '逐元素 max', 'desc': 'A.max(B)', 'arity': 2, 'slots': ['左值', '右值']},
+            {'key': 'min', 'label': '逐元素 min', 'desc': 'A.min(B)', 'arity': 2, 'slots': ['左值', '右值']},
+        ],
+    },
+    {
+        'key': 'compare',
+        'label': '比较/逻辑',
+        'collapsed': True,
+        'operators': [
+            {'key': '>', 'label': '>', 'desc': 'A > B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '<', 'label': '<', 'desc': 'A < B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '>=', 'label': '>=', 'desc': 'A >= B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '<=', 'label': '<=', 'desc': 'A <= B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '==', 'label': '==', 'desc': 'A == B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '!=', 'label': '!=', 'desc': 'A != B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '&', 'label': '&', 'desc': 'A & B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
+            {'key': '|', 'label': '|', 'desc': 'A | B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
+            {'key': '~', 'label': '~', 'desc': '~A', 'arity': 1, 'slots': ['条件 X'], 'syntax': 'prefix'},
+        ],
+    },
+]
+
+
+def get_visual_operator_groups() -> list[dict]:
+    """Return visual-editor operator metadata derived from FactorExpr capabilities."""
+    return VISUAL_OPERATOR_GROUPS
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1: 因子表达式基类
 # ═════════════════════════════════════════════════════════════════════════════

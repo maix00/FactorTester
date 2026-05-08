@@ -255,6 +255,19 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 }
 .op-palette h3 { font-size: 12px; color: #888; margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
 .op-palette h3:first-child { margin-top: 0; }
+.visual-op-group { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; margin-bottom: 8px; overflow: hidden; }
+.visual-op-group summary {
+    cursor: pointer; padding: 8px 10px; font-size: 12px; font-weight: 650; color: #475467;
+    background: #f8fafc; user-select: none;
+}
+.visual-op-group .op-block { margin: 6px 8px; }
+.visual-op-more {
+    margin: 4px 8px 8px; border: 1px dashed #d0d5dd; border-radius: 7px; background: #fcfcfd;
+}
+.visual-op-more summary {
+    padding: 6px 8px; background: transparent; color: #667085; font-size: 11px;
+}
+.visual-op-more .op-block { margin: 6px; }
 .op-block {
     display: block; padding: 8px 12px; margin-bottom: 4px; background: #fff;
     border: 1px solid #e2e8f0; border-radius: 4px; font-size: 13px;
@@ -262,9 +275,10 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 }
 .op-block:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.08); border-color: #4a90d9; }
 .op-block.leaf { border-left: 3px solid #4a90d9; }
-.op-block.ts { border-left: 3px solid #d47a00; }
-.op-block.cs { border-left: 3px solid #1b8a3d; }
-.op-block.arith { border-left: 3px solid #8b5cf6; }
+.op-block.ts, .op-block.tsAdvanced { border-left: 3px solid #d47a00; }
+.op-block.cs, .op-block.csAdvanced { border-left: 3px solid #1b8a3d; }
+.op-block.arith, .op-block.arithAdvanced, .op-block.compare { border-left: 3px solid #8b5cf6; }
+.op-block.unary, .op-block.unaryAdvanced { border-left: 3px solid #0ea5e9; }
 .op-block .op-desc { font-size: 11px; color: #aaa; margin-top: 1px; }
 
 .visual-canvas-wrap {

@@ -944,6 +944,17 @@ def api_validate_expr():
         })
 
 
+@cf_bp.route('/api/visual-operators')
+@login_required
+def api_visual_operators():
+    """返回可视化编辑器算子卡牌元数据。"""
+    from tools.factors.FactorExpr import get_visual_operator_groups
+    return jsonify({
+        'success': True,
+        'groups': get_visual_operator_groups(),
+    })
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # API 路由 — 参数模板（可选：保存/加载因子参数配置）
 # ═════════════════════════════════════════════════════════════════════════════
