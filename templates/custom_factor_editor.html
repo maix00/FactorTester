@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>因子管理</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/modules/custom_factor_editor/custom_factor_editor.css">
+
+    <link rel="stylesheet" href="/static/css/modules/shared/param_drawer.css">
+    <link rel="stylesheet" href="/static/css/modules/shared/param_info_table.css">
+    <link rel="stylesheet" href="/static/css/modules/shared/collapsible_factor_list.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    {% include 'modules/shared/mathjax_setup.html' %}
+    <script src="/static/js/modules/shared/param_drawer_utils.js"></script>
+</head>
+<body>
+    <!-- 全因子概览弹窗 -->
+    <div class="all-factors-overlay" id="all-factors-overlay" onclick="if(event.target===this)closeAllFactorsOverlay()">
+        <div class="all-factors-panel">
+            <div class="all-factors-header">
+                <h2>📋 全部因子概览</h2>
+                <button class="all-factors-close" onclick="closeAllFactorsOverlay()">✕</button>
+            </div>
+            <div class="all-factors-body" id="all-factors-body">
+                <p style="color:#999;">加载中...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 参数配置右侧抽屉 (照抄 parameter_module.html 样式) -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="settings-drawer-overlay" id="param-drawer"
+         onclick="if(event.target===this)closeParamDrawer()">
+        <div class="settings-drawer-panel">
+            <button class="drawer-close-btn" onclick="closeParamDrawer()">✕ 关闭</button>
+
+            <!-- 数学公式 -->
+            <div id="cfe-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;"></div>
+
+            <!-- 因子说明 -->
+            <div id="cfe-desc-block" style="display:none;margin:12px 24px 0;">
+                <div class="setting-summary-row" onclick="(function(c,b){var isOpen=c.style.display!=='none';c.style.display=isOpen?'none':'';b.textContent=isOpen?'\u25bc \u5c55\u5f00':'\u25b2 \u6536\u8d77';})(document.getElementById('cfe-desc-content'),this.querySelector('.cfe-desc-toggle'))">
+                    <span class="setting-summary-label">📖 因子说明</span>
+                    <span class="setting-summary-value">有说明</span>
+                    <span class="cfe-desc-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+                </div>
+                <div id="cfe-desc-content" style="display:none;margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+                    <div id="cfe-desc-rendered" style="font-size:14px;line-height:1.75;color:#374151;"></div>
+                </div>
+            </div>
+
+            <div class="module">
+                <div class="section-title" id="param-drawer-title">参数配置</div>
+
+                <!-- 摘要行 (点击可开关，参考 parameter_module.html) -->
+                <div class="setting-summary-row" id="param-drawer-summary-row">
+                    <span class="setting-summary-label">📊 参数配置</span>
+                    <span class="setting-summary-value" id="param-drawer-summary-text">—</span>
+                </div>
+
+                <!-- 因子库参数配置区：按用户索引配置，不复用单因子测试的模板下拉语义 -->
+                <div class="factor-config-browser" id="params-template-bar">
+                    <div class="param-template-row" id="param-tpl-org-filter-row" style="display:none;">
+                        <select id="param-tpl-org-filter" class="param-template-select">
+                            <option value="">全部机构</option>
+                        </select>
+                    </div>
+                    <div class="param-template-row">
+                        <input id="param-tpl-owner-filter"
+                               type="search"
+                               class="param-template-search"
+                               placeholder="搜索用户名/别名">
+                    </div>
+                    <div class="param-template-row">
+                        <span id="param-tpl-name-label"
+                              class="param-template-name-label"
+                              title="当前参数配置"
+                              style="display:none;max-width:240px;"></span>
+                    </div>
+                    <div class="factor-config-results" id="param-config-results"></div>
+                    <div class="param-template-row param-template-actions">
+                        <button onclick="saveParamTemplate()" title="保存或覆盖自己的唯一参数配置" class="param-template-btn param-template-btn-success">保存我的配置</button>
+                        <button onclick="updateParamTemplate()" title="用当前参数列表覆盖自己的唯一参数配置" class="param-template-btn param-template-btn-warning">更新</button>
+                        <button onclick="deleteParamTemplate()" title="删除自己的唯一参数配置" class="param-template-btn param-template-btn-danger">删除我的配置</button>
+                        <span id="param-tpl-status" class="param-template-status"></span>
+                    </div>
+                </div>
+
+                <!-- 参数表格 -->
+                <div class="param-table-container" id="param_table_scroll">
+                    <table class="param-table" id="param_table">
+                        <thead id="param-table-head">
+                            <tr><th colspan="2">选择因子后可配置参数</th></tr>
+                        </thead>
+                        <tbody id="param-table-body">
+                        </tbody>
+                    </table>
+                </div>
+                <p class="param-hint">💡 表格过宽可横向滚动 · 拖拽行可重排序 · 参数值留空则使用默认值</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="app">
+        <!-- 左侧：因子列表 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>因子库</h2>
+                <a href="/" class="btn-back">← 返回首页</a>
+            </div>
+            <div class="sidebar-actions">
+                <button class="btn-new" onclick="createNew()">+ 新建因子</button>
+                <div class="sidebar-filter" style="display:flex; gap:6px;">
+                    <input type="text" id="factor-family-filter" placeholder="搜索因子..." oninput="filterFactorFamilyList()" style="flex:1;">
+                    <button onclick="openAllFactorsOverlay()" style="padding:6px 12px; background:#f0f4f8; border:1px solid #d0d5dd; border-radius:4px; font-size:12px; cursor:pointer; white-space:nowrap;">📋 查看全部</button>
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#667085;cursor:pointer;">
+                    <input type="checkbox" id="include-subordinate-factors" onchange="loadFactorFamilyList()" style="width:auto;margin:0;">
+                    搜索/查看下级用户因子
+                </label>
+            </div>
+            <div class="factor-family-list" id="factor-family-list">
+                <div class="factor-family-list-empty">加载中...</div>
+            </div>
+        </div>
+
+        <div class="layout-resizer" id="sidebar-resizer" title="拖拽调整侧栏宽度"></div>
+
+        <!-- 右侧：编辑器 -->
+        <div class="editor" id="editor">
+            <div class="editor-header">
+                <div class="editor-title" id="editor-title">选择一个因子开始编辑</div>
+                <div class="mode-tabs">
+                    <button class="mode-tab active" onclick="switchMode('code')">代码模式</button>
+                    <button class="mode-tab" onclick="switchMode('visual')">可视化模式</button>
+                </div>
+            </div>
+            <div class="editor-body" id="editor-body">
+                <div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>
+            </div>
+            <div class="editor-footer" id="editor-footer" style="display:none">
+                <div style="flex:1"></div>
+                <button class="btn-cancel" onclick="discardEdit()">取消</button>
+                <button class="btn-save" onclick="saveFactor()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- toast 容器 -->
+    <div id="toast-container"></div>
+
+    <script src="/static/js/modules/custom_factor_editor/custom_factor_editor.js"></script>
+    <script src="/static/js/modules/shared/collapsible_factor_list.js"></script>
+    <script src="/static/js/modules/shared/client_param_table.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/param_drawer.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/all_factors_overview.js"></script>
+
+
+
+</body>
+</html>

@@ -1,10 +1,12 @@
 <div class="section" 
      data-factor-alias="{{ factor_family_alias }}" 
+     data-factor-type="{{ factor_type | default('public') }}"
      data-param-aliases='{{ param_aliases|tojson }}'>
     <div class="section-title">当前因子: <b style="color:#0078d4;">{{ factor_family_alias }}</b>{% if chinese_name %} <span style="color:#555;font-weight:normal;font-size:0.85em;">{{ chinese_name }}</span>{% endif %}</div>
     <div style="margin-top:16px;color:#888;">功能陆续开发中</div>
     
     {% include 'modules/shared/latex_module.html' %}
+    {% include 'modules/shared/param_info_table.html' %}
     {% include 'modules/single_factor_test/global_template_module.html' %}
     {% include 'modules/shared/parameter_module.html' %}
     {% include 'modules/shared/time_range_module.html' %}

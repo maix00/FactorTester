@@ -5,7 +5,7 @@ Shared parameter-management routes (any test module can use):
   POST /reorder_params
 """
 from flask import request, jsonify
-from server.shared import get_factor_family_instance, _get_session_params, _save_session_params
+from server.shared import get_factor_family_instance, _get_session_params, _save_session_params, _current_user
 from . import shared_bp
 
 
@@ -15,7 +15,7 @@ def add_params():
     factor_family_alias = data.get('factor_family_alias')
     params = data.get('params', {})
     try:
-        ff = get_factor_family_instance(factor_family_alias)
+        ff = get_factor_family_instance(factor_family_alias, username=_current_user())
         # 用 FactorFamily 的 normalize + check + rectified new_params 构建，
         # 不污染 ff._params_list（共享实例，多用户不安全）
         normalized = ff._normalize_param_kwargs(**params)
@@ -49,7 +49,7 @@ def delete_params():
     factor_family_alias = data.get('factor_family_alias')
     factor_idx = int(data.get('factor_idx', -1))
     try:
-        ff = get_factor_family_instance(factor_family_alias)
+        ff = get_factor_family_instance(factor_family_alias, username=_current_user())
         pl = _get_session_params(factor_family_alias, ff)
         if 0 <= factor_idx < len(pl):
             pl.pop(factor_idx)
@@ -66,7 +66,7 @@ def reorder_params():
     from_idx = int(data.get('from_idx', -1))
     to_idx   = int(data.get('to_idx', -1))
     try:
-        ff = get_factor_family_instance(factor_family_alias)
+        ff = get_factor_family_instance(factor_family_alias, username=_current_user())
         pl = _get_session_params(factor_family_alias, ff)
         if 0 <= from_idx < len(pl) and 0 <= to_idx < len(pl):
             param = pl.pop(from_idx)

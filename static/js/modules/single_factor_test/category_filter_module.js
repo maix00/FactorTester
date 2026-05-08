@@ -4,8 +4,10 @@
  */
 (function() {
     // 全局变量
-    var submissions = [];           // 存储所有提交记录
-    window.submissions = submissions;   // 新增
+    // SubmissionRecord 是前端提交记录；它引用后端创建的 FactorTester，但不是 FactorTester 本身。
+    var submissions = [];           // 兼容旧模块名：IC/Group 仍读取 window.submissions
+    window.submissions = submissions;
+    window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var treeInstance = null;
 
@@ -46,6 +48,7 @@
         });
         submissions = newSubs;
         window.submissions = submissions;
+        window.submissionRecords = submissions;
         renderHistory();
     }
 
@@ -283,6 +286,9 @@
     }
 
     function getCurrentTimeRange() {
+        if (typeof window.getSharedRuntimeTimeRange === 'function') {
+            return window.getSharedRuntimeTimeRange();
+        }
         // 根据你的时间范围模块的输入框 ID 来读取
         const startYear = document.getElementById('start_year').value;
         const startMonth = document.getElementById('start_month').value.padStart(2, '0');
@@ -659,6 +665,7 @@
         window._applySubmissions = function(newSubmissions) {
             submissions = newSubmissions;
             window.submissions = newSubmissions;
+            window.submissionRecords = newSubmissions;
             expandedState = {};
             renderHistory();
             if (typeof updateCategorySummary === 'function') updateCategorySummary();

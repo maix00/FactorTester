@@ -3,7 +3,6 @@
 <div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;">
     $$ {{ math_expr }} $$
 </div>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 {% endif %}
 
 <!-- 因子说明摘要行（公式下方） -->
@@ -23,12 +22,12 @@
         <script>
         (function() {
             const rawEl = document.getElementById('latex-description-md');
-            const outEl = document.getElementById('latex-description-rendered');
-            if (rawEl && outEl) {
+                const outEl = document.getElementById('latex-description-rendered');
+                if (rawEl && outEl) {
                 try {
-                    outEl.innerHTML = marked.parse(rawEl.textContent);
+                    outEl.innerHTML = marked.parse(JSON.parse(rawEl.textContent));
                 } catch(e) {
-                    outEl.innerHTML = '<pre>' + rawEl.textContent + '</pre>';
+                    outEl.textContent = rawEl.textContent;
                 }
             }
         })();

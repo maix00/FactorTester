@@ -3,12 +3,62 @@
   GET  /single_factor_test  — 单因子测试页
   GET  /multi_factor_test     — 多因子分析页  GET  /price_viewer        — 价格序列查看页"""
 import os, traceback
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify, render_template, session
 from .shared import (
     get_factor_groups, get_chinese_names, build_group_html, get_factor_main_section_html,
+    get_factor_family_instance, get_custom_factor_instance, _current_user, _user_data_dir,
+    _get_account, _account_display_name, _can_view_user_scope,
 )
 
 core_bp = Blueprint('core', __name__)
+
+
+def _list_custom_factors_for_sidebar(username: str) -> list:
+    """返回当前用户的自定义因子列表（用于左侧边栏展示）。"""
+    import json as _json
+    cf_dir = os.path.join(_user_data_dir(username), 'custom_factors')
+    factors = []
+    if not os.path.exists(cf_dir):
+        return factors
+    for fname in os.listdir(cf_dir):
+        if not fname.endswith('.json'):
+            continue
+        factor_id = fname[:-5]
+        try:
+            with open(os.path.join(cf_dir, fname), 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+            data['id'] = factor_id
+            factors.append(data)
+        except Exception:
+            pass
+    factors.sort(key=lambda f: f.get('updated_at', ''), reverse=True)
+    return factors
+
+
+def _search_custom_factors(factors, query):
+    """在自定义因子列表中搜索。"""
+    q = query.lower()
+    return [
+        f for f in factors
+        if q in f.get('name', '').lower()
+        or q in f.get('chinese_name', '').lower()
+        or q in f.get('category', '').lower()
+    ]
+
+
+def _get_sidebar_custom_factors(username: str, include_subordinates: bool) -> list:
+    from server.modules.custom_factors import _list_custom_factors, _list_visible_custom_factors
+    if include_subordinates:
+        return _list_visible_custom_factors(username)
+    custom = _list_custom_factors(username)
+    acct = _get_account(username) or {}
+    for factor in custom:
+        factor['owner_username'] = username
+        factor['owner_alias'] = _account_display_name(acct) or '我'
+        factor['owner_organization_id'] = acct.get('organization_id') or ''
+        factor['owner_organization_name'] = acct.get('organization_name') or ''
+        factor['can_edit'] = True
+    return custom
 
 
 @core_bp.route('/', methods=['GET'])
@@ -22,8 +72,18 @@ def index():
     groups, factor_names = get_factor_groups(factors_dir)
     search_query  = request.args.get('search', '')
     selected_name = request.args.get('factor', '')
+    factor_type   = request.args.get('type', '')  # 'custom' 或空='public'
+    include_subordinates = request.args.get('include_subordinates') == '1'
     chinese_names = get_chinese_names(factors_dir)
 
+    # 获取当前用户的自定义因子
+    username = _current_user()
+    owner_username = (request.args.get('owner_username') or username or '').strip()
+    custom_factors = []
+    if username:
+        custom_factors = _get_sidebar_custom_factors(username, include_subordinates)
+
+    # 搜索过滤
     if search_query:
         q = search_query.lower()
         groups = {
@@ -32,25 +92,82 @@ def index():
         }
         groups = {g: names for g, names in groups.items() if names}
         factor_names = [n for n in factor_names if q in n.lower() or q in chinese_names.get(n, '').lower()]
+        # 同时搜索自定义因子
+        custom_factors = _search_custom_factors(custom_factors, q)
 
-    group_html = build_group_html(groups, chinese_names) if groups else '<div style="color:#888;">无匹配因子</div>'
+    group_html = build_group_html(groups, chinese_names, custom_factors) if (groups or custom_factors) else '<div style="color:#888;">无匹配因子</div>'
     main_content = ''
 
-    if selected_name and selected_name in factor_names:
-        try:
-            main_content = get_factor_main_section_html(selected_name)
-        except Exception as e:
-            traceback.print_exc()
-            main_content = f'''
-                <div class="section">
-                    <div class="section-title">错误</div>
-                    <div style="color:#d40000;padding:20px;">
-                        加载因子 "{selected_name}" 失败:<br>
-                        <pre>{str(e)}</pre>
+    if selected_name:
+        if factor_type == 'custom' and username:
+            if not _can_view_user_scope(username, owner_username):
+                main_content = '<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无权查看该用户因子</div></div>'
+            else:
+                # 加载自定义因子（用统一入口，支持 name 和 id 双查找）
+                try:
+                    ff = get_factor_family_instance(selected_name, username=owner_username)
+                    if ff is not None:
+                        math_expr = getattr(ff, 'math_expr', '')
+                        cf_data = getattr(ff, '_custom_factor_data', {})
+                        # 展示用的名称：用户自定义的 name，而非 UUID
+                        display_alias = cf_data.get('name', '') or selected_name
+                        desc = cf_data.get('chinese_name', '') or getattr(ff, 'desc', '')
+                        description = cf_data.get('description', '') or ''
+                        params = ff.params
+                        from server.param_meta import serialize_param_meta
+                        param_metas = [serialize_param_meta(p) for p in params]
+                        param_aliases = [p.alias for p in params]
+                        # 使用 session 中保存的参数列表（与公共因子行为一致）
+                        from server.shared import _get_session_params
+                        session_params = _get_session_params(display_alias, ff)
+                        factors = ff.get_factors(params_list=session_params)
+                        start_date = getattr(__import__('Settings'), 'default_test_start_date', '2025-01-02')
+                        end_date = getattr(__import__('Settings'), 'default_test_end_date', '2025-05-31')
+                        import pandas as pd
+                        start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else str(start_date)
+                        end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, pd.Timestamp) else str(end_date)
+                        import Settings
+                        start_time = getattr(Settings, 'default_day_start_time', '09:30')
+                        end_time = getattr(Settings, 'default_day_end_time', '15:00')
+                        main_content = render_template(
+                            'factor_main.html',
+                            factor_family_alias=display_alias,
+                            chinese_name=desc,
+                            math_expr=math_expr,
+                            description=description,
+                            params=params,
+                            param_metas=param_metas,
+                            param_aliases=param_aliases,
+                            factors=factors,
+                            start_date=start_date,
+                            end_date=end_date,
+                            start_time=start_time,
+                            end_time=end_time,
+                            is_custom=True,
+                            factor_type='custom',
+                        )
+                    else:
+                        main_content = f'''<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无法加载自定义因子 "{selected_name}"</div></div>'''
+                except Exception as e:
+                    traceback.print_exc()
+                    main_content = f'''<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">加载自定义因子 "{selected_name}" 失败:<br><pre>{str(e)}</pre></div></div>'''
+        elif selected_name in factor_names:
+            try:
+                main_content = get_factor_main_section_html(selected_name)
+            except Exception as e:
+                traceback.print_exc()
+                main_content = f'''
+                    <div class="section">
+                        <div class="section-title">错误</div>
+                        <div style="color:#d40000;padding:20px;">
+                            加载因子 "{selected_name}" 失败:<br>
+                            <pre>{str(e)}</pre>
+                        </div>
                     </div>
-                </div>
-            '''
-    elif not groups:
+                '''
+        else:
+            main_content = f'<div style="margin-top:64px;color:#888;font-size:22px;text-align:center;">因子 "{selected_name}" 未找到</div>'
+    elif not groups and not custom_factors:
         main_content = '<div style="margin-top:64px;color:#888;font-size:22px;text-align:center;">未搜索到任何因子</div>'
 
     return render_template(
@@ -59,6 +176,7 @@ def index():
         group_html=group_html,
         main_content=main_content,
         initial_modules=[],
+        include_subordinates=include_subordinates,
     )
 
 

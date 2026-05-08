@@ -8,6 +8,7 @@ from .shared import (
     _load_user_tpls, _save_user_tpls, _new_tpl_id,
     login_required,
     get_factor_family_instance, _get_session_params, _save_session_params,
+    _visible_accounts_for, _can_view_user_scope, _account_display_name,
 )
 
 templates_bp = Blueprint('templates', __name__)
@@ -174,9 +175,32 @@ def delete_time_template(tpl_id):
 @login_required
 def list_params_templates(ff_alias):
     u = _require_user()
-    with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'params', ff_alias)
-    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
+    include_visible = request.args.get('include_visible') == '1'
+    accounts = _visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
+    current_acct = next((a for a in accounts if a.get('username') == u), None) or {}
+    can_filter_organization = bool(current_acct.get('role') == 'super_admin' or current_acct.get('is_admin'))
+    result = []
+    for acct in accounts:
+        owner = acct.get('username')
+        if not owner:
+            continue
+        with _get_user_file_lock(owner):
+            templates = _load_user_tpls(owner, 'params', ff_alias)
+        for t in templates:
+            result.append({
+                'id': t['id'],
+                'name': t['name'],
+                'owner_username': owner,
+                'owner_alias': _account_display_name(acct),
+                'owner_organization_id': acct.get('organization_id') or '',
+                'owner_organization_name': acct.get('organization_name') or '',
+                'editable': owner == u,
+            })
+    return jsonify({
+        'success': True,
+        'templates': result,
+        'can_filter_organization': can_filter_organization,
+    })
 
 
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['POST'])
@@ -202,11 +226,17 @@ def save_params_template(ff_alias):
 @login_required
 def get_params_template(ff_alias, tpl_id):
     u = _require_user()
-    with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'params', ff_alias)
+    owner_username = (request.args.get('owner_username') or u).strip()
+    if not _can_view_user_scope(u, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
+    with _get_user_file_lock(owner_username):
+        templates = _load_user_tpls(owner_username, 'params', ff_alias)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
+    tpl = dict(tpl)
+    tpl['owner_username'] = owner_username
+    tpl['editable'] = owner_username == u
     return jsonify({'success': True, 'template': tpl})
 
 
@@ -303,12 +333,15 @@ def replace_params():
 
 # ── 全局模板 ──────────────────────────────────────────────────────────────────
 
-@templates_bp.route('/api/global_templates', methods=['GET'])
+# ── 全局模板 ──────────────────────────────────────────────────────────────────
+# scope_key: 隔离键，当前用因子家族 alias 作为值，后续可扩展为其他维度
+
+@templates_bp.route('/api/global_templates/<scope_key>', methods=['GET'])
 @login_required
-def list_global_templates():
+def list_global_templates(scope_key):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
     result = []
     for t in templates:
         snap = t.get('snapshot', {})
@@ -318,6 +351,7 @@ def list_global_templates():
             'id': t['id'],
             'name': t['name'],
             'ff_alias': t.get('ff_alias', ''),
+            'scope_key': scope_key,
             'summary': summary,
         })
     return jsonify({'success': True, 'templates': result})
@@ -437,9 +471,9 @@ def _build_snapshot_summary(snap: dict) -> dict:
     return summary
 
 
-@templates_bp.route('/api/global_templates', methods=['POST'])
+@templates_bp.route('/api/global_templates/<scope_key>', methods=['POST'])
 @login_required
-def save_global_template():
+def save_global_template(scope_key):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     ff_alias = (data.get('ff_alias') or '').strip()
@@ -450,37 +484,37 @@ def save_global_template():
         return jsonify({'success': False, 'error': '因子家族不能为空'})
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         new_id = _new_tpl_id()
         templates.append({
             'id': new_id,
             'name': name,
             'ff_alias': ff_alias,
-            'snapshot': snapshot,  # { params_list, time_data, submissions, return_freqs, group_settings }
+            'snapshot': snapshot,
         })
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True, 'id': new_id})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['GET'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['GET'])
 @login_required
-def get_global_template(tpl_id):
+def get_global_template(scope_key, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
     return jsonify({'success': True, 'template': tpl})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['PUT'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['PUT'])
 @login_required
-def update_global_template(tpl_id):
+def update_global_template(scope_key, tpl_id):
     data = request.get_json()
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
@@ -491,19 +525,92 @@ def update_global_template(tpl_id):
             tpl['name'] = name
         if 'snapshot' in data:
             tpl['snapshot'] = data['snapshot']
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True})
 
 
-@templates_bp.route('/api/global_templates/<tpl_id>', methods=['DELETE'])
+@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['DELETE'])
 @login_required
-def delete_global_template(tpl_id):
+def delete_global_template(scope_key, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global')
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
         if len(templates) == before:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
-        _save_user_tpls(u, 'global', templates)
+        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
     return jsonify({'success': True})
+
+
+# ── scope 下模板覆盖的因子列表（按因子家族分组） ─────────────────────────
+
+@templates_bp.route('/api/global_templates/<scope_key>/factors', methods=['GET'])
+@login_required
+def list_scope_factors(scope_key):
+    """列出 scope_key 下所有全局模板覆盖的因子，
+    从模板的 ff_alias 映射到实际的公共/自定义因子详情，按 factor_family 分组。"""
+    u = _require_user()
+    with _get_user_file_lock(u):
+        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+
+    # 收集所有 ff_alias
+    ff_aliases = set()
+    for t in templates:
+        ff_alias = t.get('ff_alias', '').strip()
+        if ff_alias:
+            ff_aliases.add(ff_alias)
+
+    # 构建因子映射：分别从公共因子和自定义因子中查找
+    from .modules.custom_factors import _list_public_factors, _list_custom_factors
+    public_factors = {f['id']: f for f in _list_public_factors()}
+    custom_factors = {f['id']: f for f in _list_custom_factors(u)}
+
+    # 按 factor_family 分组
+    groups: dict[str, list] = {}
+    for alias in sorted(ff_aliases):
+        factor_info = None
+        source = None
+        if alias in public_factors:
+            factor_info = public_factors[alias]
+            source = 'public'
+        elif alias in custom_factors:
+            factor_info = custom_factors[alias]
+            source = 'custom'
+
+        if factor_info:
+            family = factor_info.get('factor_family', 'FactorFamily')
+            entry = {
+                'id': alias,
+                'name': factor_info.get('name', alias),
+                'chinese_name': factor_info.get('chinese_name', ''),
+                'category': factor_info.get('category', ''),
+                'source': source,
+                'updated_at': factor_info.get('updated_at', ''),
+                'params_count': len(factor_info.get('params', [])),
+                'description': factor_info.get('description', '')[:120] + ('...' if len(factor_info.get('description', '')) > 120 else ''),
+            }
+        else:
+            family = 'FactorFamily'
+            entry = {
+                'id': alias,
+                'name': alias,
+                'chinese_name': '',
+                'category': '',
+                'source': 'unknown',
+                'updated_at': '',
+                'params_count': 0,
+                'description': '',
+            }
+
+        groups.setdefault(family, []).append(entry)
+
+    # 转为有序列表
+    grouped = [{'family': k, 'factors': v} for k, v in sorted(groups.items())]
+
+    return jsonify({
+        'success': True,
+        'scope_key': scope_key,
+        'groups': grouped,
+        'total_factors': sum(len(g['factors']) for g in grouped),
+    })

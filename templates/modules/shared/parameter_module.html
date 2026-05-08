@@ -1,5 +1,6 @@
+{% from 'modules/shared/param_config_bar.html' import render_param_config_bar %}
 <!-- 参数设置摘要行 -->
-<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.MathJax)MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean))">
     <span class="setting-summary-label">⚙️ 参数设置</span>
     <span class="setting-summary-value multiline" id="param-summary-text">加载中…</span>
     <span class="setting-summary-arrow">编辑 ▶</span>
@@ -12,132 +13,66 @@
         <button class="drawer-close-btn"
                 onclick="document.getElementById('param-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
 
+{% if math_expr %}
+<div id="pm-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;">
+    $$ {{ math_expr }} $$
+</div>
+{% endif %}
+
+<!-- 因子说明折叠区 -->
+<div style="margin:12px 24px 0;">
+    <div class="setting-summary-row" onclick="(function(c,b){var isOpen=c.style.display!=='none';c.style.display=isOpen?'none':'';b.textContent=isOpen?'\u25bc \u5c55\u5f00':'\u25b2 \u6536\u8d77';})(document.getElementById('pm-desc-content'),this.querySelector('.pm-desc-toggle'))">
+        <span class="setting-summary-label">📖 因子说明</span>
+        <span class="setting-summary-value">{% if description %}有说明{% else %}-{% endif %}</span>
+        <span class="pm-desc-toggle" style="font-size:12px;color:#4a90d9;flex-shrink:0;padding:2px 8px;border:1px solid #d0d5dd;border-radius:10px;">▼ 展开</span>
+    </div>
+    <div id="pm-desc-content" style="display:none;margin-top:6px;border:1px solid #e5e7eb;border-radius:10px;background:#ffffff;padding:18px;">
+        {% if description %}
+            <div id="pm-desc-raw" style="display:none;">{{ description | tojson }}</div>
+            <div id="pm-desc-rendered" style="font-size:14px;line-height:1.75;color:#374151;"></div>
+            <script>
+            (function() {
+                const rawEl = document.getElementById('pm-desc-raw');
+                const outEl = document.getElementById('pm-desc-rendered');
+                if (rawEl && outEl) {
+                    try {
+                        outEl.innerHTML = marked.parse(JSON.parse(rawEl.textContent));
+                    } catch(e) {
+                        outEl.textContent = rawEl.textContent;
+                    }
+                }
+            })();
+            </script>
+        {% else %}
+            <span style="color:#888;">该因子暂未提供说明</span>
+        {% endif %}
+    </div>
+</div>
+
 <div class="module" id="parameter_module"
      data-factor-alias="{{ factor_family_alias }}"
+     data-factor-type="{{ factor_type | default('public') }}"
      data-param-aliases='{{ param_aliases|tojson }}'>
     <div class="section-title">参数设置</div>
 
-    <style>
-        .param-table-container {
-            overflow-x: auto;
-            max-width: 100%;
-            margin-bottom: 16px;
-            text-align: center;          /* 让内部表格居中 */
-            background: transparent;     /* 透明背景 */
-        }
-        .param-table {
-            border-collapse: collapse;
-            width: auto;
-            max-width: 100%;
-            margin: 0 auto;
-            font-size: 14px;
-            background: #fff;            /* 白色背景移到表格 */
-            border: 1px solid #e1e4e8;  /* 边框移到表格 */
-            border-radius: 6px;
-            overflow: hidden;            /* 保证圆角生效 */
-        }
-        .param-table th,
-        .param-table td {
-            padding: 8px 12px;
-            text-align: center;
-            border-bottom: 1px solid #e1e4e8;
-            white-space: normal;
-            word-break: break-word;
-            vertical-align: middle;
-            max-width: 150px;
-            min-width: 60px;
-        }
-        /* 表头样式 */
-        .param-table th {
-            background: #f6f8fa;
-            font-weight: 600;
-            color: #24292e;
-            border-bottom: 2px solid #e1e4e8;
-            min-width: 60px;            /* 给一个较小的最小宽度，避免过窄 */
-        }
-        /* 第一列（因子名）稍微加宽 */
-        .param-table td:first-child,
-        .param-table th:first-child {
-            min-width: 100px;
-        }
-        /* 输入框样式 */
-        .param-table input {
-            width: 100%;                /* 占满单元格宽度 */
-            min-width: 50px;           /* 最小宽度 */
-            max-width: 140px;          /* 最大宽度，与单元格max-width协调 */
-            padding: 4px 6px;          /* 适当减小内边距 */
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 13px;
-            text-align: center;
-            box-sizing: border-box;
-        }
-        .param-table td:not(:has(input)) {
-            word-break: break-word;
-            white-space: normal;
-        }
-        .param-table tbody tr:last-child td {
-            border-bottom: none;
-        }
-        /* 按钮样式 */
-        .param-btn {
-            background: #0078d4;
-            color: #fff;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 16px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: background 0.2s;
-            white-space: nowrap;
-        }
-        .param-btn:hover {
-            background: #005a9e;
-        }
-        .param-btn-danger {
-            background: #d40000;
-        }
-        .param-btn-danger:hover {
-            background: #a80000;
-        }
-        .param-hint {
-            margin-top: 4px;
-            color: #586069;
-            font-size: 13px;
-            text-align: left;           /* 提示文字左对齐 */
-        }
-        /* 拖拽样式 */
-        .param-table tr[draggable="true"]:active {
-            cursor: grabbing;
-        }
-        .param-table .drag-over {
-            background: #e6f7ff !important;
-        }
-    </style>
-
     <!-- 参数模板区 -->
-    <div id="params-template-bar" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;padding:8px;background:#f6f8fa;border-radius:8px;border:1px solid #e1e4e8;">
-        <!-- 第一行：下拉选择 -->
-        <div style="display:flex;align-items:center;gap:6px;">
-            <select id="params-tpl-select" style="flex:1;min-width:120px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;">
-                <option value="">— 选择模板 —</option>
-            </select>
-        </div>
-        <!-- 第二行：名称标签 + 编辑框 -->
-        <div style="display:flex;align-items:center;gap:6px;">
-            <span id="params-tpl-name-label" title="双击重命名" style="display:none;font-size:13px;color:#0078d4;cursor:pointer;padding:2px 4px;border-radius:4px;border:1px dashed transparent;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                onmouseover="this.style.borderColor='#0078d4'" onmouseout="this.style.borderColor='transparent'"></span>
-            <input id="params-tpl-name-input" type="text" style="display:none;font-size:13px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">
-        </div>
-        <!-- 第三行：按钮组 -->
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <button id="params-tpl-load-btn" title="加载选中模板的参数组合" style="font-size:12px;padding:3px 10px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">加载</button>
-            <button id="params-tpl-save-btn" title="将当前参数列表保存为新模板" style="font-size:12px;padding:3px 10px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
-            <button id="params-tpl-update-btn" title="用当前参数列表覆盖选中模板" style="font-size:12px;padding:3px 10px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
-            <button id="params-tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:3px 10px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
-            <span id="params-tpl-status" style="font-size:12px;white-space:nowrap;"></span>
-        </div>
-    </div>
+    {{ render_param_config_bar(
+        bar_id='params-template-bar',
+        select_id='params-tpl-select',
+        select_placeholder='— 选择模板 —',
+        label_id='params-tpl-name-label',
+        input_id='params-tpl-name-input',
+        status_id='params-tpl-status',
+        label_title='双击重命名',
+        label_hover=true,
+        label_max_width='200px',
+        buttons=[
+            {'id': 'params-tpl-load-btn', 'text': '加载', 'title': '加载选中模板的参数组合', 'variant': 'param-template-btn-primary'},
+            {'id': 'params-tpl-save-btn', 'text': '另存为…', 'title': '将当前参数列表保存为新模板', 'variant': 'param-template-btn-success'},
+            {'id': 'params-tpl-update-btn', 'text': '更新', 'title': '用当前参数列表覆盖选中模板', 'variant': 'param-template-btn-warning'},
+            {'id': 'params-tpl-delete-btn', 'text': '删除', 'title': '删除选中模板', 'variant': 'param-template-btn-danger'}
+        ]
+    ) }}
 
     <div class="param-table-container" id="param_table_scroll">
         <table class="param-table" id="param_table">

@@ -38,6 +38,8 @@ def create_app() -> Flask:
     from server.modules.single_factor_test import sft_bp
     from server.modules.multi_factor_analysis import mfa_bp
     from server.modules.products.cn_futures import cn_futures_bp
+    from server.modules.custom_factors import cf_bp
+    from server.admin import admin_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(core_bp)
@@ -46,5 +48,7 @@ def create_app() -> Flask:
     app.register_blueprint(sft_bp)
     app.register_blueprint(mfa_bp)
     app.register_blueprint(cn_futures_bp)
+    app.register_blueprint(cf_bp)
+    app.register_blueprint(admin_bp)
 
     return app

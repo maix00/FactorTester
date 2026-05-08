@@ -2,11 +2,13 @@
 
 function searchFactors() {
     var query = document.getElementById('search').value;
+    var includeSubordinates = document.getElementById('include-subordinates')?.checked;
+    var params = new URLSearchParams();
     if (query.trim()) {
-        window.location.href = '?search=' + encodeURIComponent(query);
-    } else {
-        window.location.href = '?';
+        params.set('search', query);
     }
+    if (includeSubordinates) params.set('include_subordinates', '1');
+    window.location.href = '?' + params.toString();
 }
 
 function shutdownServer() {
@@ -38,5 +40,9 @@ document.addEventListener('DOMContentLoaded', function() {
         searchInput.addEventListener('keyup', function(e) {
             if (e.key === 'Enter') searchFactors();
         });
+    }
+    var includeSubordinates = document.getElementById('include-subordinates');
+    if (includeSubordinates) {
+        includeSubordinates.addEventListener('change', searchFactors);
     }
 });
