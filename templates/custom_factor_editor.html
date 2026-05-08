@@ -73,21 +73,16 @@
                                placeholder="搜索用户名/别名">
                     </div>
                     <div class="param-template-row">
-                        <select id="param-tpl-select" class="param-template-select">
-                            <option value="">— 选择该用户的参数配置 —</option>
-                        </select>
-                    </div>
-                    <div class="param-template-row">
                         <span id="param-tpl-name-label"
                               class="param-template-name-label"
                               title="当前参数配置"
                               style="display:none;max-width:240px;"></span>
                     </div>
+                    <div class="factor-config-results" id="param-config-results"></div>
                     <div class="param-template-row param-template-actions">
-                        <button onclick="loadParamTemplate()" title="查看选中的参数配置" class="param-template-btn param-template-btn-primary">查看</button>
-                        <button onclick="saveParamTemplate()" title="将当前参数列表保存为自己的新配置" class="param-template-btn param-template-btn-success">另存为…</button>
-                        <button onclick="updateParamTemplate()" title="用当前参数列表覆盖自己的选中配置" class="param-template-btn param-template-btn-warning">更新</button>
-                        <button onclick="deleteParamTemplate()" title="删除自己的选中配置" class="param-template-btn param-template-btn-danger">删除</button>
+                        <button onclick="saveParamTemplate()" title="保存或覆盖自己的唯一参数配置" class="param-template-btn param-template-btn-success">保存我的配置</button>
+                        <button onclick="updateParamTemplate()" title="用当前参数列表覆盖自己的唯一参数配置" class="param-template-btn param-template-btn-warning">更新</button>
+                        <button onclick="deleteParamTemplate()" title="删除自己的唯一参数配置" class="param-template-btn param-template-btn-danger">删除我的配置</button>
                         <span id="param-tpl-status" class="param-template-status"></span>
                     </div>
                 </div>

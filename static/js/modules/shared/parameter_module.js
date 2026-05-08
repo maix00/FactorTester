@@ -252,6 +252,7 @@
                     while ($pSel.options.length > 1) $pSel.remove(1);
                     if (data.success && data.templates) {
                         data.templates.forEach(function(t) {
+                            if ((t.name || '').indexOf('__global_') === 0) return;
                             var opt = document.createElement('option');
                             opt.value = t.id; opt.textContent = t.name;
                             $pSel.appendChild(opt);

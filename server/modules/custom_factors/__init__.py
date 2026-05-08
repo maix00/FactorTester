@@ -22,7 +22,7 @@ from server.shared import (
     _factor_family_cache_lock, get_factor_family_instance,
     invalidate_custom_factor_cache,
     _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
-    _get_user_file_lock, _load_user_tpls, get_custom_factor_instance,
+    _get_user_file_lock, get_custom_factor_instance,
 )
 from server.param_meta import serialize_param_meta
 from tools.factors import FactorFamily
@@ -35,6 +35,62 @@ def _cf_dir(username: str) -> str:
     d = os.path.join(_user_data_dir(username), 'custom_factors')
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _factor_library_param_config_dir(username: str) -> str:
+    d = os.path.join(_user_data_dir(username), 'factor_library_param_configs')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _factor_library_param_config_path(username: str, ff_alias: str) -> str:
+    return os.path.join(_factor_library_param_config_dir(username), f'{ff_alias}.json')
+
+
+def _load_factor_library_param_config(username: str, ff_alias: str) -> dict | None:
+    path = _factor_library_param_config_path(username, ff_alias)
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+            if isinstance(data, dict) and isinstance(data.get('params_list'), list):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _save_factor_library_param_config(username: str, ff_alias: str, params_list: list) -> dict:
+    config = {
+        'id': username,
+        'scope': 'user_id',
+        'scope_user_id': username,
+        'name': username,
+        'params_list': params_list,
+        'updated_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+    }
+    path = _factor_library_param_config_path(username, ff_alias)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        _json.dump(config, f, ensure_ascii=False, indent=2)
+    return config
+
+
+def _delete_factor_library_param_config(username: str, ff_alias: str) -> bool:
+    path = _factor_library_param_config_path(username, ff_alias)
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+def _list_factor_library_param_config_aliases(username: str) -> list[str]:
+    d = _factor_library_param_config_dir(username)
+    return [
+        os.path.splitext(fname)[0]
+        for fname in sorted(os.listdir(d))
+        if fname.endswith('.json')
+    ]
 
 
 def _factor_path(username: str, factor_id: str) -> str:
@@ -218,17 +274,6 @@ def _list_public_factors() -> list:
     return result
 
 
-def _list_param_template_factor_aliases(username: str) -> list[str]:
-    params_dir = os.path.join(_user_data_dir(username), 'params_templates')
-    if not os.path.isdir(params_dir):
-        return []
-    return [
-        os.path.splitext(fname)[0]
-        for fname in sorted(os.listdir(params_dir))
-        if fname.endswith('.json')
-    ]
-
-
 def _template_time_from_id(tpl: dict) -> str:
     if tpl.get('updated_at'):
         return tpl.get('updated_at')
@@ -237,6 +282,21 @@ def _template_time_from_id(tpl: dict) -> str:
         return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
     except Exception:
         return ''
+
+
+def _normalize_param_config_rows(username: str, ff_alias: str, params_list: list) -> list:
+    ff = get_factor_family_instance(ff_alias, username=username)
+    normalized_rows = []
+    for params in params_list:
+        if not isinstance(params, dict):
+            raise ValueError('参数行必须是对象')
+        normalized = ff._normalize_param_kwargs(**params)
+        ff._check_in_space(**normalized)
+        normalized_rows.append({
+            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
+            for p in ff.params
+        })
+    return normalized_rows
 
 
 def _factor_group_key(name: str | None) -> str:
@@ -322,6 +382,31 @@ def _build_param_factor_item(current_username: str, owner_acct: dict, ff_alias: 
         'can_edit': owner_username == current_username,
         'updated_at': _template_time_from_id(tpl),
     }
+
+
+def _build_factor_library_config_factors(current_username: str, owner_acct: dict, ff_alias: str, config: dict) -> list:
+    owner_username = owner_acct.get('username') or ''
+    public_by_alias = {}
+    for factor in _list_public_factors():
+        public_by_alias[factor.get('id')] = factor
+        public_by_alias[factor.get('name')] = factor
+    custom_by_alias = {}
+    for factor in _list_custom_factors(owner_username):
+        custom_by_alias[factor.get('id')] = factor
+        custom_by_alias[factor.get('name')] = factor
+    factors = []
+    params_list = config.get('params_list') or []
+    if not isinstance(params_list, list):
+        return factors
+    for row_idx, row in enumerate(params_list):
+        try:
+            factors.append(_build_param_factor_item(
+                current_username, owner_acct, ff_alias, config, row if isinstance(row, dict) else {},
+                row_idx, public_by_alias, custom_by_alias,
+            ))
+        except Exception:
+            continue
+    return factors
 
 
 def _parse_class_meta(source_code: str) -> dict:
@@ -620,27 +705,25 @@ def api_param_factor_overview():
         for factor in _list_custom_factors(owner_username):
             custom_by_alias[factor.get('id')] = factor
             custom_by_alias[factor.get('name')] = factor
-        for ff_alias in _list_param_template_factor_aliases(owner_username):
-            with _get_user_file_lock(owner_username):
-                templates = _load_user_tpls(owner_username, 'params', ff_alias)
-            for tpl in templates:
-                params_list = tpl.get('params_list') or []
-                if not isinstance(params_list, list):
-                    continue
-                for row_idx, row in enumerate(params_list):
-                    try:
-                        items.append(_build_param_factor_item(
-                            username, acct, ff_alias, tpl, row if isinstance(row, dict) else {},
-                            row_idx, public_by_alias, custom_by_alias,
-                        ))
-                    except Exception as exc:
-                        errors.append({
-                            'owner_username': owner_username,
-                            'factor_family_alias': ff_alias,
-                            'template_name': tpl.get('name') or '',
-                            'row_index': row_idx,
-                            'error': str(exc),
-                        })
+        for ff_alias in _list_factor_library_param_config_aliases(owner_username):
+            tpl = _load_factor_library_param_config(owner_username, ff_alias)
+            if not tpl:
+                continue
+            params_list = tpl.get('params_list') or []
+            for row_idx, row in enumerate(params_list):
+                try:
+                    items.append(_build_param_factor_item(
+                        username, acct, ff_alias, tpl, row if isinstance(row, dict) else {},
+                        row_idx, public_by_alias, custom_by_alias,
+                    ))
+                except Exception as exc:
+                    errors.append({
+                        'owner_username': owner_username,
+                        'factor_family_alias': ff_alias,
+                        'template_name': tpl.get('name') or '',
+                        'row_index': row_idx,
+                        'error': str(exc),
+                    })
 
     items.sort(key=lambda f: (
         _factor_group_key(f.get('factor_family_alias') or f.get('factor_family_name')),
@@ -673,28 +756,92 @@ def api_param_configs(ff_alias):
         owner = acct.get('username')
         if not owner:
             continue
-        with _get_user_file_lock(owner):
-            templates = _load_user_tpls(owner, 'params', ff_alias)
+        tpl = _load_factor_library_param_config(owner, ff_alias)
+        factors = []
+        public_by_alias = {}
+        for factor in _list_public_factors():
+            public_by_alias[factor.get('id')] = factor
+            public_by_alias[factor.get('name')] = factor
+        custom_by_alias = {}
+        for factor in _list_custom_factors(owner):
+            custom_by_alias[factor.get('id')] = factor
+            custom_by_alias[factor.get('name')] = factor
+        if tpl:
+            params_list = tpl.get('params_list') or []
+            if not isinstance(params_list, list):
+                params_list = []
+            for row_idx, row in enumerate(params_list):
+                try:
+                    factors.append(_build_param_factor_item(
+                        username, acct, ff_alias, tpl, row if isinstance(row, dict) else {},
+                        row_idx, public_by_alias, custom_by_alias,
+                    ))
+                except Exception:
+                    continue
         users.append({
             'owner_username': owner,
             'owner_alias': _account_display_name(acct),
             'owner_organization_id': acct.get('organization_id') or '',
             'owner_organization_name': acct.get('organization_name') or '',
             'editable': owner == username,
-            'templates': [
-                {
-                    'id': tpl.get('id'),
-                    'name': tpl.get('name') or '未命名配置',
-                    'updated_at': _template_time_from_id(tpl),
-                }
-                for tpl in templates
-            ],
+            'config': {
+                'id': tpl.get('id') if tpl else owner,
+                'name': tpl.get('name') if tpl else owner,
+                'updated_at': _template_time_from_id(tpl) if tpl else '',
+                'factor_count': len(tpl.get('params_list') or []) if tpl else 0,
+            } if tpl else None,
+            'factors': factors,
         })
     return jsonify({
         'success': True,
         'users': users,
         'can_filter_organization': can_filter_organization,
     })
+
+
+@cf_bp.route('/api/param-configs/<ff_alias>/<owner_username>', methods=['GET'])
+@login_required
+def api_get_param_config(ff_alias, owner_username):
+    username = _current_user()
+    if not _can_view_user_scope(username, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
+    config = _load_factor_library_param_config(owner_username, ff_alias)
+    if not config:
+        return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
+    config = dict(config)
+    config['owner_username'] = owner_username
+    config['editable'] = owner_username == username
+    return jsonify({'success': True, 'config': config})
+
+
+@cf_bp.route('/api/param-configs/<ff_alias>', methods=['PUT'])
+@login_required
+def api_save_param_config(ff_alias):
+    username = _current_user()
+    data = request.get_json() or {}
+    params_list = data.get('params_list', [])
+    if not isinstance(params_list, list) or len(params_list) == 0:
+        return jsonify({'success': False, 'error': '参数列表不能为空'})
+    try:
+        normalized_rows = _normalize_param_config_rows(username, ff_alias, params_list)
+        with _get_user_file_lock(username):
+            config = _save_factor_library_param_config(username, ff_alias, normalized_rows)
+        acct = _get_account(username) or {'username': username}
+        factors = _build_factor_library_config_factors(username, acct, ff_alias, config)
+        return jsonify({'success': True, 'config': config, 'factors': factors})
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)})
+
+
+@cf_bp.route('/api/param-configs/<ff_alias>', methods=['DELETE'])
+@login_required
+def api_delete_param_config(ff_alias):
+    username = _current_user()
+    with _get_user_file_lock(username):
+        deleted = _delete_factor_library_param_config(username, ff_alias)
+    if not deleted:
+        return jsonify({'success': False, 'error': '配置不存在'}), 404
+    return jsonify({'success': True})
 
 
 @cf_bp.route('/api/public-factor/<factor_name>', methods=['GET'])

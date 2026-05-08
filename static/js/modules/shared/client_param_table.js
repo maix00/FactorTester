@@ -12,10 +12,11 @@
     }
 
     function buildAlias(familyAlias, aliases, row) {
+        if (row && row.__factor_alias) return row.__factor_alias;
         const parts = [];
         aliases.forEach(alias => {
             const value = row[alias] == null ? '' : String(row[alias]);
-            if (value !== '') parts.push(alias + '_' + value);
+            if (value !== '') parts.push(alias + ':' + value);
         });
         return parts.length ? familyAlias + '|' + parts.join('|') : familyAlias;
     }

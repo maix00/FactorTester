@@ -9,6 +9,7 @@ let _paramRows = [];                 // 参数行数据 [{alias: value}, ...]
 let _paramTemplates = [];             // 当前因子家族可见的参数配置（自己 + 下级只读）
 let _paramConfigUsers = [];           // 因子库参数配置按用户索引返回
 let _paramTemplateCanFilterOrganization = false;
+let _selectedParamConfig = null;
 
 // 打开因子家族参数抽屉
 function openFactorFamilyParamDrawer(factorFamilyName) {
@@ -20,6 +21,7 @@ function openFactorFamilyParamDrawer(factorFamilyName) {
     }
     _paramFamilyAlias = factorFamilyName;
     _paramFamilyDef = def;
+    _selectedParamConfig = null;
     _paramAliases = (def.params && def.params.length)
         ? def.params.map(p => p.alias)
         : [];
@@ -134,21 +136,24 @@ function buildParamRowAlias(row) {
     return parts.length ? _paramFamilyAlias + '|' + parts.join('|') : _paramFamilyAlias;
 }
 
-function addParamRow() {
+async function addParamRow() {
     const row = ClientParamTable.collectAddRow('param-new-', _paramAliases, _paramFamilyDef?.params || []);
     _paramRows.push(row);
     renderParamTable();
+    await persistCurrentParamConfig('新增成功');
 }
 
-function deleteParamRow(idx) {
+async function deleteParamRow(idx) {
     _paramRows.splice(idx, 1);
     renderParamTable();
+    await persistCurrentParamConfig('删除成功');
 }
 
-function reorderParamRows(fromIdx, targetIdx) {
+async function reorderParamRows(fromIdx, targetIdx) {
     const [row] = _paramRows.splice(fromIdx, 1);
     _paramRows.splice(targetIdx, 0, row);
     renderParamTable();
+    await persistCurrentParamConfig('排序已保存');
 }
 
 // ── 构建 params_list（供模板保存 & 使用） ──
@@ -162,32 +167,74 @@ function buildParamConfigParamsList() {
     });
 }
 
+function applySavedFactorAliases(factors) {
+    (factors || []).forEach(factor => {
+        const idx = Number(factor.template_row_index || 0);
+        if (_paramRows[idx]) {
+            _paramRows[idx].__factor_alias = factor.factor_alias || '';
+        }
+    });
+}
+
+async function persistCurrentParamConfig(successMessage) {
+    const status = document.getElementById('param-tpl-status');
+    try {
+        if (!_paramRows.length) {
+            const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
+                method: 'DELETE'
+            });
+            const data = await resp.json();
+            if (!data.success && resp.status !== 404) {
+                if (status) status.textContent = '保存失败: ' + (data.error || '');
+                return false;
+            }
+            _selectedParamConfig = null;
+            if (status) status.textContent = '✓ 已清空我的配置';
+            await loadParamTemplatesIntoSelect();
+            return true;
+        }
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params_list: buildParamConfigParamsList() })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            applySavedFactorAliases(data.factors || []);
+            renderParamTable();
+            if (status) status.textContent = '✓ ' + (successMessage || '已保存我的配置');
+            await loadParamTemplatesIntoSelect();
+            return true;
+        }
+        if (status) status.textContent = '保存失败: ' + (data.error || '');
+    } catch(e) {
+        if (status) status.textContent = '网络错误';
+    }
+    return false;
+}
+
 // ── 抽屉内模板管理 ──
 function updateParamTemplateNameLabel() {
-    const sel = document.getElementById('param-tpl-select');
     const label = document.getElementById('param-tpl-name-label');
-    if (!sel || !label) return;
-    if (!sel.value) {
+    if (!label) return;
+    if (!_selectedParamConfig) {
         label.style.display = 'none';
         label.textContent = '';
         label.title = '当前参数配置';
         return;
     }
-    const option = sel.options[sel.selectedIndex];
-    label.textContent = option ? option.text : '';
-    label.title = option?.dataset.editable === '1'
+    label.textContent = `${_selectedParamConfig.owner_alias || _selectedParamConfig.owner_username || ''} / ${_selectedParamConfig.name || ''}`;
+    label.title = _selectedParamConfig.editable
         ? '自己的参数配置，可更新或删除'
         : '下级用户的参数配置，只能查看';
     label.style.display = '';
 }
 
 async function loadParamTemplatesIntoSelect() {
-    const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
-    if (!sel) return;
-    sel.onchange = updateParamTemplateNameLabel;
     _paramTemplates = [];
     _paramConfigUsers = [];
+    _selectedParamConfig = null;
     _paramTemplateCanFilterOrganization = false;
     renderParamTemplateOptions();
     try {
@@ -206,39 +253,62 @@ async function loadParamTemplatesIntoSelect() {
 }
 
 function renderParamTemplateOptions() {
-    const sel = document.getElementById('param-tpl-select');
+    const list = document.getElementById('param-config-results');
     const orgSel = document.getElementById('param-tpl-org-filter');
     const orgRow = document.getElementById('param-tpl-org-filter-row');
     const orgFilter = orgSel?.value || '';
     const userFilter = (document.getElementById('param-tpl-owner-filter')?.value || '').trim().toLowerCase();
-    if (!sel) return;
-    const selected = sel.value;
+    if (!list) return;
     renderParamTemplateOrgOptions(orgSel, orgRow, orgFilter);
-    sel.innerHTML = '<option value="">— 选择该用户的参数配置 —</option>';
+    const items = [];
     _paramTemplates.forEach(t => {
         if (orgFilter && (t.owner_organization_id || '') !== orgFilter) return;
         const ownerText = `${t.owner_alias || ''} ${t.owner_username || ''}`;
         const haystack = ownerText.toLowerCase();
         if (userFilter && !haystack.includes(userFilter)) return;
-        const owner = t.owner_alias ? `${t.owner_alias} / ` : '';
-        const editable = t.editable ? '1' : '0';
-        sel.innerHTML += '<option value="' + escAttr(t.id) + '" data-owner="' + escAttr(t.owner_username || '') + '" data-editable="' + editable + '">' +
-            escHtml(owner + t.name + (t.editable ? '' : '（只读）')) + '</option>';
+        items.push(t);
     });
-    if ([...sel.options].some(opt => opt.value === selected)) {
-        sel.value = selected;
+
+    if (!items.length) {
+        list.innerHTML = '<div class="factor-config-empty">未找到该用户的参数配置因子</div>';
+        _selectedParamConfig = null;
+        updateParamTemplateNameLabel();
+        return;
+    }
+    list.innerHTML = items.map((item, idx) => renderParamConfigResult(item, idx)).join('');
+    list.querySelectorAll('[data-param-config-idx]').forEach(btn => {
+        btn.addEventListener('click', () => selectAndLoadParamConfig(items[Number(btn.dataset.paramConfigIdx)]));
+    });
+    if (_selectedParamConfig && !items.some(item => isSameParamConfig(item, _selectedParamConfig))) {
+        _selectedParamConfig = null;
     }
     updateParamTemplateNameLabel();
+}
+
+function renderParamConfigResult(item, idx) {
+    const readonly = item.editable ? '' : '（只读）';
+    const selected = _selectedParamConfig && isSameParamConfig(item, _selectedParamConfig) ? ' style="border-color:#0078d4;background:#eef6ff;"' : '';
+    return '<button type="button" class="factor-config-result" data-param-config-idx="' + idx + '"' + selected + '>' +
+        '<span><span class="factor-config-result-title">' + escHtml(item.factor_alias || item.name || '') + '</span>' +
+        '<span class="factor-config-result-meta">' + escHtml((item.owner_alias || item.owner_username || '') + ' / ' + (item.name || '') + readonly) + '</span></span>' +
+        '<span class="factor-config-result-meta">第 ' + (Number(item.template_row_index || 0) + 1) + ' 行</span>' +
+        '</button>';
+}
+
+function isSameParamConfig(a, b) {
+    return a && b && a.id === b.id && a.owner_username === b.owner_username;
 }
 
 function flattenParamConfigUsers(users) {
     const result = [];
     users.forEach(user => {
-        (user.templates || []).forEach(tpl => {
+        (user.factors || []).forEach(factor => {
             result.push({
-                id: tpl.id,
-                name: tpl.name,
-                updated_at: tpl.updated_at || '',
+                id: user.owner_username || factor.template_id,
+                name: factor.template_name || user.owner_username || '',
+                factor_alias: factor.factor_alias,
+                template_row_index: factor.template_row_index,
+                updated_at: factor.updated_at || '',
                 owner_username: user.owner_username || '',
                 owner_alias: user.owner_alias || user.owner_username || '',
                 owner_organization_id: user.owner_organization_id || '',
@@ -276,23 +346,26 @@ function filterParamTemplatesByOwner() {
     renderParamTemplateOptions();
 }
 
+async function selectAndLoadParamConfig(config) {
+    _selectedParamConfig = config;
+    renderParamTemplateOptions();
+    await loadParamTemplate();
+}
+
 async function loadParamTemplate() {
-    const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
-    if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择参数配置';
+    if (!_selectedParamConfig) {
+        if (status) status.textContent = '请先搜索并选择参数配置因子';
         return;
     }
-    const tplId = sel.value;
-    const tplName = sel.options[sel.selectedIndex].text;
-    const ownerUsername = sel.options[sel.selectedIndex].dataset.owner || '';
+    const tplName = _selectedParamConfig.name;
+    const ownerUsername = _selectedParamConfig.owner_username || '';
     if (status) status.textContent = '加载中...';
     try {
-        const ownerParam = ownerUsername ? '?owner_username=' + encodeURIComponent(ownerUsername) : '';
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId + ownerParam);
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias) + '/' + encodeURIComponent(ownerUsername));
         const data = await resp.json();
-        if (data.success && data.template && data.template.params_list) {
-            _paramRows = data.template.params_list.map(obj => {
+        if (data.success && data.config && data.config.params_list) {
+            _paramRows = data.config.params_list.map(obj => {
                 const row = {};
                 _paramAliases.forEach(a => { row[a] = obj[a] !== undefined ? String(obj[a]) : ''; });
                 return row;
@@ -310,19 +383,17 @@ async function loadParamTemplate() {
 }
 
 async function saveParamTemplate() {
-    const name = prompt('配置名称 (用于保存当前参数配置):');
-    if (!name) return;
     const status = document.getElementById('param-tpl-status');
     if (status) status.textContent = '保存中...';
     try {
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias), {
-            method: 'POST',
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, params_list: buildParamConfigParamsList() })
+            body: JSON.stringify({ params_list: buildParamConfigParamsList() })
         });
         const data = await resp.json();
         if (data.success) {
-            if (status) status.textContent = '✓ 已保存: ' + name;
+            if (status) status.textContent = '✓ 已保存我的配置';
             await loadParamTemplatesIntoSelect();
         } else {
             if (status) status.textContent = '保存失败: ' + (data.error || '');
@@ -333,22 +404,19 @@ async function saveParamTemplate() {
 }
 
 async function updateParamTemplate() {
-    const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
-    if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择参数配置';
+    if (!_selectedParamConfig) {
+        await saveParamTemplate();
         return;
     }
-    const tplId = sel.value;
-    const tplName = sel.options[sel.selectedIndex].text;
-    const editable = sel.options[sel.selectedIndex].dataset.editable === '1';
-    if (!editable) {
+    const tplName = _selectedParamConfig.name;
+    if (!_selectedParamConfig.editable) {
         if (status) status.textContent = '下级用户的配置只能查看，不能更新';
         return;
     }
     if (status) status.textContent = '更新中...';
     try {
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId, {
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ params_list: buildParamConfigParamsList() })
@@ -365,28 +433,26 @@ async function updateParamTemplate() {
 }
 
 async function deleteParamTemplate() {
-    const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
-    if (!sel || !sel.value) {
-        if (status) status.textContent = '请先选择参数配置';
+    if (!_selectedParamConfig) {
+        if (status) status.textContent = '请先搜索并选择参数配置因子';
         return;
     }
-    const tplId = sel.value;
-    const tplName = sel.options[sel.selectedIndex].text;
-    const editable = sel.options[sel.selectedIndex].dataset.editable === '1';
-    if (!editable) {
+    const tplName = _selectedParamConfig.name;
+    if (!_selectedParamConfig.editable) {
         if (status) status.textContent = '下级用户的配置只能查看，不能删除';
         return;
     }
     if (!confirm('确定删除参数配置「' + tplName + '」？')) return;
     if (status) status.textContent = '删除中...';
     try {
-        const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '/' + tplId, {
+        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
             method: 'DELETE'
         });
         const data = await resp.json();
         if (data.success) {
             if (status) status.textContent = '✓ 已删除';
+            _selectedParamConfig = null;
             await loadParamTemplatesIntoSelect();
         } else {
             if (status) status.textContent = '删除失败: ' + (data.error || '');
