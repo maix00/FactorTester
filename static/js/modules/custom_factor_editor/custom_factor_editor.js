@@ -494,7 +494,7 @@ function getCurrentEditorFactorDraft() {
         description: document.getElementById('cfg-desc')?.value || document.getElementById('cfg-desc-vis')?.value || '',
         category: document.getElementById('cfg-cat')?.value || document.getElementById('cfg-cat-vis')?.value || '自编',
         source_code: getCurrentEditorSource(),
-        type: 'custom',
+        type: _currentFactorFamilySource || 'custom',
     };
 }
 
@@ -1033,11 +1033,16 @@ async function validateCustomExpr(factorName, options = {}) {
     btn.textContent = '校验中...';
     btn.className = 'btn-validate';
     try {
+        const validateAsPublic = _currentMode === 'visual'
+            && _currentFactorFamilySource === 'public'
+            && !_visGraphDirty
+            && (factorName || _currentFactorFamilyId);
         const res = await fetch('/custom-factors/api/validate', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                source_code: sourceCode,
-                factor_name: factorName,
+                source_code: validateAsPublic ? '' : sourceCode,
+                factor_name: factorName || _currentFactorFamilyId,
+                is_public: validateAsPublic,
                 chinese_name: (document.getElementById('cfg-cn') || document.getElementById('cfg-cn-vis'))?.value || '',
                 description: (document.getElementById('cfg-desc') || document.getElementById('cfg-desc-vis'))?.value || '',
             })
@@ -1164,12 +1169,15 @@ const OP_PALETTE = {
         { key: '/', label: '/', desc: 'A / B', arity: 2 },
     ]
 };
+const VIS_FACTOR_PARAM_TYPES = ['FactorFreqParam', 'ReturnFreqParam', 'ReverseParam'];
+const VIS_PARAMETER_TYPES = ['DataColumnParam', 'WindowParam', 'DateOrTimeParam', 'TimeDeltaParam', 'FactorParam', 'TypeParam'];
 
 let _visNodes = [];
 let _visNextId = 1;
 let _visSelectedNodeId = null;
 let _visDragging = null;
 let _visSourceFallback = '';
+let _visGraphDirty = false;
 
 function renderVisualEditor(factor) {
     _currentMode = 'visual';
@@ -1181,6 +1189,7 @@ function renderVisualEditor(factor) {
     setActiveEditorModeTab('visual');
     footer.style.display = '';
     _visSourceFallback = factor.source_code || '';
+    _visGraphDirty = false;
     loadVisualNodesFromSource(_visSourceFallback);
 
     body.innerHTML = `
@@ -1206,7 +1215,7 @@ function renderVisualEditor(factor) {
                 </div>
                 <div class="config-section" style="margin-top:16px;">
                     <h3>基本信息</h3>
-                    <div class="field"><label>类名</label><input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" placeholder="如 MyFactor" oninput="_dirty=true"></div>
+                    <div class="field"><label>类名</label><input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" placeholder="如 MyFactor" oninput="_dirty=true;_visGraphDirty=true"></div>
                     <div class="field"><label>中文名称</label><input type="text" id="cfg-cn-vis" value="${escHtml(factor.chinese_name || '')}" oninput="_dirty=true"></div>
                     <div class="field"><label>分类</label><input type="text" id="cfg-cat-vis" value="${escHtml(factor.category || '自编')}" oninput="_dirty=true"></div>
                     <div class="field"><label>描述 (Markdown)</label><textarea id="cfg-desc-vis" oninput="_dirty=true">${escHtml(factor.description || '')}</textarea></div>
@@ -1272,6 +1281,7 @@ function onCanvasDrop(e) {
     };
     _visNodes.push(node);
     _dirty = true;
+    _visGraphDirty = true;
     invalidateCodeValidation();
     renderAllVisNodes();
     selectVisNode(node.id);
@@ -1298,8 +1308,13 @@ function renderAllVisNodes() {
         el.dataset.nodeId = node.id;
         el.innerHTML = `
             <button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>
-            <div class="node-label">${escHtml(node.label)}</div>
-            <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
+            <div class="node-card-head">
+                <div class="node-label">${escHtml(node.label)}</div>
+                <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
+            </div>
+            ${node.params?.intermediate_name ? `<div class="node-intermediate-badge">中间因子 ${escHtml(node.params.intermediate_name)}</div>` : ''}
+            ${renderVisualNodeSlots(node)}
+            <div class="node-output-slot">输出</div>
         `;
         el.addEventListener('mousedown', (event) => onVisNodeMouseDown(event, node.id));
         el.addEventListener('click', (event) => { event.stopPropagation(); selectVisNode(node.id); });
@@ -1361,6 +1376,7 @@ function updateVisNodeLabel(nodeId, newLabel) {
     renderAllVisNodes();
     updateVisualExprPreview();
     _dirty = true;
+    _visGraphDirty = true;
 }
 
 function deleteVisNode(nodeId) {
@@ -1369,6 +1385,7 @@ function deleteVisNode(nodeId) {
     if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
     renderAllVisNodes();
     _dirty = true;
+    _visGraphDirty = true;
     updateVisualExprPreview();
 }
 
@@ -1390,13 +1407,16 @@ function buildExprFromNode(node, seen) {
     if (node.key === 'Constant') return node.params?.value || node.label || '0';
     const inputs = (node.inputs || []).map(id => _visNodes.find(n => n.id === id));
     const exprs = inputs.map(child => buildExprFromNode(child, new Set(seen))).filter(Boolean);
-    if (node.cat === 'arith') return exprs.length >= 2 ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
+    let expr = '';
+    if (node.cat === 'arith') expr = exprs.length >= 2 ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
     if (node.cat === 'ts' || node.cat === 'cs') {
         if (!exprs.length) return '';
         const rest = exprs.slice(1).join(', ');
-        return `${exprs[0]}.${node.key}(${rest})`;
+        expr = `${exprs[0]}.${node.key}(${rest})`;
     }
-    return '';
+    const intermediateName = node.params?.intermediate_name || '';
+    if (expr && intermediateName) return `(${expr}).as_intermediate(${JSON.stringify(intermediateName)})`;
+    return expr;
 }
 
 function updateVisualExprPreview() {
@@ -1417,6 +1437,35 @@ function getVisualNodeSubtitle(node) {
     return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
 }
 
+function renderVisualNodeSlots(node) {
+    const labels = getVisualSlotLabels(node);
+    if (!labels.length) return '';
+    const rows = labels.map((label, index) => {
+        const inputNode = _visNodes.find(n => n.id === (node.inputs || [])[index]);
+        return `<div class="node-slot ${inputNode ? 'filled' : ''}">
+            <span class="node-slot-name">${escHtml(label)}</span>
+            <span class="node-slot-value">${escHtml(inputNode ? inputNode.label : '未连接')}</span>
+        </div>`;
+    }).join('');
+    return `<div class="node-slots">${rows}</div>`;
+}
+
+function getVisualSlotLabels(node) {
+    if (node.cat === 'arith') {
+        if (node.key === '-') return ['被减数', '减数'];
+        if (node.key === '/') return ['分子', '分母'];
+        if (node.key === '*') return ['左因子', '右因子'];
+        return ['左项', '右项'];
+    }
+    if (node.cat === 'ts') {
+        if (['rolling_mean', 'rolling_std', 'rolling_min', 'rolling_max'].includes(node.key)) return ['序列 X', '窗口 N'];
+        if (['shift', 'delta'].includes(node.key)) return ['序列 X', '步长 N'];
+        return ['序列 X'];
+    }
+    if (node.cat === 'cs') return ['序列 X'];
+    return [];
+}
+
 function getVisualOperatorArity(node) {
     return Object.values(OP_PALETTE).flat().find(op => op.key === node.key && op.cat === node.cat)?.arity || 0;
 }
@@ -1424,7 +1473,7 @@ function getVisualOperatorArity(node) {
 function renderVisualInputSelectors(node) {
     const arity = getVisualOperatorArity(node);
     if (!arity) return '';
-    const labels = node.cat === 'arith' ? ['左输入', '右输入'] : ['主输入', '参数/窗口'];
+    const labels = getVisualSlotLabels(node);
     let html = '<div class="field"><label>输入连接</label>';
     for (let i = 0; i < arity; i++) {
         const current = (node.inputs || [])[i] || '';
@@ -1439,12 +1488,18 @@ function renderVisualInputSelectors(node) {
 }
 
 function renderVisualNodeParamControls(node) {
+    const intermediateControls = node.cat !== 'leaf' ? `
+        <div class="field"><label>中间因子标记</label>
+            <input value="${escHtml(node.params?.intermediate_name || '')}" placeholder="如 SIG_YZ，不填则不标记"
+                oninput="updateVisualParam(${node.id}, 'intermediate_name', this.value)">
+        </div>
+    ` : '';
     if (node.key === 'DataColumnParam') {
         return `
             <div class="field"><label>参数别名</label><input value="${escHtml(node.params?.alias || node.label || 'P')}" oninput="updateVisualParam(${node.id}, 'alias', this.value)"></div>
             <div class="field"><label>参数类型</label>
                 <select onchange="updateVisualParam(${node.id}, 'type', this.value)">
-                    ${['DataColumnParam', 'WindowParam', 'DateOrTimeParam'].map(t => `<option value="${t}" ${node.params?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+                    ${[...VIS_PARAMETER_TYPES, ...VIS_FACTOR_PARAM_TYPES].map(t => `<option value="${t}" ${node.params?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
                 </select>
             </div>
             <div class="field"><label>默认值</label><input value="${escHtml(node.params?.default_value || '')}" oninput="updateVisualParam(${node.id}, 'default_value', this.value)"></div>
@@ -1453,7 +1508,7 @@ function renderVisualNodeParamControls(node) {
     if (node.key === 'Constant') {
         return `<div class="field"><label>常数值</label><input value="${escHtml(node.params?.value || node.label || '0')}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>`;
     }
-    return '';
+    return intermediateControls;
 }
 
 function updateVisualNodeInput(nodeId, index, value) {
@@ -1463,6 +1518,7 @@ function updateVisualNodeInput(nodeId, index, value) {
     node.inputs[index] = value ? Number(value) : null;
     node.inputs = node.inputs.filter(Boolean);
     _dirty = true;
+    _visGraphDirty = true;
     invalidateCodeValidation();
     renderAllVisNodes();
     selectVisNode(nodeId);
@@ -1474,7 +1530,9 @@ function updateVisualParam(nodeId, key, value) {
     node.params = node.params || {};
     node.params[key] = value;
     if (key === 'alias' || key === 'value') node.label = value;
+    if (key === 'intermediate_name' && value) node.label = value;
     _dirty = true;
+    _visGraphDirty = true;
     invalidateCodeValidation();
     renderAllVisNodes();
     updateVisualExprPreview();
@@ -1508,6 +1566,7 @@ function renderVisEdges(svg) {
 
 function visualToSource(options = {}) {
     if (_currentMode !== 'visual') return document.getElementById('code-source')?.value || '';
+    if (!_visGraphDirty && _visSourceFallback.trim()) return _visSourceFallback;
     const expr = visualToExpr();
     if (!expr) {
         if (!options.silent) showToast('请先完成可视化表达式连接', 'error');
@@ -1516,9 +1575,11 @@ function visualToSource(options = {}) {
     const className = document.getElementById('cfg-name-vis')?.value?.trim() || extractClassNameFromSource(_visSourceFallback) || 'MyFactor';
     const paramNodes = _visNodes.filter(n => n.key === 'DataColumnParam');
     const paramTypes = [...new Set(paramNodes.map(n => n.params?.type || 'DataColumnParam'))];
+    const factorParamTypes = paramTypes.filter(t => VIS_FACTOR_PARAM_TYPES.includes(t));
+    const regularParamTypes = paramTypes.filter(t => !VIS_FACTOR_PARAM_TYPES.includes(t));
     const imports = [
-        'from tools.factors import FactorFamily',
-        paramTypes.length ? `from tools.parameters import ${paramTypes.join(', ')}` : '',
+        `from tools.factors import ${['FactorFamily', ...factorParamTypes].join(', ')}`,
+        regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
     ].filter(Boolean).join('\n');
     const paramLines = paramNodes.map(n => {
         const alias = n.params?.alias || n.label || 'P';
@@ -1572,7 +1633,7 @@ function loadVisualNodesFromSource(source) {
 
 function parseParamNodesFromSource(source) {
     const params = [];
-    const regex = /^\s*(\w+)\s*=\s*(DataColumnParam|WindowParam|DateOrTimeParam)\(\s*['"]([^'"]+)['"]\s*,\s*default_value\s*=\s*([^)\n]+)\)/gm;
+    const regex = /^\s*(\w+)\s*=\s*(\w+Param)\(\s*['"]([^'"]+)['"]\s*,\s*default_value\s*=\s*([^)\n]+)\)/gm;
     let match;
     while ((match = regex.exec(source || '')) !== null) {
         params.push({
@@ -1600,15 +1661,26 @@ function parseAssignmentsFromSource(source) {
     return assignments;
 }
 
-function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y) {
+function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y, labelHint = '') {
     const trimmed = stripOuterParens(String(expr || '').trim());
     if (!trimmed) return null;
     if (nodeByAlias.has(trimmed)) return nodeByAlias.get(trimmed);
     if (assignments.has(trimmed)) {
-        return buildVisualGraphFromExpression(assignments.get(trimmed), assignments, nodeByAlias, x, y);
+        return buildVisualGraphFromExpression(assignments.get(trimmed), assignments, nodeByAlias, x, y, trimmed);
+    }
+    const intermediate = parseIntermediateExpression(trimmed);
+    if (intermediate) {
+        const nodeId = buildVisualGraphFromExpression(intermediate.expr, assignments, nodeByAlias, x, y, intermediate.name || labelHint);
+        const node = _visNodes.find(n => n.id === nodeId);
+        if (node && node.cat !== 'leaf') {
+            node.params = node.params || {};
+            node.params.intermediate_name = intermediate.name || labelHint || node.label;
+            node.label = node.params.intermediate_name;
+        }
+        return nodeId;
     }
     if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(trimmed)) {
-        return addVisualNodeFromParsed('Constant', 'leaf', trimmed, x, y, [], { value: trimmed });
+        return addVisualNodeFromParsed('Constant', 'leaf', labelHint || trimmed, x, y, [], { value: trimmed });
     }
 
     const method = parseMethodExpression(trimmed);
@@ -1620,20 +1692,22 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y) {
             if (argId) inputIds.push(argId);
         }
         const cat = OP_PALETTE.cs.some(op => op.key === method.name) ? 'cs' : 'ts';
-        return addVisualNodeFromParsed(method.name, cat, method.name, x, y, inputIds);
+        return addVisualNodeFromParsed(method.name, cat, labelHint || method.name, x, y, inputIds);
     }
 
     const binary = parseBinaryExpression(trimmed);
     if (binary) {
         const leftId = buildVisualGraphFromExpression(binary.left, assignments, nodeByAlias, x - 220, y - 60);
         const rightId = buildVisualGraphFromExpression(binary.right, assignments, nodeByAlias, x - 220, y + 60);
-        return addVisualNodeFromParsed(binary.op, 'arith', binary.op, x, y, [leftId, rightId].filter(Boolean));
+        return addVisualNodeFromParsed(binary.op, 'arith', labelHint || binary.op, x, y, [leftId, rightId].filter(Boolean));
     }
 
-    return addVisualNodeFromParsed('Constant', 'leaf', trimmed, x, y, [], { value: trimmed });
+    return addVisualNodeFromParsed('Constant', 'leaf', labelHint || trimmed, x, y, [], { value: trimmed });
 }
 
 function addVisualNodeFromParsed(key, cat, label, x, y, inputs = [], params = {}) {
+    const opKeys = new Set(Object.values(OP_PALETTE).flat().map(op => op.key));
+    const intermediateName = cat !== 'leaf' && label && !opKeys.has(label) ? label : '';
     const node = {
         id: _visNextId++,
         key,
@@ -1642,10 +1716,21 @@ function addVisualNodeFromParsed(key, cat, label, x, y, inputs = [], params = {}
         x: Math.max(0, x),
         y: Math.max(0, y),
         inputs,
-        params,
+        params: intermediateName ? {...params, intermediate_name: intermediateName} : params,
     };
     _visNodes.push(node);
     return node.id;
+}
+
+function parseIntermediateExpression(expr) {
+    const match = expr.match(/^(.+)\.as_intermediate\((.*)\)$/);
+    if (!match) return null;
+    const args = splitTopLevelArgs(match[2]);
+    const rawName = (args[0] || '').trim();
+    return {
+        expr: match[1].trim(),
+        name: rawName.replace(/^['"]|['"]$/g, ''),
+    };
 }
 
 function parseMethodExpression(expr) {
