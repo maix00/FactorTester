@@ -80,36 +80,37 @@ VISUAL_OPERATOR_GROUPS = [
         ],
     },
     {
-        'key': 'unary',
-        'label': '单目算子',
-        'collapsed': False,
-        'operators': [
-            {'key': 'log', 'label': '对数', 'desc': 'X.log()', 'arity': 1, 'slots': ['序列 X']},
-            {'key': 'abs', 'label': '绝对值', 'desc': 'X.abs()', 'arity': 1, 'slots': ['序列 X']},
-        ],
-        'more_label': '更多单目算子',
-        'more_operators': [
-            {'key': 'sqrt', 'label': '平方根', 'desc': 'X.sqrt()', 'arity': 1, 'slots': ['序列 X']},
-            {'key': 'sign', 'label': '符号', 'desc': 'X.sign()', 'arity': 1, 'slots': ['序列 X']},
-            {'key': 'neg', 'label': '取负', 'desc': 'X.neg()', 'arity': 1, 'slots': ['序列 X']},
-        ],
-    },
-    {
         'key': 'cs',
-        'label': '截面算子',
+        'label': '横截算子',
         'collapsed': False,
         'operators': [
             {'key': 'cs_rank', 'label': '截面排名', 'desc': 'X.cs_rank()', 'arity': 1, 'slots': ['序列 X']},
             {'key': 'cs_zscore', 'label': '截面标准化', 'desc': 'X.cs_zscore()', 'arity': 1, 'slots': ['序列 X']},
         ],
-        'more_label': '更多截面算子',
+        'more_label': '更多横截算子',
         'more_operators': [
             {'key': 'cs_spearman', 'label': 'Spearman', 'desc': 'X.cs_spearman(Y)', 'arity': 2, 'slots': ['序列 X', '序列 Y']},
         ],
     },
     {
-        'key': 'arith',
-        'label': '算术算子',
+        'key': 'arithUnary',
+        'label': '算数一元',
+        'collapsed': False,
+        'operators': [
+            {'key': 'log', 'label': '对数', 'desc': 'X.log()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'abs', 'label': '绝对值', 'desc': 'X.abs()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+        'more_label': '更多算数一元',
+        'more_operators': [
+            {'key': 'sqrt', 'label': '平方根', 'desc': 'X.sqrt()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'sign', 'label': '符号', 'desc': 'X.sign()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'neg', 'label': '取负', 'desc': 'X.neg()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': '~', 'label': '~', 'desc': '~A', 'arity': 1, 'slots': ['条件 X'], 'syntax': 'prefix'},
+        ],
+    },
+    {
+        'key': 'arithBinary',
+        'label': '算数二元',
         'collapsed': False,
         'operators': [
             {'key': '+', 'label': '+', 'desc': 'A + B', 'arity': 2, 'slots': ['左项', '右项'], 'syntax': 'infix'},
@@ -117,18 +118,11 @@ VISUAL_OPERATOR_GROUPS = [
             {'key': '*', 'label': '*', 'desc': 'A * B', 'arity': 2, 'slots': ['左因子', '右因子'], 'syntax': 'infix'},
             {'key': '/', 'label': '/', 'desc': 'A / B', 'arity': 2, 'slots': ['分子', '分母'], 'syntax': 'infix'},
         ],
-        'more_label': '更多算术算子',
+        'more_label': '更多算数二元',
         'more_operators': [
             {'key': '**', 'label': '**', 'desc': 'A ** B', 'arity': 2, 'slots': ['底数', '指数'], 'syntax': 'infix'},
             {'key': 'max', 'label': '逐元素 max', 'desc': 'A.max(B)', 'arity': 2, 'slots': ['左值', '右值']},
             {'key': 'min', 'label': '逐元素 min', 'desc': 'A.min(B)', 'arity': 2, 'slots': ['左值', '右值']},
-        ],
-    },
-    {
-        'key': 'compare',
-        'label': '比较/逻辑',
-        'collapsed': True,
-        'operators': [
             {'key': '>', 'label': '>', 'desc': 'A > B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
             {'key': '<', 'label': '<', 'desc': 'A < B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
             {'key': '>=', 'label': '>=', 'desc': 'A >= B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
@@ -137,7 +131,16 @@ VISUAL_OPERATOR_GROUPS = [
             {'key': '!=', 'label': '!=', 'desc': 'A != B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
             {'key': '&', 'label': '&', 'desc': 'A & B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
             {'key': '|', 'label': '|', 'desc': 'A | B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
-            {'key': '~', 'label': '~', 'desc': '~A', 'arity': 1, 'slots': ['条件 X'], 'syntax': 'prefix'},
+        ],
+    },
+    {
+        'key': 'arithTernary',
+        'label': '算数三元',
+        'collapsed': False,
+        'operators': [
+        ],
+        'more_label': '更多算数三元',
+        'more_operators': [
         ],
     },
 ]

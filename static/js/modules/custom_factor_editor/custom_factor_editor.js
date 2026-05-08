@@ -1180,6 +1180,7 @@ let _visSelectedNodeId = null;
 let _visDragging = null;
 let _visSourceFallback = '';
 let _visGraphDirty = false;
+let _visPendingConnection = null;
 
 async function loadVisualOperatorRegistry() {
     try {
@@ -1242,15 +1243,22 @@ function renderVisualEditor(factor) {
                 </div>
                 <div style="margin-top:12px;">
                     <button class="btn-validate" onclick="visualToExpr()" style="width:100%">生成表达式</button>
+                    <button class="btn-validate" onclick="autoLayoutVisualNodes()" style="width:100%; margin-top:8px;">自动整理</button>
                 </div>
                 <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-expr-preview"></div>
+                <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-connect-hint">点击卡牌右侧端口，再点击目标卡牌的输入槽完成连接。</div>
             </div>
         </div>
     `;
 
     initPaletteDrag();
+    layoutVisualExpressionTree();
     renderAllVisNodes();
-    updateVisualExprPreview();
+    requestAnimationFrame(() => {
+        layoutVisualExpressionTree({measure: true});
+        renderAllVisNodes();
+        updateVisualExprPreview();
+    });
     invalidateCodeValidation();
 }
 
@@ -1332,10 +1340,13 @@ function onCanvasDrop(e) {
 
 function onCanvasClick(e) {
     if (e.target.closest('.vis-node')) return;
+    _visPendingConnection = null;
     _visSelectedNodeId = null;
     renderAllVisNodes();
     document.getElementById('node-props').innerHTML = '<span style="color:#888;">点击画布上的节点查看属性</span>';
     document.getElementById('visual-expr-preview').textContent = '';
+    const hint = document.getElementById('visual-connect-hint');
+    if (hint) hint.textContent = '点击卡牌右侧端口，再点击目标卡牌的输入槽完成连接。';
 }
 
 function renderAllVisNodes() {
@@ -1357,7 +1368,7 @@ function renderAllVisNodes() {
             </div>
             ${node.params?.intermediate_name ? `<div class="node-intermediate-badge">中间因子 ${escHtml(node.params.intermediate_name)}</div>` : ''}
             ${renderVisualNodeSlots(node)}
-            <div class="node-output-slot">输出</div>
+            <button class="node-output-port" title="点击后选择目标输入槽" onclick="startVisualConnection(${node.id});event.stopPropagation()"></button>
         `;
         el.addEventListener('mousedown', (event) => onVisNodeMouseDown(event, node.id));
         el.addEventListener('click', (event) => { event.stopPropagation(); selectVisNode(node.id); });
@@ -1367,7 +1378,7 @@ function renderAllVisNodes() {
 }
 
 function onVisNodeMouseDown(e, nodeId) {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button') || e.target.closest('.node-slot')) return;
     e.preventDefault();
     e.stopPropagation();
     const node = _visNodes.find(n => n.id === nodeId);
@@ -1422,10 +1433,62 @@ function updateVisNodeLabel(nodeId, newLabel) {
     _visGraphDirty = true;
 }
 
+function startVisualConnection(fromNodeId) {
+    const from = _visNodes.find(n => n.id === fromNodeId);
+    if (!from) return;
+    _visPendingConnection = {fromNodeId};
+    const hint = document.getElementById('visual-connect-hint');
+    if (hint) hint.textContent = `正在连接 ${from.label}：点击目标卡牌的输入槽。`;
+    renderAllVisNodes();
+}
+
+function completeVisualConnection(toNodeId, inputIndex) {
+    if (!_visPendingConnection) return;
+    const fromNodeId = _visPendingConnection.fromNodeId;
+    if (fromNodeId === toNodeId) {
+        showToast('不能连接到自身', 'error');
+        return;
+    }
+    if (wouldCreateVisualCycle(fromNodeId, toNodeId)) {
+        showToast('该连接会形成环，已取消', 'error');
+        _visPendingConnection = null;
+        renderAllVisNodes();
+        return;
+    }
+    const target = _visNodes.find(n => n.id === toNodeId);
+    if (!target) return;
+    target.inputs = target.inputs || [];
+    target.inputs[inputIndex] = fromNodeId;
+    _visPendingConnection = null;
+    _dirty = true;
+    _visGraphDirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    selectVisNode(toNodeId);
+    updateVisualExprPreview();
+    const hint = document.getElementById('visual-connect-hint');
+    if (hint) hint.textContent = '点击卡牌右侧端口，再点击目标卡牌的输入槽完成连接。';
+}
+
+function wouldCreateVisualCycle(fromNodeId, toNodeId) {
+    const stack = [fromNodeId];
+    const seen = new Set();
+    while (stack.length) {
+        const id = stack.pop();
+        if (id === toNodeId) return true;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const node = _visNodes.find(n => n.id === id);
+        (node?.inputs || []).forEach(childId => stack.push(childId));
+    }
+    return false;
+}
+
 function deleteVisNode(nodeId) {
     _visNodes = _visNodes.filter(n => n.id !== nodeId);
     _visNodes.forEach(node => { node.inputs = (node.inputs || []).filter(id => id !== nodeId); });
     if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
+    if (_visPendingConnection?.fromNodeId === nodeId) _visPendingConnection = null;
     renderAllVisNodes();
     _dirty = true;
     _visGraphDirty = true;
@@ -1492,7 +1555,10 @@ function renderVisualNodeSlots(node) {
     if (!labels.length) return '';
     const rows = labels.map((label, index) => {
         const inputNode = _visNodes.find(n => n.id === (node.inputs || [])[index]);
-        return `<div class="node-slot ${inputNode ? 'filled' : ''}">
+        const awaiting = _visPendingConnection && _visPendingConnection.fromNodeId !== node.id;
+        return `<div class="node-slot ${inputNode ? 'filled' : ''} ${awaiting ? 'awaiting' : ''}"
+            onclick="completeVisualConnection(${node.id}, ${index});event.stopPropagation()"
+            title="${awaiting ? '点击连接到此输入槽' : '先点击另一个卡牌的输出端口'}">
             <span class="node-slot-name">${escHtml(label)}</span>
             <span class="node-slot-value">${escHtml(inputNode ? inputNode.label : '未连接')}</span>
         </div>`;
@@ -1574,6 +1640,16 @@ function updateVisualNodeInput(nodeId, index, value) {
     selectVisNode(nodeId);
 }
 
+function autoLayoutVisualNodes() {
+    layoutVisualExpressionTree({measure: true});
+    renderAllVisNodes();
+    requestAnimationFrame(() => {
+        layoutVisualExpressionTree({measure: true});
+        renderAllVisNodes();
+        updateVisualExprPreview();
+    });
+}
+
 function updateVisualParam(nodeId, key, value) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
@@ -1614,6 +1690,89 @@ function renderVisEdges(svg) {
     }
 }
 
+function layoutVisualExpressionTree(options = {}) {
+    if (!_visNodes.length) return;
+    const root = getVisualRootNode();
+    if (!root) return;
+    const roots = [root, ..._visNodes.filter(node => node.id !== root.id && !isReachableFromRoot(node.id, root.id))];
+    const state = { nextY: 64, maxX: 0, maxY: 0 };
+    roots.forEach((node, index) => {
+        if (index > 0) state.nextY += 60;
+        state.totalDepth = getVisualTreeDepth(node.id, new Set());
+        layoutVisualSubtree(node.id, 0, state, new Set(), options);
+    });
+    const canvas = document.getElementById('visual-canvas');
+    if (canvas) {
+        canvas.style.width = Math.max(1200, state.maxX + 360) + 'px';
+        canvas.style.height = Math.max(900, state.maxY + 220) + 'px';
+    }
+}
+
+function layoutVisualSubtree(nodeId, depth, state, path, options) {
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node || path.has(nodeId)) return { top: state.nextY, bottom: state.nextY + estimateVisualNodeSize(node, options).height };
+    path.add(nodeId);
+    const size = estimateVisualNodeSize(node, options);
+    const childIds = (node.inputs || []).filter(Boolean);
+    const childBoxes = childIds.map(id => layoutVisualSubtree(id, depth + 1, state, new Set(path), options));
+
+    let centerY;
+    if (childBoxes.length) {
+        centerY = (childBoxes[0].top + childBoxes[childBoxes.length - 1].bottom) / 2;
+    } else {
+        centerY = state.nextY + size.height / 2;
+        state.nextY += size.height + 34;
+    }
+
+    node.x = 70 + Math.max(0, (state.totalDepth || 0) - depth) * 270;
+    node.y = Math.max(30, centerY - size.height / 2);
+    state.maxX = Math.max(state.maxX, node.x + size.width);
+    state.maxY = Math.max(state.maxY, node.y + size.height);
+    path.delete(nodeId);
+    return {
+        top: Math.min(node.y, ...childBoxes.map(box => box.top)),
+        bottom: Math.max(node.y + size.height, ...childBoxes.map(box => box.bottom)),
+    };
+}
+
+function estimateVisualNodeSize(node, options = {}) {
+    if (options.measure) {
+        const el = document.querySelector(`.vis-node[data-node-id="${node.id}"]`);
+        if (el) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width && rect.height) return {width: rect.width, height: rect.height};
+        }
+    }
+    const slots = getVisualSlotLabels(node).length;
+    const hasIntermediate = !!node.params?.intermediate_name;
+    return {
+        width: 190,
+        height: 72 + slots * 30 + (hasIntermediate ? 26 : 0),
+    };
+}
+
+function getVisualTreeDepth(nodeId, seen) {
+    if (seen.has(nodeId)) return 0;
+    seen.add(nodeId);
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node || !(node.inputs || []).length) return 0;
+    return 1 + Math.max(...node.inputs.map(id => getVisualTreeDepth(id, new Set(seen))));
+}
+
+function isReachableFromRoot(targetId, rootId) {
+    const stack = [rootId];
+    const seen = new Set();
+    while (stack.length) {
+        const id = stack.pop();
+        if (id === targetId) return true;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const node = _visNodes.find(n => n.id === id);
+        (node?.inputs || []).forEach(childId => stack.push(childId));
+    }
+    return false;
+}
+
 function visualToSource(options = {}) {
     if (_currentMode !== 'visual') return document.getElementById('code-source')?.value || '';
     if (!_visGraphDirty && _visSourceFallback.trim()) return _visSourceFallback;
@@ -1631,7 +1790,15 @@ function visualToSource(options = {}) {
         `from tools.factors import ${['FactorFamily', ...factorParamTypes].join(', ')}`,
         regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
     ].filter(Boolean).join('\n');
-    const paramLines = paramNodes.map(n => {
+    const uniqueParamNodes = [];
+    const seenParamAliases = new Set();
+    paramNodes.forEach(n => {
+        const alias = n.params?.alias || n.label || 'P';
+        if (seenParamAliases.has(alias)) return;
+        seenParamAliases.add(alias);
+        uniqueParamNodes.push(n);
+    });
+    const paramLines = uniqueParamNodes.map(n => {
         const alias = n.params?.alias || n.label || 'P';
         const type = n.params?.type || 'DataColumnParam';
         const dv = n.params?.default_value || '';
@@ -1647,37 +1814,19 @@ function loadVisualNodesFromSource(source) {
     const params = parseParamNodesFromSource(source);
     const nodeByAlias = new Map();
     params.forEach((param, index) => {
-        const node = {
-            id: _visNextId++,
-            key: 'DataColumnParam',
-            cat: 'leaf',
-            label: param.alias,
-            x: 60,
-            y: 60 + index * 78,
-            inputs: [],
-            params: param,
-        };
-        _visNodes.push(node);
-        nodeByAlias.set(param.alias, node.id);
+        nodeByAlias.set(param.alias, param);
     });
     if (!_visNodes.length) {
-        const node = {
-            id: _visNextId++,
-            key: 'DataColumnParam',
-            cat: 'leaf',
-            label: 'P',
-            x: 60,
-            y: 80,
-            inputs: [],
-            params: { alias: 'P', type: 'DataColumnParam', default_value: 'CA' },
-        };
-        _visNodes.push(node);
-        nodeByAlias.set('P', node.id);
+        nodeByAlias.set('P', { alias: 'P', type: 'DataColumnParam', default_value: 'CA' });
     }
     const returnExpr = parseReturnExprFromSource(source);
     const assignments = parseAssignmentsFromSource(source);
     if (returnExpr) {
-        buildVisualGraphFromExpression(returnExpr, assignments, nodeByAlias, 320, 90);
+        buildVisualGraphFromExpression(returnExpr, assignments, nodeByAlias);
+    } else {
+        for (const param of nodeByAlias.values()) {
+            addVisualNodeFromParsed('DataColumnParam', 'leaf', param.alias, 0, 0, [], {...param});
+        }
     }
 }
 
@@ -1711,10 +1860,13 @@ function parseAssignmentsFromSource(source) {
     return assignments;
 }
 
-function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y, labelHint = '') {
+function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x = 0, y = 0, labelHint = '') {
     const trimmed = stripOuterParens(String(expr || '').trim());
     if (!trimmed) return null;
-    if (nodeByAlias.has(trimmed)) return nodeByAlias.get(trimmed);
+    if (nodeByAlias.has(trimmed)) {
+        const param = nodeByAlias.get(trimmed);
+        return addVisualNodeFromParsed('DataColumnParam', 'leaf', param.alias, 0, 0, [], {...param});
+    }
     if (assignments.has(trimmed)) {
         return buildVisualGraphFromExpression(assignments.get(trimmed), assignments, nodeByAlias, x, y, trimmed);
     }
@@ -1755,7 +1907,7 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x, y, la
     return addVisualNodeFromParsed('Constant', 'leaf', labelHint || trimmed, x, y, [], { value: trimmed });
 }
 
-function addVisualNodeFromParsed(key, cat, label, x, y, inputs = [], params = {}) {
+function addVisualNodeFromParsed(key, cat, label, x = 0, y = 0, inputs = [], params = {}) {
     const opKeys = new Set(Object.values(OP_PALETTE).flat().map(op => op.key));
     const intermediateName = cat !== 'leaf' && label && !opKeys.has(label) ? label : '';
     const node = {
