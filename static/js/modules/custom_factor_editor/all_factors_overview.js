@@ -1,26 +1,25 @@
 // ── 全因子概览 ──
 let _scopeFactorsData = null;
-let _allFactorsIncludeSubordinates = false;
+let _allFactorsIncludeSubordinates = true;
+let _allFactorsOwnerFilter = '';
 
 async function openAllFactorsOverlay() {
     document.getElementById('all-factors-overlay').classList.add('open');
     const body = document.getElementById('all-factors-body');
     body.innerHTML = '<p style="color:#888;">加载中...</p>';
-    _allFactorsIncludeSubordinates = false;
+    _allFactorsIncludeSubordinates = true;
+    _allFactorsOwnerFilter = '';
     await loadAllFactorsOverview();
 }
 
 async function loadAllFactorsOverview() {
     const body = document.getElementById('all-factors-body');
     try {
-        const resp = await fetch('/custom-factors/api/list' + (_allFactorsIncludeSubordinates ? '?include_subordinates=1' : ''));
+        const resp = await fetch('/custom-factors/api/param-factor-overview' + (_allFactorsIncludeSubordinates ? '?include_subordinates=1' : ''));
         const data = await resp.json();
         if (data.success) {
-            const factors = [
-                ...(data.public_factors || []).map(f => ({...f, type: 'public', source: 'public'})),
-                ...(data.custom_factors || []).map(f => ({...f, type: 'custom', source: 'custom'})),
-            ].sort(compareAllFactorsForDisplay);
-            _scopeFactorsData = {success: true, factors};
+            const factors = (data.factors || []).sort(compareAllFactorsForDisplay);
+            _scopeFactorsData = {success: true, factors, errors: data.errors || []};
             renderScopeFactorsOverview();
         } else {
             body.innerHTML = '<p style="color:#999;">加载失败: ' + (data.error || '未知错误') + '</p>';
@@ -38,30 +37,43 @@ function renderScopeFactorsOverview() {
     const body = document.getElementById('all-factors-body');
     const data = _scopeFactorsData;
     if (!data || !data.factors || !data.factors.length) {
-        body.innerHTML = renderAllFactorsControls() + '<p style="color:#999;">暂无因子</p>';
+        body.innerHTML = renderAllFactorsControls() + '<p style="color:#999;">暂无参数配置因子</p>';
         return;
     }
 
+    const visibleFactors = filterAllFactorsByOwner(data.factors);
     const groups = {};
-    data.factors.forEach(f => {
-        const group = getGroup(f.name || f.id);
+    visibleFactors.forEach(f => {
+        const group = getGroup(f.factor_family_alias || f.factor_family_name || f.factor_alias);
         if (!groups[group]) groups[group] = [];
         groups[group].push(f);
     });
     let totalPublic = 0, totalCustom = 0, totalUnknown = 0;
-    data.factors.forEach(f => {
+    const ownersSeen = new Set();
+    const templatesSeen = new Set();
+    visibleFactors.forEach(f => {
         if (f.source === 'public') totalPublic++;
         else if (f.source === 'custom') totalCustom++;
         else totalUnknown++;
+        ownersSeen.add(f.owner_username || '');
+        templatesSeen.add((f.owner_username || '') + ':' + (f.factor_family_alias || '') + ':' + (f.template_id || ''));
     });
 
     let html = renderAllFactorsControls();
     html += '<div class="all-factors-stats">';
-    html += '<div class="all-factors-stat">总计: <strong>' + data.factors.length + '</strong> 个因子</div>';
-    html += '<div class="all-factors-stat">公共: <strong>' + totalPublic + '</strong></div>';
-    html += '<div class="all-factors-stat">自定义: <strong>' + totalCustom + '</strong></div>';
-    html += '<div class="all-factors-stat">家族: <strong>' + Object.keys(groups).length + '</strong></div>';
+    html += '<div class="all-factors-stat">显示: <strong>' + visibleFactors.length + '</strong> / ' + data.factors.length + ' 个参数配置因子</div>';
+    html += '<div class="all-factors-stat">用户: <strong>' + ownersSeen.size + '</strong></div>';
+    html += '<div class="all-factors-stat">配置: <strong>' + templatesSeen.size + '</strong></div>';
+    html += '<div class="all-factors-stat">因子家族: <strong>' + Object.keys(groups).length + '</strong></div>';
+    html += '<div class="all-factors-stat">公共/自定义/未知: <strong>' + totalPublic + '/' + totalCustom + '/' + totalUnknown + '</strong></div>';
     html += '</div>';
+    if (data.errors && data.errors.length) {
+        html += '<div class="all-factors-warning">有 ' + data.errors.length + ' 条参数配置无法解析，已跳过。</div>';
+    }
+    if (!visibleFactors.length) {
+        body.innerHTML = html + '<p style="color:#999;">当前所有者筛选下暂无参数配置因子</p>';
+        return;
+    }
 
     for (const group of Object.keys(groups).sort()) {
         const items = groups[group].sort(compareAllFactorsForDisplay);
@@ -80,17 +92,18 @@ function renderScopeFactorsOverview() {
             html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
                 escHtml(getAllFactorOwnerLabel(ownerItems[0])) + '</span><span class="collapsible-factor-count">' + ownerItems.length + '</span></button><div class="collapsible-factor-body">';
             html += '<table class="all-factors-table"><thead><tr>';
-            html += '<th>因子名</th><th>中文名</th><th>类别</th><th>参数数量</th><th>来源</th><th>更新时间</th>';
+            html += '<th>因子</th><th>因子家族</th><th>参数配置</th><th>参数</th><th>所有者</th><th>来源</th><th>更新时间</th>';
             html += '</tr></thead><tbody>';
             for (const f of ownerItems) {
                 html += '<tr>';
-                html += '<td><strong>' + escHtml(f.name || f.id) + '</strong></td>';
-                html += '<td>' + escHtml(f.chinese_name || '—') + '</td>';
-                html += '<td>' + escHtml(f.category || '—') + '</td>';
-                html += '<td>' + ((f.params && f.params.length) || f.params_count || 0) + '</td>';
+                html += '<td><strong class="all-factors-alias">' + escHtml(f.factor_alias || '—') + '</strong></td>';
+                html += '<td><div>' + escHtml(f.factor_family_alias || f.factor_family_name || '—') + '</div><div class="all-factors-subtext">' + escHtml(f.chinese_name || f.category || '') + '</div></td>';
+                html += '<td><div>' + escHtml(f.template_name || '—') + '</div><div class="all-factors-subtext">第 ' + (Number(f.template_row_index || 0) + 1) + ' 行</div></td>';
+                html += '<td>' + renderParamsSummary(f.params || []) + '</td>';
+                html += '<td>' + escHtml(getAllFactorOwnerLabel(f)) + '</td>';
                 const sourceLabel = getAllFactorOwnerLabel(f);
                 const sourceClass = f.source === 'public' ? 'tag-public' : (f.source === 'custom' ? 'tag-custom' : 'tag-unknown');
-                html += '<td><span class="tag ' + sourceClass + '">' + escHtml(sourceLabel) + '</span></td>';
+                html += '<td><span class="tag ' + sourceClass + '">' + escHtml(f.source_label || sourceLabel) + '</span></td>';
                 html += '<td style="color:#888;font-size:12px;">' + escHtml(f.updated_at || '—') + '</td>';
                 html += '</tr>';
             }
@@ -104,15 +117,50 @@ function renderScopeFactorsOverview() {
 }
 
 function renderAllFactorsControls() {
-    return '<label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:13px;color:#667085;cursor:pointer;">' +
+    const ownerOptions = buildAllFactorOwnerOptions();
+    let html = '<div class="all-factors-controls">';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#667085;cursor:pointer;">' +
         '<input type="checkbox" onchange="toggleAllFactorsSubordinates(this.checked)" ' +
-        (_allFactorsIncludeSubordinates ? 'checked' : '') + ' style="width:auto;margin:0;">查看下级用户因子</label>';
+        (_allFactorsIncludeSubordinates ? 'checked' : '') + ' style="width:auto;margin:0;">包含下级用户的参数配置因子</label>';
+    html += '<label class="all-factors-owner-filter">所有者 ';
+    html += '<select onchange="setAllFactorsOwnerFilter(this.value)">';
+    html += '<option value="">全部所有者</option>';
+    ownerOptions.forEach(opt => {
+        html += '<option value="' + escAttr(opt.value) + '"' + (opt.value === _allFactorsOwnerFilter ? ' selected' : '') + '>' + escHtml(opt.label) + '</option>';
+    });
+    html += '</select></label></div>';
+    return html;
 }
 
 async function toggleAllFactorsSubordinates(checked) {
     _allFactorsIncludeSubordinates = !!checked;
+    _allFactorsOwnerFilter = '';
     document.getElementById('all-factors-body').innerHTML = renderAllFactorsControls() + '<p style="color:#888;">加载中...</p>';
     await loadAllFactorsOverview();
+}
+
+function setAllFactorsOwnerFilter(value) {
+    _allFactorsOwnerFilter = value || '';
+    renderScopeFactorsOverview();
+}
+
+function buildAllFactorOwnerOptions() {
+    const factors = (_scopeFactorsData && _scopeFactorsData.factors) || [];
+    const owners = new Map();
+    factors.forEach(f => {
+        const key = f.owner_username || '';
+        if (!key || owners.has(key)) return;
+        owners.set(key, {
+            value: key,
+            label: getAllFactorOwnerLabel(f),
+        });
+    });
+    return [...owners.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function filterAllFactorsByOwner(factors) {
+    if (!_allFactorsOwnerFilter) return factors;
+    return factors.filter(f => (f.owner_username || '') === _allFactorsOwnerFilter);
 }
 
 function getGroup(name) {
@@ -132,20 +180,24 @@ function getGroup(name) {
 }
 
 function getAllFactorOwnerSortKey(f) {
-    if (f.source === 'public') return '公共';
     return `${f.owner_organization_name || f.owner_organization_id || '未分机构'}/${f.owner_alias || f.owner_username || '未知用户'}`;
 }
 
 function getAllFactorOwnerLabel(f) {
-    if (f.source === 'public') return '公共';
-    if (f.can_edit) return '我的因子';
+    if (f.can_edit) return '我的配置';
     return `${f.owner_organization_name || f.owner_organization_id || '未分机构'} / ${f.owner_alias || f.owner_username || '未知用户'}`;
+}
+
+function renderParamsSummary(params) {
+    if (!params.length) return '<span class="all-factors-subtext">无参数</span>';
+    return params.map(p => '<span class="all-factors-param">' + escHtml(p.alias) + ':' + escHtml(p.value) + '</span>').join(' ');
 }
 
 function compareAllFactorsForDisplay(a, b) {
     return (
-        getGroup(a.name || a.id).localeCompare(getGroup(b.name || b.id)) ||
+        getGroup(a.factor_family_alias || a.factor_family_name || a.factor_alias).localeCompare(getGroup(b.factor_family_alias || b.factor_family_name || b.factor_alias)) ||
         getAllFactorOwnerSortKey(a).localeCompare(getAllFactorOwnerSortKey(b)) ||
-        (a.name || a.id || '').localeCompare(b.name || b.id || '')
+        (a.factor_family_alias || '').localeCompare(b.factor_family_alias || '') ||
+        (a.factor_alias || '').localeCompare(b.factor_alias || '')
     );
 }

@@ -6,6 +6,7 @@ let _paramFamilyAlias = '';              // 当前选中的因子家族名/ID
 let _paramFamilyDef = null;              // 因子家族定义（含 params 数组）
 let _paramAliases = [];              // 参数别名列表（列头）
 let _paramRows = [];                 // 参数行数据 [{alias: value}, ...]
+let _paramTemplates = [];             // 当前因子家族可见的参数配置（自己 + 下级只读）
 
 // 打开因子家族参数抽屉
 function openFactorFamilyParamDrawer(factorFamilyName) {
@@ -35,6 +36,11 @@ function openFactorFamilyParamDrawer(factorFamilyName) {
     document.getElementById('param-drawer-title').textContent = '参数配置 — ' + factorFamilyName;
     document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';
     renderParamTable();
+    const ownerFilter = document.getElementById('param-tpl-owner-filter');
+    if (ownerFilter) {
+        ownerFilter.value = '';
+        ownerFilter.oninput = filterParamTemplatesByOwner;
+    }
     loadParamTemplatesIntoSelect(); // 加载该因子家族的模板列表
 
     // 数学公式 + 因子说明（共享 util）
@@ -172,25 +178,45 @@ async function loadParamTemplatesIntoSelect() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel) return;
-    sel.innerHTML = '<option value="">— 选择参数配置 —</option>';
     sel.onchange = updateParamTemplateNameLabel;
-    updateParamTemplateNameLabel();
+    _paramTemplates = [];
+    renderParamTemplateOptions();
     try {
         // 因子库这里的 scope 是“当前用户配置 + 可见下级用户只读配置”，不是单因子测试的模板导入。
         const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '?include_visible=1');
         const data = await resp.json();
         if (data.success && data.templates) {
-            data.templates.forEach(t => {
-                const owner = t.owner_alias ? `${t.owner_alias} / ` : '';
-                const editable = t.editable ? '1' : '0';
-                sel.innerHTML += '<option value="' + escAttr(t.id) + '" data-owner="' + escAttr(t.owner_username || '') + '" data-editable="' + editable + '">' +
-                    escHtml(owner + t.name + (t.editable ? '' : '（只读）')) + '</option>';
-            });
+            _paramTemplates = data.templates;
         }
-        updateParamTemplateNameLabel();
+        renderParamTemplateOptions();
     } catch(e) {
         if (status) status.textContent = '加载模板列表失败';
     }
+}
+
+function renderParamTemplateOptions() {
+    const sel = document.getElementById('param-tpl-select');
+    const filter = (document.getElementById('param-tpl-owner-filter')?.value || '').trim().toLowerCase();
+    if (!sel) return;
+    const selected = sel.value;
+    sel.innerHTML = '<option value="">— 选择参数配置 —</option>';
+    _paramTemplates.forEach(t => {
+        const ownerText = `${t.owner_alias || ''} ${t.owner_username || ''} ${t.owner_organization_name || ''}`;
+        const haystack = `${ownerText} ${t.name || ''}`.toLowerCase();
+        if (filter && !haystack.includes(filter)) return;
+        const owner = t.owner_alias ? `${t.owner_alias} / ` : '';
+        const editable = t.editable ? '1' : '0';
+        sel.innerHTML += '<option value="' + escAttr(t.id) + '" data-owner="' + escAttr(t.owner_username || '') + '" data-editable="' + editable + '">' +
+            escHtml(owner + t.name + (t.editable ? '' : '（只读）')) + '</option>';
+    });
+    if ([...sel.options].some(opt => opt.value === selected)) {
+        sel.value = selected;
+    }
+    updateParamTemplateNameLabel();
+}
+
+function filterParamTemplatesByOwner() {
+    renderParamTemplateOptions();
 }
 
 async function loadParamTemplate() {

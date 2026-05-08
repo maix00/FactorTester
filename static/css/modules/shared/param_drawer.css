@@ -34,6 +34,15 @@
     border: 1px solid #ddd;
     border-radius: 5px;
 }
+.param-template-search {
+    flex: 1;
+    min-width: 120px;
+    font-size: 13px;
+    padding: 4px 7px;
+    border: 1px solid #d0d7de;
+    border-radius: 5px;
+    background: #fff;
+}
 .param-template-name-label {
     font-size: 13px;
     color: #0078d4;

@@ -5,6 +5,8 @@
     label_id,
     status_id,
     input_id='',
+    search_id='',
+    search_placeholder='',
     label_title='当前配置',
     label_hover=false,
     label_max_width='200px',
@@ -16,6 +18,14 @@
             <option value="">{{ select_placeholder }}</option>
         </select>
     </div>
+    {% if search_id %}
+    <div class="param-template-row">
+        <input id="{{ search_id }}"
+               type="search"
+               class="param-template-search"
+               placeholder="{{ search_placeholder }}">
+    </div>
+    {% endif %}
     <div class="param-template-row">
         <span id="{{ label_id }}"
               class="param-template-name-label{% if label_hover %} is-editable{% endif %}"

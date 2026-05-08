@@ -190,6 +190,8 @@ def list_params_templates(ff_alias):
                 'name': t['name'],
                 'owner_username': owner,
                 'owner_alias': _account_display_name(acct),
+                'owner_organization_id': acct.get('organization_id') or '',
+                'owner_organization_name': acct.get('organization_name') or '',
                 'editable': owner == u,
             })
     return jsonify({'success': True, 'templates': result})

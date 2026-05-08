@@ -22,6 +22,7 @@ from server.shared import (
     _factor_family_cache_lock, get_factor_family_instance,
     invalidate_custom_factor_cache,
     _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
+    _get_user_file_lock, _load_user_tpls, get_custom_factor_instance,
 )
 from server.param_meta import serialize_param_meta
 from tools.factors import FactorFamily
@@ -215,6 +216,112 @@ def _list_public_factors() -> list:
                 'load_error': True,
             })
     return result
+
+
+def _list_param_template_factor_aliases(username: str) -> list[str]:
+    params_dir = os.path.join(_user_data_dir(username), 'params_templates')
+    if not os.path.isdir(params_dir):
+        return []
+    return [
+        os.path.splitext(fname)[0]
+        for fname in sorted(os.listdir(params_dir))
+        if fname.endswith('.json')
+    ]
+
+
+def _template_time_from_id(tpl: dict) -> str:
+    if tpl.get('updated_at'):
+        return tpl.get('updated_at')
+    try:
+        ts = int(str(tpl.get('id', ''))[:13]) / 1000
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
+    except Exception:
+        return ''
+
+
+def _factor_group_key(name: str | None) -> str:
+    group = ''
+    upper_count = 0
+    for char in str(name or ''):
+        if char.isupper() and char.isalpha():
+            upper_count += 1
+            if upper_count == 1:
+                group += char
+            elif upper_count == 2:
+                break
+            else:
+                group += char
+        elif upper_count == 1:
+            group += char
+    return group or str(name or '')
+
+
+def _resolve_param_factor_family(owner_username: str, ff_alias: str, public_by_alias: dict, custom_by_alias: dict):
+    custom_meta = custom_by_alias.get(ff_alias)
+    if custom_meta:
+        ff = get_custom_factor_instance(owner_username, custom_meta.get('id') or ff_alias)
+        if ff is not None:
+            return ff, dict(custom_meta, source='custom')
+    public_meta = public_by_alias.get(ff_alias)
+    if public_meta:
+        return get_factor_family_instance(public_meta.get('id') or ff_alias), dict(public_meta, source='public')
+    # 兜底：兼容旧数据，只要能加载就展示；source 标为 unknown，避免误报所有权。
+    ff = get_factor_family_instance(ff_alias, username=owner_username)
+    return ff, {
+        'id': ff_alias,
+        'name': getattr(ff, 'alias', ff_alias),
+        'category': getattr(ff, 'category', '') or '',
+        'chinese_name': getattr(ff, 'desc', '') or '',
+        'description': getattr(ff, 'description', '') or '',
+        'factor_family': ff.__class__.__name__,
+        'source': 'unknown',
+    }
+
+
+def _build_param_factor_item(current_username: str, owner_acct: dict, ff_alias: str, tpl: dict,
+                             row: dict, row_idx: int, public_by_alias: dict, custom_by_alias: dict) -> dict:
+    owner_username = owner_acct.get('username') or ''
+    ff, meta = _resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
+    normalized = ff._normalize_param_kwargs(**(row or {}))
+    ff._check_in_space(**normalized)
+    full_params = {
+        p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
+        for p in ff.params
+    }
+    params_display = []
+    for p in ff.params:
+        value = full_params.get(p.alias)
+        try:
+            value_alias = p._value_space.alias(value)
+        except Exception:
+            value_alias = str(value) if value is not None else ''
+        params_display.append({
+            'alias': p.alias,
+            'value': value_alias,
+        })
+    source = meta.get('source') or 'unknown'
+    return {
+        'id': f"{owner_username}:{ff_alias}:{tpl.get('id')}:{row_idx}",
+        'factor_alias': ff.get_alias(**full_params),
+        'factor_family_alias': getattr(ff, 'alias', None) or meta.get('name') or ff_alias,
+        'factor_family_id': meta.get('id') or ff_alias,
+        'factor_family_name': meta.get('name') or ff_alias,
+        'chinese_name': meta.get('chinese_name') or '',
+        'category': meta.get('category') or '',
+        'source': source,
+        'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),
+        'template_id': tpl.get('id') or '',
+        'template_name': tpl.get('name') or '未命名配置',
+        'template_row_index': row_idx,
+        'params': params_display,
+        'params_count': len(params_display),
+        'owner_username': owner_username,
+        'owner_alias': _account_display_name(owner_acct),
+        'owner_organization_id': owner_acct.get('organization_id') or '',
+        'owner_organization_name': owner_acct.get('organization_name') or '',
+        'can_edit': owner_username == current_username,
+        'updated_at': _template_time_from_id(tpl),
+    }
 
 
 def _parse_class_meta(source_code: str) -> dict:
@@ -486,6 +593,67 @@ def api_list_factors():
         'custom_factors': custom,
         'current_username': username,
         'is_admin': is_admin,
+    })
+
+
+@cf_bp.route('/api/param-factor-overview', methods=['GET'])
+@login_required
+def api_param_factor_overview():
+    """返回参数配置展开后的具体因子，而不是因子家族定义。"""
+    username = _current_user()
+    include_subordinates = request.args.get('include_subordinates') == '1'
+    accounts = _visible_accounts_for(username, include_self=True) if include_subordinates else [_get_account(username) or {'username': username}]
+    public_by_alias = {}
+    for factor in _list_public_factors():
+        public_by_alias[factor.get('id')] = factor
+        public_by_alias[factor.get('name')] = factor
+
+    items = []
+    errors = []
+    for acct in accounts:
+        owner_username = acct.get('username')
+        if not owner_username:
+            continue
+        custom_by_alias = {}
+        for factor in _list_custom_factors(owner_username):
+            custom_by_alias[factor.get('id')] = factor
+            custom_by_alias[factor.get('name')] = factor
+        for ff_alias in _list_param_template_factor_aliases(owner_username):
+            with _get_user_file_lock(owner_username):
+                templates = _load_user_tpls(owner_username, 'params', ff_alias)
+            for tpl in templates:
+                params_list = tpl.get('params_list') or []
+                if not isinstance(params_list, list):
+                    continue
+                for row_idx, row in enumerate(params_list):
+                    try:
+                        items.append(_build_param_factor_item(
+                            username, acct, ff_alias, tpl, row if isinstance(row, dict) else {},
+                            row_idx, public_by_alias, custom_by_alias,
+                        ))
+                    except Exception as exc:
+                        errors.append({
+                            'owner_username': owner_username,
+                            'factor_family_alias': ff_alias,
+                            'template_name': tpl.get('name') or '',
+                            'row_index': row_idx,
+                            'error': str(exc),
+                        })
+
+    items.sort(key=lambda f: (
+        _factor_group_key(f.get('factor_family_alias') or f.get('factor_family_name')),
+        f.get('owner_organization_name') or f.get('owner_organization_id') or '',
+        f.get('owner_alias') or f.get('owner_username') or '',
+        f.get('factor_family_alias') or '',
+        f.get('factor_alias') or '',
+        f.get('template_name') or '',
+    ))
+    return jsonify({
+        'success': True,
+        'factors': items,
+        'errors': errors,
+        'include_subordinates': include_subordinates,
+        'current_username': username,
     })
 
 
