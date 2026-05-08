@@ -7,13 +7,12 @@
   - 公共因子与自定义因子的区分
 
 存储路径：data/users/{username}/custom_factors/
-每个自定义因子存为一个 .py 文件，文件名 = factor_id.py
+每个自定义因子存为一个 .py 文件，文件名对齐源码中的 class 名
 """
 
 import os
 import json as _json
 import time
-import uuid
 import traceback
 from flask import Blueprint, request, jsonify, render_template
 
@@ -854,7 +853,8 @@ def api_create_factor():
     if name in existing_names:
         return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{name}"，请使用其他名称'}), 400
 
-    factor_id = uuid.uuid4().hex[:12]
+    # 文件名与 class 名保持一致
+    factor_id = name
 
     # 注入 desc 和 description（如果用户在右侧表单填写了）
     chinese_name = (data.get('chinese_name') or '').strip()
