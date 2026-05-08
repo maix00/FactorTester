@@ -24,7 +24,13 @@ from server.shared import (
     _get_user_file_lock, get_custom_factor_instance,
 )
 from server.param_meta import serialize_param_meta
-from server.modules.shared.param_config import build_param_factor_item, normalize_param_rows
+from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
+from server.modules.custom_factors.param_config_store import (
+    load_param_config,
+    save_param_config,
+    delete_param_config,
+    list_param_config_aliases,
+)
 from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
@@ -35,62 +41,6 @@ def _cf_dir(username: str) -> str:
     d = os.path.join(_user_data_dir(username), 'custom_factors')
     os.makedirs(d, exist_ok=True)
     return d
-
-
-def _factor_library_param_config_dir(username: str) -> str:
-    d = os.path.join(_user_data_dir(username), 'factor_library_param_configs')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _factor_library_param_config_path(username: str, ff_alias: str) -> str:
-    return os.path.join(_factor_library_param_config_dir(username), f'{ff_alias}.json')
-
-
-def _load_factor_library_param_config(username: str, ff_alias: str) -> dict | None:
-    path = _factor_library_param_config_path(username, ff_alias)
-    try:
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = _json.load(f)
-            if isinstance(data, dict) and isinstance(data.get('params_list'), list):
-                return data
-    except Exception:
-        pass
-    return None
-
-
-def _save_factor_library_param_config(username: str, ff_alias: str, params_list: list) -> dict:
-    config = {
-        'id': username,
-        'scope': 'user_id',
-        'scope_user_id': username,
-        'name': username,
-        'params_list': params_list,
-        'updated_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
-    }
-    path = _factor_library_param_config_path(username, ff_alias)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        _json.dump(config, f, ensure_ascii=False, indent=2)
-    return config
-
-
-def _delete_factor_library_param_config(username: str, ff_alias: str) -> bool:
-    path = _factor_library_param_config_path(username, ff_alias)
-    if os.path.exists(path):
-        os.remove(path)
-        return True
-    return False
-
-
-def _list_factor_library_param_config_aliases(username: str) -> list[str]:
-    d = _factor_library_param_config_dir(username)
-    return [
-        os.path.splitext(fname)[0]
-        for fname in sorted(os.listdir(d))
-        if fname.endswith('.json')
-    ]
 
 
 def _factor_path(username: str, factor_id: str) -> str:
@@ -653,8 +603,8 @@ def api_param_factor_overview():
         for factor in _list_custom_factors(owner_username):
             custom_by_alias[factor.get('id')] = factor
             custom_by_alias[factor.get('name')] = factor
-        for ff_alias in _list_factor_library_param_config_aliases(owner_username):
-            tpl = _load_factor_library_param_config(owner_username, ff_alias)
+        for ff_alias in list_param_config_aliases(owner_username):
+            tpl = load_param_config(owner_username, ff_alias)
             if not tpl:
                 continue
             params_list = tpl.get('params_list') or []
@@ -704,7 +654,7 @@ def api_param_configs(ff_alias):
         owner = acct.get('username')
         if not owner:
             continue
-        tpl = _load_factor_library_param_config(owner, ff_alias)
+        tpl = load_param_config(owner, ff_alias)
         factors = []
         public_by_alias = {}
         for factor in _list_public_factors():
@@ -754,7 +704,7 @@ def api_get_param_config(ff_alias, owner_username):
     username = _current_user()
     if not _can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
-    config = _load_factor_library_param_config(owner_username, ff_alias)
+    config = load_param_config(owner_username, ff_alias)
     if not config:
         return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
     config = dict(config)
@@ -773,9 +723,9 @@ def api_save_param_config(ff_alias):
         return jsonify({'success': False, 'error': '参数列表不能为空'})
     try:
         ff = get_factor_family_instance(ff_alias, username=username)
-        normalized_rows = normalize_param_rows(ff, params_list)
+        serialized_rows = serialize_param_rows(ff, params_list)
         with _get_user_file_lock(username):
-            config = _save_factor_library_param_config(username, ff_alias, normalized_rows)
+            config = save_param_config(username, ff_alias, serialized_rows)
         acct = _get_account(username) or {'username': username}
         factors = _build_factor_library_config_factors(username, acct, ff_alias, config)
         return jsonify({'success': True, 'config': config, 'factors': factors})
@@ -788,7 +738,7 @@ def api_save_param_config(ff_alias):
 def api_delete_param_config(ff_alias):
     username = _current_user()
     with _get_user_file_lock(username):
-        deleted = _delete_factor_library_param_config(username, ff_alias)
+        deleted = delete_param_config(username, ff_alias)
     if not deleted:
         return jsonify({'success': False, 'error': '配置不存在'}), 404
     return jsonify({'success': True})

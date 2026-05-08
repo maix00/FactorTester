@@ -34,6 +34,18 @@ def param_value_display(param, value) -> str:
         return str(value)
 
 
+def serialize_param_rows(factor_family, params_list: list) -> list:
+    """Normalize rows, then store JSON-safe value aliases."""
+    normalized_rows = normalize_param_rows(factor_family, params_list)
+    return [
+        {
+            p.alias: param_value_display(p, row.get(p.alias))
+            for p in factor_family.params
+        }
+        for row in normalized_rows
+    ]
+
+
 def build_param_factor_item(
     factor_family,
     params: dict,

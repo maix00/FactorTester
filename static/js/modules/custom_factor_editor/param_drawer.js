@@ -131,7 +131,7 @@ function buildParamRowAlias(row) {
     const parts = [];
     _paramAliases.forEach(alias => {
         const val = row[alias] !== undefined ? String(row[alias]) : '';
-        if (val !== '') parts.push(alias + '_' + val);
+        if (val !== '') parts.push(alias + ':' + val);
     });
     return parts.length ? _paramFamilyAlias + '|' + parts.join('|') : _paramFamilyAlias;
 }
