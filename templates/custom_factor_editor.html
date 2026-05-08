@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from 'modules/shared/param_config_bar.html' import render_param_config_bar %}
 <html>
 <head>
     <title>因子管理</title>
@@ -59,21 +60,26 @@
                     <span class="setting-summary-value" id="param-drawer-summary-text">—</span>
                 </div>
 
-                <!-- 用户参数配置管理条 -->
-                <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-                    <select id="param-tpl-select" style="flex:1;min-width:140px;padding:6px 8px;border:1px solid #d0d5dd;border-radius:6px;font-size:13px;">
-                        <option value="">— 选择参数配置 —</option>
-                    </select>
-                    <button onclick="loadParamTemplate()" style="padding:6px 12px; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">查看</button>
-                    <button onclick="saveParamTemplate()" style="padding:6px 10px; background:#10b981; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">保存</button>
-                    <button onclick="updateParamTemplate()" style="padding:6px 10px; background:#f59e0b; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">更新</button>
-                    <button onclick="deleteParamTemplate()" style="padding:6px 10px; background:#ef4444; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">删除</button>
-                </div>
-                <div id="param-tpl-status" style="font-size:12px;color:#888;margin-bottom:8px;"></div>
+                <!-- 用户参数配置区：复用单因子测试三行抽屉布局；这里的 scope 是用户配置 + 下级只读配置 -->
+                {{ render_param_config_bar(
+                    bar_id='params-template-bar',
+                    select_id='param-tpl-select',
+                    select_placeholder='— 选择参数配置 —',
+                    label_id='param-tpl-name-label',
+                    status_id='param-tpl-status',
+                    label_title='当前参数配置',
+                    label_max_width='240px',
+                    buttons=[
+                        {'text': '查看', 'title': '查看选中的参数配置', 'onclick': 'loadParamTemplate()', 'variant': 'param-template-btn-primary'},
+                        {'text': '另存为…', 'title': '将当前参数列表保存为自己的新配置', 'onclick': 'saveParamTemplate()', 'variant': 'param-template-btn-success'},
+                        {'text': '更新', 'title': '用当前参数列表覆盖自己的选中配置', 'onclick': 'updateParamTemplate()', 'variant': 'param-template-btn-warning'},
+                        {'text': '删除', 'title': '删除自己的选中配置', 'onclick': 'deleteParamTemplate()', 'variant': 'param-template-btn-danger'}
+                    ]
+                ) }}
 
                 <!-- 参数表格 -->
-                <div class="param-table-container" id="param-table-wrapper">
-                    <table class="param-table">
+                <div class="param-table-container" id="param_table_scroll">
+                    <table class="param-table" id="param_table">
                         <thead id="param-table-head">
                             <tr><th colspan="2">选择因子后可配置参数</th></tr>
                         </thead>
@@ -109,6 +115,8 @@
             </div>
         </div>
 
+        <div class="layout-resizer" id="sidebar-resizer" title="拖拽调整侧栏宽度"></div>
+
         <!-- 右侧：编辑器 -->
         <div class="editor" id="editor">
             <div class="editor-header">
@@ -134,6 +142,7 @@
 
     <script src="/static/js/modules/custom_factor_editor/custom_factor_editor.js"></script>
     <script src="/static/js/modules/shared/collapsible_factor_list.js"></script>
+    <script src="/static/js/modules/shared/client_param_table.js"></script>
     <script src="/static/js/modules/custom_factor_editor/param_drawer.js"></script>
     <script src="/static/js/modules/custom_factor_editor/all_factors_overview.js"></script>
 

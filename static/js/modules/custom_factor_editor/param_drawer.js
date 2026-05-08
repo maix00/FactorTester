@@ -6,7 +6,6 @@ let _paramFamilyAlias = '';              // 当前选中的因子家族名/ID
 let _paramFamilyDef = null;              // 因子家族定义（含 params 数组）
 let _paramAliases = [];              // 参数别名列表（列头）
 let _paramRows = [];                 // 参数行数据 [{alias: value}, ...]
-let _paramDragSrcIdx = null;         // 拖拽源索引
 
 // 打开因子家族参数抽屉
 function openFactorFamilyParamDrawer(factorFamilyName) {
@@ -91,52 +90,19 @@ function getDefaultParamRow() {
 
 // ── 渲染参数表格到抽屉 ──
 function renderParamTable() {
-    const tbody = document.getElementById('param-table-body');
-    if (!tbody) return;
-
-    // 先更新表头
-    const thead = document.getElementById('param-table-head');
-    if (thead) {
-        thead.innerHTML = '<tr>' +
-            '<th style="min-width:100px;">因子(家族)名</th>' +
-            _paramAliases.map(a => '<th>' + escHtml(a) + '</th>').join('') +
-            '<th style="min-width:80px;">操作</th>' +
-            '</tr>';
-    }
-
-    let html = '';
-
-    // 新增行（对齐单因子测试参数抽屉：默认值填入 value，新增行置顶）
-    html += '<tr id="add_row">';
-    html += '<td>' + escHtml(_paramFamilyAlias) + '</td>';
-    _paramAliases.forEach(alias => {
-        const defVal = escHtml(getDefaultParamRow()[alias] || '');
-        html += '<td><input type="text" id="param-new-' + escHtml(alias) + '" ' +
-            'value="' + defVal + '" ' +
-            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addParamRow()}" ' +
-            '></td>';
+    if (!window.ClientParamTable) return;
+    ClientParamTable.render({
+        theadId: 'param-table-head',
+        tbodyId: 'param-table-body',
+        familyAlias: _paramFamilyAlias,
+        params: _paramFamilyDef?.params || [],
+        rows: _paramRows,
+        callbacks: {
+            add: addParamRow,
+            delete: deleteParamRow,
+            reorder: reorderParamRows,
+        },
     });
-    html += '<td style="text-align:center;">' +
-        '<button class="param-btn" onclick="addParamRow()">新增</button>' +
-        '</td>';
-    html += '</tr>';
-
-    _paramRows.forEach((row, i) => {
-        html += '<tr class="param-row" draggable="true" data-idx="' + i + '" ondragstart="onParamDragStart(event,' + i + ')" ondragover="onParamDragOver(event)" ondrop="onParamDrop(event,' + i + ')" ondragend="onParamDragEnd()">';
-        html += '<td>' + escHtml(buildParamRowAlias(row)) + '</td>';
-        _paramAliases.forEach(alias => {
-            const val = row[alias] !== undefined ? row[alias] : '';
-            html += '<td>' + escHtml(val) + '</td>';
-        });
-        html += '<td style="text-align:center;">' +
-            '<button class="param-btn param-btn-danger" onclick="deleteParamRow(' + i + ')">删除</button>' +
-            '</td>';
-        html += '</tr>';
-    });
-
-    tbody.innerHTML = html;
-
-    // 更新摘要
     document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';
 }
 
@@ -156,11 +122,7 @@ function buildParamRowAlias(row) {
 }
 
 function addParamRow() {
-    const row = {};
-    _paramAliases.forEach(alias => {
-        const input = document.getElementById('param-new-' + alias);
-        row[alias] = (input && input.value) ? input.value : getDefaultParamRow()[alias] || '';
-    });
+    const row = ClientParamTable.collectAddRow('param-new-', _paramAliases, _paramFamilyDef?.params || []);
     _paramRows.push(row);
     renderParamTable();
 }
@@ -170,26 +132,10 @@ function deleteParamRow(idx) {
     renderParamTable();
 }
 
-// ── 拖拽重排行 ──
-function onParamDragStart(e, idx) {
-    _paramDragSrcIdx = idx;
-    e.target.style.opacity = '0.4';
-    e.dataTransfer.effectAllowed = 'move';
-}
-function onParamDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-}
-function onParamDrop(e, targetIdx) {
-    e.preventDefault();
-    if (_paramDragSrcIdx !== null && _paramDragSrcIdx !== targetIdx) {
-        const [row] = _paramRows.splice(_paramDragSrcIdx, 1);
-        _paramRows.splice(targetIdx, 0, row);
-        renderParamTable();
-    }
-}
-function onParamDragEnd() {
-    _paramDragSrcIdx = null;
+function reorderParamRows(fromIdx, targetIdx) {
+    const [row] = _paramRows.splice(fromIdx, 1);
+    _paramRows.splice(targetIdx, 0, row);
+    renderParamTable();
 }
 
 // ── 构建 params_list（供模板保存 & 使用） ──
@@ -204,12 +150,33 @@ function buildParamConfigParamsList() {
 }
 
 // ── 抽屉内模板管理 ──
+function updateParamTemplateNameLabel() {
+    const sel = document.getElementById('param-tpl-select');
+    const label = document.getElementById('param-tpl-name-label');
+    if (!sel || !label) return;
+    if (!sel.value) {
+        label.style.display = 'none';
+        label.textContent = '';
+        label.title = '当前参数配置';
+        return;
+    }
+    const option = sel.options[sel.selectedIndex];
+    label.textContent = option ? option.text : '';
+    label.title = option?.dataset.editable === '1'
+        ? '自己的参数配置，可更新或删除'
+        : '下级用户的参数配置，只能查看';
+    label.style.display = '';
+}
+
 async function loadParamTemplatesIntoSelect() {
     const sel = document.getElementById('param-tpl-select');
     const status = document.getElementById('param-tpl-status');
     if (!sel) return;
     sel.innerHTML = '<option value="">— 选择参数配置 —</option>';
+    sel.onchange = updateParamTemplateNameLabel;
+    updateParamTemplateNameLabel();
     try {
+        // 因子库这里的 scope 是“当前用户配置 + 可见下级用户只读配置”，不是单因子测试的模板导入。
         const resp = await fetch('/api/params_templates/' + encodeURIComponent(_paramFamilyAlias) + '?include_visible=1');
         const data = await resp.json();
         if (data.success && data.templates) {
@@ -220,6 +187,7 @@ async function loadParamTemplatesIntoSelect() {
                     escHtml(owner + t.name + (t.editable ? '' : '（只读）')) + '</option>';
             });
         }
+        updateParamTemplateNameLabel();
     } catch(e) {
         if (status) status.textContent = '加载模板列表失败';
     }
@@ -247,6 +215,7 @@ async function loadParamTemplate() {
                 return row;
             });
             renderParamTable();
+            updateParamTemplateNameLabel();
             if (status) status.textContent = '✓ 已查看配置: ' + tplName;
             document.getElementById('param-drawer-summary-text').textContent = _paramRows.length + ' 行参数';
         } else {

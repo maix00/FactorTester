@@ -746,6 +746,11 @@ def api_validate_expr():
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'factor_name': ff.__class__.__name__,
+                'params': [
+                    serialize_param_meta(p)
+                    for p in ff.params
+                ],
                 'desc': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
             })
@@ -818,6 +823,11 @@ def api_validate_expr():
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'factor_name': factor_cls.__name__,
+                'params': [
+                    serialize_param_meta(p)
+                    for p in ff.params
+                ],
                 'desc': getattr(ff, 'desc', '') or '',
                 'description': getattr(ff, 'description', '') or '',
             })

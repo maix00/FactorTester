@@ -9,6 +9,9 @@ let _isNew = false;            // 是否为新建
 let _dirty = false;
 let _factorFamilies = [];  // {name, id, type:'custom'|'public', chinese_name, category, updated_at, is_public, params, ...}
 let _groupedFactorFamilies = {};  // {group: [...]}
+let _validatedFactorDraft = null;
+let _validatedSourceSnapshot = '';
+let _editingOriginalParamAliases = '';
 
 // ═══════════════════════════════════════════════════════════
 // 初始化
@@ -273,14 +276,16 @@ function renderFactorFamilyReadonlyView(factor) {
                     <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic})"
                         style="font-size:12px; padding:4px 12px;">校验表达式树</button>
                 </div>
-                <textarea readonly id="code-source-readonly" style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
-                    padding:12px; font-family:'SF Mono','Fira Code',monospace; font-size:12px;
-                    line-height:1.5; resize:none; background:#fafbfc; color:#555;">${escHtml(sourceCode)}</textarea>
+                <div class="code-editor-shell readonly">
+                    <pre id="code-source-readonly-lines" class="code-line-gutter">${renderCodeLineNumbers(sourceCode)}</pre>
+                    <pre id="code-source-readonly-highlight" class="code-editor-highlight" onscroll="syncReadonlyCodeScroll()">${highlightPython(sourceCode)}</pre>
+                </div>
                 <div id="readonly-tree-repr" style="margin-top:6px; display:none; background:#f0f4f8; border:1px solid #e2e8f0;
                     border-radius:6px; padding:10px 14px; font-family:'SF Mono','Fira Code',monospace;
                     font-size:12px; color:#333; max-height:180px; overflow:auto; white-space:pre; line-height:1.5;"></div>
             </div>
         </div>
+        <div class="editor-resize-handle" title="拖拽调整代码区域宽度"></div>
         <div class="config-pane">
             <div class="config-section">
                 <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
@@ -331,6 +336,8 @@ function renderFactorFamilyReadonlyView(factor) {
         </div>
     `;
     renderFactorFamilyReadonlyMathAndDesc(factor);
+    initCodePaneResizer();
+    requestAnimationFrame(updateAllCodeLineNumbers);
 }
 
 function renderFactorFamilyReadonlyMathAndDesc(factor) {
@@ -453,7 +460,7 @@ function createNew() {
     renderFactorFamilyList();
     renderCodeEditor({
         name: '', chinese_name: '', description: '', category: '自编',
-        source_code: '', type: 'custom'
+        source_code: getDefaultFactorTemplate(), type: 'custom'
     });
 }
 
@@ -494,6 +501,7 @@ function renderCodeEditor(factor) {
     const desc = factor.description || '';
     const cn = factor.chinese_name || '';
     const cat = factor.category || '自编';
+    _editingOriginalParamAliases = Array.isArray(factor.params) ? factor.params.map(p => p.alias).join('|') : '';
 
     body.innerHTML = `
         <div class="code-pane" style="overflow:hidden; display:flex; flex-direction:column;">
@@ -507,12 +515,15 @@ function renderCodeEditor(factor) {
                             style="font-size:12px; padding:4px 8px;">📋 模板</button>
                     </div>
                 </div>
-                <textarea id="code-source" placeholder="输入完整 Python class 源码..." oninput="_dirty=true"
-                    style="flex:1; width:100%; border:1px solid #e2e8f0; border-radius:6px;
-                    padding:12px; font-family:'SF Mono','Fira Code',monospace; font-size:12px;
-                    line-height:1.5; resize:none; background:#fff;">${escHtml(sourceCode)}</textarea>
+                <div class="code-editor-shell">
+                    <pre id="code-source-lines" class="code-line-gutter">${renderCodeLineNumbers(sourceCode)}</pre>
+                    <pre id="code-source-highlight" class="code-editor-highlight">${highlightPython(sourceCode)}</pre>
+                    <textarea id="code-source" placeholder="输入完整 Python class 源码..."
+                        spellcheck="false" oninput="handleCodeInput()" onscroll="syncCodeEditorScroll()" onkeydown="handleCodeEditorKeydown(event)">${escHtml(sourceCode)}</textarea>
+                </div>
             </div>
         </div>
+        <div class="editor-resize-handle" title="拖拽调整代码区域宽度"></div>
         <div class="config-pane">
             <div class="config-section">
                 <h3>基本信息</h3>
@@ -531,14 +542,14 @@ function renderCodeEditor(factor) {
             </div>
 
             <div class="config-section">
-                <h3>算子/参数面板</h3>
-                <p style="font-size:11px; color:#999; margin-bottom:8px;">点击插入到源码末尾</p>
-                ${renderOperatorPalette()}
+                <button class="btn-validate" id="btn-param-config" onclick="openOrValidateParamDrawer('${escAttr(factor.name || factor.id)}')"
+                    style="width:100%; padding:8px; font-size:13px;">校验后配置参数</button>
+                <div id="param-config-status" style="font-size:12px;color:#999;margin-top:6px;">请先校验表达式树</div>
             </div>
 
-            <div class="config-section" style="margin-top:8px;">
-                <button class="btn-validate" onclick="openFactorFamilyParamDrawer('${escAttr(factor.name || factor.id)}')"
-                    style="width:100%; padding:8px; font-size:13px;">⚙️ 参数配置</button>
+            <div class="config-section">
+                <h3>算子/参数面板</h3>
+                ${renderOperatorPalette()}
             </div>
         </div>
     `;
@@ -549,6 +560,294 @@ function renderCodeEditor(factor) {
         btnCustom.className = 'btn-validate';
         btnCustom.textContent = '校验表达式树';
     }
+    invalidateCodeValidation();
+    syncPythonHighlight();
+    initCodePaneResizer();
+    requestAnimationFrame(updateAllCodeLineNumbers);
+}
+
+function handleCodeInput() {
+    _dirty = true;
+    invalidateCodeValidation();
+    syncPythonHighlight();
+}
+
+function invalidateCodeValidation() {
+    _validatedFactorDraft = null;
+    _validatedSourceSnapshot = '';
+    const btn = document.getElementById('btn-param-config');
+    const status = document.getElementById('param-config-status');
+    if (btn) btn.textContent = '校验后配置参数';
+    if (status) status.textContent = '请先校验表达式树';
+    const drawer = document.getElementById('param-drawer');
+    if (drawer?.classList.contains('open') && typeof closeParamDrawer === 'function') {
+        closeParamDrawer();
+    }
+}
+
+function setValidatedFactorDraft(data, sourceCode) {
+    const params = Array.isArray(data.params) ? data.params : [];
+    const aliases = params.map(p => p.alias).join('|');
+    const oldAliases = _validatedFactorDraft?.params?.map(p => p.alias).join('|') || _editingOriginalParamAliases;
+    const factorName = data.factor_name || _currentFactorFamilyId || 'ValidatedFactor';
+    _validatedFactorDraft = upsertValidatedFactorFamilyDef(factorName, params);
+    _validatedSourceSnapshot = sourceCode;
+    const btn = document.getElementById('btn-param-config');
+    const status = document.getElementById('param-config-status');
+    if (btn) btn.textContent = '参数配置';
+    if (status) {
+        status.textContent = oldAliases && oldAliases !== aliases
+            ? '参数依赖已变化，当前参数表会按新表达式重建'
+            : `校验通过：${params.length} 个参数`;
+    }
+}
+
+function upsertValidatedFactorFamilyDef(factorName, params) {
+    const type = _currentFactorFamilySource || 'custom';
+    const owner = _currentFactorFamilyOwner || '';
+    let def = _factorFamilies.find(f =>
+        f.type === type
+        && (f.id === _currentFactorFamilyId || f.name === factorName)
+        && (type === 'public' || ((f.owner_username || '') === owner))
+    );
+    if (!def) {
+        def = {
+            id: _currentFactorFamilyId || factorName,
+            name: factorName,
+            type,
+            owner_username: owner,
+            can_edit: true,
+        };
+        _factorFamilies.push(def);
+    }
+    def.name = factorName;
+    def.params = params;
+    def.description = document.getElementById('cfg-desc')?.value || def.description || '';
+    def.chinese_name = document.getElementById('cfg-cn')?.value || def.chinese_name || '';
+    def.category = document.getElementById('cfg-cat')?.value || def.category || '自编';
+    return def;
+}
+
+function openValidatedParamDrawer() {
+    const sourceCode = document.getElementById('code-source')?.value || '';
+    if (!_validatedFactorDraft || sourceCode !== _validatedSourceSnapshot) {
+        showToast('请先校验当前源码，再配置参数', 'error');
+        invalidateCodeValidation();
+        return;
+    }
+    openFactorFamilyParamDrawer(_validatedFactorDraft.name);
+}
+
+async function openOrValidateParamDrawer(factorName) {
+    const sourceCode = document.getElementById('code-source')?.value || '';
+    if (_validatedFactorDraft && sourceCode === _validatedSourceSnapshot) {
+        openValidatedParamDrawer();
+        return;
+    }
+    const ok = await validateCustomExpr(factorName, {openParamsOnSuccess: true});
+    if (!ok) showToast('表达式树校验未通过，无法配置参数', 'error');
+}
+
+function syncPythonHighlight() {
+    const ta = document.getElementById('code-source');
+    const pre = document.getElementById('code-source-highlight');
+    const lines = document.getElementById('code-source-lines');
+    if (!ta || !pre) return;
+    pre.innerHTML = highlightPython(ta.value);
+    if (lines) {
+        lines.innerHTML = renderCodeLineNumbers(ta.value, measureCodeLineHeights(ta.value, ta));
+    }
+    syncCodeEditorScroll();
+}
+
+function syncCodeEditorScroll() {
+    const ta = document.getElementById('code-source');
+    const pre = document.getElementById('code-source-highlight');
+    const lines = document.getElementById('code-source-lines');
+    if (!ta || !pre) return;
+    pre.scrollTop = ta.scrollTop;
+    pre.scrollLeft = ta.scrollLeft;
+    if (lines) lines.scrollTop = ta.scrollTop;
+}
+
+function syncReadonlyCodeScroll() {
+    const pre = document.getElementById('code-source-readonly-highlight');
+    const lines = document.getElementById('code-source-readonly-lines');
+    if (pre && lines) lines.scrollTop = pre.scrollTop;
+}
+
+function renderCodeLineNumbers(code) {
+    const rows = String(code || '').split('\n');
+    const heights = arguments.length > 1 ? arguments[1] : [];
+    return rows.map((_, index) => {
+        const height = Number(heights[index]);
+        const style = Number.isFinite(height) ? ` style="height:${height}px"` : '';
+        return `<span class="code-line-gutter-row"${style}>${index + 1}</span>`;
+    }).join('') || '<span class="code-line-gutter-row">1</span>';
+}
+
+function measureCodeLineHeights(code, referenceEl) {
+    if (!referenceEl) return [];
+    const style = getComputedStyle(referenceEl);
+    const contentWidth = Math.max(
+        20,
+        referenceEl.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0)
+    );
+    const measurer = document.createElement('div');
+    measurer.style.position = 'absolute';
+    measurer.style.visibility = 'hidden';
+    measurer.style.pointerEvents = 'none';
+    measurer.style.whiteSpace = 'pre-wrap';
+    measurer.style.overflowWrap = 'anywhere';
+    measurer.style.wordBreak = 'break-word';
+    measurer.style.boxSizing = 'border-box';
+    measurer.style.width = contentWidth + 'px';
+    measurer.style.fontFamily = style.fontFamily;
+    measurer.style.fontSize = style.fontSize;
+    measurer.style.lineHeight = style.lineHeight;
+    measurer.style.tabSize = style.tabSize;
+    document.body.appendChild(measurer);
+    const heights = String(code || '').split('\n').map(line => {
+        measurer.textContent = line || ' ';
+        return Math.max(parseFloat(style.lineHeight || 0), measurer.scrollHeight);
+    });
+    measurer.remove();
+    return heights;
+}
+
+function updateAllCodeLineNumbers() {
+    const ta = document.getElementById('code-source');
+    const editableLines = document.getElementById('code-source-lines');
+    if (ta && editableLines) {
+        editableLines.innerHTML = renderCodeLineNumbers(ta.value, measureCodeLineHeights(ta.value, ta));
+    }
+    const readonlyPre = document.getElementById('code-source-readonly-highlight');
+    const readonlyLines = document.getElementById('code-source-readonly-lines');
+    if (readonlyPre && readonlyLines) {
+        const code = readonlyPre.textContent || '';
+        readonlyLines.innerHTML = renderCodeLineNumbers(code, measureCodeLineHeights(code, readonlyPre));
+    }
+}
+
+const CFE_CODE_WIDTH_STORAGE_KEY = 'custom_factor_editor.codePaneWidthPct.v2';
+let _codeLineNumberResizeListenerBound = false;
+
+function initCodePaneResizer() {
+    const body = document.getElementById('editor-body');
+    const handle = body?.querySelector('.editor-resize-handle');
+    if (!body || !handle) return;
+
+    const saved = Number(localStorage.getItem(CFE_CODE_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(saved)) {
+        setCodePaneWidth(saved);
+    }
+
+    let dragging = false;
+    function onPointerMove(event) {
+        if (!dragging) return;
+        const rect = body.getBoundingClientRect();
+        if (!rect.width) return;
+        const pct = ((event.clientX - rect.left) / rect.width) * 100;
+        setCodePaneWidth(pct);
+    }
+    function onPointerUp() {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        body.classList.remove('resizing');
+        const current = parseFloat(body.style.getPropertyValue('--cfe-code-pane-width'));
+        if (Number.isFinite(current)) {
+            localStorage.setItem(CFE_CODE_WIDTH_STORAGE_KEY, String(current));
+        }
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+    }
+
+    handle.onpointerdown = function(event) {
+        event.preventDefault();
+        dragging = true;
+        handle.classList.add('dragging');
+        body.classList.add('resizing');
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+    };
+    if (!_codeLineNumberResizeListenerBound) {
+        _codeLineNumberResizeListenerBound = true;
+        window.addEventListener('resize', () => requestAnimationFrame(updateAllCodeLineNumbers));
+    }
+}
+
+function setCodePaneWidth(pct) {
+    const body = document.getElementById('editor-body');
+    if (!body) return;
+    const clamped = Math.max(36, Math.min(68, Number(pct)));
+    body.style.setProperty('--cfe-code-pane-width', clamped.toFixed(1) + '%');
+    requestAnimationFrame(updateAllCodeLineNumbers);
+}
+
+function handleCodeEditorKeydown(event) {
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    const ta = event.target;
+    if (event.shiftKey) {
+        outdentCodeSelection(ta);
+    } else {
+        indentCodeSelection(ta);
+    }
+    handleCodeInput();
+}
+
+function indentCodeSelection(ta) {
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const value = ta.value;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    const selected = value.slice(lineStart, end);
+
+    if (!selected.includes('\n') && start === end) {
+        ta.setRangeText('    ', start, end, 'end');
+        return;
+    }
+
+    const indented = selected.replace(/^/gm, '    ');
+    ta.setRangeText(indented, lineStart, end, 'select');
+    ta.selectionStart = start + 4;
+    ta.selectionEnd = end + (indented.length - selected.length);
+}
+
+function outdentCodeSelection(ta) {
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const value = ta.value;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    const selected = value.slice(lineStart, end);
+    const outdented = selected.replace(/^( {1,4}|\t)/gm, match => match === '\t' ? '' : match.slice(Math.min(4, match.length)));
+    ta.setRangeText(outdented, lineStart, end, 'select');
+    ta.selectionStart = Math.max(lineStart, start - Math.min(4, start - lineStart));
+    ta.selectionEnd = Math.max(ta.selectionStart, end - (selected.length - outdented.length));
+}
+
+function highlightPython(code) {
+    let html = escHtml(code || '');
+    const protectedParts = [];
+    function protect(regex, cls) {
+        html = html.replace(regex, match => {
+            const key = `\uE000${String.fromCharCode(0xE100 + protectedParts.length)}\uE001`;
+            protectedParts.push(`<span class="${cls}">${match}</span>`);
+            return key;
+        });
+    }
+    protect(/("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, 'py-string');
+    protect(/#.*$/gm, 'py-comment');
+    html = html
+        .replace(/\b(class|def|return|from|import|as|if|elif|else|for|while|try|except|finally|with|lambda|staticmethod|None|True|False|and|or|not|in|is)\b/g, '<span class="py-keyword">$1</span>')
+        .replace(/\b(FactorFamily|DataColumnParam|WindowParam|FactorFreqParam|ReturnFreqParam|ReverseParam|FactorExpr|DataColumn)\b/g, '<span class="py-builtin">$1</span>')
+        .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="py-number">$1</span>')
+        .replace(/(@\w+)/g, '<span class="py-decorator">$1</span>');
+    protectedParts.forEach((part, index) => {
+        html = html.replace(`\uE000${String.fromCharCode(0xE100 + index)}\uE001`, part);
+    });
+    return html || ' ';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -557,70 +856,102 @@ function renderCodeEditor(factor) {
 function renderOperatorPalette() {
     const categories = [
         {
-            title: '📦 导入语句',
+            title: '📦 默认代码',
             items: [
-                { label: '基础导入', code: 'from tools.factors import FactorFamily\nfrom tools.factors import FactorExpr' },
-                { label: '完整导入', code: 'from tools.factors import FactorExpr, FactorFamily\nfrom tools.factors.parameters import DataColumnParam, WindowParam' },
+                { label: '完整因子类', code: getDefaultFactorTemplate() },
+                { label: '基础导入', code: 'from tools.factors import FactorFamily\nfrom tools.parameters import DataColumnParam, WindowParam' },
+                { label: '扩展导入', code: 'from tools.factors import FactorFamily, FactorExpr\nfrom tools.factors import FactorFreqParam, ReturnFreqParam, ReverseParam\nfrom tools.parameters import DataColumnParam, WindowParam, TimeDeltaParam, FactorParam, TypeParam' },
             ]
         },
         {
             title: '🔧 参数定义模板',
             items: [
-                { label: 'DataColumn 参数', code: '# $F: 标的字段\n# $N: 窗口参数\nF = DataColumnParam("$F")\nN = WindowParam("$N")' },
-                { label: '窗口参数', code: 'N = WindowParam("$N", default=20)' },
-                { label: '多参数模板', code: '# 参数定义\nF = DataColumnParam("$F")\nN1 = WindowParam("$N1", default=5)\nN2 = WindowParam("$N2", default=20)' },
+                { label: '价格 + 窗口', code: "P = DataColumnParam('P', default_value='CA')\nN = WindowParam('N', default_value='20d')" },
+                { label: 'OHLC 参数', code: "O = DataColumnParam('O', default_value='OA')\nH = DataColumnParam('H', default_value='HA')\nL = DataColumnParam('L', default_value='LA')\nC = DataColumnParam('C', default_value='CA')" },
+                { label: '收益步长 RF', code: "RF = WindowParam('RF', default_value='1d')" },
+                { label: '长短窗口', code: "NS = WindowParam('NS', default_value='10d')\nNL = WindowParam('NL', default_value='30d')" },
+                { label: '系统参数', code: "# FactorFamily 会自动追加 $F 和 $Rev；收益测试常用 $RF\n# from tools.factors import FactorFreqParam, ReturnFreqParam, ReverseParam" },
             ]
         },
         {
             title: '⏱ 时序算子',
             items: [
-                { label: 'MA - 移动平均', code: 'res = MA(P, N)' },
-                { label: 'STD - 标准差', code: 'res = STD(P, N)' },
-                { label: 'REF - 前移', code: 'res = REF(P, N)' },
-                { label: 'DELTA - 差分', code: 'res = DELTA(P, N)' },
-                { label: 'LOG - 对数', code: 'res = LOG(P)' },
-                { label: 'ABS - 绝对值', code: 'res = ABS(P)' },
-                { label: 'RANK - 时序排名', code: 'res = RANK(P, N)' },
-                { label: 'MAX - 滚动最大值', code: 'res = MAX(P, N)' },
-                { label: 'MIN - 滚动最小值', code: 'res = MIN(P, N)' },
-                { label: 'SUM - 滚动求和', code: 'res = SUM(P, N)' },
-                { label: 'PROD - 滚动乘积', code: 'res = PROD(P, N)' },
-                { label: 'EMA - 指数移动平均', code: 'res = EMA(P, N)' },
+                { label: 'rolling_mean', code: 'res = P.rolling_mean(N)' },
+                { label: 'rolling_std', code: 'res = P.rolling_std(N)' },
+                { label: 'rolling_var', code: 'res = P.rolling_var(N)' },
+                { label: 'rolling_min', code: 'res = P.rolling_min(N)' },
+                { label: 'rolling_max', code: 'res = P.rolling_max(N)' },
+                { label: 'rolling_sum', code: 'res = P.rolling_sum(N)' },
+                { label: 'rolling_ema', code: 'res = P.rolling_ema(N)' },
+                { label: 'rolling_corr', code: 'res = P.rolling_corr(V, N)' },
+                { label: 'rolling_skew', code: 'res = P.rolling_skew(N)' },
+                { label: 'rolling_argmax', code: 'res = P.rolling_argmax(N)' },
+                { label: 'rolling_argmin', code: 'res = P.rolling_argmin(N)' },
+                { label: 'shift / delta', code: 'ret = P.delta(RF) / P.shift(RF)' },
             ]
         },
         {
             title: '📊 截面算子',
             items: [
-                { label: 'CS_RANK - 截面排名', code: 'res = CS_RANK(P)' },
-                { label: 'CS_ZSCORE - 截面标准化', code: 'res = CS_ZSCORE(P)' },
-                { label: 'CS_DEMEAN - 截面去均值', code: 'res = CS_DEMEAN(P)' },
-                { label: 'CS_NORM - 截面归一化', code: 'res = CS_NORM(P)' },
+                { label: 'cs_rank', code: 'res = P.cs_rank()' },
+                { label: 'cs_zscore', code: 'res = P.cs_zscore()' },
+                { label: 'cs_spearman', code: 'res = P.cs_spearman(V)' },
             ]
         },
         {
             title: '🔗 组合/辅助',
             items: [
-                { label: 'as_intermediate', code: '.as_intermediate()' },
+                { label: 'log / abs / sqrt', code: 'res = P.log().abs().sqrt()' },
+                { label: 'sign / neg', code: 'res = P.sign() * P.neg()' },
+                { label: '逐元素 max/min', code: 'res = H.max(C) - L.min(C)' },
+                { label: '中间变量', code: "signal = res.as_intermediate('SIGNAL')" },
                 { label: 'return 语句', code: 'return res' },
-                { label: '运算表达式', code: 'res = (P.delta("$F") / P.shift("$F")) * (1 + cs_rank(REF(DELTA($F))))' },
+                { label: '收益率表达式', code: 'ret = P.delta(RF) / P.shift(RF)' },
             ]
         },
     ];
 
     let html = '';
-    categories.forEach(cat => {
-        html += `<div style="margin-bottom:8px;">
-            <div style="font-size:12px; font-weight:600; margin-bottom:4px; color:#555;">${cat.title}</div>`;
+    categories.forEach((cat, index) => {
+        html += `<details class="operator-palette-group" ${index === 0 ? 'open' : ''}>
+            <summary>${cat.title}</summary>
+            <div class="operator-palette-items">`;
         cat.items.forEach(item => {
             html += `<button class="btn-palette-item" onclick="insertSnippet(\`${escAttr(item.code)}\`)"
-                style="display:block; width:100%; text-align:left; padding:4px 8px; margin-bottom:2px;
-                border:1px solid #e2e8f0; border-radius:4px; background:#fff; cursor:pointer;
-                font-size:11px; font-family:monospace; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
                 title="${escHtml(item.code)}">${escHtml(item.label)}</button>`;
         });
-        html += `</div>`;
+        html += `</div></details>`;
     });
     return html;
+}
+
+function getDefaultFactorTemplate() {
+    return `from tools.factors import FactorFamily
+from tools.parameters import DataColumnParam, WindowParam
+
+
+class MyFactor(FactorFamily):
+    @staticmethod
+    def factor_expr():
+        P = DataColumnParam('P', default_value='CA')
+        N = WindowParam('N', default_value='20d')
+        signal = P.rolling_mean(N)
+        return signal
+`;
+}
+
+function insertTemplate(name) {
+    if (name === 'factor_class') {
+        const ta = document.getElementById('code-source');
+        if (!ta) return;
+        const tpl = getDefaultFactorTemplate();
+        if (ta.value.trim() && !confirm('当前源码不为空，是否用默认代码模板覆盖？')) return;
+        ta.setRangeText(tpl, 0, ta.value.length, 'end');
+        _dirty = true;
+        invalidateCodeValidation();
+        syncPythonHighlight();
+        ta.focus();
+    }
 }
 
 function insertSnippet(code) {
@@ -630,19 +961,20 @@ function insertSnippet(code) {
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
     const before = ta.value.substring(0, start);
-    const after = ta.value.substring(end);
     const needsNewline = before.length > 0 && !before.endsWith('\n');
-    ta.value = before + (needsNewline ? '\n' : '') + code + after;
+    const inserted = (needsNewline ? '\n' : '') + code;
+    ta.setRangeText(inserted, start, end, 'end');
     ta.focus();
-    ta.selectionStart = ta.selectionEnd = start + (needsNewline ? 1 : 0) + code.length;
     _dirty = true;
+    invalidateCodeValidation();
+    syncPythonHighlight();
 }
 
 // ═══════════════════════════════════════════════════════════
 // 校验 / 保存 / 取消
 // ═══════════════════════════════════════════════════════════
 
-async function validateCustomExpr(factorName) {
+async function validateCustomExpr(factorName, options = {}) {
     const sourceCode = document.getElementById('code-source')?.value || '';
     const btn = document.getElementById('btn-validate-custom');
     if (!btn) return;
@@ -657,16 +989,25 @@ async function validateCustomExpr(factorName) {
         if (data.valid) {
             btn.textContent = '✓ 校验通过';
             btn.className = 'btn-validate ok';
-            if (data.tree_repr) {
-                showTreeReprPopup(factorName, data.tree_repr);
+            setValidatedFactorDraft(data, sourceCode);
+            if (data.tree_repr && !options.openParamsOnSuccess) {
+                showTreeReprPopup(data.factor_name || factorName, data.tree_repr);
             }
+            if (options.openParamsOnSuccess) {
+                openValidatedParamDrawer();
+            }
+            return true;
         } else {
             btn.textContent = '✗ ' + (data.error || '无效');
             btn.className = 'btn-validate err';
+            invalidateCodeValidation();
+            return false;
         }
     } catch(e) {
         btn.textContent = '校验失败';
         btn.className = 'btn-validate err';
+        invalidateCodeValidation();
+        return false;
     }
 }
 
