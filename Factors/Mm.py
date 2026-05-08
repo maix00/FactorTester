@@ -19,15 +19,15 @@ class Mm(FactorFamily):
     def factor_expr():
         H = DataColumnParam('H', default_value='HA')
         L = DataColumnParam('L', default_value='LA')
-        h = H.shift(0)
-        l = L.shift(0)
-        h_pos = h.rolling_argmax('$F')
-        l_pos = l.rolling_argmin('$F')
-        ph = h.rolling_max('$F')
-        pl = l.rolling_min('$F')
-        up = (ph - pl) / (ph + 1e-10)
-        dn = (pl - ph) / (pl + 1e-10)
-        return (h_pos > l_pos) * up + (l_pos > h_pos) * dn
+        HighPos = (H.rolling_argmax('$F')).as_intermediate('HighPos')
+        LowPos = (L.rolling_argmin('$F')).as_intermediate('LowPos')
+        HighVal = (H.rolling_max('$F')).as_intermediate('HighVal')
+        LowVal = (L.rolling_min('$F')).as_intermediate('LowVal')
+        DropRatio = ((HighVal - LowVal) / (HighVal + 1e-10)).as_intermediate('DropRatio')
+        UpRatio = ((HighVal - LowVal) / (LowVal + 1e-10)).as_intermediate('UpRatio')
+        LowFirst = (HighPos > LowPos).as_intermediate('LowFirst')
+        HighFirst = (LowPos > HighPos).as_intermediate('HighFirst')
+        return HighFirst * DropRatio + LowFirst * UpRatio
 
     desc = '区间方向动量'
     description = """

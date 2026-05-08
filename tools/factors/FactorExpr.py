@@ -898,22 +898,17 @@ class RollingOp(OperandExpr):
         """数据操作数（向后兼容，一元时使用）。"""
         return self.operands[1]
 
-    def _window_str(self) -> str:
-        """窗口的字符串表示，用于 op_name / alias / latex。"""
-        w = self.window
-        if isinstance(w, ConstExpr):
-            return str(w.value)
-        return str(w).replace(' ', '')
-
     @property
     def op_name(self) -> str:
-        return f"{self.op.upper()}_{self._window_str()}"
+        p = self.window
+        label = str(p.value) if isinstance(p, ConstExpr) else str(p)
+        return f"{self.op.upper()}_{label}"
 
     def _to_latex(self, subst: dict | None = None) -> str:
         sk = self._structural_key()
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
-        w_str = self._window_str()
+        w_str = self.window._to_latex(subst) if isinstance(self.window, FactorExpr) else str(self.window)
         if len(self.operands) == 2:
             # 一元
             operand_latex = self.operands[1]._to_latex(subst)
@@ -939,7 +934,9 @@ class RollingOp(OperandExpr):
         parts = [self.op]
         for opnd in self.operands[1:]:
             parts.append(opnd._get_alias())
-        parts.append(f"W{self._window_str()}")
+        p_expr = self.window
+        p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
+        parts.append(p)
         return "_".join(parts)
 
     def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
