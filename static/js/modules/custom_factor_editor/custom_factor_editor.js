@@ -509,10 +509,30 @@ function extractClassNameFromSource(source) {
     return match ? match[1] : '';
 }
 
-function switchMode(mode) {
+async function switchMode(mode) {
     if (document.getElementById('editor-footer')?.style.display === 'none') return;
+    if (mode === _currentMode) return;
+    if (mode === 'visual' && _currentMode === 'code') {
+        const ok = await validateCustomExpr(
+            extractClassNameFromSource(document.getElementById('code-source')?.value || '') || _currentFactorFamilyId || '',
+            {silentTree: true}
+        );
+        if (!ok) {
+            showToast('源码校验未通过，暂不能转为可视化', 'error');
+            return;
+        }
+    }
+    if (mode === 'code' && _currentMode === 'visual') {
+        const ok = await validateCustomExpr(
+            document.getElementById('cfg-name-vis')?.value?.trim() || _currentFactorFamilyId || '',
+            {silentTree: true}
+        );
+        if (!ok) {
+            showToast('可视化表达式校验未通过，暂不能转为代码', 'error');
+            return;
+        }
+    }
     const draft = getCurrentEditorFactorDraft();
-    _currentMode = mode;
     setEditorModeTabsVisible(true);
     setActiveEditorModeTab(mode);
     if (draft.source_code || mode === 'visual') {
@@ -1053,7 +1073,7 @@ async function validateCustomExpr(factorName, options = {}) {
             btn.textContent = '✓ 校验通过';
             btn.className = 'btn-validate ok';
             setValidatedFactorDraft(data, sourceCode);
-            if (data.tree_repr && !options.openParamsOnSuccess) {
+            if (data.tree_repr && !options.openParamsOnSuccess && !options.silentTree) {
                 showTreeReprPopup(data.factor_name || factorName, data.tree_repr);
             }
             if (options.openParamsOnSuccess) {
@@ -1201,6 +1221,7 @@ async function loadVisualOperatorRegistry() {
 }
 
 function renderVisualEditor(factor) {
+    const previousMode = _currentMode;
     _currentMode = 'visual';
     const body = document.getElementById('editor-body');
     const footer = document.getElementById('editor-footer');
@@ -1210,8 +1231,14 @@ function renderVisualEditor(factor) {
     setActiveEditorModeTab('visual');
     footer.style.display = '';
     _visSourceFallback = factor.source_code || '';
-    _visGraphDirty = false;
-    loadVisualNodesFromSource(_visSourceFallback);
+    const shouldParseSource = !_visNodes.length
+        || previousMode === 'code'
+        || (!_visGraphDirty && _visSourceFallback !== (renderVisualEditor._lastSource || ''));
+    if (shouldParseSource) {
+        _visGraphDirty = false;
+        loadVisualNodesFromSource(_visSourceFallback);
+        renderVisualEditor._lastSource = _visSourceFallback;
+    }
 
     body.innerHTML = `
         <div class="visual-layout">
@@ -1486,7 +1513,9 @@ function wouldCreateVisualCycle(fromNodeId, toNodeId) {
 
 function deleteVisNode(nodeId) {
     _visNodes = _visNodes.filter(n => n.id !== nodeId);
-    _visNodes.forEach(node => { node.inputs = (node.inputs || []).filter(id => id !== nodeId); });
+    _visNodes.forEach(node => {
+        node.inputs = (node.inputs || []).map(id => id === nodeId ? null : id);
+    });
     if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
     if (_visPendingConnection?.fromNodeId === nodeId) _visPendingConnection = null;
     renderAllVisNodes();
@@ -1501,18 +1530,25 @@ function visualToExpr() {
         return '';
     }
     const root = getVisualRootNode();
-    const expr = root ? buildExprFromNode(root, new Set()) : '';
+    const expr = root ? buildExprFromNode(root, new Set(), {root: true}) : '';
     document.getElementById('visual-expr-preview').textContent = expr || '（无法生成表达式）';
     return expr;
 }
 
-function buildExprFromNode(node, seen) {
+function buildExprFromNode(node, seen, options = {}) {
     if (!node || seen.has(node.id)) return '';
     seen.add(node.id);
     if (node.key === 'DataColumnParam') return node.params?.alias || node.label || 'P';
-    if (node.key === 'Constant') return node.params?.value || node.label || '0';
-    const inputs = (node.inputs || []).map(id => _visNodes.find(n => n.id === id));
-    const exprs = inputs.map(child => buildExprFromNode(child, new Set(seen))).filter(Boolean);
+    if (node.key === 'Constant') {
+        const value = node.params?.value || node.label || '0';
+        return options.root ? `ConstExpr(${value})` : value;
+    }
+    const arity = getVisualOperatorArity(node);
+    const inputIds = (node.inputs || []).slice(0, arity);
+    if (arity && (inputIds.length < arity || inputIds.some(id => !id))) return '';
+    const inputs = inputIds.map(id => _visNodes.find(n => n.id === id));
+    const exprs = inputs.map(child => buildExprFromNode(child, new Set(seen)));
+    if (exprs.some(expr => !expr)) return '';
     let expr = '';
     if (isVisualInfixOperator(node)) {
         expr = exprs.length >= getVisualOperatorArity(node) ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
@@ -1559,8 +1595,10 @@ function renderVisualNodeSlots(node) {
         return `<div class="node-slot ${inputNode ? 'filled' : ''} ${awaiting ? 'awaiting' : ''}"
             onclick="completeVisualConnection(${node.id}, ${index});event.stopPropagation()"
             title="${awaiting ? '点击连接到此输入槽' : '先点击另一个卡牌的输出端口'}">
+            <span class="node-input-port" aria-hidden="true"></span>
             <span class="node-slot-name">${escHtml(label)}</span>
             <span class="node-slot-value">${escHtml(inputNode ? inputNode.label : '未连接')}</span>
+            ${inputNode ? `<button class="node-disconnect" title="取消连接" onclick="disconnectVisualInput(${node.id}, ${index});event.stopPropagation()">×</button>` : ''}
         </div>`;
     }).join('');
     return `<div class="node-slots">${rows}</div>`;
@@ -1632,12 +1670,24 @@ function updateVisualNodeInput(nodeId, index, value) {
     if (!node) return;
     node.inputs = node.inputs || [];
     node.inputs[index] = value ? Number(value) : null;
-    node.inputs = node.inputs.filter(Boolean);
     _dirty = true;
     _visGraphDirty = true;
     invalidateCodeValidation();
     renderAllVisNodes();
     selectVisNode(nodeId);
+}
+
+function disconnectVisualInput(nodeId, index) {
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node) return;
+    node.inputs = node.inputs || [];
+    node.inputs[index] = null;
+    _dirty = true;
+    _visGraphDirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    selectVisNode(nodeId);
+    updateVisualExprPreview();
 }
 
 function autoLayoutVisualNodes() {
@@ -1665,21 +1715,40 @@ function updateVisualParam(nodeId, key, value) {
 }
 
 function getVisualRootNode() {
-    const referenced = new Set(_visNodes.flatMap(node => node.inputs || []));
-    return [..._visNodes].reverse().find(node => !referenced.has(node.id)) || _visNodes[_visNodes.length - 1];
+    const referenced = new Set(_visNodes.flatMap(node => (node.inputs || []).filter(Boolean)));
+    const roots = [..._visNodes].filter(node => !referenced.has(node.id));
+    const completeExpressionRoots = roots.filter(node => getVisualOperatorArity(node) > 0 && isVisualNodeComplete(node.id, new Set()));
+    if (completeExpressionRoots.length) return completeExpressionRoots[completeExpressionRoots.length - 1];
+    const expressionRoots = roots.filter(node => getVisualOperatorArity(node) > 0);
+    if (expressionRoots.length) return expressionRoots[expressionRoots.length - 1];
+    return roots[roots.length - 1] || _visNodes[_visNodes.length - 1];
+}
+
+function isVisualNodeComplete(nodeId, seen) {
+    if (seen.has(nodeId)) return false;
+    seen.add(nodeId);
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node) return false;
+    const arity = getVisualOperatorArity(node);
+    if (!arity) return true;
+    const inputIds = (node.inputs || []).slice(0, arity);
+    if (inputIds.length < arity || inputIds.some(id => !id)) return false;
+    return inputIds.every(id => isVisualNodeComplete(id, new Set(seen)));
 }
 
 function renderVisEdges(svg) {
     svg.innerHTML = '';
     for (const node of _visNodes) {
-        for (const inputId of (node.inputs || [])) {
+        for (const [index, inputId] of (node.inputs || []).entries()) {
             const from = _visNodes.find(n => n.id === inputId);
             if (!from) continue;
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            const x1 = from.x + 120;
-            const y1 = from.y + 28;
-            const x2 = node.x;
-            const y2 = node.y + 28;
+            const fromPoint = getVisualOutputPoint(from.id);
+            const toPoint = getVisualInputPoint(node.id, index);
+            const x1 = fromPoint.x;
+            const y1 = fromPoint.y;
+            const x2 = toPoint.x;
+            const y2 = toPoint.y;
             const mid = (x1 + x2) / 2;
             path.setAttribute('d', `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
             path.setAttribute('stroke', '#94a3b8');
@@ -1688,6 +1757,36 @@ function renderVisEdges(svg) {
             svg.appendChild(path);
         }
     }
+}
+
+function getVisualOutputPoint(nodeId) {
+    const canvas = document.getElementById('visual-canvas');
+    const port = document.querySelector(`.vis-node[data-node-id="${nodeId}"] .node-output-port`);
+    if (canvas && port) {
+        const canvasRect = canvas.getBoundingClientRect();
+        const rect = port.getBoundingClientRect();
+        return {
+            x: rect.left - canvasRect.left + rect.width / 2,
+            y: rect.top - canvasRect.top + rect.height / 2,
+        };
+    }
+    const node = _visNodes.find(n => n.id === nodeId);
+    return {x: (node?.x || 0) + 150, y: (node?.y || 0) + 36};
+}
+
+function getVisualInputPoint(nodeId, inputIndex) {
+    const canvas = document.getElementById('visual-canvas');
+    const slot = document.querySelector(`.vis-node[data-node-id="${nodeId}"] .node-slot:nth-child(${inputIndex + 1}) .node-input-port`);
+    if (canvas && slot) {
+        const canvasRect = canvas.getBoundingClientRect();
+        const rect = slot.getBoundingClientRect();
+        return {
+            x: rect.left - canvasRect.left + rect.width / 2,
+            y: rect.top - canvasRect.top + rect.height / 2,
+        };
+    }
+    const node = _visNodes.find(n => n.id === nodeId);
+    return {x: node?.x || 0, y: (node?.y || 0) + 54 + inputIndex * 30};
 }
 
 function layoutVisualExpressionTree(options = {}) {
@@ -1786,8 +1885,10 @@ function visualToSource(options = {}) {
     const paramTypes = [...new Set(paramNodes.map(n => n.params?.type || 'DataColumnParam'))];
     const factorParamTypes = paramTypes.filter(t => VIS_FACTOR_PARAM_TYPES.includes(t));
     const regularParamTypes = paramTypes.filter(t => !VIS_FACTOR_PARAM_TYPES.includes(t));
+    const factorImports = ['FactorFamily', ...factorParamTypes];
+    if (expr.includes('ConstExpr(')) factorImports.push('ConstExpr');
     const imports = [
-        `from tools.factors import ${['FactorFamily', ...factorParamTypes].join(', ')}`,
+        `from tools.factors import ${[...new Set(factorImports)].join(', ')}`,
         regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
     ].filter(Boolean).join('\n');
     const uniqueParamNodes = [];

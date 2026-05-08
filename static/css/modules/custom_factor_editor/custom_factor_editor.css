@@ -311,15 +311,27 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 }
 .vis-node .node-slots { display: grid; gap: 4px; margin-top: 8px; }
 .vis-node .node-slot {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    display: grid; grid-template-columns: 12px auto minmax(0, 1fr) 16px; align-items: center; gap: 7px;
     padding: 4px 6px; border-radius: 6px; background: #f8fafc; border: 1px dashed #cbd5e1;
     font-size: 11px; color: #64748b;
 }
 .vis-node .node-slot.filled { border-style: solid; background: #eff6ff; color: #1e40af; }
 .vis-node .node-slot.awaiting { border-color: #4a90d9; background: #eef6ff; cursor: crosshair; }
 .vis-node .node-slot:hover { border-color: #4a90d9; }
+.vis-node .node-input-port {
+    width: 10px; height: 10px; border-radius: 999px; background: #4a90d9;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 3px #bfdbfe;
+}
+.vis-node .node-slot.awaiting .node-input-port {
+    background: #2563eb; box-shadow: 0 0 0 4px rgba(37,99,235,0.18), 0 0 0 1px #2563eb;
+}
 .vis-node .node-slot-name { font-weight: 650; white-space: nowrap; }
-.vis-node .node-slot-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vis-node .node-slot-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.vis-node .node-disconnect {
+    width: 15px; height: 15px; border-radius: 999px; border: 0; background: #dbeafe;
+    color: #2563eb; cursor: pointer; font-size: 11px; line-height: 15px; padding: 0;
+}
+.vis-node .node-disconnect:hover { background: #bfdbfe; color: #1d4ed8; }
 .vis-node .node-output-port {
     position: absolute; right: -8px; top: 50%; transform: translateY(-50%);
     width: 16px; height: 16px; border-radius: 999px; border: 2px solid #fff;
