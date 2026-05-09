@@ -11,6 +11,16 @@ body {
     padding: 0;
 }
 
+.home-back-link {
+    font-size: 13px;
+    color: #4a90d9;
+    text-decoration: none;
+}
+
+.home-back-link:hover {
+    text-decoration: underline;
+}
+
 .container {
     display: flex;
     max-width: 1400px;

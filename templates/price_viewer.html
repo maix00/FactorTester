@@ -16,7 +16,7 @@
         html, body { height: 100%; margin: 0; overflow: hidden; }
         body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .pv-wrapper { max-width: 100%; margin: 0 auto; padding: 16px 20px; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; }
-        .pv-header { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-shrink: 0; }
+        .pv-header { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
         .pv-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
         .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
         .pv-header .back-link:hover { text-decoration: underline; }
@@ -113,7 +113,8 @@
 <body>
 <div class="pv-wrapper">
     <div class="pv-header">
-        <a href="/" class="back-link">← 返回首页</a>
+        {% set back_link_class = 'back-link' %}
+        {% include 'modules/shared/home_back_link.html' %}
         <h1>📈 价格序列查看</h1>
     </div>
 

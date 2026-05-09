@@ -27,7 +27,8 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
-                <a href="/" class="btn-back">← 返回首页</a>
+                {% set back_link_class = 'btn-back' %}
+                {% include 'modules/shared/home_back_link.html' %}
             </div>
             <div class="sidebar-actions">
                 <div class="sidebar-filter" style="margin-top:0;">

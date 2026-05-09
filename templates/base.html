@@ -21,7 +21,7 @@
     <div class="container">
         <div class="sidebar">
             <div style="margin-bottom:12px;">
-                <a href="/" style="font-size:13px;color:#4a90d9;text-decoration:none;">← 返回首页</a>
+                {% include 'modules/shared/home_back_link.html' %}
             </div>
             <h2>单因子(家族)测试</h2>
             <input type="text" id="search" placeholder="搜索因子名称..." value="{{ search_query }}" autocomplete="off">
