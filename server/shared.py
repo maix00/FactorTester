@@ -818,24 +818,36 @@ def get_factor_main_section_html(factor_family_alias):
 
 # ─── Tree / product utilities ─────────────────────────────────────────────────
 def convert_to_fancytree(tree_dict, checkbox_default=True):
-    def create_node(key, value, path):
-        key_str = str(key) if not isinstance(key, type) else key.__name__
-        current_path = f"{path}/{key_str}" if path else key_str
-        child_nodes = []
+    def iter_child_entries(value):
+        entries = []
+        processed_keys = set()
         if isinstance(value, dict) and "$SUBCLASS$" in value:
             sub_dict = value["$SUBCLASS$"]
             if isinstance(sub_dict, dict):
                 for subkey, subval in sorted(sub_dict.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
                     if subkey not in ("$SUBCLASS$", "$OBJECTS$"):
-                        child_nodes.append(create_node(subkey, subval, current_path))
-        processed_keys = set()
-        if isinstance(value, dict) and "$SUBCLASS$" in value and isinstance(value["$SUBCLASS$"], dict):
-            processed_keys.update(value["$SUBCLASS$"].keys())
+                        entries.append((subkey, subval))
+                processed_keys.update(sub_dict.keys())
         if isinstance(value, dict):
             for k, v in sorted(value.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
                 if k in ("$SUBCLASS$", "$OBJECTS$") or k in processed_keys:
                     continue
-                child_nodes.append(create_node(k, v, current_path))
+                entries.append((k, v))
+        return entries
+
+    def build_nodes(key, value, path):
+        if isinstance(key, type) and bool(key.__dict__.get('_is_hidden_product_tree_class', False)):
+            flattened = []
+            for child_key, child_val in iter_child_entries(value):
+                flattened.extend(build_nodes(child_key, child_val, path))
+            return flattened
+
+        key_str = str(key) if not isinstance(key, type) else key.__name__
+        current_path = f"{path}/{key_str}" if path else key_str
+        child_nodes = []
+        for child_key, child_val in iter_child_entries(value):
+            child_nodes.extend(build_nodes(child_key, child_val, current_path))
+
         has_objects = isinstance(value, dict) and "$OBJECTS$" in value and bool(value["$OBJECTS$"])
         has_subclass = isinstance(value, dict) and "$SUBCLASS$" in value and bool(value["$SUBCLASS$"])
         node = {"title": key_str, "key": current_path, "checkbox": checkbox_default}
@@ -864,15 +876,44 @@ def convert_to_fancytree(tree_dict, checkbox_default=True):
         else:
             node["folder"] = False
             node["lazy"] = False
-        return node
+        return [node]
 
     top_nodes = []
     for key, value in sorted(tree_dict.items(), key=lambda x: str(x[0]) if not isinstance(x[0], type) else x[0].__name__):
         if key not in ("$SUBCLASS$", "$OBJECTS$"):
-            top_nodes.append(create_node(key, value, ""))
+            top_nodes.extend(build_nodes(key, value, ""))
     return top_nodes
 
 def find_node_by_path(tree_dict, path_parts):
+    def iter_child_entries(current):
+        if not isinstance(current, dict):
+            return []
+        entries = []
+        for key, value in current.items():
+            if key in ('$SUBCLASS$', '$OBJECTS$'):
+                continue
+            entries.append((key, value))
+        sub_dict = current.get('$SUBCLASS$')
+        if isinstance(sub_dict, dict):
+            for key, value in sub_dict.items():
+                if key in ('$SUBCLASS$', '$OBJECTS$'):
+                    continue
+                entries.append((key, value))
+        return entries
+
+    def find_child(current, part):
+        entries = iter_child_entries(current)
+        for key, value in entries:
+            key_str = str(key) if not isinstance(key, type) else key.__name__
+            if key_str == part:
+                return value
+        for key, value in entries:
+            if isinstance(key, type) and bool(key.__dict__.get('_is_hidden_product_tree_class', False)) and isinstance(value, dict):
+                found = find_child(value, part)
+                if found is not None:
+                    return found
+        return None
+
     flag = False
     original_path_parts = path_parts.copy()
     if len(path_parts) >= 2 and path_parts[-2] == '_products':
@@ -880,34 +921,15 @@ def find_node_by_path(tree_dict, path_parts):
         flag = True
     current = tree_dict
     for part in path_parts:
-        found = None
         if len(current) == 1 and '$OBJECTS$' in current:
             flag = True
             break
-        for key, value in current.items():
-            key_str = str(key) if not isinstance(key, type) else key.__name__
-            if key_str == part:
-                if isinstance(value, dict):
-                    current = value
-                    found = True
-                    break
-                else:
-                    return None
-        if found:
-            continue
-        if '$SUBCLASS$' in current and isinstance(current['$SUBCLASS$'], dict):
-            subclass_dict = current['$SUBCLASS$']
-            for key, value in subclass_dict.items():
-                key_str = str(key) if not isinstance(key, type) else key.__name__
-                if key_str == part:
-                    if isinstance(value, dict):
-                        current = value
-                        found = True
-                        break
-                    else:
-                        return None
-        if not found:
+        matched = find_child(current, part)
+        if matched is None:
             return None
+        if not isinstance(matched, dict):
+            return None
+        current = matched
     if flag:
         assert '$OBJECTS$' in current and isinstance(current['$OBJECTS$'], list), \
             f"路径 {original_path_parts} 指向的节点没有 $OBJECTS$ 列表"
@@ -927,6 +949,79 @@ def get_minimal_paths(paths):
             result.append(p)
     return result
 
+def _future_code_exchange(future):
+    code = str(getattr(future, 'code', '')).upper()
+    alias = str(getattr(future, 'alias', getattr(future, 'name', '')))
+    exchange = alias.split('.')[1].split('@')[0].upper() if '.' in alias else ''
+    return (code, exchange) if code and exchange else None
+
+
+def _contract_code_exchange(contract, exchange_map):
+    name = str(getattr(contract, 'name', getattr(contract, 'alias', contract)))
+    if '|' in name:
+        parts = name.split('|')
+        if len(parts) >= 3:
+            exchange = exchange_map.get(parts[0], parts[0]).upper()
+            code = parts[2].upper()
+            return code, exchange
+
+    match = re.match(r'^([A-Za-z]+)\d+\.?([A-Za-z]+)?', name)
+    if match:
+        code = match.group(1).upper()
+        exchange = exchange_map.get(match.group(2) or '', match.group(2) or '').upper()
+        return (code, exchange) if exchange else None
+    return None
+
+
+def _build_submission_tree():
+    """Single-factor product tree: product categories + CN futures contracts."""
+    try:
+        from sources.LocalCNFutures.CNFutures import (
+            CNFuturesContract,
+            CNFuturesDayNightTimeCategory,
+            CNFuturesSectorCategory,
+            exchange_map,
+            get_all_futures_contract,
+        )
+        from tools.products.Futures import (
+            make_contract_category_from_futures_category,
+            map_contracts_to_futures,
+        )
+        from tools.products.Product import Product
+        from tools.products.categories.Category import combine_trees
+
+        product_tree = Settings.get_cat_tree()
+        contracts = list(get_all_futures_contract())
+        futures = Settings.get_all_products()
+
+        contract_to_future = map_contracts_to_futures(
+            contracts,
+            futures,
+            contract_key=lambda c: _contract_code_exchange(c, exchange_map),
+            futures_key=_future_code_exchange,
+        )
+
+        sector_category = make_contract_category_from_futures_category(
+            CNFuturesSectorCategory,
+            CNFuturesContract,
+            contracts,
+            contract_to_future,
+        )
+        daynight_category = make_contract_category_from_futures_category(
+            CNFuturesDayNightTimeCategory,
+            CNFuturesContract,
+            contracts,
+            contract_to_future,
+        )
+        contract_tree = (sector_category * daynight_category).get_tree_with_parents(
+            all_objects=contracts,
+            ancester=Product,
+        )
+        return combine_trees(product_tree, contract_tree).tree
+    except Exception:
+        return Settings.get_cat_tree().tree
+
+
 # ─── Category tree (loaded once at startup) ───────────────────────────────────
-tree = Settings.get_cat_tree().tree
+tree = _build_submission_tree()
 _fancytree_cache = None

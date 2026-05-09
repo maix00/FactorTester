@@ -57,7 +57,7 @@
         var html = '';
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
-            html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
+            html += '<div class="submission-item" data-index="' + index + '" style="width:100%; box-sizing:border-box; border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
             html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 36px 8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8; min-height:52px;">';
             var labelHtml = sub.label
                 ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + sub.label + '</span>'
@@ -76,8 +76,8 @@
             // 删除按钮放在 header 右下角
             html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
             html += '  </div>';
-            html += '  <div style="padding:8px 12px; overflow-x:auto;">';
-            html += '    <table style="width:100%; border-collapse:collapse; table-layout:fixed;">';
+            html += '  <div style="width:100%; box-sizing:border-box; padding:8px 12px; overflow-x:auto;">';
+            html += '    <table style="width:100%; min-width:100%; border-collapse:collapse; table-layout:auto;">';
             sub.paths.forEach(function(path, pathIdx) {
                 var rowId = 'path-' + index + '-' + pathIdx;
                 var expanded = isExpanded[path] || false;
@@ -86,16 +86,16 @@
                     pathDisplay = path + ' <span style="color:#888;font-size:12px;">' + sub.pathsDescMap[path] + '</span>';
                 }
                 html += '      <tr class="path-row" data-path="' + path.replace(/"/g, '&quot;') + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
-                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; word-break:break-all;">';
+                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; min-width:0; overflow-wrap:anywhere; word-break:break-word;">';
                 html += '          <div style="display:flex;align-items:flex-start;">';
-                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1;">' + pathDisplay + '</span>';
+                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word;">' + pathDisplay + '</span>';
                 html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>';
                 html += '          </div>';
                 html += '        </td>';
                 html += '      </tr>';
                 if (expanded) {
                     html += '      <tr class="product-detail-row" id="detail-' + index + '-' + pathIdx + '">';
-                    html += '        <td style="padding:8px 0 8px 20px; background:#fafbfc;">';
+                    html += '        <td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">';
                     html += '          <div class="loading-products" style="font-size:13px;">加载中...</div>';
                     html += '        </td>';
                     html += '      </tr>';
@@ -122,7 +122,7 @@
                 // 展开：加载产品详情
                 expanded[path] = true;
                 var detailHtml = '<tr class="product-detail-row" id="detail-' + subIndex + '-' + pathIndex + '">' +
-                    '<td style="padding:8px 0 8px 20px; background:#fafbfc;">' +
+                    '<td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">' +
                     '<div class="loading-products" style="font-size:13px;">加载中...</div>' +
                     '</td></tr>';
                 $row.after(detailHtml);

@@ -12,19 +12,19 @@ from datetime import datetime
 
 from tools.products.Product import Product
 from tools.base.IdleResourceManager import IdleResourceManager
-from tools.products.FuturesTermStructure import (
-    FuturesContractTermStructureMixin,
-    FuturesTermStructureMixin,
+from tools.products.AdjustableTermStructure import (
+    AdjustableContractMixin,
+    AdjustableProductMixin,
 )
 
 
-class FuturesContract(FuturesContractTermStructureMixin, Product):
+class FuturesContract(AdjustableContractMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
         super().__init__(name, point_value, currency, *args, **kwargs)
 
 
-class Futures(FuturesTermStructureMixin, Product):
+class Futures(AdjustableProductMixin, Product):
     """
     期货品种类（主力合约）。
 

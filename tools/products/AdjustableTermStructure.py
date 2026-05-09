@@ -63,12 +63,18 @@ class FuturesTermStructureStore:
         return df
 
 
-class FuturesContractTermStructureMixin:
-    """Marker/base mixin for contracts that can appear in a term structure."""
+class AdjustableContractMixin:
+    """Base mixin for contract-like products that can participate in adjustment chains."""
+
+    # Product/category tree should skip technical base layers like this mixin.
+    _is_hidden_product_tree_class = True
 
 
-class FuturesTermStructureMixin:
-    """Mixin for futures products with term-structure snapshot support."""
+class AdjustableProductMixin:
+    """Base mixin for products that support adjustment/term-structure style helpers."""
+
+    # Product/category tree should skip technical base layers like this mixin.
+    _is_hidden_product_tree_class = True
 
     term_structure_path: Optional[str] = None
 

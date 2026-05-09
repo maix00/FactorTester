@@ -1,6 +1,6 @@
 """Generate CN futures term-structure snapshots.
 
-The output is consumed by tools.products.FuturesTermStructure.  It stores one
+The output is consumed by tools.products.AdjustableTermStructure.  It stores one
 row per (product, trading_day, contract), ordered by maturity inside each day.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pandas as pd
 
 from sources.LocalCNFutures import TERM_STRUCTURE_PATH
 from sources.LocalCNFutures.CNFutures import exchange_map
-from tools.products.FuturesTermStructure import (
+from tools.products.AdjustableTermStructure import (
     TERM_CONTRACT_COL,
     TERM_CONTRACT_UID_COL,
     TERM_DAYS_TO_MATURITY_COL,

@@ -35,6 +35,9 @@ class Product(UniqueObject):
     MIN1: DataMeta   # 1 分钟数据
     DAY1: DataMeta   # 1 日数据
 
+    # 技术基类可覆写为 True，以在前端产品树中隐藏该层级。
+    _is_hidden_product_tree_class: bool = False
+
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
                  currency: Optional[str] = None, *args, **kwargs):
