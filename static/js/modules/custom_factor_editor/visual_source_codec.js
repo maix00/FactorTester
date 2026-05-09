@@ -5,6 +5,7 @@ function visualToExpr() {
         document.getElementById('visual-expr-preview').textContent = '（无节点）';
         return '';
     }
+    ensureReturnNode();
     const root = getVisualRootNode();
     const expr = root ? buildExprFromNode(root, new Set(), {root: true}) : '';
     document.getElementById('visual-expr-preview').textContent = expr || '（无法生成表达式）';
@@ -14,6 +15,11 @@ function visualToExpr() {
 function buildExprFromNode(node, seen, options = {}) {
     if (!node || seen.has(node.id)) return '';
     seen.add(node.id);
+    if (node.key === 'Return') {
+        const returnInputId = (node.inputs || [])[0];
+        const returnInput = _visNodes.find(n => n.id === returnInputId);
+        return returnInput ? buildExprFromNode(returnInput, new Set(seen), {root: true}) : '';
+    }
     if (node.key === 'DataColumnParam') return node.params?.alias || node.label || 'P';
     if (node.key === 'Constant') {
         const name = (node.params?.name || '').trim();
@@ -80,7 +86,10 @@ function normalizeVisualConstValue(value) {
 
 function visualToSource(options = {}) {
     if (_currentMode !== 'visual') return document.getElementById('code-source')?.value || '';
-    if (!_visGraphDirty && _visSourceFallback.trim()) return _visSourceFallback;
+    if (!_visGraphDirty && _visSourceFallback.trim()) {
+        rememberVisualGraphSnapshot(_visSourceFallback);
+        return _visSourceFallback;
+    }
     const expr = visualToExpr();
     if (!expr) {
         if (!options.silent) showToast('请先完成可视化表达式连接', 'error');
@@ -122,7 +131,164 @@ function visualToSource(options = {}) {
     const source = `${imports}\n\n\nclass ${className}(FactorFamily):\n    @staticmethod\n    def factor_expr():\n${setupBlock}        return ${expr}\n`;
     _visLastGeneratedSource = source;
     _visSourceFallback = source;
+    rememberVisualGraphSnapshot(source);
     return source;
+}
+
+function rememberVisualGraphSnapshot(source) {
+    if (!source) return;
+    _visGraphSnapshotSource = source;
+    _visGraphSnapshotNormalizedSource = normalizeVisualSourceForSnapshot(source);
+    _visGraphSnapshot = {
+        nodes: cloneVisualGraphValue(_visNodes),
+        nextId: _visNextId,
+        selectedNodeId: _visSelectedNodeId,
+        rootId: getVisualRootNode()?.id || null,
+        sourceExpr: parseReturnExprFromSource(source),
+    };
+}
+
+function snapshotCurrentVisualGraphForModeSwitch() {
+    const source = visualToSource({silent: true});
+    if (source) rememberVisualGraphSnapshot(source);
+}
+
+function restoreVisualGraphSnapshotIfMatches(source) {
+    if (!source || !_visGraphSnapshot) return false;
+    const sourceMatches = source === _visGraphSnapshotSource
+        || normalizeVisualSourceForSnapshot(source) === _visGraphSnapshotNormalizedSource;
+    if (!sourceMatches) return false;
+    _visNodes = cloneVisualGraphValue(_visGraphSnapshot.nodes || []);
+    _visNextId = _visGraphSnapshot.nextId || inferNextVisualNodeId();
+    _visSelectedNodeId = _visGraphSnapshot.selectedNodeId || null;
+    _visGraphDirty = true;
+    renderVisualEditor._lastSource = source;
+    return true;
+}
+
+function mergeVisualGraphSnapshotOrphans(source = '') {
+    if (!_visGraphSnapshot?.nodes?.length) return false;
+    const snapshotNodes = cloneVisualGraphValue(_visGraphSnapshot.nodes);
+    const sourceExpr = parseReturnExprFromSource(source) || _visGraphSnapshot.sourceExpr || '';
+    const sourceRootIds = findVisualSnapshotSourceRootIds(snapshotNodes, sourceExpr);
+    const orphanNodes = getVisualSnapshotOrphanNodes(snapshotNodes, sourceRootIds);
+    if (!orphanNodes.length) return false;
+
+    const idMap = new Map();
+    let nextId = inferNextVisualNodeId();
+    orphanNodes.forEach(node => {
+        idMap.set(node.id, nextId++);
+    });
+
+    const orphanIdSet = new Set(orphanNodes.map(node => node.id));
+    const restoredOrphans = orphanNodes.map(node => ({
+        ...node,
+        id: idMap.get(node.id),
+        inputs: (node.inputs || []).map(inputId => (
+            orphanIdSet.has(inputId) ? idMap.get(inputId) : null
+        )),
+        params: {...(node.params || {})},
+    }));
+
+    _visNodes.push(...restoredOrphans);
+    _visNextId = Math.max(_visNextId, nextId);
+    _visGraphDirty = true;
+    return true;
+}
+
+function findVisualSnapshotSourceRootIds(nodes, sourceExpr) {
+    const normalizedSourceExpr = normalizeVisualExprForSnapshot(sourceExpr);
+    const roots = getVisualSnapshotRoots(nodes);
+    if (!normalizedSourceExpr) return _visGraphSnapshot.rootId ? [_visGraphSnapshot.rootId] : [];
+    const matched = roots
+        .filter(node => normalizeVisualExprForSnapshot(buildSnapshotExprFromNode(nodes, node, new Set(), {root: true})) === normalizedSourceExpr)
+        .map(node => node.id);
+    if (matched.length) return matched;
+    return _visGraphSnapshot.rootId ? [_visGraphSnapshot.rootId] : [];
+}
+
+function getVisualSnapshotRoots(nodes) {
+    const referenced = new Set(nodes.flatMap(node => (node.inputs || []).filter(Boolean)));
+    return nodes.filter(node => !referenced.has(node.id));
+}
+
+function buildSnapshotExprFromNode(nodes, node, seen, options = {}) {
+    if (!node || seen.has(node.id)) return '';
+    seen.add(node.id);
+    if (node.key === 'Return') {
+        const returnInputId = (node.inputs || [])[0];
+        const returnInput = nodes.find(n => n.id === returnInputId);
+        return returnInput ? buildSnapshotExprFromNode(nodes, returnInput, new Set(seen), {root: true}) : '';
+    }
+    if (node.key === 'DataColumnParam') return node.params?.alias || node.label || 'P';
+    if (node.key === 'Constant') {
+        const name = (node.params?.name || '').trim();
+        const value = normalizeVisualConstValue(node.params?.value);
+        if (name) return options.root ? `ConstExpr(${name})` : name;
+        return options.root ? `ConstExpr(${value})` : value;
+    }
+    const arity = getVisualOperatorArity(node);
+    const inputIds = (node.inputs || []).slice(0, arity);
+    if (arity && (inputIds.length < arity || inputIds.some(id => !id))) return '';
+    const exprs = inputIds
+        .map(id => nodes.find(n => n.id === id))
+        .map(child => buildSnapshotExprFromNode(nodes, child, new Set(seen)));
+    if (exprs.some(expr => !expr)) return '';
+    let expr = '';
+    if (isVisualInfixOperator(node)) {
+        expr = exprs.length >= arity ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
+    } else if (node.key === '~') {
+        expr = exprs.length >= 1 ? `(~${exprs[0]})` : '';
+    } else if (node.key === 'expr_max' || node.key === 'expr_min') {
+        expr = exprs.length >= arity ? `${node.key}(${exprs.join(', ')})` : '';
+    } else if (node.key === 'max' || node.key === 'min') {
+        expr = exprs.length >= 2 ? `${exprs[0]}.${node.key}(${exprs[1]})` : '';
+    } else if (node.key === 'rolling_corr') {
+        expr = exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
+    } else {
+        if (!exprs.length) return '';
+        expr = `${exprs[0]}.${node.key}(${exprs.slice(1).join(', ')})`;
+    }
+    const intermediateName = node.params?.intermediate_name || '';
+    if (expr && intermediateName) return `(${expr}).as_intermediate(${JSON.stringify(intermediateName)})`;
+    return expr;
+}
+
+function getVisualSnapshotOrphanNodes(nodes, sourceRootIds) {
+    if (!sourceRootIds?.length) return nodes;
+    const reachable = new Set();
+    const stack = [...sourceRootIds];
+    while (stack.length) {
+        const id = stack.pop();
+        if (reachable.has(id)) continue;
+        reachable.add(id);
+        const node = nodes.find(n => n.id === id);
+        (node?.inputs || []).filter(Boolean).forEach(inputId => stack.push(inputId));
+    }
+    return nodes.filter(node => !reachable.has(node.id));
+}
+
+function cloneVisualGraphValue(value) {
+    return JSON.parse(JSON.stringify(value || []));
+}
+
+function inferNextVisualNodeId() {
+    return Math.max(0, ..._visNodes.map(n => Number(n.id) || 0)) + 1;
+}
+
+function normalizeVisualSourceForSnapshot(source) {
+    return String(source || '')
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .join('\n');
+}
+
+function normalizeVisualExprForSnapshot(expr) {
+    return stripOuterParens(String(expr || '').trim())
+        .replace(/\s+/g, '')
+        .replace(/"/g, "'");
 }
 
 function getNamedVisualConstNodes() {
@@ -152,11 +318,13 @@ function loadVisualNodesFromSource(source) {
     const returnExpr = parseReturnExprFromSource(source);
     const assignments = parseAssignmentsFromSource(source);
     if (returnExpr) {
-        buildVisualGraphFromExpression(returnExpr, assignments, nodeByAlias);
+        const exprNodeId = buildVisualGraphFromExpression(returnExpr, assignments, nodeByAlias);
+        ensureReturnNode(exprNodeId);
     } else {
         for (const param of nodeByAlias.values()) {
             addVisualNodeFromParsed('DataColumnParam', 'leaf', param.alias, 0, 0, [], {...param});
         }
+        ensureReturnNode();
     }
 }
 

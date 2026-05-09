@@ -29,6 +29,9 @@ let OP_PALETTE = {
 };
 const VIS_FACTOR_PARAM_TYPES = ['FactorFreqParam', 'ReturnFreqParam', 'ReverseParam'];
 const VIS_PARAMETER_TYPES = ['DataColumnParam', 'WindowParam', 'DateOrTimeParam', 'TimeDeltaParam', 'FactorParam', 'TypeParam'];
+const VIS_SYSTEM_OPERATORS = [
+    { key: 'Return', label: 'return', desc: '最终返回值', arity: 1, slots: ['返回表达式'], cat: 'output' },
+];
 
 async function loadVisualOperatorRegistry() {
     try {

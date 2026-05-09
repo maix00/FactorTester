@@ -10,6 +10,9 @@ let _visSourceFallback = '';
 let _visGraphDirty = false;
 let _visPendingConnection = null;
 let _visLastGeneratedSource = '';
+let _visGraphSnapshot = null;
+let _visGraphSnapshotSource = '';
+let _visGraphSnapshotNormalizedSource = '';
 
 function renderVisualEditor(factor) {
     const previousMode = _currentMode;
@@ -22,15 +25,18 @@ function renderVisualEditor(factor) {
     setActiveEditorModeTab('visual');
     footer.style.display = '';
     _visSourceFallback = factor.source_code || '';
-    const shouldParseSource = !_visNodes.length
+    const restoredSnapshot = previousMode === 'code' && restoreVisualGraphSnapshotIfMatches(_visSourceFallback);
+    const shouldParseSource = !restoredSnapshot && (!_visNodes.length
         || (previousMode === 'code' && _visSourceFallback !== _visLastGeneratedSource)
-        || (!_visGraphDirty && _visSourceFallback !== (renderVisualEditor._lastSource || ''));
+        || (!_visGraphDirty && _visSourceFallback !== (renderVisualEditor._lastSource || '')));
     if (shouldParseSource) {
         _visGraphDirty = false;
         loadVisualNodesFromSource(_visSourceFallback);
+        if (previousMode === 'code') mergeVisualGraphSnapshotOrphans(_visSourceFallback);
         renderVisualEditor._lastSource = _visSourceFallback;
     }
 
+    ensureReturnNode();
     body.innerHTML = `
         <div class="visual-layout">
             <div class="op-palette" id="op-palette">${renderPalette()}</div>
@@ -127,19 +133,21 @@ function renderAllVisNodes() {
     canvas.querySelectorAll('.vis-edge-delete').forEach(n => n.remove());
     for (const node of _visNodes) {
         const el = document.createElement('div');
-        el.className = 'vis-node' + (node.id === _visSelectedNodeId ? ' selected' : '');
+        el.className = 'vis-node'
+            + (node.key === 'Return' ? ' return-node' : '')
+            + (node.id === _visSelectedNodeId ? ' selected' : '');
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         el.dataset.nodeId = node.id;
         el.innerHTML = `
-            <button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>
+            ${node.key === 'Return' ? '' : `<button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>`}
             <div class="node-card-head">
                 <div class="node-label">${escHtml(node.label)}</div>
                 <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
             </div>
             ${node.params?.intermediate_name ? `<div class="node-intermediate-badge">中间因子 ${escHtml(node.params.intermediate_name)}</div>` : ''}
             ${renderVisualNodeSlots(node)}
-            <button class="node-output-port" title="点击后选择目标输入槽" onclick="startVisualConnection(${node.id});event.stopPropagation()"></button>
+            ${node.key === 'Return' ? '' : `<button class="node-output-port" title="点击后选择目标输入槽" onclick="startVisualConnection(${node.id});event.stopPropagation()"></button>`}
         `;
         el.addEventListener('mousedown', (event) => onVisNodeMouseDown(event, node.id));
         el.addEventListener('click', (event) => { event.stopPropagation(); selectVisNode(node.id); });
@@ -190,6 +198,7 @@ function selectVisNode(nodeId) {
         arithBinary: '算数二元',
         arithVariadic: '算数多元',
         arithTernary: '算数三元',
+        output: '输出',
     };
     const labelEditor = node.key === 'DataColumnParam' || node.key === 'Constant'
         ? ''
@@ -281,6 +290,7 @@ function deleteVisNode(nodeId) {
 }
 
 function getVisualNodeSubtitle(node) {
+    if (node.key === 'Return') return '最终返回值';
     if (node.key === 'DataColumnParam') return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
     if (node.key === 'Constant') return node.params?.name ? `${node.params.name}=${node.params?.value ?? ''}` : (node.params?.value ?? '');
     return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
@@ -313,6 +323,7 @@ function getVisualOperatorArity(node) {
 }
 
 function getVisualOperatorDef(node) {
+    if (node.key === 'Return') return VIS_SYSTEM_OPERATORS[0];
     return Object.entries(OP_PALETTE).flatMap(([cat, ops]) => ops.map(op => ({...op, cat})))
         .find(op => op.key === node.key && op.cat === node.cat)
         || Object.entries(OP_PALETTE).flatMap(([cat, ops]) => ops.map(op => ({...op, cat})))
@@ -342,6 +353,7 @@ function renderVisualInputSelectors(node) {
 }
 
 function renderVisualNodeParamControls(node) {
+    if (node.key === 'Return') return '';
     const intermediateControls = node.cat !== 'leaf' ? `
         <div class="field"><label>中间因子标记</label>
             <input value="${escHtml(node.params?.intermediate_name || '')}" placeholder="如 SIG_YZ，不填则不标记"
@@ -418,6 +430,8 @@ function updateVisualParam(nodeId, key, value) {
 }
 
 function getVisualRootNode() {
+    const returnNode = getVisualReturnNode();
+    if (returnNode) return returnNode;
     const referenced = new Set(_visNodes.flatMap(node => (node.inputs || []).filter(Boolean)));
     const roots = [..._visNodes].filter(node => !referenced.has(node.id));
     const completeExpressionRoots = roots.filter(node => getVisualOperatorArity(node) > 0 && isVisualNodeComplete(node.id, new Set()));
@@ -425,6 +439,30 @@ function getVisualRootNode() {
     const expressionRoots = roots.filter(node => getVisualOperatorArity(node) > 0);
     if (expressionRoots.length) return expressionRoots[expressionRoots.length - 1];
     return roots[roots.length - 1] || _visNodes[_visNodes.length - 1];
+}
+
+function getVisualReturnNode() {
+    return _visNodes.find(node => node.key === 'Return') || null;
+}
+
+function ensureReturnNode(inputId = null) {
+    let returnNode = getVisualReturnNode();
+    if (returnNode) {
+        if (inputId) returnNode.inputs = [inputId];
+        return returnNode.id;
+    }
+    const node = {
+        id: _visNextId++,
+        key: 'Return',
+        cat: 'output',
+        label: 'return',
+        x: 760,
+        y: 40,
+        inputs: inputId ? [inputId] : [],
+        params: {},
+    };
+    _visNodes.push(node);
+    return node.id;
 }
 
 function isVisualNodeComplete(nodeId, seen) {

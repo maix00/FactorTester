@@ -531,6 +531,7 @@ async function switchMode(mode) {
             showToast('可视化表达式校验未通过，暂不能转为代码', 'error');
             return;
         }
+        snapshotCurrentVisualGraphForModeSwitch();
     }
     const draft = getCurrentEditorFactorDraft();
     setEditorModeTabsVisible(true);

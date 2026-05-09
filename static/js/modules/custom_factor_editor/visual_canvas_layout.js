@@ -71,6 +71,7 @@ function getVisualInputPoint(nodeId, inputIndex) {
 
 function layoutVisualExpressionTree(options = {}) {
     if (!_visNodes.length) return;
+    ensureReturnNode();
     const root = getVisualRootNode();
     if (!root) return;
     const roots = [root, ..._visNodes.filter(node => node.id !== root.id && !isReachableFromRoot(node.id, root.id))];

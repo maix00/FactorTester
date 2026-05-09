@@ -52,6 +52,11 @@
     user-select: none; z-index: 1;
 }
 .vis-node.selected { border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.15); }
+.vis-node.return-node {
+    border-color: #16a34a; background: #f0fdf4;
+    box-shadow: 0 3px 12px rgba(22, 163, 74, 0.12);
+}
+.vis-node.return-node .node-label { color: #15803d; }
 .vis-node .node-card-head { padding-right: 10px; }
 .vis-node .node-label { font-weight: 600; }
 .vis-node .node-sub { font-size: 11px; color: #888; }
@@ -121,4 +126,3 @@ svg.vis-edges { position: absolute; top:0; left:0; width:100%; height:100%; poin
     box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
 }
 .vis-edge-delete:hover { opacity: 1; background: #fee2e2; }
-
