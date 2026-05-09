@@ -245,9 +245,26 @@ class FactorParam(TypeParam):
                  *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
-        from tools.factors.FactorExpr import FactorExpr
-        super().__init__(alias=alias, default_value=default_value,
-                         typ=(FactorExpr, type(None)), *args, **kwargs)
+        from tools.factors.FactorExpr import FactorExpr, ParamRef
+        from tools.parameters.DataColumnParam import DataColumnParam
+
+        def contains(value: Any) -> bool:
+            return isinstance(value, (FactorExpr, DataColumnParam, type(None)))
+
+        def rectify(value: Any) -> Any:
+            return ParamRef(value) if isinstance(value, DataColumnParam) else value
+
+        def alias_value(value: Any) -> str:
+            if isinstance(value, ParamRef):
+                return getattr(value.param, 'alias', str(value))
+            return getattr(value, 'alias', str(value))
+
+        space = ValueSpace(
+            contains=contains,
+            rectify=rectify,
+            alias=alias_value,
+        )
+        Parameter.__init__(self, alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
 class FinRangeParam(Parameter):
@@ -283,4 +300,3 @@ class TimeDeltaParam(Parameter):
         space = ValueSpace.timedelta(flag)
         self.flag = flag
         super().__init__(alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
-

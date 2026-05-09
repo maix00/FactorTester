@@ -858,25 +858,25 @@ class ParamRef(FactorExpr):
         from tools.factors import Factor
         factor: Optional['Factor'] = None
 
-        if param_values is not None and self.param.alias in param_values:
-            value = param_values[self.param.alias]
-            if isinstance(self.param, DataColumnParam):
-                resolved: FactorExpr = ColumnRef(DataColumn(value))
-            elif isinstance(self.param, FactorParam):
-                if value is None:
-                    resolved = ConstExpr(None)
-                else:
-                    if isinstance(value, Factor):
-                        resolved = value._func_expr
-                        factor = value
-                    else:
-                        resolved = value
-                    if not isinstance(resolved, FactorExpr):
-                        raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
+        has_value = param_values is not None and self.param.alias in param_values
+        value = param_values[self.param.alias] if has_value else self.param.default_value
+        if isinstance(self.param, DataColumnParam):
+            resolved: FactorExpr = ColumnRef(DataColumn(value))
+        elif isinstance(self.param, FactorParam):
+            value = self.param._value_space.rectify(value)
+            if value is None:
+                resolved = ConstExpr(None)
             else:
-                resolved = ConstExpr(value)
+                if isinstance(value, Factor):
+                    resolved = value._func_expr
+                    factor = value
+                else:
+                    resolved = value
+                if not isinstance(resolved, FactorExpr):
+                    raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
+                resolved = resolved.resolve(param_values=param_values, *args, **kwargs)
         else:
-            resolved = ConstExpr(self.param.default_value)
+            resolved = ConstExpr(value)
 
         if self._is_intermediate:
             resolved = resolved.as_intermediate(self._intermediate_name, factor=factor)
@@ -889,8 +889,8 @@ class ParamRef(FactorExpr):
     def _to_latex(self, subst: dict | None = None) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
         param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
-        from tools.parameters import FactorParam
-        if isinstance(self.param, FactorParam):
+        from tools.parameters import DataColumnParam, FactorParam
+        if isinstance(self.param, (DataColumnParam, FactorParam)):
             return f"{param_latex}_{{t}}"
         return param_latex
 
@@ -1152,16 +1152,33 @@ class ShiftOp(OperandExpr):
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
         operand_latex = self.operand._to_latex(subst)
-        if id(self.periods) == id(0):
-            return f"{operand_latex}_{{t}}"
+        operand_base = _strip_latex_time_subscript(operand_latex)
+        if _is_zero_shift_period(self.periods):
+            return f"{operand_base}_{{t}}"
         p_label = self.periods._to_latex(subst) if isinstance(self.periods, FactorExpr) else str(self.periods)
-        # 如果是列/参数引用且形如 "X_{t}"，替换为自然下标 "X_{t - NS}"
-        return f"{operand_latex}_{{t - {p_label}}}"
+        return f"{operand_base}_{{t - {p_label}}}"
 
     def _get_alias(self) -> str:
         p_expr = self.periods
         p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
         return f"shift_{self.operand._get_alias()}_{p}"
+
+
+def _is_zero_shift_period(periods: 'FactorExpr') -> bool:
+    if not isinstance(periods, ConstExpr):
+        return False
+    value = periods.value
+    if value == 0:
+        return True
+    try:
+        return pd.Timedelta(value) == pd.Timedelta(0)
+    except Exception:
+        return False
+
+
+def _strip_latex_time_subscript(latex: str) -> str:
+    suffix = '_{t}'
+    return latex[:-len(suffix)] if latex.endswith(suffix) else latex
 
 
 def _rolling_argmaxmin(

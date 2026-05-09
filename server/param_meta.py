@@ -78,7 +78,7 @@ def describe_value_space(param) -> str:
             type_names = getattr(t, '__name__', str(t))
         base = f'合法值：Python 类型 {type_names}。'
     elif typ == 'FactorParam':
-        base = '合法值：FactorExpr 或 None，用于引用另一个因子表达式。'
+        base = '合法值：FactorExpr、DataColumnParam 或 None，用于引用另一个因子表达式或数据列参数。'
     else:
         base = '合法值：由该参数的 ValueSpace 校验、标准化并转换为展示别名。'
     return f'{desc}\n{base}' if desc else base
