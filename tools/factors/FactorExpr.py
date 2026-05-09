@@ -46,6 +46,161 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
+VISUAL_OPERATOR_GROUPS = [
+    {
+        'key': 'leaf',
+        'label': '参数/常数',
+        'collapsed': False,
+        'operators': [
+            {'key': 'DataColumnParam', 'label': '参数', 'symbol': 'P', 'desc': '数据列/窗口/时间参数', 'arity': 0, 'slots': []},
+            {'key': 'FactorFreqParam', 'label': '系统频率', 'symbol': '$F', 'desc': '系统参数：因子信号频率', 'arity': 0, 'slots': []},
+            {'key': 'Constant', 'label': '常数', 'symbol': '1', 'desc': '数值常量', 'arity': 0, 'slots': []},
+        ],
+    },
+    {
+        'key': 'ts',
+        'label': '时序算子',
+        'collapsed': False,
+        'operators': [
+            {'key': 'rolling_mean', 'label': '均值', 'symbol': 'RMean', 'desc': 'X.rolling_mean(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_std', 'label': '标准差', 'symbol': 'RStd', 'desc': 'X.rolling_std(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_min', 'label': '最小值', 'symbol': 'RMin', 'desc': 'X.rolling_min(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_max', 'label': '最大值', 'symbol': 'RMax', 'desc': 'X.rolling_max(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'shift', 'label': '平移', 'symbol': 'shift', 'desc': 'X.shift(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
+            {'key': 'delta', 'label': '差分', 'symbol': 'delta', 'desc': 'X.delta(N)', 'arity': 2, 'slots': ['序列 X', '步长 N']},
+        ],
+        'more_label': '更多时序算子',
+        'more_operators': [
+            {'key': 'rolling_var', 'label': '方差', 'symbol': 'RVar', 'desc': 'X.rolling_var(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_sum', 'label': '求和', 'symbol': 'RSum', 'desc': 'X.rolling_sum(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_ema', 'label': 'EMA', 'symbol': 'REMA', 'desc': 'X.rolling_ema(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_corr', 'label': '滚动相关', 'symbol': 'RCorr', 'desc': 'X.rolling_corr(Y, N)', 'arity': 3, 'slots': ['序列 X', '序列 Y', '窗口 N']},
+            {'key': 'rolling_skew', 'label': '偏度', 'symbol': 'RSkew', 'desc': 'X.rolling_skew(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_argmax', 'label': '最大位置', 'symbol': 'RArgMax', 'desc': 'X.rolling_argmax(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+            {'key': 'rolling_argmin', 'label': '最小位置', 'symbol': 'RArgMin', 'desc': 'X.rolling_argmin(N)', 'arity': 2, 'slots': ['序列 X', '窗口 N']},
+        ],
+    },
+    {
+        'key': 'cs',
+        'label': '横截算子',
+        'collapsed': False,
+        'operators': [
+            {'key': 'cs_rank', 'label': '截面排名', 'symbol': 'Rank', 'desc': 'X.cs_rank()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'cs_zscore', 'label': '截面标准化', 'symbol': 'Z', 'desc': 'X.cs_zscore()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+        'more_label': '更多横截算子',
+        'more_operators': [
+            {'key': 'cs_spearman', 'label': 'Spearman', 'symbol': 'rho_s', 'desc': 'X.cs_spearman(Y)', 'arity': 2, 'slots': ['序列 X', '序列 Y']},
+        ],
+    },
+    {
+        'key': 'arithUnary',
+        'label': '算数一元',
+        'collapsed': False,
+        'operators': [
+            {'key': 'log', 'label': '对数', 'symbol': 'log', 'desc': 'X.log()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'abs', 'label': '绝对值', 'symbol': 'abs', 'desc': 'X.abs()', 'arity': 1, 'slots': ['序列 X']},
+        ],
+        'more_label': '更多算数一元',
+        'more_operators': [
+            {'key': 'sqrt', 'label': '平方根', 'symbol': 'sqrt', 'desc': 'X.sqrt()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'sign', 'label': '符号', 'symbol': 'sign', 'desc': 'X.sign()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': 'neg', 'label': '取负', 'symbol': '-', 'desc': 'X.neg()', 'arity': 1, 'slots': ['序列 X']},
+            {'key': '~', 'label': '逻辑非', 'symbol': '~', 'desc': '~A', 'arity': 1, 'slots': ['条件 X'], 'syntax': 'prefix'},
+        ],
+    },
+    {
+        'key': 'arithBinary',
+        'label': '算数二元',
+        'collapsed': False,
+        'operators': [
+            {'key': '+', 'label': '加法', 'symbol': '+', 'desc': 'A + B', 'arity': 2, 'slots': ['左项', '右项'], 'syntax': 'infix'},
+            {'key': '-', 'label': '减法', 'symbol': '-', 'desc': 'A - B', 'arity': 2, 'slots': ['被减数', '减数'], 'syntax': 'infix'},
+            {'key': '*', 'label': '乘法', 'symbol': '*', 'desc': 'A * B', 'arity': 2, 'slots': ['左因子', '右因子'], 'syntax': 'infix'},
+            {'key': '/', 'label': '除法', 'symbol': '/', 'desc': 'A / B', 'arity': 2, 'slots': ['分子', '分母'], 'syntax': 'infix'},
+        ],
+        'more_label': '更多算数二元',
+        'more_operators': [
+            {'key': '**', 'label': '幂', 'symbol': '**', 'desc': 'A ** B', 'arity': 2, 'slots': ['底数', '指数'], 'syntax': 'infix'},
+            {'key': 'max', 'label': '逐元素 max', 'symbol': 'max', 'desc': 'A.max(B)', 'arity': 2, 'slots': ['左值', '右值']},
+            {'key': 'min', 'label': '逐元素 min', 'symbol': 'min', 'desc': 'A.min(B)', 'arity': 2, 'slots': ['左值', '右值']},
+            {'key': '>', 'label': '大于', 'symbol': '>', 'desc': 'A > B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '<', 'label': '小于', 'symbol': '<', 'desc': 'A < B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '>=', 'label': '大于等于', 'symbol': '>=', 'desc': 'A >= B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '<=', 'label': '小于等于', 'symbol': '<=', 'desc': 'A <= B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '==', 'label': '等于', 'symbol': '==', 'desc': 'A == B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '!=', 'label': '不等于', 'symbol': '!=', 'desc': 'A != B', 'arity': 2, 'slots': ['左比较项', '右比较项'], 'syntax': 'infix'},
+            {'key': '&', 'label': '逻辑与', 'symbol': '&', 'desc': 'A & B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
+            {'key': '|', 'label': '逻辑或', 'symbol': '|', 'desc': 'A | B', 'arity': 2, 'slots': ['左条件', '右条件'], 'syntax': 'infix'},
+        ],
+    },
+    {
+        'key': 'arithVariadic',
+        'label': '算数多元',
+        'collapsed': False,
+        'operators': [
+            {'key': 'expr_max', 'label': '多元 max', 'symbol': 'max', 'desc': 'max(A, B, C)', 'arity': 3, 'slots': ['输入 A', '输入 B', '输入 C'], 'syntax': 'function'},
+            {'key': 'expr_min', 'label': '多元 min', 'symbol': 'min', 'desc': 'min(A, B, C)', 'arity': 3, 'slots': ['输入 A', '输入 B', '输入 C'], 'syntax': 'function'},
+        ],
+        'more_label': '更多算数多元',
+        'more_operators': [
+        ],
+    },
+]
+
+VISUAL_COMPOSITE_KEY = {
+    'add': '+',
+    'sub': '-',
+    'mul': '*',
+    'div': '/',
+    'pow': '**',
+    'gt': '>',
+    'lt': '<',
+    'ge': '>=',
+    'le': '<=',
+    'eq': '==',
+    'ne': '!=',
+    'and': '&',
+    'or': '|',
+    'not': '~',
+    'neg': 'neg',
+    'abs': 'abs',
+    'log': 'log',
+    'sqrt': 'sqrt',
+    'sign': 'sign',
+    'bimax': 'max',
+    'bimin': 'min',
+    'max': 'expr_max',
+    'min': 'expr_min',
+}
+
+VISUAL_OPERATOR_CATEGORY = {
+    '~': 'arithUnary',
+    'neg': 'arithUnary',
+    'abs': 'arithUnary',
+    'log': 'arithUnary',
+    'sqrt': 'arithUnary',
+    'sign': 'arithUnary',
+    'expr_max': 'arithVariadic',
+    'expr_min': 'arithVariadic',
+}
+
+
+def get_visual_operator_groups() -> list[dict]:
+    """Return visual-editor operator metadata derived from FactorExpr capabilities."""
+    return VISUAL_OPERATOR_GROUPS
+
+
+def get_visual_composite_key(op: str) -> str:
+    """Return the visual-editor key for a CompositeExpr op."""
+    return VISUAL_COMPOSITE_KEY.get(op, op)
+
+
+def get_visual_operator_category(visual_key: str, default: str = 'arithBinary') -> str:
+    """Return the visual-editor category for a visual operator key."""
+    return VISUAL_OPERATOR_CATEGORY.get(visual_key, default)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1: 因子表达式基类
 # ═════════════════════════════════════════════════════════════════════════════
@@ -160,30 +315,28 @@ class FactorExpr:
         raise NotImplementedError
 
     def _iter_intermediate_nodes(self) -> List['FactorExpr']:
-        """按先序遍历收集中间表达式节点（去重、排除自身）。
+        """按依赖顺序收集中间表达式节点（去重）。
 
         Returns:
-            nodes: 按发现顺序排列的 intermediate 节点列表。
+            nodes: 子依赖在前、父节点在后的 intermediate 节点列表。
         """
         nodes: List[FactorExpr] = []
         seen: set[tuple] = set()
-        stack: list[FactorExpr] = [self]
 
-        while stack:
-            node = stack.pop()
+        def visit(node: FactorExpr):
             sk = node._structural_key()
             if sk in seen:
-                continue
+                return
             seen.add(sk)
 
-            if node is not self and node._is_intermediate:
-                nodes.append(node)
-                # intermediate 的子节点不再展开，将其内部细节隐藏
-                continue
-
             ops = list(getattr(node, '_operands', ()))
-            for op in reversed(ops):
-                stack.append(op)
+            for op in ops:
+                visit(op)
+
+            if node._is_intermediate:
+                nodes.append(node)
+
+        visit(self)
 
         return nodes
 
@@ -229,8 +382,9 @@ class FactorExpr:
                 sym = f"{base}_{i}"
                 i += 1
             used.add(sym)
-            lines.append(f"{sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
-            sk_to_sym[node._structural_key()] = sym
+            latex_sym = f"\\mathrm{{{sym}}}"
+            lines.append(f"{latex_sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
+            sk_to_sym[node._structural_key()] = latex_sym
 
         # 2) 最后一行 X_t，用符号映射递归生成
         raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(final_name)).strip('_')
@@ -693,6 +847,9 @@ class ColumnRef(FactorExpr):
         return self.column.value
 
     def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         col_to_latex = {
             'O': 'O_t', 'H': 'H_t', 'L': 'L_t', 'C': 'C_t',
             'OA': '\\tilde{O}_t', 'HA': '\\tilde{H}_t',
@@ -741,23 +898,25 @@ class ParamRef(FactorExpr):
 
         if param_values is not None and self.param.alias in param_values:
             value = param_values[self.param.alias]
-            if isinstance(self.param, DataColumnParam):
-                resolved: FactorExpr = ColumnRef(DataColumn(value))
-            elif isinstance(self.param, FactorParam):
-                if value is None:
-                    resolved = ConstExpr(None)
-                else:
-                    if isinstance(value, Factor):
-                        resolved = value._func_expr
-                        factor = value
-                    else:
-                        resolved = value
-                    if not isinstance(resolved, FactorExpr):
-                        raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
-            else:
-                resolved = ConstExpr(value)
         else:
-            resolved = ConstExpr(self.param.default_value)
+            value = self.param.default_value
+        if isinstance(self.param, DataColumnParam):
+            resolved: FactorExpr = ColumnRef(DataColumn(value))
+        elif isinstance(self.param, FactorParam):
+            value = self.param._value_space.rectify(value)
+            if value is None:
+                resolved = ConstExpr(None)
+            else:
+                if isinstance(value, Factor):
+                    resolved = value._func_expr
+                    factor = value
+                else:
+                    resolved = value
+                if not isinstance(resolved, FactorExpr):
+                    raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
+                resolved = resolved.resolve(param_values=param_values, *args, **kwargs)
+        else:
+            resolved = ConstExpr(value)
 
         if self._is_intermediate:
             resolved = resolved.as_intermediate(self._intermediate_name, factor=factor)
@@ -769,9 +928,12 @@ class ParamRef(FactorExpr):
 
     def _to_latex(self, subst: dict | None = None) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
-        from tools.parameters import FactorParam
-        if isinstance(self.param, FactorParam):
+        from tools.parameters import DataColumnParam, FactorParam
+        if isinstance(self.param, (DataColumnParam, FactorParam)):
             return f"{param_latex}_{{t}}"
         return param_latex
 
@@ -807,6 +969,9 @@ class ConstExpr(FactorExpr):
         return f"const({self.value})"
 
     def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         return str(self.value)
 
     def _get_alias(self) -> str:
@@ -898,48 +1063,45 @@ class RollingOp(OperandExpr):
         """数据操作数（向后兼容，一元时使用）。"""
         return self.operands[1]
 
-    def _window_str(self) -> str:
-        """窗口的字符串表示，用于 op_name / alias / latex。"""
-        w = self.window
-        if isinstance(w, ConstExpr):
-            return str(w.value)
-        return str(w).replace(' ', '')
-
     @property
     def op_name(self) -> str:
-        return f"{self.op.upper()}_{self._window_str()}"
+        p = self.window
+        label = str(p.value) if isinstance(p, ConstExpr) else str(p)
+        return f"{self.op.upper()}_{label}"
 
     def _to_latex(self, subst: dict | None = None) -> str:
         sk = self._structural_key()
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
-        w_str = self._window_str()
+        w_str = self.window._to_latex(subst) if isinstance(self.window, FactorExpr) else str(self.window)
         if len(self.operands) == 2:
             # 一元
             operand_latex = self.operands[1]._to_latex(subst)
             _LATEX_MAP = {
-                'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}({operand_latex})',
-                'rolling_std': f'\\text{{RStd}}_{{{w_str}}}({operand_latex})',
-                'rolling_var': f'\\text{{RVar}}_{{{w_str}}}({operand_latex})',
-                'rolling_min': f'\\text{{RMin}}_{{{w_str}}}({operand_latex})',
-                'rolling_max': f'\\text{{RMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_sum': f'\\text{{RSum}}_{{{w_str}}}({operand_latex})',
-                'rolling_ema': f'\\text{{REMA}}_{{{w_str}}}({operand_latex})',
-                'rolling_skew': f'\\text{{RSkew}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmax': f'\\text{{RArgMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmin': f'\\text{{RArgMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_std': f'\\text{{RStd}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_var': f'\\text{{RVar}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_min': f'\\text{{RMin}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_max': f'\\text{{RMax}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_sum': f'\\text{{RSum}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_ema': f'\\text{{REMA}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_skew': f'\\text{{RSkew}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_argmax': f'\\text{{RArgMax}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_argmin': f'\\text{{RArgMin}}_{{{w_str}}}\\left({operand_latex}\\right)',
             }
-            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
+            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}\\left({operand_latex}\\right)')
         else:
             left_latex = self.operands[1]._to_latex(subst)
             right_latex = self.operands[2]._to_latex(subst)
-            return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}({left_latex}, {right_latex})'
+            return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}\\left({left_latex}, {right_latex}\\right)'
 
     def _get_alias(self) -> str:
         parts = [self.op]
         for opnd in self.operands[1:]:
             parts.append(opnd._get_alias())
-        parts.append(f"W{self._window_str()}")
+        p_expr = self.window
+        p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
+        parts.append(p)
         return "_".join(parts)
 
     def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
@@ -1036,16 +1198,33 @@ class ShiftOp(OperandExpr):
         if subst is not None and sk in subst:
             return f"{subst[sk]}_t"
         operand_latex = self.operand._to_latex(subst)
-        if id(self.periods) == id(0):
-            return f"{operand_latex}_{{t}}"
+        operand_base = _strip_latex_time_subscript(operand_latex)
+        if _is_zero_shift_period(self.periods):
+            return f"{operand_base}_{{t}}"
         p_label = self.periods._to_latex(subst) if isinstance(self.periods, FactorExpr) else str(self.periods)
-        # 如果是列/参数引用且形如 "X_{t}"，替换为自然下标 "X_{t - NS}"
-        return f"{operand_latex}_{{t - {p_label}}}"
+        return f"{operand_base}_{{t - {p_label}}}"
 
     def _get_alias(self) -> str:
         p_expr = self.periods
         p = str(p_expr.value) if isinstance(p_expr, ConstExpr) else str(p_expr).replace(' ', '')
         return f"shift_{self.operand._get_alias()}_{p}"
+
+
+def _is_zero_shift_period(periods: 'FactorExpr') -> bool:
+    if not isinstance(periods, ConstExpr):
+        return False
+    value = periods.value
+    if value == 0:
+        return True
+    try:
+        return pd.Timedelta(value) == pd.Timedelta(0)
+    except Exception:
+        return False
+
+
+def _strip_latex_time_subscript(latex: str) -> str:
+    suffix = '_{t}'
+    return latex[:-len(suffix)] if latex.endswith(suffix) else latex
 
 
 def _rolling_argmaxmin(
@@ -1316,6 +1495,17 @@ class CompositeExpr(OperandExpr):
         'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
 
+    _LATEX_PRECEDENCE = {
+        'or': 10,
+        'and': 20,
+        'gt': 30, 'lt': 30, 'ge': 30, 'le': 30, 'eq': 30, 'ne': 30,
+        'add': 40, 'sub': 40,
+        'mul': 50, 'div': 50,
+        'pow': 60,
+        'neg': 70, 'abs': 70, 'not': 70, 'log': 70, 'sign': 70, 'sqrt': 70,
+        'max': 80, 'min': 80,
+    }
+
     def __new__(cls, op: str, *operands: FactorExpr, **kwargs) -> 'FactorExpr':
         """表达式规范化：常量折叠 + 等价化简，在构造前归并。
 
@@ -1429,12 +1619,8 @@ class CompositeExpr(OperandExpr):
                 operand_latex = operands_latex[0]
                 return f"{self._Ops[self.op]['latex']}\\left({operand_latex}\\right)"
             elif self._Ops[self.op]['nop'] == 2:
-                left_latex = operands_latex[0]
-                right_latex = operands_latex[1]
-                left_parenthesis = isinstance(self.operands[0], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[0].op not in ('div', 'pow')
-                right_parenthesis = isinstance(self.operands[1], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[1].op not in ('div', 'pow')
-                left_latex = f'\\left({left_latex}\\right)' if left_parenthesis else left_latex
-                right_latex = f'\\left({right_latex}\\right)' if right_parenthesis else right_latex
+                left_latex = self._binary_operand_latex(self.operands[0], operands_latex[0], side='left', subst=subst)
+                right_latex = self._binary_operand_latex(self.operands[1], operands_latex[1], side='right', subst=subst)
                 if self.op in ('add', 'sub', 'mul', 'pow', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
                     return f'{left_latex} {self._Ops[self.op]["latex"]} {right_latex}'
                 elif self.op in ('div'):
@@ -1445,6 +1631,42 @@ class CompositeExpr(OperandExpr):
                 return f'{self._Ops[self.op]["latex"]}\\left({", ".join(operands_latex)}\\right)'
         else:
             return f'\\text{{{self.op.capitalize()}}}\\left({", ".join(operands_latex)}\\right)'
+
+    @classmethod
+    def _expr_precedence(cls, expr: FactorExpr) -> int:
+        if not isinstance(expr, CompositeExpr):
+            return 10_000
+        return cls._LATEX_PRECEDENCE.get(expr.op, 0)
+
+    def _needs_parenthesis(self, child: FactorExpr, side: str, subst: dict | None = None) -> bool:
+        if not isinstance(child, CompositeExpr):
+            return False
+        if subst is not None and child._structural_key() in subst:
+            return False
+        if self.op == 'div':
+            return False
+
+        parent_prec = self._LATEX_PRECEDENCE.get(self.op, 0)
+        child_prec = self._expr_precedence(child)
+
+        if child_prec < parent_prec:
+            return True
+        if child_prec > parent_prec:
+            return False
+
+        # 同优先级时按算子特性处理，保证树结构语义不丢失。
+        if self.op == 'sub' and side == 'right':
+            return True
+        if self.op == 'pow':
+            return True
+        if self.op == 'mul' and child.op == 'div':
+            return True
+        if self.op in ('gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
+            return True
+        return False
+
+    def _binary_operand_latex(self, child: FactorExpr, child_latex: str, side: str, subst: dict | None = None) -> str:
+        return f'\\left({child_latex}\\right)' if self._needs_parenthesis(child, side, subst=subst) else child_latex
 
     def _get_alias(self) -> str:
         op_aliases = {

@@ -1,6 +1,6 @@
 {% from 'modules/shared/param_config_bar.html' import render_param_config_bar %}
 <!-- 参数设置摘要行 -->
-<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.MathJax)MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean))">
+<div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.MathJax)MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean)).then(function(){if(window.fitMathJaxToContainer)window.fitMathJaxToContainer(document.getElementById('pm-math-block'));})">
     <span class="setting-summary-label">⚙️ 参数设置</span>
     <span class="setting-summary-value multiline" id="param-summary-text">加载中…</span>
     <span class="setting-summary-arrow">编辑 ▶</span>
@@ -14,7 +14,7 @@
                 onclick="document.getElementById('param-drawer').classList.remove('open');document.getElementById('user-badge').style.display=''">✕ 关闭</button>
 
 {% if math_expr %}
-<div id="pm-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;">
+<div id="pm-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;overflow:hidden;">
     $$ {{ math_expr }} $$
 </div>
 {% endif %}

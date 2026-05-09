@@ -131,7 +131,7 @@ function buildParamRowAlias(row) {
     const parts = [];
     _paramAliases.forEach(alias => {
         const val = row[alias] !== undefined ? String(row[alias]) : '';
-        if (val !== '') parts.push(alias + '_' + val);
+        if (val !== '') parts.push(alias + ':' + val);
     });
     return parts.length ? _paramFamilyAlias + '|' + parts.join('|') : _paramFamilyAlias;
 }
@@ -245,11 +245,25 @@ async function loadParamTemplatesIntoSelect() {
             _paramConfigUsers = data.users;
             _paramTemplates = flattenParamConfigUsers(data.users);
             _paramTemplateCanFilterOrganization = !!data.can_filter_organization;
+            loadOwnParamConfigFromUsers(data.users);
         }
         renderParamTemplateOptions();
     } catch(e) {
         if (status) status.textContent = '加载模板列表失败';
     }
+}
+
+function loadOwnParamConfigFromUsers(users) {
+    const own = (users || []).find(user => user.editable && user.config && Array.isArray(user.config.params_list));
+    if (!own) return;
+    _paramRows = own.config.params_list.map((obj, idx) => {
+        const row = {};
+        _paramAliases.forEach(a => { row[a] = obj[a] !== undefined ? String(obj[a]) : ''; });
+        const factor = (own.factors || []).find(f => Number(f.template_row_index || 0) === idx);
+        if (factor) row.__factor_alias = factor.factor_alias || '';
+        return row;
+    });
+    renderParamTable();
 }
 
 function renderParamTemplateOptions() {
@@ -370,6 +384,12 @@ async function loadParamTemplate() {
                 _paramAliases.forEach(a => { row[a] = obj[a] !== undefined ? String(obj[a]) : ''; });
                 return row;
             });
+            _paramTemplates
+                .filter(item => item.owner_username === ownerUsername)
+                .forEach(item => {
+                    const idx = Number(item.template_row_index || 0);
+                    if (_paramRows[idx]) _paramRows[idx].__factor_alias = item.factor_alias || '';
+                });
             renderParamTable();
             updateParamTemplateNameLabel();
             if (status) status.textContent = '✓ 已查看配置: ' + tplName;
@@ -385,22 +405,7 @@ async function loadParamTemplate() {
 async function saveParamTemplate() {
     const status = document.getElementById('param-tpl-status');
     if (status) status.textContent = '保存中...';
-    try {
-        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ params_list: buildParamConfigParamsList() })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            if (status) status.textContent = '✓ 已保存我的配置';
-            await loadParamTemplatesIntoSelect();
-        } else {
-            if (status) status.textContent = '保存失败: ' + (data.error || '');
-        }
-    } catch(e) {
-        if (status) status.textContent = '网络错误';
-    }
+    await persistCurrentParamConfig('已保存我的配置');
 }
 
 async function updateParamTemplate() {
@@ -415,21 +420,7 @@ async function updateParamTemplate() {
         return;
     }
     if (status) status.textContent = '更新中...';
-    try {
-        const resp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(_paramFamilyAlias), {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ params_list: buildParamConfigParamsList() })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            if (status) status.textContent = '✓ 已更新: ' + tplName;
-        } else {
-            if (status) status.textContent = '更新失败: ' + (data.error || '');
-        }
-    } catch(e) {
-        if (status) status.textContent = '网络错误';
-    }
+    await persistCurrentParamConfig('已更新: ' + tplName);
 }
 
 async function deleteParamTemplate() {

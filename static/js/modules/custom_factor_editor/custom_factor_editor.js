@@ -11,12 +11,16 @@ let _factorFamilies = [];  // {name, id, type:'custom'|'public', chinese_name, c
 let _groupedFactorFamilies = {};  // {group: [...]}
 let _validatedFactorDraft = null;
 let _validatedSourceSnapshot = '';
+let _validatedVisualGraph = null;
 let _editingOriginalParamAliases = '';
+let _lastViewedFactorFamily = null;
+let _editingSaveTarget = null; // {source:'custom'|'public', id:string, owner:string}
 
 // ═══════════════════════════════════════════════════════════
 // 初始化
 // ═══════════════════════════════════════════════════════════
 async function init() {
+    await loadVisualOperatorRegistry();
     await loadFactorFamilyList();
 }
 
@@ -112,7 +116,7 @@ function renderFactorFamilyList() {
             if (!ownerGroups[ownerKey]) ownerGroups[ownerKey] = [];
             ownerGroups[ownerKey].push(f);
         });
-        html += `<div class="collapsible-factor-node collapsible-factor-group">
+        html += `<div class="collapsible-factor-node collapsible-factor-group" data-factor-group="${escAttr(g)}">
             <button class="collapsible-factor-header" type="button">
                 <span class="caret">▶</span>
                 <span class="collapsible-factor-title">${escHtml(g)}</span>
@@ -121,7 +125,7 @@ function renderFactorFamilyList() {
             <div class="collapsible-factor-body">`;
         for (const ownerKey of Object.keys(ownerGroups).sort()) {
             const ownerItems = ownerGroups[ownerKey];
-            html += `<div class="collapsible-factor-node collapsible-factor-owner">
+            html += `<div class="collapsible-factor-node collapsible-factor-owner" data-factor-owner="${escAttr(ownerKey)}">
                 <button class="collapsible-factor-header" type="button">
                     <span class="caret">▶</span>
                     <span class="collapsible-factor-title">${escHtml(getFactorFamilyOwnerLabel(ownerItems[0]))}</span>
@@ -151,7 +155,7 @@ function renderFactorFamilyList() {
             const sourceTag = f.type === 'custom'
                 ? `<span class="source-tag custom">${f.can_edit ? '我' : escHtml(f.owner_alias || '下级')}</span>`
                 : '<span class="source-tag public">公共</span>';
-                html += `<div class="factor-family-list-item${active}" onclick="selectFactorFamily('${escAttr(f.id)}', '${escAttr(f.type)}', '${escAttr(ownerUsername)}')">
+                html += `<div class="factor-family-list-item${active}" data-factor-id="${escAttr(f.id)}" data-factor-type="${escAttr(f.type)}" data-factor-owner-username="${escAttr(ownerUsername)}" onclick="selectFactorFamily('${escAttr(f.id)}', '${escAttr(f.type)}', '${escAttr(ownerUsername)}')">
                 <div class="info">
                     <div class="name">${name}${sourceTag}</div>
                     <div class="meta">${meta}</div>
@@ -164,6 +168,7 @@ function renderFactorFamilyList() {
     }
     list.innerHTML = html;
     if (typeof bindCollapsibleFactorLists === 'function') bindCollapsibleFactorLists(list);
+    expandCurrentFactorFamilyInNav();
 }
 
 function getFactorFamilyOwnerSortKey(f) {
@@ -249,11 +254,45 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource, ownerUsern
         factor.can_edit = factor.can_edit || listFactorFamily.can_edit;
     }
     _currentFactorFamilyId = factorFamilyId;
+    _editingSaveTarget = null;
+    _lastViewedFactorFamily = {
+        id: factorFamilyId,
+        source: _currentFactorFamilySource,
+        owner: _currentFactorFamilyOwner,
+    };
     _isNew = false;
     _dirty = false;
     renderFactorFamilyList();
     // 自定义和公共因子家族都默认使用只读视图
     renderFactorFamilyReadonlyView(factor);
+}
+
+function expandCurrentFactorFamilyInNav() {
+    if (!_currentFactorFamilyId) return;
+    const list = document.getElementById('factor-family-list');
+    if (!list) return;
+    const selector = `.factor-family-list-item[data-factor-id="${cssEscape(_currentFactorFamilyId)}"][data-factor-type="${cssEscape(_currentFactorFamilySource || 'custom')}"]`;
+    const candidates = [...list.querySelectorAll(selector)];
+    const item = candidates.find(el => {
+        if ((_currentFactorFamilySource || 'custom') === 'public') return true;
+        return (el.dataset.factorOwnerUsername || '') === (_currentFactorFamilyOwner || '');
+    });
+    if (!item) return;
+    let node = item.parentElement;
+    while (node && node !== list) {
+        if (node.classList?.contains('collapsible-factor-node')) {
+            node.classList.add('open');
+            const body = node.querySelector(':scope > .collapsible-factor-body');
+            if (body) body.style.removeProperty('display');
+        }
+        node = node.parentElement;
+    }
+    requestAnimationFrame(() => item.scrollIntoView({block: 'nearest'}));
+}
+
+function cssEscape(value) {
+    if (window.CSS?.escape) return CSS.escape(String(value || ''));
+    return String(value || '').replace(/["\\]/g, '\\$&');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -263,6 +302,7 @@ function renderFactorFamilyReadonlyView(factor) {
     const isPublic = factor.type === 'public';
     const typeLabel = isPublic ? '公共因子' : '自定义因子';
     const ownerText = !isPublic && factor.owner_alias ? ` / ${factor.owner_alias}` : '';
+    setEditorModeTabsVisible(false);
     document.getElementById('editor-title').textContent = `${factor.name}（${typeLabel}${ownerText} — 只读）`;
     document.getElementById('editor-footer').style.display = 'none';
     const sourceCode = factor.source_code || '';
@@ -273,7 +313,7 @@ function renderFactorFamilyReadonlyView(factor) {
             <div class="code-area" style="display:flex; flex-direction:column;">
                 <div style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                     <span style="font-size:13px; color:#888;">源码 (${escHtml(factor.name)}.py) — 只读</span>
-                    <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic})"
+                    <button class="btn-validate" id="btn-validate-public" onclick="validateReadonlyExpr('${escAttr(factor.name)}', ${isPublic}, '${escAttr(factor.id || '')}', '${escAttr(factor.owner_username || '')}')"
                         style="font-size:12px; padding:4px 12px;">校验表达式树</button>
                 </div>
                 <div class="code-editor-shell readonly">
@@ -289,7 +329,7 @@ function renderFactorFamilyReadonlyView(factor) {
         <div class="config-pane">
             <div class="config-section">
                 <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
-                <div id="readonly-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:8px 0 12px;text-align:center;"></div>
+                <div id="readonly-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:8px 0 12px;text-align:center;overflow:hidden;"></div>
                 <div id="readonly-desc-block" style="display:none;margin-top:8px;">
                     <div class="setting-summary-row" onclick="toggleReadonlyDesc()">
                         <span class="setting-summary-label">📖 因子说明</span>
@@ -363,16 +403,23 @@ function toggleReadonlyDesc() {
 // 进入编辑模式（从只读视图切到代码编辑器）
 function enterEditMode(factorName, isPublic) {
     // 直接进入编辑器：已有 factor family id 在 _currentFactorFamilyId 中，fetch 最新源码
+    const ownerParam = !isPublic && _currentFactorFamilyOwner ? `?owner_username=${encodeURIComponent(_currentFactorFamilyOwner)}` : '';
     const fetchUrl = isPublic
         ? `/custom-factors/api/public-factor/${encodeURIComponent(factorName)}`
-        : `/custom-factors/api/get/${encodeURIComponent(_currentFactorFamilyId)}`;
+        : `/custom-factors/api/get/${encodeURIComponent(_currentFactorFamilyId)}${ownerParam}`;
     fetch(fetchUrl)
         .then(r => r.json())
         .then(data => {
             if (data.success && data.factor) {
                 data.factor.type = isPublic ? 'public' : 'custom';
-                // 如果是公共因子，允许管理员保存为自定义副本（不能覆盖公共）
+                _isNew = false;
+                _editingSaveTarget = {
+                    source: isPublic ? 'public' : 'custom',
+                    id: isPublic ? (data.factor.id || factorName) : _currentFactorFamilyId,
+                    owner: isPublic ? '' : (_currentFactorFamilyOwner || ''),
+                };
                 renderCodeEditor(data.factor);
+                expandCurrentFactorFamilyInNav();
                 document.getElementById('editor-title').textContent =
                     `${factorName}（${isPublic ? '公共因子' : '自定义因子'} — 编辑模式）`;
             }
@@ -380,7 +427,7 @@ function enterEditMode(factorName, isPublic) {
 }
 
 // 只读视图的校验
-async function validateReadonlyExpr(factorName, isPublic) {
+async function validateReadonlyExpr(factorName, isPublic, factorId = '', ownerUsername = '') {
     const btn = document.getElementById('btn-validate-public');
     const treeDiv = document.getElementById('readonly-tree-repr');
     btn.textContent = '校验中...';
@@ -388,7 +435,12 @@ async function validateReadonlyExpr(factorName, isPublic) {
     try {
         const res = await fetch('/custom-factors/api/validate', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ factor_name: factorName, is_public: isPublic })
+            body: JSON.stringify({
+                factor_name: factorName,
+                is_public: isPublic,
+                factor_id: factorId,
+                owner_username: ownerUsername,
+            })
         });
         const data = await res.json();
         if (data.valid && data.tree_repr) {
@@ -423,6 +475,7 @@ async function deleteFactor(factorFamilyId) {
                 '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
             document.getElementById('editor-footer').style.display = 'none';
             document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+            setEditorModeTabsVisible(false);
         } else {
             showToast(data.error || '删除失败', 'error');
         }
@@ -455,6 +508,9 @@ function getParamAliasTitle(paramDef) {
 
 function createNew() {
     _currentFactorFamilyId = null;
+    _currentFactorFamilySource = 'custom';
+    _currentFactorFamilyOwner = '';
+    _editingSaveTarget = null;
     _isNew = true;
     _dirty = false;
     renderFactorFamilyList();
@@ -464,20 +520,105 @@ function createNew() {
     });
 }
 
-function switchMode(mode) {
-    _currentMode = mode;
+function setEditorModeTabsVisible(visible) {
+    const tabs = document.querySelector('.mode-tabs');
+    if (tabs) tabs.style.display = visible ? 'flex' : 'none';
+}
+
+function setActiveEditorModeTab(mode) {
     document.querySelectorAll('.mode-tab').forEach(t => {
         t.classList.toggle('active', t.textContent.includes(mode === 'code' ? '代码' : '可视'));
     });
+}
+
+function getCurrentEditorFactorDraft() {
+    return {
+        id: _currentFactorFamilyId || '',
+        name: document.getElementById('cfg-name-vis')?.value?.trim()
+            || extractClassNameFromSource(document.getElementById('code-source')?.value || '')
+            || _currentFactorFamilyId
+            || '',
+        chinese_name: document.getElementById('cfg-cn')?.value || document.getElementById('cfg-cn-vis')?.value || '',
+        description: document.getElementById('cfg-desc')?.value || document.getElementById('cfg-desc-vis')?.value || '',
+        category: document.getElementById('cfg-cat')?.value || document.getElementById('cfg-cat-vis')?.value || '自编',
+        source_code: getCurrentEditorSource(),
+        type: _currentFactorFamilySource || 'custom',
+    };
+}
+
+function getCurrentEditorSource() {
+    if (_currentMode === 'visual') return visualToSource({silent: true});
+    return document.getElementById('code-source')?.value || '';
+}
+
+function extractClassNameFromSource(source) {
+    const match = String(source || '').match(/^\s*class\s+(\w+)\s*\(/m);
+    return match ? match[1] : '';
+}
+
+async function switchMode(mode) {
+    if (document.getElementById('editor-footer')?.style.display === 'none') return;
+    if (mode === _currentMode) return;
+    let beforeValidation = null;
+    if (mode === 'visual' && _currentMode === 'code') {
+        beforeValidation = await validateCustomExpr(
+            extractClassNameFromSource(document.getElementById('code-source')?.value || '') || _currentFactorFamilyId || '',
+            {silentTree: true, returnData: true}
+        );
+        if (!beforeValidation?.valid) {
+            showToast('源码校验未通过，暂不能转为可视化', 'error');
+            return;
+        }
+    }
+    if (mode === 'code' && _currentMode === 'visual') {
+        beforeValidation = await validateCustomExpr(
+            document.getElementById('cfg-name-vis')?.value?.trim() || _currentFactorFamilyId || '',
+            {silentTree: true, returnData: true}
+        );
+        if (!beforeValidation?.valid) {
+            showToast('可视化表达式校验未通过，暂不能转为代码', 'error');
+            return;
+        }
+        snapshotCurrentVisualGraphForModeSwitch();
+    }
+    const draft = getCurrentEditorFactorDraft();
+    setEditorModeTabsVisible(true);
+    setActiveEditorModeTab(mode);
+    if (draft.source_code || mode === 'visual') {
+        if (mode === 'code') renderCodeEditor(draft);
+        else renderVisualEditor(draft);
+        await verifyModeSwitchTreeConsistency(beforeValidation, mode);
+        return;
+    }
     if (_currentFactorFamilyId && _currentFactorFamilySource === 'custom') {
         const factor = _factorFamilies.find(f => f.id === _currentFactorFamilyId && f.type === 'custom');
         if (factor) {
             if (mode === 'code') renderCodeEditor(factor);
             else renderVisualEditor(factor);
+            await verifyModeSwitchTreeConsistency(beforeValidation, mode);
             return;
         }
     }
     if (_isNew) createNew();
+}
+
+async function verifyModeSwitchTreeConsistency(beforeValidation, mode) {
+    if (!beforeValidation?.valid) return;
+    const factorName = mode === 'code'
+        ? extractClassNameFromSource(document.getElementById('code-source')?.value || '') || _currentFactorFamilyId || ''
+        : document.getElementById('cfg-name-vis')?.value?.trim() || _currentFactorFamilyId || '';
+    const afterValidation = await validateCustomExpr(factorName, {silentTree: true, returnData: true});
+    if (!afterValidation?.valid) {
+        showToast('切换后表达式树校验失败，请检查生成代码', 'error');
+        return;
+    }
+    if (normalizeTreeRepr(beforeValidation.tree_repr) !== normalizeTreeRepr(afterValidation.tree_repr)) {
+        showToast('切换前后表达式树不一致，请检查自动转换结果', 'error');
+    }
+}
+
+function normalizeTreeRepr(treeRepr) {
+    return String(treeRepr || '').replace(/\s+/g, '');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -494,6 +635,8 @@ function renderCodeEditor(factor) {
     } else {
         title.textContent = _isNew ? '新建因子' : (factor.name || '未命名因子');
     }
+    setEditorModeTabsVisible(true);
+    setActiveEditorModeTab('code');
     footer.style.display = '';
     _currentMode = 'code';
 
@@ -575,6 +718,7 @@ function handleCodeInput() {
 function invalidateCodeValidation() {
     _validatedFactorDraft = null;
     _validatedSourceSnapshot = '';
+    _validatedVisualGraph = null;
     const btn = document.getElementById('btn-param-config');
     const status = document.getElementById('param-config-status');
     if (btn) btn.textContent = '校验后配置参数';
@@ -592,6 +736,7 @@ function setValidatedFactorDraft(data, sourceCode) {
     const factorName = data.factor_name || _currentFactorFamilyId || 'ValidatedFactor';
     _validatedFactorDraft = upsertValidatedFactorFamilyDef(factorName, params);
     _validatedSourceSnapshot = sourceCode;
+    _validatedVisualGraph = data.visual_graph || null;
     const btn = document.getElementById('btn-param-config');
     const status = document.getElementById('param-config-status');
     if (btn) btn.textContent = '参数配置';
@@ -622,14 +767,14 @@ function upsertValidatedFactorFamilyDef(factorName, params) {
     }
     def.name = factorName;
     def.params = params;
-    def.description = document.getElementById('cfg-desc')?.value || def.description || '';
-    def.chinese_name = document.getElementById('cfg-cn')?.value || def.chinese_name || '';
-    def.category = document.getElementById('cfg-cat')?.value || def.category || '自编';
+    def.description = document.getElementById('cfg-desc')?.value || document.getElementById('cfg-desc-vis')?.value || def.description || '';
+    def.chinese_name = document.getElementById('cfg-cn')?.value || document.getElementById('cfg-cn-vis')?.value || def.chinese_name || '';
+    def.category = document.getElementById('cfg-cat')?.value || document.getElementById('cfg-cat-vis')?.value || def.category || '自编';
     return def;
 }
 
 function openValidatedParamDrawer() {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     if (!_validatedFactorDraft || sourceCode !== _validatedSourceSnapshot) {
         showToast('请先校验当前源码，再配置参数', 'error');
         invalidateCodeValidation();
@@ -639,7 +784,7 @@ function openValidatedParamDrawer() {
 }
 
 async function openOrValidateParamDrawer(factorName) {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     if (_validatedFactorDraft && sourceCode === _validatedSourceSnapshot) {
         openValidatedParamDrawer();
         return;
@@ -975,38 +1120,51 @@ function insertSnippet(code) {
 // ═══════════════════════════════════════════════════════════
 
 async function validateCustomExpr(factorName, options = {}) {
-    const sourceCode = document.getElementById('code-source')?.value || '';
+    const sourceCode = getCurrentEditorSource();
     const btn = document.getElementById('btn-validate-custom');
     if (!btn) return;
     btn.textContent = '校验中...';
     btn.className = 'btn-validate';
     try {
+        const validateAsPublic = _currentMode === 'visual'
+            && _currentFactorFamilySource === 'public'
+            && !_visGraphDirty
+            && (factorName || _currentFactorFamilyId);
         const res = await fetch('/custom-factors/api/validate', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ source_code: sourceCode, factor_name: factorName })
+            body: JSON.stringify({
+                source_code: validateAsPublic ? '' : sourceCode,
+                factor_name: factorName || _currentFactorFamilyId,
+                is_public: validateAsPublic,
+                chinese_name: (document.getElementById('cfg-cn') || document.getElementById('cfg-cn-vis'))?.value || '',
+                description: (document.getElementById('cfg-desc') || document.getElementById('cfg-desc-vis'))?.value || '',
+            })
         });
         const data = await res.json();
         if (data.valid) {
             btn.textContent = '✓ 校验通过';
             btn.className = 'btn-validate ok';
             setValidatedFactorDraft(data, sourceCode);
-            if (data.tree_repr && !options.openParamsOnSuccess) {
+            if (data.tree_repr && !options.openParamsOnSuccess && !options.silentTree) {
                 showTreeReprPopup(data.factor_name || factorName, data.tree_repr);
             }
             if (options.openParamsOnSuccess) {
                 openValidatedParamDrawer();
             }
+            if (options.returnData) return data;
             return true;
         } else {
             btn.textContent = '✗ ' + (data.error || '无效');
             btn.className = 'btn-validate err';
             invalidateCodeValidation();
+            if (options.returnData) return data;
             return false;
         }
     } catch(e) {
         btn.textContent = '校验失败';
         btn.className = 'btn-validate err';
         invalidateCodeValidation();
+        if (options.returnData) return {valid: false, error: '校验失败'};
         return false;
     }
 }
@@ -1023,10 +1181,10 @@ function showTreeReprPopup(factorName, treeRepr) {
 }
 
 async function saveFactor() {
-    const chinese_name = document.getElementById('cfg-cn')?.value?.trim() || '';
-    const description = document.getElementById('cfg-desc')?.value?.trim() || '';
-    const category = document.getElementById('cfg-cat')?.value?.trim() || '自编';
-    const source_code = document.getElementById('code-source')?.value?.trim() || '';
+    const chinese_name = (document.getElementById('cfg-cn') || document.getElementById('cfg-cn-vis'))?.value?.trim() || '';
+    const description = (document.getElementById('cfg-desc') || document.getElementById('cfg-desc-vis'))?.value?.trim() || '';
+    const category = (document.getElementById('cfg-cat') || document.getElementById('cfg-cat-vis'))?.value?.trim() || '自编';
+    const source_code = getCurrentEditorSource().trim();
 
     if (!source_code) { showToast('请输入源码', 'error'); return; }
 
@@ -1034,13 +1192,25 @@ async function saveFactor() {
 
     try {
         let res;
-        if (_isNew || !_currentFactorFamilyId) {
+        const saveTarget = _editingSaveTarget || {
+            source: _currentFactorFamilySource || 'custom',
+            id: _currentFactorFamilyId || '',
+            owner: _currentFactorFamilyOwner || '',
+        };
+        const shouldUpdatePublic = !_isNew && saveTarget.id && saveTarget.source === 'public';
+        const shouldCreate = _isNew || !saveTarget.id;
+        if (shouldUpdatePublic) {
+            res = await fetch('/custom-factors/api/update-public/' + encodeURIComponent(saveTarget.id), {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+        } else if (shouldCreate) {
             res = await fetch('/custom-factors/api/create', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
         } else {
-            res = await fetch('/custom-factors/api/update/' + _currentFactorFamilyId, {
+            res = await fetch('/custom-factors/api/update/' + encodeURIComponent(saveTarget.id), {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
@@ -1049,12 +1219,18 @@ async function saveFactor() {
         if (data.success) {
             _dirty = false;
             _currentFactorFamilyId = data.factor.id;
+            _currentFactorFamilySource = data.factor.type || (data.factor.is_public ? 'public' : 'custom');
+            _currentFactorFamilyOwner = _currentFactorFamilySource === 'public' ? '' : '';
             _isNew = false;
+            _lastViewedFactorFamily = {
+                id: _currentFactorFamilyId,
+                source: _currentFactorFamilySource,
+                owner: _currentFactorFamilyOwner,
+            };
+            _editingSaveTarget = null;
             showToast('保存成功', 'success');
             await loadFactorFamilyList();
-            // 重新 fetch 因子数据并渲染编辑器
-            const factor = data.factor;
-            renderCodeEditor(factor);
+            await selectFactorFamily(_currentFactorFamilyId, _currentFactorFamilySource, _currentFactorFamilyOwner);
         } else {
             showToast(data.error || '保存失败', 'error');
         }
@@ -1065,332 +1241,31 @@ async function saveFactor() {
 
 function discardEdit() {
     if (_dirty && !confirm('有未保存的修改，确定放弃？')) return;
-    _currentFactorFamilyId = null;
     _isNew = false;
     _dirty = false;
+    if (_lastViewedFactorFamily?.id) {
+        selectFactorFamily(
+            _lastViewedFactorFamily.id,
+            _lastViewedFactorFamily.source,
+            _lastViewedFactorFamily.owner
+        );
+        return;
+    }
+    if (_currentFactorFamilyId) {
+        selectFactorFamily(_currentFactorFamilyId, _currentFactorFamilySource, _currentFactorFamilyOwner);
+        return;
+    }
+    _currentFactorFamilyId = null;
     renderFactorFamilyList();
     const body = document.getElementById('editor-body');
     body.innerHTML = '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';
     document.getElementById('editor-footer').style.display = 'none';
     document.getElementById('editor-title').textContent = '选择一个因子开始编辑';
+    setEditorModeTabsVisible(false);
 }
 
-// ═══════════════════════════════════════════════════════════
-// 可视化编辑器模式 — 算子面板 + 拖放画布
-// ═══════════════════════════════════════════════════════════
+// 可视化编辑器模式已拆分到 visual_editor.js
 
-// 算子定义
-const OP_PALETTE = {
-    leaf: [
-        { key:'OPEN', label:'OPEN', desc:'开盘价' },
-        { key:'HIGH', label:'HIGH', desc:'最高价' },
-        { key:'LOW', label:'LOW', desc:'最低价' },
-        { key:'CLOSE', label:'CLOSE', desc:'收盘价' },
-        { key:'CLOSE_ADJUSTED', label:'CLOSE_ADJ', desc:'复权收盘价' },
-        { key:'VOLUME', label:'VOLUME', desc:'成交量' },
-        { key:'AMOUNT', label:'AMOUNT', desc:'成交额' },
-    ],
-    ts: [
-        { key:'MA($X,$N)', label:'MA', desc:'移动平均 MA(X,N)' },
-        { key:'STD($X,$N)', label:'STD', desc:'标准差 STD(X,N)' },
-        { key:'REF($X,$N)', label:'REF', desc:'前移 REF(X,N)' },
-        { key:'DELTA($X,$N)', label:'DELTA', desc:'差分 DELTA(X,N)' },
-        { key:'LOG($X)', label:'LOG', desc:'对数 LOG(X)' },
-        { key:'ABS($X)', label:'ABS', desc:'绝对值 ABS(X)' },
-    ],
-    cs: [
-        { key:'CS_RANK($X)', label:'CS_RANK', desc:'横截面排名' },
-        { key:'CS_ZSCORE($X)', label:'CS_ZSCORE', desc:'横截面标准化' },
-    ],
-    arith: [
-        { key:'+', label:'+', desc:'加法' },
-        { key:'-', label:'-', desc:'减法' },
-        { key:'*', label:'*', desc:'乘法' },
-        { key:'/', label:'/', desc:'除法' },
-    ]
-};
-
-// 画布上的节点
-let _visNodes = [];
-let _visNextId = 1;
-let _visSelectedNodeId = null;
-let _visDragging = null;  // { nodeId, startX, startY, mouseX, mouseY }
-
-function renderVisualEditor(factor) {
-    _currentMode = 'visual';
-    const body = document.getElementById('editor-body');
-    const footer = document.getElementById('editor-footer');
-    const title = document.getElementById('editor-title');
-    title.textContent = _isNew ? '新建因子（可视化）' : (factor.name || '未命名因子（可视化）');
-    footer.style.display = '';
-
-    // 尝试从 func_expr 回解析出节点
-    _visNodes = [];
-    _visNextId = 1;
-    _visSelectedNodeId = null;
-    if (factor.func_expr) {
-        // 简化为从头开始（回解析太复杂）
-    }
-
-    body.innerHTML = `
-        <div class="visual-layout">
-            <div class="op-palette" id="op-palette">
-                ${renderPalette()}
-            </div>
-            <div class="visual-canvas-wrap" id="visual-canvas-wrap"
-                 ondragover="event.preventDefault()"
-                 ondrop="onCanvasDrop(event)"
-                 onclick="onCanvasClick(event)">
-                <div class="visual-canvas" id="visual-canvas">
-                    <svg class="vis-edges" id="vis-edges"></svg>
-                </div>
-            </div>
-            <div class="visual-config-pane">
-                <div class="config-section">
-                    <h3>节点属性</h3>
-                    <div id="node-props" style="font-size:12px;color:#888;">点击画布上的节点查看属性</div>
-                </div>
-                <div class="config-section" style="margin-top:16px;">
-                    <h3>基本信息</h3>
-                    <div class="field">
-                        <label>因子名称</label>
-                        <input type="text" id="cfg-name-vis" value="${escHtml(factor.name || '')}" oninput="_dirty=true">
-                    </div>
-                    <div class="field">
-                        <label>中文名称</label>
-                        <input type="text" id="cfg-cn-vis" value="${escHtml(factor.chinese_name || '')}" oninput="_dirty=true">
-                    </div>
-                    <div class="field">
-                        <label>分类</label>
-                        <input type="text" id="cfg-cat-vis" value="${escHtml(factor.category || '自编')}" oninput="_dirty=true">
-                    </div>
-                </div>
-                <div style="margin-top:12px;">
-                    <button class="btn-validate" onclick="visualToExpr()" style="width:100%">🔄 生成表达式</button>
-                </div>
-                <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-expr-preview"></div>
-            </div>
-        </div>
-    `;
-
-    // 让算子面板中的元素可拖拽
-    initPaletteDrag();
-}
-
-function renderPalette() {
-    const labels = { leaf:'📊 数据列', ts:'⏱ 时序算子', cs:'📐 横截面算子', arith:'➕ 算术运算' };
-    let html = '';
-    for (const [cat, ops] of Object.entries(OP_PALETTE)) {
-        html += `<h3>${labels[cat]}</h3>`;
-        for (const op of ops) {
-            html += `<div class="op-block ${cat}" draggable="true"
-                data-op-key="${escHtml(op.key)}" data-op-cat="${cat}"
-                ondragstart="onOpDragStart(event)">
-                <strong>${escHtml(op.label)}</strong>
-                <div class="op-desc">${escHtml(op.desc)}</div>
-            </div>`;
-        }
-    }
-    return html;
-}
-
-function initPaletteDrag() {
-    document.querySelectorAll('.op-block').forEach(el => {
-        el.addEventListener('dragstart', onOpDragStart);
-    });
-}
-
-function onOpDragStart(e) {
-    e.dataTransfer.setData('text/plain', JSON.stringify({
-        key: e.target.closest('.op-block').dataset.opKey,
-        cat: e.target.closest('.op-block').dataset.opCat,
-    }));
-    e.dataTransfer.effectAllowed = 'copy';
-}
-
-function onCanvasDrop(e) {
-    e.preventDefault();
-    const raw = e.dataTransfer.getData('text/plain');
-    if (!raw) return;
-    const op = JSON.parse(raw);
-    const wrap = document.getElementById('visual-canvas-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left + wrap.scrollLeft - 50;
-    const y = e.clientY - rect.top + wrap.scrollTop - 18;
-
-    const node = {
-        id: _visNextId++,
-        key: op.key,
-        cat: op.cat,
-        label: op.key,
-        x: Math.max(0, x),
-        y: Math.max(0, y),
-        params: {},
-    };
-    _visNodes.push(node);
-    renderAllVisNodes();
-    _dirty = true;
-    selectVisNode(node.id);
-}
-
-function onCanvasClick(e) {
-    if (e.target.closest('.vis-node')) return;
-    _visSelectedNodeId = null;
-    renderAllVisNodes();
-    document.getElementById('node-props').innerHTML =
-        '<span style="color:#888;">点击画布上的节点查看属性</span>';
-    document.getElementById('visual-expr-preview').textContent = '';
-}
-
-function renderAllVisNodes() {
-    const canvas = document.getElementById('visual-canvas');
-    // remove old nodes
-    canvas.querySelectorAll('.vis-node').forEach(n => n.remove());
-
-    for (const node of _visNodes) {
-        const el = document.createElement('div');
-        el.className = 'vis-node' + (node.id === _visSelectedNodeId ? ' selected' : '');
-        el.style.left = node.x + 'px';
-        el.style.top = node.y + 'px';
-        el.dataset.nodeId = node.id;
-        el.innerHTML = `
-            <button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>
-            <div class="node-label">${escHtml(node.label)}</div>
-            <div class="node-sub">${escHtml(node.key)}</div>
-        `;
-        el.addEventListener('mousedown', (e) => onVisNodeMouseDown(e, node.id));
-        el.addEventListener('click', (e) => { e.stopPropagation(); selectVisNode(node.id); });
-        canvas.appendChild(el);
-    }
-}
-
-function onVisNodeMouseDown(e, nodeId) {
-    e.preventDefault();
-    e.stopPropagation();
-    const node = _visNodes.find(n => n.id === nodeId);
-    if (!node) return;
-    _visDragging = {
-        nodeId,
-        startX: node.x,
-        startY: node.y,
-        mouseX: e.clientX,
-        mouseY: e.clientY,
-    };
-    document.addEventListener('mousemove', onVisMouseMove);
-    document.addEventListener('mouseup', onVisMouseUp);
-}
-
-function onVisMouseMove(e) {
-    if (!_visDragging) return;
-    const node = _visNodes.find(n => n.id === _visDragging.nodeId);
-    if (!node) return;
-    const dx = e.clientX - _visDragging.mouseX;
-    const dy = e.clientY - _visDragging.mouseY;
-    node.x = Math.max(0, _visDragging.startX + dx);
-    node.y = Math.max(0, _visDragging.startY + dy);
-    renderAllVisNodes();
-    _dirty = true;
-}
-
-function onVisMouseUp() {
-    _visDragging = null;
-    document.removeEventListener('mousemove', onVisMouseMove);
-    document.removeEventListener('mouseup', onVisMouseUp);
-}
-
-function selectVisNode(nodeId) {
-    _visSelectedNodeId = nodeId;
-    renderAllVisNodes();
-    const node = _visNodes.find(n => n.id === nodeId);
-    if (!node) return;
-
-    // 显示节点属性面板
-    const props = document.getElementById('node-props');
-    const catNames = { leaf:'数据列', ts:'时序算子', cs:'横截面算子', arith:'算术' };
-    props.innerHTML = `
-        <div class="field"><label>类型</label><span>${catNames[node.cat] || node.cat}</span></div>
-        <div class="field"><label>算子</label><span>${escHtml(node.key)}</span></div>
-        <div class="field"><label>标签</label><input type="text" id="vis-node-label" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>
-    `;
-
-    updateVisualExprPreview();
-}
-
-function updateVisNodeLabel(nodeId, newLabel) {
-    const node = _visNodes.find(n => n.id === nodeId);
-    if (node) { node.label = newLabel; renderAllVisNodes(); _dirty = true; }
-}
-
-function deleteVisNode(nodeId) {
-    _visNodes = _visNodes.filter(n => n.id !== nodeId);
-    if (_visSelectedNodeId === nodeId) _visSelectedNodeId = null;
-    renderAllVisNodes();
-    _dirty = true;
-    updateVisualExprPreview();
-}
-
-// 从可视化节点生成 func_expr 字符串
-function visualToExpr() {
-    if (_visNodes.length === 0) {
-        document.getElementById('visual-expr-preview').textContent = '（无节点）';
-        return '';
-    }
-    // 简单串行连接：按拓扑？这里先用最后一个节点作为根
-    // 实际复杂的树状连接需要连线，先做简单版：把所有节点按 key 拼接
-    const root = _visNodes[_visNodes.length - 1];
-    const expr = buildExprFromNode(root);
-    document.getElementById('visual-expr-preview').textContent = expr || '（无法生成表达式）';
-    return expr;
-}
-
-function buildExprFromNode(node) {
-    return node.key;  // 简化版直接返回 key
-}
-
-function updateVisualExprPreview() {
-    const expr = visualToExpr();
-    document.getElementById('visual-expr-preview').textContent = expr || '';
-}
-
-// 覆盖保存：可视化模式也收集 func_expr
-// saveFactor 中读取 code-expr，可视化模式需要从 _visNodes 生成
-// 我们修改 saveFactor 的判断逻辑
-const _origSaveFactor = saveFactor;
-saveFactor = async function() {
-    if (_currentMode === 'visual') {
-        const expr = visualToExpr();
-        // 把可视化表达式写入隐藏字段，让原来的保存逻辑拿得到
-        const codeTextarea = document.getElementById('code-expr');
-        if (!codeTextarea) {
-            // 创建临时 textarea
-            const tmp = document.createElement('textarea');
-            tmp.id = 'code-expr';
-            tmp.style.display = 'none';
-            tmp.value = expr;
-            document.getElementById('editor-body').appendChild(tmp);
-        } else {
-            codeTextarea.value = expr;
-        }
-        // 可视化模式下用 visual 表单的字段
-        const nameEl = document.getElementById('cfg-name-vis');
-        const cnEl = document.getElementById('cfg-cn-vis');
-        const catEl = document.getElementById('cfg-cat-vis');
-        if (nameEl && !document.getElementById('cfg-name')) {
-            // 创建隐藏的 code 字段
-            ['cfg-name','cfg-cn','cfg-cat','cfg-desc'].forEach(id => {
-                const vis = document.getElementById(id + '-vis');
-                if (vis && !document.getElementById(id)) {
-                    const h = document.createElement('input');
-                    h.type = 'hidden'; h.id = id; h.value = vis.value;
-                    document.getElementById('editor-body').appendChild(h);
-                }
-            });
-        }
-    }
-    return await _origSaveFactor();
-};
-
-// ═══════════════════════════════════════════════════════════
 // Toast
 // ═══════════════════════════════════════════════════════════
 

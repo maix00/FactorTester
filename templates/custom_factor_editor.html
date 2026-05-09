@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/modules/custom_factor_editor/custom_factor_editor.css">
+    <link rel="stylesheet" href="/static/css/modules/custom_factor_editor/visual_editor.css">
 
     <link rel="stylesheet" href="/static/css/modules/shared/param_drawer.css">
     <link rel="stylesheet" href="/static/css/modules/shared/param_info_table.css">
@@ -36,7 +37,7 @@
             <button class="drawer-close-btn" onclick="closeParamDrawer()">✕ 关闭</button>
 
             <!-- 数学公式 -->
-            <div id="cfe-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;"></div>
+            <div id="cfe-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:24px 24px 0;text-align:center;overflow:hidden;"></div>
 
             <!-- 因子说明 -->
             <div id="cfe-desc-block" style="display:none;margin:12px 24px 0;">
@@ -131,7 +132,7 @@
         <div class="editor" id="editor">
             <div class="editor-header">
                 <div class="editor-title" id="editor-title">选择一个因子开始编辑</div>
-                <div class="mode-tabs">
+                <div class="mode-tabs" style="display:none">
                     <button class="mode-tab active" onclick="switchMode('code')">代码模式</button>
                     <button class="mode-tab" onclick="switchMode('visual')">可视化模式</button>
                 </div>
@@ -150,6 +151,10 @@
     <!-- toast 容器 -->
     <div id="toast-container"></div>
 
+    <script src="/static/js/modules/custom_factor_editor/visual_operator_registry.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/visual_source_codec.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/visual_canvas_layout.js"></script>
+    <script src="/static/js/modules/custom_factor_editor/visual_editor.js"></script>
     <script src="/static/js/modules/custom_factor_editor/custom_factor_editor.js"></script>
     <script src="/static/js/modules/shared/collapsible_factor_list.js"></script>
     <script src="/static/js/modules/shared/client_param_table.js"></script>

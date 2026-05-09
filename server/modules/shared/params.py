@@ -7,6 +7,7 @@ Shared parameter-management routes (any test module can use):
 from flask import request, jsonify
 from server.shared import get_factor_family_instance, _get_session_params, _save_session_params, _current_user
 from . import shared_bp
+from .param_config import normalize_param_row, param_value_display
 
 
 @shared_bp.route('/add_params', methods=['POST'])
@@ -16,14 +17,7 @@ def add_params():
     params = data.get('params', {})
     try:
         ff = get_factor_family_instance(factor_family_alias, username=_current_user())
-        # 用 FactorFamily 的 normalize + check + rectified new_params 构建，
-        # 不污染 ff._params_list（共享实例，多用户不安全）
-        normalized = ff._normalize_param_kwargs(**params)
-        ff._check_in_space(**normalized)
-        new_params = {
-            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-            for p in ff.params
-        }
+        new_params = normalize_param_row(ff, params)
         pl = _get_session_params(factor_family_alias, ff)
         if new_params not in pl:
             pl.append(new_params)
@@ -31,13 +25,7 @@ def add_params():
         added_display = {}
         for p in ff.params:
             val = new_params.get(p.alias)
-            if val is not None:
-                try:
-                    added_display[p.alias] = p._value_space.alias(val)
-                except Exception:
-                    added_display[p.alias] = str(val)
-            else:
-                added_display[p.alias] = str(val) if val is not None else ''
+            added_display[p.alias] = param_value_display(p, val)
         return jsonify({'success': True, 'params_count': len(pl), 'added_params': added_display})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

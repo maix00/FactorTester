@@ -1,8 +1,40 @@
 <!-- 数学公式（始终可见） -->
 {% if math_expr %}
-<div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;">
+<div id="latex-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;text-align:center;overflow:hidden;">
     $$ {{ math_expr }} $$
 </div>
+<script>
+(function() {
+    const block = document.getElementById('latex-math-block');
+    if (!block) return;
+
+    function fit() {
+        if (window.fitMathJaxToContainer) {
+            window.fitMathJaxToContainer(block);
+        }
+    }
+
+    function typesetAndFit() {
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            if (window.MathJax.typesetClear) {
+                MathJax.typesetClear([block]);
+            }
+            MathJax.typesetPromise([block]).then(fit).catch(function() {});
+            return;
+        }
+        if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
+            window.MathJax.startup.promise.then(fit);
+            return;
+        }
+        setTimeout(fit, 300);
+    }
+
+    typesetAndFit();
+    if (!window.ResizeObserver) {
+        window.addEventListener('resize', fit);
+    }
+})();
+</script>
 {% endif %}
 
 <!-- 因子说明摘要行（公式下方） -->

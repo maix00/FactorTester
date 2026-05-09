@@ -629,7 +629,14 @@ def get_factor_groups(factors_dir):
         groups.setdefault(group, []).append(name)
     return groups, factor_names
 
-def build_group_html(groups, chinese_names: dict | None = None, custom_factors: list | None = None):
+def build_group_html(
+    groups,
+    chinese_names: dict | None = None,
+    custom_factors: list | None = None,
+    selected_name: str | None = None,
+    selected_type: str | None = None,
+    selected_owner_username: str | None = None,
+):
     """构建侧边栏因子列表 HTML。
     
     自定义因子与公共因子按驼峰首段混合分组：
@@ -741,6 +748,16 @@ def build_group_html(groups, chinese_names: dict | None = None, custom_factors: 
                         href += f'&amp;owner_username={_html.escape(str(owner))}'
                 else:
                     href = f'?factor={_html.escape(str(item["id"]))}'
+                is_active = False
+                if selected_name:
+                    if is_custom:
+                        is_active = (
+                            (selected_type == 'custom')
+                            and (selected_owner_username or '') == (item.get('owner_username') or '')
+                            and selected_name in {(item.get('id') or ''), (item.get('name') or '')}
+                        )
+                    else:
+                        is_active = (selected_type != 'custom') and selected_name == (item.get('id') or '')
                 cn = item.get('chinese_name', '')
                 source_text = '我' if item.get('can_edit') else (item.get('owner_alias') or '下级')
                 source_tag = f' <span class="factor-source-tag factor-source-custom">{_html.escape(source_text)}</span>' if is_custom else ' <span class="factor-source-tag factor-source-public">公共</span>'
@@ -752,7 +769,8 @@ def build_group_html(groups, chinese_names: dict | None = None, custom_factors: 
                     label = f'{name_html}{source_tag} <span class="factor-cn-name">{_html.escape(str(cn))}</span>{cat_tag}'
                 else:
                     label = f'{name_html}{source_tag}{cat_tag}'
-                group_html += f'<li><a href="{href}">{label}</a></li>'
+                active_cls = ' class="active"' if is_active else ''
+                group_html += f'<li><a{active_cls} href="{href}">{label}</a></li>'
             group_html += '</ul></div></div>'
         group_html += '</div></div>'
 

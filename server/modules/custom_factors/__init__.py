@@ -7,24 +7,36 @@
   - 公共因子与自定义因子的区分
 
 存储路径：data/users/{username}/custom_factors/
-每个自定义因子存为一个 .py 文件，文件名 = factor_id.py
+每个自定义因子存为一个 .py 文件，文件名对齐源码中的 class 名
 """
 
 import os
 import json as _json
 import time
-import uuid
 import traceback
 from flask import Blueprint, request, jsonify, render_template
 
 from server.shared import (
     login_required, _current_user, _user_data_dir, _load_accounts,
-    _factor_family_cache_lock, get_factor_family_instance,
+    _factor_family_cache_lock, _factor_family_cache, get_factor_family_instance,
     invalidate_custom_factor_cache,
     _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
-    _get_user_file_lock, get_custom_factor_instance,
+    _get_user_file_lock, get_custom_factor_instance, _is_super_admin_account,
 )
 from server.param_meta import serialize_param_meta
+from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
+from server.modules.custom_factors.param_config_store import (
+    load_param_config,
+    save_param_config,
+    delete_param_config,
+    list_param_config_aliases,
+)
+from server.modules.custom_factors.source_helpers import (
+    assemble_factor_source as _assemble_py,
+    parse_class_meta as _parse_class_meta,
+    strip_factor_meta as _strip_meta,
+)
+from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
@@ -35,62 +47,6 @@ def _cf_dir(username: str) -> str:
     d = os.path.join(_user_data_dir(username), 'custom_factors')
     os.makedirs(d, exist_ok=True)
     return d
-
-
-def _factor_library_param_config_dir(username: str) -> str:
-    d = os.path.join(_user_data_dir(username), 'factor_library_param_configs')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _factor_library_param_config_path(username: str, ff_alias: str) -> str:
-    return os.path.join(_factor_library_param_config_dir(username), f'{ff_alias}.json')
-
-
-def _load_factor_library_param_config(username: str, ff_alias: str) -> dict | None:
-    path = _factor_library_param_config_path(username, ff_alias)
-    try:
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = _json.load(f)
-            if isinstance(data, dict) and isinstance(data.get('params_list'), list):
-                return data
-    except Exception:
-        pass
-    return None
-
-
-def _save_factor_library_param_config(username: str, ff_alias: str, params_list: list) -> dict:
-    config = {
-        'id': username,
-        'scope': 'user_id',
-        'scope_user_id': username,
-        'name': username,
-        'params_list': params_list,
-        'updated_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
-    }
-    path = _factor_library_param_config_path(username, ff_alias)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        _json.dump(config, f, ensure_ascii=False, indent=2)
-    return config
-
-
-def _delete_factor_library_param_config(username: str, ff_alias: str) -> bool:
-    path = _factor_library_param_config_path(username, ff_alias)
-    if os.path.exists(path):
-        os.remove(path)
-        return True
-    return False
-
-
-def _list_factor_library_param_config_aliases(username: str) -> list[str]:
-    d = _factor_library_param_config_dir(username)
-    return [
-        os.path.splitext(fname)[0]
-        for fname in sorted(os.listdir(d))
-        if fname.endswith('.json')
-    ]
 
 
 def _factor_path(username: str, factor_id: str) -> str:
@@ -111,6 +67,20 @@ def _save_factor(username: str, factor_id: str, source_code: str):
     path = _factor_path(username, factor_id)
     with open(path, 'w', encoding='utf-8') as f:
         f.write(source_code)
+
+
+def _public_factor_path(factor_id: str) -> str:
+    return os.path.join(os.getcwd(), 'Factors', f'{factor_id}.py')
+
+
+def _save_public_factor(factor_id: str, source_code: str):
+    path = _public_factor_path(factor_id)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(source_code)
+
+
+def _current_user_is_super_admin() -> bool:
+    return _is_super_admin_account(_get_account(_current_user()))
 
 
 def _delete_factor_file(username: str, factor_id: str) -> bool:
@@ -284,21 +254,6 @@ def _template_time_from_id(tpl: dict) -> str:
         return ''
 
 
-def _normalize_param_config_rows(username: str, ff_alias: str, params_list: list) -> list:
-    ff = get_factor_family_instance(ff_alias, username=username)
-    normalized_rows = []
-    for params in params_list:
-        if not isinstance(params, dict):
-            raise ValueError('参数行必须是对象')
-        normalized = ff._normalize_param_kwargs(**params)
-        ff._check_in_space(**normalized)
-        normalized_rows.append({
-            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-            for p in ff.params
-        })
-    return normalized_rows
-
-
 def _factor_group_key(name: str | None) -> str:
     group = ''
     upper_count = 0
@@ -342,46 +297,9 @@ def _build_param_factor_item(current_username: str, owner_acct: dict, ff_alias: 
                              row: dict, row_idx: int, public_by_alias: dict, custom_by_alias: dict) -> dict:
     owner_username = owner_acct.get('username') or ''
     ff, meta = _resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
-    normalized = ff._normalize_param_kwargs(**(row or {}))
-    ff._check_in_space(**normalized)
-    full_params = {
-        p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-        for p in ff.params
-    }
-    params_display = []
-    for p in ff.params:
-        value = full_params.get(p.alias)
-        try:
-            value_alias = p._value_space.alias(value)
-        except Exception:
-            value_alias = str(value) if value is not None else ''
-        params_display.append({
-            'alias': p.alias,
-            'value': value_alias,
-        })
-    source = meta.get('source') or 'unknown'
-    return {
-        'id': f"{owner_username}:{ff_alias}:{tpl.get('id')}:{row_idx}",
-        'factor_alias': ff.get_alias(**full_params),
-        'factor_family_alias': getattr(ff, 'alias', None) or meta.get('name') or ff_alias,
-        'factor_family_id': meta.get('id') or ff_alias,
-        'factor_family_name': meta.get('name') or ff_alias,
-        'chinese_name': meta.get('chinese_name') or '',
-        'category': meta.get('category') or '',
-        'source': source,
-        'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),
-        'template_id': tpl.get('id') or '',
-        'template_name': tpl.get('name') or '未命名配置',
-        'template_row_index': row_idx,
-        'params': params_display,
-        'params_count': len(params_display),
-        'owner_username': owner_username,
-        'owner_alias': _account_display_name(owner_acct),
-        'owner_organization_id': owner_acct.get('organization_id') or '',
-        'owner_organization_name': owner_acct.get('organization_name') or '',
-        'can_edit': owner_username == current_username,
-        'updated_at': _template_time_from_id(tpl),
-    }
+    acct = dict(owner_acct)
+    acct['alias'] = _account_display_name(owner_acct)
+    return build_param_factor_item(ff, row or {}, row_idx, acct, current_username, meta=meta, config=tpl)
 
 
 def _build_factor_library_config_factors(current_username: str, owner_acct: dict, ff_alias: str, config: dict) -> list:
@@ -407,178 +325,6 @@ def _build_factor_library_config_factors(current_username: str, owner_acct: dict
         except Exception:
             continue
     return factors
-
-
-def _parse_class_meta(source_code: str) -> dict:
-    """从 Python 源码中提取 class 元信息：name, chinese_name(desc), description, category。"""
-    import re
-    result = {'name': '', 'chinese_name': '', 'description': '', 'category': ''}
-
-    # 提取 class 名称
-    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
-    if class_match:
-        result['name'] = class_match.group(1)
-
-    # 提取 desc = '...'
-    desc_match = re.search(r"""^\s*desc\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if desc_match:
-        result['chinese_name'] = desc_match.group(1)
-
-    # 提取 description = """...""" 或 '''...'''
-    desc_long_match = re.search(
-        r'^\s*description\s*=\s*("""|\'\'\')(.*?)\1',
-        source_code, re.MULTILINE | re.DOTALL
-    )
-    if not desc_long_match:
-        # 尝试单行 description
-        desc_long_match = re.search(r"""^\s*description\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if desc_long_match:
-        result['description'] = desc_long_match.group(2) if desc_long_match.lastindex >= 2 else desc_long_match.group(1)
-
-    # 提取 category
-    cat_match = re.search(r"""^\s*category\s*=\s*['\"]([^'\"]*)['\"]""", source_code, re.MULTILINE)
-    if cat_match:
-        result['category'] = cat_match.group(1)
-
-    return result
-
-
-def _assemble_py(source_code: str, chinese_name: str = '', description: str = '',
-                 category: str = '自编') -> str:
-    """将用户编写的源码片段拼装为完整的 .py 文件。
-
-    用户 source_code 只需包含 import 行 + class 头部 + factor_expr() 方法体。
-    desc / description 由本函数拼入，缩进统一使用 4 空格。
-    """
-    import re
-
-    lines = source_code.split('\n')
-
-    # ── 收集 import 行（class 定义之前的所有行） ──
-    import_lines = []
-    class_start = 0
-    for i, line in enumerate(lines):
-        if re.match(r'^\s*class\s+\w+\s*\(', line):
-            class_start = i
-            break
-        import_lines.append(line)
-    for i in range(len(lines)):
-        if re.match(r'^\s*class\s+\w+\s*\(', lines[i]):
-            class_start = i
-            break
-    import_lines = lines[:class_start]
-
-    # ── 提取 class 名称 ──
-    class_match = re.search(r'^\s*class\s+(\w+)\s*\((.*?)\)\s*$', lines[class_start])
-    class_name = class_match.group(1) if class_match else 'MyFactor'
-    base_class = class_match.group(2).strip() if class_match else 'FactorFamily'
-
-    # ── 提取 factor_expr 方法体（def factor_expr ... return ...） ──
-    # 从 class 行之后的所有行中提取
-    body_lines = []
-    in_factor_expr = False
-    factor_expr_indent = ''
-    for line in lines[class_start + 1:]:
-        if re.match(r'^\s*(@staticmethod\s*$|def\s+factor_expr\s*\()', line):
-            in_factor_expr = True
-            factor_expr_indent = line[:len(line) - len(line.lstrip())]
-            continue
-        if in_factor_expr:
-            # 遇到非空行且缩进 <= 方法缩进，说明出了方法体
-            stripped = line.strip()
-            if stripped:
-                line_indent = line[:len(line) - len(line.lstrip())]
-                if len(line_indent) <= len(factor_expr_indent):
-                    break
-                # 跳过已有的 desc / description / category 行
-                if re.match(r'^\s*(desc|description|category)\s*=', line):
-                    continue
-            body_lines.append(line)
-
-    # ── 拼装 ──
-    indent = '    '  # class 体内缩进
-
-    parts = []
-    # 头部注释
-    parts.append(f'# -*- coding: utf-8 -*-')
-    parts.append(f'# Custom Factor: {class_name}')
-    parts.append('')
-
-    # import 行（不过滤，保持用户手写）
-    for il in import_lines:
-        parts.append(il)
-    # 确保有基础 import
-    parts.append('from tools.factors import FactorFamily')
-    parts.append('from tools.parameters import WindowParam, DataColumnParam, DateOrTimeParam')
-    parts.append('')
-
-    # class 定义
-    parts.append(f'class {class_name}({base_class}):')
-    if not any(l.strip().startswith('"""') or l.strip().startswith("'''") or l.strip().startswith('#') for l in body_lines[:2]):
-        parts.append(f'{indent}"""')
-        parts.append(f'{indent}{chinese_name or class_name}')
-        parts.append(f'{indent}"""')
-
-    # factor_expr 方法
-    parts.append('')
-    parts.append(f'{indent}@staticmethod')
-    parts.append(f'{indent}def factor_expr():')
-    for bl in body_lines:
-        parts.append(bl if bl.startswith(indent) else indent + bl)
-
-    # desc
-    if chinese_name:
-        parts.append('')
-        parts.append(f'{indent}desc = {repr(chinese_name)}')
-
-    # description（多行时用三引号）
-    if description:
-        parts.append('')
-        if '\n' in description:
-            parts.append(f'{indent}description = """')
-            for dl in description.split('\n'):
-                parts.append(f'{indent}{dl}')
-            parts.append(f'{indent}"""')
-        else:
-            parts.append(f'{indent}description = {repr(description)}')
-
-    # category
-    if category:
-        parts.append(f'{indent}category = {repr(category)}')
-
-    parts.append('')
-
-    return '\n'.join(parts)
-
-
-def _strip_meta(source_code: str) -> str:
-    """从完整 .py 源码中移除 desc/description/category 类属性行。
-
-    返回编辑区用的纯源码（import + class + factor_expr），
-    不含用户通过右侧表单编辑的元信息。
-    正确处理 description = \"\"\"...\"\"\" 多行块。
-    """
-    import re
-    lines = source_code.split('\n')
-    stripped = []
-    in_multiline_desc = False
-    for line in lines:
-        # 进入多行 description =
-        if re.match(r'^\s*description\s*=\s*("""|\'\'\')', line):
-            in_multiline_desc = True
-            # 如果同行闭合（单行三引号），不算多行
-            if line.count('"""') + line.count("'''") >= 2:
-                in_multiline_desc = False
-            continue
-        if in_multiline_desc:
-            if '"""' in line or "'''" in line:
-                in_multiline_desc = False
-            continue
-        # 跳过单行 desc / description / category
-        if re.match(r'^\s*(desc|description|category)\s*=', line):
-            continue
-        stripped.append(line)
-    return '\n'.join(stripped)
 
 
 # ── 公共因子只读详情 ──────────────────────────────────────────────────────────
@@ -705,8 +451,8 @@ def api_param_factor_overview():
         for factor in _list_custom_factors(owner_username):
             custom_by_alias[factor.get('id')] = factor
             custom_by_alias[factor.get('name')] = factor
-        for ff_alias in _list_factor_library_param_config_aliases(owner_username):
-            tpl = _load_factor_library_param_config(owner_username, ff_alias)
+        for ff_alias in list_param_config_aliases(owner_username):
+            tpl = load_param_config(owner_username, ff_alias)
             if not tpl:
                 continue
             params_list = tpl.get('params_list') or []
@@ -756,7 +502,7 @@ def api_param_configs(ff_alias):
         owner = acct.get('username')
         if not owner:
             continue
-        tpl = _load_factor_library_param_config(owner, ff_alias)
+        tpl = load_param_config(owner, ff_alias)
         factors = []
         public_by_alias = {}
         for factor in _list_public_factors():
@@ -789,6 +535,7 @@ def api_param_configs(ff_alias):
                 'name': tpl.get('name') if tpl else owner,
                 'updated_at': _template_time_from_id(tpl) if tpl else '',
                 'factor_count': len(tpl.get('params_list') or []) if tpl else 0,
+                'params_list': tpl.get('params_list') if tpl else [],
             } if tpl else None,
             'factors': factors,
         })
@@ -805,7 +552,7 @@ def api_get_param_config(ff_alias, owner_username):
     username = _current_user()
     if not _can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
-    config = _load_factor_library_param_config(owner_username, ff_alias)
+    config = load_param_config(owner_username, ff_alias)
     if not config:
         return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
     config = dict(config)
@@ -823,9 +570,10 @@ def api_save_param_config(ff_alias):
     if not isinstance(params_list, list) or len(params_list) == 0:
         return jsonify({'success': False, 'error': '参数列表不能为空'})
     try:
-        normalized_rows = _normalize_param_config_rows(username, ff_alias, params_list)
+        ff = get_factor_family_instance(ff_alias, username=username)
+        serialized_rows = serialize_param_rows(ff, params_list)
         with _get_user_file_lock(username):
-            config = _save_factor_library_param_config(username, ff_alias, normalized_rows)
+            config = save_param_config(username, ff_alias, serialized_rows)
         acct = _get_account(username) or {'username': username}
         factors = _build_factor_library_config_factors(username, acct, ff_alias, config)
         return jsonify({'success': True, 'config': config, 'factors': factors})
@@ -838,7 +586,7 @@ def api_save_param_config(ff_alias):
 def api_delete_param_config(ff_alias):
     username = _current_user()
     with _get_user_file_lock(username):
-        deleted = _delete_factor_library_param_config(username, ff_alias)
+        deleted = delete_param_config(username, ff_alias)
     if not deleted:
         return jsonify({'success': False, 'error': '配置不存在'}), 404
     return jsonify({'success': True})
@@ -892,18 +640,14 @@ def api_create_factor():
         return jsonify({'success': False, 'error': '源码中未找到 class 定义'}), 400
     name = class_match.group(1)
 
-    # 检查是否与公共因子重名
-    public_names = {f['name'] for f in _list_public_factors()}
-    if name in public_names:
-        return jsonify({'success': False, 'error': f'因子名称 "{name}" 与公共因子重名，请使用其他名称'}), 400
-
     # 检查是否与已有自定义因子重名
     existing = _list_custom_factors(username)
     existing_names = {f['name'] for f in existing}
     if name in existing_names:
         return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{name}"，请使用其他名称'}), 400
 
-    factor_id = uuid.uuid4().hex[:12]
+    # 文件名与 class 名保持一致
+    factor_id = name
 
     # 注入 desc 和 description（如果用户在右侧表单填写了）
     chinese_name = (data.get('chinese_name') or '').strip()
@@ -924,6 +668,7 @@ def api_create_factor():
             'chinese_name': chinese_name,
             'description': description,
             'category': (data.get('category') or '自编').strip(),
+            'source_code': _strip_meta(full_source),
             'is_public': False,
         }
     })
@@ -965,11 +710,11 @@ def api_update_factor(factor_id):
         class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
         new_name = class_match.group(1) if class_match else old_name
         if new_name != old_name:
-            public_names = {f['name'] for f in _list_public_factors()}
-            if new_name in public_names:
-                return jsonify({'success': False, 'error': f'因子名称 "{new_name}" 与公共因子重名'}), 400
             existing_list = _list_custom_factors(username)
-            existing_names = {f['name'] for f in existing_list if f['id'] != factor_id}
+            existing_names = {
+                f['name'] for f in existing_list
+                if f['id'] != factor_id and f['name'] != old_name
+            }
             if new_name in existing_names:
                 return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{new_name}"'}), 400
 
@@ -998,7 +743,59 @@ def api_update_factor(factor_id):
             'chinese_name': new_meta.get('chinese_name', ''),
             'description': new_meta.get('description', ''),
             'category': new_meta.get('category', '自编'),
+            'source_code': _strip_meta(full_source),
             'is_public': False,
+        }
+    })
+
+
+@cf_bp.route('/api/update-public/<factor_id>', methods=['POST'])
+@login_required
+def api_update_public_factor(factor_id):
+    """超级管理员更新公共因子家族源码。"""
+    if not _current_user_is_super_admin():
+        return jsonify({'success': False, 'error': '只有超级管理员可以修改公共因子家族'}), 403
+
+    existing_path = _public_factor_path(factor_id)
+    if not os.path.exists(existing_path):
+        return jsonify({'success': False, 'error': '公共因子不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    source_code = (data.get('source_code') or '').strip()
+    if not source_code:
+        return jsonify({'success': False, 'error': '源码不能为空'}), 400
+
+    import re
+    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
+    class_name = class_match.group(1) if class_match else ''
+    if class_name != factor_id:
+        return jsonify({'success': False, 'error': '公共因子家族暂不支持重命名，请保持 class 名与文件名一致'}), 400
+
+    old_source = ''
+    with open(existing_path, 'r', encoding='utf-8') as f:
+        old_source = f.read()
+    old_meta = _parse_class_meta(old_source)
+    chinese_name = (data.get('chinese_name') or old_meta.get('chinese_name', '')).strip()
+    description = (data.get('description') or old_meta.get('description', '')).strip()
+    category = (data.get('category') or old_meta.get('category', '') or '公共').strip()
+    full_source = _assemble_py(source_code, chinese_name, description, category)
+
+    _save_public_factor(factor_id, full_source)
+    with _factor_family_cache_lock:
+        _factor_family_cache.pop(factor_id, None)
+
+    new_meta = _parse_class_meta(full_source)
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': new_meta.get('name', factor_id),
+            'chinese_name': new_meta.get('chinese_name', ''),
+            'description': new_meta.get('description', ''),
+            'category': new_meta.get('category', '公共'),
+            'source_code': _strip_meta(full_source),
+            'is_public': True,
+            'type': 'public',
         }
     })
 
@@ -1094,13 +891,16 @@ def api_validate_expr():
         try:
             ff = get_factor_family_instance(factor_name)
             tree_repr = ''
+            visual_graph = None
             if ff.expr is not None:
                 tree_repr = ff.expr.tree_repr()
+                visual_graph = factor_expr_to_visual_graph(ff.expr)
             return jsonify({
                 'success': True,
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'visual_graph': visual_graph,
                 'factor_name': ff.__class__.__name__,
                 'params': [
                     serialize_param_meta(p)
@@ -1120,10 +920,14 @@ def api_validate_expr():
     # ── 自定义因子：编译源码 → exec → 获取 tree_repr ──
     source_code = (data.get('source_code') or '').strip()
     factor_id = (data.get('factor_id') or '').strip()
+    owner_username = (data.get('owner_username') or username).strip()
 
     if not source_code and factor_id:
+        if not _can_view_user_scope(username, owner_username):
+            return jsonify({'success': True, 'valid': False, 'error': '无权查看该用户因子'})
         # 从已保存文件加载
-        source_code = _load_factor(username, factor_id) or ''
+        loaded_source = _load_factor(owner_username, factor_id) or ''
+        source_code = _strip_meta(loaded_source) if loaded_source else ''
 
     if not source_code:
         return jsonify({'success': True, 'valid': False, 'error': '源码不能为空'})
@@ -1170,14 +974,17 @@ def api_validate_expr():
 
             ff = factor_cls()
             tree_repr = ''
+            visual_graph = None
             if ff.expr is not None:
                 tree_repr = ff.expr.tree_repr()
+                visual_graph = factor_expr_to_visual_graph(ff.expr)
 
             return jsonify({
                 'success': True,
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'visual_graph': visual_graph,
                 'factor_name': factor_cls.__name__,
                 'params': [
                     serialize_param_meta(p)
@@ -1202,6 +1009,17 @@ def api_validate_expr():
             'error': f'{type(e).__name__}: {str(e)}',
             'traceback': traceback.format_exc(),
         })
+
+
+@cf_bp.route('/api/visual-operators')
+@login_required
+def api_visual_operators():
+    """返回可视化编辑器算子卡牌元数据。"""
+    from tools.factors.FactorExpr import get_visual_operator_groups
+    return jsonify({
+        'success': True,
+        'groups': get_visual_operator_groups(),
+    })
 
 
 # ═════════════════════════════════════════════════════════════════════════════
