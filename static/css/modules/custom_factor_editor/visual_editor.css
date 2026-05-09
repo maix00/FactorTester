@@ -40,8 +40,28 @@
         linear-gradient(90deg, #f0f0f0 1px, transparent 1px);
     background-size: 24px 24px;
 }
+.visual-zoom-toolbar {
+    position: sticky; top: 10px; left: 10px; z-index: 20;
+    display: inline-flex; align-items: center; gap: 4px;
+    margin: 10px; padding: 5px; border: 1px solid #dbe3ef; border-radius: 999px;
+    background: rgba(255,255,255,0.92); box-shadow: 0 6px 18px rgba(15,23,42,0.10);
+    backdrop-filter: blur(8px);
+}
+.visual-zoom-toolbar button {
+    min-width: 28px; height: 24px; border: 0; border-radius: 999px;
+    background: #eef6ff; color: #1d4ed8; font-size: 12px; font-weight: 650;
+    cursor: pointer; padding: 0 8px;
+}
+.visual-zoom-toolbar button:hover { background: #dbeafe; }
+.visual-zoom-toolbar span {
+    min-width: 44px; text-align: center; font-size: 12px; color: #475467;
+    font-family: 'SF Mono','Fira Code',monospace;
+}
+.visual-canvas-space {
+    position: relative; min-width: 100%; min-height: 100%;
+}
 .visual-canvas {
-    position: relative; width: 4000px; height: 4000px;
+    position: absolute; top: 0; left: 0; width: 4000px; height: 4000px;
     min-width: 100%; min-height: 100%;
 }
 .vis-node {

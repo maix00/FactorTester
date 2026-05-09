@@ -46,8 +46,8 @@ function getVisualOutputPoint(nodeId) {
         const canvasRect = canvas.getBoundingClientRect();
         const rect = port.getBoundingClientRect();
         return {
-            x: rect.left - canvasRect.left + rect.width / 2,
-            y: rect.top - canvasRect.top + rect.height / 2,
+            x: (rect.left - canvasRect.left + rect.width / 2) / _visCanvasScale,
+            y: (rect.top - canvasRect.top + rect.height / 2) / _visCanvasScale,
         };
     }
     const node = _visNodes.find(n => n.id === nodeId);
@@ -61,8 +61,8 @@ function getVisualInputPoint(nodeId, inputIndex) {
         const canvasRect = canvas.getBoundingClientRect();
         const rect = slot.getBoundingClientRect();
         return {
-            x: rect.left - canvasRect.left + rect.width / 2,
-            y: rect.top - canvasRect.top + rect.height / 2,
+            x: (rect.left - canvasRect.left + rect.width / 2) / _visCanvasScale,
+            y: (rect.top - canvasRect.top + rect.height / 2) / _visCanvasScale,
         };
     }
     const node = _visNodes.find(n => n.id === nodeId);
@@ -85,6 +85,7 @@ function layoutVisualExpressionTree(options = {}) {
     if (canvas) {
         canvas.style.width = Math.max(1200, state.maxX + 360) + 'px';
         canvas.style.height = Math.max(900, state.maxY + 220) + 'px';
+        if (typeof applyVisualCanvasZoom === 'function') applyVisualCanvasZoom();
     }
 }
 

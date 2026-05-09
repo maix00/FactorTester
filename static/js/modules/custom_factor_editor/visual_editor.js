@@ -14,10 +14,15 @@ let _visGraphSnapshot = null;
 let _visGraphSnapshotSource = '';
 let _visGraphSnapshotNormalizedSource = '';
 const VIS_HISTORY_LIMIT = 100;
+const VIS_ZOOM_MIN = 0.35;
+const VIS_ZOOM_MAX = 2.2;
+const VIS_ZOOM_STEP = 1.15;
 let _visUndoStack = [];
 let _visRedoStack = [];
 let _visHistoryRestoring = false;
 let _visHistoryKeydownBound = false;
+let _visCanvasScale = 1;
+let _visGestureLastScale = 1;
 
 function renderVisualEditor(factor) {
     const previousMode = _currentMode;
@@ -50,8 +55,16 @@ function renderVisualEditor(factor) {
             <div class="op-palette" id="op-palette">${renderPalette()}</div>
             <div class="visual-canvas-wrap" id="visual-canvas-wrap"
                  ondragover="event.preventDefault()" ondrop="onCanvasDrop(event)" onclick="onCanvasClick(event)">
-                <div class="visual-canvas" id="visual-canvas">
-                    <svg class="vis-edges" id="vis-edges"></svg>
+                <div class="visual-zoom-toolbar" onclick="event.stopPropagation()">
+                    <button type="button" onclick="zoomVisualCanvasBy(1 / 1.15)" title="缩小">−</button>
+                    <span id="visual-zoom-label">100%</span>
+                    <button type="button" onclick="zoomVisualCanvasBy(1.15)" title="放大">+</button>
+                    <button type="button" onclick="resetVisualCanvasZoom()" title="重置缩放">重置</button>
+                </div>
+                <div class="visual-canvas-space" id="visual-canvas-space">
+                    <div class="visual-canvas" id="visual-canvas">
+                        <svg class="vis-edges" id="vis-edges"></svg>
+                    </div>
                 </div>
             </div>
             <div class="visual-config-pane">
@@ -89,6 +102,7 @@ function renderVisualEditor(factor) {
 
     initPaletteDrag();
     bindVisualHistoryShortcuts();
+    initVisualCanvasZoom();
     layoutVisualExpressionTree();
     renderAllVisNodes();
     requestAnimationFrame(() => {
@@ -104,10 +118,9 @@ function onCanvasDrop(e) {
     const raw = e.dataTransfer.getData('text/plain');
     if (!raw) return;
     const op = JSON.parse(raw);
-    const wrap = document.getElementById('visual-canvas-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left + wrap.scrollLeft - 50;
-    const y = e.clientY - rect.top + wrap.scrollTop - 18;
+    const point = visualClientPointToCanvas(e.clientX, e.clientY);
+    const x = point.x - 50;
+    const y = point.y - 18;
     const params = defaultVisualNodeParams(op);
     recordVisualHistory();
     const node = {
@@ -196,8 +209,8 @@ function onVisMouseMove(e) {
     if (!_visDragging) return;
     const node = _visNodes.find(n => n.id === _visDragging.nodeId);
     if (!node) return;
-    node.x = Math.max(0, _visDragging.startX + e.clientX - _visDragging.mouseX);
-    node.y = Math.max(0, _visDragging.startY + e.clientY - _visDragging.mouseY);
+    node.x = Math.max(0, _visDragging.startX + (e.clientX - _visDragging.mouseX) / _visCanvasScale);
+    node.y = Math.max(0, _visDragging.startY + (e.clientY - _visDragging.mouseY) / _visCanvasScale);
     _visDragging.moved = true;
     renderAllVisNodes();
     _dirty = true;
@@ -375,7 +388,12 @@ function getVisualNodeSubtitle(node) {
     if (node.key === 'Return') return '最终返回值';
     if (isVisualParamNode(node)) return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
     if (node.key === 'Constant') return node.params?.name ? `${node.params.name}=${node.params?.value ?? ''}` : (node.params?.value ?? '');
-    return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
+    return `${getVisualOperatorDisplayName(node)} · ${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
+}
+
+function getVisualOperatorDisplayName(node) {
+    const def = getVisualOperatorDef(node);
+    return def?.label && def.label !== node.label ? `${def.label} (${node.key})` : node.key;
 }
 
 function renderVisualNodeSlots(node) {
@@ -653,6 +671,94 @@ function bindVisualHistoryShortcuts() {
 function isVisualHistoryNativeUndoTarget(target) {
     const tag = String(target?.tagName || '').toLowerCase();
     return tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
+}
+
+function initVisualCanvasZoom() {
+    applyVisualCanvasZoom();
+    const wrap = document.getElementById('visual-canvas-wrap');
+    if (!wrap || wrap.dataset.zoomBound === '1') return;
+    wrap.dataset.zoomBound = '1';
+    wrap.addEventListener('wheel', function(event) {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        const factor = Math.exp(-event.deltaY * 0.0035);
+        zoomVisualCanvasAt(factor, event.clientX, event.clientY);
+    }, {passive: false});
+    wrap.addEventListener('gesturestart', function(event) {
+        event.preventDefault();
+        _visGestureLastScale = Number(event.scale) || 1;
+    });
+    wrap.addEventListener('gesturechange', function(event) {
+        event.preventDefault();
+        const currentScale = Number(event.scale) || 1;
+        const factor = currentScale / (_visGestureLastScale || 1);
+        _visGestureLastScale = currentScale;
+        zoomVisualCanvasAt(factor, event.clientX, event.clientY);
+    });
+    wrap.addEventListener('gestureend', function() {
+        _visGestureLastScale = 1;
+    });
+}
+
+function zoomVisualCanvasBy(factor) {
+    const wrap = document.getElementById('visual-canvas-wrap');
+    const rect = wrap?.getBoundingClientRect();
+    zoomVisualCanvasAt(factor, rect ? rect.left + rect.width / 2 : 0, rect ? rect.top + rect.height / 2 : 0);
+}
+
+function zoomVisualCanvasAt(factor, clientX, clientY) {
+    const wrap = document.getElementById('visual-canvas-wrap');
+    if (!wrap) return;
+    const oldScale = _visCanvasScale;
+    const nextScale = clampVisualCanvasScale(oldScale * factor);
+    if (Math.abs(nextScale - oldScale) < 0.001) return;
+    const rect = wrap.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const contentX = (wrap.scrollLeft + localX) / oldScale;
+    const contentY = (wrap.scrollTop + localY) / oldScale;
+    _visCanvasScale = nextScale;
+    applyVisualCanvasZoom();
+    wrap.scrollLeft = Math.max(0, contentX * nextScale - localX);
+    wrap.scrollTop = Math.max(0, contentY * nextScale - localY);
+    renderAllVisNodes();
+}
+
+function resetVisualCanvasZoom() {
+    const wrap = document.getElementById('visual-canvas-wrap');
+    const rect = wrap?.getBoundingClientRect();
+    zoomVisualCanvasAt(1 / _visCanvasScale, rect ? rect.left + rect.width / 2 : 0, rect ? rect.top + rect.height / 2 : 0);
+}
+
+function applyVisualCanvasZoom() {
+    const canvas = document.getElementById('visual-canvas');
+    const space = document.getElementById('visual-canvas-space');
+    if (canvas) {
+        canvas.style.transform = `scale(${_visCanvasScale})`;
+        canvas.style.transformOrigin = '0 0';
+    }
+    if (canvas && space) {
+        const width = parseFloat(canvas.style.width || canvas.offsetWidth || 4000);
+        const height = parseFloat(canvas.style.height || canvas.offsetHeight || 4000);
+        space.style.width = `${Math.max(width * _visCanvasScale, 1)}px`;
+        space.style.height = `${Math.max(height * _visCanvasScale, 1)}px`;
+    }
+    const label = document.getElementById('visual-zoom-label');
+    if (label) label.textContent = `${Math.round(_visCanvasScale * 100)}%`;
+}
+
+function clampVisualCanvasScale(scale) {
+    return Math.min(VIS_ZOOM_MAX, Math.max(VIS_ZOOM_MIN, scale));
+}
+
+function visualClientPointToCanvas(clientX, clientY) {
+    const wrap = document.getElementById('visual-canvas-wrap');
+    if (!wrap) return {x: 0, y: 0};
+    const rect = wrap.getBoundingClientRect();
+    return {
+        x: (clientX - rect.left + wrap.scrollLeft) / _visCanvasScale,
+        y: (clientY - rect.top + wrap.scrollTop) / _visCanvasScale,
+    };
 }
 
 function isVisualNodeComplete(nodeId, seen) {
