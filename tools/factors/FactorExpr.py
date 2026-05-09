@@ -896,8 +896,10 @@ class ParamRef(FactorExpr):
         from tools.factors import Factor
         factor: Optional['Factor'] = None
 
-        has_value = param_values is not None and self.param.alias in param_values
-        value = param_values[self.param.alias] if has_value else self.param.default_value
+        if param_values is not None and self.param.alias in param_values:
+            value = param_values[self.param.alias]
+        else:
+            value = self.param.default_value
         if isinstance(self.param, DataColumnParam):
             resolved: FactorExpr = ColumnRef(DataColumn(value))
         elif isinstance(self.param, FactorParam):
@@ -1076,22 +1078,22 @@ class RollingOp(OperandExpr):
             # 一元
             operand_latex = self.operands[1]._to_latex(subst)
             _LATEX_MAP = {
-                'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}({operand_latex})',
-                'rolling_std': f'\\text{{RStd}}_{{{w_str}}}({operand_latex})',
-                'rolling_var': f'\\text{{RVar}}_{{{w_str}}}({operand_latex})',
-                'rolling_min': f'\\text{{RMin}}_{{{w_str}}}({operand_latex})',
-                'rolling_max': f'\\text{{RMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_sum': f'\\text{{RSum}}_{{{w_str}}}({operand_latex})',
-                'rolling_ema': f'\\text{{REMA}}_{{{w_str}}}({operand_latex})',
-                'rolling_skew': f'\\text{{RSkew}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmax': f'\\text{{RArgMax}}_{{{w_str}}}({operand_latex})',
-                'rolling_argmin': f'\\text{{RArgMin}}_{{{w_str}}}({operand_latex})',
+                'rolling_mean': f'\\text{{RMean}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_std': f'\\text{{RStd}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_var': f'\\text{{RVar}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_min': f'\\text{{RMin}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_max': f'\\text{{RMax}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_sum': f'\\text{{RSum}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_ema': f'\\text{{REMA}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_skew': f'\\text{{RSkew}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_argmax': f'\\text{{RArgMax}}_{{{w_str}}}\\left({operand_latex}\\right)',
+                'rolling_argmin': f'\\text{{RArgMin}}_{{{w_str}}}\\left({operand_latex}\\right)',
             }
-            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}({operand_latex})')
+            return _LATEX_MAP.get(self.op, f'{self.op}_{{{w_str}}}\\left({operand_latex}\\right)')
         else:
             left_latex = self.operands[1]._to_latex(subst)
             right_latex = self.operands[2]._to_latex(subst)
-            return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}({left_latex}, {right_latex})'
+            return f'\\text{{{self.op.capitalize()}}}_{{{w_str}}}\\left({left_latex}, {right_latex}\\right)'
 
     def _get_alias(self) -> str:
         parts = [self.op]
