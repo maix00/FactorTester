@@ -158,6 +158,19 @@ class Futures(Product):
                 contracts.append(self.FuturesContractClass(contract_id))
         return contracts
 
+    def get_nth_roller_contract_from_trading_day(self, trading_day: datetime | str, n: int = 0) -> Optional[FuturesContract]:
+        """返回交易日所在主力段之后第 n 个主力链合约，n=0 为当期主力。"""
+        contracts = self.get_roller_contracts_from_trading_day(trading_day, n=int(n) + 1)
+        return contracts[int(n)] if len(contracts) > int(n) else None
+
+    def get_term_structure_contracts_from_trading_day(self, trading_day: datetime | str, depth: int = 2) -> List[FuturesContract]:
+        """返回用于期限结构计算的合约链。
+
+        当前实现基于主力展期链，适合计算“当期主力 vs 后续主力”的近似期限结构；
+        若需要完整期限结构，应由数据源提供某日全部可交易合约与到期日排序。
+        """
+        return self.get_roller_contracts_from_trading_day(trading_day, n=depth)
+
     def get_roller_info_path(self) -> str | None:
         """返回此品种对应的 roller_info 文件路径。子类可重写以支持按品种分流。"""
         return self.roller_info_path
