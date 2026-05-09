@@ -1493,6 +1493,17 @@ class CompositeExpr(OperandExpr):
         'min': {'symb': 'min', 'latex': '\\min', 'nop': -1, 'func': lambda *args: _reduce_biop('bimin', args)},
     }
 
+    _LATEX_PRECEDENCE = {
+        'or': 10,
+        'and': 20,
+        'gt': 30, 'lt': 30, 'ge': 30, 'le': 30, 'eq': 30, 'ne': 30,
+        'add': 40, 'sub': 40,
+        'mul': 50, 'div': 50,
+        'pow': 60,
+        'neg': 70, 'abs': 70, 'not': 70, 'log': 70, 'sign': 70, 'sqrt': 70,
+        'max': 80, 'min': 80,
+    }
+
     def __new__(cls, op: str, *operands: FactorExpr, **kwargs) -> 'FactorExpr':
         """表达式规范化：常量折叠 + 等价化简，在构造前归并。
 
@@ -1606,12 +1617,8 @@ class CompositeExpr(OperandExpr):
                 operand_latex = operands_latex[0]
                 return f"{self._Ops[self.op]['latex']}\\left({operand_latex}\\right)"
             elif self._Ops[self.op]['nop'] == 2:
-                left_latex = operands_latex[0]
-                right_latex = operands_latex[1]
-                left_parenthesis = isinstance(self.operands[0], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[0].op not in ('div', 'pow')
-                right_parenthesis = isinstance(self.operands[1], (CompositeExpr,)) and self.op not in ('div', 'pow') and self.operands[1].op not in ('div', 'pow')
-                left_latex = f'\\left({left_latex}\\right)' if left_parenthesis else left_latex
-                right_latex = f'\\left({right_latex}\\right)' if right_parenthesis else right_latex
+                left_latex = self._binary_operand_latex(self.operands[0], operands_latex[0], side='left', subst=subst)
+                right_latex = self._binary_operand_latex(self.operands[1], operands_latex[1], side='right', subst=subst)
                 if self.op in ('add', 'sub', 'mul', 'pow', 'gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
                     return f'{left_latex} {self._Ops[self.op]["latex"]} {right_latex}'
                 elif self.op in ('div'):
@@ -1622,6 +1629,42 @@ class CompositeExpr(OperandExpr):
                 return f'{self._Ops[self.op]["latex"]}\\left({", ".join(operands_latex)}\\right)'
         else:
             return f'\\text{{{self.op.capitalize()}}}\\left({", ".join(operands_latex)}\\right)'
+
+    @classmethod
+    def _expr_precedence(cls, expr: FactorExpr) -> int:
+        if not isinstance(expr, CompositeExpr):
+            return 10_000
+        return cls._LATEX_PRECEDENCE.get(expr.op, 0)
+
+    def _needs_parenthesis(self, child: FactorExpr, side: str, subst: dict | None = None) -> bool:
+        if not isinstance(child, CompositeExpr):
+            return False
+        if subst is not None and child._structural_key() in subst:
+            return False
+        if self.op == 'div':
+            return False
+
+        parent_prec = self._LATEX_PRECEDENCE.get(self.op, 0)
+        child_prec = self._expr_precedence(child)
+
+        if child_prec < parent_prec:
+            return True
+        if child_prec > parent_prec:
+            return False
+
+        # 同优先级时按算子特性处理，保证树结构语义不丢失。
+        if self.op == 'sub' and side == 'right':
+            return True
+        if self.op == 'pow':
+            return True
+        if self.op == 'mul' and child.op == 'div':
+            return True
+        if self.op in ('gt', 'lt', 'ge', 'le', 'eq', 'ne', 'and', 'or'):
+            return True
+        return False
+
+    def _binary_operand_latex(self, child: FactorExpr, child_latex: str, side: str, subst: dict | None = None) -> str:
+        return f'\\left({child_latex}\\right)' if self._needs_parenthesis(child, side, subst=subst) else child_latex
 
     def _get_alias(self) -> str:
         op_aliases = {

@@ -5,17 +5,34 @@
 </div>
 <script>
 (function() {
+    const block = document.getElementById('latex-math-block');
+    if (!block) return;
+
     function fit() {
         if (window.fitMathJaxToContainer) {
-            window.fitMathJaxToContainer(document.getElementById('latex-math-block'));
+            window.fitMathJaxToContainer(block);
         }
     }
-    if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
-        window.MathJax.startup.promise.then(fit);
-    } else {
+
+    function typesetAndFit() {
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            if (window.MathJax.typesetClear) {
+                MathJax.typesetClear([block]);
+            }
+            MathJax.typesetPromise([block]).then(fit).catch(function() {});
+            return;
+        }
+        if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
+            window.MathJax.startup.promise.then(fit);
+            return;
+        }
         setTimeout(fit, 300);
     }
-    window.addEventListener('resize', fit);
+
+    typesetAndFit();
+    if (!window.ResizeObserver) {
+        window.addEventListener('resize', fit);
+    }
 })();
 </script>
 {% endif %}

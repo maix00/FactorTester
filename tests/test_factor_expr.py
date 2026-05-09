@@ -401,6 +401,21 @@ def test_latex_generation():
     print("  ✓ LaTeX 生成通过\n")
 
 
+def test_latex_parenthesis_rules():
+    """检验二元算子在 LaTeX 中的括号规则。"""
+    mul_add = ((CLOSE + OPEN) * HIGH).to_latex()
+    assert '\\left(' in mul_add and '\\right)' in mul_add
+
+    mul_div = (CLOSE * (OPEN / HIGH)).to_latex()
+    assert '\\left(\\frac' in mul_div
+
+    sub_add = (CLOSE - (OPEN + HIGH)).to_latex()
+    assert '\\left(' in sub_add and '\\right)' in sub_add
+
+    pow_add = ((CLOSE + OPEN) ** 2).to_latex()
+    assert '\\left(' in pow_add and ' ^ ' in pow_add
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 12. Parameter 依赖追踪 (param_deps) 测试
 # ═════════════════════════════════════════════════════════════════════════════

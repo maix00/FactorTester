@@ -95,7 +95,14 @@ def index():
         # 同时搜索自定义因子
         custom_factors = _search_custom_factors(custom_factors, q)
 
-    group_html = build_group_html(groups, chinese_names, custom_factors) if (groups or custom_factors) else '<div style="color:#888;">无匹配因子</div>'
+    group_html = build_group_html(
+        groups,
+        chinese_names,
+        custom_factors,
+        selected_name=selected_name,
+        selected_type=factor_type or 'public',
+        selected_owner_username=owner_username,
+    ) if (groups or custom_factors) else '<div style="color:#888;">无匹配因子</div>'
     main_content = ''
 
     if selected_name:
