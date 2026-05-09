@@ -23,9 +23,14 @@ from sources.LocalCNFutures.CNFutures import (
     get_all_futures_contract,
 )
 from tools.data.DataSource import DataSource
-from tools.products.Futures import Futures, FuturesContract
+from tools.products.Futures import (
+    Futures,
+    FuturesContract,
+    make_contract_category_from_futures_category,
+    map_contracts_to_futures,
+)
 from tools.products.Product import Product
-from tools.products.categories.Category import Category, CategoryTree, combine_trees
+from tools.products.categories.Category import CategoryTree, combine_trees
 
 
 @lru_cache(maxsize=1)
@@ -102,28 +107,17 @@ def _get_contract_category_tree(contracts) -> CategoryTree:
     """Build a CNFuturesContract tree that mirrors CNFutures category labels."""
     contract_to_future = _map_contracts_to_futures(contracts)
 
-    sector_category = Category(
-        alias='行业',
-        type=CNFuturesContract,
-        categories=list(CNFuturesSectorCategory.categories),
+    sector_category = make_contract_category_from_futures_category(
+        CNFuturesSectorCategory,
+        CNFuturesContract,
+        contracts,
+        contract_to_future,
     )
-    sector_category.objs = contracts
-    sector_category.get_value_alias = CNFuturesSectorCategory.get_value_alias
-    sector_category.whether_is_in_category = lambda catname, obj, *args, **kwargs: (
-        (future := contract_to_future.get(obj)) is not None
-        and CNFuturesSectorCategory.whether_is_in_category(catname, future)
-    )
-
-    daynight_category = Category(
-        alias='日夜盘',
-        type=CNFuturesContract,
-        categories=list(CNFuturesDayNightTimeCategory.categories),
-    )
-    daynight_category.objs = contracts
-    daynight_category.get_value_alias = CNFuturesDayNightTimeCategory.get_value_alias
-    daynight_category.whether_is_in_category = lambda catname, obj, *args, **kwargs: (
-        (future := contract_to_future.get(obj)) is not None
-        and CNFuturesDayNightTimeCategory.whether_is_in_category(catname, future)
+    daynight_category = make_contract_category_from_futures_category(
+        CNFuturesDayNightTimeCategory,
+        CNFuturesContract,
+        contracts,
+        contract_to_future,
     )
 
     return (sector_category * daynight_category).get_tree_with_parents(
@@ -133,23 +127,19 @@ def _get_contract_category_tree(contracts) -> CategoryTree:
 
 
 def _map_contracts_to_futures(contracts):
-    products = _cached_products()
-    futures_by_key = {}
-    for product in products:
-        code = str(getattr(product, 'code', '')).upper()
-        alias = str(getattr(product, 'alias', getattr(product, 'name', '')))
-        exchange = alias.split('.')[1].split('@')[0].upper() if '.' in alias else ''
-        if code and exchange:
-            futures_by_key.setdefault((code, exchange), product)
+    return map_contracts_to_futures(
+        contracts,
+        _cached_products(),
+        contract_key=_contract_code_exchange,
+        futures_key=_future_code_exchange,
+    )
 
-    mapping = {}
-    for contract in contracts:
-        key = _contract_code_exchange(contract)
-        if key:
-            future = futures_by_key.get(key)
-            if future is not None:
-                mapping[contract] = future
-    return mapping
+
+def _future_code_exchange(future):
+    code = str(getattr(future, 'code', '')).upper()
+    alias = str(getattr(future, 'alias', getattr(future, 'name', '')))
+    exchange = alias.split('.')[1].split('@')[0].upper() if '.' in alias else ''
+    return (code, exchange) if code and exchange else None
 
 
 def _contract_code_exchange(contract):
