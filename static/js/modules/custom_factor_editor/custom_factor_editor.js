@@ -329,7 +329,7 @@ function renderFactorFamilyReadonlyView(factor) {
         <div class="config-pane">
             <div class="config-section">
                 <h3>${escHtml(factor.chinese_name || factor.name)}</h3>
-                <div id="readonly-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:8px 0 12px;text-align:center;"></div>
+                <div id="readonly-math-block" style="display:none;background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin:8px 0 12px;text-align:center;overflow:hidden;"></div>
                 <div id="readonly-desc-block" style="display:none;margin-top:8px;">
                     <div class="setting-summary-row" onclick="toggleReadonlyDesc()">
                         <span class="setting-summary-label">📖 因子说明</span>

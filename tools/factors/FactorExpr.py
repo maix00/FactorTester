@@ -148,10 +148,57 @@ VISUAL_OPERATOR_GROUPS = [
     },
 ]
 
+VISUAL_COMPOSITE_KEY = {
+    'add': '+',
+    'sub': '-',
+    'mul': '*',
+    'div': '/',
+    'pow': '**',
+    'gt': '>',
+    'lt': '<',
+    'ge': '>=',
+    'le': '<=',
+    'eq': '==',
+    'ne': '!=',
+    'and': '&',
+    'or': '|',
+    'not': '~',
+    'neg': 'neg',
+    'abs': 'abs',
+    'log': 'log',
+    'sqrt': 'sqrt',
+    'sign': 'sign',
+    'bimax': 'max',
+    'bimin': 'min',
+    'max': 'expr_max',
+    'min': 'expr_min',
+}
+
+VISUAL_OPERATOR_CATEGORY = {
+    '~': 'arithUnary',
+    'neg': 'arithUnary',
+    'abs': 'arithUnary',
+    'log': 'arithUnary',
+    'sqrt': 'arithUnary',
+    'sign': 'arithUnary',
+    'expr_max': 'arithVariadic',
+    'expr_min': 'arithVariadic',
+}
+
 
 def get_visual_operator_groups() -> list[dict]:
     """Return visual-editor operator metadata derived from FactorExpr capabilities."""
     return VISUAL_OPERATOR_GROUPS
+
+
+def get_visual_composite_key(op: str) -> str:
+    """Return the visual-editor key for a CompositeExpr op."""
+    return VISUAL_COMPOSITE_KEY.get(op, op)
+
+
+def get_visual_operator_category(visual_key: str, default: str = 'arithBinary') -> str:
+    """Return the visual-editor category for a visual operator key."""
+    return VISUAL_OPERATOR_CATEGORY.get(visual_key, default)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -268,30 +315,28 @@ class FactorExpr:
         raise NotImplementedError
 
     def _iter_intermediate_nodes(self) -> List['FactorExpr']:
-        """按先序遍历收集中间表达式节点（去重、排除自身）。
+        """按依赖顺序收集中间表达式节点（去重）。
 
         Returns:
-            nodes: 按发现顺序排列的 intermediate 节点列表。
+            nodes: 子依赖在前、父节点在后的 intermediate 节点列表。
         """
         nodes: List[FactorExpr] = []
         seen: set[tuple] = set()
-        stack: list[FactorExpr] = [self]
 
-        while stack:
-            node = stack.pop()
+        def visit(node: FactorExpr):
             sk = node._structural_key()
             if sk in seen:
-                continue
+                return
             seen.add(sk)
+
+            ops = list(getattr(node, '_operands', ()))
+            for op in ops:
+                visit(op)
 
             if node._is_intermediate:
                 nodes.append(node)
-                # intermediate 的子节点不再展开，将其内部细节隐藏
-                continue
 
-            ops = list(getattr(node, '_operands', ()))
-            for op in reversed(ops):
-                stack.append(op)
+        visit(self)
 
         return nodes
 
@@ -802,6 +847,9 @@ class ColumnRef(FactorExpr):
         return self.column.value
 
     def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         col_to_latex = {
             'O': 'O_t', 'H': 'H_t', 'L': 'L_t', 'C': 'C_t',
             'OA': '\\tilde{O}_t', 'HA': '\\tilde{H}_t',
@@ -878,6 +926,9 @@ class ParamRef(FactorExpr):
 
     def _to_latex(self, subst: dict | None = None) -> str:
         """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
         from tools.parameters import DataColumnParam, FactorParam
         if isinstance(self.param, (DataColumnParam, FactorParam)):
@@ -916,6 +967,9 @@ class ConstExpr(FactorExpr):
         return f"const({self.value})"
 
     def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
         return str(self.value)
 
     def _get_alias(self) -> str:

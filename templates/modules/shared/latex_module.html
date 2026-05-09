@@ -1,8 +1,23 @@
 <!-- 数学公式（始终可见） -->
 {% if math_expr %}
-<div style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;">
+<div id="latex-math-block" style="background:#fafbfc;border-radius:6px;padding:16px;font-size:18px;margin-bottom:10px;text-align:center;overflow:hidden;">
     $$ {{ math_expr }} $$
 </div>
+<script>
+(function() {
+    function fit() {
+        if (window.fitMathJaxToContainer) {
+            window.fitMathJaxToContainer(document.getElementById('latex-math-block'));
+        }
+    }
+    if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
+        window.MathJax.startup.promise.then(fit);
+    } else {
+        setTimeout(fit, 300);
+    }
+    window.addEventListener('resize', fit);
+})();
+</script>
 {% endif %}
 
 <!-- 因子说明摘要行（公式下方） -->

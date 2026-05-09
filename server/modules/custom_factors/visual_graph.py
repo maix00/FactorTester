@@ -14,45 +14,9 @@ from tools.factors.FactorExpr import (
     ParamRef,
     RollingOp,
     ShiftOp,
+    get_visual_composite_key,
+    get_visual_operator_category,
 )
-
-
-_COMPOSITE_KEY = {
-    'add': '+',
-    'sub': '-',
-    'mul': '*',
-    'div': '/',
-    'pow': '**',
-    'gt': '>',
-    'lt': '<',
-    'ge': '>=',
-    'le': '<=',
-    'eq': '==',
-    'ne': '!=',
-    'and': '&',
-    'or': '|',
-    'not': '~',
-    'neg': 'neg',
-    'abs': 'abs',
-    'log': 'log',
-    'sqrt': 'sqrt',
-    'sign': 'sign',
-    'bimax': 'max',
-    'bimin': 'min',
-    'max': 'expr_max',
-    'min': 'expr_min',
-}
-
-_COMPOSITE_CAT = {
-    '~': 'arithUnary',
-    'neg': 'arithUnary',
-    'abs': 'arithUnary',
-    'log': 'arithUnary',
-    'sqrt': 'arithUnary',
-    'sign': 'arithUnary',
-    'expr_max': 'arithVariadic',
-    'expr_min': 'arithVariadic',
-}
 
 
 def factor_expr_to_visual_graph(expr: FactorExpr | None) -> dict[str, Any] | None:
@@ -114,8 +78,8 @@ class _VisualGraphSerializer:
                 self.emit(opnd) for opnd in expr.operands
             ], expr)
         elif isinstance(expr, CompositeExpr):
-            visual_key = _COMPOSITE_KEY.get(expr.op, expr.op)
-            cat = _COMPOSITE_CAT.get(visual_key, 'arithBinary')
+            visual_key = get_visual_composite_key(expr.op)
+            cat = get_visual_operator_category(visual_key, 'arithBinary')
             node_id = self.add_op(visual_key, cat, self._intermediate_label(expr) or visual_key, [
                 self.emit(opnd) for opnd in expr.operands
             ], expr)

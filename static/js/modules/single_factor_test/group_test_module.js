@@ -402,7 +402,13 @@
 
                 // 触发 MathJax 渲染
                 if (window.MathJax && window.MathJax.typesetPromise) {
-                    MathJax.typesetPromise([popup]).catch(function(err) { console.warn('MathJax render error:', err); });
+                    MathJax.typesetPromise([popup])
+                        .then(function() {
+                            if (window.fitMathJaxToContainer) {
+                                window.fitMathJaxToContainer(popup);
+                            }
+                        })
+                        .catch(function(err) { console.warn('MathJax render error:', err); });
                 }
             });
 

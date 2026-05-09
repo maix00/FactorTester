@@ -54,14 +54,18 @@ window.renderDrawerMathAndDesc = function(mathExpr, description, mathBlockEl, de
                 if (window.MathJax.typesetClear) {
                     MathJax.typesetClear([mathBlockEl]);
                 }
-                MathJax.typesetPromise([mathBlockEl]).catch(function() {});
+                MathJax.typesetPromise([mathBlockEl])
+                    .then(function() { fitMathJaxToContainer(mathBlockEl); })
+                    .catch(function() {});
             } else if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise) {
                 // MathJax 已配置但尚未完成初始化（async 加载期间）
                 window.MathJax.startup.promise.then(function() {
                     if (window.MathJax.typesetClear) {
                         MathJax.typesetClear([mathBlockEl]);
                     }
-                    MathJax.typesetPromise([mathBlockEl]).catch(function() {});
+                    MathJax.typesetPromise([mathBlockEl])
+                        .then(function() { fitMathJaxToContainer(mathBlockEl); })
+                        .catch(function() {});
                 });
             } else if (attempts < 20) {
                 setTimeout(typeset, 100);
@@ -69,4 +73,20 @@ window.renderDrawerMathAndDesc = function(mathExpr, description, mathBlockEl, de
         };
         typeset();
     }
+};
+
+window.fitMathJaxToContainer = function(mathBlockEl) {
+    if (!mathBlockEl) return;
+    var math = mathBlockEl.querySelector('mjx-container');
+    if (!math) return;
+    math.style.transform = '';
+    math.style.transformOrigin = 'center top';
+    math.style.display = 'inline-block';
+    mathBlockEl.style.overflow = 'hidden';
+    var available = Math.max(80, mathBlockEl.clientWidth - 8);
+    var width = math.scrollWidth || math.getBoundingClientRect().width;
+    var height = math.scrollHeight || math.getBoundingClientRect().height;
+    var scale = width > available ? available / width : 1;
+    math.style.transform = 'scale(' + scale + ')';
+    mathBlockEl.style.minHeight = scale < 1 ? (height * scale + 8) + 'px' : '';
 };
