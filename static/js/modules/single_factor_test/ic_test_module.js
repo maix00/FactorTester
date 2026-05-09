@@ -956,7 +956,7 @@
         const container = document.getElementById('ic-tab-container');
         if (!container) return;
         if (!submissions || submissions.length === 0) {
-            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">暂无测试器，请先添加测试器。</div>';
+            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px;">请先完成产品类别设置并提交。</div>';
             return;
         }
         // 获取因子列表（如果尚未获取）
