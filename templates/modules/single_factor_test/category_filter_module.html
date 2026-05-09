@@ -15,7 +15,7 @@
 <div class="module" id="category_filter_module" style="margin-top:24px;">
     <div style="display: flex; gap: 24px; flex-wrap: wrap;">
         <!-- 左侧：产品树 -->
-        <div style="flex: 2; min-width: 260px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
+        <div id="category-tree-panel" style="flex: 2; min-width: 260px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
             <div class="section-title" style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">🌳 产品类别筛选</div>
             <div style="margin-bottom: 12px; color: #586069; font-size: 13px;">
                 树状结构，勾选叶子节点或分类后提交
@@ -78,6 +78,7 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
 
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/category_filter_module.js') }}"></script>
 

@@ -10,6 +10,7 @@
     window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var treeInstance = null;
+    var categoryTreeSizer = null;
 
     // 用后端列表同步本地 submissions
     function syncFromServer(serverSubmissions) {
@@ -371,6 +372,27 @@
 
     // 初始化 Fancytree 和 Sortable
     $(function() {
+        if (typeof window.setupResizableTreeContainer === 'function') {
+            categoryTreeSizer = window.setupResizableTreeContainer({
+                outerSelector: '#category-tree-panel',
+                innerSelector: '#tree-container',
+                minWidth: 260,
+                initialWidth: 340,
+                maxWidth: 'min(54vw, 620px)',
+                outerMaxWidth: 'min(58vw, 700px)',
+                desktopMediaQuery: '(max-width: 1200px)',
+                mobileInnerMaxHeight: '400px'
+            });
+        }
+        var drawer = document.getElementById('category-drawer');
+        if (drawer && categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
+            drawer.addEventListener('transitionend', function() {
+                if (drawer.classList.contains('open')) {
+                    categoryTreeSizer.sync();
+                }
+            });
+        }
+
         // 清空容器，确保没有残留内容
         var $container = $("#tree-container");
         $container.empty();  // 移除任何可能存在的占位文字

@@ -183,6 +183,7 @@
 <!-- Fancytree + jQuery -->
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
 
 <script>
 (function() {
@@ -195,8 +196,6 @@
     let currentChart = null;  // Highcharts chart instance
     let currentContracts = []; // 当前主力连续的合约列表
     let highlightedRow = null; // 当前高亮的表格行
-    let treeResizeObserver = null;
-    let syncSidebarWidthFromTree = null;
 
     function escHtml(value) {
         return String(value == null ? '' : value)
@@ -205,59 +204,6 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
-    }
-
-    function initSidebarWidthSync() {
-        var sidebar = document.getElementById('pv-sidebar');
-        var treeContainer = document.getElementById('pv-tree-container');
-        if (!sidebar || !treeContainer) return;
-
-        syncSidebarWidthFromTree = function() {
-            if (window.matchMedia('(max-width: 1024px)').matches) {
-                sidebar.style.width = '';
-                sidebar.style.flexBasis = '';
-                treeContainer.style.width = '';
-                return;
-            }
-
-            var treeStyle = window.getComputedStyle(treeContainer);
-            var treeMin = parseFloat(treeStyle.minWidth) || 260;
-            var treeMax = parseFloat(treeStyle.maxWidth);
-            if (!Number.isFinite(treeMax)) {
-                treeMax = window.innerWidth * 0.62;
-            }
-
-            var treeWidth = treeContainer.getBoundingClientRect().width;
-            var clampedTreeWidth = Math.min(Math.max(treeWidth, treeMin), treeMax);
-            if (Math.abs(clampedTreeWidth - treeWidth) > 0.5) {
-                treeContainer.style.width = Math.round(clampedTreeWidth) + 'px';
-                treeWidth = clampedTreeWidth;
-            }
-
-            var sidebarStyle = window.getComputedStyle(sidebar);
-            var horizontalChrome =
-                (parseFloat(sidebarStyle.paddingLeft) || 0) +
-                (parseFloat(sidebarStyle.paddingRight) || 0) +
-                (parseFloat(sidebarStyle.borderLeftWidth) || 0) +
-                (parseFloat(sidebarStyle.borderRightWidth) || 0);
-            var sidebarWidth = Math.ceil(treeWidth + horizontalChrome);
-
-            sidebar.style.width = sidebarWidth + 'px';
-            sidebar.style.flexBasis = sidebarWidth + 'px';
-        };
-
-        syncSidebarWidthFromTree();
-
-        if (treeResizeObserver) {
-            treeResizeObserver.disconnect();
-            treeResizeObserver = null;
-        }
-        if (window.ResizeObserver) {
-            treeResizeObserver = new ResizeObserver(function() {
-                if (syncSidebarWidthFromTree) syncSidebarWidthFromTree();
-            });
-            treeResizeObserver.observe(treeContainer);
-        }
     }
 
     // ── 合约表格 ────────────────────────────────────────
@@ -356,7 +302,17 @@
     // ── Init ──────────────────────────────────────────────
     async function init() {
         document.getElementById('pv-end-date').value = new Date().toISOString().split('T')[0];
-        initSidebarWidthSync();
+        if (typeof window.setupResizableTreeContainer === 'function') {
+            window.setupResizableTreeContainer({
+                outerSelector: '#pv-sidebar',
+                innerSelector: '#pv-tree-container',
+                minWidth: 260,
+                initialWidth: 340,
+                maxWidth: 'min(62vw, 700px)',
+                outerMaxWidth: 'min(70vw, 760px)',
+                mobileInnerMaxHeight: '38vh'
+            });
+        }
 
         // 加载品种列表用于按名称查找
         try {
@@ -779,7 +735,6 @@
     }
 
     window.addEventListener('resize', function() {
-        if (syncSidebarWidthFromTree) syncSidebarWidthFromTree();
         if (currentChart) currentChart.reflow();
     });
 
