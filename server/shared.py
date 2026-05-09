@@ -783,7 +783,7 @@ def get_factor_main_section_html(factor_family_alias):
         chinese_name = getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or ''
         description = getattr(ff, 'description', '') or ''
         params = ff.params
-        from server.param_meta import serialize_param_meta
+        from server.modules.shared.param_meta import serialize_param_meta
         param_metas = [serialize_param_meta(p) for p in params]
         param_aliases = [p.alias for p in params]
         factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
