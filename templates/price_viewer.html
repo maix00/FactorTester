@@ -22,7 +22,7 @@
         .pv-header .back-link:hover { text-decoration: underline; }
         .pv-layout { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
         .pv-sidebar {
-            width: 280px; min-width: 280px; background: #fff; border: 1px solid #e2e8f0;
+            width: fit-content; min-width: 0; max-width: min(70vw, 760px); flex: 0 0 auto; background: #fff; border: 1px solid #e2e8f0;
             border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             max-height: 100%; overflow: hidden; position: sticky; top: 16px;
             display: flex; flex-direction: column; min-height: 0; box-sizing: border-box;
@@ -61,6 +61,49 @@
         #pv-contract-table .contract-name-muted { color: #8a94a6; }
         #pv-contract-table tbody tr:hover { background: rgba(255,165,0,0.08); }
         /* Fancytree 内 product-node 突出显示 */
+        #pv-tree-container {
+            width: 340px;
+            min-width: 260px;
+            max-width: min(62vw, 700px);
+            box-sizing: border-box;
+            resize: horizontal;
+            overflow-x: auto;
+            overflow-y: auto;
+        }
+        #pv-tree-container > ul.ui-fancytree.fancytree-container {
+            display: block;
+            width: 100% !important;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            margin: 0;
+        }
+        #pv-tree-container .fancytree-title {
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        #pv-tree-container .node-description {
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        @media (max-width: 1024px) {
+            .pv-layout { flex-direction: column; }
+            .pv-sidebar {
+                width: 100%;
+                min-width: 0;
+                flex: 0 0 auto;
+                position: static;
+                max-height: none;
+            }
+            #pv-tree-container {
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+                resize: none;
+                max-height: 38vh;
+            }
+        }
         .fancytree-container .product-node .fancytree-title { color: #0078d4; font-weight: 600; }
         .fancytree-container .disabled-contract-node .fancytree-title { color: #8a94a6; font-weight: 500; }
         .fancytree-container .product-node.active .fancytree-title { background: #dbeafe; border-radius: 4px; padding: 1px 4px; }
@@ -82,7 +125,7 @@
                 树状结构，点击叶子节点查看价格
             </div>
             <!-- Fancytree 容器 -->
-            <div id="pv-tree-container" style="flex:1 1 auto; min-height:0; overflow-y:auto; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
+            <div id="pv-tree-container" style="flex:1 1 auto; min-height:0; box-sizing:border-box; overflow:auto; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
         </div>
 
         <!-- 右侧图表区 -->
@@ -152,6 +195,8 @@
     let currentChart = null;  // Highcharts chart instance
     let currentContracts = []; // 当前主力连续的合约列表
     let highlightedRow = null; // 当前高亮的表格行
+    let treeResizeObserver = null;
+    let syncSidebarWidthFromTree = null;
 
     function escHtml(value) {
         return String(value == null ? '' : value)
@@ -160,6 +205,59 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function initSidebarWidthSync() {
+        var sidebar = document.getElementById('pv-sidebar');
+        var treeContainer = document.getElementById('pv-tree-container');
+        if (!sidebar || !treeContainer) return;
+
+        syncSidebarWidthFromTree = function() {
+            if (window.matchMedia('(max-width: 1024px)').matches) {
+                sidebar.style.width = '';
+                sidebar.style.flexBasis = '';
+                treeContainer.style.width = '';
+                return;
+            }
+
+            var treeStyle = window.getComputedStyle(treeContainer);
+            var treeMin = parseFloat(treeStyle.minWidth) || 260;
+            var treeMax = parseFloat(treeStyle.maxWidth);
+            if (!Number.isFinite(treeMax)) {
+                treeMax = window.innerWidth * 0.62;
+            }
+
+            var treeWidth = treeContainer.getBoundingClientRect().width;
+            var clampedTreeWidth = Math.min(Math.max(treeWidth, treeMin), treeMax);
+            if (Math.abs(clampedTreeWidth - treeWidth) > 0.5) {
+                treeContainer.style.width = Math.round(clampedTreeWidth) + 'px';
+                treeWidth = clampedTreeWidth;
+            }
+
+            var sidebarStyle = window.getComputedStyle(sidebar);
+            var horizontalChrome =
+                (parseFloat(sidebarStyle.paddingLeft) || 0) +
+                (parseFloat(sidebarStyle.paddingRight) || 0) +
+                (parseFloat(sidebarStyle.borderLeftWidth) || 0) +
+                (parseFloat(sidebarStyle.borderRightWidth) || 0);
+            var sidebarWidth = Math.ceil(treeWidth + horizontalChrome);
+
+            sidebar.style.width = sidebarWidth + 'px';
+            sidebar.style.flexBasis = sidebarWidth + 'px';
+        };
+
+        syncSidebarWidthFromTree();
+
+        if (treeResizeObserver) {
+            treeResizeObserver.disconnect();
+            treeResizeObserver = null;
+        }
+        if (window.ResizeObserver) {
+            treeResizeObserver = new ResizeObserver(function() {
+                if (syncSidebarWidthFromTree) syncSidebarWidthFromTree();
+            });
+            treeResizeObserver.observe(treeContainer);
+        }
     }
 
     // ── 合约表格 ────────────────────────────────────────
@@ -258,6 +356,7 @@
     // ── Init ──────────────────────────────────────────────
     async function init() {
         document.getElementById('pv-end-date').value = new Date().toISOString().split('T')[0];
+        initSidebarWidthSync();
 
         // 加载品种列表用于按名称查找
         try {
@@ -680,6 +779,7 @@
     }
 
     window.addEventListener('resize', function() {
+        if (syncSidebarWidthFromTree) syncSidebarWidthFromTree();
         if (currentChart) currentChart.reflow();
     });
 
