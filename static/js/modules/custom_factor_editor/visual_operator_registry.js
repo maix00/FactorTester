@@ -3,9 +3,9 @@
 let _visualOperatorGroups = [];
 let OP_PALETTE = {
     leaf: [
-        { key: 'DataColumnParam', label: '参数', desc: '数据列/窗口/时间参数', arity: 0 },
-        { key: 'FactorFreqParam', label: '$F', desc: '系统参数：因子信号频率', arity: 0 },
-        { key: 'Constant', label: '常数', desc: '数值常量', arity: 0 },
+        { key: 'DataColumnParam', label: '参数', symbol: 'P', desc: '数据列/窗口/时间参数', arity: 0 },
+        { key: 'FactorFreqParam', label: '系统频率', symbol: '$F', desc: '系统参数：因子信号频率', arity: 0 },
+        { key: 'Constant', label: '常数', symbol: '1', desc: '数值常量', arity: 0 },
     ],
     ts: [
         { key: 'rolling_mean', label: '均值', desc: 'X.rolling_mean(N)', arity: 2 },
@@ -76,7 +76,9 @@ function renderPalette() {
 function renderVisualOperatorBlocks(cat, ops) {
     return (ops || []).map(op => `<div class="op-block ${cat}" draggable="true"
         data-op-key="${escHtml(op.key)}" data-op-cat="${escHtml(cat)}" ondragstart="onOpDragStart(event)">
-        <strong>${escHtml(op.label)}</strong><div class="op-desc">${escHtml(op.desc)}</div>
+        <strong>${escHtml(op.key)}</strong>
+        <div class="op-symbol">${escHtml(op.symbol || op.label || op.key)}</div>
+        <div class="op-desc">${escHtml(op.desc)}</div>
     </div>`).join('');
 }
 

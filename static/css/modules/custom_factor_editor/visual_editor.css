@@ -31,6 +31,11 @@
 .op-block.arith, .op-block.arithAdvanced, .op-block.compare { border-left: 3px solid #8b5cf6; }
 .op-block.unary, .op-block.unaryAdvanced { border-left: 3px solid #0ea5e9; }
 .op-block .op-desc { font-size: 11px; color: #aaa; margin-top: 1px; }
+.op-block .op-symbol {
+    display: inline-flex; margin-top: 3px; padding: 1px 6px; border-radius: 999px;
+    background: #f1f5f9; color: #475467; font-family: 'SF Mono','Fira Code',monospace;
+    font-size: 11px;
+}
 
 .visual-canvas-wrap {
     flex: 1; overflow: auto; position: relative;

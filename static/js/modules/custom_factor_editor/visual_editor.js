@@ -239,7 +239,6 @@ function selectVisNode(nodeId) {
         arithUnary: '算数一元',
         arithBinary: '算数二元',
         arithVariadic: '算数多元',
-        arithTernary: '算数三元',
         output: '输出',
     };
     const labelEditor = isVisualParamNode(node) || node.key === 'Constant'
@@ -393,7 +392,8 @@ function getVisualNodeSubtitle(node) {
 
 function getVisualOperatorDisplayName(node) {
     const def = getVisualOperatorDef(node);
-    return def?.label && def.label !== node.label ? `${def.label} (${node.key})` : node.key;
+    const symbol = def?.symbol || def?.label || '';
+    return symbol && symbol !== node.key ? `${node.key} / ${symbol}` : node.key;
 }
 
 function renderVisualNodeSlots(node) {
