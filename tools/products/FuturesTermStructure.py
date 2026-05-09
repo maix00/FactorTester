@@ -13,7 +13,7 @@ Each row represents one tradable contract for one product on one trading day.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, cast
 
 import pandas as pd
 
@@ -44,7 +44,7 @@ class FuturesTermStructureStore:
         if product:
             filters.append((TERM_PRODUCT_COL, '==', product))
         if trading_day is not None:
-            day = pd.Timestamp(trading_day).normalize()
+            day = cast(pd.Timestamp, pd.Timestamp(trading_day)).normalize()
             filters.append((TERM_TRADING_DAY_COL, '==', day))
         kwargs = {}
         if filters:
@@ -78,12 +78,12 @@ class FuturesTermStructureMixin:
     def get_term_structure_store(self) -> FuturesTermStructureStore:
         path = self.get_term_structure_path()
         if not path:
-            raise ValueError(f"term_structure_path not set for {self.name}")
+            raise ValueError(f"term_structure_path not set for {getattr(self, 'name', type(self).__name__)}")
         return FuturesTermStructureStore(path)
 
     def get_term_structure(self, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
         """Return contracts for this product/date ordered by maturity."""
-        return self.get_term_structure_store().contract_pool(self.name, trading_day, depth=depth)
+        return self.get_term_structure_store().contract_pool(getattr(self, 'name'), trading_day, depth=depth)
 
     def get_term_structure_contracts(self, trading_day: Any, depth: Optional[int] = None) -> List[Any]:
         """Return contract objects for this product/date ordered by maturity."""
@@ -123,6 +123,6 @@ class FuturesTermStructureMixin:
         df = df[[TERM_DAYS_TO_MATURITY_COL, column]].dropna()
         if len(df) < 2:
             return float('nan')
-        x = df[TERM_DAYS_TO_MATURITY_COL].to_numpy(dtype=float)
-        y = df[column].to_numpy(dtype=float)
+        x = pd.Series(df[TERM_DAYS_TO_MATURITY_COL]).to_numpy(dtype=float)
+        y = pd.Series(df[column]).to_numpy(dtype=float)
         return float(np.polyfit(x, y, 1)[0])

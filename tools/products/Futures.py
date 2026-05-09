@@ -7,7 +7,7 @@ Futures 通过 roller_info 表维护「历史交易日 → 对应主办合约」
 roller_info 的闲置释放由 tools.base.IdleResourceManager 统一管理。
 """
 import pandas as pd
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
 from datetime import datetime
 
 from tools.products.Product import Product
@@ -77,7 +77,7 @@ class Futures(FuturesTermStructureMixin, Product):
         ri['ENDDATE'] = pd.to_datetime(ri['ENDDATE'])
 
         # 切片：只保留当前品种
-        subset = ri[ri['PRODUCT'] == self.name].sort_values(by='STARTDATE')
+        subset = cast(pd.DataFrame, ri[ri['PRODUCT'] == self.name]).sort_values(by=['STARTDATE'])
         self.roller_info = subset if not subset.empty else None
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
@@ -156,7 +156,8 @@ class Futures(FuturesTermStructureMixin, Product):
         self._ensure_roller_info()
         if self.roller_info is None:
             return []
-        idx = int(self.roller_info.index.get_loc(row.name))
+        loc = self.roller_info.index.get_loc(row.name)
+        idx = int(loc.start if isinstance(loc, slice) else loc[0] if hasattr(loc, '__len__') else loc)
         rows = self.roller_info.iloc[idx:idx + max(1, int(n))]
         contracts = []
         for _, r in rows.iterrows():

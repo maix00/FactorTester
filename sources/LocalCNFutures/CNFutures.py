@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, cast
 import pandas as pd
 import os
 from tools.products.Futures import Futures, FuturesContract
@@ -79,7 +79,7 @@ def _infer_unique_version(code: str, exchange_short: Optional[str] = None) -> Op
     if exchange_short is not None:
         exch = exchange_map_reversed.get(exchange_short, exchange_short)
         df = df[df[exchange_code_col_name].astype(str) == str(exch)]
-    versions = sorted(set(df[version_col_name].dropna().astype(str)))
+    versions = sorted(set(pd.Series(df[version_col_name]).dropna().astype(str)))
     return versions[0] if len(versions) == 1 else None
 
 def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str | None:
@@ -227,11 +227,11 @@ def get_all_futures() -> List[CNFutures]:
 
     cnfutures_list = []
     for _, row in _data.iterrows():
-        code = row[code_col_name]
-        exchange = row[exchange_code_col_name]
-        exchange = exchange_map.get(exchange, exchange)
+        code = str(row[code_col_name])
+        exchange_raw = str(row[exchange_code_col_name])
+        exchange = exchange_map.get(exchange_raw, exchange_raw)
         version = str(row[version_col_name])
-        key = f"{code}|{row[exchange_code_col_name]}"
+        key = f"{code}|{exchange_raw}"
         if version_count.get(key, 0) <= 1:
             name = f"{code}.{exchange}"
         else:

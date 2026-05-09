@@ -8,6 +8,7 @@
 import os
 import traceback
 from functools import lru_cache
+from typing import Any
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
@@ -54,6 +55,17 @@ def _contract_data_path(contract_uid: str) -> str:
 
 def _contract_has_data(contract_uid: str) -> bool:
     return os.path.isfile(_contract_data_path(contract_uid))
+
+
+def _scalar(value: Any) -> Any:
+    return value.item() if hasattr(value, 'item') else value
+
+
+def _timestamp_or_none(value: Any) -> pd.Timestamp | None:
+    value = _scalar(value)
+    if pd.isna(value):
+        return None
+    return pd.Timestamp(value)
 
 
 @shared_bp.route('/api/list_product_names')
@@ -287,16 +299,17 @@ def get_contracts():
 
         contracts = []
         for _, row in subset.iterrows():
-            start = row['STARTDATE']
-            end = row['ENDDATE']
+            start = _timestamp_or_none(row['STARTDATE'])
+            end = _timestamp_or_none(row['ENDDATE'])
+            uid = str(_scalar(row['CONTRACT_UID']))
             contracts.append({
-                'contract': row['CONTRACT'],
-                'uid': row['CONTRACT_UID'],
-                'has_data': _contract_has_data(row['CONTRACT_UID']),
-                'start': start.strftime('%Y-%m-%d') if pd.notna(start) else None,
-                'end': end.strftime('%Y-%m-%d') if pd.notna(end) else None,
-                'start_ts': int(start.timestamp() * 1000) if pd.notna(start) else None,
-                'end_ts': int(end.timestamp() * 1000) if pd.notna(end) else None,
+                'contract': str(_scalar(row['CONTRACT'])),
+                'uid': uid,
+                'has_data': _contract_has_data(uid),
+                'start': start.strftime('%Y-%m-%d') if start is not None else None,
+                'end': end.strftime('%Y-%m-%d') if end is not None else None,
+                'start_ts': int(start.timestamp() * 1000) if start is not None else None,
+                'end_ts': int(end.timestamp() * 1000) if end is not None else None,
             })
 
         return jsonify({'success': True, 'product': product_name, 'contracts': contracts})
@@ -391,13 +404,9 @@ def get_price_data():
 
             result_data = []
             for _, row in price_df.iterrows():
-                ts = row[time_col]
-                if hasattr(ts, 'strftime'):
-                    time_str = ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
-                    timestamp_ms = int(ts.timestamp() * 1000)
-                else:
-                    time_str = str(ts)
-                    timestamp_ms = int(pd.Timestamp(ts).timestamp() * 1000)
+                ts = pd.Timestamp(_scalar(row[time_col]))
+                time_str = ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
+                timestamp_ms = int(ts.timestamp() * 1000)
 
                 entry = {'time': time_str, 'timestamp': timestamp_ms}
 
@@ -571,13 +580,14 @@ def get_price_data():
             ri = product.roller_info
             if ri is not None:
                 for _, r in ri.iterrows():
-                    s, e = r['STARTDATE'], r['ENDDATE']
+                    s, e = _timestamp_or_none(r['STARTDATE']), _timestamp_or_none(r['ENDDATE'])
+                    uid = str(_scalar(r['CONTRACT_UID']))
                     contracts.append({
-                        'contract': r['CONTRACT'],
-                        'uid': r['CONTRACT_UID'],
-                        'has_data': _contract_has_data(r['CONTRACT_UID']),
-                        'start_ts': int(s.timestamp() * 1000) if pd.notna(s) else None,
-                        'end_ts': int(e.timestamp() * 1000) if pd.notna(e) else None,
+                        'contract': str(_scalar(r['CONTRACT'])),
+                        'uid': uid,
+                        'has_data': _contract_has_data(uid),
+                        'start_ts': int(s.timestamp() * 1000) if s is not None else None,
+                        'end_ts': int(e.timestamp() * 1000) if e is not None else None,
                     })
         except Exception:
             pass
