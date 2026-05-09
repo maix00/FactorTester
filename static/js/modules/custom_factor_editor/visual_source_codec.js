@@ -99,6 +99,11 @@ function isVisualParamNode(node) {
     return node?.key === 'DataColumnParam' || node?.key === 'FactorFreqParam';
 }
 
+function isVisualFactorParamNode(node) {
+    const type = getVisualParamType(node);
+    return node?.key === 'FactorFreqParam' || VIS_FACTOR_PARAM_TYPES.includes(type);
+}
+
 function getVisualParamAlias(node) {
     return node?.params?.alias || node?.label || 'P';
 }
@@ -106,6 +111,14 @@ function getVisualParamAlias(node) {
 function getVisualParamVariableName(node) {
     const alias = getVisualParamAlias(node);
     return String(alias).replace(/^\$/, '') || 'P';
+}
+
+function getVisualParamType(node) {
+    const alias = getVisualParamAlias(node);
+    if (alias === '$F') return 'FactorFreqParam';
+    if (alias === '$RF') return 'ReturnFreqParam';
+    if (alias === '$Rev') return 'ReverseParam';
+    return node?.params?.type || node?.key || 'DataColumnParam';
 }
 
 function visualToSource(options = {}) {
@@ -117,7 +130,7 @@ function visualToSource(options = {}) {
     }
     const className = document.getElementById('cfg-name-vis')?.value?.trim() || extractClassNameFromSource(_visSourceFallback) || 'MyFactor';
     const paramNodes = _visNodes.filter(isVisualParamNode);
-    const paramTypes = [...new Set(paramNodes.map(n => n.params?.type || 'DataColumnParam'))];
+    const paramTypes = [...new Set(paramNodes.map(getVisualParamType))];
     const factorParamTypes = paramTypes.filter(t => VIS_FACTOR_PARAM_TYPES.includes(t));
     const regularParamTypes = paramTypes.filter(t => !VIS_FACTOR_PARAM_TYPES.includes(t));
     const factorImports = ['FactorFamily', ...factorParamTypes];
@@ -140,8 +153,11 @@ function visualToSource(options = {}) {
     const paramLines = uniqueParamNodes.map(n => {
         const alias = getVisualParamAlias(n);
         const varName = getVisualParamVariableName(n);
-        const type = n.params?.type || 'DataColumnParam';
+        const type = getVisualParamType(n);
         const dv = n.params?.default_value || '';
+        if (isVisualFactorParamNode(n)) {
+            return `        ${varName} = ${type}`;
+        }
         if (n.params?.has_default_value === false) {
             return `        ${varName} = ${type}('${alias}')`;
         }
@@ -573,6 +589,16 @@ function parseParamNodesFromSource(source) {
             variable_name: match[1] || '',
             type: match[2],
             ...extractParamDefaultValue(match[4]),
+        });
+    }
+    const factorRegex = /^\s*(\w+)\s*=\s*(FactorFreqParam|ReturnFreqParam|ReverseParam)\s*$/gm;
+    while ((match = factorRegex.exec(body)) !== null) {
+        params.push({
+            alias: match[2] === 'FactorFreqParam' ? '$F' : (match[2] === 'ReturnFreqParam' ? '$RF' : '$Rev'),
+            variable_name: match[1] || '',
+            type: match[2],
+            default_value: '',
+            has_default_value: false,
         });
     }
     return params;

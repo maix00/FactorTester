@@ -131,9 +131,9 @@ class _VisualGraphSerializer:
 
     def add_param_ref(self, expr: ParamRef) -> int:
         param = expr.param
-        param_type = type(param).__name__
         alias = getattr(param, 'alias', '') or 'P'
-        key = 'FactorFreqParam' if param_type == 'FactorFreqParam' or alias == '$F' else 'DataColumnParam'
+        param_type = _visual_param_type(param)
+        key = 'FactorFreqParam' if param_type == 'FactorFreqParam' else 'DataColumnParam'
         default_value = _serialize_param_default(param)
         return self.add_node(
             key=key,
@@ -226,6 +226,17 @@ def _serialize_param_default(param: Any) -> str:
         if isinstance(value, DataColumn):
             return value.value
         return str(value)
+
+
+def _visual_param_type(param: Any) -> str:
+    alias = getattr(param, 'alias', '') or ''
+    if alias == '$F':
+        return 'FactorFreqParam'
+    if alias == '$RF':
+        return 'ReturnFreqParam'
+    if alias == '$Rev':
+        return 'ReverseParam'
+    return type(param).__name__
 
 
 def _python_literal(value: Any) -> str:

@@ -559,22 +559,23 @@ function extractClassNameFromSource(source) {
 async function switchMode(mode) {
     if (document.getElementById('editor-footer')?.style.display === 'none') return;
     if (mode === _currentMode) return;
+    let beforeValidation = null;
     if (mode === 'visual' && _currentMode === 'code') {
-        const ok = await validateCustomExpr(
+        beforeValidation = await validateCustomExpr(
             extractClassNameFromSource(document.getElementById('code-source')?.value || '') || _currentFactorFamilyId || '',
-            {silentTree: true}
+            {silentTree: true, returnData: true}
         );
-        if (!ok) {
+        if (!beforeValidation?.valid) {
             showToast('源码校验未通过，暂不能转为可视化', 'error');
             return;
         }
     }
     if (mode === 'code' && _currentMode === 'visual') {
-        const ok = await validateCustomExpr(
+        beforeValidation = await validateCustomExpr(
             document.getElementById('cfg-name-vis')?.value?.trim() || _currentFactorFamilyId || '',
-            {silentTree: true}
+            {silentTree: true, returnData: true}
         );
-        if (!ok) {
+        if (!beforeValidation?.valid) {
             showToast('可视化表达式校验未通过，暂不能转为代码', 'error');
             return;
         }
@@ -586,6 +587,7 @@ async function switchMode(mode) {
     if (draft.source_code || mode === 'visual') {
         if (mode === 'code') renderCodeEditor(draft);
         else renderVisualEditor(draft);
+        await verifyModeSwitchTreeConsistency(beforeValidation, mode);
         return;
     }
     if (_currentFactorFamilyId && _currentFactorFamilySource === 'custom') {
@@ -593,10 +595,30 @@ async function switchMode(mode) {
         if (factor) {
             if (mode === 'code') renderCodeEditor(factor);
             else renderVisualEditor(factor);
+            await verifyModeSwitchTreeConsistency(beforeValidation, mode);
             return;
         }
     }
     if (_isNew) createNew();
+}
+
+async function verifyModeSwitchTreeConsistency(beforeValidation, mode) {
+    if (!beforeValidation?.valid) return;
+    const factorName = mode === 'code'
+        ? extractClassNameFromSource(document.getElementById('code-source')?.value || '') || _currentFactorFamilyId || ''
+        : document.getElementById('cfg-name-vis')?.value?.trim() || _currentFactorFamilyId || '';
+    const afterValidation = await validateCustomExpr(factorName, {silentTree: true, returnData: true});
+    if (!afterValidation?.valid) {
+        showToast('切换后表达式树校验失败，请检查生成代码', 'error');
+        return;
+    }
+    if (normalizeTreeRepr(beforeValidation.tree_repr) !== normalizeTreeRepr(afterValidation.tree_repr)) {
+        showToast('切换前后表达式树不一致，请检查自动转换结果', 'error');
+    }
+}
+
+function normalizeTreeRepr(treeRepr) {
+    return String(treeRepr || '').replace(/\s+/g, '');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1129,17 +1151,20 @@ async function validateCustomExpr(factorName, options = {}) {
             if (options.openParamsOnSuccess) {
                 openValidatedParamDrawer();
             }
+            if (options.returnData) return data;
             return true;
         } else {
             btn.textContent = '✗ ' + (data.error || '无效');
             btn.className = 'btn-validate err';
             invalidateCodeValidation();
+            if (options.returnData) return data;
             return false;
         }
     } catch(e) {
         btn.textContent = '校验失败';
         btn.className = 'btn-validate err';
         invalidateCodeValidation();
+        if (options.returnData) return {valid: false, error: '校验失败'};
         return false;
     }
 }

@@ -13,6 +13,11 @@ let _visLastGeneratedSource = '';
 let _visGraphSnapshot = null;
 let _visGraphSnapshotSource = '';
 let _visGraphSnapshotNormalizedSource = '';
+const VIS_HISTORY_LIMIT = 100;
+let _visUndoStack = [];
+let _visRedoStack = [];
+let _visHistoryRestoring = false;
+let _visHistoryKeydownBound = false;
 
 function renderVisualEditor(factor) {
     const previousMode = _currentMode;
@@ -35,6 +40,7 @@ function renderVisualEditor(factor) {
             && _validatedSourceSnapshot === _visSourceFallback
             && loadVisualNodesFromGraph(_validatedVisualGraph, _visSourceFallback);
         if (!graphLoaded) loadVisualNodesFromSource(_visSourceFallback);
+        resetVisualHistory();
         renderVisualEditor._lastSource = _visSourceFallback;
     }
 
@@ -69,6 +75,10 @@ function renderVisualEditor(factor) {
                 </div>
                 <div style="margin-top:12px;">
                     <button class="btn-validate" onclick="visualToExpr()" style="width:100%">生成表达式</button>
+                    <div style="display:flex; gap:8px; margin-top:8px;">
+                        <button class="btn-validate" onclick="undoVisualHistory()" style="flex:1;">撤回</button>
+                        <button class="btn-validate" onclick="redoVisualHistory()" style="flex:1;">反撤回</button>
+                    </div>
                     <button class="btn-validate" onclick="autoLayoutVisualNodes()" style="width:100%; margin-top:8px;">自动整理</button>
                 </div>
                 <div style="margin-top:8px;font-size:12px;color:#888;" id="visual-expr-preview"></div>
@@ -78,6 +88,7 @@ function renderVisualEditor(factor) {
     `;
 
     initPaletteDrag();
+    bindVisualHistoryShortcuts();
     layoutVisualExpressionTree();
     renderAllVisNodes();
     requestAnimationFrame(() => {
@@ -98,6 +109,7 @@ function onCanvasDrop(e) {
     const x = e.clientX - rect.left + wrap.scrollLeft - 50;
     const y = e.clientY - rect.top + wrap.scrollTop - 18;
     const params = defaultVisualNodeParams(op);
+    recordVisualHistory();
     const node = {
         id: _visNextId++,
         key: op.key,
@@ -167,7 +179,15 @@ function onVisNodeMouseDown(e, nodeId) {
     e.stopPropagation();
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
-    _visDragging = { nodeId, startX: node.x, startY: node.y, mouseX: e.clientX, mouseY: e.clientY };
+    _visDragging = {
+        nodeId,
+        startX: node.x,
+        startY: node.y,
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        moved: false,
+        snapshot: createVisualHistorySnapshot(),
+    };
     document.addEventListener('mousemove', onVisMouseMove);
     document.addEventListener('mouseup', onVisMouseUp);
 }
@@ -178,11 +198,15 @@ function onVisMouseMove(e) {
     if (!node) return;
     node.x = Math.max(0, _visDragging.startX + e.clientX - _visDragging.mouseX);
     node.y = Math.max(0, _visDragging.startY + e.clientY - _visDragging.mouseY);
+    _visDragging.moved = true;
     renderAllVisNodes();
     _dirty = true;
 }
 
 function onVisMouseUp() {
+    if (_visDragging?.moved) {
+        pushVisualHistorySnapshot(_visDragging.snapshot);
+    }
     _visDragging = null;
     document.removeEventListener('mousemove', onVisMouseMove);
     document.removeEventListener('mouseup', onVisMouseUp);
@@ -221,6 +245,7 @@ function selectVisNode(nodeId) {
 function updateVisNodeLabel(nodeId, newLabel) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
+    recordVisualHistory();
     node.label = newLabel;
     if (node.key === 'DataColumnParam') node.params.alias = newLabel;
     if (node.key === 'Constant') node.params.name = newLabel;
@@ -254,6 +279,7 @@ function completeVisualConnection(toNodeId, inputIndex) {
     }
     const target = _visNodes.find(n => n.id === toNodeId);
     if (!target) return;
+    recordVisualHistory();
     target.inputs = target.inputs || [];
     target.inputs[inputIndex] = fromNodeId;
     _visPendingConnection = null;
@@ -282,6 +308,7 @@ function wouldCreateVisualCycle(fromNodeId, toNodeId) {
 }
 
 function deleteVisNode(nodeId) {
+    recordVisualHistory();
     _visNodes = _visNodes.filter(n => n.id !== nodeId);
     _visNodes.forEach(node => {
         node.inputs = (node.inputs || []).map(id => id === nodeId ? null : id);
@@ -297,6 +324,7 @@ function deleteVisNode(nodeId) {
 function duplicateVisNode(nodeId) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node || node.key === 'Return') return;
+    recordVisualHistory();
     const cloneId = cloneVisualNodeTree(node.id, 28, 28);
     _dirty = true;
     _visGraphDirty = true;
@@ -445,6 +473,7 @@ function renderVisualNodeParamControls(node) {
 function updateVisualNodeInput(nodeId, index, value) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
+    recordVisualHistory();
     node.inputs = node.inputs || [];
     node.inputs[index] = value ? Number(value) : null;
     _dirty = true;
@@ -457,6 +486,7 @@ function updateVisualNodeInput(nodeId, index, value) {
 function disconnectVisualInput(nodeId, index) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
+    recordVisualHistory();
     node.inputs = node.inputs || [];
     node.inputs[index] = null;
     _dirty = true;
@@ -468,6 +498,7 @@ function disconnectVisualInput(nodeId, index) {
 }
 
 function autoLayoutVisualNodes() {
+    recordVisualHistory();
     layoutVisualExpressionTree({measure: true});
     renderAllVisNodes();
     requestAnimationFrame(() => {
@@ -480,6 +511,7 @@ function autoLayoutVisualNodes() {
 function updateVisualParam(nodeId, key, value) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
+    recordVisualHistory();
     node.params = node.params || {};
     node.params[key] = value;
     if (key === 'alias' || key === 'name') node.label = value || (node.key === 'Constant' ? 'Constant' : node.label);
@@ -529,6 +561,98 @@ function ensureReturnNode(inputId = null) {
     };
     _visNodes.push(node);
     return node.id;
+}
+
+function createVisualHistorySnapshot() {
+    return {
+        nodes: JSON.parse(JSON.stringify(_visNodes || [])),
+        nextId: _visNextId,
+        selectedNodeId: _visSelectedNodeId,
+        graphDirty: _visGraphDirty,
+    };
+}
+
+function recordVisualHistory() {
+    if (_visHistoryRestoring) return;
+    pushVisualHistorySnapshot(createVisualHistorySnapshot());
+}
+
+function pushVisualHistorySnapshot(snapshot) {
+    if (!snapshot || _visHistoryRestoring) return;
+    _visUndoStack.push(snapshot);
+    if (_visUndoStack.length > VIS_HISTORY_LIMIT) {
+        _visUndoStack.splice(0, _visUndoStack.length - VIS_HISTORY_LIMIT);
+    }
+    _visRedoStack = [];
+}
+
+function resetVisualHistory() {
+    _visUndoStack = [];
+    _visRedoStack = [];
+}
+
+function restoreVisualHistorySnapshot(snapshot) {
+    if (!snapshot) return;
+    _visHistoryRestoring = true;
+    _visNodes = JSON.parse(JSON.stringify(snapshot.nodes || []));
+    _visNextId = snapshot.nextId || inferNextVisualNodeId();
+    _visSelectedNodeId = snapshot.selectedNodeId || null;
+    _visGraphDirty = snapshot.graphDirty !== false;
+    _visPendingConnection = null;
+    _dirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    if (_visSelectedNodeId) {
+        selectVisNode(_visSelectedNodeId);
+    } else {
+        const props = document.getElementById('node-props');
+        if (props) props.innerHTML = '<span style="color:#888;">点击画布上的节点查看属性</span>';
+    }
+    updateVisualExprPreview();
+    _visHistoryRestoring = false;
+}
+
+function undoVisualHistory() {
+    if (!_visUndoStack.length) return;
+    const current = createVisualHistorySnapshot();
+    const previous = _visUndoStack.pop();
+    _visRedoStack.push(current);
+    if (_visRedoStack.length > VIS_HISTORY_LIMIT) {
+        _visRedoStack.splice(0, _visRedoStack.length - VIS_HISTORY_LIMIT);
+    }
+    restoreVisualHistorySnapshot(previous);
+}
+
+function redoVisualHistory() {
+    if (!_visRedoStack.length) return;
+    const current = createVisualHistorySnapshot();
+    const next = _visRedoStack.pop();
+    _visUndoStack.push(current);
+    if (_visUndoStack.length > VIS_HISTORY_LIMIT) {
+        _visUndoStack.splice(0, _visUndoStack.length - VIS_HISTORY_LIMIT);
+    }
+    restoreVisualHistorySnapshot(next);
+}
+
+function bindVisualHistoryShortcuts() {
+    if (_visHistoryKeydownBound) return;
+    _visHistoryKeydownBound = true;
+    document.addEventListener('keydown', function(event) {
+        if (_currentMode !== 'visual') return;
+        if (isVisualHistoryNativeUndoTarget(event.target)) return;
+        const isUndo = (event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'z';
+        const isRedo = (event.metaKey || event.ctrlKey)
+            && ((event.shiftKey && event.key.toLowerCase() === 'z') || event.key.toLowerCase() === 'y');
+        if (!isUndo && !isRedo) return;
+        event.preventDefault();
+        if (isUndo) undoVisualHistory();
+        else redoVisualHistory();
+    });
+}
+
+function isVisualHistoryNativeUndoTarget(target) {
+    const tag = String(target?.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
 }
 
 function isVisualNodeComplete(nodeId, seen) {

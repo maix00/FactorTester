@@ -7,7 +7,7 @@
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.factors import FactorFamily
+from tools.factors import FactorFamily, FactorFreqParam
 from tools.parameters import DataColumnParam, WindowParam
 
 
@@ -19,10 +19,11 @@ class Mm(FactorFamily):
     def factor_expr():
         H = DataColumnParam('H', default_value='HA')
         L = DataColumnParam('L', default_value='LA')
-        HighPos = (H.rolling_argmax('$F')).as_intermediate('HighPos')
-        LowPos = (L.rolling_argmin('$F')).as_intermediate('LowPos')
-        HighVal = (H.rolling_max('$F')).as_intermediate('HighVal')
-        LowVal = (L.rolling_min('$F')).as_intermediate('LowVal')
+        F = FactorFreqParam
+        HighPos = (H.rolling_argmax(F)).as_intermediate('HighPos')
+        LowPos = (L.rolling_argmin(F)).as_intermediate('LowPos')
+        HighVal = (H.rolling_max(F)).as_intermediate('HighVal')
+        LowVal = (L.rolling_min(F)).as_intermediate('LowVal')
         DropRatio = ((HighVal - LowVal) / (HighVal + 1e-10)).as_intermediate('DropRatio')
         UpRatio = ((HighVal - LowVal) / (LowVal + 1e-10)).as_intermediate('UpRatio')
         LowFirst = (HighPos > LowPos).as_intermediate('LowFirst')
