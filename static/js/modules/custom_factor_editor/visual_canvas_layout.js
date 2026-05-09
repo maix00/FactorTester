@@ -124,7 +124,7 @@ function estimateVisualNodeSize(node, options = {}) {
         }
     }
     const slots = getVisualSlotLabels(node).length;
-    const hasIntermediate = !!node.params?.intermediate_name;
+    const hasIntermediate = !!getVisualUserIntermediateName(node);
     return {
         width: 190,
         height: 72 + slots * 30 + (hasIntermediate ? 26 : 0),

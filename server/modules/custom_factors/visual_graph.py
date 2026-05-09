@@ -179,6 +179,8 @@ class _VisualGraphSerializer:
         intermediate = self._intermediate_label(expr)
         if intermediate:
             params['intermediate_name'] = intermediate
+            params['intermediate_user_defined'] = True
+            params['intermediate_from_factor_expr'] = True
             label = intermediate
         return self.add_node(key=key, cat=cat, label=label, inputs=[i for i in inputs if i], params=params)
 

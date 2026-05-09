@@ -150,7 +150,7 @@ function renderAllVisNodes() {
                 <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
             </div>
             ${renderVisualSharedLeafBadge(node)}
-            ${node.params?.intermediate_name ? `<div class="node-intermediate-badge">中间因子 ${escHtml(node.params.intermediate_name)}</div>` : ''}
+            ${getVisualUserIntermediateName(node) ? `<div class="node-intermediate-badge">中间因子 ${escHtml(getVisualUserIntermediateName(node))}</div>` : ''}
             ${renderVisualNodeSlots(node)}
             ${node.key === 'Return' ? '' : `<button class="node-output-port" title="点击后选择目标输入槽" onclick="startVisualConnection(${node.id});event.stopPropagation()"></button>`}
         `;
@@ -411,7 +411,7 @@ function renderVisualNodeParamControls(node) {
     if (node.key === 'Return') return '';
     const intermediateControls = node.cat !== 'leaf' ? `
         <div class="field"><label>中间因子标记</label>
-            <input value="${escHtml(node.params?.intermediate_name || '')}" placeholder="如 SIG_YZ，不填则不标记"
+            <input value="${escHtml(getVisualUserIntermediateName(node))}" placeholder="如 SIG_YZ，不填则不标记"
                 oninput="updateVisualParam(${node.id}, 'intermediate_name', this.value)">
         </div>
     ` : '';
@@ -483,7 +483,11 @@ function updateVisualParam(nodeId, key, value) {
     node.params = node.params || {};
     node.params[key] = value;
     if (key === 'alias' || key === 'name') node.label = value || (node.key === 'Constant' ? 'Constant' : node.label);
-    if (key === 'intermediate_name' && value) node.label = value;
+    if (key === 'intermediate_name') {
+        node.params.intermediate_user_defined = !!String(value || '').trim();
+        node.params.intermediate_canvas_defined = !!String(value || '').trim();
+        if (value) node.label = value;
+    }
     _dirty = true;
     _visGraphDirty = true;
     invalidateCodeValidation();

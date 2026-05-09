@@ -1,4 +1,13 @@
 // 可视化表达式与 Python 源码互转
+//
+// 业务规范：
+// 1. 代码 -> 画布的主表达式只允许来自后端执行 factor_expr() 后得到的 FactorExpr visual_graph。
+// 2. 代码 -> 画布只允许做两类源码字符串检查：
+//    - 扫描 factor_expr() 中的 Param(...) 声明，用于补回孤立参数。
+//    - 检查“上一轮画布生成过的孤立表达式代码行”是否仍存在，存在才恢复快照分支。
+// 3. 不允许从源码字符串解析 return/assignment 来推导表达式树或孤立表达式。
+// 4. 画布 -> 代码可以自动生成 Python 局部变量名，但不能自动调用 as_intermediate()。
+// 5. as_intermediate() 只代表用户显式创建的中间因子；它会影响后端运算逻辑和 LaTeX 展示。
 
 function visualToExpr() {
     if (_visNodes.length === 0) {
@@ -49,7 +58,7 @@ function buildExprFromNode(node, seen, options = {}) {
         const rest = exprs.slice(1).join(', ');
         expr = `${exprs[0]}.${node.key}(${rest})`;
     }
-    const intermediateName = node.params?.intermediate_name || '';
+    const intermediateName = getVisualUserIntermediateName(node);
     if (expr && intermediateName) return `(${expr}).as_intermediate(${JSON.stringify(intermediateName)})`;
     return expr;
 }
@@ -100,10 +109,6 @@ function getVisualParamVariableName(node) {
 
 function visualToSource(options = {}) {
     if (_currentMode !== 'visual') return document.getElementById('code-source')?.value || '';
-    if (!_visGraphDirty && _visSourceFallback.trim()) {
-        rememberVisualGraphSnapshot(_visSourceFallback);
-        return _visSourceFallback;
-    }
     const plan = buildVisualSourcePlan();
     if (!plan.returnExpr) {
         if (!options.silent) showToast('请先完成可视化表达式连接', 'error');
@@ -157,7 +162,7 @@ function buildVisualSourcePlan() {
     const returnNode = getVisualReturnNode();
     const returnInputId = (returnNode?.inputs || [])[0];
     const returnInput = _visNodes.find(n => n.id === returnInputId);
-    const nameByNodeId = assignVisualIntermediateNames();
+    const nameByNodeId = assignVisualVariableNames();
     const assignmentLines = [];
     const assignmentLineByNodeId = new Map();
     const emitted = new Set();
@@ -175,7 +180,7 @@ function buildVisualSourcePlan() {
         const expr = buildInlineExprForSourceNode(node, nameByNodeId);
         const name = nameByNodeId.get(node.id);
         if (!expr || !name) return false;
-        const line = `${name} = (${expr}).as_intermediate(${JSON.stringify(name)})`;
+        const line = buildVisualAssignmentLine(node, name, expr);
         assignmentLines.push(line);
         assignmentLineByNodeId.set(node.id, line);
         emitted.add(node.id);
@@ -196,21 +201,18 @@ function buildVisualSourcePlan() {
     };
 }
 
-function assignVisualIntermediateNames() {
+function assignVisualVariableNames() {
     const used = new Set();
     _visNodes.filter(isVisualParamNode).forEach(node => used.add(getVisualParamVariableName(node)));
     getNamedVisualConstNodes().forEach(node => used.add(node.params.name.trim()));
     const nameByNodeId = new Map();
     _visNodes.forEach(node => {
         if (!node || node.key === 'Return' || node.cat === 'leaf') return;
-        const preferred = node.params?.intermediate_name || node.label || '';
+        const preferred = getVisualUserIntermediateName(node) || node.label || '';
         const fallback = `expr_${node.id}`;
         const name = uniqueVisualPythonIdentifier(preferred, fallback, used);
         used.add(name);
         nameByNodeId.set(node.id, name);
-        node.params = node.params || {};
-        node.params.intermediate_name = name;
-        node.label = name;
     });
     return nameByNodeId;
 }
@@ -243,6 +245,28 @@ function buildReturnExprForSourceNode(node, nameByNodeId) {
         return `ConstExpr(${name || normalizeVisualConstValue(node.params?.value)})`;
     }
     return '';
+}
+
+function getVisualUserIntermediateName(node) {
+    const name = String(node?.params?.intermediate_name || '').trim();
+    if (isVisualGeneratedVariableName(name)
+        && node?.params?.intermediate_from_factor_expr
+        && !node?.params?.intermediate_canvas_defined) {
+        return '';
+    }
+    return node?.params?.intermediate_user_defined && name ? name : '';
+}
+
+function isVisualGeneratedVariableName(name) {
+    return /^expr_\d+$/.test(String(name || '').trim());
+}
+
+function buildVisualAssignmentLine(node, name, expr) {
+    const intermediateName = getVisualUserIntermediateName(node);
+    if (intermediateName) {
+        return `${name} = (${expr}).as_intermediate(${JSON.stringify(intermediateName)})`;
+    }
+    return `${name} = ${expr}`;
 }
 
 function buildInlineExprForSourceNode(node, nameByNodeId) {
@@ -294,6 +318,7 @@ function rememberVisualGraphSnapshot(source, detachedBranches = null) {
         nextId: _visNextId,
         selectedNodeId: _visSelectedNodeId,
         rootId: getVisualRootNode()?.id || null,
+        namedConstants: collectVisualNamedConstRecords(_visNodes),
         detachedBranches: detachedBranches || collectVisualDetachedBranchRecords(_visNodes),
     };
 }
@@ -343,6 +368,21 @@ function getNamedVisualConstNodes() {
         nodes.push(n);
     });
     return nodes;
+}
+
+function collectVisualNamedConstRecords(nodes) {
+    return nodes
+        .filter(node => node.key === 'Constant' && node.params?.name?.trim())
+        .map(node => {
+            const name = node.params.name.trim();
+            const value = normalizeVisualConstValue(node.params?.value);
+            return {
+                nodeId: node.id,
+                name,
+                value,
+                line: `${name} = ${value}`,
+            };
+        });
 }
 
 function collectVisualDetachedBranchRecords(nodes, assignmentLineByNodeId = null) {
@@ -396,7 +436,7 @@ function buildVisualDetachedBranchRecord(nodes, rootId, assignmentLineByNodeId =
             const expr = buildInlineExprForSnapshotNode(nodes, node, nameByNodeId);
             const name = nameByNodeId.get(node.id);
             if (!expr || !name) return false;
-            lines.push(`${name} = (${expr}).as_intermediate(${JSON.stringify(name)})`);
+            lines.push(buildVisualAssignmentLine(node, name, expr));
         }
         emitted.add(node.id);
         return true;
@@ -429,7 +469,7 @@ function assignSnapshotIntermediateNames(nodes) {
     const nameByNodeId = new Map();
     nodes.forEach(node => {
         if (!node || node.key === 'Return' || node.cat === 'leaf') return;
-        const preferred = node.params?.intermediate_name || node.label || '';
+        const preferred = getVisualUserIntermediateName(node) || node.label || '';
         const fallback = `expr_${node.id}`;
         const name = uniqueVisualPythonIdentifier(preferred, fallback, used);
         used.add(name);
@@ -462,13 +502,13 @@ function restoreSnapshotDetachedBranchesIfStillInSource(source) {
     if (!branches.length) return;
     const sourceLines = new Set(normalizeVisualSourceForSnapshot(source).split('\n'));
     const snapshotNodes = cloneVisualGraphValue(_visGraphSnapshot.nodes || []);
-    const currentNames = new Set(_visNodes.map(node => node.params?.intermediate_name || node.label).filter(Boolean));
+    const currentNames = new Set(_visNodes.map(node => getVisualUserIntermediateName(node) || node.label).filter(Boolean));
     let nextId = inferNextVisualNodeId();
 
     branches.forEach(branch => {
         if (!branch.lines?.every(line => sourceLines.has(String(line || '').trim()))) return;
         const branchNodes = snapshotNodes.filter(node => (branch.nodeIds || []).includes(node.id));
-        const branchNames = branchNodes.map(node => node.params?.intermediate_name || node.label).filter(Boolean);
+        const branchNames = branchNodes.map(node => getVisualUserIntermediateName(node) || node.label).filter(Boolean);
         if (branchNames.some(name => currentNames.has(name))) return;
 
         const oldIds = new Set(branchNodes.map(node => node.id));
@@ -481,10 +521,52 @@ function restoreSnapshotDetachedBranchesIfStillInSource(source) {
             params: {...(node.params || {})},
         }));
         cloned.forEach(node => {
-            const name = node.params?.intermediate_name || node.label;
+            const name = getVisualUserIntermediateName(node) || node.label;
             if (name) currentNames.add(name);
         });
         _visNodes.push(...cloned);
+    });
+    _visNextId = Math.max(_visNextId, nextId);
+}
+
+function restoreSnapshotNamedConstantsIfStillInSource(source) {
+    const records = _visGraphSnapshot?.namedConstants || [];
+    if (!records.length) return;
+    const sourceLines = new Set(normalizeVisualSourceForSnapshot(source).split('\n'));
+    const usedNames = new Set(_visNodes
+        .filter(node => node.key === 'Constant')
+        .map(node => node.params?.name?.trim())
+        .filter(Boolean));
+    let nextId = inferNextVisualNodeId();
+
+    records.forEach(record => {
+        const name = String(record.name || '').trim();
+        const value = normalizeVisualConstValue(record.value);
+        if (!name || usedNames.has(name)) return;
+        if (!sourceLines.has(String(record.line || '').trim())) return;
+
+        const existing = _visNodes.find(node =>
+            node.key === 'Constant'
+            && !node.params?.name?.trim()
+            && normalizeVisualConstValue(node.params?.value) === value
+        );
+        if (existing) {
+            existing.params = existing.params || {};
+            existing.params.name = name;
+            existing.label = name;
+        } else {
+            _visNodes.push({
+                id: nextId++,
+                key: 'Constant',
+                cat: 'leaf',
+                label: name,
+                x: 0,
+                y: 0,
+                inputs: [],
+                params: {name, value},
+            });
+        }
+        usedNames.add(name);
     });
     _visNextId = Math.max(_visNextId, nextId);
 }
@@ -497,6 +579,7 @@ function loadVisualNodesFromSource(source) {
     addUnusedVisualParamsFromSource(params.length ? params : [
         { alias: 'P', variable_name: 'P', type: 'DataColumnParam', default_value: 'CA' },
     ]);
+    restoreSnapshotNamedConstantsIfStillInSource(source);
     restoreSnapshotDetachedBranchesIfStillInSource(source);
     ensureReturnNode();
 }
@@ -517,6 +600,7 @@ function loadVisualNodesFromGraph(graph, source = '') {
     _visSelectedNodeId = null;
     ensureReturnNode();
     addUnusedVisualParamsFromSource(parseParamNodesFromSource(source));
+    restoreSnapshotNamedConstantsIfStillInSource(source);
     restoreSnapshotDetachedBranchesIfStillInSource(source);
     return true;
 }
@@ -574,8 +658,6 @@ function addVisualParamNodeFromParsed(param, x = 0, y = 0) {
 }
 
 function addVisualNodeFromParsed(key, cat, label, x = 0, y = 0, inputs = [], params = {}) {
-    const opKeys = new Set(Object.values(OP_PALETTE).flat().map(op => op.key));
-    const intermediateName = cat !== 'leaf' && label && !opKeys.has(label) ? label : '';
     const node = {
         id: _visNextId++,
         key,
@@ -584,7 +666,7 @@ function addVisualNodeFromParsed(key, cat, label, x = 0, y = 0, inputs = [], par
         x: Math.max(0, x),
         y: Math.max(0, y),
         inputs,
-        params: intermediateName ? {...params, intermediate_name: intermediateName} : params,
+        params,
     };
     _visNodes.push(node);
     return node.id;
