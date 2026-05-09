@@ -36,6 +36,7 @@ from server.modules.custom_factors.source_helpers import (
     parse_class_meta as _parse_class_meta,
     strip_factor_meta as _strip_meta,
 )
+from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
@@ -830,13 +831,16 @@ def api_validate_expr():
         try:
             ff = get_factor_family_instance(factor_name)
             tree_repr = ''
+            visual_graph = None
             if ff.expr is not None:
                 tree_repr = ff.expr.tree_repr()
+                visual_graph = factor_expr_to_visual_graph(ff.expr)
             return jsonify({
                 'success': True,
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'visual_graph': visual_graph,
                 'factor_name': ff.__class__.__name__,
                 'params': [
                     serialize_param_meta(p)
@@ -910,14 +914,17 @@ def api_validate_expr():
 
             ff = factor_cls()
             tree_repr = ''
+            visual_graph = None
             if ff.expr is not None:
                 tree_repr = ff.expr.tree_repr()
+                visual_graph = factor_expr_to_visual_graph(ff.expr)
 
             return jsonify({
                 'success': True,
                 'valid': True,
                 'error': None,
                 'tree_repr': tree_repr,
+                'visual_graph': visual_graph,
                 'factor_name': factor_cls.__name__,
                 'params': [
                     serialize_param_meta(p)

@@ -31,8 +31,10 @@ function renderVisualEditor(factor) {
         || (!_visGraphDirty && _visSourceFallback !== (renderVisualEditor._lastSource || '')));
     if (shouldParseSource) {
         _visGraphDirty = false;
-        loadVisualNodesFromSource(_visSourceFallback);
-        if (previousMode === 'code') mergeVisualGraphSnapshotOrphans(_visSourceFallback);
+        const graphLoaded = _validatedVisualGraph
+            && _validatedSourceSnapshot === _visSourceFallback
+            && loadVisualNodesFromGraph(_validatedVisualGraph, _visSourceFallback);
+        if (!graphLoaded) loadVisualNodesFromSource(_visSourceFallback);
         renderVisualEditor._lastSource = _visSourceFallback;
     }
 
@@ -135,16 +137,19 @@ function renderAllVisNodes() {
         const el = document.createElement('div');
         el.className = 'vis-node'
             + (node.key === 'Return' ? ' return-node' : '')
+            + (isVisualSharedLeafSelected(node) ? ' shared-selected' : '')
             + (node.id === _visSelectedNodeId ? ' selected' : '');
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         el.dataset.nodeId = node.id;
         el.innerHTML = `
             ${node.key === 'Return' ? '' : `<button class="btn-delete-node" onclick="deleteVisNode(${node.id});event.stopPropagation()">×</button>`}
+            ${node.key === 'Return' ? '' : `<button class="btn-copy-node" title="复制节点" onclick="duplicateVisNode(${node.id});event.stopPropagation()">⧉</button>`}
             <div class="node-card-head">
                 <div class="node-label">${escHtml(node.label)}</div>
                 <div class="node-sub">${escHtml(getVisualNodeSubtitle(node))}</div>
             </div>
+            ${renderVisualSharedLeafBadge(node)}
             ${node.params?.intermediate_name ? `<div class="node-intermediate-badge">中间因子 ${escHtml(node.params.intermediate_name)}</div>` : ''}
             ${renderVisualNodeSlots(node)}
             ${node.key === 'Return' ? '' : `<button class="node-output-port" title="点击后选择目标输入槽" onclick="startVisualConnection(${node.id});event.stopPropagation()"></button>`}
@@ -200,7 +205,7 @@ function selectVisNode(nodeId) {
         arithTernary: '算数三元',
         output: '输出',
     };
-    const labelEditor = node.key === 'DataColumnParam' || node.key === 'Constant'
+    const labelEditor = isVisualParamNode(node) || node.key === 'Constant'
         ? ''
         : `<div class="field"><label>标签</label><input type="text" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>`;
     props.innerHTML = `
@@ -289,9 +294,58 @@ function deleteVisNode(nodeId) {
     updateVisualExprPreview();
 }
 
+function duplicateVisNode(nodeId) {
+    const node = _visNodes.find(n => n.id === nodeId);
+    if (!node || node.key === 'Return') return;
+    const cloneId = cloneVisualNodeTree(node.id, 28, 28);
+    _dirty = true;
+    _visGraphDirty = true;
+    invalidateCodeValidation();
+    renderAllVisNodes();
+    selectVisNode(cloneId);
+}
+
+function cloneVisualNodeTree(rootId, dx = 28, dy = 28) {
+    const idMap = new Map();
+    const cloneNode = (oldId) => {
+        if (idMap.has(oldId)) return idMap.get(oldId);
+        const source = _visNodes.find(n => n.id === oldId);
+        if (!source || source.key === 'Return') return null;
+        const clone = JSON.parse(JSON.stringify(source));
+        clone.id = _visNextId++;
+        clone.x = (source.x || 0) + dx;
+        clone.y = (source.y || 0) + dy;
+        idMap.set(oldId, clone.id);
+        clone.inputs = (source.inputs || []).map(inputId => inputId ? cloneNode(inputId) : null);
+        _visNodes.push(clone);
+        return clone.id;
+    };
+    return cloneNode(rootId);
+}
+
+function renderVisualSharedLeafBadge(node) {
+    const key = getVisualLeafReferenceKey(node);
+    if (!key) return '';
+    const count = _visNodes.filter(n => getVisualLeafReferenceKey(n) === key).length;
+    if (count <= 1) return '';
+    return `<div class="node-shared-ref" title="画布中有多个叶节点引用同一个 ${escAttr(key)}">同源</div>`;
+}
+
+function getVisualLeafReferenceKey(node) {
+    if (isVisualParamNode(node)) return `参数 ${getVisualParamAlias(node)}`;
+    if (node.key === 'Constant') return `常数 ${node.params?.name || normalizeVisualConstValue(node.params?.value)}`;
+    return '';
+}
+
+function isVisualSharedLeafSelected(node) {
+    const selected = _visNodes.find(n => n.id === _visSelectedNodeId);
+    const selectedKey = selected ? getVisualLeafReferenceKey(selected) : '';
+    return !!selectedKey && getVisualLeafReferenceKey(node) === selectedKey && node.id !== _visSelectedNodeId;
+}
+
 function getVisualNodeSubtitle(node) {
     if (node.key === 'Return') return '最终返回值';
-    if (node.key === 'DataColumnParam') return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
+    if (isVisualParamNode(node)) return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
     if (node.key === 'Constant') return node.params?.name ? `${node.params.name}=${node.params?.value ?? ''}` : (node.params?.value ?? '');
     return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
 }
@@ -332,7 +386,8 @@ function getVisualOperatorDef(node) {
 }
 
 function isVisualInfixOperator(node) {
-    return getVisualOperatorDef(node)?.syntax === 'infix';
+    return getVisualOperatorDef(node)?.syntax === 'infix'
+        || ['+', '-', '*', '/', '**', '>', '<', '>=', '<=', '==', '!=', '&', '|'].includes(node.key);
 }
 
 function renderVisualInputSelectors(node) {
@@ -360,6 +415,13 @@ function renderVisualNodeParamControls(node) {
                 oninput="updateVisualParam(${node.id}, 'intermediate_name', this.value)">
         </div>
     ` : '';
+    if (node.key === 'FactorFreqParam') {
+        return `
+            <div class="field"><label>系统参数</label><span>$F（因子信号频率，代码中变量名为 F）</span></div>
+            <div class="field"><label>参数类型</label><span>FactorFreqParam</span></div>
+            <div class="field"><label>默认值</label><span>${escHtml(node.params?.default_value || '1d')}</span></div>
+        `;
+    }
     if (node.key === 'DataColumnParam') {
         return `
             <div class="field"><label>参数别名/标签</label><input value="${escHtml(node.params?.alias || node.label || 'P')}" oninput="updateVisualParam(${node.id}, 'alias', this.value)"></div>

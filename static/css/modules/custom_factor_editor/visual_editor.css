@@ -52,6 +52,9 @@
     user-select: none; z-index: 1;
 }
 .vis-node.selected { border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,0.15); }
+.vis-node.shared-selected {
+    border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.12);
+}
 .vis-node.return-node {
     border-color: #16a34a; background: #f0fdf4;
     box-shadow: 0 3px 12px rgba(22, 163, 74, 0.12);
@@ -63,6 +66,11 @@
 .vis-node .node-intermediate-badge {
     display: inline-flex; margin-top: 6px; padding: 2px 7px; border-radius: 999px;
     background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412;
+    font-size: 11px; font-weight: 650;
+}
+.vis-node .node-shared-ref {
+    display: inline-flex; margin-top: 6px; padding: 2px 7px; border-radius: 999px;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
     font-size: 11px; font-weight: 650;
 }
 .vis-node .node-slots { display: grid; gap: 4px; margin-top: 8px; }
@@ -112,6 +120,12 @@
     font-size: 11px; line-height: 18px; text-align: center; cursor: pointer; display: none;
 }
 .vis-node:hover .btn-delete-node { display: block; }
+.vis-node .btn-copy-node {
+    position: absolute; top: -8px; right: 12px; width: 18px; height: 18px;
+    border-radius: 50%; background: #2563eb; color: #fff; border: none;
+    font-size: 11px; line-height: 18px; text-align: center; cursor: pointer; display: none;
+}
+.vis-node:hover .btn-copy-node { display: block; }
 
 .visual-config-pane {
     width: 280px; border-left: 1px solid #e2e8f0; padding: 14px 16px;

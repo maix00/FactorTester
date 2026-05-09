@@ -21,13 +21,10 @@ class MmClose2High(FactorFamily):
         C = DataColumnParam('P', default_value='CA')
         H = DataColumnParam('H', default_value='HA')
         L = DataColumnParam('L', default_value='LA')
-        c = C.shift(0)  # no-op to get ColumnRef
-        h = H.shift(0)
-        l = L.shift(0)
-        h_max = h.rolling_max(N)
-        l_min = l.rolling_min(N)
+        h_max = H.rolling_max(N).as_intermediate('Hmax')
+        l_min = L.rolling_min(N).as_intermediate('Lmin')
         rng = h_max - l_min
-        return (c - l_min) / (rng + 1e-10)
+        return (C - l_min) / (rng + 1e-10)
 
     desc = '收盘价区间位置'
     description = """

@@ -53,6 +53,7 @@ VISUAL_OPERATOR_GROUPS = [
         'collapsed': False,
         'operators': [
             {'key': 'DataColumnParam', 'label': '参数', 'desc': '数据列/窗口/时间参数', 'arity': 0, 'slots': []},
+            {'key': 'FactorFreqParam', 'label': '$F', 'desc': '系统参数：因子信号频率', 'arity': 0, 'slots': []},
             {'key': 'Constant', 'label': '常数', 'desc': '数值常量', 'arity': 0, 'slots': []},
         ],
     },
@@ -293,7 +294,7 @@ class FactorExpr:
                 continue
             seen.add(sk)
 
-            if node is not self and node._is_intermediate:
+            if node._is_intermediate:
                 nodes.append(node)
                 # intermediate 的子节点不再展开，将其内部细节隐藏
                 continue
@@ -346,8 +347,9 @@ class FactorExpr:
                 sym = f"{base}_{i}"
                 i += 1
             used.add(sym)
-            lines.append(f"{sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
-            sk_to_sym[node._structural_key()] = sym
+            latex_sym = f"\\mathrm{{{sym}}}"
+            lines.append(f"{latex_sym}_t &:= {node._to_latex(subst=sk_to_sym)},")
+            sk_to_sym[node._structural_key()] = latex_sym
 
         # 2) 最后一行 X_t，用符号映射递归生成
         raw = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in str(final_name)).strip('_')

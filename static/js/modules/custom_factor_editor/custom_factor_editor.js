@@ -11,6 +11,7 @@ let _factorFamilies = [];  // {name, id, type:'custom'|'public', chinese_name, c
 let _groupedFactorFamilies = {};  // {group: [...]}
 let _validatedFactorDraft = null;
 let _validatedSourceSnapshot = '';
+let _validatedVisualGraph = null;
 let _editingOriginalParamAliases = '';
 
 // ═══════════════════════════════════════════════════════════
@@ -649,6 +650,7 @@ function handleCodeInput() {
 function invalidateCodeValidation() {
     _validatedFactorDraft = null;
     _validatedSourceSnapshot = '';
+    _validatedVisualGraph = null;
     const btn = document.getElementById('btn-param-config');
     const status = document.getElementById('param-config-status');
     if (btn) btn.textContent = '校验后配置参数';
@@ -666,6 +668,7 @@ function setValidatedFactorDraft(data, sourceCode) {
     const factorName = data.factor_name || _currentFactorFamilyId || 'ValidatedFactor';
     _validatedFactorDraft = upsertValidatedFactorFamilyDef(factorName, params);
     _validatedSourceSnapshot = sourceCode;
+    _validatedVisualGraph = data.visual_graph || null;
     const btn = document.getElementById('btn-param-config');
     const status = document.getElementById('param-config-status');
     if (btn) btn.textContent = '参数配置';
@@ -1118,7 +1121,8 @@ async function saveFactor() {
 
     try {
         let res;
-        if (_isNew || !_currentFactorFamilyId) {
+        const shouldCreate = _isNew || !_currentFactorFamilyId || _currentFactorFamilySource === 'public';
+        if (shouldCreate) {
             res = await fetch('/custom-factors/api/create', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
@@ -1133,6 +1137,8 @@ async function saveFactor() {
         if (data.success) {
             _dirty = false;
             _currentFactorFamilyId = data.factor.id;
+            _currentFactorFamilySource = 'custom';
+            _currentFactorFamilyOwner = '';
             _isNew = false;
             showToast('保存成功', 'success');
             await loadFactorFamilyList();
