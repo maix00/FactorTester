@@ -14,6 +14,7 @@ from tools.factors.FactorExpr import (
     ParamRef,
     RollingOp,
     ShiftOp,
+    TermStructureOp,
     get_visual_composite_key,
     get_visual_operator_category,
 )
@@ -77,6 +78,8 @@ class _VisualGraphSerializer:
             node_id = self.add_op(expr.op, 'cs', self._intermediate_label(expr) or expr.op, [
                 self.emit(opnd) for opnd in expr.operands
             ], expr)
+        elif isinstance(expr, TermStructureOp):
+            node_id = self.add_term_structure_op(expr)
         elif isinstance(expr, CompositeExpr):
             visual_key = get_visual_composite_key(expr.op)
             cat = get_visual_operator_category(visual_key, 'arithBinary')
@@ -119,6 +122,28 @@ class _VisualGraphSerializer:
             label='',
             inputs=[],
             params={'name': '', 'value': _python_literal(expr.value)},
+        )
+
+    def add_term_structure_op(self, expr: TermStructureOp) -> int:
+        params: dict[str, Any] = {
+            'column': getattr(expr, 'column', 'CLOSE'),
+        }
+        if expr.op in ('term_spread', 'term_ratio'):
+            params['near_rank'] = getattr(expr, 'near_rank', 0)
+            params['far_rank'] = getattr(expr, 'far_rank', 1)
+        elif expr.op == 'term_slope':
+            params['depth'] = getattr(expr, 'depth', 4)
+        intermediate = self._intermediate_label(expr)
+        if intermediate:
+            params['intermediate_name'] = intermediate
+            params['intermediate_user_defined'] = True
+            params['intermediate_from_factor_expr'] = True
+        return self.add_node(
+            key=expr.op,
+            cat='termStructure',
+            label=intermediate or expr.op,
+            inputs=[],
+            params=params,
         )
 
     def add_column_ref(self, expr: ColumnRef) -> int:

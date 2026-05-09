@@ -485,6 +485,24 @@ function renderVisualNodeParamControls(node) {
             <div class="field"><label>常数值</label><input value="${escHtml(normalizeVisualConstValue(node.params?.value))}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>
         `;
     }
+    if (isVisualTermStructureOperator(node)) {
+        const col = node.params?.column || 'CLOSE';
+        const rankControls = node.key === 'term_slope' ? `
+            <div class="field"><label>合约深度</label><input type="number" min="2" value="${escHtml(node.params?.depth || 4)}" oninput="updateVisualParam(${node.id}, 'depth', this.value)"></div>
+        ` : `
+            <div class="field"><label>近端 rank</label><input type="number" min="0" value="${escHtml(node.params?.near_rank ?? 0)}" oninput="updateVisualParam(${node.id}, 'near_rank', this.value)"></div>
+            <div class="field"><label>远端 rank</label><input type="number" min="1" value="${escHtml(node.params?.far_rank ?? 1)}" oninput="updateVisualParam(${node.id}, 'far_rank', this.value)"></div>
+        `;
+        return `
+            ${intermediateControls}
+            ${rankControls}
+            <div class="field"><label>价格列</label>
+                <select onchange="updateVisualParam(${node.id}, 'column', this.value)">
+                    ${['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME', 'OPEN_INTEREST'].map(c => `<option value="${c}" ${col === c ? 'selected' : ''}>${c}</option>`).join('')}
+                </select>
+            </div>
+        `;
+    }
     return intermediateControls;
 }
 

@@ -102,8 +102,17 @@ class CNFutures(Futures):
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
-                 data_path: Optional[str] = None):
-        super().__init__(name, point_value, 'CNY', roller_info_path, CNFuturesContract, timezone='Asia/Shanghai')
+                 data_path: Optional[str] = None,
+                 term_structure_path: Optional[str] = None):
+        super().__init__(
+            name,
+            point_value,
+            'CNY',
+            roller_info_path,
+            term_structure_path,
+            CNFuturesContract,
+            timezone='Asia/Shanghai',
+        )
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
@@ -115,6 +124,14 @@ class CNFutures(Futures):
             from Settings import DATA_DIR
             self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
         return self._ROLLER_INFO_PATH_CACHED
+
+    def get_term_structure_path(self) -> str:
+        if self.term_structure_path:
+            return self.term_structure_path
+        if not hasattr(self, '_TERM_STRUCTURE_PATH_CACHED'):
+            from sources.LocalCNFutures import TERM_STRUCTURE_PATH
+            self._TERM_STRUCTURE_PATH_CACHED = TERM_STRUCTURE_PATH
+        return self._TERM_STRUCTURE_PATH_CACHED
 
 from tools.products.Product import Product
 

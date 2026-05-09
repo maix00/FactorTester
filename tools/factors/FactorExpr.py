@@ -146,6 +146,19 @@ VISUAL_OPERATOR_GROUPS = [
         'more_operators': [
         ],
     },
+    {
+        'key': 'termStructure',
+        'label': '期限结构',
+        'collapsed': False,
+        'operators': [
+            {'key': 'term_spread', 'label': '近远月价差', 'symbol': 'TSprd', 'desc': 'term_spread(near, far, column)', 'arity': 0, 'slots': []},
+            {'key': 'term_ratio', 'label': '近远月比值', 'symbol': 'TRatio', 'desc': 'term_ratio(near, far, column)', 'arity': 0, 'slots': []},
+            {'key': 'term_slope', 'label': '期限斜率', 'symbol': 'TSlope', 'desc': 'term_slope(depth, column)', 'arity': 0, 'slots': []},
+        ],
+        'more_label': '更多期限结构算子',
+        'more_operators': [
+        ],
+    },
 ]
 
 VISUAL_COMPOSITE_KEY = {
@@ -183,6 +196,9 @@ VISUAL_OPERATOR_CATEGORY = {
     'sign': 'arithUnary',
     'expr_max': 'arithVariadic',
     'expr_min': 'arithVariadic',
+    'term_spread': 'termStructure',
+    'term_ratio': 'termStructure',
+    'term_slope': 'termStructure',
 }
 
 
@@ -1703,6 +1719,141 @@ def expr_min(*exprs: FactorExpr) -> FactorExpr:
     if len(exprs) == 1:
         return exprs[0]
     return CompositeExpr('min', *exprs)
+
+
+class TermStructureOp(FactorExpr):
+    """Futures term-structure snapshot operator.
+
+    This operator evaluates along each product's own futures contract curve at
+    every timestamp. It is deliberately separate from CrossSectionalOp: the
+    "cross section" here is contracts under one product, not products.
+    """
+
+    _LATEX = {
+        'term_spread': '\\mathrm{TermSpread}',
+        'term_ratio': '\\mathrm{TermRatio}',
+        'term_slope': '\\mathrm{TermSlope}',
+    }
+
+    def __init__(
+        self,
+        op: str,
+        near_rank: int = 0,
+        far_rank: int = 1,
+        depth: int = 4,
+        column: Any = DataColumn.CLOSE,
+    ):
+        if op not in self._LATEX:
+            raise ValueError(f"Unknown term structure op: {op}")
+        self.op = op
+        self.near_rank = int(near_rank)
+        self.far_rank = int(far_rank)
+        self.depth = int(depth)
+        self.column = DataColumn(column).name if not isinstance(column, str) else DataColumn(column).name
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    @property
+    def dependencies(self) -> Set['FactorExpr']:
+        return set()
+
+    @property
+    def operands(self) -> Tuple['FactorExpr', ...]:
+        return tuple()
+
+    @property
+    def required_columns(self) -> Set[str]:
+        return set()
+
+    def resolve(self, *args, **kwargs) -> 'FactorExpr':
+        return self
+
+    def _structural_key(self) -> tuple:
+        return (type(self).__name__, self.op, self.near_rank, self.far_rank, self.depth, self.column)
+
+    def _time_index_for_product(self, product: 'Product', freq: DataFreq) -> pd.DatetimeIndex:
+        try:
+            data = product.get_some_data(freq, copy=False)
+        except Exception:
+            return pd.DatetimeIndex([])
+        if data is None or data.empty:
+            return pd.DatetimeIndex([])
+        if isinstance(data.index, pd.MultiIndex):
+            idx = data.index.get_level_values(-1)
+        else:
+            idx = data.index
+        return pd.DatetimeIndex(pd.to_datetime(idx)).unique().sort_values()
+
+    def _evaluate(
+        self,
+        products: Sequence['Product'],
+        freq: DataFreq,
+        source: Optional['DataSource'] = None,
+        cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
+        preloaded: Optional[Dict[Any, pd.DataFrame]] = None,
+        *args,
+        **kwargs,
+    ) -> pd.DataFrame:
+        del source, cache, preloaded, args, kwargs
+        series_dict = {}
+        for product in products:
+            if not hasattr(product, 'get_term_structure'):
+                continue
+            idx = self._time_index_for_product(product, freq)
+            if len(idx) == 0:
+                continue
+            values = []
+            for ts in idx:
+                try:
+                    if self.op == 'term_spread':
+                        val = product.term_spread(ts, self.near_rank, self.far_rank, self.column)
+                    elif self.op == 'term_ratio':
+                        val = product.term_ratio(ts, self.near_rank, self.far_rank, self.column)
+                    else:
+                        val = product.term_slope(ts, self.depth, self.column)
+                except Exception:
+                    val = np.nan
+                values.append(val)
+            series_dict[product] = pd.Series(values, index=idx, dtype=float)
+        if not series_dict:
+            return pd.DataFrame()
+        result = pd.concat(series_dict, axis=1)
+        result.columns = list(series_dict.keys())
+        return result
+
+    @property
+    def op_name(self) -> str:
+        return self.op
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        if self.op in ('term_spread', 'term_ratio'):
+            return f"{self._LATEX[self.op]}_{{{self.near_rank},{self.far_rank}}}({self.column})"
+        return f"{self._LATEX[self.op]}_{{{self.depth}}}({self.column})"
+
+    def _get_alias(self) -> str:
+        if self.op in ('term_spread', 'term_ratio'):
+            return f"{self.op}_{self.column}_{self.near_rank}_{self.far_rank}"
+        return f"{self.op}_{self.column}_{self.depth}"
+
+
+def term_spread(near_rank: int = 0, far_rank: int = 1, column: Any = DataColumn.CLOSE) -> TermStructureOp:
+    """Near-far futures term-structure spread: near - far."""
+    return TermStructureOp('term_spread', near_rank=near_rank, far_rank=far_rank, column=column)
+
+
+def term_ratio(near_rank: int = 0, far_rank: int = 1, column: Any = DataColumn.CLOSE) -> TermStructureOp:
+    """Near-far futures term-structure ratio: near / far - 1."""
+    return TermStructureOp('term_ratio', near_rank=near_rank, far_rank=far_rank, column=column)
+
+
+def term_slope(depth: int = 4, column: Any = DataColumn.CLOSE) -> TermStructureOp:
+    """Linear slope of futures prices against days-to-maturity."""
+    return TermStructureOp('term_slope', depth=depth, column=column)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

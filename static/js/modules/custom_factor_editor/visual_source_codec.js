@@ -54,6 +54,8 @@ function buildExprFromNode(node, seen, options = {}) {
         expr = exprs.length >= 2 ? `${exprs[0]}.${node.key}(${exprs[1]})` : '';
     } else if (node.key === 'rolling_corr') {
         expr = exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
+    } else if (isVisualTermStructureOperator(node)) {
+        expr = buildVisualTermStructureExpr(node);
     } else {
         if (!exprs.length) return '';
         const rest = exprs.slice(1).join(', ');
@@ -74,6 +76,8 @@ function defaultVisualNodeParams(op) {
     if (op.key === 'DataColumnParam') return { alias: nextVisualParamAlias(), type: 'DataColumnParam', default_value: 'CA' };
     if (op.key === 'FactorFreqParam') return { alias: '$F', type: 'FactorFreqParam', default_value: '1d', locked: true };
     if (op.key === 'Constant') return { name: '', value: '1' };
+    if (op.key === 'term_spread' || op.key === 'term_ratio') return { near_rank: 0, far_rank: 1, column: 'CLOSE' };
+    if (op.key === 'term_slope') return { depth: 4, column: 'CLOSE' };
     return {};
 }
 
@@ -138,6 +142,9 @@ function visualToSource(options = {}) {
     if (generatedBodyText.includes('ConstExpr(')) factorImports.push('ConstExpr');
     if (generatedBodyText.includes('expr_max(')) factorImports.push('expr_max');
     if (generatedBodyText.includes('expr_min(')) factorImports.push('expr_min');
+    if (generatedBodyText.includes('term_spread(')) factorImports.push('term_spread');
+    if (generatedBodyText.includes('term_ratio(')) factorImports.push('term_ratio');
+    if (generatedBodyText.includes('term_slope(')) factorImports.push('term_slope');
     const imports = [
         `from tools.factors import ${[...new Set(factorImports)].join(', ')}`,
         regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
@@ -190,7 +197,7 @@ function buildVisualSourcePlan() {
     const emitNode = (node) => {
         if (!node || node.key === 'Return' || emitted.has(node.id)) return true;
         const arity = getVisualOperatorArity(node);
-        if (!arity) return true;
+        if (!arity && node.cat === 'leaf') return true;
         const inputIds = (node.inputs || []).slice(0, arity);
         if (inputIds.length < arity || inputIds.some(id => !id)) return false;
         for (const inputId of inputIds) {
@@ -325,8 +332,31 @@ function buildVisualOperatorExpr(node, exprs, arity) {
     if (node.key === 'rolling_corr') {
         return exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
     }
+    if (isVisualTermStructureOperator(node)) {
+        return buildVisualTermStructureExpr(node);
+    }
     if (!exprs.length) return '';
     return `${exprs[0]}.${node.key}(${exprs.slice(1).join(', ')})`;
+}
+
+function isVisualTermStructureOperator(node) {
+    return node?.cat === 'termStructure'
+        || ['term_spread', 'term_ratio', 'term_slope'].includes(node?.key);
+}
+
+function buildVisualTermStructureExpr(node) {
+    const params = node?.params || {};
+    const column = JSON.stringify(params.column || 'CLOSE');
+    if (node.key === 'term_spread' || node.key === 'term_ratio') {
+        const nearRank = Number.isFinite(Number(params.near_rank)) ? Number(params.near_rank) : 0;
+        const farRank = Number.isFinite(Number(params.far_rank)) ? Number(params.far_rank) : 1;
+        return `${node.key}(near_rank=${nearRank}, far_rank=${farRank}, column=${column})`;
+    }
+    if (node.key === 'term_slope') {
+        const depth = Number.isFinite(Number(params.depth)) ? Number(params.depth) : 4;
+        return `term_slope(depth=${depth}, column=${column})`;
+    }
+    return '';
 }
 
 function rememberVisualGraphSnapshot(source, detachedBranches = null) {

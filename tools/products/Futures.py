@@ -12,14 +12,19 @@ from datetime import datetime
 
 from tools.products.Product import Product
 from tools.base.IdleResourceManager import IdleResourceManager
+from tools.products.FuturesTermStructure import (
+    FuturesContractTermStructureMixin,
+    FuturesTermStructureMixin,
+)
 
-class FuturesContract(Product):
+
+class FuturesContract(FuturesContractTermStructureMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
         super().__init__(name, point_value, currency, *args, **kwargs)
 
 
-class Futures(Product):
+class Futures(FuturesTermStructureMixin, Product):
     """
     期货品种类（主力合约）。
 
@@ -37,10 +42,12 @@ class Futures(Product):
 
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  roller_info_path: Optional[str] = None,
+                 term_structure_path: Optional[str] = None,
                  FuturesContractClass: type = FuturesContract, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(name, point_value, currency, *args, **kwargs)
             self.roller_info_path = roller_info_path
+            self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None
             self.FuturesContractClass = FuturesContractClass
 
