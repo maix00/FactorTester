@@ -1201,6 +1201,7 @@ let _visDragging = null;
 let _visSourceFallback = '';
 let _visGraphDirty = false;
 let _visPendingConnection = null;
+let _visLastGeneratedSource = '';
 
 async function loadVisualOperatorRegistry() {
     try {
@@ -1232,7 +1233,7 @@ function renderVisualEditor(factor) {
     footer.style.display = '';
     _visSourceFallback = factor.source_code || '';
     const shouldParseSource = !_visNodes.length
-        || previousMode === 'code'
+        || (previousMode === 'code' && _visSourceFallback !== _visLastGeneratedSource)
         || (!_visGraphDirty && _visSourceFallback !== (renderVisualEditor._lastSource || ''));
     if (shouldParseSource) {
         _visGraphDirty = false;
@@ -1351,7 +1352,7 @@ function onCanvasDrop(e) {
         id: _visNextId++,
         key: op.key,
         cat: op.cat,
-        label: params.alias || params.value || op.key,
+        label: params.alias || params.name || op.key,
         x: Math.max(0, x),
         y: Math.max(0, y),
         inputs: [],
@@ -1381,6 +1382,7 @@ function renderAllVisNodes() {
     const svg = document.getElementById('vis-edges');
     if (!canvas) return;
     canvas.querySelectorAll('.vis-node').forEach(n => n.remove());
+    canvas.querySelectorAll('.vis-edge-delete').forEach(n => n.remove());
     for (const node of _visNodes) {
         const el = document.createElement('div');
         el.className = 'vis-node' + (node.id === _visSelectedNodeId ? ' selected' : '');
@@ -1437,11 +1439,23 @@ function selectVisNode(nodeId) {
     const node = _visNodes.find(n => n.id === nodeId);
     if (!node) return;
     const props = document.getElementById('node-props');
-    const catNames = { leaf: '参数/常数', ts: '时序算子', cs: '横截面算子', arith: '算术' };
+    const catNames = {
+        leaf: '参数/常数',
+        ts: '时序算子',
+        cs: '横截算子',
+        arith: '算术',
+        arithUnary: '算数一元',
+        arithBinary: '算数二元',
+        arithVariadic: '算数多元',
+        arithTernary: '算数三元',
+    };
+    const labelEditor = node.key === 'DataColumnParam' || node.key === 'Constant'
+        ? ''
+        : `<div class="field"><label>标签</label><input type="text" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>`;
     props.innerHTML = `
         <div class="field"><label>类型</label><span>${catNames[node.cat] || node.cat}</span></div>
         <div class="field"><label>算子</label><span>${escHtml(node.key)}</span></div>
-        <div class="field"><label>标签</label><input type="text" value="${escHtml(node.label)}" oninput="updateVisNodeLabel(${nodeId}, this.value)"></div>
+        ${labelEditor}
         ${renderVisualNodeParamControls(node)}
         ${renderVisualInputSelectors(node)}
     `;
@@ -1453,7 +1467,7 @@ function updateVisNodeLabel(nodeId, newLabel) {
     if (!node) return;
     node.label = newLabel;
     if (node.key === 'DataColumnParam') node.params.alias = newLabel;
-    if (node.key === 'Constant') node.params.value = newLabel;
+    if (node.key === 'Constant') node.params.name = newLabel;
     renderAllVisNodes();
     updateVisualExprPreview();
     _dirty = true;
@@ -1540,7 +1554,9 @@ function buildExprFromNode(node, seen, options = {}) {
     seen.add(node.id);
     if (node.key === 'DataColumnParam') return node.params?.alias || node.label || 'P';
     if (node.key === 'Constant') {
-        const value = node.params?.value || node.label || '0';
+        const name = (node.params?.name || '').trim();
+        const value = normalizeVisualConstValue(node.params?.value);
+        if (name) return options.root ? `ConstExpr(${name})` : name;
         return options.root ? `ConstExpr(${value})` : value;
     }
     const arity = getVisualOperatorArity(node);
@@ -1554,6 +1570,8 @@ function buildExprFromNode(node, seen, options = {}) {
         expr = exprs.length >= getVisualOperatorArity(node) ? `(${exprs[0]} ${node.key} ${exprs[1]})` : '';
     } else if (node.key === '~') {
         expr = exprs.length >= 1 ? `(~${exprs[0]})` : '';
+    } else if (node.key === 'expr_max' || node.key === 'expr_min') {
+        expr = exprs.length >= getVisualOperatorArity(node) ? `${node.key}(${exprs.join(', ')})` : '';
     } else if (node.key === 'max' || node.key === 'min') {
         expr = exprs.length >= 2 ? `${exprs[0]}.${node.key}(${exprs[1]})` : '';
     } else if (node.key === 'rolling_corr') {
@@ -1575,14 +1593,32 @@ function updateVisualExprPreview() {
 }
 
 function defaultVisualNodeParams(op) {
-    if (op.key === 'DataColumnParam') return { alias: 'P', type: 'DataColumnParam', default_value: 'CA' };
-    if (op.key === 'Constant') return { value: '1' };
+    if (op.key === 'DataColumnParam') return { alias: nextVisualParamAlias(), type: 'DataColumnParam', default_value: 'CA' };
+    if (op.key === 'Constant') return { name: '', value: '1' };
     return {};
+}
+
+function nextVisualParamAlias(base = 'P') {
+    const used = new Set(_visNodes
+        .filter(n => n.key === 'DataColumnParam')
+        .map(n => n.params?.alias || n.label)
+        .filter(Boolean));
+    if (!used.has(base)) return base;
+    for (let i = 2; i < 1000; i++) {
+        const candidate = `${base}${i}`;
+        if (!used.has(candidate)) return candidate;
+    }
+    return `${base}${Date.now()}`;
+}
+
+function normalizeVisualConstValue(value) {
+    const text = String(value ?? '').trim();
+    return text || '1';
 }
 
 function getVisualNodeSubtitle(node) {
     if (node.key === 'DataColumnParam') return `${node.params?.type || 'DataColumnParam'}=${node.params?.default_value || ''}`;
-    if (node.key === 'Constant') return node.params?.value || '';
+    if (node.key === 'Constant') return node.params?.name ? `${node.params.name}=${node.params?.value ?? ''}` : (node.params?.value ?? '');
     return `${(node.inputs || []).length}/${getVisualOperatorArity(node)} 输入`;
 }
 
@@ -1650,7 +1686,7 @@ function renderVisualNodeParamControls(node) {
     ` : '';
     if (node.key === 'DataColumnParam') {
         return `
-            <div class="field"><label>参数别名</label><input value="${escHtml(node.params?.alias || node.label || 'P')}" oninput="updateVisualParam(${node.id}, 'alias', this.value)"></div>
+            <div class="field"><label>参数别名/标签</label><input value="${escHtml(node.params?.alias || node.label || 'P')}" oninput="updateVisualParam(${node.id}, 'alias', this.value)"></div>
             <div class="field"><label>参数类型</label>
                 <select onchange="updateVisualParam(${node.id}, 'type', this.value)">
                     ${[...VIS_PARAMETER_TYPES, ...VIS_FACTOR_PARAM_TYPES].map(t => `<option value="${t}" ${node.params?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
@@ -1660,7 +1696,10 @@ function renderVisualNodeParamControls(node) {
         `;
     }
     if (node.key === 'Constant') {
-        return `<div class="field"><label>常数值</label><input value="${escHtml(node.params?.value || node.label || '0')}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>`;
+        return `
+            <div class="field"><label>常数名称（可空）</label><input value="${escHtml(node.params?.name || '')}" placeholder="如 N，不填则直接内联数值" oninput="updateVisualParam(${node.id}, 'name', this.value)"></div>
+            <div class="field"><label>常数值</label><input value="${escHtml(normalizeVisualConstValue(node.params?.value))}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>
+        `;
     }
     return intermediateControls;
 }
@@ -1705,7 +1744,7 @@ function updateVisualParam(nodeId, key, value) {
     if (!node) return;
     node.params = node.params || {};
     node.params[key] = value;
-    if (key === 'alias' || key === 'value') node.label = value;
+    if (key === 'alias' || key === 'name') node.label = value || (node.key === 'Constant' ? 'Constant' : node.label);
     if (key === 'intermediate_name' && value) node.label = value;
     _dirty = true;
     _visGraphDirty = true;
@@ -1738,6 +1777,8 @@ function isVisualNodeComplete(nodeId, seen) {
 
 function renderVisEdges(svg) {
     svg.innerHTML = '';
+    const canvas = document.getElementById('visual-canvas');
+    canvas?.querySelectorAll('.vis-edge-delete').forEach(n => n.remove());
     for (const node of _visNodes) {
         for (const [index, inputId] of (node.inputs || []).entries()) {
             const from = _visNodes.find(n => n.id === inputId);
@@ -1755,6 +1796,20 @@ function renderVisEdges(svg) {
             path.setAttribute('stroke-width', '2');
             path.setAttribute('fill', 'none');
             svg.appendChild(path);
+            if (canvas) {
+                const btn = document.createElement('button');
+                btn.className = 'vis-edge-delete';
+                btn.type = 'button';
+                btn.textContent = '×';
+                btn.title = '取消这条连接';
+                btn.style.left = `${mid - 8}px`;
+                btn.style.top = `${((y1 + y2) / 2) - 8}px`;
+                btn.onclick = (event) => {
+                    event.stopPropagation();
+                    disconnectVisualInput(node.id, index);
+                };
+                canvas.appendChild(btn);
+            }
         }
     }
 }
@@ -1887,6 +1942,8 @@ function visualToSource(options = {}) {
     const regularParamTypes = paramTypes.filter(t => !VIS_FACTOR_PARAM_TYPES.includes(t));
     const factorImports = ['FactorFamily', ...factorParamTypes];
     if (expr.includes('ConstExpr(')) factorImports.push('ConstExpr');
+    if (expr.includes('expr_max(')) factorImports.push('expr_max');
+    if (expr.includes('expr_min(')) factorImports.push('expr_min');
     const imports = [
         `from tools.factors import ${[...new Set(factorImports)].join(', ')}`,
         regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
@@ -1905,7 +1962,28 @@ function visualToSource(options = {}) {
         const dv = n.params?.default_value || '';
         return `        ${alias} = ${type}('${alias}', default_value=${JSON.stringify(dv)})`;
     }).join('\n');
-    return `${imports}\n\n\nclass ${className}(FactorFamily):\n    @staticmethod\n    def factor_expr():\n${paramLines || "        P = DataColumnParam('P', default_value='CA')"}\n        return ${expr}\n`;
+    const constLines = getNamedVisualConstNodes().map(n => {
+        const name = n.params?.name?.trim();
+        return `        ${name} = ${normalizeVisualConstValue(n.params?.value)}`;
+    }).join('\n');
+    const setupLines = [paramLines, constLines].filter(Boolean).join('\n');
+    const setupBlock = setupLines ? `${setupLines}\n` : '';
+    const source = `${imports}\n\n\nclass ${className}(FactorFamily):\n    @staticmethod\n    def factor_expr():\n${setupBlock}        return ${expr}\n`;
+    _visLastGeneratedSource = source;
+    _visSourceFallback = source;
+    return source;
+}
+
+function getNamedVisualConstNodes() {
+    const seen = new Set();
+    const nodes = [];
+    _visNodes.filter(n => n.key === 'Constant').forEach(n => {
+        const name = n.params?.name?.trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        nodes.push(n);
+    });
+    return nodes;
 }
 
 function loadVisualNodesFromSource(source) {
@@ -1969,7 +2047,17 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x = 0, y
         return addVisualNodeFromParsed('DataColumnParam', 'leaf', param.alias, 0, 0, [], {...param});
     }
     if (assignments.has(trimmed)) {
-        return buildVisualGraphFromExpression(assignments.get(trimmed), assignments, nodeByAlias, x, y, trimmed);
+        const assigned = assignments.get(trimmed);
+        if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(stripOuterParens(assigned))) {
+            return addVisualNodeFromParsed('Constant', 'leaf', trimmed, x, y, [], { name: trimmed, value: stripOuterParens(assigned) });
+        }
+        return buildVisualGraphFromExpression(assigned, assignments, nodeByAlias, x, y, trimmed);
+    }
+    const constExpr = trimmed.match(/^ConstExpr\((.*)\)$/);
+    if (constExpr) {
+        const args = splitTopLevelArgs(constExpr[1]);
+        const value = args[0] || '1';
+        return addVisualNodeFromParsed('Constant', 'leaf', labelHint || '', x, y, [], { name: labelHint || '', value });
     }
     const intermediate = parseIntermediateExpression(trimmed);
     if (intermediate) {
@@ -1983,7 +2071,16 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x = 0, y
         return nodeId;
     }
     if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(trimmed)) {
-        return addVisualNodeFromParsed('Constant', 'leaf', labelHint || trimmed, x, y, [], { value: trimmed });
+        return addVisualNodeFromParsed('Constant', 'leaf', labelHint || '', x, y, [], { name: labelHint || '', value: trimmed });
+    }
+
+    const fnCall = parseFunctionExpression(trimmed);
+    if (fnCall) {
+        const inputIds = fnCall.args.map((arg, index) =>
+            buildVisualGraphFromExpression(arg, assignments, nodeByAlias, x - 220, y + index * 90)
+        ).filter(Boolean);
+        const cat = getVisualOperatorCatByKey(fnCall.name) || 'arithVariadic';
+        return addVisualNodeFromParsed(fnCall.name, cat, labelHint || fnCall.name, x, y, inputIds);
     }
 
     const method = parseMethodExpression(trimmed);
@@ -2002,10 +2099,10 @@ function buildVisualGraphFromExpression(expr, assignments, nodeByAlias, x = 0, y
     if (binary) {
         const leftId = buildVisualGraphFromExpression(binary.left, assignments, nodeByAlias, x - 220, y - 60);
         const rightId = buildVisualGraphFromExpression(binary.right, assignments, nodeByAlias, x - 220, y + 60);
-        return addVisualNodeFromParsed(binary.op, 'arith', labelHint || binary.op, x, y, [leftId, rightId].filter(Boolean));
+        return addVisualNodeFromParsed(binary.op, getVisualOperatorCatByKey(binary.op) || 'arithBinary', labelHint || binary.op, x, y, [leftId, rightId].filter(Boolean));
     }
 
-    return addVisualNodeFromParsed('Constant', 'leaf', labelHint || trimmed, x, y, [], { value: trimmed });
+    return addVisualNodeFromParsed('Constant', 'leaf', labelHint || '', x, y, [], { name: labelHint || '', value: trimmed });
 }
 
 function addVisualNodeFromParsed(key, cat, label, x = 0, y = 0, inputs = [], params = {}) {
@@ -2047,6 +2144,19 @@ function parseMethodExpression(expr) {
     if (!match) return null;
     const args = splitTopLevelArgs(match[3]);
     return { base: match[1].trim(), name: match[2], args };
+}
+
+function parseFunctionExpression(expr) {
+    const functionKeys = Object.values(OP_PALETTE).flat()
+        .filter(op => op.syntax === 'function')
+        .map(op => op.key)
+        .sort((a, b) => b.length - a.length)
+        .map(escapeRegExp)
+        .join('|');
+    if (!functionKeys) return null;
+    const match = expr.match(new RegExp(`^(${functionKeys})\\((.*)\\)$`));
+    if (!match) return null;
+    return { name: match[1], args: splitTopLevelArgs(match[2]) };
 }
 
 function parseBinaryExpression(expr) {

@@ -134,6 +134,18 @@ VISUAL_OPERATOR_GROUPS = [
         ],
     },
     {
+        'key': 'arithVariadic',
+        'label': '算数多元',
+        'collapsed': False,
+        'operators': [
+            {'key': 'expr_max', 'label': 'max', 'desc': 'max(A, B, C)', 'arity': 3, 'slots': ['输入 A', '输入 B', '输入 C'], 'syntax': 'function'},
+            {'key': 'expr_min', 'label': 'min', 'desc': 'min(A, B, C)', 'arity': 3, 'slots': ['输入 A', '输入 B', '输入 C'], 'syntax': 'function'},
+        ],
+        'more_label': '更多算数多元',
+        'more_operators': [
+        ],
+    },
+    {
         'key': 'arithTernary',
         'label': '算数三元',
         'collapsed': False,
