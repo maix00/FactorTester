@@ -13,6 +13,8 @@ let _validatedFactorDraft = null;
 let _validatedSourceSnapshot = '';
 let _validatedVisualGraph = null;
 let _editingOriginalParamAliases = '';
+let _lastViewedFactorFamily = null;
+let _editingSaveTarget = null; // {source:'custom'|'public', id:string, owner:string}
 
 // ═══════════════════════════════════════════════════════════
 // 初始化
@@ -114,7 +116,7 @@ function renderFactorFamilyList() {
             if (!ownerGroups[ownerKey]) ownerGroups[ownerKey] = [];
             ownerGroups[ownerKey].push(f);
         });
-        html += `<div class="collapsible-factor-node collapsible-factor-group">
+        html += `<div class="collapsible-factor-node collapsible-factor-group" data-factor-group="${escAttr(g)}">
             <button class="collapsible-factor-header" type="button">
                 <span class="caret">▶</span>
                 <span class="collapsible-factor-title">${escHtml(g)}</span>
@@ -123,7 +125,7 @@ function renderFactorFamilyList() {
             <div class="collapsible-factor-body">`;
         for (const ownerKey of Object.keys(ownerGroups).sort()) {
             const ownerItems = ownerGroups[ownerKey];
-            html += `<div class="collapsible-factor-node collapsible-factor-owner">
+            html += `<div class="collapsible-factor-node collapsible-factor-owner" data-factor-owner="${escAttr(ownerKey)}">
                 <button class="collapsible-factor-header" type="button">
                     <span class="caret">▶</span>
                     <span class="collapsible-factor-title">${escHtml(getFactorFamilyOwnerLabel(ownerItems[0]))}</span>
@@ -153,7 +155,7 @@ function renderFactorFamilyList() {
             const sourceTag = f.type === 'custom'
                 ? `<span class="source-tag custom">${f.can_edit ? '我' : escHtml(f.owner_alias || '下级')}</span>`
                 : '<span class="source-tag public">公共</span>';
-                html += `<div class="factor-family-list-item${active}" onclick="selectFactorFamily('${escAttr(f.id)}', '${escAttr(f.type)}', '${escAttr(ownerUsername)}')">
+                html += `<div class="factor-family-list-item${active}" data-factor-id="${escAttr(f.id)}" data-factor-type="${escAttr(f.type)}" data-factor-owner-username="${escAttr(ownerUsername)}" onclick="selectFactorFamily('${escAttr(f.id)}', '${escAttr(f.type)}', '${escAttr(ownerUsername)}')">
                 <div class="info">
                     <div class="name">${name}${sourceTag}</div>
                     <div class="meta">${meta}</div>
@@ -166,6 +168,7 @@ function renderFactorFamilyList() {
     }
     list.innerHTML = html;
     if (typeof bindCollapsibleFactorLists === 'function') bindCollapsibleFactorLists(list);
+    expandCurrentFactorFamilyInNav();
 }
 
 function getFactorFamilyOwnerSortKey(f) {
@@ -251,11 +254,45 @@ async function selectFactorFamily(factorFamilyId, factorFamilySource, ownerUsern
         factor.can_edit = factor.can_edit || listFactorFamily.can_edit;
     }
     _currentFactorFamilyId = factorFamilyId;
+    _editingSaveTarget = null;
+    _lastViewedFactorFamily = {
+        id: factorFamilyId,
+        source: _currentFactorFamilySource,
+        owner: _currentFactorFamilyOwner,
+    };
     _isNew = false;
     _dirty = false;
     renderFactorFamilyList();
     // 自定义和公共因子家族都默认使用只读视图
     renderFactorFamilyReadonlyView(factor);
+}
+
+function expandCurrentFactorFamilyInNav() {
+    if (!_currentFactorFamilyId) return;
+    const list = document.getElementById('factor-family-list');
+    if (!list) return;
+    const selector = `.factor-family-list-item[data-factor-id="${cssEscape(_currentFactorFamilyId)}"][data-factor-type="${cssEscape(_currentFactorFamilySource || 'custom')}"]`;
+    const candidates = [...list.querySelectorAll(selector)];
+    const item = candidates.find(el => {
+        if ((_currentFactorFamilySource || 'custom') === 'public') return true;
+        return (el.dataset.factorOwnerUsername || '') === (_currentFactorFamilyOwner || '');
+    });
+    if (!item) return;
+    let node = item.parentElement;
+    while (node && node !== list) {
+        if (node.classList?.contains('collapsible-factor-node')) {
+            node.classList.add('open');
+            const body = node.querySelector(':scope > .collapsible-factor-body');
+            if (body) body.style.removeProperty('display');
+        }
+        node = node.parentElement;
+    }
+    requestAnimationFrame(() => item.scrollIntoView({block: 'nearest'}));
+}
+
+function cssEscape(value) {
+    if (window.CSS?.escape) return CSS.escape(String(value || ''));
+    return String(value || '').replace(/["\\]/g, '\\$&');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -375,8 +412,14 @@ function enterEditMode(factorName, isPublic) {
         .then(data => {
             if (data.success && data.factor) {
                 data.factor.type = isPublic ? 'public' : 'custom';
-                // 如果是公共因子，允许管理员保存为自定义副本（不能覆盖公共）
+                _isNew = false;
+                _editingSaveTarget = {
+                    source: isPublic ? 'public' : 'custom',
+                    id: isPublic ? (data.factor.id || factorName) : _currentFactorFamilyId,
+                    owner: isPublic ? '' : (_currentFactorFamilyOwner || ''),
+                };
                 renderCodeEditor(data.factor);
+                expandCurrentFactorFamilyInNav();
                 document.getElementById('editor-title').textContent =
                     `${factorName}（${isPublic ? '公共因子' : '自定义因子'} — 编辑模式）`;
             }
@@ -465,6 +508,9 @@ function getParamAliasTitle(paramDef) {
 
 function createNew() {
     _currentFactorFamilyId = null;
+    _currentFactorFamilySource = 'custom';
+    _currentFactorFamilyOwner = '';
+    _editingSaveTarget = null;
     _isNew = true;
     _dirty = false;
     renderFactorFamilyList();
@@ -1121,14 +1167,25 @@ async function saveFactor() {
 
     try {
         let res;
-        const shouldCreate = _isNew || !_currentFactorFamilyId || _currentFactorFamilySource === 'public';
-        if (shouldCreate) {
+        const saveTarget = _editingSaveTarget || {
+            source: _currentFactorFamilySource || 'custom',
+            id: _currentFactorFamilyId || '',
+            owner: _currentFactorFamilyOwner || '',
+        };
+        const shouldUpdatePublic = !_isNew && saveTarget.id && saveTarget.source === 'public';
+        const shouldCreate = _isNew || !saveTarget.id;
+        if (shouldUpdatePublic) {
+            res = await fetch('/custom-factors/api/update-public/' + encodeURIComponent(saveTarget.id), {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+        } else if (shouldCreate) {
             res = await fetch('/custom-factors/api/create', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
         } else {
-            res = await fetch('/custom-factors/api/update/' + _currentFactorFamilyId, {
+            res = await fetch('/custom-factors/api/update/' + encodeURIComponent(saveTarget.id), {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
@@ -1137,14 +1194,18 @@ async function saveFactor() {
         if (data.success) {
             _dirty = false;
             _currentFactorFamilyId = data.factor.id;
-            _currentFactorFamilySource = 'custom';
-            _currentFactorFamilyOwner = '';
+            _currentFactorFamilySource = data.factor.type || (data.factor.is_public ? 'public' : 'custom');
+            _currentFactorFamilyOwner = _currentFactorFamilySource === 'public' ? '' : '';
             _isNew = false;
+            _lastViewedFactorFamily = {
+                id: _currentFactorFamilyId,
+                source: _currentFactorFamilySource,
+                owner: _currentFactorFamilyOwner,
+            };
+            _editingSaveTarget = null;
             showToast('保存成功', 'success');
             await loadFactorFamilyList();
-            // 重新 fetch 因子数据并渲染编辑器
-            const factor = data.factor;
-            renderCodeEditor(factor);
+            await selectFactorFamily(_currentFactorFamilyId, _currentFactorFamilySource, _currentFactorFamilyOwner);
         } else {
             showToast(data.error || '保存失败', 'error');
         }
@@ -1155,9 +1216,21 @@ async function saveFactor() {
 
 function discardEdit() {
     if (_dirty && !confirm('有未保存的修改，确定放弃？')) return;
-    _currentFactorFamilyId = null;
     _isNew = false;
     _dirty = false;
+    if (_lastViewedFactorFamily?.id) {
+        selectFactorFamily(
+            _lastViewedFactorFamily.id,
+            _lastViewedFactorFamily.source,
+            _lastViewedFactorFamily.owner
+        );
+        return;
+    }
+    if (_currentFactorFamilyId) {
+        selectFactorFamily(_currentFactorFamilyId, _currentFactorFamilySource, _currentFactorFamilyOwner);
+        return;
+    }
+    _currentFactorFamilyId = null;
     renderFactorFamilyList();
     const body = document.getElementById('editor-body');
     body.innerHTML = '<div class="editor-placeholder">← 从左侧选择因子，或点击「新建因子」</div>';

@@ -5,7 +5,8 @@
 // 2. 代码 -> 画布只允许做两类源码字符串检查：
 //    - 扫描 factor_expr() 中的 Param(...) 声明，用于补回孤立参数。
 //    - 检查“上一轮画布生成过的孤立表达式代码行”是否仍存在，存在才恢复快照分支。
-// 3. 不允许从源码字符串解析 return/assignment 来推导表达式树或孤立表达式。
+// 3. 不允许从源码字符串解析 return/assignment 来推导表达式树、孤立表达式或常数名。
+//    FactorExpr 只保留常数值，不保留“这个值来自哪个局部变量名”的溯源；同值常数无法可靠反推名字。
 // 4. 画布 -> 代码可以自动生成 Python 局部变量名，但不能自动调用 as_intermediate()。
 // 5. as_intermediate() 只代表用户显式创建的中间因子；它会影响后端运算逻辑和 LaTeX 展示。
 
@@ -141,6 +142,9 @@ function visualToSource(options = {}) {
         const varName = getVisualParamVariableName(n);
         const type = n.params?.type || 'DataColumnParam';
         const dv = n.params?.default_value || '';
+        if (n.params?.has_default_value === false) {
+            return `        ${varName} = ${type}('${alias}')`;
+        }
         return `        ${varName} = ${type}('${alias}', default_value=${JSON.stringify(dv)})`;
     }).join('\n');
     const constLines = getNamedVisualConstNodes().map(n => {
@@ -318,7 +322,6 @@ function rememberVisualGraphSnapshot(source, detachedBranches = null) {
         nextId: _visNextId,
         selectedNodeId: _visSelectedNodeId,
         rootId: getVisualRootNode()?.id || null,
-        namedConstants: collectVisualNamedConstRecords(_visNodes),
         detachedBranches: detachedBranches || collectVisualDetachedBranchRecords(_visNodes),
     };
 }
@@ -368,21 +371,6 @@ function getNamedVisualConstNodes() {
         nodes.push(n);
     });
     return nodes;
-}
-
-function collectVisualNamedConstRecords(nodes) {
-    return nodes
-        .filter(node => node.key === 'Constant' && node.params?.name?.trim())
-        .map(node => {
-            const name = node.params.name.trim();
-            const value = normalizeVisualConstValue(node.params?.value);
-            return {
-                nodeId: node.id,
-                name,
-                value,
-                line: `${name} = ${value}`,
-            };
-        });
 }
 
 function collectVisualDetachedBranchRecords(nodes, assignmentLineByNodeId = null) {
@@ -529,48 +517,6 @@ function restoreSnapshotDetachedBranchesIfStillInSource(source) {
     _visNextId = Math.max(_visNextId, nextId);
 }
 
-function restoreSnapshotNamedConstantsIfStillInSource(source) {
-    const records = _visGraphSnapshot?.namedConstants || [];
-    if (!records.length) return;
-    const sourceLines = new Set(normalizeVisualSourceForSnapshot(source).split('\n'));
-    const usedNames = new Set(_visNodes
-        .filter(node => node.key === 'Constant')
-        .map(node => node.params?.name?.trim())
-        .filter(Boolean));
-    let nextId = inferNextVisualNodeId();
-
-    records.forEach(record => {
-        const name = String(record.name || '').trim();
-        const value = normalizeVisualConstValue(record.value);
-        if (!name || usedNames.has(name)) return;
-        if (!sourceLines.has(String(record.line || '').trim())) return;
-
-        const existing = _visNodes.find(node =>
-            node.key === 'Constant'
-            && !node.params?.name?.trim()
-            && normalizeVisualConstValue(node.params?.value) === value
-        );
-        if (existing) {
-            existing.params = existing.params || {};
-            existing.params.name = name;
-            existing.label = name;
-        } else {
-            _visNodes.push({
-                id: nextId++,
-                key: 'Constant',
-                cat: 'leaf',
-                label: name,
-                x: 0,
-                y: 0,
-                inputs: [],
-                params: {name, value},
-            });
-        }
-        usedNames.add(name);
-    });
-    _visNextId = Math.max(_visNextId, nextId);
-}
-
 function loadVisualNodesFromSource(source) {
     _visNodes = [];
     _visNextId = 1;
@@ -579,7 +525,6 @@ function loadVisualNodesFromSource(source) {
     addUnusedVisualParamsFromSource(params.length ? params : [
         { alias: 'P', variable_name: 'P', type: 'DataColumnParam', default_value: 'CA' },
     ]);
-    restoreSnapshotNamedConstantsIfStillInSource(source);
     restoreSnapshotDetachedBranchesIfStillInSource(source);
     ensureReturnNode();
 }
@@ -600,7 +545,6 @@ function loadVisualNodesFromGraph(graph, source = '') {
     _visSelectedNodeId = null;
     ensureReturnNode();
     addUnusedVisualParamsFromSource(parseParamNodesFromSource(source));
-    restoreSnapshotNamedConstantsIfStillInSource(source);
     restoreSnapshotDetachedBranchesIfStillInSource(source);
     return true;
 }
@@ -619,17 +563,26 @@ function addUnusedVisualParamsFromSource(params) {
 function parseParamNodesFromSource(source) {
     const body = extractFactorExprBody(source);
     const params = [];
-    const regex = /^\s*(\w+)\s*=\s*(\w+Param)\(\s*['"]([^'"]+)['"]\s*,\s*default_value\s*=\s*([^)\n]+)\)/gm;
+    // 只识别 factor_expr() 内的参数声明形状：P = SomeParam('alias', ...)
+    // 这一步用于补回未参与主表达式的孤立参数，不参与 return/assignment 表达式树推导。
+    const regex = /^\s*(\w+)\s*=\s*(\w+Param)\(\s*['"]([^'"]+)['"]([^)]*)\)/gm;
     let match;
     while ((match = regex.exec(body)) !== null) {
         params.push({
             alias: match[3] || match[1],
             variable_name: match[1] || '',
             type: match[2],
-            default_value: String(match[4] || '').trim().replace(/^['"]|['"]$/g, ''),
+            ...extractParamDefaultValue(match[4]),
         });
     }
     return params;
+}
+
+function extractParamDefaultValue(argsTail) {
+    const match = String(argsTail || '').match(/(?:^|,)\s*default_value\s*=\s*([^,\n)]+)/);
+    return match
+        ? {default_value: String(match[1] || '').trim().replace(/^['"]|['"]$/g, ''), has_default_value: true}
+        : {default_value: '', has_default_value: false};
 }
 
 function extractFactorExprBody(source) {
