@@ -944,6 +944,7 @@
             summaryText.textContent = `默认使用因子$F，${checkedCount}个因子参与测试`;
         }
     }
+    window.updateFreqSummary = updateFreqSummary;
 
     // 弃用旧的内联面板生成，保留兼容性（返回空字符串）
     function buildFactorConfigPanel(subId, factors) {
@@ -1032,12 +1033,20 @@
         };
     }
 
-    document.addEventListener('DOMContentLoaded', async () => {
+    async function initICModule() {
         initFreqDrawerButtons();
+        await fetchFactorList();
+        populateFreqDrawer(factorList);
         if (window.submissions && window.submissions.length) {
             await window.renderICTabs(window.submissions);
         }
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initICModule);
+    } else {
+        initICModule();
+    }
 
     // 供参数模块调用，刷新因子列表和 IC 选项卡
     window.refreshICModule = async function() {

@@ -42,6 +42,9 @@
 
         // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
         window.reloadParamModule = function reloadParamModule(callback) {
+            if (typeof window.reloadSingleFactorContent === 'function') {
+                return window.reloadSingleFactorContent(callback);
+            }
             return fetch(window.location.pathname + _buildFactorUrl(factorAlias))
                 .then(res => res.text())
                 .then(html => {

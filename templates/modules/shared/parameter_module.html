@@ -140,9 +140,18 @@
             }
         });
         var el = document.getElementById('param-summary-text');
-        if (el) el.innerHTML = names.length > 0 
-            ? names.map(function(n) { return '<div>' + n + '</div>'; }).join('')
-            : '暂无参数';
+        if (el) {
+            el.textContent = '';
+            if (names.length > 0) {
+                names.forEach(function(n) {
+                    var div = document.createElement('div');
+                    div.textContent = n;
+                    el.appendChild(div);
+                });
+            } else {
+                el.textContent = '暂无参数';
+            }
+        }
     }
     // 暴露到全局，让 parameter_module.js 在 reload 后也能调用
     window._updateParamSummary = updateParamSummary;
@@ -153,8 +162,13 @@
             if (!this.classList.contains('open')) updateParamSummary();
         });
     }
-    document.addEventListener('DOMContentLoaded', function () {
+    function initParamSummary() {
         updateParamSummary();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initParamSummary);
+    } else {
+        initParamSummary();
+    }
 })();
 </script>

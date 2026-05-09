@@ -1,0 +1,77 @@
+.single-factor-app .sidebar {
+    width: 360px;
+}
+
+.single-factor-app .editor-header {
+    min-height: 57px;
+    padding-right: 160px;
+}
+
+.single-factor-body {
+    display: block;
+    overflow: auto;
+    padding: 18px 22px 36px;
+    background: #f6f8fa;
+}
+
+.single-factor-body > .section {
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.single-factor-body .module,
+.single-factor-body .param-info-module {
+    background: #fff;
+}
+
+.single-factor-body .editor-placeholder {
+    height: calc(100vh - 110px);
+}
+
+.single-factor-app .factor-family-list-item .name {
+    align-items: baseline;
+}
+
+.single-factor-app .source-tag.custom {
+    color: #b45309;
+    background: #fff7ed;
+    border-color: #fed7aa;
+}
+
+.single-factor-app .source-tag.public {
+    color: #475467;
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.single-factor-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 240px;
+    color: #98a2b3;
+    font-size: 15px;
+}
+
+.single-factor-body #group-fee-drawer .group-fee-drawer-panel {
+    width: min(1180px, 96vw);
+    max-width: 96vw;
+}
+
+.single-factor-body #group-fee-drawer .group-fee-table-wrap {
+    max-height: calc(100vh - 170px);
+}
+
+@media (max-width: 860px) {
+    .single-factor-app {
+        grid-template-columns: 280px 8px minmax(0, 1fr);
+    }
+
+    .single-factor-app .sidebar {
+        width: 280px;
+    }
+
+    .single-factor-body {
+        padding: 14px 12px 28px;
+    }
+}

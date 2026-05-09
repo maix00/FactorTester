@@ -110,6 +110,7 @@
             ? lines.map(function(l) { return '<div>' + l + '</div>'; }).join('')
             : '未选择';
     }
+    window.updateCategorySummary = updateCategorySummary;
     var drawer = document.getElementById('category-drawer');
     if (drawer) {
         drawer.addEventListener('transitionend', function () {
@@ -118,9 +119,14 @@
     }
     // window.submissions 由 category_filter_module.js 约定暴露，
     // 它在提交或删除后可能更新，简单轮询即可
-    document.addEventListener('DOMContentLoaded', function () {
+    function initCategorySummary() {
         setInterval(updateCategorySummary, 1000);
         updateCategorySummary();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCategorySummary);
+    } else {
+        initCategorySummary();
+    }
 })();
 </script>

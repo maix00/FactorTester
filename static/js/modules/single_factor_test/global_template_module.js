@@ -403,6 +403,17 @@
         if (snapshot.fee_modifications && window._applyFeeModifications) {
             window._applyFeeModifications(snapshot.fee_modifications);
         }
+
+        refreshOuterSummaries();
+    }
+
+    function refreshOuterSummaries() {
+        setTimeout(function() {
+            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+            if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
+            if (typeof window.updateCategorySummary === 'function') window.updateCategorySummary();
+            if (typeof window.updateFreqSummary === 'function') window.updateFreqSummary();
+        }, 0);
     }
 
     // ── 保存模板 ──────────────────────────────────────────────────────────
@@ -612,9 +623,16 @@
     }
 
     // ── 初始化 ────────────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', () => {
+    function initGlobalTemplateModule() {
         const saveBtn = document.getElementById('global-tpl-save-btn');
         if (saveBtn) saveBtn.onclick = saveTemplate;
+
+        const summaryRow = document.getElementById('global-tpl-summary-row');
+        if (summaryRow) {
+            summaryRow.addEventListener('click', function() {
+                setTimeout(loadTemplateList, 0);
+            });
+        }
 
         // 抽屉打开时加载模板列表
         const drawer = document.getElementById('global-tpl-drawer');
@@ -626,7 +644,14 @@
             });
             observer.observe(drawer, { attributes: true, attributeFilter: ['class'] });
         }
-    });
+        loadTemplateList();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initGlobalTemplateModule);
+    } else {
+        initGlobalTemplateModule();
+    }
 
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;
