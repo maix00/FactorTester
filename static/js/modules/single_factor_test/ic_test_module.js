@@ -6,6 +6,8 @@
     // 全局变量
     let factorFamilyAlias = window.factorFamilyAlias || '';
     let factorList = [];  // 存储因子列表 [{alias, name, freq}]
+    let icContractSelection = {}; // key: `${subId}-${idx}` => Set(contract_uid)
+    let icHoverBandState = {}; // key: `${subId}-${idx}` => { from, to }
 
     if (typeof Highcharts !== 'undefined') {
         Highcharts.setOptions({
@@ -56,6 +58,7 @@
         const ohlcData     = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.OPEN[i], priceData.HIGH[i], priceData.LOW[i], priceData.CLOSE[i]]);
         const factorValues = factorData.dates.map((ts, i) => [_parseTs(ts), factorData.values[i]]);
         const returnValues = returnData.dates.map((ts, i) => [_parseTs(ts), returnData.values[i]]);
+        const contractSeriesList = Array.isArray(priceData.contract_series_list) ? priceData.contract_series_list : [];
 
         // 动态计算各面板布局（gap=0.5%，总和精确=100%）
         let priceH, factorH, returnH, extraH;
@@ -100,10 +103,15 @@
         // 构建 series
         const series = [
             {
-                name: `${productName} 价格`,
+                name: `${productName} 主力连续`,
                 type: 'candlestick',
                 data: ohlcData,
                 yAxis: 0,
+                zIndex: 10,
+                color: '#1F2937',
+                lineColor: '#1F2937',
+                upColor: '#FFF176',
+                upLineColor: '#1F2937',
             },
             {
                 name: `因子值`,
@@ -122,6 +130,30 @@
                 id: 'return'
             }
         ];
+
+        // 同一品种不同期限合约叠加：使用价格查看模块同链路 /api/get_price_data(contract_uid)
+        if (contractSeriesList.length > 0) {
+            const palette = ['#7E57C2', '#26A69A', '#FF7043', '#5C6BC0', '#EC407A', '#66BB6A'];
+            contractSeriesList.forEach(function(s, i) {
+                if (!s || !Array.isArray(s.data) || s.data.length === 0) return;
+                const fromTs = s.data[0] && s.data[0][0] != null ? s.data[0][0] : null;
+                const toTs = s.data[s.data.length - 1] && s.data[s.data.length - 1][0] != null ? s.data[s.data.length - 1][0] : null;
+                series.push({
+                    name: s.name,
+                    type: 'candlestick',
+                    data: s.data,
+                    yAxis: 0,
+                    zIndex: 2,
+                    custom: { isContractOverlay: true, rangeFrom: fromTs, rangeTo: toTs },
+                    color: palette[i % palette.length],
+                    lineWidth: 1,
+                    upColor: 'transparent',
+                    upLineColor: palette[i % palette.length],
+                    lineColor: palette[i % palette.length],
+                    fillColor: 'transparent',
+                });
+            });
+        }
 
         let nextTop = priceH + factorH + returnH + gap * 3;
         let nextIdx = 3;
@@ -168,9 +200,10 @@
             });
         }
 
-        Highcharts.stockChart(container, {
+        const chart = Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: `${productName} — ${factorName}` },
+            legend: { enabled: true },
             plotOptions: {
                 series: {
                     point: {
@@ -216,6 +249,27 @@
             navigator: { enabled: true },
             scrollbar: { enabled: true },
             rangeSelector: { enabled: true }
+        });
+        window._icComparisonChartRefs = window._icComparisonChartRefs || {};
+        window._icComparisonChartRefs[`${subId}-${idx}`] = chart;
+        bindLegendHoverHighlight(chart, subId, idx);
+    }
+
+    function bindLegendHoverHighlight(chart, subId, idx) {
+        if (!chart || !Array.isArray(chart.series)) return;
+        chart.series.forEach(function(s) {
+            const custom = s && s.options ? s.options.custom : null;
+            if (!custom || !custom.isContractOverlay) return;
+            const legendEl = s.legendItem && s.legendItem.element;
+            if (!legendEl || legendEl.__icHoverBound) return;
+
+            legendEl.addEventListener('mouseenter', function() {
+                window.icHighlightContractRange(subId, idx, custom.rangeFrom, custom.rangeTo);
+            });
+            legendEl.addEventListener('mouseleave', function() {
+                window.icHighlightContractRange(subId, idx, null, null);
+            });
+            legendEl.__icHoverBound = true;
         });
     }
 
@@ -522,18 +576,33 @@
                     ${rollingIcHtml}
                     <!-- 产品选择、加载按钮和复权复选框 -->
                     <div style="margin-top:16px;">
-                        <label>选择产品：</label>
-                        <select id="product-select-${subId}-${idx}" class="form-select" style="width:200px; display:inline-block; margin-left:8px;">${productOptions}</select>
+                        <label>主产品(用于因子/收益率)：</label>
+                        <select id="primary-product-select-${subId}-${idx}" class="form-select" style="width:240px; display:inline-block; margin-left:8px;">${productOptions}</select>
                         <button class="btn btn-sm btn-outline-primary" data-sub="${subId}" data-idx="${idx}" data-factor-name="${factor.name}" data-factor-alias="${factor.alias}">加载因子和收益</button>
+                        <span id="adjust-wrap-${subId}-${idx}" style="margin-left:12px;display:none;">
+                            <label style="margin:0;">
+                                <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
+                            </label>
+                        </span>
                         <label style="margin-left:12px;">
-                            <input type="checkbox" id="adjust-price-${subId}-${idx}"> 复权价格
-                        </label>
-                        <label style="margin-left:12px;">
-                            <input type="checkbox" id="show-volume-${subId}-${idx}" onchange="window.icRedrawComparison(${subId},${idx})"> 📊 成交量
+                            <input type="checkbox" id="show-volume-${subId}-${idx}" checked onchange="window.icRedrawComparison(${subId},${idx})"> 📊 成交量
                         </label>
                         <label style="margin-left:8px;">
-                            <input type="checkbox" id="show-oi-${subId}-${idx}" onchange="window.icRedrawComparison(${subId},${idx})"> 📈 持仓量
+                            <input type="checkbox" id="show-oi-${subId}-${idx}" checked onchange="window.icRedrawComparison(${subId},${idx})"> 📈 持仓量
                         </label>
+                        <div style="margin-top:6px;color:#666;font-size:12px;">期限合约请在下方点击表格选择</div>
+                    </div>
+                    <div id="contract-table-wrap-${subId}-${idx}" style="margin-top:10px;display:none;border:1px solid #e1e4e8;border-radius:6px;background:#fff;max-height:220px;overflow:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead>
+                                <tr style="position:sticky;top:0;background:#f6f8fa;z-index:1;">
+                                    <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">合约</th>
+                                    <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">起始日期</th>
+                                    <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #f0f0f0;">结束日期</th>
+                                </tr>
+                            </thead>
+                            <tbody id="contract-table-body-${subId}-${idx}"></tbody>
+                        </table>
                     </div>
                     <!-- 价格 / 因子值 / 收益率 三联图容器 -->
                     <div style="margin-top:8px;">
@@ -568,7 +637,17 @@
             if (factor.rolling_ic && factor.rolling_ic.dates && factor.rolling_ic.dates.length > 0) {
                 drawRollingICChart(`ic-rolling-chart-${subId}-${idx}`, factor.rolling_ic);
             }
+
+            // 初始化期限合约表格（基于主产品）
+            const primarySelect = document.getElementById(`primary-product-select-${subId}-${idx}`);
+            if (primarySelect) {
+                populateContractTable(subId, idx, primarySelect.value);
+                primarySelect.addEventListener('change', function() {
+                    populateContractTable(subId, idx, primarySelect.value);
+                });
+            }
         });
+
         // 绑定加载按钮事件
         document.querySelectorAll(`[data-sub="${subId}"]`).forEach(btn => {
             btn.removeEventListener('click', loadHandler);
@@ -589,8 +668,9 @@
 
     // 加载因子值和收益率并绘图
     async function loadFactorAndReturn(subId, factorIdx, factorName, factorAlias) {
-        const select = document.getElementById(`product-select-${subId}-${factorIdx}`);
-        const product = select ? select.value : null;
+        const primarySelect = document.getElementById(`primary-product-select-${subId}-${factorIdx}`);
+        const testerPrimary = primarySelect ? primarySelect.value : '';
+        const product = testerPrimary || null;
         if (!product || product === '') { alert('请选择一个产品'); return; }
 
         const factorChartDiv = document.getElementById(`factor-chart-${subId}-${factorIdx}`);
@@ -621,7 +701,7 @@
                         factor_family_alias: factorFamilyAlias,
                         factor_name: factorName,
                         factor_alias: factorAlias,
-                        product: product
+                        product: testerPrimary || product
                     })
                 }).then(r => _safeJson(r, 'get_factor_series')),
                 fetch('/get_return_series', {
@@ -631,7 +711,7 @@
                         factor_name: factorName,
                         factor_alias: factorAlias,
                         factor_family_alias: factorFamilyAlias,
-                        product: product,
+                        product: testerPrimary || product,
                         paths: submission.paths
                     })
                 }).then(r => _safeJson(r, 'get_return_series'))
@@ -655,37 +735,41 @@
                 throw new Error(returnErr);
             }
 
-            const factorDates = factorData.dates;
-            // get_price_series expects ms timestamps; convert ISO strings (daily) if needed
-            const factorDatesMs = factorDates.map(d => typeof d === 'string' ? new Date(d + 'T00:00:00Z').getTime() : d);
             const adjustCheckbox = document.getElementById(`adjust-price-${subId}-${factorIdx}`);
             const adjusted = adjustCheckbox ? adjustCheckbox.checked : false;
-            const priceData = await fetch('/get_price_series', {
+
+            // 主价格序列改为复用价格查看模块链路，保证连续性
+            const priceApi = await fetch('/api/get_price_data', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    submission_id: subId,
-                    product: product,
-                    factor_family_alias: factorFamilyAlias,
-                    factor_name: factorName,
-                    factor_alias: factorAlias,
-                    factor_dates: factorDatesMs,
+                    product_name: testerPrimary || product,
                     adjusted: adjusted,
                     start_date: submission.start_date,
                     end_date: submission.end_date
                 })
             }).then(r => r.json());
 
+            const priceData = priceApiToSeries(priceApi);
+
             if (priceData.error) {
-                var priceErr = 'get_price_series 错误: ' + priceData.error;
-                if (priceData.traceback) {
+                var priceErr = 'get_price_data 错误: ' + priceData.error;
+                if (priceApi.traceback) {
                     factorChartDiv.innerHTML = '<div style="color:#d00; text-align:left;">' + priceErr + '</div>' +
-                        `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;">${priceData.traceback.replace(/</g,'&lt;')}</pre>`;
+                        `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;">${priceApi.traceback.replace(/</g,'&lt;')}</pre>`;
                     return;
                 }
                 throw new Error(priceErr);
             }
 
             if (priceData.dates && priceData.OPEN && factorData.dates && factorData.values && returnData.dates && returnData.values) {
+                // 拉取“同一产品不同期限合约”叠加线（接口链路复用 price_viewer）
+                const key = `${subId}-${factorIdx}`;
+                const selectedContractUids = Array.from(icContractSelection[key] || []);
+                const contractSeriesList = adjusted
+                    ? []
+                    : await fetchContractSeriesForOverlay(selectedContractUids, submission, adjusted);
+                priceData.contract_series_list = contractSeriesList;
+
                 // 缓存数据以便 Volume/OI 复选框切换时重绘
                 const cacheKey = `${subId}-${factorIdx}`;
                 window._icComparisonCache = window._icComparisonCache || {};
@@ -700,6 +784,132 @@
             factorChartDiv.innerHTML = `<div style="color:#d00; text-align:center;">请求失败: ${err.message}</div>`;
         }
     }
+
+    async function populateContractTable(subId, factorIdx, productName) {
+        const wrap = document.getElementById(`contract-table-wrap-${subId}-${factorIdx}`);
+        const tbody = document.getElementById(`contract-table-body-${subId}-${factorIdx}`);
+        const adjustWrap = document.getElementById(`adjust-wrap-${subId}-${factorIdx}`);
+        const adjustCheckbox = document.getElementById(`adjust-price-${subId}-${factorIdx}`);
+        if (!wrap || !tbody) return;
+        tbody.innerHTML = '';
+        wrap.style.display = 'none';
+        if (adjustWrap) adjustWrap.style.display = 'none';
+        if (adjustCheckbox) adjustCheckbox.checked = false;
+        if (!productName) return;
+        const key = `${subId}-${factorIdx}`;
+        icContractSelection[key] = new Set();
+        try {
+            const submission = window.submissions ? window.submissions.find(s => String(s.id) === String(subId)) : null;
+            const q = new URLSearchParams({ product: productName });
+            if (submission && submission.start_date) q.set('start_date', submission.start_date);
+            if (submission && submission.end_date) q.set('end_date', submission.end_date);
+            const resp = await fetch('/api/get_contracts?' + q.toString());
+            const data = await resp.json();
+            if (!data.success || !Array.isArray(data.contracts)) return;
+            if (adjustWrap) adjustWrap.style.display = data.has_term_structure ? 'inline-block' : 'none';
+            wrap.style.display = data.contracts.length > 0 ? 'block' : 'none';
+            data.contracts.forEach(function(c, idx) {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.innerHTML =
+                    '<td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;">' + c.contract + '</td>' +
+                    '<td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;">' + (c.start || '') + '</td>' +
+                    '<td style="padding:6px 10px;border-bottom:1px solid #f0f0f0;">' + (c.end || '') + '</td>';
+                if (idx < 3) {
+                    icContractSelection[key].add(c.uid);
+                    tr.style.background = 'rgba(255,165,0,0.15)';
+                }
+                tr.addEventListener('mouseenter', function() {
+                    window.icHighlightContractRange(subId, factorIdx, c.start_ts, c.end_ts);
+                });
+                tr.addEventListener('mouseleave', function() {
+                    window.icHighlightContractRange(subId, factorIdx, null, null);
+                });
+                tr.addEventListener('click', function() {
+                    if (icContractSelection[key].has(c.uid)) {
+                        icContractSelection[key].delete(c.uid);
+                        tr.style.background = '';
+                    } else {
+                        icContractSelection[key].add(c.uid);
+                        tr.style.background = 'rgba(255,165,0,0.15)';
+                    }
+                });
+                tbody.appendChild(tr);
+            });
+        } catch (e) {
+            console.warn('加载期限合约失败:', e);
+        }
+    }
+
+    async function fetchContractSeriesForOverlay(contractUids, submission, adjusted) {
+        const list = [];
+        if (!Array.isArray(contractUids) || contractUids.length === 0) return list;
+        const startMs = submission && submission.start_date ? new Date(submission.start_date + 'T00:00:00').getTime() : null;
+        const endMs = submission && submission.end_date ? new Date(submission.end_date + 'T23:59:59').getTime() : null;
+        const reqs = contractUids.map(async function(uid) {
+            const res = await fetch('/api/get_price_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contract_uid: uid,
+                    adjusted: false,
+                    start_date: submission.start_date,
+                    end_date: submission.end_date,
+                })
+            }).then(r => r.json());
+            if (!res.success || !Array.isArray(res.data)) return null;
+            const ohlc = res.data
+                .filter(function(d) {
+                    if (!d || d.timestamp == null || d.open == null || d.high == null || d.low == null || d.close == null) return false;
+                    if (startMs != null && d.timestamp < startMs) return false;
+                    if (endMs != null && d.timestamp > endMs) return false;
+                    return true;
+                })
+                .map(function(d) { return [d.timestamp, d.open, d.high, d.low, d.close]; });
+            if (ohlc.length === 0) return null;
+            const displayName = res.contract_name || uid;
+            return { name: displayName, data: ohlc };
+        });
+        const got = await Promise.all(reqs);
+        got.forEach(function(x) { if (x) list.push(x); });
+        return list;
+    }
+
+    function priceApiToSeries(apiData) {
+        if (!apiData || !apiData.success || !Array.isArray(apiData.data) || apiData.data.length === 0) {
+            return { error: (apiData && apiData.error) || '无价格数据' };
+        }
+        const data = apiData.data.slice().sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        return {
+            dates: data.map(d => d.timestamp),
+            OPEN: data.map(d => d.open),
+            HIGH: data.map(d => d.high),
+            LOW: data.map(d => d.low),
+            CLOSE: data.map(d => d.close),
+            VOLUME: data.map(d => d.volume || 0),
+            OPEN_INTEREST: data.map(d => d.open_interest == null ? null : d.open_interest),
+        };
+    }
+
+    window.icHighlightContractRange = function(subId, idx, fromTs, toTs) {
+        const key = `${subId}-${idx}`;
+        const chart = window._icComparisonChartRefs && window._icComparisonChartRefs[key];
+        if (!chart || !chart.xAxis || !chart.xAxis[0]) return;
+        const axis = chart.xAxis[0];
+        axis.removePlotBand('ic-contract-hover-band');
+        if (fromTs == null || toTs == null) {
+            delete icHoverBandState[key];
+            return;
+        }
+        icHoverBandState[key] = { from: fromTs, to: toTs };
+        axis.addPlotBand({
+            id: 'ic-contract-hover-band',
+            from: fromTs,
+            to: toTs,
+            color: 'rgba(100,149,237,0.12)',
+            zIndex: 3,
+        });
+    };
 
     // 运行 IC 测试（核心修改）
     async function resolveSubmissionIdForIC(subId, submission) {

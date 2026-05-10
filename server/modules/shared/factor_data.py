@@ -220,6 +220,8 @@ def get_price_series():
     data = request.get_json()
     submission_id       = data.get('submission_id')
     product_name        = data.get('product')
+    products_list       = data.get('products') or []
+    primary_product     = data.get('primary_product')
     factor_dates        = data.get('factor_dates')
     adjusted            = data.get('adjusted', False)
     factor_family_alias = data.get('factor_family_alias')
@@ -232,9 +234,15 @@ def get_price_series():
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
-        product = next((p for p in tester.products if p.name == product_name), None)
-        if not product:
+        product_names = []
+        if isinstance(products_list, list):
+            product_names = [str(x) for x in products_list if x not in (None, '')]
+        if not product_names and product_name:
+            product_names = [str(product_name)]
+        if not product_names:
             return jsonify({'error': '未找到产品'}), 404
+
+        primary_name = str(primary_product or product_names[0])
 
         assert factor_dates
         factor_idx = pd.to_datetime(factor_dates, unit='ms')
@@ -242,58 +250,72 @@ def get_price_series():
         end_date   = factor_idx.max().strftime('%Y-%m-%d')
         required = (['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME'] if adjusted
                     else ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME'])
-        raw_df = product.get_price_data(start_date, end_date, adjusted=adjusted)
-        if raw_df is None or raw_df.empty:
-            return jsonify({'error': '无价格数据'}), 404
-        # 检测 OI 列
-        _has_oi = 'OPEN_INTEREST' in raw_df.columns
-        if _has_oi:
-            required.append('OPEN_INTEREST')
-        for col in required:
-            if col not in raw_df.columns:
-                return jsonify({'error': f'价格数据缺少列: {col}'}), 500
-        if not isinstance(raw_df.index, pd.DatetimeIndex):
-            raw_df.index = pd.to_datetime(raw_df.index.get_level_values(-1))
-        if raw_df.index.tz is not None:
-            raw_df.index = raw_df.index.tz_convert('UTC').tz_localize(None)
+        def _resolve_product(name: str):
+            return next((p for p in tester.products if p.name == name), None)
 
-        # 构建区间：每个因子时间点作为右边界，左边界为上一个因子时间点（第一个左边界为数据开始）
-        bins = factor_idx.union([raw_df.index.min()])  # 添加数据开始时间
-        bins = bins.sort_values()
-        # 使用 cut 将价格数据分到对应的区间（右闭？需要仔细）
-        # 我们希望区间为 (left, right] 即包含右端点，左开右闭
-        # 使用 pd.cut 的 right=True 参数
-        labels = factor_idx  # 区间右端点作为标签
-        # 将 raw_df 索引分到区间
-        # 注意：pd.cut 要求 bins 严格递增，且 left 边界可能小于最小值，我们手动处理
-        # 先创建区间索引
-        intervals = pd.IntervalIndex.from_arrays(bins[:-1], bins[1:], closed='right')
-        # 为每个价格时间点找到所属区间
-        bin_indices = intervals.get_indexer(raw_df.index)
-        # 过滤出属于有效区间的点（-1表示不在任何区间）
-        mask = bin_indices >= 0
-        raw_filtered = raw_df[mask]
-        bin_indices = bin_indices[mask]
+        def _build_series_for_product(product):
+            raw_df = product.get_price_data(start_date, end_date, adjusted=adjusted)
+            if raw_df is None or raw_df.empty:
+                return None
+            has_oi = 'OPEN_INTEREST' in raw_df.columns
+            required_cols = list(required)
+            if has_oi:
+                required_cols.append('OPEN_INTEREST')
+            for col in required_cols:
+                if col not in raw_df.columns:
+                    return None
+            if not isinstance(raw_df.index, pd.DatetimeIndex):
+                raw_df.index = pd.to_datetime(raw_df.index.get_level_values(-1))
+            if raw_df.index.tz is not None:
+                raw_df.index = raw_df.index.tz_convert('UTC').tz_localize(None)
 
-        # 分组聚合
-        def agg_func(group):
-            result = {
-                'OPEN': group[required[0]].iloc[0],      # 区间内第一笔 open
-                'HIGH': group[required[1]].max(),
-                'LOW': group[required[2]].min(),
-                'CLOSE': group[required[3]].iloc[-1],    # 区间内最后一笔 close
-                'VOLUME': group[required[4]].sum(),       # 区间内总成交量
+            bins = factor_idx.union([raw_df.index.min()]).sort_values()
+            intervals = pd.IntervalIndex.from_arrays(bins[:-1], bins[1:], closed='right')
+            bin_indices = intervals.get_indexer(raw_df.index)
+            mask = bin_indices >= 0
+            raw_filtered = raw_df[mask]
+            bin_indices2 = bin_indices[mask]
+
+            def agg_func(group):
+                res = {
+                    'OPEN': group[required_cols[0]].iloc[0],
+                    'HIGH': group[required_cols[1]].max(),
+                    'LOW': group[required_cols[2]].min(),
+                    'CLOSE': group[required_cols[3]].iloc[-1],
+                    'VOLUME': group[required_cols[4]].sum(),
+                }
+                if has_oi:
+                    res['OPEN_INTEREST'] = group['OPEN_INTEREST'].iloc[-1]
+                return pd.Series(res)
+
+            grouped = raw_filtered.groupby(bin_indices2)
+            ohlc = grouped.apply(agg_func).reindex(range(len(factor_idx))).replace({np.nan: None})
+            ohlc.index = factor_idx
+            out = {
+                'product': getattr(product, 'name', str(product)),
+                'OPEN': ohlc['OPEN'].tolist(),
+                'HIGH': ohlc['HIGH'].tolist(),
+                'LOW': ohlc['LOW'].tolist(),
+                'CLOSE': ohlc['CLOSE'].tolist(),
+                'VOLUME': ohlc['VOLUME'].tolist(),
             }
-            if _has_oi:
-                result['OPEN_INTEREST'] = group['OPEN_INTEREST'].iloc[-1]  # 区间末持仓量
-            return pd.Series(result)
-        
-        # 按 bin_indices 分组
-        grouped = raw_filtered.groupby(bin_indices)
-        ohlc = grouped.apply(agg_func).reindex(range(len(factor_idx)))
-        ohlc = ohlc.replace({np.nan: None})
-        # 将索引替换为因子时间点
-        ohlc.index = factor_idx
+            if has_oi:
+                out['OPEN_INTEREST'] = ohlc['OPEN_INTEREST'].tolist()
+            return out
+
+        series_list = []
+        for name in product_names:
+            p = _resolve_product(name)
+            if p is None:
+                continue
+            s = _build_series_for_product(p)
+            if s is not None:
+                series_list.append(s)
+
+        if not series_list:
+            return jsonify({'error': '无价格数据'}), 404
+
+        primary_series = next((s for s in series_list if s.get('product') == primary_name), series_list[0])
 
         _is_daily = factor.freq is not None and factor.freq.is_day_multiple()
         if _is_daily:
@@ -302,14 +324,15 @@ def get_price_series():
             dates_out = factor_dates
         result = {
             'dates': dates_out,
-            'OPEN': ohlc['OPEN'].tolist(),
-            'HIGH': ohlc['HIGH'].tolist(),
-            'LOW': ohlc['LOW'].tolist(),
-            'CLOSE': ohlc['CLOSE'].tolist(),
-            'VOLUME': ohlc['VOLUME'].tolist(),
+            'OPEN': primary_series['OPEN'],
+            'HIGH': primary_series['HIGH'],
+            'LOW': primary_series['LOW'],
+            'CLOSE': primary_series['CLOSE'],
+            'VOLUME': primary_series['VOLUME'],
+            'series_list': series_list,
         }
-        if _has_oi:
-            result['OPEN_INTEREST'] = ohlc['OPEN_INTEREST'].tolist()
+        if 'OPEN_INTEREST' in primary_series:
+            result['OPEN_INTEREST'] = primary_series['OPEN_INTEREST']
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

@@ -277,6 +277,9 @@ def get_contracts():
     if not product_name:
         return jsonify({'success': False, 'error': '缺少 product 参数'}), 400
 
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
     try:
         # 先找到 product 对象，确定数据源
         products = _cached_products()
@@ -289,18 +292,28 @@ def get_contracts():
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
 
         if not isinstance(product, Futures):
-            return jsonify({'success': True, 'product': product_name, 'contracts': []})
+            return jsonify({'success': True, 'product': product_name, 'has_term_structure': False, 'contracts': []})
 
         # 通过实例加载 roller_info（带全局缓存、闲置自动释放）
         product._ensure_roller_info()
         subset = product.roller_info
         if subset is None or subset.empty:
-            return jsonify({'success': True, 'product': product_name, 'contracts': []})
+            return jsonify({'success': True, 'product': product_name, 'has_term_structure': True, 'contracts': []})
+
+        req_start = pd.Timestamp(start_date).normalize() if start_date else None
+        req_end = pd.Timestamp(end_date).normalize() if end_date else None
 
         contracts = []
         for _, row in subset.iterrows():
             start = _timestamp_or_none(row['STARTDATE'])
             end = _timestamp_or_none(row['ENDDATE'])
+
+            # 只返回与请求时间范围有重叠的合约
+            if req_start is not None and end is not None and end.normalize() < req_start:
+                continue
+            if req_end is not None and start is not None and start.normalize() > req_end:
+                continue
+
             uid = str(_scalar(row['CONTRACT_UID']))
             contracts.append({
                 'contract': str(_scalar(row['CONTRACT'])),
@@ -312,7 +325,7 @@ def get_contracts():
                 'end_ts': int(end.timestamp() * 1000) if end is not None else None,
             })
 
-        return jsonify({'success': True, 'product': product_name, 'contracts': contracts})
+        return jsonify({'success': True, 'product': product_name, 'has_term_structure': True, 'contracts': contracts})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
@@ -399,6 +412,17 @@ def get_price_data():
                 )
                 oi_col = 'open_interest'
                 time_col = 'trade_time'
+
+            # 合约模式也要严格应用时间范围截断
+            if start_date:
+                start_ts = pd.Timestamp(start_date)
+                price_df = price_df[price_df[time_col] >= start_ts]
+            if end_date:
+                end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
+                price_df = price_df[price_df[time_col] <= end_ts]
+
+            if price_df.empty:
+                return jsonify({'success': False, 'error': '指定范围内无合约价格数据'}), 404
 
             has_oi = oi_col in price_df.columns
 
