@@ -111,10 +111,11 @@ def serialize_param_options(param) -> list[dict]:
 
     if alias == '$F':
         return [
+            {'value': '30m', 'label': '30min'},
+            {'value': '1h', 'label': '1h'},
             {'value': '1d', 'label': '1d'},
             {'value': '5d', 'label': '5d'},
             {'value': '20d', 'label': '20d'},
-            {'value': '30min', 'label': '30min'},
             {'value': 'S', 'label': 'S'},
         ]
 

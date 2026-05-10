@@ -191,6 +191,11 @@
 }
 .param-table select.param-input-control {
     appearance: none;
+    text-align-last: center;
+    padding-right: 10px;
+}
+.param-table select.param-input-control option {
+    text-align: center;
 }
 .param-table .param-input-control:focus {
     outline: none;

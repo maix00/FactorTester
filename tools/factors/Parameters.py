@@ -77,7 +77,7 @@ def get_return_freq_param(alias: Optional[str] = '$RF', desc: Optional[str] = No
 def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = None) -> Parameter:
     """
     创建因子信号频率参数。
-    默认值为 '1d'（日频），支持任意正 Timedelta 以及特殊枚举值 'S'（反转信号）。
+    默认值为 '30min'（日内频率），支持任意正 Timedelta 以及特殊枚举值 'S'（反转信号）。
     该参数的别名会出现在因子全名中。
     """
     td_space = ValueSpace.timedelta('pos')
@@ -86,8 +86,8 @@ def get_factor_freq_param(alias: Optional[str] = '$F', desc: Optional[str] = Non
     return Parameter(
         alias=alias,
         value_space=space,
-        default_value='1d',
-        desc=desc or '因子信号频率，支持任意正时长（如 1d、5d、30min）',
+        default_value='30min',
+        desc=desc or '因子信号频率，支持任意正时长（如 30min、1d、5d）',
     )
 
 def get_StartCalcPointParam(alias: Optional[str] = '$SCP', default_value: Optional[Any] = None, **kwargs) -> DateOrTimeParam:
