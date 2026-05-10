@@ -485,6 +485,12 @@ function renderVisualNodeParamControls(node) {
             <div class="field"><label>常数值</label><input value="${escHtml(normalizeVisualConstValue(node.params?.value))}" oninput="updateVisualParam(${node.id}, 'value', this.value)"></div>
         `;
     }
+    if (isVisualTermStructureOperator(node)) {
+        return `
+            ${intermediateControls}
+            <div class="field"><label>输入说明</label><span>请用常数/参数节点连接卡片输入槽；这些是表达式树 operands，不是右侧隐藏配置。</span></div>
+        `;
+    }
     return intermediateControls;
 }
 

@@ -14,7 +14,7 @@
         .docs-sidebar a:hover, .docs-sidebar a.active { color: #4a90d9; border-left-color: #4a90d9; }
         .docs-content { flex: 1; min-width: 0; }
         .docs-header { margin-bottom: 32px; }
-        .docs-header a { color: #4a90d9; text-decoration: none; font-size: 14px; }
+        .docs-header a { color: #4a90d9; text-decoration: none; font-size: 13px; }
         .docs-header h1 { font-size: 28px; margin: 12px 0 4px; }
         .docs-header p { color: #888; font-size: 14px; }
         .docs-section { background: #fff; border-radius: 10px; padding: 28px 32px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
@@ -82,7 +82,7 @@
         <div class="docs-header">
             <div class="docs-header-bar">
                 <div>
-                    <a href="/">← 返回首页</a>
+                    {% include 'modules/shared/home_back_link.html' %}
                     <h1>📖 技术文档</h1>
                     <p>GTHT 量化因子工具箱 &mdash; 前后端架构、API 接口、因子库说明</p>
                 </div>

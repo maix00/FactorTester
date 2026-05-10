@@ -54,6 +54,8 @@ function buildExprFromNode(node, seen, options = {}) {
         expr = exprs.length >= 2 ? `${exprs[0]}.${node.key}(${exprs[1]})` : '';
     } else if (node.key === 'rolling_corr') {
         expr = exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
+    } else if (isVisualTermStructureOperator(node)) {
+        expr = buildVisualTermStructureExpr(node, exprs);
     } else {
         if (!exprs.length) return '';
         const rest = exprs.slice(1).join(', ');
@@ -138,6 +140,9 @@ function visualToSource(options = {}) {
     if (generatedBodyText.includes('ConstExpr(')) factorImports.push('ConstExpr');
     if (generatedBodyText.includes('expr_max(')) factorImports.push('expr_max');
     if (generatedBodyText.includes('expr_min(')) factorImports.push('expr_min');
+    if (generatedBodyText.includes('term_spread(')) factorImports.push('term_spread');
+    if (generatedBodyText.includes('term_ratio(')) factorImports.push('term_ratio');
+    if (generatedBodyText.includes('term_slope(')) factorImports.push('term_slope');
     const imports = [
         `from tools.factors import ${[...new Set(factorImports)].join(', ')}`,
         regularParamTypes.length ? `from tools.parameters import ${regularParamTypes.join(', ')}` : '',
@@ -190,7 +195,7 @@ function buildVisualSourcePlan() {
     const emitNode = (node) => {
         if (!node || node.key === 'Return' || emitted.has(node.id)) return true;
         const arity = getVisualOperatorArity(node);
-        if (!arity) return true;
+        if (!arity && node.cat === 'leaf') return true;
         const inputIds = (node.inputs || []).slice(0, arity);
         if (inputIds.length < arity || inputIds.some(id => !id)) return false;
         for (const inputId of inputIds) {
@@ -325,8 +330,28 @@ function buildVisualOperatorExpr(node, exprs, arity) {
     if (node.key === 'rolling_corr') {
         return exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
     }
+    if (isVisualTermStructureOperator(node)) {
+        return buildVisualTermStructureExpr(node, exprs);
+    }
     if (!exprs.length) return '';
     return `${exprs[0]}.${node.key}(${exprs.slice(1).join(', ')})`;
+}
+
+function isVisualTermStructureOperator(node) {
+    return node?.cat === 'termStructure'
+        || ['term_spread', 'term_ratio', 'term_slope'].includes(node?.key);
+}
+
+function buildVisualTermStructureExpr(node, exprs = []) {
+    if (node.key === 'term_spread' || node.key === 'term_ratio') {
+        if (exprs.length < 3) return '';
+        return `${node.key}(near_rank=${exprs[0]}, far_rank=${exprs[1]}, column=${exprs[2]})`;
+    }
+    if (node.key === 'term_slope') {
+        if (exprs.length < 2) return '';
+        return `term_slope(depth=${exprs[0]}, column=${exprs[1]})`;
+    }
+    return '';
 }
 
 function rememberVisualGraphSnapshot(source, detachedBranches = null) {

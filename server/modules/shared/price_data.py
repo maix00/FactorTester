@@ -7,21 +7,73 @@
 """
 import os
 import traceback
+from functools import lru_cache
+from typing import Any
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
 from Settings import get_all_products, get_cat_tree
-from server.shared import convert_to_fancytree
+from server.shared import convert_to_fancytree, find_node_by_path
 from sources.LocalCNFutures import MINK_PRODUCT_DIR
-from tools.products.Futures import Futures
+from sources.LocalCNFutures.CNFutures import (
+    CNFuturesContract,
+    CNFuturesDayNightTimeCategory,
+    CNFuturesSectorCategory,
+    exchange_map,
+    get_all_futures_contract,
+)
+from tools.data.DataSource import DataSource
+from tools.products.Futures import (
+    Futures,
+    FuturesContract,
+    make_contract_category_from_futures_category,
+    map_contracts_to_futures,
+)
+from tools.products.AdjustableTermStructure import AdjustableProductMixin
+from tools.products.Product import Product
+from tools.products.categories.Category import CategoryTree, combine_trees
+
+
+@lru_cache(maxsize=1)
+def _cached_products():
+    return tuple(get_all_products())
+
+
+@lru_cache(maxsize=1)
+def _cached_contracts():
+    return tuple(get_all_futures_contract())
+
+
+@lru_cache(maxsize=1)
+def _cached_price_viewer_tree() -> CategoryTree:
+    return _build_price_viewer_tree()
+
+
+def _contract_data_path(contract_uid: str) -> str:
+    return os.path.join(MINK_PRODUCT_DIR, f"{contract_uid}.parquet")
+
+
+def _contract_has_data(contract_uid: str) -> bool:
+    return os.path.isfile(_contract_data_path(contract_uid))
+
+
+def _scalar(value: Any) -> Any:
+    return value.item() if hasattr(value, 'item') else value
+
+
+def _timestamp_or_none(value: Any) -> pd.Timestamp | None:
+    value = _scalar(value)
+    if pd.isna(value):
+        return None
+    return pd.Timestamp(value)
 
 
 @shared_bp.route('/api/list_product_names')
 def list_product_names():
     """返回所有品种的中英文名称列表。"""
     try:
-        products = get_all_products()
+        products = _cached_products()
         result = []
         for p in products:
             if p is None:
@@ -34,6 +86,7 @@ def list_product_names():
                 'desc': desc,
                 'code': code or name.split('.')[0] if '.' in name else name,
                 'exchange': name.split('.')[1] if '.' in name and '@' not in name.split('.')[1] else name.split('.')[1].split('@')[0] if '.' in name else '',
+                'type': 'product',
             })
         return jsonify({'success': True, 'products': result})
     except Exception as e:
@@ -44,11 +97,172 @@ def list_product_names():
 def get_product_tree():
     """返回产品类别树（Fancytree 格式），支持所有产品类型。"""
     try:
-        cat_tree = get_cat_tree()
+        cat_tree = _cached_price_viewer_tree()
         fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=False)
         return jsonify(fancytree_data)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+def _build_price_viewer_tree() -> CategoryTree:
+    """价格页产品树：原品种分类 + 合约类型继承链。
+
+    CNFuturesContract 不是根级分类，而是 FuturesContract 的具体子类；
+    同时它应继承对应 CNFutures 主力品种的行业/日夜盘分类，方便按同一语义浏览合约。
+    """
+    product_tree = get_cat_tree()
+    contracts = list(_cached_contracts())
+    contract_tree = _get_contract_category_tree(contracts)
+    return combine_trees(product_tree, contract_tree)
+
+
+def _get_contract_category_tree(contracts) -> CategoryTree:
+    """Build a CNFuturesContract tree that mirrors CNFutures category labels."""
+    contract_to_future = _map_contracts_to_futures(contracts)
+
+    sector_category = make_contract_category_from_futures_category(
+        CNFuturesSectorCategory,
+        CNFuturesContract,
+        contracts,
+        contract_to_future,
+    )
+    daynight_category = make_contract_category_from_futures_category(
+        CNFuturesDayNightTimeCategory,
+        CNFuturesContract,
+        contracts,
+        contract_to_future,
+    )
+
+    return (sector_category * daynight_category).get_tree_with_parents(
+        all_objects=contracts,
+        ancester=Product,
+    )
+
+
+def _map_contracts_to_futures(contracts):
+    return map_contracts_to_futures(
+        contracts,
+        _cached_products(),
+        contract_key=_contract_code_exchange,
+        futures_key=_future_code_exchange,
+    )
+
+
+def _future_code_exchange(future):
+    code = str(getattr(future, 'code', '')).upper()
+    alias = str(getattr(future, 'alias', getattr(future, 'name', '')))
+    exchange = alias.split('.')[1].split('@')[0].upper() if '.' in alias else ''
+    return (code, exchange) if code and exchange else None
+
+
+def _contract_code_exchange(contract):
+    name = str(getattr(contract, 'name', getattr(contract, 'alias', contract)))
+    if '|' in name:
+        parts = name.split('|')
+        if len(parts) >= 3:
+            exchange = exchange_map.get(parts[0], parts[0]).upper()
+            code = parts[2].upper()
+            return code, exchange
+
+    import re
+    match = re.match(r'^([A-Za-z]+)\d+\.?([A-Za-z]+)?', name)
+    if match:
+        code = match.group(1).upper()
+        exchange = exchange_map.get(match.group(2) or '', match.group(2) or '').upper()
+        return (code, exchange) if exchange else None
+    return None
+
+
+@shared_bp.route('/api/contract_tree')
+def get_contract_tree():
+    """返回合约粒度的产品节点，供价格页左侧懒加载。"""
+    try:
+        path = request.args.get('path')
+        if path:
+            node_path = path[:-10] if path.endswith('/_products') else path
+            node = find_node_by_path(_cached_price_viewer_tree().tree, node_path.split('/'))
+            contracts = node.get('$OBJECTS$', []) if isinstance(node, dict) else ([node] if node else [])
+        else:
+            contracts = _cached_contracts()
+        contracts = sorted(contracts, key=lambda x: getattr(x, 'name', str(x)))
+        nodes = []
+        for c in contracts:
+            name = getattr(c, 'name', str(c))
+            has_data = _contract_has_data(name)
+            nodes.append({
+                'title': name,
+                'key': f"CNFuturesContract/{name}",
+                'checkbox': False,
+                'folder': False,
+                'lazy': False,
+                'extraClasses': 'product-node contract-node' + ('' if has_data else ' disabled-contract-node'),
+                'desc': '合约' if has_data else '暂无价格数据',
+                'product_name': name,
+                'product_code': name,
+                'product_type': 'contract',
+                'contract_uid': name,
+                'has_data': has_data,
+            })
+        return jsonify(nodes)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+def _available_sources_for_product(product, freq=None):
+    """Serialize available data sources for one product/frequency."""
+    try:
+        sources = []
+        freqs = [freq] if freq is not None else product.list_available_freqs()
+        for f in freqs:
+            meta = getattr(product, f.name)
+            for source in meta.list_available_sources():
+                sources.append({
+                    'alias': source.alias,
+                    'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),
+                })
+        unique = {}
+        for source in sources:
+            unique[source['alias']] = source
+        return list(unique.values())
+    except Exception:
+        return []
+
+
+def _available_freq_names_for_product(product):
+    """Return frequency names that are actually provided by available data sources."""
+    freqs = []
+    try:
+        for source in _available_sources_for_product(product):
+            freq = source.get('freq')
+            if freq and freq not in freqs:
+                freqs.append(freq)
+    except Exception:
+        pass
+    return freqs
+
+
+def _find_contract_product(contract_uid):
+    contracts = _cached_contracts()
+    return next((c for c in contracts if c is not None and (
+        getattr(c, 'name', None) == contract_uid or
+        getattr(c, 'alias', None) == contract_uid
+    )), None)
+
+
+def _supports_adjusted_price(product) -> bool:
+    """Whether this product supports adjusted OHLC prices."""
+    supports = getattr(product, 'supports_adjusted_price', None)
+    if callable(supports):
+        return bool(supports())
+    return isinstance(product, AdjustableProductMixin)
+
+
+def _supports_term_structure(product) -> bool:
+    """Whether this product supports term-structure/contract-chain views."""
+    supports = getattr(product, 'supports_term_structure', None)
+    if callable(supports):
+        return bool(supports())
+    return isinstance(product, AdjustableProductMixin)
 
 
 @shared_bp.route('/api/get_contracts')
@@ -70,9 +284,12 @@ def get_contracts():
     if not product_name:
         return jsonify({'success': False, 'error': '缺少 product 参数'}), 400
 
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
     try:
         # 先找到 product 对象，确定数据源
-        products = get_all_products()
+        products = _cached_products()
         product = next((p for p in products if p is not None and (
             getattr(p, 'name', None) == product_name or
             getattr(p, 'alias', None) == product_name
@@ -81,29 +298,68 @@ def get_contracts():
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
 
-        if not isinstance(product, Futures):
-            return jsonify({'success': True, 'product': product_name, 'contracts': []})
+        if not _supports_term_structure(product):
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': False,
+                'has_term_structure': False,
+                'contracts': [],
+            })
 
         # 通过实例加载 roller_info（带全局缓存、闲置自动释放）
-        product._ensure_roller_info()
+        ensure_roller_info = getattr(product, '_ensure_roller_info', None)
+        if not callable(ensure_roller_info):
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': True,
+                'has_term_structure': True,
+                'contracts': [],
+            })
+        ensure_roller_info()
         subset = product.roller_info
         if subset is None or subset.empty:
-            return jsonify({'success': True, 'product': product_name, 'contracts': []})
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': True,
+                'has_term_structure': True,
+                'contracts': [],
+            })
+
+        req_start = pd.Timestamp(start_date).normalize() if start_date else None
+        req_end = pd.Timestamp(end_date).normalize() if end_date else None
 
         contracts = []
         for _, row in subset.iterrows():
-            start = row['STARTDATE']
-            end = row['ENDDATE']
+            start = _timestamp_or_none(row['STARTDATE'])
+            end = _timestamp_or_none(row['ENDDATE'])
+
+            # 只返回与请求时间范围有重叠的合约
+            if req_start is not None and end is not None and end.normalize() < req_start:
+                continue
+            if req_end is not None and start is not None and start.normalize() > req_end:
+                continue
+
+            uid = str(_scalar(row['CONTRACT_UID']))
             contracts.append({
-                'contract': row['CONTRACT'],
-                'uid': row['CONTRACT_UID'],
-                'start': start.strftime('%Y-%m-%d') if pd.notna(start) else None,
-                'end': end.strftime('%Y-%m-%d') if pd.notna(end) else None,
-                'start_ts': int(start.timestamp() * 1000) if pd.notna(start) else None,
-                'end_ts': int(end.timestamp() * 1000) if pd.notna(end) else None,
+                'contract': str(_scalar(row['CONTRACT'])),
+                'uid': uid,
+                'has_data': _contract_has_data(uid),
+                'start': start.strftime('%Y-%m-%d') if start is not None else None,
+                'end': end.strftime('%Y-%m-%d') if end is not None else None,
+                'start_ts': int(start.timestamp() * 1000) if start is not None else None,
+                'end_ts': int(end.timestamp() * 1000) if end is not None else None,
             })
 
-        return jsonify({'success': True, 'product': product_name, 'contracts': contracts})
+        return jsonify({
+            'success': True,
+            'product': product_name,
+            'supports_term_structure': True,
+            'has_term_structure': True,
+            'contracts': contracts,
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
@@ -128,7 +384,7 @@ def get_price_data():
             contract_uid: '...',   // 仅在请求合约时返回
             adjusted: false,
             freq: 'DAY1',
-            contracts: [...],      // 主力连续时返回合约区间（用于高亮）
+            contracts: [...],      // 支持期限结构时返回合约区间（用于高亮）
             data: [{ time: '...', open: ..., high: ..., low: ..., close: ..., volume: ... }, ...]
         }
     """
@@ -137,6 +393,7 @@ def get_price_data():
     contract_uid = data.get('contract_uid')
     adjusted = data.get('adjusted', False)
     freq_str = data.get('freq', 'DAY1')
+    data_source_alias = data.get('data_source')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
 
@@ -146,7 +403,11 @@ def get_price_data():
     try:
         # ========== 合约模式：直接读原始合约数据 ==========
         if contract_uid:
-            contract_file = os.path.join(MINK_PRODUCT_DIR, f"{contract_uid}.parquet")
+            contract_product = _find_contract_product(contract_uid)
+            available_freqs = _available_freq_names_for_product(contract_product) if contract_product else []
+            available_sources = _available_sources_for_product(contract_product) if contract_product else []
+
+            contract_file = _contract_data_path(contract_uid)
             if not os.path.exists(contract_file):
                 return jsonify({'success': False, 'error': f'合约数据不存在: {contract_uid}'}), 404
 
@@ -159,6 +420,8 @@ def get_price_data():
                 freq = DataFreq(freq_str)
             except Exception:
                 freq = DataFreq('MIN1')
+            if available_freqs and freq.name not in available_freqs:
+                freq = DataFreq(available_freqs[0])
 
             freq_is_daily = freq.is_day_multiple()
 
@@ -184,17 +447,24 @@ def get_price_data():
                 oi_col = 'open_interest'
                 time_col = 'trade_time'
 
+            # 合约模式也要严格应用时间范围截断
+            if start_date:
+                start_ts = pd.Timestamp(start_date)
+                price_df = price_df[price_df[time_col] >= start_ts]
+            if end_date:
+                end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
+                price_df = price_df[price_df[time_col] <= end_ts]
+
+            if price_df.empty:
+                return jsonify({'success': False, 'error': '指定范围内无合约价格数据'}), 404
+
             has_oi = oi_col in price_df.columns
 
             result_data = []
             for _, row in price_df.iterrows():
-                ts = row[time_col]
-                if hasattr(ts, 'strftime'):
-                    time_str = ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
-                    timestamp_ms = int(ts.timestamp() * 1000)
-                else:
-                    time_str = str(ts)
-                    timestamp_ms = int(pd.Timestamp(ts).timestamp() * 1000)
+                ts = pd.Timestamp(_scalar(row[time_col]))
+                time_str = ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
+                timestamp_ms = int(ts.timestamp() * 1000)
 
                 entry = {'time': time_str, 'timestamp': timestamp_ms}
 
@@ -219,15 +489,21 @@ def get_price_data():
                 'product': contract_uid,
                 'contract_uid': contract_uid,
                 'contract_name': contract_uid.split('|')[-2] + contract_uid.split('|')[-1] if '|' in contract_uid else contract_uid,
+                'is_term_contract': True,
                 'adjusted': False,
+                'supports_adjusted': False,
+                'supports_term_structure': False,
                 'freq': freq.name if hasattr(freq, 'name') else str(freq),
+                'data_source': (available_sources[0]['alias'] if available_sources else ''),
+                'available_sources': available_sources,
+                'available_freqs': available_freqs,
                 'count': len(result_data),
                 'has_oi': has_oi,
                 'data': result_data,
             })
 
-        # ========== 主力连续模式 ==========
-        products = get_all_products()
+        # ========== 产品价格模式 ==========
+        products = _cached_products()
         product = next((p for p in products if p is not None and (
             getattr(p, 'name', None) == product_name or
             getattr(p, 'alias', None) == product_name
@@ -235,15 +511,25 @@ def get_price_data():
 
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
+        supports_adjusted = _supports_adjusted_price(product)
+        adjusted = bool(adjusted and supports_adjusted)
 
         from tools.data.DataFreq import DataFreq
-        try:
-            freq = DataFreq(freq_str)
-        except Exception:
-            freq = DataFreq('DAY1')
+        candidate_source = None
+        if data_source_alias:
+            try:
+                candidate_source = DataSource[data_source_alias]
+                freq = candidate_source.freq
+            except Exception:
+                return jsonify({'success': False, 'error': f'数据源不存在: {data_source_alias}'}), 400
+        else:
+            try:
+                freq = DataFreq(freq_str)
+            except Exception:
+                freq = DataFreq('DAY1')
 
-        # 设置频率
         old_freq = getattr(product, 'current_freq', None)
+        old_source = None
         try:
             product.set_current_freq(freq)
         except ValueError:
@@ -253,6 +539,15 @@ def get_price_data():
                 return jsonify({'success': False, 'error': '无可用数据频率'}), 400
             freq = available[0]
             product.set_current_freq(freq)
+        data_meta = getattr(product, freq.name)
+        if hasattr(data_meta, 'current_source'):
+            old_source = data_meta.current_source
+        selected_source = None
+        if candidate_source is not None:
+            try:
+                selected_source = data_meta.set_current_source(candidate_source)
+            except Exception:
+                return jsonify({'success': False, 'error': f'数据源不可用于该品种和频率: {data_source_alias}'}), 400
 
         # 确定日期范围
         if start_date:
@@ -320,45 +615,63 @@ def get_price_data():
 
             result_data.append(entry)
 
+        active_source_used = selected_source
+        if active_source_used is None:
+            try:
+                active_source_used = data_meta.get_current_source()
+            except Exception:
+                active_source_used = None
+
         if old_freq:
             try:
                 product.set_current_freq(old_freq)
             except Exception:
                 pass
+        if old_source:
+            try:
+                data_meta.set_current_source(old_source)
+            except Exception:
+                pass
 
-        # 主力连续模式：附带合约区间列表（用于高亮）
+        supports_term_structure = _supports_term_structure(product)
+
+        # 支持期限结构的产品：附带合约区间列表（用于高亮）
         contracts = []
-        try:
-            product._ensure_roller_info()
-            ri = product.roller_info
-            if ri is not None:
-                for _, r in ri.iterrows():
-                    s, e = r['STARTDATE'], r['ENDDATE']
-                    contracts.append({
-                        'contract': r['CONTRACT'],
-                        'uid': r['CONTRACT_UID'],
-                        'start_ts': int(s.timestamp() * 1000) if pd.notna(s) else None,
-                        'end_ts': int(e.timestamp() * 1000) if pd.notna(e) else None,
-                    })
-        except Exception:
-            pass
+        if supports_term_structure:
+            try:
+                ensure_roller_info = getattr(product, '_ensure_roller_info', None)
+                if callable(ensure_roller_info):
+                    ensure_roller_info()
+                    ri = product.roller_info
+                    if ri is not None:
+                        for _, r in ri.iterrows():
+                            s, e = _timestamp_or_none(r['STARTDATE']), _timestamp_or_none(r['ENDDATE'])
+                            uid = str(_scalar(r['CONTRACT_UID']))
+                            contracts.append({
+                                'contract': str(_scalar(r['CONTRACT'])),
+                                'uid': uid,
+                                'has_data': _contract_has_data(uid),
+                                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
+                                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
+                            })
+            except Exception:
+                pass
 
-        # 可用频率列表
-        available_freqs = []
-        try:
-            af = product.list_available_freqs()
-            for f in af:
-                available_freqs.append(f.name if hasattr(f, 'name') else str(f))
-        except Exception:
-            pass
+        available_sources = _available_sources_for_product(product)
+        available_freqs = _available_freq_names_for_product(product)
 
         return jsonify({
             'success': True,
             'product': product_name,
             'desc': getattr(product, 'desc', product_name),
             'is_futures': isinstance(product, Futures),
+            'is_term_contract': False,
             'adjusted': adjusted,
+            'supports_adjusted': supports_adjusted,
+            'supports_term_structure': supports_term_structure,
             'freq': freq.name if hasattr(freq, 'name') else str(freq),
+            'data_source': getattr(active_source_used, 'alias', ''),
+            'available_sources': available_sources,
             'available_freqs': available_freqs,
             'count': len(result_data),
             'has_oi': has_oi,

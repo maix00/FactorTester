@@ -295,8 +295,10 @@
                             console.error('同步参数模板失败:', e);
                         });
                     }
-                    // 刷新参数模块 UI
-                    if (typeof window.reloadParamModule === 'function') {
+                    // 局部刷新参数表与外部摘要（统一走 replace_params 返回的最新因子行）
+                    if (typeof window._renderParamFactorRows === 'function' && Array.isArray(replaceData.factor_rows)) {
+                        window._renderParamFactorRows(replaceData.factor_rows);
+                    } else if (typeof window.reloadParamModule === 'function') {
                         await new Promise(function(resolve) {
                             window.reloadParamModule(resolve);
                         });
@@ -403,6 +405,17 @@
         if (snapshot.fee_modifications && window._applyFeeModifications) {
             window._applyFeeModifications(snapshot.fee_modifications);
         }
+
+        refreshOuterSummaries();
+    }
+
+    function refreshOuterSummaries() {
+        setTimeout(function() {
+            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+            if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
+            if (typeof window.updateCategorySummary === 'function') window.updateCategorySummary();
+            if (typeof window.updateFreqSummary === 'function') window.updateFreqSummary();
+        }, 0);
     }
 
     // ── 保存模板 ──────────────────────────────────────────────────────────
@@ -612,9 +625,16 @@
     }
 
     // ── 初始化 ────────────────────────────────────────────────────────────
-    document.addEventListener('DOMContentLoaded', () => {
+    function initGlobalTemplateModule() {
         const saveBtn = document.getElementById('global-tpl-save-btn');
         if (saveBtn) saveBtn.onclick = saveTemplate;
+
+        const summaryRow = document.getElementById('global-tpl-summary-row');
+        if (summaryRow) {
+            summaryRow.addEventListener('click', function() {
+                setTimeout(loadTemplateList, 0);
+            });
+        }
 
         // 抽屉打开时加载模板列表
         const drawer = document.getElementById('global-tpl-drawer');
@@ -626,7 +646,14 @@
             });
             observer.observe(drawer, { attributes: true, attributeFilter: ['class'] });
         }
-    });
+        loadTemplateList();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initGlobalTemplateModule);
+    } else {
+        initGlobalTemplateModule();
+    }
 
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;

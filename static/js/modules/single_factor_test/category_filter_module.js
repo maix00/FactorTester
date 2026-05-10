@@ -10,6 +10,16 @@
     window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var treeInstance = null;
+    var categoryTreeSizer = null;
+
+    function _hasMountedTree($container) {
+        if (!$container || !$container.length) return false;
+        try {
+            return !!$container.fancytree('getTree');
+        } catch (e) {
+            return false;
+        }
+    }
 
     // 用后端列表同步本地 submissions
     function syncFromServer(serverSubmissions) {
@@ -57,7 +67,7 @@
         var html = '';
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
-            html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
+            html += '<div class="submission-item" data-index="' + index + '" style="width:100%; box-sizing:border-box; border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
             html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 36px 8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8; min-height:52px;">';
             var labelHtml = sub.label
                 ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + sub.label + '</span>'
@@ -76,8 +86,8 @@
             // 删除按钮放在 header 右下角
             html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
             html += '  </div>';
-            html += '  <div style="padding:8px 12px; overflow-x:auto;">';
-            html += '    <table style="width:100%; border-collapse:collapse; table-layout:fixed;">';
+            html += '  <div style="width:100%; box-sizing:border-box; padding:8px 12px; overflow-x:auto;">';
+            html += '    <table style="width:100%; min-width:100%; border-collapse:collapse; table-layout:auto;">';
             sub.paths.forEach(function(path, pathIdx) {
                 var rowId = 'path-' + index + '-' + pathIdx;
                 var expanded = isExpanded[path] || false;
@@ -86,16 +96,16 @@
                     pathDisplay = path + ' <span style="color:#888;font-size:12px;">' + sub.pathsDescMap[path] + '</span>';
                 }
                 html += '      <tr class="path-row" data-path="' + path.replace(/"/g, '&quot;') + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
-                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; word-break:break-all;">';
+                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; min-width:0; overflow-wrap:anywhere; word-break:break-word;">';
                 html += '          <div style="display:flex;align-items:flex-start;">';
-                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1;">' + pathDisplay + '</span>';
+                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word;">' + pathDisplay + '</span>';
                 html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>';
                 html += '          </div>';
                 html += '        </td>';
                 html += '      </tr>';
                 if (expanded) {
                     html += '      <tr class="product-detail-row" id="detail-' + index + '-' + pathIdx + '">';
-                    html += '        <td style="padding:8px 0 8px 20px; background:#fafbfc;">';
+                    html += '        <td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">';
                     html += '          <div class="loading-products" style="font-size:13px;">加载中...</div>';
                     html += '        </td>';
                     html += '      </tr>';
@@ -122,7 +132,7 @@
                 // 展开：加载产品详情
                 expanded[path] = true;
                 var detailHtml = '<tr class="product-detail-row" id="detail-' + subIndex + '-' + pathIndex + '">' +
-                    '<td style="padding:8px 0 8px 20px; background:#fafbfc;">' +
+                    '<td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">' +
                     '<div class="loading-products" style="font-size:13px;">加载中...</div>' +
                     '</td></tr>';
                 $row.after(detailHtml);
@@ -369,10 +379,69 @@
         });
     }
 
-    // 初始化 Fancytree 和 Sortable
-    $(function() {
-        // 清空容器，确保没有残留内容
+    // 初始化 Fancytree 和 Sortable。单因子测试页面会动态替换内容，
+    // 外部依赖脚本（jQuery/Fancytree/Sortable）可能比本模块稍晚就绪；
+    // 因此这里不用直接依赖 $(ready)，而是显式等待依赖，避免抽屉停在“加载产品树...”。
+    function initCategoryFilterModule(retryCount) {
+        retryCount = retryCount || 0;
+        if (!window.jQuery) {
+            if (retryCount < 80) {
+                setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
+            } else {
+                var el = document.getElementById('tree-container');
+                if (el) el.innerHTML = '<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：jQuery 未就绪</div>';
+            }
+            return;
+        }
+        var $ = window.jQuery;
+        if (!$.fn || typeof $.fn.fancytree !== 'function') {
+            var $waitingContainer = $("#tree-container");
+            if ($waitingContainer.length) {
+                $waitingContainer.html('<div style="color:#888;text-align:center;padding:20px;">产品树插件加载中...</div>');
+            }
+            if (retryCount < 80) {
+                setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
+            } else if ($waitingContainer.length) {
+                $waitingContainer.html('<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：Fancytree 未就绪</div>');
+            }
+            return;
+        }
+
         var $container = $("#tree-container");
+        if (!_hasMountedTree($container)) {
+            treeInstance = null;
+        }
+
+        if (typeof window.setupResizableTreeContainer === 'function') {
+            categoryTreeSizer = window.setupResizableTreeContainer({
+                outerSelector: '#category-tree-panel',
+                innerSelector: '#tree-container',
+                minWidth: 260,
+                initialWidth: 340,
+                maxWidth: 'min(54vw, 620px)',
+                outerMaxWidth: 'min(58vw, 700px)',
+                desktopMediaQuery: '(max-width: 1200px)',
+                mobileInnerMaxHeight: '400px'
+            });
+        }
+        var drawer = document.getElementById('category-drawer');
+        if (drawer && categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
+            drawer.addEventListener('transitionend', function() {
+                if (drawer.classList.contains('open')) {
+                    categoryTreeSizer.sync();
+                }
+            });
+        }
+
+        // 若之前已初始化，先销毁后重建（处理内容热替换后树丢失/失效）。
+        if (_hasMountedTree($container)) {
+            try {
+                $container.fancytree('destroy');
+            } catch (e) {}
+            treeInstance = null;
+        }
+
+        // 清空容器，确保没有残留内容
         $container.empty();  // 移除任何可能存在的占位文字
 
         // 可选：显示一个临时的 loading 提示（Fancytree 加载期间会显示自带 loading，但为了体验可以加一个）
@@ -409,7 +478,7 @@
         });
 
         // 提交按钮事件
-        $("#submit-selected").click(submitSelectedProducts);
+        $("#submit-selected").off('click').on('click', submitSelectedProducts);
 
         // 初始化 SortableJS 实现拖动排序
         var historyContainer = document.getElementById('submission-history');
@@ -490,45 +559,41 @@
                     if (!data.success) { tplStatus('加载失败: ' + data.error, false); return; }
                     var tplSubs = data.template.submissions;
                     if (!tplSubs || tplSubs.length === 0) { tplStatus('该模板没有提交记录', false); return; }
-                    // 清空后端
-                    var clr = await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
-                    var clrData = await clr.json();
-                    if (!clrData.success) { tplStatus('清空失败: ' + clrData.error, false); return; }
-                    // 清空前端
-                    submissions.length = 0;
-                    renderHistory();
-                    // 逐条重新提交
+                    var replaceData = await fetch('/replace_submissions', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            template_submissions: tplSubs,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    }).then(function(r) { return r.json(); });
+                    if (!replaceData.success) { tplStatus('加载失败: ' + (replaceData.error || '未知错误'), false); return; }
+
                     var timeRange = getCurrentTimeRange();
-                    for (var si = 0; si < tplSubs.length; si++) {
-                        var tplSub = tplSubs[si];
-                        var id_time = Date.now() + si;
-                        try {
-                            var res = await fetch('/submit_selected_products', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time, page_uuid: window._pageUuid || '' })
-                            }).then(r => r.json());
-                            if (!res.success) { tplStatus('提交失败: ' + res.error, false); continue; }
-                            submissions.push({
-                                id: id_time,
-                                paths: res.selected_paths || tplSub.paths,
-                                pathsDescMap: {},
-                                factor_tester_name: res.factor_tester_name,
-                                factor_tester_serial: res.factor_tester_serial,
-                                count_desc: res.count_desc,
-                                timestamp: new Date().toLocaleTimeString(),
-                                start_date: timeRange.start_date,
-                                end_date: timeRange.end_date,
-                                start_time: timeRange.start_time,
-                                end_time: timeRange.end_time,
-                                label: tplSub.label || ''
-                            });
-                        } catch(e) { tplStatus('提交异常: ' + e.message, false); }
+                    var normalized = (replaceData.replaced_submissions || []).map(function(s) {
+                        return {
+                            id: s.id,
+                            paths: s.paths || [],
+                            pathsDescMap: {},
+                            factor_tester_name: s.factor_tester_name,
+                            factor_tester_serial: s.factor_tester_serial,
+                            count_desc: s.count_desc,
+                            timestamp: new Date().toLocaleTimeString(),
+                            start_date: timeRange.start_date,
+                            end_date: timeRange.end_date,
+                            start_time: timeRange.start_time,
+                            end_time: timeRange.end_time,
+                            label: s.label || ''
+                        };
+                    });
+                    if (typeof window._applySubmissions === 'function') {
+                        window._applySubmissions(normalized);
+                    } else {
+                        submissions = normalized;
+                        window.submissions = submissions;
+                        renderHistory();
                     }
-                    renderHistory();
-                    tplStatus('✓ 模板已加载（' + submissions.length + '条提交）', true);
-                    if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
-                    if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+                    tplStatus('✓ 模板已加载（' + normalized.length + '条提交）', true);
                 });
         });
 
@@ -673,5 +738,16 @@
             if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
             if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
         };
-    });
+    }
+
+    window.ensureCategoryTreeReady = function() {
+        var $ = window.jQuery;
+        if (!$) return;
+        var $container = $("#tree-container");
+        if (!$container.length) return;
+        if (_hasMountedTree($container)) return;
+        initCategoryFilterModule(0);
+    };
+
+    initCategoryFilterModule();
 })();

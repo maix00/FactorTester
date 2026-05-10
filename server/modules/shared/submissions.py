@@ -9,6 +9,7 @@ Shared submission / product-tree routes:
   POST /delete_path_of_submission
 """
 from flask import request, jsonify
+import time
 from server.shared import (
     _factor_testers_lock,
     tree, convert_to_fancytree, find_node_by_path, get_minimal_paths,
@@ -224,6 +225,70 @@ def delete_path_of_submission():
         tester.products = sorted(list(set(selected_products)))
         return jsonify({
             'success':     True,
+            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@shared_bp.route('/replace_submissions', methods=['POST'])
+def replace_submissions():
+    """按给定列表一次性替换当前页面的 submissions。"""
+    data = request.get_json() or {}
+    tpl_submissions = data.get('template_submissions', [])
+    page_uuid = (data.get('page_uuid') or '').strip() or None
+    if not isinstance(tpl_submissions, list):
+        return jsonify({'success': False, 'error': 'template_submissions 必须是列表'})
+    try:
+        from tools.factors.FactorTester import FactorTester
+        user = shared._current_user_obj()
+        replaced = []
+        with _factor_testers_lock:
+            for tester in shared.factor_testers:
+                tester_puuid = getattr(tester, '_page_uuid', None)
+                if tester_puuid is None or tester_puuid == page_uuid:
+                    try:
+                        tester.delete()
+                    except Exception:
+                        pass
+            shared.factor_testers = [
+                t for t in shared.factor_testers
+                if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
+            ]
+
+            for i, sub in enumerate(tpl_submissions):
+                selected_paths = sub.get('paths') if isinstance(sub, dict) else []
+                if not isinstance(selected_paths, list) or len(selected_paths) == 0:
+                    continue
+                selected_paths = get_minimal_paths(selected_paths)
+                selected_products = []
+                for path in selected_paths:
+                    node = find_node_by_path(tree, path.split('/'))
+                    if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
+                        selected_products.extend(node['$OBJECTS$'])
+                    else:
+                        selected_products.append(node)
+                selected_products = sorted(list(set(selected_products)))
+                alias = str(int(time.time() * 1000) + i)
+                _start, _end, _start_calc = shared.get_current_time(page_uuid)
+                factor_tester = FactorTester(products=selected_products, alias=alias, time_range=(_start, _end), user=user)
+                factor_tester.selected_paths = selected_paths
+                if page_uuid:
+                    factor_tester._page_uuid = page_uuid
+                if user is not None:
+                    user.add_tester(factor_tester)
+                shared.factor_testers.append(factor_tester)
+                replaced.append({
+                    'id': alias,
+                    'paths': selected_paths,
+                    'label': sub.get('label', '') if isinstance(sub, dict) else '',
+                    'factor_tester_name': factor_tester.name,
+                    'factor_tester_serial': f"#{alias}",
+                    'count_desc': f"{len(selected_products)} 个产品",
+                })
+        return jsonify({
+            'success': True,
+            'replaced_submissions': replaced,
             'submissions': [_tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:

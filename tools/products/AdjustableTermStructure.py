@@ -1,0 +1,255 @@
+"""Term-structure infrastructure for futures products.
+
+The storage model is a normalized snapshot table:
+
+    PRODUCT, TRADING_DAY, CONTRACT_UID, CONTRACT,
+    MATURITY_DATE, DAYS_TO_MATURITY, TERM_RANK,
+    OPEN, HIGH, LOW, CLOSE, VOLUME, OPEN_INTEREST,
+    IS_MAIN
+
+Each row represents one tradable contract for one product on one trading day.
+`TERM_RANK` is ordered by maturity within (PRODUCT, TRADING_DAY).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable, List, Optional, cast
+
+import numpy as np
+import pandas as pd
+
+
+TERM_PRODUCT_COL = 'PRODUCT'
+TERM_TRADING_DAY_COL = 'TRADING_DAY'
+TERM_CONTRACT_UID_COL = 'CONTRACT_UID'
+TERM_CONTRACT_COL = 'CONTRACT'
+TERM_MATURITY_COL = 'MATURITY_DATE'
+TERM_DAYS_TO_MATURITY_COL = 'DAYS_TO_MATURITY'
+TERM_RANK_COL = 'TERM_RANK'
+TERM_IS_MAIN_COL = 'IS_MAIN'
+
+
+@dataclass(frozen=True)
+class FuturesTermStructureStore:
+    """Reader for a futures term-structure snapshot table."""
+
+    path: str
+
+    def load(
+        self,
+        product: Optional[str] = None,
+        trading_day: Optional[Any] = None,
+        columns: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        filters = []
+        if product:
+            filters.append((TERM_PRODUCT_COL, '==', product))
+        if trading_day is not None:
+            day = cast(pd.Timestamp, pd.Timestamp(trading_day)).normalize()
+            filters.append((TERM_TRADING_DAY_COL, '==', day))
+        kwargs = {}
+        if filters:
+            kwargs['filters'] = filters
+        if columns:
+            kwargs['columns'] = columns
+        return pd.read_parquet(self.path, **kwargs)
+
+    def contract_pool(self, product: str, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
+        df = self.load(product=product, trading_day=trading_day)
+        if df.empty:
+            return df
+        df = df.sort_values(TERM_RANK_COL)
+        if depth is not None:
+            df = df.head(int(depth))
+        return df
+
+
+class AdjustableContractMixin:
+    """Base mixin for contract-like products that can participate in adjustment chains."""
+
+    # Product/category tree should skip technical base layers like this mixin.
+    _is_hidden_product_tree_class = True
+
+    def is_term_contract(self) -> bool:
+        return True
+
+
+class AdjustableProductMixin:
+    """Base mixin for products that support adjustment/term-structure style helpers."""
+
+    # Product/category tree should skip technical base layers like this mixin.
+    _is_hidden_product_tree_class = True
+
+    term_structure_path: Optional[str] = None
+
+    def supports_adjusted_price(self) -> bool:
+        return True
+
+    def supports_term_structure(self) -> bool:
+        return True
+
+    def get_term_structure_path(self) -> Optional[str]:
+        return getattr(self, 'term_structure_path', None)
+
+    def get_term_structure_store(self) -> FuturesTermStructureStore:
+        path = self.get_term_structure_path()
+        if not path:
+            raise ValueError(f"term_structure_path not set for {getattr(self, 'name', type(self).__name__)}")
+        return FuturesTermStructureStore(path)
+
+    def get_term_structure(self, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
+        """Return contracts for this product/date ordered by maturity."""
+        return self.get_term_structure_store().contract_pool(getattr(self, 'name'), trading_day, depth=depth)
+
+    def get_term_structure_contracts(self, trading_day: Any, depth: Optional[int] = None) -> List[Any]:
+        """Return contract objects for this product/date ordered by maturity."""
+        df = self.get_term_structure(trading_day, depth=depth)
+        if df.empty:
+            return []
+        contract_cls = getattr(self, 'FuturesContractClass')
+        return [contract_cls(uid) for uid in df[TERM_CONTRACT_UID_COL].dropna().astype(str)]
+
+    def get_nth_term_contract(self, trading_day: Any, n: int = 0) -> Optional[Any]:
+        contracts = self.get_term_structure_contracts(trading_day, depth=int(n) + 1)
+        return contracts[int(n)] if len(contracts) > int(n) else None
+
+    def term_spread(self, trading_day: Any, near_rank: int = 0, far_rank: int = 1, column: str = 'CLOSE') -> float:
+        """Return near - far for one product/date from the snapshot table."""
+        df = self.get_term_structure(trading_day, depth=max(int(near_rank), int(far_rank)) + 1)
+        if df.empty or len(df) <= max(int(near_rank), int(far_rank)):
+            return float('nan')
+        near = df.iloc[int(near_rank)][column]
+        far = df.iloc[int(far_rank)][column]
+        return float(near - far)
+
+    def term_ratio(self, trading_day: Any, near_rank: int = 0, far_rank: int = 1, column: str = 'CLOSE') -> float:
+        """Return near / far - 1 for one product/date from the snapshot table."""
+        df = self.get_term_structure(trading_day, depth=max(int(near_rank), int(far_rank)) + 1)
+        if df.empty or len(df) <= max(int(near_rank), int(far_rank)):
+            return float('nan')
+        near = df.iloc[int(near_rank)][column]
+        far = df.iloc[int(far_rank)][column]
+        return float(near / far - 1) if far else float('nan')
+
+    def term_slope(self, trading_day: Any, depth: int = 4, column: str = 'CLOSE') -> float:
+        """Linear slope of value against days-to-maturity."""
+        import numpy as np
+
+        df = self.get_term_structure(trading_day, depth=depth)
+        df = df[[TERM_DAYS_TO_MATURITY_COL, column]].dropna()
+        if len(df) < 2:
+            return float('nan')
+        x = pd.Series(df[TERM_DAYS_TO_MATURITY_COL]).to_numpy(dtype=float)
+        y = pd.Series(df[column]).to_numpy(dtype=float)
+        return float(np.polyfit(x, y, 1)[0])
+
+    @staticmethod
+    def _normalize_trading_days(index: Iterable[Any]) -> pd.DatetimeIndex:
+        idx = pd.DatetimeIndex(pd.to_datetime(list(index)))
+        if len(idx) == 0:
+            return idx
+        # Parquet trading_day is stored as tz-naive midnight; align incoming
+        # timestamps (often tz-aware from market data) to the same representation.
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        return idx.normalize().unique().sort_values()
+
+    def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
+        days = self._normalize_trading_days(trading_days)
+        if len(days) == 0:
+            return pd.DataFrame()
+        df = self.get_term_structure_store().load(product=getattr(self, 'name'))
+        if df.empty:
+            return df
+        day_set = set(days)
+        df = df[df[TERM_TRADING_DAY_COL].isin(day_set)]
+        if df.empty:
+            return df
+        df = df.sort_values([TERM_TRADING_DAY_COL, TERM_RANK_COL])
+        if depth is not None:
+            df = df[df[TERM_RANK_COL] < int(depth)]
+        return df
+
+    def term_spread_series(
+        self,
+        trading_days: Iterable[Any],
+        near_rank: int = 0,
+        far_rank: int = 1,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        near_rank = int(near_rank)
+        far_rank = int(far_rank)
+        depth = max(near_rank, far_rank) + 1
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+
+        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        out.loc[near.index.intersection(out.index)] = (near - far).reindex(near.index.intersection(out.index)).astype(float)
+        return out
+
+    def term_ratio_series(
+        self,
+        trading_days: Iterable[Any],
+        near_rank: int = 0,
+        far_rank: int = 1,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        near_rank = int(near_rank)
+        far_rank = int(far_rank)
+        depth = max(near_rank, far_rank) + 1
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+
+        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        ratio = (near / far) - 1.0
+        ratio = ratio.where(far != 0)
+        out.loc[ratio.index.intersection(out.index)] = ratio.reindex(ratio.index.intersection(out.index)).astype(float)
+        return out
+
+    def term_slope_series(
+        self,
+        trading_days: Iterable[Any],
+        depth: int = 4,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        depth = int(depth)
+        if depth < 2:
+            return out
+
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+        df = df[[TERM_TRADING_DAY_COL, TERM_DAYS_TO_MATURITY_COL, column]].dropna()
+        if df.empty:
+            return out
+
+        def _slope(g: pd.DataFrame) -> float:
+            if len(g) < 2:
+                return float('nan')
+            x = pd.Series(g[TERM_DAYS_TO_MATURITY_COL]).to_numpy(dtype=float)
+            y = pd.Series(g[column]).to_numpy(dtype=float)
+            return float(np.polyfit(x, y, 1)[0])
+
+        slopes = df.groupby(TERM_TRADING_DAY_COL, sort=False).apply(_slope)
+        slopes = cast(pd.Series, slopes)
+        out.loc[slopes.index.intersection(out.index)] = slopes.reindex(slopes.index.intersection(out.index)).astype(float)
+        return out

@@ -18,7 +18,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 .layout-resizer:hover { background: #e2e8f0; }
 .sidebar-header {
     padding: 16px 20px; border-bottom: 1px solid #e2e8f0;
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 6px;
 }
 .sidebar-header h2 { font-size: 18px; color: #1a1a1a; }
 .btn-back { font-size: 13px; color: #4a90d9; text-decoration: none; }

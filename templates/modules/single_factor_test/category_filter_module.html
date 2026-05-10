@@ -1,5 +1,5 @@
 <!-- 产品类别摘要行 -->
-<div class="setting-summary-row" onclick="document.getElementById('category-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+<div class="setting-summary-row" onclick="document.getElementById('category-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.ensureCategoryTreeReady)window.ensureCategoryTreeReady()">
     <span class="setting-summary-label">🌳 产品类别</span>
     <span class="setting-summary-value multiline" id="category-summary-text">加载中…</span>
     <span class="setting-summary-arrow">编辑 ▶</span>
@@ -15,7 +15,7 @@
 <div class="module" id="category_filter_module" style="margin-top:24px;">
     <div style="display: flex; gap: 24px; flex-wrap: wrap;">
         <!-- 左侧：产品树 -->
-        <div style="flex: 2; min-width: 260px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
+        <div id="category-tree-panel" style="flex: 2; min-width: 260px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 16px;">
             <div class="section-title" style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">🌳 产品类别筛选</div>
             <div style="margin-bottom: 12px; color: #586069; font-size: 13px;">
                 树状结构，勾选叶子节点或分类后提交
@@ -27,7 +27,7 @@
                 <span id="submit_status" style="margin-left: 12px; font-size: 13px; color: #28a745;"></span>
             </div>
             <!-- 容器内部不要有任何占位文字，Fancytree 会自动填充 -->
-            <div id="tree-container" style="max-height: 400px; overflow-y: auto; border: 1px solid #e1e4e8; border-radius: 8px; padding: 8px; background: #fff;"></div>
+            <div id="tree-container" style="width:100%; box-sizing:border-box; max-height:400px; overflow:auto; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
             <style>
                 /* IC测试：确保产品树所有节点（含叶节点）的勾选框可见 */
             </style>
@@ -67,7 +67,7 @@
                 </div>
             </div>
 
-            <div id="submission-history" style="max-height: 400px; overflow-y: auto; padding-right: 4px;"></div>
+            <div id="submission-history" style="width:100%; box-sizing:border-box; max-height:400px; overflow-y:auto; overflow-x:hidden; padding-right:4px;"></div>
         </div>
     </div>
 </div>
@@ -78,6 +78,7 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
 
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/category_filter_module.js') }}"></script>
 
@@ -110,6 +111,7 @@
             ? lines.map(function(l) { return '<div>' + l + '</div>'; }).join('')
             : '未选择';
     }
+    window.updateCategorySummary = updateCategorySummary;
     var drawer = document.getElementById('category-drawer');
     if (drawer) {
         drawer.addEventListener('transitionend', function () {
@@ -118,9 +120,14 @@
     }
     // window.submissions 由 category_filter_module.js 约定暴露，
     // 它在提交或删除后可能更新，简单轮询即可
-    document.addEventListener('DOMContentLoaded', function () {
+    function initCategorySummary() {
         setInterval(updateCategorySummary, 1000);
         updateCategorySummary();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCategorySummary);
+    } else {
+        initCategorySummary();
+    }
 })();
 </script>

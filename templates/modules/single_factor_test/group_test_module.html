@@ -76,7 +76,7 @@
 
     <!-- 费率抽屉 -->
     <div class="settings-drawer-overlay" id="group-fee-drawer">
-        <div class="settings-drawer-panel">
+        <div class="settings-drawer-panel group-fee-drawer-panel">
             <button class="drawer-close-btn" id="group-fee-drawer-close">✕ 关闭</button>
             <h5 style="margin-bottom:12px;">📋 按品种手续费率</h5>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
@@ -84,7 +84,7 @@
                 <button id="drawer_reset_fee_btn" class="btn btn-outline-warning btn-sm" title="恢复所有费率为获取时的原始值">↺ 恢复原始值</button>
                 <span id="drawer_fee_fetch_status" style="font-size:12px;color:#888;"></span>
             </div>
-            <div style="overflow-x:auto;max-height:60vh;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
+            <div class="group-fee-table-wrap" style="overflow:auto;max-height:72vh;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
                 <table id="fee_table" style="border-collapse:collapse;width:100%;font-size:12px;">
                     <thead>
                         <tr style="background:#f7fbff;position:sticky;top:0;z-index:2;">

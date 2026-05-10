@@ -35,6 +35,9 @@ class Product(UniqueObject):
     MIN1: DataMeta   # 1 分钟数据
     DAY1: DataMeta   # 1 日数据
 
+    # 技术基类可覆写为 True，以在前端产品树中隐藏该层级。
+    _is_hidden_product_tree_class: bool = False
+
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
                  currency: Optional[str] = None, *args, **kwargs):
@@ -69,6 +72,18 @@ class Product(UniqueObject):
                 raise ValueError(f"No data frequency available for product {self.name}")
             self.current_freq = available_freqs[0]
         return getattr(self, 'current_freq')
+
+    def supports_adjusted_price(self) -> bool:
+        """Whether this product class supports adjusted OHLC prices."""
+        return False
+
+    def supports_term_structure(self) -> bool:
+        """Whether this product class supports term-structure contract chains."""
+        return False
+
+    def is_term_contract(self) -> bool:
+        """Whether this product is an individual contract in a term structure."""
+        return False
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
         """

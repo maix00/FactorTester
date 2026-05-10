@@ -125,6 +125,7 @@
             el.textContent = text;
         }
     }
+    window.updateTimeSummary = updateTimeSummary;
     var drawer = document.getElementById('time-range-drawer');
     if (drawer) {
         drawer.addEventListener('transitionend', function () {
@@ -132,12 +133,17 @@
         });
     }
     // current_settings 由 JS 填充，用 MutationObserver 监听
-    document.addEventListener('DOMContentLoaded', function () {
+    function initTimeSummary() {
         var src = document.getElementById('current_settings');
         if (src) {
             new MutationObserver(updateTimeSummary).observe(src, { childList: true, characterData: true, subtree: true });
             updateTimeSummary();
         }
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTimeSummary);
+    } else {
+        initTimeSummary();
+    }
 })();
 </script>

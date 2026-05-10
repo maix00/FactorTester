@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, cast
 import pandas as pd
 import os
 from tools.products.Futures import Futures, FuturesContract
@@ -79,7 +79,7 @@ def _infer_unique_version(code: str, exchange_short: Optional[str] = None) -> Op
     if exchange_short is not None:
         exch = exchange_map_reversed.get(exchange_short, exchange_short)
         df = df[df[exchange_code_col_name].astype(str) == str(exch)]
-    versions = sorted(set(df[version_col_name].dropna().astype(str)))
+    versions = sorted(set(pd.Series(df[version_col_name]).dropna().astype(str)))
     return versions[0] if len(versions) == 1 else None
 
 def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str | None:
@@ -102,8 +102,17 @@ class CNFutures(Futures):
 
     def __init__(self, name: str, point_value: Optional[int] = None, 
                  roller_info_path: Optional[str] = None,
-                 data_path: Optional[str] = None):
-        super().__init__(name, point_value, 'CNY', roller_info_path, CNFuturesContract, timezone='Asia/Shanghai')
+                 data_path: Optional[str] = None,
+                 term_structure_path: Optional[str] = None):
+        super().__init__(
+            name,
+            point_value,
+            'CNY',
+            roller_info_path,
+            term_structure_path,
+            CNFuturesContract,
+            timezone='Asia/Shanghai',
+        )
         self.alias = name.split('@')[0]
         self.code = self.alias.split('.')[0]
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
@@ -115,6 +124,14 @@ class CNFutures(Futures):
             from Settings import DATA_DIR
             self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
         return self._ROLLER_INFO_PATH_CACHED
+
+    def get_term_structure_path(self) -> str:
+        if self.term_structure_path:
+            return self.term_structure_path
+        if not hasattr(self, '_TERM_STRUCTURE_PATH_CACHED'):
+            from sources.LocalCNFutures import TERM_STRUCTURE_PATH
+            self._TERM_STRUCTURE_PATH_CACHED = TERM_STRUCTURE_PATH
+        return self._TERM_STRUCTURE_PATH_CACHED
 
 from tools.products.Product import Product
 
@@ -210,11 +227,11 @@ def get_all_futures() -> List[CNFutures]:
 
     cnfutures_list = []
     for _, row in _data.iterrows():
-        code = row[code_col_name]
-        exchange = row[exchange_code_col_name]
-        exchange = exchange_map.get(exchange, exchange)
+        code = str(row[code_col_name])
+        exchange_raw = str(row[exchange_code_col_name])
+        exchange = exchange_map.get(exchange_raw, exchange_raw)
         version = str(row[version_col_name])
-        key = f"{code}|{row[exchange_code_col_name]}"
+        key = f"{code}|{exchange_raw}"
         if version_count.get(key, 0) <= 1:
             name = f"{code}.{exchange}"
         else:

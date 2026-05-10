@@ -352,17 +352,33 @@ class DataMeta(UniqueObject):
         if df.empty:
             return df
         if not isinstance(self.object, Futures):
-            fallback_cols = [self._get_nonadjusted_col_name(col) if self._check_is_adjusted(col) else col for col in cols]
-            existing_cols = [col for col in fallback_cols if col in df.columns]
-            return df[existing_cols] if existing_cols else df
+            result = pd.DataFrame(index=df.index)
+            for col in cols:
+                if col in df.columns:
+                    result[col] = df[col]
+                    continue
+                if self._check_is_adjusted(col):
+                    raw_col = self._get_nonadjusted_col_name(col)
+                    if raw_col in df.columns:
+                        # 非复权产品没有 adjusted 列时，按请求列名返回原始列值。
+                        result[col] = df[raw_col]
+            return result if len(result.columns) > 0 else df.iloc[:, 0:0]
 
         adjust_cols = [col if self._check_is_adjusted(col) else self._get_adjusted_col_name(col) for col in cols]
         adjust_cols = [col for col in adjust_cols if col not in df.columns]
         if len(adjust_cols) > 0:
-            assert DataColumn.ADJUSTMENT_MUL.name in df.columns
-            assert DataColumn.ADJUSTMENT_ADD.name in df.columns
-            cols = [self._get_nonadjusted_col_name(col) for col in adjust_cols]
-            for col, col_adj in zip(cols, adjust_cols):
-                df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
-                    + df[DataColumn.ADJUSTMENT_ADD.name]
+            has_adjustment = (
+                DataColumn.ADJUSTMENT_MUL.name in df.columns
+                and DataColumn.ADJUSTMENT_ADD.name in df.columns
+            )
+            raw_cols = [self._get_nonadjusted_col_name(col) for col in adjust_cols]
+            for col, col_adj in zip(raw_cols, adjust_cols):
+                if col not in df.columns:
+                    continue
+                if has_adjustment:
+                    df[col_adj] = df[col] * df[DataColumn.ADJUSTMENT_MUL.name] \
+                        + df[DataColumn.ADJUSTMENT_ADD.name]
+                else:
+                    # Futures 类但当前数据源没有复权参数时，同样按 adjusted 名称回退原始列。
+                    df[col_adj] = df[col]
         return df

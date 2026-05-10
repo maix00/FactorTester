@@ -10,8 +10,25 @@ from .shared import (
     get_factor_family_instance, _get_session_params, _save_session_params,
     _visible_accounts_for, _can_view_user_scope, _account_display_name,
 )
+from .modules.shared.param_config import param_value_display
 
 templates_bp = Blueprint('templates', __name__)
+
+
+def _build_factor_rows(ff, params_list):
+    factors = ff.get_factors(params_list=params_list)
+    rows = []
+    for idx, (factor, row) in enumerate(zip(factors, params_list)):
+        display_params = {}
+        for p in ff.params:
+            val = row.get(p.alias)
+            display_params[p.alias] = param_value_display(p, val)
+        rows.append({
+            'index': idx,
+            'factor_alias': factor.alias,
+            'params': display_params,
+        })
+    return rows
 
 # ── 路径模板 ──────────────────────────────────────────────────────────────────
 
@@ -326,7 +343,7 @@ def replace_params():
                 seen.add(key)
                 new_pl.append(new_params)
         _save_session_params(ff_alias, new_pl)
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, new_pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

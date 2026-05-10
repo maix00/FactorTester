@@ -7,7 +7,7 @@
     <style>
         body { margin: 0; background: #f5f7fb; color: #1f2937; font-family: "Avenir Next", "PingFang SC", sans-serif; }
         .page { max-width: 1180px; margin: 34px auto; padding: 0 24px; }
-        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+        .topbar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 22px; }
         .topbar h1 { margin: 0; font-size: 24px; }
         .back { color: #2563eb; text-decoration: none; font-size: 13px; }
         .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
@@ -51,8 +51,9 @@
 <body>
     <div class="page">
         <div class="topbar">
+            {% set back_link_class = 'back' %}
+            {% include 'modules/shared/home_back_link.html' %}
             <h1>用户与机构管理</h1>
-            <a class="back" href="/">返回首页</a>
         </div>
         <div class="grid">
             <div class="card">

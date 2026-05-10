@@ -23,7 +23,7 @@ from server.shared import (
     _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
     _get_user_file_lock, get_custom_factor_instance, _is_super_admin_account,
 )
-from server.param_meta import serialize_param_meta
+from server.modules.shared.param_meta import serialize_param_meta
 from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
 from server.modules.custom_factors.param_config_store import (
     load_param_config,

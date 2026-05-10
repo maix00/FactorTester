@@ -16,7 +16,7 @@
     <style>
         body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .mf-wrapper { max-width: 1200px; margin: 0 auto; padding: 24px; }
-        .mf-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .mf-header { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 24px; }
         .mf-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
         .mf-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
         .mf-header .back-link:hover { text-decoration: underline; }
@@ -64,7 +64,8 @@
 <body>
 <div class="mf-wrapper">
     <div class="mf-header">
-        <a href="/" class="back-link">← 返回首页</a>
+        {% set back_link_class = 'back-link' %}
+        {% include 'modules/shared/home_back_link.html' %}
         <h1>🔗 多因子分析</h1>
     </div>
 
