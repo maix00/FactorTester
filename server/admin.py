@@ -18,7 +18,8 @@ from server.services.accounts import (
     can_manage_user_account, can_manage_organization,
     next_account_username,
 )
-from .shared import login_required, _require_user
+from server.services.http_auth import login_required
+from server.services.runtime_state import require_user
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -31,7 +32,7 @@ ROLE_LABELS = {
 
 
 def _require_admin_account():
-    username = _require_user()
+    username = require_user()
     acct = get_account(username)
     if not (is_super_admin_account(acct) or is_org_admin_account(acct) or is_level_admin_account(acct)):
         return username, acct, (jsonify({'success': False, 'error': '需要管理员权限'}), 403)

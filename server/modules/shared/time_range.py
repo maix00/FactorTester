@@ -8,8 +8,8 @@ import pandas as pd
 from flask import request, jsonify
 import Settings
 from server.services.factor_registry import get_factor_family_instance
-from server.shared import _factor_testers_lock
-import server.shared as shared
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
 
 
@@ -68,13 +68,13 @@ def set_time_range():
         )
 
         # 写入 page_uuid 对应的时间
-        shared._set_runtime_time(page_uuid, new_start, new_end)
+        runtime_state.set_runtime_time(page_uuid, new_start, new_end)
 
         # 更新与当前 page_uuid 绑定的 tester
         from tools.factors.FactorTester import FactorTester
         tester_count = 0
-        with _factor_testers_lock:
-            for tester in shared.factor_testers:
+        with factor_testers_lock:
+            for tester in runtime_state.factor_testers:
                 if isinstance(tester, FactorTester) and getattr(tester, '_page_uuid', None) == page_uuid:
                     tester.update_time_range((new_start, new_end))
                     tester_count += 1

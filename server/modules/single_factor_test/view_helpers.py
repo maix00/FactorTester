@@ -10,7 +10,7 @@ from flask import render_template
 import Settings as Settings
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.factor_registry import get_factor_family_instance
-from server.shared import _get_session_params
+from server.services.runtime_state import get_session_params
 
 
 def build_group_html(
@@ -155,7 +155,7 @@ def get_factor_main_section_html(factor_family_alias):
         params = factor_family.params
         param_metas = [serialize_param_meta(param) for param in params]
         param_aliases = [param.alias for param in params]
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         start_date = getattr(Settings, 'default_test_start_date', '2020-01-01')
         start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else start_date
         end_date = getattr(Settings, 'default_test_end_date', '2024-12-31')

@@ -10,20 +10,21 @@ from server.modules.custom_factors.catalog import (
     list_visible_custom_factors,
 )
 from server.services.accounts import get_account, load_accounts
-from server.shared import _current_user, login_required
+from server.services.http_auth import login_required
+from server.services.runtime_state import current_user
 
 
 @cf_bp.route('/editor', methods=['GET'])
 @login_required
 def editor_page():
-    username = _current_user()
+    username = current_user()
     return render_template('custom_factor_editor.html', username=username)
 
 
 @cf_bp.route('/api/list', methods=['GET'])
 @login_required
 def api_list_factors():
-    username = _current_user()
+    username = current_user()
     public = list_public_factors()
     include_subordinates = request.args.get('include_subordinates') == '1'
     if include_subordinates:

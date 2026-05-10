@@ -28,20 +28,18 @@ from server.services.factor_registry import (
     invalidate_custom_factor_cache,
     invalidate_factor_family_cache,
 )
-from server.shared import (
-    _current_user,
-    login_required,
-)
+from server.services.http_auth import login_required
+from server.services.runtime_state import current_user
 
 
 def _current_user_is_super_admin() -> bool:
-    return is_super_admin_account(get_account(_current_user()))
+    return is_super_admin_account(get_account(current_user()))
 
 
 @cf_bp.route('/api/create', methods=['POST'])
 @login_required
 def api_create_factor():
-    username = _current_user()
+    username = current_user()
     data = request.get_json(silent=True) or {}
 
     source_code = (data.get('source_code') or '').strip()
@@ -82,7 +80,7 @@ def api_create_factor():
 @cf_bp.route('/api/update/<factor_id>', methods=['POST'])
 @login_required
 def api_update_factor(factor_id):
-    username = _current_user()
+    username = current_user()
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
@@ -193,7 +191,7 @@ def api_update_public_factor(factor_id):
 @cf_bp.route('/api/delete/<factor_id>', methods=['POST'])
 @login_required
 def api_delete_factor(factor_id):
-    username = _current_user()
+    username = current_user()
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
@@ -212,7 +210,7 @@ def api_delete_factor(factor_id):
 @cf_bp.route('/api/get/<factor_id>', methods=['GET'])
 @login_required
 def api_get_factor(factor_id):
-    username = _current_user()
+    username = current_user()
     owner_username = (request.args.get('owner_username') or username).strip()
     if not can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户因子'}), 403

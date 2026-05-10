@@ -7,12 +7,9 @@ import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
 from . import mfa_bp
-from server.shared import (
-    _get_session_params,
-    _factor_testers_lock,
-)
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock, get_session_params
 from server.services.factor_registry import get_factor_family_instance
-import server.shared as shared
 
 
 def _safe_float(v):
@@ -34,13 +31,13 @@ def run_mfa_correlation():
         return jsonify({'success': False, 'error': '请至少选择2个因子'}), 400
 
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+        with factor_testers_lock:
+            tester = next((t for t in runtime_state.factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 
         factor_family = get_factor_family_instance(factor_family_alias)
-        all_factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        all_factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         factors = [f for f in all_factors if f.alias in factor_aliases]
         if len(factors) < 2:
             return jsonify({'success': False, 'error': f'只匹配到{len(factors)}个因子'}), 400

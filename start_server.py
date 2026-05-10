@@ -4,7 +4,7 @@ from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
 from server.services.accounts import accounts_lock, load_accounts
-from server.shared import _current_user
+from server.services.runtime_state import current_user
 from tools.base.IdleResourceManager import IdleResourceManager
 
 app = create_app()
@@ -100,7 +100,7 @@ def _start_hot_reload_watcher(interval: float = 2.0):
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
-    username = _current_user()
+    username = current_user()
     if not username:
         return jsonify({'success': False, 'error': '请先登录'}), 401
     with accounts_lock:

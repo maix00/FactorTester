@@ -159,18 +159,18 @@
         <p>因子列表通过扫描 <code>Factors/</code> 目录中的 <code>.py</code> 文件中定义的类自动发现，按类别（Mm/Oi/Vl/Vp）分组显示。中文名通过类 docstring 的首行提取。</p>
 
         <h3>2.4 认证 — <code>server/auth.py</code></h3>
-        <p>基于 session 的简单认证。账号存储为 <code>data/accounts.json</code>（JSON 数组，密码明文）。首个注册账号自动拥有 <code>is_admin: true</code>。所有 API 通过 <code>server/shared.py</code> 中的 <code>_current_user()</code> 获取当前用户。</p>
+        <p>基于 session 的认证。账号与机构层级由 <code>server/services/accounts.py</code> 管理；请求运行态由 <code>server/services/runtime_state.py</code> 管理，例如当前用户、页面级时间范围、参数 session 状态等。</p>
 
-        <h3>2.5 全局状态 — <code>server/shared.py</code></h3>
+        <h3>2.5 运行态状态 — <code>server/services/runtime_state.py</code></h3>
         <p>核心状态管理文件，提供：</p>
         <table>
             <tr><th>函数/变量</th><th>说明</th></tr>
             <tr><td><code>_tester_cache</code></td><td>FactorTester 单例缓存，按因子名 key</td></tr>
             <tr><td><code>_active_tester</code></td><td><code>ContextVar</code>，当前请求的活跃 tester，保证线程安全</td></tr>
-            <tr><td><code>_params_store</code></td><td>dict，按因子名存储当前参数组列表</td></tr>
-            <tr><td><code>_current_user()</code></td><td>从 Flask session 获取当前登录用户名</td></tr>
-            <tr><td><code>get_factor_family_instance()</code></td><td>实例化因子族类，触发因子计算</td></tr>
-            <tr><td><code>get_factor_main_section_html()</code></td><td>渲染因子主页的 HTML 片段</td></tr>
+            <tr><td><code>params_store</code></td><td>dict，按 session 与因子名存储当前参数组列表</td></tr>
+            <tr><td><code>current_user()</code></td><td>从 Flask session 获取当前登录用户名</td></tr>
+            <tr><td><code>get_factor_family_instance()</code></td><td>位于 <code>server/services/factor_registry.py</code>，负责实例化因子族类</td></tr>
+            <tr><td><code>get_factor_main_section_html()</code></td><td>位于 <code>server/modules/single_factor_test/view_helpers.py</code>，渲染单因子测试主页 HTML 片段</td></tr>
         </table>
     </div>
 

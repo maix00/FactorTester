@@ -14,8 +14,8 @@ from server.services import product_tree
 from server.services.product_tree import (
     convert_to_fancytree, find_node_by_path, get_minimal_paths, tree,
 )
-from server.shared import _factor_testers_lock
-import server.shared as shared
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
 
 
@@ -35,8 +35,8 @@ def _tester_to_dict(t):
 
 def _valid_testers():
     """返回当前有效（未被销毁）的 tester 列表。"""
-    with _factor_testers_lock:
-        return [t for t in shared.factor_testers if t.products and len(t.products) > 0]
+    with factor_testers_lock:
+        return [t for t in runtime_state.factor_testers if t.products and len(t.products) > 0]
 
 
 @shared_bp.route('/api/tree-data')
@@ -113,16 +113,16 @@ def submit_selected_products():
 
         from tools.factors.FactorTester import FactorTester
         # 按 page_uuid 查找时间：优先 set_time_range 值，fallback Settings 默认值
-        _start, _end, _start_calc = shared.get_current_time(page_uuid)
-        user = shared._current_user_obj()
+        _start, _end, _start_calc = runtime_state.get_current_time(page_uuid)
+        user = runtime_state.current_user_obj()
         factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
         factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
         if page_uuid:
             factor_tester._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
         if user is not None:
             user.add_tester(factor_tester)
-        with _factor_testers_lock:
-            shared.factor_testers.append(factor_tester)
+        with factor_testers_lock:
+            runtime_state.factor_testers.append(factor_tester)
         return jsonify({
             'success':             True,
             'count':               len(selected_products),
@@ -143,11 +143,11 @@ def reorder_submissions():
     data = request.get_json()
     new_order = data.get('new_order', [])
     try:
-        with _factor_testers_lock:
-            n = len(shared.factor_testers)
-            alias_to_tester = {t.alias: t for t in shared.factor_testers}
-            shared.factor_testers = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
-            assert len(shared.factor_testers) == n, "Reordered list length mismatch"
+        with factor_testers_lock:
+            n = len(runtime_state.factor_testers)
+            alias_to_tester = {t.alias: t for t in runtime_state.factor_testers}
+            runtime_state.factor_testers[:] = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
+            assert len(runtime_state.factor_testers) == n, "Reordered list length mismatch"
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -159,14 +159,14 @@ def delete_submission():
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
     assert id_time is not None, "Missing id_time"
     try:
-        with _factor_testers_lock:
-            n = len(shared.factor_testers)
+        with factor_testers_lock:
+            n = len(runtime_state.factor_testers)
             # alias 格式为 user_name:core_id，匹配尾部 id
-            tester = next((t for t in shared.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
+            tester = next((t for t in runtime_state.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
             assert tester is not None, "Submission not found"
             tester.delete()
-            shared.factor_testers = [t for t in shared.factor_testers if not (t.alias.endswith(':' + id_time) or t.alias == id_time)]
-            assert len(shared.factor_testers) == n - 1, "No submission deleted"
+            runtime_state.factor_testers[:] = [t for t in runtime_state.factor_testers if not (t.alias.endswith(':' + id_time) or t.alias == id_time)]
+            assert len(runtime_state.factor_testers) == n - 1, "No submission deleted"
         return jsonify({
             'success':     True,
             'submissions': [_tester_to_dict(t) for t in _valid_testers()],
@@ -185,16 +185,16 @@ def clear_all_submissions():
     data = request.get_json()
     page_uuid = data.get('page_uuid', '').strip() or None if data else None
     try:
-        with _factor_testers_lock:
-            for tester in shared.factor_testers:
+        with factor_testers_lock:
+            for tester in runtime_state.factor_testers:
                 tester_puuid = getattr(tester, '_page_uuid', None)
                 if tester_puuid is None or tester_puuid == page_uuid:
                     try:
                         tester.delete()
                     except Exception:
                         pass
-            shared.factor_testers = [
-                t for t in shared.factor_testers
+            runtime_state.factor_testers[:] = [
+                t for t in runtime_state.factor_testers
                 if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
             ]
         return jsonify({
@@ -212,8 +212,8 @@ def delete_path_of_submission():
     assert id_time is not None, "Missing id_time"
     new_paths = data.get('new_paths')
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
+        with factor_testers_lock:
+            tester = next((t for t in runtime_state.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
         assert tester is not None, "Submission not found"
         selected_paths = get_minimal_paths(new_paths)
         selected_products = []
@@ -242,18 +242,18 @@ def replace_submissions():
         return jsonify({'success': False, 'error': 'template_submissions 必须是列表'})
     try:
         from tools.factors.FactorTester import FactorTester
-        user = shared._current_user_obj()
+        user = runtime_state.current_user_obj()
         replaced = []
-        with _factor_testers_lock:
-            for tester in shared.factor_testers:
+        with factor_testers_lock:
+            for tester in runtime_state.factor_testers:
                 tester_puuid = getattr(tester, '_page_uuid', None)
                 if tester_puuid is None or tester_puuid == page_uuid:
                     try:
                         tester.delete()
                     except Exception:
                         pass
-            shared.factor_testers = [
-                t for t in shared.factor_testers
+            runtime_state.factor_testers[:] = [
+                t for t in runtime_state.factor_testers
                 if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
             ]
 
@@ -271,14 +271,14 @@ def replace_submissions():
                         selected_products.append(node)
                 selected_products = sorted(list(set(selected_products)))
                 alias = str(int(time.time() * 1000) + i)
-                _start, _end, _start_calc = shared.get_current_time(page_uuid)
+                _start, _end, _start_calc = runtime_state.get_current_time(page_uuid)
                 factor_tester = FactorTester(products=selected_products, alias=alias, time_range=(_start, _end), user=user)
                 factor_tester.selected_paths = selected_paths
                 if page_uuid:
                     factor_tester._page_uuid = page_uuid
                 if user is not None:
                     user.add_tester(factor_tester)
-                shared.factor_testers.append(factor_tester)
+                runtime_state.factor_testers.append(factor_tester)
                 replaced.append({
                     'id': alias,
                     'paths': selected_paths,

@@ -10,12 +10,9 @@ from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from . import mfa_bp
-from server.shared import (
-    _get_session_params,
-    _factor_testers_lock,
-)
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock, get_session_params
 from server.services.factor_registry import get_factor_family_instance
-import server.shared as shared
 
 
 def _safe_float(v):
@@ -131,13 +128,13 @@ def run_mfa_hierarchy():
         return jsonify({'success': False, 'error': '第二层分组数需在2~10之间'}), 400
 
     try:
-        with _factor_testers_lock:
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id)), None)
+        with factor_testers_lock:
+            tester = next((t for t in runtime_state.factor_testers if t.alias == str(submission_id)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 
         factor_family = get_factor_family_instance(factor_family_alias)
-        all_factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        all_factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         
         factor_a = next((f for f in all_factors if f.alias == factor_a_alias), None)
         factor_b = next((f for f in all_factors if f.alias == factor_b_alias), None)

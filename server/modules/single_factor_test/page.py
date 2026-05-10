@@ -17,9 +17,7 @@ from server.services.factor_registry import (
     get_factor_family_instance,
     get_factor_groups,
 )
-from server.shared import (
-    _current_user,
-)
+from server.services.runtime_state import current_user, get_session_params
 from server.modules.single_factor_test.view_helpers import get_factor_main_section_html
 from . import sft_bp
 
@@ -72,7 +70,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
     factors_dir = os.path.join(os.getcwd(), 'Factors')
     _, factor_names = get_factor_groups(factors_dir)
     chinese_names = get_chinese_names(factors_dir)
-    username = _current_user()
+    username = current_user()
     custom_factors = _get_sidebar_custom_factors(username, include_subordinates) if username else []
 
     if search_query:
@@ -120,7 +118,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
 
 
 def _render_single_factor_content(selected_name: str, factor_type: str = '', owner_username: str = '') -> str:
-    username = _current_user()
+    username = current_user()
     factor_type = factor_type or 'public'
     if not selected_name:
         return '<div class="editor-placeholder">← 从左侧选择因子家族开始测试</div>'
@@ -142,11 +140,10 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
             description = cf_data.get('description', '') or getattr(ff, 'description', '') or ''
             params = ff.params
             from server.modules.shared.param_meta import serialize_param_meta
-            from server.shared import _get_session_params
 
             param_metas = [serialize_param_meta(p) for p in params]
             param_aliases = [p.alias for p in params]
-            session_params = _get_session_params(display_alias, ff)
+            session_params = get_session_params(display_alias, ff)
             factors = ff.get_factors(params_list=session_params)
             start_date = getattr(__import__('Settings'), 'default_test_start_date', '2025-01-02')
             end_date = getattr(__import__('Settings'), 'default_test_end_date', '2025-05-31')

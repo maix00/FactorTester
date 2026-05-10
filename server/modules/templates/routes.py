@@ -3,11 +3,8 @@ Templates Blueprint: CRUD for path / time / params templates,
 plus current_params and replace_params endpoints.
 """
 from flask import Blueprint, request, jsonify
-from server.shared import (
-    _require_user, _get_user_file_lock,
-    login_required,
-    _get_session_params, _save_session_params,
-)
+from server.services.http_auth import login_required
+from server.services.runtime_state import get_session_params, get_user_file_lock, require_user, save_session_params
 from server.services.factor_registry import get_factor_family_instance
 from server.modules.shared.param_config import param_value_display
 from server.services.accounts import (
@@ -46,8 +43,8 @@ def _build_factor_rows(ff, params_list):
 @templates_bp.route('/api/path_templates', methods=['GET'])
 @login_required
 def list_path_templates():
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'path')
     return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
 
@@ -62,8 +59,8 @@ def save_path_template():
         return jsonify({'success': False, 'error': '模板名称不能为空'})
     if not isinstance(submissions, list) or len(submissions) == 0:
         return jsonify({'success': False, 'error': '提交列表不能为空'})
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'path')
         new_id = _new_tpl_id()
         templates.append({'id': new_id, 'name': name, 'submissions': submissions})
@@ -74,8 +71,8 @@ def save_path_template():
 @templates_bp.route('/api/path_templates/<tpl_id>', methods=['GET'])
 @login_required
 def get_path_template(tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'path')
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
@@ -87,8 +84,8 @@ def get_path_template(tpl_id):
 @login_required
 def update_path_template(tpl_id):
     data = request.get_json()
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'path')
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
@@ -109,8 +106,8 @@ def update_path_template(tpl_id):
 @templates_bp.route('/api/path_templates/<tpl_id>', methods=['DELETE'])
 @login_required
 def delete_path_template(tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'path')
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
@@ -124,8 +121,8 @@ def delete_path_template(tpl_id):
 @templates_bp.route('/api/time_templates', methods=['GET'])
 @login_required
 def list_time_templates():
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'time')
     return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
 
@@ -140,8 +137,8 @@ def save_time_template():
         return jsonify({'success': False, 'error': '模板名称不能为空'})
     if not isinstance(time_data, dict) or not time_data:
         return jsonify({'success': False, 'error': '时间数据不能为空'})
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'time')
         new_id = _new_tpl_id()
         templates.append({'id': new_id, 'name': name, 'time_data': time_data})
@@ -152,8 +149,8 @@ def save_time_template():
 @templates_bp.route('/api/time_templates/<tpl_id>', methods=['GET'])
 @login_required
 def get_time_template(tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'time')
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
@@ -165,8 +162,8 @@ def get_time_template(tpl_id):
 @login_required
 def update_time_template(tpl_id):
     data = request.get_json()
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'time')
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
@@ -187,8 +184,8 @@ def update_time_template(tpl_id):
 @templates_bp.route('/api/time_templates/<tpl_id>', methods=['DELETE'])
 @login_required
 def delete_time_template(tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'time')
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
@@ -202,7 +199,7 @@ def delete_time_template(tpl_id):
 @templates_bp.route('/api/params_templates/<ff_alias>', methods=['GET'])
 @login_required
 def list_params_templates(ff_alias):
-    u = _require_user()
+    u = require_user()
     include_visible = request.args.get('include_visible') == '1'
     accounts = visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
     current_acct = next((a for a in accounts if a.get('username') == u), None) or {}
@@ -212,7 +209,7 @@ def list_params_templates(ff_alias):
         owner = acct.get('username')
         if not owner:
             continue
-        with _get_user_file_lock(owner):
+        with get_user_file_lock(owner):
             templates = _load_user_tpls(owner, 'params', ff_alias)
         for t in templates:
             result.append({
@@ -241,8 +238,8 @@ def save_params_template(ff_alias):
         return jsonify({'success': False, 'error': '模板名称不能为空'})
     if not isinstance(params_list, list) or len(params_list) == 0:
         return jsonify({'success': False, 'error': '参数列表不能为空'})
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'params', ff_alias)
         new_id = _new_tpl_id()
         templates.append({'id': new_id, 'name': name, 'params_list': params_list})
@@ -253,11 +250,11 @@ def save_params_template(ff_alias):
 @templates_bp.route('/api/params_templates/<ff_alias>/<tpl_id>', methods=['GET'])
 @login_required
 def get_params_template(ff_alias, tpl_id):
-    u = _require_user()
+    u = require_user()
     owner_username = (request.args.get('owner_username') or u).strip()
     if not can_view_user_scope(u, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
-    with _get_user_file_lock(owner_username):
+    with get_user_file_lock(owner_username):
         templates = _load_user_tpls(owner_username, 'params', ff_alias)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
@@ -272,8 +269,8 @@ def get_params_template(ff_alias, tpl_id):
 @login_required
 def update_params_template(ff_alias, tpl_id):
     data = request.get_json()
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'params', ff_alias)
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
@@ -296,8 +293,8 @@ def update_params_template(ff_alias, tpl_id):
 @templates_bp.route('/api/params_templates/<ff_alias>/<tpl_id>', methods=['DELETE'])
 @login_required
 def delete_params_template(ff_alias, tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, 'params', ff_alias)
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
@@ -313,7 +310,7 @@ def delete_params_template(ff_alias, tpl_id):
 def get_current_params(ff_alias):
     try:
         ff = get_factor_family_instance(ff_alias)
-        params_list = _get_session_params(ff_alias, ff)
+        params_list = get_session_params(ff_alias, ff)
         # 将 Timedelta/Arrow 等不可 JSON 序列化的值转为字符串
         import pandas as pd
         def _serialize_params(pl):
@@ -353,7 +350,7 @@ def replace_params():
             if key not in seen:
                 seen.add(key)
                 new_pl.append(new_params)
-        _save_session_params(ff_alias, new_pl)
+        save_session_params(ff_alias, new_pl)
         return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, new_pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -370,8 +367,8 @@ SINGLE_FACTOR_SETTING_TEMPLATE_KIND = 'global'
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['GET'])
 @login_required
 def list_single_factor_setting_templates(factor_family_alias):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
     result = []
     for t in templates:
@@ -399,8 +396,8 @@ def save_single_factor_setting_template(factor_family_alias):
         return jsonify({'success': False, 'error': '模板名称不能为空'})
     if not ff_alias:
         return jsonify({'success': False, 'error': '因子家族不能为空'})
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         new_id = _new_tpl_id()
         templates.append({
@@ -416,8 +413,8 @@ def save_single_factor_setting_template(factor_family_alias):
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['GET'])
 @login_required
 def get_single_factor_setting_template(factor_family_alias, tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
@@ -429,8 +426,8 @@ def get_single_factor_setting_template(factor_family_alias, tpl_id):
 @login_required
 def update_single_factor_setting_template(factor_family_alias, tpl_id):
     data = request.get_json()
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
@@ -449,8 +446,8 @@ def update_single_factor_setting_template(factor_family_alias, tpl_id):
 @templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['DELETE'])
 @login_required
 def delete_single_factor_setting_template(factor_family_alias, tpl_id):
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
@@ -467,8 +464,8 @@ def delete_single_factor_setting_template(factor_family_alias, tpl_id):
 def list_single_factor_setting_template_factors(factor_family_alias):
     """列出某个单因子测试因子家族设置模板覆盖的因子，
     从模板的 ff_alias 映射到实际的公共/自定义因子详情，按 factor_family 分组。"""
-    u = _require_user()
-    with _get_user_file_lock(u):
+    u = require_user()
+    with get_user_file_lock(u):
         templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
 
     # 收集所有 ff_alias

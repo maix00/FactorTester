@@ -11,10 +11,8 @@ from server.modules.custom_factors.storage import load_factor_source
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
 from server.modules.shared.param_meta import serialize_param_meta
 from server.services.accounts import can_view_user_scope
-from server.shared import (
-    _current_user,
-    login_required,
-)
+from server.services.http_auth import login_required
+from server.services.runtime_state import current_user
 from server.services.factor_registry import get_factor_family_instance
 
 
@@ -22,7 +20,7 @@ from server.services.factor_registry import get_factor_family_instance
 @login_required
 def api_validate_expr():
     data = request.get_json(silent=True) or {}
-    username = _current_user()
+    username = current_user()
 
     if data.get('is_public') and data.get('factor_name'):
         factor_name = data['factor_name']

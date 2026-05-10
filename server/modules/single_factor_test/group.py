@@ -8,8 +8,8 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
-from server.shared import _factor_testers_lock
-import server.shared as shared
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock
 
 
 def _safe_float(v):
@@ -63,9 +63,9 @@ def run_group_test():
     return_freqs: list = data.get('return_freqs', None)
     _gt_token = None
     try:
-        with _factor_testers_lock:
+        with factor_testers_lock:
             target_suffix = f":{submission_id}"
-            tester = next((t for t in shared.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
+            tester = next((t for t in runtime_state.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 

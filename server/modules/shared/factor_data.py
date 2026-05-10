@@ -11,8 +11,7 @@ import traceback
 from types import SimpleNamespace
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
-from server.shared import _get_session_params, get_factor_tester
-import server.shared as shared
+from server.services.runtime_state import get_factor_tester, get_session_params
 from . import shared_bp
 
 
@@ -63,7 +62,7 @@ def factor_list():
         return jsonify({'success': False, 'error': '缺少参数'})
     try:
         ff = get_factor_family_instance(factor_family_alias)
-        factors = ff.get_factors(params_list=_get_session_params(factor_family_alias, ff))
+        factors = ff.get_factors(params_list=get_session_params(factor_family_alias, ff))
         factor_data = []
         for f in factors:
             factor_freq_param = f.family.params_dict.get('$F') if f.family else None
@@ -90,7 +89,7 @@ def get_factor_series():
     try:
         tester = get_factor_tester(submission_id, caller='get_factor_series')
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -163,7 +162,7 @@ def get_return_series():
     try:
         tester = get_factor_tester(submission_id, caller='get_return_series')
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -231,7 +230,7 @@ def get_price_series():
     try:
         tester = get_factor_tester(submission_id, caller='get_price_series')
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         factor = _find_factor(factors, factor_name, factor_alias)
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
@@ -353,7 +352,7 @@ def get_factor_distribution():
         ts = pd.Timestamp(float(timestamp_ms) / 1000.0, unit='s', tz='Asia/Shanghai')
         tester = get_factor_tester(submission_id, caller='get_factor_distribution')
         factor_family = get_factor_family_instance(factor_family_alias)
-        factors = factor_family.get_factors(params_list=_get_session_params(factor_family_alias, factor_family))
+        factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
         target_factor = _find_factor(factors, factor_name, factor_alias)
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
