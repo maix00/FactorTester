@@ -17,20 +17,7 @@ from server.services.product_tree import (
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
-
-
-def _tester_to_dict(t):
-    """将 FactorTester 转为前端需要的字典。"""
-    # alias 格式为 user_name:core_id，提取纯 id
-    core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
-    return {
-        'id':                   core_id,
-        'name':                 t.name,
-        'product_count':        len(t.products) if hasattr(t, 'products') and t.products else 0,
-        'selected_paths':       getattr(t, 'selected_paths', []) or [],
-        'factor_tester_name':   t.name,
-        'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
-    }
+from .submission_helpers import resolve_products_from_paths, tester_to_dict
 
 
 def _valid_testers():
@@ -53,7 +40,7 @@ def list_submissions():
         testers = _valid_testers()
         return jsonify({
             'success':     True,
-            'submissions': [_tester_to_dict(t) for t in testers],
+            'submissions': [tester_to_dict(t) for t in testers],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -101,15 +88,7 @@ def submit_selected_products():
     page_uuid = data.get('page_uuid', '').strip() or None
     try:
         assert selected_paths, "未选择任何产品路径"
-        selected_paths = get_minimal_paths(selected_paths)
-        selected_products = []
-        for path in selected_paths:
-            node = find_node_by_path(tree, path.split('/'))
-            if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
-                selected_products.extend(node['$OBJECTS$'])
-            else:
-                selected_products.append(node)
-        selected_products = sorted(list(set(selected_products)))
+        selected_paths, selected_products = resolve_products_from_paths(selected_paths)
 
         from tools.factors.FactorTester import FactorTester
         # 按 page_uuid 查找时间：优先 set_time_range 值，fallback Settings 默认值
@@ -132,7 +111,7 @@ def submit_selected_products():
             'factor_tester_name':   factor_tester.name,
             'factor_tester_serial': f"#{id_time}",
             'count_desc':          f"{len(selected_products)} 个产品",
-            'submissions':         [_tester_to_dict(t) for t in _valid_testers()],
+            'submissions':         [tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -161,15 +140,17 @@ def delete_submission():
     try:
         with factor_testers_lock:
             n = len(runtime_state.factor_testers)
-            # alias 格式为 user_name:core_id，匹配尾部 id
-            tester = next((t for t in runtime_state.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
+            tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
             assert tester is not None, "Submission not found"
             tester.delete()
-            runtime_state.factor_testers[:] = [t for t in runtime_state.factor_testers if not (t.alias.endswith(':' + id_time) or t.alias == id_time)]
+            runtime_state.factor_testers[:] = [
+                t for t in runtime_state.factor_testers
+                if not runtime_state.alias_matches_submission_id(getattr(t, 'alias', ''), id_time, allow_suffix=True)
+            ]
             assert len(runtime_state.factor_testers) == n - 1, "No submission deleted"
         return jsonify({
             'success':     True,
-            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+            'submissions': [tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -199,7 +180,7 @@ def clear_all_submissions():
             ]
         return jsonify({
             'success':     True,
-            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+            'submissions': [tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -212,21 +193,13 @@ def delete_path_of_submission():
     assert id_time is not None, "Missing id_time"
     new_paths = data.get('new_paths')
     try:
-        with factor_testers_lock:
-            tester = next((t for t in runtime_state.factor_testers if t.alias.endswith(':' + id_time) or t.alias == id_time), None)
+        tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
         assert tester is not None, "Submission not found"
-        selected_paths = get_minimal_paths(new_paths)
-        selected_products = []
-        for path in selected_paths:
-            node = find_node_by_path(tree, path.split('/'))
-            if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
-                selected_products.extend(node['$OBJECTS$'])
-            else:
-                selected_products.append(node)
+        selected_paths, selected_products = resolve_products_from_paths(new_paths)
         tester.products = sorted(list(set(selected_products)))
         return jsonify({
             'success':     True,
-            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+            'submissions': [tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -261,15 +234,7 @@ def replace_submissions():
                 selected_paths = sub.get('paths') if isinstance(sub, dict) else []
                 if not isinstance(selected_paths, list) or len(selected_paths) == 0:
                     continue
-                selected_paths = get_minimal_paths(selected_paths)
-                selected_products = []
-                for path in selected_paths:
-                    node = find_node_by_path(tree, path.split('/'))
-                    if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
-                        selected_products.extend(node['$OBJECTS$'])
-                    else:
-                        selected_products.append(node)
-                selected_products = sorted(list(set(selected_products)))
+                selected_paths, selected_products = resolve_products_from_paths(selected_paths)
                 alias = str(int(time.time() * 1000) + i)
                 _start, _end, _start_calc = runtime_state.get_current_time(page_uuid)
                 factor_tester = FactorTester(products=selected_products, alias=alias, time_range=(_start, _end), user=user)
@@ -290,7 +255,7 @@ def replace_submissions():
         return jsonify({
             'success': True,
             'replaced_submissions': replaced,
-            'submissions': [_tester_to_dict(t) for t in _valid_testers()],
+            'submissions': [tester_to_dict(t) for t in _valid_testers()],
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

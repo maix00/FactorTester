@@ -25,10 +25,37 @@ factor_testers: list = []
 factor_testers_lock = threading.Lock()
 
 
-def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
+def alias_matches_submission_id(alias: str, submission_id: str | int | None, allow_suffix: bool = True) -> bool:
+    """Return True if tester alias matches submission_id.
+
+    Alias format may be either:
+    - core id: "123456"
+    - namespaced id: "<username>:123456"
+    """
+    if submission_id is None:
+        return False
+    sid = str(submission_id)
+    if alias == sid:
+        return True
+    if allow_suffix:
+        return alias.endswith(f":{sid}")
+    return False
+
+
+def find_factor_tester(submission_id: str | int | None, allow_suffix: bool = True):
+    """Find tester by submission id. Return None when not found."""
     with factor_testers_lock:
-        target_suffix = f":{alias}"
-        tester = next((t for t in factor_testers if t.alias == str(alias) or t.alias.endswith(target_suffix)), None)
+        return next(
+            (
+                t for t in factor_testers
+                if alias_matches_submission_id(getattr(t, 'alias', ''), submission_id, allow_suffix=allow_suffix)
+            ),
+            None,
+        )
+
+
+def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
+    tester = find_factor_tester(alias, allow_suffix=True)
     assert tester is not None, f"{str(caller) + ': ' if caller is not None else ''}未找到对应的测试器实例"
     return tester
 

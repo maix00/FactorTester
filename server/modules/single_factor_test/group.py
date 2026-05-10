@@ -9,7 +9,6 @@ from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 import server.services.runtime_state as runtime_state
-from server.services.runtime_state import factor_testers_lock
 
 
 def _safe_float(v):
@@ -63,9 +62,7 @@ def run_group_test():
     return_freqs: list = data.get('return_freqs', None)
     _gt_token = None
     try:
-        with factor_testers_lock:
-            target_suffix = f":{submission_id}"
-            tester = next((t for t in runtime_state.factor_testers if t.alias == str(submission_id) or t.alias.endswith(target_suffix)), None)
+        tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 

@@ -14,7 +14,7 @@ from tools.factors.Factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
 from . import mfa_bp
 import server.services.runtime_state as runtime_state
-from server.services.runtime_state import factor_testers_lock, get_session_params
+from server.services.runtime_state import get_session_params
 from server.services.factor_registry import get_factor_family_instance
 
 
@@ -176,8 +176,7 @@ def run_mfa_combination():
         return jsonify({'success': False, 'error': '请至少选择2个因子'}), 400
 
     try:
-        with factor_testers_lock:
-            tester = next((t for t in runtime_state.factor_testers if t.alias == str(submission_id)), None)
+        tester = runtime_state.find_factor_tester(submission_id, allow_suffix=False)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
 
