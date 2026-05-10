@@ -1371,7 +1371,7 @@ class CrossSectionalOp(OperandExpr):
 
     @staticmethod
     def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
-        common_idx = left_df.index.intersection(right_df.index)
+        common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
         common_cols = left_df.columns.intersection(right_df.columns)
 
         if len(common_idx) == 0 or len(common_cols) == 0:
@@ -1767,18 +1767,30 @@ class TermStructureOp(OperandExpr):
     def _structural_key(self) -> tuple:
         return (type(self).__name__, self.op, tuple(op._structural_key() for op in self.operands))
 
-    def _time_index_for_product(self, product: 'Product', freq: DataFreq) -> pd.DatetimeIndex:
+    def _time_index_for_product(self, product: 'Product', freq: DataFreq) -> pd.Index:
         try:
             data = product.get_some_data(freq, copy=False)
         except Exception:
-            return pd.DatetimeIndex([])
+            return pd.Index([])
         if data is None or data.empty:
-            return pd.DatetimeIndex([])
-        if isinstance(data.index, pd.MultiIndex):
-            idx = data.index.get_level_values(-1)
+            return pd.Index([])
+        return data.index
+
+    @staticmethod
+    def _trading_days_for_index(idx: pd.Index) -> pd.DatetimeIndex:
+        if isinstance(idx, pd.MultiIndex):
+            level_pos = 0
+            for i, name in enumerate(idx.names):
+                if name and str(name).upper().startswith('DAY'):
+                    level_pos = i
+                    break
+            ts = pd.to_datetime(idx.get_level_values(level_pos))
         else:
-            idx = data.index
-        return pd.DatetimeIndex(pd.to_datetime(idx)).unique().sort_values()
+            ts = pd.to_datetime(idx)
+        days = pd.DatetimeIndex(ts)
+        if days.tz is not None:
+            days = days.tz_localize(None)
+        return days.normalize()
 
     @staticmethod
     def _const_operand_value(expr: FactorExpr) -> Any:
@@ -1842,27 +1854,31 @@ class TermStructureOp(OperandExpr):
         for product in products:
             if not hasattr(product, 'get_term_structure'):
                 continue
-            idx = self._time_index_for_product(product, freq)
-            if len(idx) == 0:
+            raw_idx = self._time_index_for_product(product, freq)
+            if len(raw_idx) == 0:
+                continue
+            trading_days = self._trading_days_for_index(raw_idx)
+            if len(trading_days) == 0:
                 continue
             if self.op == 'term_spread':
                 batch_fn = getattr(product, 'term_spread_series', None)
                 if not callable(batch_fn):
                     raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_spread_series")
-                series = batch_fn(idx, near_rank=near_rank, far_rank=far_rank, column=column)
+                series = batch_fn(trading_days, near_rank=near_rank, far_rank=far_rank, column=column)
             elif self.op == 'term_ratio':
                 batch_fn = getattr(product, 'term_ratio_series', None)
                 if not callable(batch_fn):
                     raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_ratio_series")
-                series = batch_fn(idx, near_rank=near_rank, far_rank=far_rank, column=column)
+                series = batch_fn(trading_days, near_rank=near_rank, far_rank=far_rank, column=column)
             else:
                 batch_fn = getattr(product, 'term_slope_series', None)
                 if not callable(batch_fn):
                     raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_slope_series")
-                series = batch_fn(idx, depth=depth, column=column)
+                series = batch_fn(trading_days, depth=depth, column=column)
             if not isinstance(series, pd.Series):
                 raise TypeError(f"Batch method for {getattr(product, 'name', product)} must return pd.Series, got {type(series).__name__}")
-            series_dict[product] = series.astype(float).reindex(idx)
+            mapped = series.astype(float).reindex(trading_days).to_numpy(dtype=float)
+            series_dict[product] = pd.Series(mapped, index=raw_idx, dtype=float)
         if not series_dict:
             return pd.DataFrame()
         result = pd.concat(series_dict, axis=1)
