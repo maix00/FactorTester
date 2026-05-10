@@ -4,16 +4,7 @@
  */
 
 (function() {
-    // DOM 可能已经就绪，先检查再决定如何初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            initParameterModule();
-        });
-    } else {
-        initParameterModule();
-    }
-
-    window.initParameterModule = function() {
+    function initParameterModule() {
         const moduleElem = document.getElementById('parameter_module');
         if (!moduleElem) return;
 
@@ -555,5 +546,14 @@
 
         populateParamsTplSelect();
         // ── 参数模板管理 END ──────────────────────────────────────────────────
-    };
+    }
+
+    window.initParameterModule = initParameterModule;
+
+    // 动态加载单因子测试内容时，后续内联脚本会依赖这个全局函数。
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initParameterModule);
+    } else {
+        initParameterModule();
+    }
 })();

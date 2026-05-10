@@ -55,7 +55,7 @@ function buildExprFromNode(node, seen, options = {}) {
     } else if (node.key === 'rolling_corr') {
         expr = exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
     } else if (isVisualTermStructureOperator(node)) {
-        expr = buildVisualTermStructureExpr(node);
+        expr = buildVisualTermStructureExpr(node, exprs);
     } else {
         if (!exprs.length) return '';
         const rest = exprs.slice(1).join(', ');
@@ -76,8 +76,6 @@ function defaultVisualNodeParams(op) {
     if (op.key === 'DataColumnParam') return { alias: nextVisualParamAlias(), type: 'DataColumnParam', default_value: 'CA' };
     if (op.key === 'FactorFreqParam') return { alias: '$F', type: 'FactorFreqParam', default_value: '1d', locked: true };
     if (op.key === 'Constant') return { name: '', value: '1' };
-    if (op.key === 'term_spread' || op.key === 'term_ratio') return { near_rank: 0, far_rank: 1, column: 'CLOSE' };
-    if (op.key === 'term_slope') return { depth: 4, column: 'CLOSE' };
     return {};
 }
 
@@ -333,7 +331,7 @@ function buildVisualOperatorExpr(node, exprs, arity) {
         return exprs.length >= 3 ? `${exprs[0]}.rolling_corr(${exprs[1]}, ${exprs[2]})` : '';
     }
     if (isVisualTermStructureOperator(node)) {
-        return buildVisualTermStructureExpr(node);
+        return buildVisualTermStructureExpr(node, exprs);
     }
     if (!exprs.length) return '';
     return `${exprs[0]}.${node.key}(${exprs.slice(1).join(', ')})`;
@@ -344,17 +342,14 @@ function isVisualTermStructureOperator(node) {
         || ['term_spread', 'term_ratio', 'term_slope'].includes(node?.key);
 }
 
-function buildVisualTermStructureExpr(node) {
-    const params = node?.params || {};
-    const column = JSON.stringify(params.column || 'CLOSE');
+function buildVisualTermStructureExpr(node, exprs = []) {
     if (node.key === 'term_spread' || node.key === 'term_ratio') {
-        const nearRank = Number.isFinite(Number(params.near_rank)) ? Number(params.near_rank) : 0;
-        const farRank = Number.isFinite(Number(params.far_rank)) ? Number(params.far_rank) : 1;
-        return `${node.key}(near_rank=${nearRank}, far_rank=${farRank}, column=${column})`;
+        if (exprs.length < 3) return '';
+        return `${node.key}(near_rank=${exprs[0]}, far_rank=${exprs[1]}, column=${exprs[2]})`;
     }
     if (node.key === 'term_slope') {
-        const depth = Number.isFinite(Number(params.depth)) ? Number(params.depth) : 4;
-        return `term_slope(depth=${depth}, column=${column})`;
+        if (exprs.length < 2) return '';
+        return `term_slope(depth=${exprs[0]}, column=${exprs[1]})`;
     }
     return '';
 }

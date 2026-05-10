@@ -370,8 +370,34 @@
         });
     }
 
-    // 初始化 Fancytree 和 Sortable
-    $(function() {
+    // 初始化 Fancytree 和 Sortable。单因子测试页面会动态替换内容，
+    // 外部依赖脚本（jQuery/Fancytree/Sortable）可能比本模块稍晚就绪；
+    // 因此这里不用直接依赖 $(ready)，而是显式等待依赖，避免抽屉停在“加载产品树...”。
+    function initCategoryFilterModule(retryCount) {
+        retryCount = retryCount || 0;
+        if (!window.jQuery) {
+            if (retryCount < 80) {
+                setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
+            } else {
+                var el = document.getElementById('tree-container');
+                if (el) el.innerHTML = '<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：jQuery 未就绪</div>';
+            }
+            return;
+        }
+        var $ = window.jQuery;
+        if (!$.fn || typeof $.fn.fancytree !== 'function') {
+            var $waitingContainer = $("#tree-container");
+            if ($waitingContainer.length) {
+                $waitingContainer.html('<div style="color:#888;text-align:center;padding:20px;">产品树插件加载中...</div>');
+            }
+            if (retryCount < 80) {
+                setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
+            } else if ($waitingContainer.length) {
+                $waitingContainer.html('<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：Fancytree 未就绪</div>');
+            }
+            return;
+        }
+
         if (typeof window.setupResizableTreeContainer === 'function') {
             categoryTreeSizer = window.setupResizableTreeContainer({
                 outerSelector: '#category-tree-panel',
@@ -695,5 +721,7 @@
             if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
             if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
         };
-    });
+    }
+
+    initCategoryFilterModule();
 })();
