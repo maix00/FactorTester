@@ -23,6 +23,7 @@ from server.modules.shared.price_services import (
     contract_data_path as _contract_data_path,
     contract_has_data as _contract_has_data,
     find_contract_product as _find_contract_product,
+    find_product as _find_product,
     scalar as _scalar,
     supports_adjusted_price as _supports_adjusted_price,
     supports_term_structure as _supports_term_structure,
@@ -124,10 +125,7 @@ def get_contracts():
     try:
         # 先找到 product 对象，确定数据源
         products = _cached_products()
-        product = next((p for p in products if p is not None and (
-            getattr(p, 'name', None) == product_name or
-            getattr(p, 'alias', None) == product_name
-        )), None)
+        product = _find_product(products, product_name)
 
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
@@ -329,10 +327,7 @@ def get_price_data():
 
         # ========== 产品价格模式 ==========
         products = _cached_products()
-        product = next((p for p in products if p is not None and (
-            getattr(p, 'name', None) == product_name or
-            getattr(p, 'alias', None) == product_name
-        )), None)
+        product = _find_product(products, product_name)
 
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404

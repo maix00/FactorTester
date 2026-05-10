@@ -54,6 +54,11 @@ def resolve_product_from_tester(tester, product_name: str):
     return product
 
 
+def find_tester_product(tester, product_name: str):
+    """Find real product object from tester; return None if not found."""
+    return next((p for p in tester.products if getattr(p, 'name', None) == product_name), None)
+
+
 def clip_series_by_tester_range(series, tester):
     def _get_idx(s):
         return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index

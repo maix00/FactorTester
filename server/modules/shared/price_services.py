@@ -158,6 +158,14 @@ def available_freq_names_for_product(product):
     return freqs
 
 
+def find_product(products, product_name: str):
+    """Find product by name or alias from an iterable."""
+    return next((p for p in products if p is not None and (
+        getattr(p, 'name', None) == product_name or
+        getattr(p, 'alias', None) == product_name
+    )), None)
+
+
 def find_contract_product(contract_uid):
     contracts = cached_contracts()
     return next((contract for contract in contracts if contract is not None and (

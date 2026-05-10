@@ -15,6 +15,7 @@ from . import shared_bp
 from .factor_data_helpers import (
     clip_series_by_tester_range,
     column_names as _column_names,
+    find_tester_product,
     find_factor as _find_factor,
     match_product_column as _match_product_column,
     resolve_fe_table as _resolve_fe_table,
@@ -180,9 +181,6 @@ def get_price_series():
         end_date   = factor_idx.max().strftime('%Y-%m-%d')
         required = (['OPEN_ADJUSTED', 'HIGH_ADJUSTED', 'LOW_ADJUSTED', 'CLOSE_ADJUSTED', 'VOLUME'] if adjusted
                     else ['OPEN', 'HIGH', 'LOW', 'CLOSE', 'VOLUME'])
-        def _resolve_product(name: str):
-            return next((p for p in tester.products if p.name == name), None)
-
         def _build_series_for_product(product):
             raw_df = product.get_price_data(start_date, end_date, adjusted=adjusted)
             if raw_df is None or raw_df.empty:
@@ -235,7 +233,7 @@ def get_price_series():
 
         series_list = []
         for name in product_names:
-            p = _resolve_product(name)
+            p = find_tester_product(tester, name)
             if p is None:
                 continue
             s = _build_series_for_product(p)
