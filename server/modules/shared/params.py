@@ -8,7 +8,7 @@ from flask import request
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import current_user, get_session_params, save_session_params
 from . import shared_bp
-from .api_helpers import api_ok, route_guard
+from server.services.api_response import api_ok, route_guard
 from .param_config import build_factor_rows, normalize_param_row, param_value_display
 
 

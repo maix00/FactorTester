@@ -21,7 +21,7 @@ from .submission_helpers import (
     resolve_products_from_paths,
     submissions_payload,
 )
-from .api_helpers import api_fail, api_ok, route_guard
+from server.services.api_response import api_fail, api_ok, route_guard
 
 
 @shared_bp.route('/api/tree-data')

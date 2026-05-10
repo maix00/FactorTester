@@ -3,6 +3,7 @@
 from flask import jsonify, request
 
 from server.modules.custom_factors import cf_bp
+from server.services.api_response import api_ok, route_guard
 from server.modules.custom_factors.param_config_service import (
     build_param_factor_overview,
     list_param_config_users,
@@ -48,18 +49,16 @@ def api_get_param_config(ff_alias, owner_username):
 
 @cf_bp.route('/api/param-configs/<ff_alias>', methods=['PUT'])
 @login_required
+@route_guard
 def api_save_param_config(ff_alias):
     username = current_user()
     data = request.get_json() or {}
     params_list = data.get('params_list', [])
     if not isinstance(params_list, list) or len(params_list) == 0:
         return jsonify({'success': False, 'error': '参数列表不能为空'})
-    try:
-        with get_user_file_lock(username):
-            config, factors = save_current_user_param_config(username, ff_alias, params_list)
-        return jsonify({'success': True, 'config': config, 'factors': factors})
-    except Exception as exc:
-        return jsonify({'success': False, 'error': str(exc)})
+    with get_user_file_lock(username):
+        config, factors = save_current_user_param_config(username, ff_alias, params_list)
+    return api_ok({'config': config, 'factors': factors})
 
 
 @cf_bp.route('/api/param-configs/<ff_alias>', methods=['DELETE'])
