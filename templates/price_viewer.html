@@ -12,6 +12,7 @@
     <script src="https://code.highcharts.com/stock/highstock.js"></script>
     <script src="https://code.highcharts.com/highcharts-more.js"></script>
     <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <script src="{{ url_for('static', filename='js/modules/shared/price_display.js') }}"></script>
     <style>
         html, body { height: 100%; margin: 0; overflow: hidden; }
         body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -562,20 +563,22 @@
         const container = document.getElementById('pv-chart-container');
         container.innerHTML = '';
 
-        const ohlc = data.data.map(d => [
-            d.timestamp,
-            d.open, d.high, d.low, d.close
-        ]);
-        const volume = data.data.map(d => [
-            d.timestamp,
-            d.volume
-        ]);
+        const priceSeries = window.PriceDisplay && window.PriceDisplay.normalizePriceApi
+            ? window.PriceDisplay.normalizePriceApi(data)
+            : null;
+        const ohlc = window.PriceDisplay && window.PriceDisplay.toOhlc
+            ? window.PriceDisplay.toOhlc(data.data)
+            : data.data.map(d => [d.timestamp, d.open, d.high, d.low, d.close]);
+        const volume = window.PriceDisplay && window.PriceDisplay.toColumn
+            ? window.PriceDisplay.toColumn(data.data, 'volume')
+            : data.data.map(d => [d.timestamp, d.volume]);
 
-        const hasOI = data.has_oi && data.data.some(d => d.open_interest != null);
-        const oi = hasOI ? data.data.map(d => [
-            d.timestamp,
-            d.open_interest
-        ]) : [];
+        const hasOI = priceSeries ? priceSeries.has_open_interest : (data.has_oi && data.data.some(d => d.open_interest != null));
+        const oi = hasOI
+            ? (window.PriceDisplay && window.PriceDisplay.toColumn
+                ? window.PriceDisplay.toColumn(data.data, 'open_interest')
+                : data.data.map(d => [d.timestamp, d.open_interest]))
+            : [];
 
         const title = `${data.product}${data.desc ? ' — ' + data.desc : ''} (${data.adjusted ? '复权' : '原始'})`;
 
