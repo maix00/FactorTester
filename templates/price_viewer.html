@@ -495,7 +495,7 @@
                     `${data.product} | ${data.adjusted ? '复权' : '原始'} | ${data.freq} | ${data.count} 条`;
                 updatePriceTypeControl(data.supports_adjusted, data.adjusted);
                 var tableContainer = document.getElementById('pv-contract-table-container');
-                if (data.is_futures && !body.contract_uid && currentContracts.length > 0) {
+                if (data.supports_term_structure && !body.contract_uid && currentContracts.length > 0) {
                     tableContainer.style.display = 'block';
                 } else {
                     tableContainer.style.display = 'none';
@@ -588,7 +588,7 @@
 
         // 合约 plotBands（Futures 类才有）
         var plotBands = [];
-        if (data.is_futures && data.contracts && data.contracts.length > 0) {
+        if (data.supports_term_structure && data.contracts && data.contracts.length > 0) {
             plotBands = data.contracts.map(function(c, i) {
                 return {
                     id: 'contract-' + i,

@@ -72,6 +72,14 @@ class Product(UniqueObject):
                 raise ValueError(f"No data frequency available for product {self.name}")
             self.current_freq = available_freqs[0]
         return getattr(self, 'current_freq')
+
+    def supports_adjusted_price(self) -> bool:
+        """Whether this product class supports adjusted OHLC prices."""
+        return False
+
+    def supports_term_structure(self) -> bool:
+        """Whether this product class supports term-structure contract chains."""
+        return False
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
         """

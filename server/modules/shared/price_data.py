@@ -30,6 +30,7 @@ from tools.products.Futures import (
     make_contract_category_from_futures_category,
     map_contracts_to_futures,
 )
+from tools.products.AdjustableTermStructure import AdjustableProductMixin
 from tools.products.Product import Product
 from tools.products.categories.Category import CategoryTree, combine_trees
 
@@ -250,12 +251,18 @@ def _find_contract_product(contract_uid):
 
 def _supports_adjusted_price(product) -> bool:
     """Whether this product supports adjusted OHLC prices."""
-    if isinstance(product, Futures):
-        return True
-    supports = getattr(product, 'supports_adjusted', None)
-    if supports is not None:
-        return bool(supports() if callable(supports) else supports)
-    return False
+    supports = getattr(product, 'supports_adjusted_price', None)
+    if callable(supports):
+        return bool(supports())
+    return isinstance(product, AdjustableProductMixin)
+
+
+def _supports_term_structure(product) -> bool:
+    """Whether this product supports term-structure/contract-chain views."""
+    supports = getattr(product, 'supports_term_structure', None)
+    if callable(supports):
+        return bool(supports())
+    return isinstance(product, AdjustableProductMixin)
 
 
 @shared_bp.route('/api/get_contracts')
@@ -291,14 +298,35 @@ def get_contracts():
         if not product:
             return jsonify({'success': False, 'error': f'未找到品种: {product_name}'}), 404
 
-        if not isinstance(product, Futures):
-            return jsonify({'success': True, 'product': product_name, 'has_term_structure': False, 'contracts': []})
+        if not _supports_term_structure(product):
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': False,
+                'has_term_structure': False,
+                'contracts': [],
+            })
 
         # 通过实例加载 roller_info（带全局缓存、闲置自动释放）
-        product._ensure_roller_info()
+        ensure_roller_info = getattr(product, '_ensure_roller_info', None)
+        if not callable(ensure_roller_info):
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': True,
+                'has_term_structure': True,
+                'contracts': [],
+            })
+        ensure_roller_info()
         subset = product.roller_info
         if subset is None or subset.empty:
-            return jsonify({'success': True, 'product': product_name, 'has_term_structure': True, 'contracts': []})
+            return jsonify({
+                'success': True,
+                'product': product_name,
+                'supports_term_structure': True,
+                'has_term_structure': True,
+                'contracts': [],
+            })
 
         req_start = pd.Timestamp(start_date).normalize() if start_date else None
         req_end = pd.Timestamp(end_date).normalize() if end_date else None
@@ -325,7 +353,13 @@ def get_contracts():
                 'end_ts': int(end.timestamp() * 1000) if end is not None else None,
             })
 
-        return jsonify({'success': True, 'product': product_name, 'has_term_structure': True, 'contracts': contracts})
+        return jsonify({
+            'success': True,
+            'product': product_name,
+            'supports_term_structure': True,
+            'has_term_structure': True,
+            'contracts': contracts,
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
@@ -457,6 +491,7 @@ def get_price_data():
                 'contract_name': contract_uid.split('|')[-2] + contract_uid.split('|')[-1] if '|' in contract_uid else contract_uid,
                 'adjusted': False,
                 'supports_adjusted': False,
+                'supports_term_structure': False,
                 'freq': freq.name if hasattr(freq, 'name') else str(freq),
                 'data_source': (available_sources[0]['alias'] if available_sources else ''),
                 'available_sources': available_sources,
@@ -597,24 +632,29 @@ def get_price_data():
             except Exception:
                 pass
 
+        supports_term_structure = _supports_term_structure(product)
+
         # 主力连续模式：附带合约区间列表（用于高亮）
         contracts = []
-        try:
-            product._ensure_roller_info()
-            ri = product.roller_info
-            if ri is not None:
-                for _, r in ri.iterrows():
-                    s, e = _timestamp_or_none(r['STARTDATE']), _timestamp_or_none(r['ENDDATE'])
-                    uid = str(_scalar(r['CONTRACT_UID']))
-                    contracts.append({
-                        'contract': str(_scalar(r['CONTRACT'])),
-                        'uid': uid,
-                        'has_data': _contract_has_data(uid),
-                        'start_ts': int(s.timestamp() * 1000) if s is not None else None,
-                        'end_ts': int(e.timestamp() * 1000) if e is not None else None,
-                    })
-        except Exception:
-            pass
+        if supports_term_structure:
+            try:
+                ensure_roller_info = getattr(product, '_ensure_roller_info', None)
+                if callable(ensure_roller_info):
+                    ensure_roller_info()
+                    ri = product.roller_info
+                    if ri is not None:
+                        for _, r in ri.iterrows():
+                            s, e = _timestamp_or_none(r['STARTDATE']), _timestamp_or_none(r['ENDDATE'])
+                            uid = str(_scalar(r['CONTRACT_UID']))
+                            contracts.append({
+                                'contract': str(_scalar(r['CONTRACT'])),
+                                'uid': uid,
+                                'has_data': _contract_has_data(uid),
+                                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
+                                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
+                            })
+            except Exception:
+                pass
 
         available_sources = _available_sources_for_product(product)
         available_freqs = _available_freq_names_for_product(product)
@@ -626,6 +666,7 @@ def get_price_data():
             'is_futures': isinstance(product, Futures),
             'adjusted': adjusted,
             'supports_adjusted': supports_adjusted,
+            'supports_term_structure': supports_term_structure,
             'freq': freq.name if hasattr(freq, 'name') else str(freq),
             'data_source': getattr(active_source_used, 'alias', ''),
             'available_sources': available_sources,

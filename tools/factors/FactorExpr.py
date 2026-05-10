@@ -1858,6 +1858,9 @@ class TermStructureOp(OperandExpr):
         near_rank, far_rank, depth, column = self._term_param_values()
         series_dict = {}
         for product in products:
+            supports_term_structure = getattr(product, 'supports_term_structure', None)
+            if callable(supports_term_structure) and not supports_term_structure():
+                continue
             if not hasattr(product, 'get_term_structure'):
                 continue
             raw_idx = self._time_index_for_product(product, freq)

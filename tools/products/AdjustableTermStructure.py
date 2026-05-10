@@ -79,6 +79,12 @@ class AdjustableProductMixin:
 
     term_structure_path: Optional[str] = None
 
+    def supports_adjusted_price(self) -> bool:
+        return True
+
+    def supports_term_structure(self) -> bool:
+        return True
+
     def get_term_structure_path(self) -> Optional[str]:
         return getattr(self, 'term_structure_path', None)
 
