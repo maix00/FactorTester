@@ -1849,11 +1849,23 @@ class TermStructureOp(OperandExpr):
             for ts in idx:
                 try:
                     if self.op == 'term_spread':
-                        val = product.term_spread(ts, near_rank, far_rank, column)
+                        term_spread_fn = getattr(product, 'term_spread', None)
+                        if not callable(term_spread_fn):
+                            val = np.nan
+                        else:
+                            val = term_spread_fn(ts, near_rank, far_rank, column)
                     elif self.op == 'term_ratio':
-                        val = product.term_ratio(ts, near_rank, far_rank, column)
+                        term_ratio_fn = getattr(product, 'term_ratio', None)
+                        if not callable(term_ratio_fn):
+                            val = np.nan
+                        else:
+                            val = term_ratio_fn(ts, near_rank, far_rank, column)
                     else:
-                        val = product.term_slope(ts, depth, column)
+                        term_slope_fn = getattr(product, 'term_slope', None)
+                        if not callable(term_slope_fn):
+                            val = np.nan
+                        else:
+                            val = term_slope_fn(ts, depth, column)
                 except Exception:
                     val = np.nan
                 values.append(val)
