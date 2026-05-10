@@ -11,9 +11,7 @@
 """
 
 import os
-import json as _json
 import time
-import traceback
 from flask import Blueprint, request, jsonify, render_template
 
 from server.shared import (
@@ -31,10 +29,14 @@ from server.modules.custom_factors.param_config_store import (
     delete_param_config,
     list_param_config_aliases,
 )
+from server.modules.custom_factors.catalog import (
+    get_public_factor_detail as _get_public_factor_detail,
+    list_custom_factors as _list_custom_factors,
+    list_public_factors as _list_public_factors,
+    list_visible_custom_factors as _list_visible_custom_factors,
+)
 from server.modules.custom_factors.storage import (
-    custom_factor_dir as _cf_dir,
     delete_factor_source as _delete_factor_file,
-    factor_path as _factor_path,
     load_factor_source as _load_factor,
     public_factor_path as _public_factor_path,
     save_factor_source as _save_factor,
@@ -46,162 +48,12 @@ from server.modules.custom_factors.source_helpers import (
     strip_factor_meta as _strip_meta,
 )
 from server.modules.custom_factors.visual_graph import factor_expr_to_visual_graph
-from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
 
 
 def _current_user_is_super_admin() -> bool:
     return _is_super_admin_account(_get_account(_current_user()))
-
-
-def _list_custom_factors(username: str) -> list:
-    """列出用户的所有自定义因子，返回按更新时间降序排列的列表。
-
-    从 .py 文件 import，提取 class 的 desc/description/params 元信息。
-    """
-    d = _cf_dir(username)
-    factors = []
-    if not os.path.exists(d):
-        return factors
-    for fname in sorted(os.listdir(d), reverse=True):
-        if not fname.endswith('.py'):
-            continue
-        factor_id = os.path.splitext(fname)[0]
-        mtime = os.path.getmtime(os.path.join(d, fname))
-        updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
-
-        try:
-            # 用 importlib 加载 .py，获取 FactorFamily 子类
-            import importlib.util
-            module_name = f'_cf_{username}_{factor_id}'
-            spec = importlib.util.spec_from_file_location(module_name, os.path.join(d, fname))
-            if spec is None or spec.loader is None:
-                continue
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            # 找到模块中的 FactorFamily 子类
-            from tools.factors import FactorFamily
-            factor_cls = None
-            for attr_name in dir(module):
-                obj = getattr(module, attr_name)
-                if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
-                    factor_cls = obj
-                    break
-            if factor_cls is None:
-                continue
-
-            ff = factor_cls()
-            # 因子家族
-            bases = factor_cls.__bases__
-            family = 'FactorFamily'
-            for b in bases:
-                if b is not FactorFamily and issubclass(b, FactorFamily):
-                    family = b.__name__
-                    break
-            factors.append({
-                'id': factor_id,
-                'name': factor_cls.__name__,
-                'category': getattr(ff, 'category', '') or '自编',
-                'factor_family': family,
-                'chinese_name': getattr(ff, 'desc', '') or '',
-                'description': getattr(ff, 'description', '') or '',
-                'math_expr': getattr(ff, 'math_expr', '') or '',
-                'params': [
-                serialize_param_meta(p)
-                for p in ff.params
-            ],
-                'is_public': False,
-                'updated_at': updated_at,
-            })
-        except Exception:
-            # 加载失败时仍然返回基本信息（从文件名推断）
-            factors.append({
-                'id': factor_id,
-                'name': factor_id,
-                'category': '自编',
-                'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
-                'params': [],
-                'is_public': False,
-                'updated_at': updated_at,
-                'load_error': True,
-            })
-    factors.sort(key=lambda f: f.get('updated_at', ''), reverse=True)
-    return factors
-
-
-def _list_visible_custom_factors(username: str) -> list:
-    factors = []
-    for acct in _visible_accounts_for(username, include_self=True):
-        owner_username = acct.get('username')
-        if not owner_username:
-            continue
-        owner_alias = _account_display_name(acct)
-        for factor in _list_custom_factors(owner_username):
-            item = dict(factor)
-            item['owner_username'] = owner_username
-            item['owner_alias'] = owner_alias
-            item['owner_organization_id'] = acct.get('organization_id') or ''
-            item['owner_organization_name'] = acct.get('organization_name') or ''
-            item['can_edit'] = owner_username == username
-            factors.append(item)
-    return factors
-
-
-def _list_public_factors() -> list:
-    """列出所有公共因子（Factors/ 目录下的 FactorFamily 子类）。"""
-    factors_dir = os.path.join(os.getcwd(), 'Factors')
-    result = []
-    if not os.path.exists(factors_dir):
-        return result
-    for fname in sorted(os.listdir(factors_dir)):
-        if not fname.endswith('.py') or fname.startswith('__'):
-            continue
-        name = os.path.splitext(fname)[0]
-        try:
-            ff = get_factor_family_instance(name)
-            # 因子家族：取父类链中紧邻 FactorFamily 之上的类名（如果有中间家族类），
-            # 否则用 FactorFamily 作为默认家族
-            bases = ff.__class__.__bases__
-            family = 'FactorFamily'
-            for b in bases:
-                if b is not FactorFamily and issubclass(b, FactorFamily):
-                    family = b.__name__
-                    break
-            mtime = os.path.getmtime(os.path.join(factors_dir, fname))
-            updated_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
-            result.append({
-                'id': name,
-                'name': name,
-                'category': getattr(ff, 'category', '') or family,
-                'factor_family': family,
-                'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
-                'description': getattr(ff, 'description', '') or '',
-                'math_expr': getattr(ff, 'math_expr', '') or '',
-                'params': [
-                    serialize_param_meta(p)
-                    for p in ff.params
-                ],
-                'is_public': True,
-                'updated_at': updated_at,
-            })
-        except Exception:
-            result.append({
-                'id': name,
-                'name': name,
-                'category': '',
-                'factor_family': 'FactorFamily',
-                'chinese_name': '',
-                'description': '',
-                'params': [],
-                'is_public': True,
-                'updated_at': '',
-                'load_error': True,
-            })
-    return result
 
 
 def _template_time_from_id(tpl: dict) -> str:
@@ -285,46 +137,6 @@ def _build_factor_library_config_factors(current_username: str, owner_acct: dict
         except Exception:
             continue
     return factors
-
-
-# ── 公共因子只读详情 ──────────────────────────────────────────────────────────
-
-def _get_public_factor_detail(factor_name: str) -> dict | None:
-    """获取公共因子的详细信息（包括完整源码和 tree_repr）。"""
-    try:
-        ff = get_factor_family_instance(factor_name)
-
-        # 读取对应的 .py 源文件，返回完整源码
-        factors_dir = os.path.join(os.getcwd(), 'Factors')
-        src_path = os.path.join(factors_dir, f'{factor_name}.py')
-        source_code = ''
-        if os.path.exists(src_path):
-            with open(src_path, 'r', encoding='utf-8') as f:
-                source_code = f.read()
-
-        # 获取表达式树的 tree_repr
-        tree_repr = ''
-        try:
-            if ff.expr is not None:
-                tree_repr = ff.expr.tree_repr()
-        except Exception:
-            pass
-
-        return {
-            'id': factor_name,
-            'name': factor_name,
-            'chinese_name': getattr(ff, 'desc', '') or getattr(ff, 'chinese_name', '') or '',
-            'description': getattr(ff, 'description', '') or '',
-            'source_code': _strip_meta(source_code),
-            'tree_repr': tree_repr,
-            'params': [
-                serialize_param_meta(p)
-                for p in ff.params
-            ],
-            'is_public': True,
-        }
-    except Exception:
-        return None
 
 
 # ═════════════════════════════════════════════════════════════════════════════

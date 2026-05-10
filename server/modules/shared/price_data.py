@@ -7,66 +7,27 @@
 """
 import os
 import traceback
-from functools import lru_cache
-from typing import Any
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
-from Settings import get_all_products, get_cat_tree
 from server.shared import convert_to_fancytree, find_node_by_path
-from sources.LocalCNFutures import MINK_PRODUCT_DIR
-from sources.LocalCNFutures.CNFutures import (
-    CNFuturesContract,
-    CNFuturesDayNightTimeCategory,
-    CNFuturesSectorCategory,
-    exchange_map,
-    get_all_futures_contract,
-)
 from tools.data.DataSource import DataSource
-from tools.products.Futures import (
-    Futures,
-    FuturesContract,
-    make_contract_category_from_futures_category,
-    map_contracts_to_futures,
+from tools.products.Futures import Futures
+from server.modules.shared.price_services import (
+    available_freq_names_for_product as _available_freq_names_for_product,
+    available_sources_for_product as _available_sources_for_product,
+    cached_contracts as _cached_contracts,
+    cached_price_viewer_tree as _cached_price_viewer_tree,
+    cached_products as _cached_products,
+    contract_data_path as _contract_data_path,
+    contract_has_data as _contract_has_data,
+    find_contract_product as _find_contract_product,
+    scalar as _scalar,
+    supports_adjusted_price as _supports_adjusted_price,
+    supports_term_structure as _supports_term_structure,
+    timestamp_or_none as _timestamp_or_none,
 )
-from tools.products.AdjustableTermStructure import AdjustableProductMixin
-from tools.products.Product import Product
-from tools.products.categories.Category import CategoryTree, combine_trees
-
-
-@lru_cache(maxsize=1)
-def _cached_products():
-    return tuple(get_all_products())
-
-
-@lru_cache(maxsize=1)
-def _cached_contracts():
-    return tuple(get_all_futures_contract())
-
-
-@lru_cache(maxsize=1)
-def _cached_price_viewer_tree() -> CategoryTree:
-    return _build_price_viewer_tree()
-
-
-def _contract_data_path(contract_uid: str) -> str:
-    return os.path.join(MINK_PRODUCT_DIR, f"{contract_uid}.parquet")
-
-
-def _contract_has_data(contract_uid: str) -> bool:
-    return os.path.isfile(_contract_data_path(contract_uid))
-
-
-def _scalar(value: Any) -> Any:
-    return value.item() if hasattr(value, 'item') else value
-
-
-def _timestamp_or_none(value: Any) -> pd.Timestamp | None:
-    value = _scalar(value)
-    if pd.isna(value):
-        return None
-    return pd.Timestamp(value)
 
 
 @shared_bp.route('/api/list_product_names')
@@ -104,75 +65,6 @@ def get_product_tree():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 
-def _build_price_viewer_tree() -> CategoryTree:
-    """价格页产品树：原品种分类 + 合约类型继承链。
-
-    CNFuturesContract 不是根级分类，而是 FuturesContract 的具体子类；
-    同时它应继承对应 CNFutures 主力品种的行业/日夜盘分类，方便按同一语义浏览合约。
-    """
-    product_tree = get_cat_tree()
-    contracts = list(_cached_contracts())
-    contract_tree = _get_contract_category_tree(contracts)
-    return combine_trees(product_tree, contract_tree)
-
-
-def _get_contract_category_tree(contracts) -> CategoryTree:
-    """Build a CNFuturesContract tree that mirrors CNFutures category labels."""
-    contract_to_future = _map_contracts_to_futures(contracts)
-
-    sector_category = make_contract_category_from_futures_category(
-        CNFuturesSectorCategory,
-        CNFuturesContract,
-        contracts,
-        contract_to_future,
-    )
-    daynight_category = make_contract_category_from_futures_category(
-        CNFuturesDayNightTimeCategory,
-        CNFuturesContract,
-        contracts,
-        contract_to_future,
-    )
-
-    return (sector_category * daynight_category).get_tree_with_parents(
-        all_objects=contracts,
-        ancester=Product,
-    )
-
-
-def _map_contracts_to_futures(contracts):
-    return map_contracts_to_futures(
-        contracts,
-        _cached_products(),
-        contract_key=_contract_code_exchange,
-        futures_key=_future_code_exchange,
-    )
-
-
-def _future_code_exchange(future):
-    code = str(getattr(future, 'code', '')).upper()
-    alias = str(getattr(future, 'alias', getattr(future, 'name', '')))
-    exchange = alias.split('.')[1].split('@')[0].upper() if '.' in alias else ''
-    return (code, exchange) if code and exchange else None
-
-
-def _contract_code_exchange(contract):
-    name = str(getattr(contract, 'name', getattr(contract, 'alias', contract)))
-    if '|' in name:
-        parts = name.split('|')
-        if len(parts) >= 3:
-            exchange = exchange_map.get(parts[0], parts[0]).upper()
-            code = parts[2].upper()
-            return code, exchange
-
-    import re
-    match = re.match(r'^([A-Za-z]+)\d+\.?([A-Za-z]+)?', name)
-    if match:
-        code = match.group(1).upper()
-        exchange = exchange_map.get(match.group(2) or '', match.group(2) or '').upper()
-        return (code, exchange) if exchange else None
-    return None
-
-
 @shared_bp.route('/api/contract_tree')
 def get_contract_tree():
     """返回合约粒度的产品节点，供价格页左侧懒加载。"""
@@ -206,64 +98,6 @@ def get_contract_tree():
         return jsonify(nodes)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
-
-
-def _available_sources_for_product(product, freq=None):
-    """Serialize available data sources for one product/frequency."""
-    try:
-        sources = []
-        freqs = [freq] if freq is not None else product.list_available_freqs()
-        for f in freqs:
-            meta = getattr(product, f.name)
-            for source in meta.list_available_sources():
-                sources.append({
-                    'alias': source.alias,
-                    'freq': source.freq.name if hasattr(source.freq, 'name') else str(source.freq),
-                })
-        unique = {}
-        for source in sources:
-            unique[source['alias']] = source
-        return list(unique.values())
-    except Exception:
-        return []
-
-
-def _available_freq_names_for_product(product):
-    """Return frequency names that are actually provided by available data sources."""
-    freqs = []
-    try:
-        for source in _available_sources_for_product(product):
-            freq = source.get('freq')
-            if freq and freq not in freqs:
-                freqs.append(freq)
-    except Exception:
-        pass
-    return freqs
-
-
-def _find_contract_product(contract_uid):
-    contracts = _cached_contracts()
-    return next((c for c in contracts if c is not None and (
-        getattr(c, 'name', None) == contract_uid or
-        getattr(c, 'alias', None) == contract_uid
-    )), None)
-
-
-def _supports_adjusted_price(product) -> bool:
-    """Whether this product supports adjusted OHLC prices."""
-    supports = getattr(product, 'supports_adjusted_price', None)
-    if callable(supports):
-        return bool(supports())
-    return isinstance(product, AdjustableProductMixin)
-
-
-def _supports_term_structure(product) -> bool:
-    """Whether this product supports term-structure/contract-chain views."""
-    supports = getattr(product, 'supports_term_structure', None)
-    if callable(supports):
-        return bool(supports())
-    return isinstance(product, AdjustableProductMixin)
-
 
 @shared_bp.route('/api/get_contracts')
 def get_contracts():
