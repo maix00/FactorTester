@@ -34,7 +34,77 @@
         // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
         window.reloadParamModule = function reloadParamModule(callback) {
             if (typeof window.reloadSingleFactorContent === 'function') {
-                return window.reloadSingleFactorContent(callback);
+                // 根因修复：参数增删会触发整块内容重载，导致其他抽屉状态被重建。
+                // 这里在重载前做快照，重载后恢复时间范围与产品分类提交记录。
+                var snapshot = {
+                    time: null,
+                    submissions: null,
+                };
+
+                try {
+                    if (typeof window.getSharedRuntimeTimeRange === 'function') {
+                        snapshot.time = JSON.parse(JSON.stringify(window.getSharedRuntimeTimeRange()));
+                    }
+                } catch (e) {
+                    snapshot.time = null;
+                }
+
+                try {
+                    if (typeof window._getCurrentSubmissions === 'function') {
+                        snapshot.submissions = JSON.parse(JSON.stringify(window._getCurrentSubmissions() || []));
+                    }
+                } catch (e) {
+                    snapshot.submissions = null;
+                }
+
+                return window.reloadSingleFactorContent(function() {
+                    try {
+                        if (snapshot.time) {
+                            var setVal = function(id, val) {
+                                var el = document.getElementById(id);
+                                if (el && val !== null && val !== undefined) el.value = val;
+                            };
+                            if (snapshot.time.start_date) {
+                                var sp = snapshot.time.start_date.split('-');
+                                setVal('start_year', sp[0]);
+                                setVal('start_month', sp[1]);
+                                setVal('start_day', sp[2]);
+                            }
+                            if (snapshot.time.end_date) {
+                                var ep = snapshot.time.end_date.split('-');
+                                setVal('end_year', ep[0]);
+                                setVal('end_month', ep[1]);
+                                setVal('end_day', ep[2]);
+                            }
+                            if (snapshot.time.start_time) {
+                                var st = snapshot.time.start_time.split(':');
+                                setVal('start_hour', st[0]);
+                                setVal('start_minute', st[1]);
+                            }
+                            if (snapshot.time.end_time) {
+                                var et = snapshot.time.end_time.split(':');
+                                setVal('end_hour', et[0]);
+                                setVal('end_minute', et[1]);
+                            }
+                            setVal('timezone_input', snapshot.time.timezone);
+                            var isTd = document.getElementById('is_trading_day');
+                            var isDay = document.getElementById('is_cn_futures_day');
+                            var isNight = document.getElementById('is_cn_futures_night');
+                            if (isTd) isTd.checked = !!snapshot.time.is_trading_day;
+                            if (isDay) isDay.checked = !!snapshot.time.is_cn_futures_day;
+                            if (isNight) isNight.checked = !!snapshot.time.is_cn_futures_night;
+                            if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
+                        }
+
+                        if (snapshot.submissions && typeof window._applySubmissions === 'function') {
+                            window._applySubmissions(snapshot.submissions);
+                        }
+                    } catch (e) {
+                        console.error('恢复参数重载前状态失败:', e);
+                    }
+
+                    if (typeof callback === 'function') callback();
+                });
             }
             return fetch(window.location.pathname + _buildFactorUrl(factorAlias))
                 .then(res => res.text())
