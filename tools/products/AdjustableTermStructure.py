@@ -139,6 +139,10 @@ class AdjustableProductMixin:
         idx = pd.DatetimeIndex(pd.to_datetime(list(index)))
         if len(idx) == 0:
             return idx
+        # Parquet trading_day is stored as tz-naive midnight; align incoming
+        # timestamps (often tz-aware from market data) to the same representation.
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
         return idx.normalize().unique().sort_values()
 
     def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
