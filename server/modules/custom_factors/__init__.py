@@ -17,7 +17,7 @@ import traceback
 from flask import Blueprint, request, jsonify, render_template
 
 from server.shared import (
-    login_required, _current_user, _user_data_dir, _load_accounts,
+    login_required, _current_user, _load_accounts,
     _factor_family_cache_lock, _factor_family_cache, get_factor_family_instance,
     invalidate_custom_factor_cache,
     _visible_accounts_for, _can_view_user_scope, _account_display_name, _get_account,
@@ -31,6 +31,15 @@ from server.modules.custom_factors.param_config_store import (
     delete_param_config,
     list_param_config_aliases,
 )
+from server.modules.custom_factors.storage import (
+    custom_factor_dir as _cf_dir,
+    delete_factor_source as _delete_factor_file,
+    factor_path as _factor_path,
+    load_factor_source as _load_factor,
+    public_factor_path as _public_factor_path,
+    save_factor_source as _save_factor,
+    save_public_factor_source as _save_public_factor,
+)
 from server.modules.custom_factors.source_helpers import (
     assemble_factor_source as _assemble_py,
     parse_class_meta as _parse_class_meta,
@@ -41,58 +50,9 @@ from tools.factors import FactorFamily
 
 cf_bp = Blueprint('custom_factors', __name__, url_prefix='/custom-factors')
 
-# ── 常量 ──────────────────────────────────────────────────────────────────────
-
-def _cf_dir(username: str) -> str:
-    d = os.path.join(_user_data_dir(username), 'custom_factors')
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def _factor_path(username: str, factor_id: str) -> str:
-    return os.path.join(_cf_dir(username), f'{factor_id}.py')
-
-
-def _load_factor(username: str, factor_id: str) -> str | None:
-    """加载自定义因子的 .py 源码文件，返回完整 Python 源码字符串。"""
-    path = _factor_path(username, factor_id)
-    if not os.path.exists(path):
-        return None
-    with open(path, 'r', encoding='utf-8') as f:
-        return f.read()
-
-
-def _save_factor(username: str, factor_id: str, source_code: str):
-    """保存自定义因子的完整 .py 源码文件。"""
-    path = _factor_path(username, factor_id)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(source_code)
-
-
-def _public_factor_path(factor_id: str) -> str:
-    return os.path.join(os.getcwd(), 'Factors', f'{factor_id}.py')
-
-
-def _save_public_factor(factor_id: str, source_code: str):
-    path = _public_factor_path(factor_id)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(source_code)
-
 
 def _current_user_is_super_admin() -> bool:
     return _is_super_admin_account(_get_account(_current_user()))
-
-
-def _delete_factor_file(username: str, factor_id: str) -> bool:
-    path = _factor_path(username, factor_id)
-    if os.path.exists(path):
-        os.remove(path)
-        return True
-    # 兼容旧的 .json 文件清理
-    old_path = os.path.join(_cf_dir(username), f'{factor_id}.json')
-    if os.path.exists(old_path):
-        os.remove(old_path)
-    return False
 
 
 def _list_custom_factors(username: str) -> list:

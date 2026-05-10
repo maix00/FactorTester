@@ -17,6 +17,15 @@ from tools.factors.FactorFamily import FactorFamily
 import Settings as Settings
 import pandas as pd
 from tools import DataColumn  # noqa: F401 – side-effect import used elsewhere
+from server.services.user_storage import (
+    DATA_DIR as _DATA_DIR,
+    USERS_DIR as _USERS_DIR,
+    load_user_templates,
+    new_template_id,
+    save_user_templates,
+    user_data_dir,
+    user_template_path,
+)
 
 if TYPE_CHECKING:
     from tools.factors import FactorTester
@@ -156,8 +165,6 @@ def _save_session_params(ff_alias: str, params_list: list):
         _params_store[store_key] = list(params_list)
 
 # ─── User system ──────────────────────────────────────────────────────────────
-_DATA_DIR   = os.path.abspath(os.path.join(os.getcwd(), '..', 'data'))
-_USERS_DIR  = os.path.join(_DATA_DIR, 'users')
 _ACCTS_FILE = os.path.join(_USERS_DIR, 'accounts.json')
 _ORGS_FILE = os.path.join(_USERS_DIR, 'organizations.json')
 _accts_lock = threading.Lock()
@@ -424,9 +431,7 @@ def _require_user() -> str:
     return u
 
 def _user_data_dir(username: str) -> str:
-    d = os.path.join(_USERS_DIR, username)
-    os.makedirs(d, exist_ok=True)
-    return d
+    return user_data_dir(username)
 
 def _user_tpl_path(username: str, kind: str, ff_alias: str | None = None, scope_key: str | None = None) -> str:
     """返回模板文件路径。
@@ -434,37 +439,16 @@ def _user_tpl_path(username: str, kind: str, ff_alias: str | None = None, scope_
     - 如果提供了 scope_key，模板按 scope_key 隔离存储到 {kind}_templates/{scope_key}.json
     - 否则兼容旧行为：ff_alias 仅对 params 类型有效，其他类型存到 {kind}_templates.json
     """
-    d = _user_data_dir(username)
-    if scope_key:
-        d = os.path.join(d, f'{kind}_templates')
-        os.makedirs(d, exist_ok=True)
-        return os.path.join(d, f'{scope_key}.json')
-    if kind == 'params' and ff_alias:
-        d = os.path.join(d, 'params_templates')
-        os.makedirs(d, exist_ok=True)
-        return os.path.join(d, f'{ff_alias}.json')
-    return os.path.join(d, f'{kind}_templates.json')
+    return user_template_path(username, kind, ff_alias, scope_key=scope_key)
 
 def _load_user_tpls(username: str, kind: str, ff_alias: str | None = None, scope_key: str | None = None) -> list:
-    path = _user_tpl_path(username, kind, ff_alias, scope_key=scope_key)
-    try:
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                data = _json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
+    return load_user_templates(username, kind, ff_alias, scope_key=scope_key)
 
 def _save_user_tpls(username: str, kind: str, templates: list, ff_alias: str | None = None, scope_key: str | None = None):
-    path = _user_tpl_path(username, kind, ff_alias, scope_key=scope_key)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        _json.dump(templates, f, ensure_ascii=False, indent=2)
+    save_user_templates(username, kind, templates, ff_alias, scope_key=scope_key)
 
 def _new_tpl_id() -> str:
-    return str(int(time.time() * 1000))
+    return new_template_id()
 
 def login_required(f):
     @wraps(f)

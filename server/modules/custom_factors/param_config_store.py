@@ -4,11 +4,11 @@ import json
 import os
 import time
 
-from server.shared import _user_data_dir
+from server.services.user_storage import user_data_dir
 
 
 def param_config_dir(username: str) -> str:
-    d = os.path.join(_user_data_dir(username), 'factor_library_param_configs')
+    d = os.path.join(user_data_dir(username), 'factor_library_param_configs')
     os.makedirs(d, exist_ok=True)
     return d
 
