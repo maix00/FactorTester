@@ -80,6 +80,10 @@ class Product(UniqueObject):
     def supports_term_structure(self) -> bool:
         """Whether this product class supports term-structure contract chains."""
         return False
+
+    def is_term_contract(self) -> bool:
+        """Whether this product is an individual contract in a term structure."""
+        return False
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
         """

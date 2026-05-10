@@ -384,7 +384,7 @@ def get_price_data():
             contract_uid: '...',   // 仅在请求合约时返回
             adjusted: false,
             freq: 'DAY1',
-            contracts: [...],      // 主力连续时返回合约区间（用于高亮）
+            contracts: [...],      // 支持期限结构时返回合约区间（用于高亮）
             data: [{ time: '...', open: ..., high: ..., low: ..., close: ..., volume: ... }, ...]
         }
     """
@@ -489,6 +489,7 @@ def get_price_data():
                 'product': contract_uid,
                 'contract_uid': contract_uid,
                 'contract_name': contract_uid.split('|')[-2] + contract_uid.split('|')[-1] if '|' in contract_uid else contract_uid,
+                'is_term_contract': True,
                 'adjusted': False,
                 'supports_adjusted': False,
                 'supports_term_structure': False,
@@ -501,7 +502,7 @@ def get_price_data():
                 'data': result_data,
             })
 
-        # ========== 主力连续模式 ==========
+        # ========== 产品价格模式 ==========
         products = _cached_products()
         product = next((p for p in products if p is not None and (
             getattr(p, 'name', None) == product_name or
@@ -634,7 +635,7 @@ def get_price_data():
 
         supports_term_structure = _supports_term_structure(product)
 
-        # 主力连续模式：附带合约区间列表（用于高亮）
+        # 支持期限结构的产品：附带合约区间列表（用于高亮）
         contracts = []
         if supports_term_structure:
             try:
@@ -664,6 +665,7 @@ def get_price_data():
             'product': product_name,
             'desc': getattr(product, 'desc', product_name),
             'is_futures': isinstance(product, Futures),
+            'is_term_contract': False,
             'adjusted': adjusted,
             'supports_adjusted': supports_adjusted,
             'supports_term_structure': supports_term_structure,

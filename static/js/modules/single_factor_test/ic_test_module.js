@@ -58,6 +58,11 @@
         function groupName(group, name) {
             return `[${group}] ${name}`;
         }
+        function priceSeriesName() {
+            const base = productName || priceData.product || '价格序列';
+            if (priceData.is_term_contract) return `${base} 合约价格`;
+            return `${base} 价格`;
+        }
         const ohlcData     = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.OPEN[i], priceData.HIGH[i], priceData.LOW[i], priceData.CLOSE[i]]);
         const factorValues = factorData.dates.map((ts, i) => [_parseTs(ts), factorData.values[i]]);
         const returnValues = returnData.dates.map((ts, i) => [_parseTs(ts), returnData.values[i]]);
@@ -106,7 +111,7 @@
         // 构建 series
         const series = [
             {
-                name: groupName('价格', `${productName} 主力连续`),
+                name: groupName('价格', priceSeriesName()),
                 type: 'candlestick',
                 data: ohlcData,
                 yAxis: 0,
@@ -348,6 +353,21 @@
                 !!(priceData && priceData.has_open_interest)
             );
         }
+    }
+
+    function buildPriceRequestPayload(selectedProduct, submission, adjusted, isTermContractProduct) {
+        const body = {
+            adjusted: adjusted,
+            start_date: submission.start_date,
+            end_date: submission.end_date
+        };
+        if (isTermContractProduct) {
+            body.contract_uid = selectedProduct;
+            body.adjusted = false;
+        } else {
+            body.product_name = selectedProduct;
+        }
+        return body;
     }
 
     // 绘制 Highcharts 图表（保持原有功能）
@@ -619,7 +639,9 @@
             const tabId = `factor-tab-${subId}-${idx}`;
             const paneId = `factor-pane-${subId}-${idx}`;
             tabsHtml += `<li class="nav-item" role="presentation"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${paneId}" type="button" role="tab">${factor.alias || factor.name}</button></li>`;
-            const productOptions = (factor.products && factor.products.length) ? factor.products.map(p => `<option value="${p.name}">${p.name}${p.desc && p.desc !== p.name ? ' · ' + p.desc : ''}</option>`).join('') : '<option value="">无可用产品</option>';
+            const productOptions = (factor.products && factor.products.length)
+                ? factor.products.map(p => `<option value="${p.name}" data-is-term-contract="${p.is_term_contract ? '1' : '0'}">${p.name}${p.desc && p.desc !== p.name ? ' · ' + p.desc : ''}</option>`).join('')
+                : '<option value="">无可用产品</option>';
             // IC 衰减 & 滚动窗口 附加图表（如有数据）
             let icDecayHtml = '';
             let rollingIcHtml = '';
@@ -738,6 +760,8 @@
     async function loadFactorAndReturn(subId, factorIdx, factorName, factorAlias) {
         const primarySelect = document.getElementById(`primary-product-select-${subId}-${factorIdx}`);
         const testerPrimary = primarySelect ? primarySelect.value : '';
+        const selectedOption = primarySelect ? primarySelect.options[primarySelect.selectedIndex] : null;
+        const isTermContractProduct = selectedOption ? selectedOption.getAttribute('data-is-term-contract') === '1' : false;
         const product = testerPrimary || null;
         if (!product || product === '') { alert('请选择一个产品'); return; }
 
@@ -809,12 +833,7 @@
             // 主价格序列改为复用价格查看模块链路，保证连续性
             const priceApi = await fetch('/api/get_price_data', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    product_name: testerPrimary || product,
-                    adjusted: adjusted,
-                    start_date: submission.start_date,
-                    end_date: submission.end_date
-                })
+                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, submission, adjusted, isTermContractProduct))
             }).then(r => r.json());
 
             const priceData = priceApiToSeries(priceApi);
@@ -869,6 +888,10 @@
         icContractSelection[key] = new Set();
         try {
             const submission = window.submissions ? window.submissions.find(s => String(s.id) === String(subId)) : null;
+            const primarySelect = document.getElementById(`primary-product-select-${subId}-${factorIdx}`);
+            const selectedOption = primarySelect ? primarySelect.options[primarySelect.selectedIndex] : null;
+            const isTermContractProduct = selectedOption ? selectedOption.getAttribute('data-is-term-contract') === '1' : false;
+            if (isTermContractProduct) return;
             const q = new URLSearchParams({ product: productName });
             if (submission && submission.start_date) q.set('start_date', submission.start_date);
             if (submission && submission.end_date) q.set('end_date', submission.end_date);
@@ -956,6 +979,12 @@
         }
         const data = apiData.data.slice().sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
         const series = {
+            product: apiData.product || '',
+            desc: apiData.desc || '',
+            contract_uid: apiData.contract_uid || '',
+            contract_name: apiData.contract_name || '',
+            is_term_contract: !!apiData.is_term_contract || !!apiData.contract_uid,
+            supports_term_structure: !!apiData.supports_term_structure,
             dates: data.map(d => d.timestamp),
             OPEN: data.map(d => d.open),
             HIGH: data.map(d => d.high),

@@ -15,6 +15,9 @@
         const series = {
             product: apiData.product || '',
             desc: apiData.desc || '',
+            contract_uid: apiData.contract_uid || '',
+            contract_name: apiData.contract_name || '',
+            is_term_contract: !!apiData.is_term_contract || !!apiData.contract_uid,
             adjusted: !!apiData.adjusted,
             supports_adjusted: !!apiData.supports_adjusted,
             supports_term_structure: !!apiData.supports_term_structure,

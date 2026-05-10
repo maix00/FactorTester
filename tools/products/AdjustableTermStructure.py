@@ -70,6 +70,9 @@ class AdjustableContractMixin:
     # Product/category tree should skip technical base layers like this mixin.
     _is_hidden_product_tree_class = True
 
+    def is_term_contract(self) -> bool:
+        return True
+
 
 class AdjustableProductMixin:
     """Base mixin for products that support adjustment/term-structure style helpers."""

@@ -53,6 +53,13 @@ def _extract_product_names(*tables: pd.DataFrame | None) -> List[str]:
     return names
 
 
+def _is_term_contract_product(product: Any) -> bool:
+    marker = getattr(product, 'is_term_contract', None)
+    if callable(marker):
+        return bool(marker())
+    return False
+
+
 @sft_bp.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
     data = request.get_json(silent=True) or {}
@@ -369,7 +376,11 @@ def run_ic_test():
             for p in sorted(tester.products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
                 p_name = str(getattr(p, 'name', p))
                 p_desc = str(getattr(p, 'desc', p_name))
-                products.append({'name': p_name, 'desc': p_desc})
+                products.append({
+                    'name': p_name,
+                    'desc': p_desc,
+                    'is_term_contract': _is_term_contract_product(p),
+                })
 
             factor_data = {
                 'name': factor.name,
