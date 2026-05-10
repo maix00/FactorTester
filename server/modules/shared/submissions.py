@@ -136,7 +136,13 @@ def delete_submission():
     try:
         with factor_testers_lock:
             n = len(runtime_state.factor_testers)
-            tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
+            tester = next(
+                (
+                    t for t in runtime_state.factor_testers
+                    if runtime_state.alias_matches_submission_id(getattr(t, 'alias', ''), id_time, allow_suffix=True)
+                ),
+                None,
+            )
             assert tester is not None, "Submission not found"
             tester.delete()
             runtime_state.factor_testers[:] = [
@@ -193,6 +199,7 @@ def delete_path_of_submission():
         assert tester is not None, "Submission not found"
         selected_paths, selected_products = resolve_products_from_paths(new_paths)
         tester.products = sorted(list(set(selected_products)))
+        tester.selected_paths = selected_paths
         return jsonify({
             'success':     True,
             'submissions': submissions_payload(),

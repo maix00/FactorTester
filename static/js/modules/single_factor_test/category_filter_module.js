@@ -60,6 +60,30 @@
         window.submissions = submissions;
         window.submissionRecords = submissions;
         renderHistory();
+        refreshSubmissionDependents();
+    }
+
+    function refreshSubmissionDependents() {
+        setTimeout(function() {
+            try {
+                if (typeof window.updateCategorySummary === 'function') {
+                    window.updateCategorySummary();
+                }
+            } catch (e) {
+                console.error('刷新产品类别摘要失败:', e);
+            }
+            try {
+                if (typeof window.renderICTabs === 'function') {
+                    Promise.resolve(window.renderICTabs(submissions)).catch(function(e) {
+                        console.error('刷新 IC 测试标签失败:', e);
+                    });
+                } else if (typeof window.renderGroupTabs === 'function') {
+                    window.renderGroupTabs(submissions);
+                }
+            } catch (e) {
+                console.error('刷新 submission 依赖模块失败:', e);
+            }
+        }, 0);
     }
 
     // 辅助函数：渲染右侧历史记录
@@ -161,8 +185,6 @@
                 var statusElem = $('#submission_change_status');
                 if (data.success) {
                     statusElem.html('<div>✓ 路径已删除</div>').css('color', '#28a745');
-                    // 本地更新
-                    submissions[subIndex].paths = newPaths;
                     if (newPaths.length === 0) {
                         // 如果没有路径了，删除整个提交
                         fetch('/delete_submission', {
@@ -173,16 +195,27 @@
                         .then(r => r.json())
                         .then(data2 => {
                             if (data2.success) {
-                                submissions.splice(subIndex, 1);
+                                if (data2.submissions) {
+                                    syncFromServer(data2.submissions);
+                                } else {
+                                    submissions.splice(subIndex, 1);
+                                    renderHistory();
+                                    refreshSubmissionDependents();
+                                }
                                 statusElem.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
                             } else {
                                 statusElem.html('<div>✗ 删除提交失败: ' + data2.error + '</div>').css('color', '#d40000');
                             }
-                            renderHistory();
                             setTimeout(function() { statusElem.html(''); }, 3000);
                         });
                     } else {
-                        renderHistory();
+                        if (data.submissions) {
+                            syncFromServer(data.submissions);
+                        } else {
+                            submissions[subIndex].paths = newPaths;
+                            renderHistory();
+                            refreshSubmissionDependents();
+                        }
                         setTimeout(function() { statusElem.html(''); }, 3000);
                     }
                 } else {
@@ -213,6 +246,7 @@
                     } else {
                         submissions.splice(index, 1);
                         renderHistory();
+                        refreshSubmissionDependents();
                     }
                     setTimeout(function() { statusElem.html(''); }, 3000);
                 } else {
@@ -221,14 +255,6 @@
                 }
             });
         });
-
-        // 新增：通知 IC 模块更新
-        if (typeof window.renderICTabs === 'function') {
-            window.renderICTabs(submissions);
-        }
-        if (typeof window.renderGroupTabs === 'function') {
-            window.renderGroupTabs(submissions);
-        }
 
         // ── 提交名称（label）行内编辑 ────────────────────────────────────────
         function commitLabelEdit($inp) {
@@ -477,8 +503,10 @@
             }
         });
 
-        // 提交按钮事件
-        $("#submit-selected").off('click').on('click', submitSelectedProducts);
+        // 提交按钮可能随单因子内容局部刷新而重建，使用委托绑定保持事件稳定。
+        $(document)
+            .off('click.categorySubmit', '#submit-selected')
+            .on('click.categorySubmit', '#submit-selected', submitSelectedProducts);
 
         // 初始化 SortableJS 实现拖动排序
         var historyContainer = document.getElementById('submission-history');
@@ -504,6 +532,7 @@
                                 var movedItem = submissions.splice(oldIndex, 1)[0];
                                 submissions.splice(newIndex, 0, movedItem);
                                 renderHistory();
+                                refreshSubmissionDependents();
                             }
                             setTimeout(function() { statusElem.html(''); }, 3000);
                         } else {
@@ -591,7 +620,9 @@
                     } else {
                         submissions = normalized;
                         window.submissions = submissions;
+                        window.submissionRecords = submissions;
                         renderHistory();
+                        refreshSubmissionDependents();
                     }
                     tplStatus('✓ 模板已加载（' + normalized.length + '条提交）', true);
                 });
@@ -733,10 +764,7 @@
             window.submissionRecords = newSubmissions;
             expandedState = {};
             renderHistory();
-            if (typeof updateCategorySummary === 'function') updateCategorySummary();
-            // 触发 IC/Group 模块刷新
-            if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
-            if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+            refreshSubmissionDependents();
         };
     }
 
