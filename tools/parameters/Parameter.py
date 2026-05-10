@@ -245,19 +245,52 @@ class FactorParam(TypeParam):
                  *args, **kwargs):
         if hasattr(self, '_initialized'):
             return
-        from tools.factors.FactorExpr import FactorExpr, ParamRef
+        from tools import DataColumn
+        from tools.factors.FactorExpr import FactorExpr, ParamRef, ColumnRef
         from tools.parameters.DataColumnParam import DataColumnParam
 
+        def is_datacolumn_like(value: Any) -> bool:
+            try:
+                DataColumn(value)
+                return True
+            except Exception:
+                return False
+
         def contains(value: Any) -> bool:
-            return isinstance(value, (FactorExpr, DataColumnParam, type(None)))
+            return (
+                isinstance(value, (FactorExpr, DataColumnParam, str, dict, type(None)))
+                or is_datacolumn_like(value)
+            )
 
         def rectify(value: Any) -> Any:
-            return ParamRef(value) if isinstance(value, DataColumnParam) else value
+            if isinstance(value, DataColumnParam):
+                return ParamRef(value)
+            if is_datacolumn_like(value):
+                return ColumnRef(DataColumn(value))
+            return value
 
         def alias_value(value: Any) -> str:
+            if value is None:
+                return ''
+            def wrap_alias(text: Any) -> str:
+                t = str(text).strip()
+                if not t:
+                    return ''
+                return f"[{t}]"
+            if isinstance(value, dict):
+                return wrap_alias(value.get('factor_alias') or value.get('alias') or value)
+            if is_datacolumn_like(value):
+                return wrap_alias(DataColumn(value).value)
+            if isinstance(value, ColumnRef):
+                return wrap_alias(value.column.value)
+            if isinstance(value, FactorExpr):
+                try:
+                    return wrap_alias(value._get_alias())
+                except Exception:
+                    pass
             if isinstance(value, ParamRef):
-                return getattr(value.param, 'alias', str(value))
-            return getattr(value, 'alias', str(value))
+                return wrap_alias(getattr(value.param, 'alias', str(value)))
+            return wrap_alias(getattr(value, 'alias', str(value)))
 
         space = ValueSpace(
             contains=contains,

@@ -1,0 +1,235 @@
+"""Routes for creating, updating, reading, and deleting factor sources."""
+
+import os
+import re
+
+from flask import jsonify, request
+
+from server.modules.custom_factors import cf_bp
+from server.modules.custom_factors.catalog import list_custom_factors
+from server.modules.custom_factors.source_helpers import (
+    assemble_factor_source,
+    parse_class_meta,
+    strip_factor_meta,
+)
+from server.modules.custom_factors.storage import (
+    delete_factor_source,
+    load_factor_source,
+    public_factor_path,
+    save_factor_source,
+    save_public_factor_source,
+)
+from server.services.accounts import (
+    can_view_user_scope,
+    get_account,
+    is_super_admin_account,
+)
+from server.services.factor_registry import (
+    invalidate_custom_factor_cache,
+    invalidate_factor_family_cache,
+)
+from server.services.http_auth import login_required
+from server.services.runtime_state import current_user
+
+
+def _current_user_is_super_admin() -> bool:
+    return is_super_admin_account(get_account(current_user()))
+
+
+@cf_bp.route('/api/create', methods=['POST'])
+@login_required
+def api_create_factor():
+    username = current_user()
+    data = request.get_json(silent=True) or {}
+
+    source_code = (data.get('source_code') or '').strip()
+    if not source_code:
+        return jsonify({'success': False, 'error': '源码不能为空'}), 400
+
+    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
+    if not class_match:
+        return jsonify({'success': False, 'error': '源码中未找到 class 定义'}), 400
+    name = class_match.group(1)
+
+    existing_names = {factor['name'] for factor in list_custom_factors(username)}
+    if name in existing_names:
+        return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{name}"，请使用其他名称'}), 400
+
+    factor_id = name
+    chinese_name = (data.get('chinese_name') or '').strip()
+    description = (data.get('description') or '').strip()
+    category = (data.get('category') or '自编').strip()
+    full_source = assemble_factor_source(source_code, chinese_name, description, category)
+
+    save_factor_source(username, factor_id, full_source)
+
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': name,
+            'chinese_name': chinese_name,
+            'description': description,
+            'category': category,
+            'source_code': strip_factor_meta(full_source),
+            'is_public': False,
+        }
+    })
+
+
+@cf_bp.route('/api/update/<factor_id>', methods=['POST'])
+@login_required
+def api_update_factor(factor_id):
+    username = current_user()
+    existing_source = load_factor_source(username, factor_id)
+    if existing_source is None:
+        return jsonify({'success': False, 'error': '因子不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    old_meta = parse_class_meta(existing_source)
+    old_name = old_meta.get('name', '')
+
+    source_code = (data.get('source_code') or '').strip()
+    chinese_name = (data.get('chinese_name') or '').strip()
+    description = (data.get('description') or '').strip()
+    category = (data.get('category') or old_meta.get('category', '自编')).strip()
+    new_name = old_name
+
+    if source_code:
+        class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
+        new_name = class_match.group(1) if class_match else old_name
+        if new_name != old_name:
+            existing_names = {
+                factor['name'] for factor in list_custom_factors(username)
+                if factor['id'] != factor_id and factor['name'] != old_name
+            }
+            if new_name in existing_names:
+                return jsonify({'success': False, 'error': f'您已有同名自定义因子 "{new_name}"'}), 400
+
+        full_source = assemble_factor_source(
+            source_code,
+            chinese_name or old_meta.get('chinese_name', ''),
+            description or old_meta.get('description', ''),
+            category,
+        )
+    else:
+        old_editor_source = strip_factor_meta(existing_source)
+        full_source = assemble_factor_source(
+            old_editor_source,
+            chinese_name or old_meta.get('chinese_name', ''),
+            description or old_meta.get('description', ''),
+            category,
+        )
+
+    save_factor_source(username, factor_id, full_source)
+    invalidate_custom_factor_cache(username, factor_id)
+    if old_name and old_name != new_name:
+        invalidate_factor_family_cache(old_name)
+
+    new_meta = parse_class_meta(full_source)
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': new_meta.get('name', old_name),
+            'chinese_name': new_meta.get('chinese_name', ''),
+            'description': new_meta.get('description', ''),
+            'category': new_meta.get('category', '自编'),
+            'source_code': strip_factor_meta(full_source),
+            'is_public': False,
+        }
+    })
+
+
+@cf_bp.route('/api/update-public/<factor_id>', methods=['POST'])
+@login_required
+def api_update_public_factor(factor_id):
+    if not _current_user_is_super_admin():
+        return jsonify({'success': False, 'error': '只有超级管理员可以修改公共因子家族'}), 403
+
+    existing_path = public_factor_path(factor_id)
+    if not os.path.exists(existing_path):
+        return jsonify({'success': False, 'error': '公共因子不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    source_code = (data.get('source_code') or '').strip()
+    if not source_code:
+        return jsonify({'success': False, 'error': '源码不能为空'}), 400
+
+    class_match = re.search(r'^\s*class\s+(\w+)\s*\(', source_code, re.MULTILINE)
+    class_name = class_match.group(1) if class_match else ''
+    if class_name != factor_id:
+        return jsonify({'success': False, 'error': '公共因子家族暂不支持重命名，请保持 class 名与文件名一致'}), 400
+
+    with open(existing_path, 'r', encoding='utf-8') as file:
+        old_source = file.read()
+    old_meta = parse_class_meta(old_source)
+    chinese_name = (data.get('chinese_name') or old_meta.get('chinese_name', '')).strip()
+    description = (data.get('description') or old_meta.get('description', '')).strip()
+    category = (data.get('category') or old_meta.get('category', '') or '公共').strip()
+    full_source = assemble_factor_source(source_code, chinese_name, description, category)
+
+    save_public_factor_source(factor_id, full_source)
+    invalidate_factor_family_cache(factor_id)
+
+    new_meta = parse_class_meta(full_source)
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': new_meta.get('name', factor_id),
+            'chinese_name': new_meta.get('chinese_name', ''),
+            'description': new_meta.get('description', ''),
+            'category': new_meta.get('category', '公共'),
+            'source_code': strip_factor_meta(full_source),
+            'is_public': True,
+            'type': 'public',
+        }
+    })
+
+
+@cf_bp.route('/api/delete/<factor_id>', methods=['POST'])
+@login_required
+def api_delete_factor(factor_id):
+    username = current_user()
+    existing_source = load_factor_source(username, factor_id)
+    if existing_source is None:
+        return jsonify({'success': False, 'error': '因子不存在'}), 404
+
+    old_meta = parse_class_meta(existing_source)
+    old_name = old_meta.get('name', '')
+    delete_factor_source(username, factor_id)
+
+    invalidate_custom_factor_cache(username, factor_id)
+    if old_name:
+        invalidate_factor_family_cache(old_name)
+
+    return jsonify({'success': True, 'message': f'因子 "{old_name}" 已删除'})
+
+
+@cf_bp.route('/api/get/<factor_id>', methods=['GET'])
+@login_required
+def api_get_factor(factor_id):
+    username = current_user()
+    owner_username = (request.args.get('owner_username') or username).strip()
+    if not can_view_user_scope(username, owner_username):
+        return jsonify({'success': False, 'error': '无权查看该用户因子'}), 403
+    source = load_factor_source(owner_username, factor_id)
+    if source is None:
+        return jsonify({'success': False, 'error': '因子不存在'}), 404
+
+    meta = parse_class_meta(source)
+    return jsonify({
+        'success': True,
+        'factor': {
+            'id': factor_id,
+            'name': meta.get('name', ''),
+            'chinese_name': meta.get('chinese_name', ''),
+            'description': meta.get('description', ''),
+            'category': meta.get('category', '自编'),
+            'source_code': strip_factor_meta(source),
+            'is_public': False,
+            'owner_username': owner_username,
+            'can_edit': owner_username == username,
+        }
+    })

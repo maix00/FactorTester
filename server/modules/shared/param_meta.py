@@ -3,6 +3,20 @@
 from __future__ import annotations
 
 
+def serialize_option_value(param, value):
+    if value is None:
+        return ''
+    try:
+        return param._value_space.alias(value)
+    except Exception:
+        pass
+    if hasattr(value, 'value'):
+        return value.value
+    if hasattr(value, 'name'):
+        return value.name
+    return str(value)
+
+
 def serialize_default(param):
     value = getattr(param, 'default_value', None)
     if value is None:
@@ -27,6 +41,8 @@ def serialize_param_meta(param):
         'type': display_param_type(param),
         'default_value': serialize_default(param),
         'value_space_desc': describe_value_space(param),
+        'options': serialize_param_options(param),
+        'input_mode': serialize_param_input_mode(param),
     }
 
 
@@ -60,3 +76,81 @@ def describe_value_space(param) -> str:
     except Exception:
         pass
     return '；'.join(parts)
+
+
+def serialize_param_options(param) -> list[dict]:
+    """Return finite frontend choices when a parameter has an enumerable domain."""
+    cls_name = type(param).__name__
+    alias = getattr(param, 'alias', '')
+
+    if cls_name == 'DataColumnParam':
+        try:
+            from tools import DataColumn
+            return [
+                {
+                    'value': col.value,
+                    'label': f'{col.name} ({col.value})',
+                }
+                for col in DataColumn
+            ]
+        except Exception:
+            return []
+
+    if cls_name == 'FactorParam':
+        try:
+            from tools import DataColumn
+            return [
+                {
+                    'value': col.value,
+                    'label': f'DataColumn.{col.name} ({col.value})',
+                }
+                for col in DataColumn
+            ]
+        except Exception:
+            return []
+
+    if alias == '$F':
+        return [
+            {'value': '30m', 'label': '30min'},
+            {'value': '1h', 'label': '1h'},
+            {'value': '1d', 'label': '1d'},
+            {'value': '5d', 'label': '5d'},
+            {'value': '20d', 'label': '20d'},
+            {'value': 'S', 'label': 'S'},
+        ]
+
+    if alias == '$Rev':
+        return [
+            {'value': '0', 'label': '不反转'},
+            {'value': '1', 'label': '反转'},
+        ]
+
+    fin_values = getattr(param, '_fin_values', None)
+    if isinstance(fin_values, list) and fin_values:
+        return [
+            {
+                'value': serialize_option_value(param, value),
+                'label': serialize_option_value(param, value),
+            }
+            for value in fin_values
+        ]
+
+    return []
+
+
+def serialize_param_input_mode(param) -> str:
+    """Frontend control mode: enum, text, or enum_custom."""
+    cls_name = type(param).__name__
+    alias = getattr(param, 'alias', '')
+
+    if cls_name == 'DataColumnParam':
+        return 'enum'
+    if cls_name == 'FactorParam':
+        return 'enum_custom'
+    if alias == '$Rev':
+        return 'enum'
+    if alias == '$F':
+        return 'enum_custom'
+    if isinstance(getattr(param, '_fin_values', None), list) and getattr(param, '_fin_values', None):
+        return 'enum'
+    return 'text'

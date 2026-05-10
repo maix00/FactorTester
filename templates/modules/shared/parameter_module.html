@@ -52,7 +52,8 @@
 <div class="module" id="parameter_module"
      data-factor-alias="{{ factor_family_alias }}"
      data-factor-type="{{ factor_type | default('public') }}"
-     data-param-aliases='{{ param_aliases|tojson }}'>
+     data-param-aliases='{{ param_aliases|tojson }}'
+     data-param-metas='{{ (param_metas | default([])) | tojson }}'>
     <div class="section-title">参数设置</div>
 
     <!-- 参数模板区 -->
@@ -89,10 +90,44 @@
                 <tr id="add_row">
                     <td>{{ factor_family_alias }}</td>
                     {% for param in params %}
+                        {% set meta = param_metas[loop.index0] if param_metas is defined and (param_metas|length) > loop.index0 else none %}
+                        {% set options = meta.options if meta and meta.options else [] %}
+                        {% set input_mode = meta.input_mode if meta and meta.input_mode else 'text' %}
+                        {% set default_value = meta.default_value if meta and meta.default_value is not none else param.get_value_alias(param.default_value) %}
+                        {% set option_values = options | map(attribute='value') | list %}
+                        {% set use_custom = input_mode == 'enum_custom' and default_value not in option_values %}
                         <td>
-                            <input type="text" id="param_{{ param.alias }}" 
-                                   value="{{ param.get_value_alias(param.default_value) }}"
-                                   onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
+                            <div class="param-input-stack">
+                            {% if options and input_mode == 'enum' %}
+                                <select id="param_{{ param.alias }}" class="param-input-control"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
+                                    {% for option in options %}
+                                        <option value="{{ option.value }}"{% if option.value == default_value %} selected{% endif %}>{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            {% elif options and input_mode == 'enum_custom' %}
+                                <select id="param_{{ param.alias }}" class="param-input-control" data-custom-input-id="param_custom_{{ param.alias }}"
+                                        onchange="var el=document.getElementById(this.dataset.customInputId);if(el)el.style.display=this.value==='__custom__'?'':'none';"
+                                        onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
+                                    {% for option in options %}
+                                        <option value="{{ option.value }}"{% if option.value == default_value %} selected{% endif %}>{{ option.label }}</option>
+                                    {% endfor %}
+                                    <option value="__custom__"{% if use_custom %} selected{% endif %}>其他…</option>
+                                </select>
+                                <input type="text" id="param_custom_{{ param.alias }}" class="param-input-control"
+                                       value="{% if use_custom %}{{ default_value }}{% endif %}"
+                                       style="{% if not use_custom %}display:none;{% endif %}"
+                                       onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
+                                {% if meta and meta.type == 'FactorParam' %}
+                                    <button type="button" class="param-btn factor-param-picker-btn"
+                                            data-param-alias="{{ param.alias }}">选择因子</button>
+                                {% endif %}
+                            {% else %}
+                                <input type="text" id="param_{{ param.alias }}" class="param-input-control"
+                                       value="{{ default_value }}"
+                                       onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
+                            {% endif %}
+                            </div>
                         </td>
                     {% endfor %}
                     <td>

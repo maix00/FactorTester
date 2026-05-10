@@ -1,0 +1,20 @@
+"""HTTP-level authentication helpers for Flask routes."""
+
+from __future__ import annotations
+
+from functools import wraps
+
+from flask import jsonify, redirect, request
+
+from server.services.runtime_state import current_user
+
+
+def login_required(func):
+    @wraps(func)
+    def decorated(*args, **kwargs):
+        if not current_user():
+            if request.is_json or request.method != 'GET':
+                return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
+            return redirect('/login')
+        return func(*args, **kwargs)
+    return decorated

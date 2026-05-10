@@ -31,42 +31,10 @@ def docs():
 @core_bp.route('/docs/tools', methods=['GET'])
 def docs_tools():
     """工具类代码概览页——带目录导览，点击进入单个文件。"""
-    import os, re, json
+    import os
+    from server.services.tool_docs import scan_tool_files
     tools_dir = os.path.join(os.getcwd(), 'tools')
-
-    def extract_desc(source):
-        lines = source.split('\n')
-        desc_lines = []
-        in_desc = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith('# ====') and not in_desc:
-                in_desc = True
-                continue
-            if stripped.startswith('# ====') and in_desc:
-                break
-            if in_desc:
-                if stripped.startswith('# '):
-                    desc_lines.append(stripped[2:])
-                elif stripped == '#':
-                    desc_lines.append('')
-                else:
-                    break
-        return '\n'.join(desc_lines).strip()
-
-    files = []
-    for root, dirs, filenames in os.walk(tools_dir):
-        dirs[:] = [d for d in sorted(dirs) if not d.startswith('__pycache__') and not d.startswith('.')]
-        for fname in sorted(filenames):
-            if fname.endswith('.py') and fname != '__init__.py':
-                full = os.path.join(root, fname)
-                rel = os.path.relpath(full, tools_dir)
-                with open(full, 'r', encoding='utf-8') as f:
-                    src = f.read()
-                desc = extract_desc(src)
-                files.append({'path': rel, 'desc': desc})
-
-    return render_template('tools_doc.html', files=files)
+    return render_template('tools_doc.html', files=scan_tool_files(tools_dir))
 
 
 @core_bp.route('/docs/tool/<path:rel_path>', methods=['GET'])

@@ -22,6 +22,16 @@
             }
         }
 
+        let paramMetas = [];
+        const metasAttr = moduleElem.getAttribute('data-param-metas');
+        if (metasAttr) {
+            try {
+                paramMetas = JSON.parse(metasAttr);
+            } catch(e) {
+                console.error('Failed to parse param-metas:', e);
+            }
+        }
+
         // 构建 URL 查询参数
         function _buildFactorUrl(alias) {
             var params = '?factor=' + encodeURIComponent(alias);
@@ -39,6 +49,132 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
         }
+
+        function getParamMeta(alias) {
+            return (paramMetas || []).find(function(p) { return p.alias === alias; }) || {};
+        }
+
+        function readParamControl(alias) {
+            const control = document.getElementById('param_' + alias);
+            if (!control) return '';
+            const meta = getParamMeta(alias);
+            if (meta.input_mode === 'enum_custom' && control.value === '__custom__') {
+                const custom = document.getElementById('param_custom_' + alias);
+                return custom ? custom.value : '';
+            }
+            return control.value;
+        }
+
+        function writeParamControl(alias, value) {
+            const control = document.getElementById('param_' + alias);
+            if (!control) return;
+            const meta = getParamMeta(alias);
+            const options = Array.isArray(meta.options) ? meta.options : [];
+            const values = options.map(function(opt) { return String(opt.value); });
+            if (meta.input_mode === 'enum_custom' && values.indexOf(String(value)) === -1) {
+                control.value = '__custom__';
+                const custom = document.getElementById('param_custom_' + alias);
+                if (custom) {
+                    custom.value = value || '';
+                    custom.style.display = '';
+                }
+                return;
+            }
+            control.value = value;
+            const custom = document.getElementById('param_custom_' + alias);
+            if (custom) custom.style.display = 'none';
+        }
+
+        let factorParamPickerTarget = '';
+        let factorParamPickerItems = [];
+        let factorParamPickerSetter = null;
+
+        function ensureFactorParamPicker() {
+            let overlay = document.getElementById('factor-param-picker-overlay');
+            if (overlay) return overlay;
+            overlay = document.createElement('div');
+            overlay.id = 'factor-param-picker-overlay';
+            overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:3000;background:rgba(15,23,42,.35);align-items:center;justify-content:center;padding:24px;';
+            overlay.innerHTML = '<div style="width:min(980px,96vw);max-height:86vh;background:#fff;border-radius:8px;box-shadow:0 18px 48px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;">' +
+                '<div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #e5e7eb;">' +
+                '<strong style="font-size:16px;">选择因子</strong>' +
+                '<input id="factor-param-picker-search" type="search" placeholder="搜索因子/家族/参数/用户" style="flex:1;min-width:180px;">' +
+                '<button type="button" class="param-btn" id="factor-param-picker-close">关闭</button>' +
+                '</div><div id="factor-param-picker-body" style="overflow:auto;padding:14px 18px;"></div></div>';
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay || e.target.id === 'factor-param-picker-close') {
+                    overlay.style.display = 'none';
+                }
+                const btn = e.target.closest('[data-factor-param-pick]');
+                if (btn) {
+                    const picked = btn.getAttribute('data-factor-param-pick') || '';
+                    if (typeof factorParamPickerSetter === 'function') {
+                        factorParamPickerSetter(picked);
+                    } else {
+                        writeParamControl(factorParamPickerTarget, picked);
+                    }
+                    overlay.style.display = 'none';
+                }
+            });
+            overlay.querySelector('#factor-param-picker-search').addEventListener('input', renderFactorParamPickerItems);
+            return overlay;
+        }
+
+        function renderFactorParamPickerItems() {
+            const body = document.getElementById('factor-param-picker-body');
+            const search = (document.getElementById('factor-param-picker-search')?.value || '').trim().toLowerCase();
+            if (!body) return;
+            const items = factorParamPickerItems.filter(function(item) {
+                if (!search) return true;
+                const haystack = [
+                    item.factor_alias,
+                    item.factor_family_alias,
+                    item.factor_family_name,
+                    item.chinese_name,
+                    item.owner_alias,
+                    item.owner_username,
+                    (item.params || []).map(function(p) { return p.alias + ':' + p.value; }).join(' '),
+                ].join(' ').toLowerCase();
+                return haystack.indexOf(search) !== -1;
+            });
+            if (!items.length) {
+                body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">暂无可选因子。请先在因子库保存参数配置。</div>';
+                return;
+            }
+            let html = '<table class="param-table" style="width:100%;"><thead><tr><th>因子</th><th>家族</th><th>参数</th><th>所有者</th><th>操作</th></tr></thead><tbody>';
+            items.forEach(function(item) {
+                const params = (item.params || []).map(function(p) {
+                    return '<span style="display:inline-block;margin:1px 4px 1px 0;color:#667085;">' + _escapeHtml(p.alias) + ':' + _escapeHtml(p.value) + '</span>';
+                }).join('');
+                html += '<tr><td><strong>' + _escapeHtml(item.factor_alias || '') + '</strong></td>' +
+                    '<td>' + _escapeHtml(item.factor_family_alias || item.factor_family_name || '') + '<div style="color:#888;font-size:12px;">' + _escapeHtml(item.chinese_name || '') + '</div></td>' +
+                    '<td>' + (params || '<span style="color:#aaa;">无</span>') + '</td>' +
+                    '<td>' + _escapeHtml(item.owner_alias || item.owner_username || '') + '</td>' +
+                    '<td><button type="button" class="param-btn" data-factor-param-pick="' + _escapeHtml(item.factor_alias || '') + '">选择</button></td></tr>';
+            });
+            html += '</tbody></table>';
+            body.innerHTML = html;
+        }
+
+        async function openFactorParamPicker(alias, setter) {
+            factorParamPickerTarget = alias;
+            factorParamPickerSetter = typeof setter === 'function' ? setter : null;
+            const overlay = ensureFactorParamPicker();
+            const body = document.getElementById('factor-param-picker-body');
+            overlay.style.display = 'flex';
+            if (body) body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">加载因子库...</div>';
+            try {
+                const resp = await fetch('/custom-factors/api/param-factor-overview?include_subordinates=1');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                factorParamPickerItems = data.factors || [];
+                renderFactorParamPickerItems();
+            } catch (e) {
+                if (body) body.innerHTML = '<div style="color:#d40000;text-align:center;padding:28px;">加载失败: ' + _escapeHtml(e.message) + '</div>';
+            }
+        }
+        window.openSharedFactorParamPicker = openFactorParamPicker;
 
         function renderFactorRows(rows) {
             const tableBody = document.getElementById('factor_table_body');
@@ -174,8 +310,7 @@
             function collectParams() {
                 const params = {};
                 paramAliases.forEach(function(alias) {
-                    const input = document.getElementById('param_' + alias);
-                    if (input) params[alias] = input.value;
+                    params[alias] = readParamControl(alias);
                 });
                 return params;
             }
@@ -197,9 +332,8 @@
                         renderFactorRows(data.factor_rows || []);
                         if (data.added_params) {
                             paramAliases.forEach(function(alias) {
-                                const input = document.getElementById('param_' + alias);
-                                if (input && data.added_params[alias] !== undefined) {
-                                    input.value = data.added_params[alias];
+                                if (data.added_params[alias] !== undefined) {
+                                    writeParamControl(alias, data.added_params[alias]);
                                 }
                             });
                         }
@@ -219,11 +353,17 @@
                 addBtn.addEventListener('click', doAdd);
             }
 
+            document.querySelectorAll('.factor-param-picker-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    openFactorParamPicker(btn.getAttribute('data-param-alias') || '');
+                });
+            });
+
             // 输入框回车键触发新增
             paramAliases.forEach(function(alias) {
-                const input = document.getElementById('param_' + alias);
-                if (input) {
-                    input.addEventListener('keydown', function(e) {
+                const control = document.getElementById('param_' + alias);
+                if (control) {
+                    control.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter') {
                             e.preventDefault();
                             doAdd();
@@ -379,7 +519,7 @@
         $pLbl.addEventListener('dblclick', function() {
             var id = $pSel.value; if (!id) return;
             var name = $pLbl.textContent;
-            if (name.indexOf('__global_') === 0) { pTplStatus('全局模板不允许重命名', false); return; }
+            if (name.indexOf('__global_') === 0) { pTplStatus('设置快照关联参数模板不允许重命名', false); return; }
             $pInp.value = name;
             $pInp.style.display = ''; $pInp.focus();
             $pLbl.style.display = 'none';
@@ -391,7 +531,7 @@
             var id = $pSel.value; if (!id) { $pInp.style.display = 'none'; return; }
             if (($pLbl.textContent || '').indexOf('__global_') === 0) {
                 $pInp.style.display = 'none'; $pLbl.style.display = '';
-                pTplStatus('全局模板不允许重命名', false); return;
+                pTplStatus('设置快照关联参数模板不允许重命名', false); return;
             }
             var newName = $pInp.value.trim();
             if (!newName) { $pInp.style.display = 'none'; $pLbl.style.display = ''; return; }
@@ -417,13 +557,13 @@
             loadSelectedParamsTemplate();
         });
 
-        // 暴露参数模板加载函数，供全局模板等外部模块调用
+        // 暴露参数模板加载函数，供单因子设置快照等外部模块调用
         // 用法：window._loadParamsTemplate() 加载下拉框选中的模板
         window._loadParamsTemplate = function() {
             return loadSelectedParamsTemplate();
         };
 
-        // 暴露参数模板保存函数，供全局模板等外部模块调用
+        // 暴露参数模板保存函数，供单因子设置快照等外部模块调用
         // 用法：window._saveCurrentParamsAsTemplate(name) 返回 Promise<{success, id}>
         window._saveCurrentParamsAsTemplate = function(name) {
             return fetch('/api/current_params/' + encodeURIComponent(factorAlias))

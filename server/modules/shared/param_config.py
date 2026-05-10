@@ -34,6 +34,23 @@ def param_value_display(param, value) -> str:
         return str(value)
 
 
+def build_factor_rows(factor_family, params_list: list) -> list:
+    """Build factor row payload for parameter table rendering."""
+    factors = factor_family.get_factors(params_list=params_list)
+    rows = []
+    for idx, (factor, row) in enumerate(zip(factors, params_list)):
+        display_params = {
+            p.alias: param_value_display(p, row.get(p.alias))
+            for p in factor_family.params
+        }
+        rows.append({
+            'index': idx,
+            'factor_alias': factor.alias,
+            'params': display_params,
+        })
+    return rows
+
+
 def serialize_param_rows(factor_family, params_list: list) -> list:
     """Normalize rows, then store JSON-safe value aliases."""
     normalized_rows = normalize_param_rows(factor_family, params_list)

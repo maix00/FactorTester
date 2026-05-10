@@ -33,7 +33,7 @@ def create_app() -> Flask:
 
     from server.auth import auth_bp
     from server.core import core_bp
-    from server.templates_bp import templates_bp
+    from server.modules.templates import templates_bp
     from server.modules.shared import shared_bp
     from server.modules.single_factor_test import sft_bp
     from server.modules.multi_factor_analysis import mfa_bp
