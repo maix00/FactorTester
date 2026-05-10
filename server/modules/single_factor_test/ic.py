@@ -16,7 +16,8 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.ic import run_ic_for_factor
 
 from . import sft_bp
-from server.shared import get_factor_family_instance, get_factor_tester, _get_session_params
+from server.services.factor_registry import get_factor_family_instance
+from server.shared import get_factor_tester, _get_session_params
 
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:

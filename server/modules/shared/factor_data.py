@@ -10,7 +10,8 @@ import pandas as pd
 import traceback
 from types import SimpleNamespace
 from flask import request, jsonify
-from server.shared import get_factor_family_instance, _get_session_params, get_factor_tester
+from server.services.factor_registry import get_factor_family_instance
+from server.shared import _get_session_params, get_factor_tester
 import server.shared as shared
 from . import shared_bp
 

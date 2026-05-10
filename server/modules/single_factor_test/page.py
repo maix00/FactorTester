@@ -12,13 +12,15 @@ from server.services.accounts import (
     can_view_user_scope,
     get_account,
 )
-from server.shared import (
-    _current_user,
+from server.services.factor_registry import (
     get_chinese_names,
     get_factor_family_instance,
     get_factor_groups,
-    get_factor_main_section_html,
 )
+from server.shared import (
+    _current_user,
+)
+from server.modules.single_factor_test.view_helpers import get_factor_main_section_html
 from . import sft_bp
 
 
@@ -50,11 +52,11 @@ def _camel_group(name: str) -> str:
 
 
 def _get_sidebar_custom_factors(username: str, include_subordinates: bool) -> list:
-    from server.modules.custom_factors import _list_custom_factors, _list_visible_custom_factors
+    from server.modules.custom_factors.catalog import list_custom_factors, list_visible_custom_factors
 
     if include_subordinates:
-        return _list_visible_custom_factors(username)
-    custom = _list_custom_factors(username)
+        return list_visible_custom_factors(username)
+    custom = list_custom_factors(username)
     acct = get_account(username) or {}
     for factor in custom:
         factor['owner_username'] = username

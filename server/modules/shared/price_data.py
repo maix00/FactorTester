@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
-from server.shared import convert_to_fancytree, find_node_by_path
+from server.services.product_tree import convert_to_fancytree, find_node_by_path
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
 from server.modules.shared.price_services import (

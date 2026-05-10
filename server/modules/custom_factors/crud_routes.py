@@ -24,11 +24,12 @@ from server.services.accounts import (
     get_account,
     is_super_admin_account,
 )
+from server.services.factor_registry import (
+    invalidate_custom_factor_cache,
+    invalidate_factor_family_cache,
+)
 from server.shared import (
     _current_user,
-    _factor_family_cache,
-    _factor_family_cache_lock,
-    invalidate_custom_factor_cache,
     login_required,
 )
 
@@ -125,8 +126,7 @@ def api_update_factor(factor_id):
     save_factor_source(username, factor_id, full_source)
     invalidate_custom_factor_cache(username, factor_id)
     if old_name and old_name != new_name:
-        with _factor_family_cache_lock:
-            _factor_family_cache.pop(old_name, None)
+        invalidate_factor_family_cache(old_name)
 
     new_meta = parse_class_meta(full_source)
     return jsonify({
@@ -172,8 +172,7 @@ def api_update_public_factor(factor_id):
     full_source = assemble_factor_source(source_code, chinese_name, description, category)
 
     save_public_factor_source(factor_id, full_source)
-    with _factor_family_cache_lock:
-        _factor_family_cache.pop(factor_id, None)
+    invalidate_factor_family_cache(factor_id)
 
     new_meta = parse_class_meta(full_source)
     return jsonify({
@@ -205,8 +204,7 @@ def api_delete_factor(factor_id):
 
     invalidate_custom_factor_cache(username, factor_id)
     if old_name:
-        with _factor_family_cache_lock:
-            _factor_family_cache.pop(old_name, None)
+        invalidate_factor_family_cache(old_name)
 
     return jsonify({'success': True, 'message': f'因子 "{old_name}" 已删除'})
 

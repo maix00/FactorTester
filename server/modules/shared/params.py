@@ -5,7 +5,8 @@ Shared parameter-management routes (any test module can use):
   POST /reorder_params
 """
 from flask import request, jsonify
-from server.shared import get_factor_family_instance, _get_session_params, _save_session_params, _current_user
+from server.services.factor_registry import get_factor_family_instance
+from server.shared import _get_session_params, _save_session_params, _current_user
 from . import shared_bp
 from .param_config import normalize_param_row, param_value_display
 

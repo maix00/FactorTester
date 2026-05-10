@@ -6,8 +6,9 @@ from flask import Blueprint, request, jsonify
 from server.shared import (
     _require_user, _get_user_file_lock,
     login_required,
-    get_factor_family_instance, _get_session_params, _save_session_params,
+    _get_session_params, _save_session_params,
 )
+from server.services.factor_registry import get_factor_family_instance
 from server.modules.shared.param_config import param_value_display
 from server.services.accounts import (
     account_display_name,
@@ -15,6 +16,7 @@ from server.services.accounts import (
     visible_accounts_for,
 )
 from server.services.user_storage import load_user_templates, new_template_id, save_user_templates
+from server.modules.templates.summary import build_snapshot_summary
 
 
 _load_user_tpls = load_user_templates
@@ -372,7 +374,7 @@ def list_global_templates(scope_key):
     for t in templates:
         snap = t.get('snapshot', {})
         # 生成设置摘要
-        summary = _build_snapshot_summary(snap)
+        summary = build_snapshot_summary(snap)
         result.append({
             'id': t['id'],
             'name': t['name'],
@@ -381,120 +383,6 @@ def list_global_templates(scope_key):
             'summary': summary,
         })
     return jsonify({'success': True, 'templates': result})
-
-
-def _build_snapshot_summary(snap: dict) -> dict:
-    """从快照构建可读摘要，展示各模块的具体值（类似外部摘要行）"""
-    summary = {}
-
-    # ── 时间范围 ──
-    td = snap.get('time_data', {})
-    if td:
-        s_date = td.get('start_date') or td.get('start') or ''
-        s_time = td.get('start_time', '')
-        e_date = td.get('end_date') or td.get('end') or ''
-        e_time = td.get('end_time', '')
-        parts = [s_date]
-        if s_time:
-            parts.append(' ' + s_time)
-        parts.append(' ~ ')
-        parts.append(e_date)
-        if e_time:
-            parts.append(' ' + e_time)
-        suffix = ''
-        if td.get('is_trading_day'):
-            suffix = ' (交易日)'
-        elif td.get('is_cn_futures_day'):
-            suffix = ' (期货日盘)'
-        elif td.get('is_cn_futures_night'):
-            suffix = ' (期货夜盘)'
-        summary['time_range'] = ''.join(parts) + suffix
-
-    # ── 参数列表 ── 每组参数单独展示具体值
-    params = snap.get('params_list', [])
-    if params:
-        # 兼容旧格式 [{factor_name, params}, ...]
-        if params[0] and 'params' in params[0]:
-            params = [p.get('params', {}) for p in params]
-        param_items = []
-        for i, p in enumerate(params):
-            if not p:
-                continue
-            pairs = [f"{k}={v}" for k, v in sorted(p.items())]
-            if len(params) > 1:
-                param_items.append(f"#{i+1}: " + ', '.join(pairs))
-            else:
-                param_items.append(', '.join(pairs))
-        if param_items:
-            summary['params'] = param_items
-
-    # ── 品种分类 ── 展示每个提交的label和实际品种数（优先用 count_desc）
-    subs = snap.get('submissions', [])
-    if subs:
-        sub_items = []
-        for s in subs:
-            label = s.get('label', '')
-            count_desc = s.get('count_desc', '')
-            if label and count_desc:
-                sub_items.append(f"{label}({count_desc})")
-            elif label:
-                sub_items.append(label)
-            elif count_desc:
-                sub_items.append(count_desc)
-        if sub_items:
-            summary['products'] = sub_items
-
-    # ── 收益率频率 ── 展示每个因子的频率设置
-    freqs = snap.get('return_freqs', [])
-    if freqs:
-        freq_items = []
-        for f in freqs:
-            if f.get('checked') is False:
-                continue
-            alias = f.get('alias', '?')
-            rf = f.get('return_freq', '')
-            if rf:
-                freq_items.append(f"{alias}:{rf}")
-            else:
-                freq_items.append(f"{alias}(默认)")
-        if freq_items:
-            summary['return_freqs'] = freq_items
-
-    # ── 分组测试 ── 展示具体的分组设置
-    gs = snap.get('group_settings', {})
-    if gs:
-        g_parts = []
-        gc = gs.get('group_count', '')
-        if gc:
-            g_parts.append(f"分组数={gc}")
-        fee_mode = gs.get('fee_mode', '')
-        if fee_mode and fee_mode != 'none':
-            fee_labels = {'none': '无', 'percent': '百分比', 'fixed': '固定'}
-            g_parts.append(f"费率={fee_labels.get(fee_mode, fee_mode)}")
-            if gs.get('fee_rate'):
-                g_parts.append(f"{gs['fee_rate']}%")
-        if gs.get('use_closetoday'):
-            g_parts.append('平今')
-        # 分组时间范围
-        gs_start = '-'.join(filter(None, [
-            gs.get('group_start_year', ''),
-            str(gs.get('group_start_month', '')).zfill(2) if gs.get('group_start_month') else '',
-            str(gs.get('group_start_day', '')).zfill(2) if gs.get('group_start_day') else '',
-        ]))
-        gs_end = '-'.join(filter(None, [
-            gs.get('group_end_year', ''),
-            str(gs.get('group_end_month', '')).zfill(2) if gs.get('group_end_month') else '',
-            str(gs.get('group_end_day', '')).zfill(2) if gs.get('group_end_day') else '',
-        ]))
-        if gs_start and gs_end:
-            g_parts.append(f"{gs_start} ~ {gs_end}")
-        elif gs_start:
-            g_parts.append(f"起始={gs_start}")
-        elif gs_end:
-            g_parts.append(f"终末={gs_end}")
-        if g_parts:
-            summary['group_test'] = ', '.join(g_parts)
-    return summary
 
 
 @templates_bp.route('/api/global_templates/<scope_key>', methods=['POST'])
@@ -588,9 +476,9 @@ def list_scope_factors(scope_key):
             ff_aliases.add(ff_alias)
 
     # 构建因子映射：分别从公共因子和自定义因子中查找
-    from .modules.custom_factors import _list_public_factors, _list_custom_factors
-    public_factors = {f['id']: f for f in _list_public_factors()}
-    custom_factors = {f['id']: f for f in _list_custom_factors(u)}
+    from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
+    public_factors = {f['id']: f for f in list_public_factors()}
+    custom_factors = {f['id']: f for f in list_custom_factors(u)}
 
     # 按 factor_family 分组
     groups: dict[str, list] = {}

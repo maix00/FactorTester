@@ -7,7 +7,8 @@ import uuid as _uuid
 import pandas as pd
 from flask import request, jsonify
 import Settings
-from server.shared import get_factor_family_instance, _factor_testers_lock
+from server.services.factor_registry import get_factor_family_instance
+from server.shared import _factor_testers_lock
 import server.shared as shared
 from . import shared_bp
 

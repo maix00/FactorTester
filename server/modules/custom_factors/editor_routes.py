@@ -13,9 +13,9 @@ from server.modules.shared.param_meta import serialize_param_meta
 from server.services.accounts import can_view_user_scope
 from server.shared import (
     _current_user,
-    get_factor_family_instance,
     login_required,
 )
+from server.services.factor_registry import get_factor_family_instance
 
 
 @cf_bp.route('/api/validate', methods=['POST'])

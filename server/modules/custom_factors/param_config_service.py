@@ -16,7 +16,7 @@ from server.services.accounts import (
     get_account,
     visible_accounts_for,
 )
-from server.shared import (
+from server.services.factor_registry import (
     get_custom_factor_instance,
     get_factor_family_instance,
 )

@@ -13,9 +13,7 @@ from server.services.accounts import (
     account_display_name,
     visible_accounts_for,
 )
-from server.shared import (
-    get_factor_family_instance,
-)
+from server.services.factor_registry import get_factor_family_instance
 from tools.factors import FactorFamily
 
 

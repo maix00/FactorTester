@@ -10,10 +10,11 @@ Shared submission / product-tree routes:
 """
 from flask import request, jsonify
 import time
-from server.shared import (
-    _factor_testers_lock,
-    tree, convert_to_fancytree, find_node_by_path, get_minimal_paths,
+from server.services import product_tree
+from server.services.product_tree import (
+    convert_to_fancytree, find_node_by_path, get_minimal_paths, tree,
 )
+from server.shared import _factor_testers_lock
 import server.shared as shared
 from . import shared_bp
 
@@ -40,9 +41,9 @@ def _valid_testers():
 
 @shared_bp.route('/api/tree-data')
 def get_tree_data():
-    if shared._fancytree_cache is None:
-        shared._fancytree_cache = convert_to_fancytree(tree, checkbox_default=True)
-    return jsonify(shared._fancytree_cache)
+    if product_tree.fancytree_cache is None:
+        product_tree.fancytree_cache = convert_to_fancytree(tree, checkbox_default=True)
+    return jsonify(product_tree.fancytree_cache)
 
 
 @shared_bp.route('/api/list_submissions')

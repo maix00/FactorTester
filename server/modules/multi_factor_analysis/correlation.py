@@ -8,9 +8,10 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
 from . import mfa_bp
 from server.shared import (
-    get_factor_family_instance, _get_session_params,
+    _get_session_params,
     _factor_testers_lock,
 )
+from server.services.factor_registry import get_factor_family_instance
 import server.shared as shared
 
 
