@@ -22,19 +22,20 @@
         const def = getDefaultValue(paramDef);
         const values = options.map(opt => String(opt.value));
         if (options.length && mode === 'enum') {
-            return '<select id="' + prefix + escHtml(alias) + '">' +
+            return '<div class="param-input-stack"><select id="' + prefix + escHtml(alias) + '" class="param-input-control">' +
                 options.map(opt => '<option value="' + escHtml(opt.value) + '"' + (String(opt.value) === def ? ' selected' : '') + '>' + escHtml(opt.label || opt.value) + '</option>').join('') +
-                '</select>';
+                '</select></div>';
         }
         if (options.length && mode === 'enum_custom') {
             const custom = values.indexOf(def) === -1;
-            return '<select id="' + prefix + escHtml(alias) + '" data-custom-input-id="' + prefix + 'custom-' + escHtml(alias) + '">' +
+            return '<div class="param-input-stack"><select id="' + prefix + escHtml(alias) + '" class="param-input-control" data-custom-input-id="' + prefix + 'custom-' + escHtml(alias) + '">' +
                 options.map(opt => '<option value="' + escHtml(opt.value) + '"' + (String(opt.value) === def ? ' selected' : '') + '>' + escHtml(opt.label || opt.value) + '</option>').join('') +
                 '<option value="__custom__"' + (custom ? ' selected' : '') + '>其他...</option></select>' +
-                '<input type="text" id="' + prefix + 'custom-' + escHtml(alias) + '" value="' + (custom ? escHtml(def) : '') + '" style="' + (custom ? '' : 'display:none;') + 'margin-top:4px;">' +
-                (paramDef.type === 'FactorParam' ? '<button type="button" class="param-btn factor-param-picker-btn" data-param-prefix="' + escHtml(prefix) + '" data-param-alias="' + escHtml(alias) + '" style="margin-top:4px;">选择因子</button>' : '');
+                '<input type="text" id="' + prefix + 'custom-' + escHtml(alias) + '" class="param-input-control" value="' + (custom ? escHtml(def) : '') + '" style="' + (custom ? '' : 'display:none;') + '">' +
+                (paramDef.type === 'FactorParam' ? '<button type="button" class="param-btn factor-param-picker-btn" data-param-prefix="' + escHtml(prefix) + '" data-param-alias="' + escHtml(alias) + '">选择因子</button>' : '') +
+                '</div>';
         }
-        return '<input type="text" id="' + prefix + escHtml(alias) + '" value="' + escHtml(def) + '">';
+        return '<div class="param-input-stack"><input type="text" id="' + prefix + escHtml(alias) + '" class="param-input-control" value="' + escHtml(def) + '"></div>';
     }
 
     function buildAlias(familyAlias, aliases, row) {

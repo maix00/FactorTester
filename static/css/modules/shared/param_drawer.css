@@ -162,21 +162,40 @@
 .param-table th:first-child {
     min-width: 100px;
 }
-.param-table input {
+.param-table td {
+    word-break: break-word;
+    white-space: normal;
+}
+.param-input-stack {
+    width: min(180px, 100%);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+.param-table .param-input-control {
     width: 100%;
-    min-width: 50px;
-    max-width: 140px;
-    padding: 4px 6px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
+    min-width: 0;
+    height: 34px;
+    padding: 6px 10px;
+    border: 1px solid #c7d0dc;
+    border-radius: 6px;
     font-size: 13px;
+    line-height: 20px;
     text-align: center;
     box-sizing: border-box;
     margin: 0;
+    background: #fff;
+    color: #1f2937;
 }
-.param-table td:not(:has(input)) {
-    word-break: break-word;
-    white-space: normal;
+.param-table select.param-input-control {
+    appearance: none;
+}
+.param-table .param-input-control:focus {
+    outline: none;
+    border-color: #4a90d9;
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.15);
 }
 .param-table tbody tr:last-child td {
     border-bottom: none;
@@ -191,6 +210,12 @@
     cursor: pointer;
     transition: background 0.2s;
     white-space: nowrap;
+}
+.param-input-stack .param-btn {
+    height: 34px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
 }
 .param-btn:hover {
     background: #005a9e;

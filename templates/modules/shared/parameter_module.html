@@ -97,15 +97,16 @@
                         {% set option_values = options | map(attribute='value') | list %}
                         {% set use_custom = input_mode == 'enum_custom' and default_value not in option_values %}
                         <td>
+                            <div class="param-input-stack">
                             {% if options and input_mode == 'enum' %}
-                                <select id="param_{{ param.alias }}"
+                                <select id="param_{{ param.alias }}" class="param-input-control"
                                         onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
                                     {% for option in options %}
                                         <option value="{{ option.value }}"{% if option.value == default_value %} selected{% endif %}>{{ option.label }}</option>
                                     {% endfor %}
                                 </select>
                             {% elif options and input_mode == 'enum_custom' %}
-                                <select id="param_{{ param.alias }}" data-custom-input-id="param_custom_{{ param.alias }}"
+                                <select id="param_{{ param.alias }}" class="param-input-control" data-custom-input-id="param_custom_{{ param.alias }}"
                                         onchange="var el=document.getElementById(this.dataset.customInputId);if(el)el.style.display=this.value==='__custom__'?'':'none';"
                                         onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
                                     {% for option in options %}
@@ -113,20 +114,20 @@
                                     {% endfor %}
                                     <option value="__custom__"{% if use_custom %} selected{% endif %}>其他…</option>
                                 </select>
-                                <input type="text" id="param_custom_{{ param.alias }}"
+                                <input type="text" id="param_custom_{{ param.alias }}" class="param-input-control"
                                        value="{% if use_custom %}{{ default_value }}{% endif %}"
-                                       style="{% if not use_custom %}display:none;{% endif %}margin-top:4px;"
+                                       style="{% if not use_custom %}display:none;{% endif %}"
                                        onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
                                 {% if meta and meta.type == 'FactorParam' %}
                                     <button type="button" class="param-btn factor-param-picker-btn"
-                                            data-param-alias="{{ param.alias }}"
-                                            style="margin-top:4px;">选择因子</button>
+                                            data-param-alias="{{ param.alias }}">选择因子</button>
                                 {% endif %}
                             {% else %}
-                                <input type="text" id="param_{{ param.alias }}"
+                                <input type="text" id="param_{{ param.alias }}" class="param-input-control"
                                        value="{{ default_value }}"
                                        onkeydown="if(event.key==='Enter'){event.preventDefault();window._doAddParam()}">
                             {% endif %}
+                            </div>
                         </td>
                     {% endfor %}
                     <td>
