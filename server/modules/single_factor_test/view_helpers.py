@@ -9,7 +9,7 @@ from flask import render_template
 
 import Settings as Settings
 from server.modules.shared.param_meta import serialize_param_meta
-from server.services.factor_registry import get_factor_family_instance
+from server.services.factor_registry import factor_group_key, get_factor_family_instance
 from server.services.runtime_state import get_session_params
 
 
@@ -27,20 +27,6 @@ def build_group_html(
     chinese_names = chinese_names or {}
     custom_factors = custom_factors or []
 
-    def get_group(name):
-        group = ""
-        upper_count = 0
-        for char in name:
-            if char.isupper():
-                upper_count += 1
-                if upper_count == 1:
-                    group += char
-                elif upper_count == 2:
-                    break
-            elif upper_count == 1:
-                group += char
-        return group if group else name
-
     merged_groups = {}
     for group, names in groups.items():
         for name in sorted(names):
@@ -56,7 +42,7 @@ def build_group_html(
 
     for custom_factor in custom_factors:
         factor_name = custom_factor.get('name', '') or custom_factor.get('id', '')
-        factor_group = get_group(factor_name)
+        factor_group = factor_group_key(str(factor_name))
         merged_groups.setdefault(factor_group, []).append({
             'name': factor_name,
             'type': 'custom',

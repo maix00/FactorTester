@@ -17,6 +17,7 @@ from server.services.accounts import (
     visible_accounts_for,
 )
 from server.services.factor_registry import (
+    factor_group_key,
     get_custom_factor_instance,
     get_factor_family_instance,
 )
@@ -30,23 +31,6 @@ def template_time_from_id(template: dict) -> str:
         return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))
     except Exception:
         return ''
-
-
-def factor_group_key(name: str | None) -> str:
-    group = ''
-    upper_count = 0
-    for char in str(name or ''):
-        if char.isupper() and char.isalpha():
-            upper_count += 1
-            if upper_count == 1:
-                group += char
-            elif upper_count == 2:
-                break
-            else:
-                group += char
-        elif upper_count == 1:
-            group += char
-    return group or str(name or '')
 
 
 def alias_map(factors: list[dict]) -> dict:
@@ -164,7 +148,7 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
                     })
 
     items.sort(key=lambda factor: (
-        factor_group_key(factor.get('factor_family_alias') or factor.get('factor_family_name')),
+        factor_group_key(str(factor.get('factor_family_alias') or factor.get('factor_family_name') or '')),
         factor.get('owner_organization_name') or factor.get('owner_organization_id') or '',
         factor.get('owner_alias') or factor.get('owner_username') or '',
         factor.get('factor_family_alias') or '',

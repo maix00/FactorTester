@@ -13,6 +13,7 @@ from server.services.accounts import (
     get_account,
 )
 from server.services.factor_registry import (
+    factor_group_key,
     get_chinese_names,
     get_factor_family_instance,
     get_factor_groups,
@@ -31,22 +32,6 @@ def _search_custom_factors(factors, query):
         or q in f.get('chinese_name', '').lower()
         or q in f.get('category', '').lower()
     ]
-
-
-def _camel_group(name: str) -> str:
-    group = ''
-    upper_count = 0
-    for c in name or '':
-        if c.isupper():
-            upper_count += 1
-            if upper_count == 1:
-                group += c
-            elif upper_count == 2:
-                break
-        else:
-            if upper_count == 1:
-                group += c
-    return group or name or ''
 
 
 def _get_sidebar_custom_factors(username: str, include_subordinates: bool) -> list:
@@ -90,7 +75,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
             'owner_organization_id': '',
             'owner_organization_name': '',
             'can_edit': False,
-            'group': _camel_group(name),
+            'group': factor_group_key(name),
         }
         for name in sorted(factor_names)
     ]
@@ -109,7 +94,7 @@ def _build_single_factor_sidebar_payload(search_query: str = '', include_subordi
             'owner_organization_name': cf.get('owner_organization_name', ''),
             'can_edit': bool(cf.get('can_edit')),
             'updated_at': cf.get('updated_at', ''),
-            'group': _camel_group(name),
+            'group': factor_group_key(name),
         })
     return {
         'public_factors': public_factors,
