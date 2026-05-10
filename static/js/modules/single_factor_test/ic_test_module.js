@@ -55,6 +55,9 @@
         const _fmtHeader = isDaily
             ? x => Highcharts.dateFormat('%Y-%m-%d', x)
             : x => Highcharts.dateFormat('%Y-%m-%d %H:%M', x);
+        function groupName(group, name) {
+            return `[${group}] ${name}`;
+        }
         const ohlcData     = priceData.dates.map((ts, i) => [_parseTs(ts), priceData.OPEN[i], priceData.HIGH[i], priceData.LOW[i], priceData.CLOSE[i]]);
         const factorValues = factorData.dates.map((ts, i) => [_parseTs(ts), factorData.values[i]]);
         const returnValues = returnData.dates.map((ts, i) => [_parseTs(ts), returnData.values[i]]);
@@ -103,31 +106,34 @@
         // 构建 series
         const series = [
             {
-                name: `${productName} 主力连续`,
+                name: groupName('价格', `${productName} 主力连续`),
                 type: 'candlestick',
                 data: ohlcData,
                 yAxis: 0,
                 zIndex: 10,
+                legendIndex: 10,
                 color: '#1F2937',
                 lineColor: '#1F2937',
                 upColor: '#FFF176',
                 upLineColor: '#1F2937',
             },
             {
-                name: `因子值`,
+                name: groupName('指标', '因子值'),
                 type: 'line',
                 data: factorValues,
                 yAxis: 1,
                 color: '#FF5722',
-                id: 'factor'
+                id: 'factor',
+                legendIndex: 200,
             },
             {
-                name: `下一期收益率`,
+                name: groupName('指标', '下一期收益率'),
                 type: 'line',
                 data: returnValues,
                 yAxis: 2,
                 color: '#4CAF50',
-                id: 'return'
+                id: 'return',
+                legendIndex: 210,
             }
         ];
 
@@ -139,11 +145,12 @@
                 const fromTs = s.data[0] && s.data[0][0] != null ? s.data[0][0] : null;
                 const toTs = s.data[s.data.length - 1] && s.data[s.data.length - 1][0] != null ? s.data[s.data.length - 1][0] : null;
                 series.push({
-                    name: s.name,
+                    name: groupName('期限价格', s.name),
                     type: 'candlestick',
                     data: s.data,
                     yAxis: 0,
                     zIndex: 2,
+                    legendIndex: 30 + i,
                     custom: { isContractOverlay: true, rangeFrom: fromTs, rangeTo: toTs },
                     color: palette[i % palette.length],
                     lineWidth: 1,
@@ -169,23 +176,25 @@
                 offset: 0,
             });
             series.push({
-                name: `成交量`,
+                name: groupName('成交量', productName),
                 type: 'column',
                 data: volData,
                 yAxis: nextIdx,
                 color: '#90CAF9',
-                id: 'volume'
+                id: 'volume',
+                legendIndex: 100,
             });
             contractSeriesList.forEach(function(s, i) {
                 if (!s || !Array.isArray(s.volume) || s.volume.length === 0) return;
                 series.push({
-                    name: `${s.name} 成交量`,
+                    name: groupName('成交量', s.name),
                     type: 'column',
                     data: s.volume,
                     yAxis: nextIdx,
                     color: palette[i % palette.length],
                     opacity: 0.35,
                     id: `contract-volume-${i}`,
+                    legendIndex: 110 + i,
                 });
             });
             nextTop += extraH + gap;
@@ -203,17 +212,18 @@
                 offset: 0,
             });
             series.push({
-                name: `持仓量`,
+                name: groupName('持仓量', productName),
                 type: 'line',
                 data: oiData,
                 yAxis: nextIdx,
                 color: '#E91E63',
-                id: 'oi'
+                id: 'oi',
+                legendIndex: 150,
             });
             contractSeriesList.forEach(function(s, i) {
                 if (!s || !Array.isArray(s.open_interest) || s.open_interest.length === 0) return;
                 series.push({
-                    name: `${s.name} 持仓量`,
+                    name: groupName('持仓量', s.name),
                     type: 'line',
                     data: s.open_interest,
                     yAxis: nextIdx,
@@ -221,6 +231,7 @@
                     dashStyle: 'ShortDot',
                     opacity: 0.8,
                     id: `contract-oi-${i}`,
+                    legendIndex: 160 + i,
                 });
             });
         }
@@ -228,7 +239,15 @@
         const chart = Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: `${productName} — ${factorName}` },
-            legend: { enabled: true },
+            legend: {
+                enabled: true,
+                layout: 'horizontal',
+                align: 'center',
+                verticalAlign: 'bottom',
+                itemDistance: 18,
+                maxHeight: 96,
+                navigation: { enabled: true },
+            },
             plotOptions: {
                 series: {
                     point: {
@@ -251,20 +270,20 @@
                     return [header].concat(this.points.map(pt => {
                         if (pt.series.type === 'candlestick') {
                             const p = pt.point;
-                            return `开: <b>${p.open.toFixed(2)}</b>  高: <b>${p.high.toFixed(2)}</b><br/>` +
+                            return `${pt.series.name}<br/>开: <b>${p.open.toFixed(2)}</b>  高: <b>${p.high.toFixed(2)}</b><br/>` +
                                    `低: <b>${p.low.toFixed(2)}</b>  收: <b>${p.close.toFixed(2)}</b>`;
                         }
                         if (pt.series.options.id === 'factor') {
-                            return `因子值: <b>${pt.y.toFixed(4)}</b>`;
+                            return `${pt.series.name}: <b>${pt.y.toFixed(4)}</b>`;
                         }
                         if (pt.series.options.id === 'return') {
-                            return `收益率: <b>${(pt.y * 100).toFixed(2)}%</b>`;
+                            return `${pt.series.name}: <b>${(pt.y * 100).toFixed(2)}%</b>`;
                         }
-                        if (pt.series.options.id === 'volume') {
-                            return `成交量: <b>${pt.y.toFixed(0)}</b>`;
+                        if (String(pt.series.options.id || '').indexOf('volume') >= 0) {
+                            return `${pt.series.name}: <b>${pt.y.toFixed(0)}</b>`;
                         }
-                        if (pt.series.options.id === 'oi') {
-                            return `持仓量: <b>${pt.y.toFixed(0)}</b>`;
+                        if (String(pt.series.options.id || '').indexOf('oi') >= 0) {
+                            return `${pt.series.name}: <b>${pt.y.toFixed(0)}</b>`;
                         }
                         return `${pt.series.name}: <b>${pt.y}</b>`;
                     }));

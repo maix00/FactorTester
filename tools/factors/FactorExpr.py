@@ -857,6 +857,12 @@ class ColumnRef(FactorExpr):
                 if preloaded_df is not None and self.column.name in preloaded_df.columns:
                     series_dict[p] = preloaded_df[self.column.name]
                     continue
+                if preloaded_df is not None:
+                    from tools.data.DataMeta import DataMeta
+                    raw_col = DataMeta._get_nonadjusted_col_name(self.column.name)
+                    if DataMeta._check_is_adjusted(self.column.name) and raw_col in preloaded_df.columns:
+                        series_dict[p] = preloaded_df[raw_col]
+                        continue
 
             dm: DataMeta = getattr(p, freq.name)
             if source is not None:
