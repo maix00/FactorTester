@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, cast
 
+import numpy as np
 import pandas as pd
 
 
@@ -132,3 +133,110 @@ class AdjustableProductMixin:
         x = pd.Series(df[TERM_DAYS_TO_MATURITY_COL]).to_numpy(dtype=float)
         y = pd.Series(df[column]).to_numpy(dtype=float)
         return float(np.polyfit(x, y, 1)[0])
+
+    @staticmethod
+    def _normalize_trading_days(index: Iterable[Any]) -> pd.DatetimeIndex:
+        idx = pd.DatetimeIndex(pd.to_datetime(list(index)))
+        if len(idx) == 0:
+            return idx
+        return idx.normalize().unique().sort_values()
+
+    def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
+        days = self._normalize_trading_days(trading_days)
+        if len(days) == 0:
+            return pd.DataFrame()
+        df = self.get_term_structure_store().load(product=getattr(self, 'name'))
+        if df.empty:
+            return df
+        day_set = set(days)
+        df = df[df[TERM_TRADING_DAY_COL].isin(day_set)]
+        if df.empty:
+            return df
+        df = df.sort_values([TERM_TRADING_DAY_COL, TERM_RANK_COL])
+        if depth is not None:
+            df = df[df[TERM_RANK_COL] < int(depth)]
+        return df
+
+    def term_spread_series(
+        self,
+        trading_days: Iterable[Any],
+        near_rank: int = 0,
+        far_rank: int = 1,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        near_rank = int(near_rank)
+        far_rank = int(far_rank)
+        depth = max(near_rank, far_rank) + 1
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+
+        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        out.loc[near.index.intersection(out.index)] = (near - far).reindex(near.index.intersection(out.index)).astype(float)
+        return out
+
+    def term_ratio_series(
+        self,
+        trading_days: Iterable[Any],
+        near_rank: int = 0,
+        far_rank: int = 1,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        near_rank = int(near_rank)
+        far_rank = int(far_rank)
+        depth = max(near_rank, far_rank) + 1
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+
+        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        ratio = (near / far) - 1.0
+        ratio = ratio.where(far != 0)
+        out.loc[ratio.index.intersection(out.index)] = ratio.reindex(ratio.index.intersection(out.index)).astype(float)
+        return out
+
+    def term_slope_series(
+        self,
+        trading_days: Iterable[Any],
+        depth: int = 4,
+        column: str = 'CLOSE',
+    ) -> pd.Series:
+        days = self._normalize_trading_days(trading_days)
+        out = pd.Series(np.nan, index=days, dtype=float)
+        if len(days) == 0:
+            return out
+
+        depth = int(depth)
+        if depth < 2:
+            return out
+
+        df = self._load_term_structure_days(days, depth=depth)
+        if df.empty:
+            return out
+        df = df[[TERM_TRADING_DAY_COL, TERM_DAYS_TO_MATURITY_COL, column]].dropna()
+        if df.empty:
+            return out
+
+        def _slope(g: pd.DataFrame) -> float:
+            if len(g) < 2:
+                return float('nan')
+            x = pd.Series(g[TERM_DAYS_TO_MATURITY_COL]).to_numpy(dtype=float)
+            y = pd.Series(g[column]).to_numpy(dtype=float)
+            return float(np.polyfit(x, y, 1)[0])
+
+        slopes = df.groupby(TERM_TRADING_DAY_COL, sort=False).apply(_slope)
+        slopes = cast(pd.Series, slopes)
+        out.loc[slopes.index.intersection(out.index)] = slopes.reindex(slopes.index.intersection(out.index)).astype(float)
+        return out

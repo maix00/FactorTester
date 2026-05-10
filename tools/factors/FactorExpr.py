@@ -1845,31 +1845,24 @@ class TermStructureOp(OperandExpr):
             idx = self._time_index_for_product(product, freq)
             if len(idx) == 0:
                 continue
-            values = []
-            for ts in idx:
-                try:
-                    if self.op == 'term_spread':
-                        term_spread_fn = getattr(product, 'term_spread', None)
-                        if not callable(term_spread_fn):
-                            val = np.nan
-                        else:
-                            val = term_spread_fn(ts, near_rank, far_rank, column)
-                    elif self.op == 'term_ratio':
-                        term_ratio_fn = getattr(product, 'term_ratio', None)
-                        if not callable(term_ratio_fn):
-                            val = np.nan
-                        else:
-                            val = term_ratio_fn(ts, near_rank, far_rank, column)
-                    else:
-                        term_slope_fn = getattr(product, 'term_slope', None)
-                        if not callable(term_slope_fn):
-                            val = np.nan
-                        else:
-                            val = term_slope_fn(ts, depth, column)
-                except Exception:
-                    val = np.nan
-                values.append(val)
-            series_dict[product] = pd.Series(values, index=idx, dtype=float)
+            if self.op == 'term_spread':
+                batch_fn = getattr(product, 'term_spread_series', None)
+                if not callable(batch_fn):
+                    raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_spread_series")
+                series = batch_fn(idx, near_rank=near_rank, far_rank=far_rank, column=column)
+            elif self.op == 'term_ratio':
+                batch_fn = getattr(product, 'term_ratio_series', None)
+                if not callable(batch_fn):
+                    raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_ratio_series")
+                series = batch_fn(idx, near_rank=near_rank, far_rank=far_rank, column=column)
+            else:
+                batch_fn = getattr(product, 'term_slope_series', None)
+                if not callable(batch_fn):
+                    raise TypeError(f"Product {getattr(product, 'name', product)} missing required method term_slope_series")
+                series = batch_fn(idx, depth=depth, column=column)
+            if not isinstance(series, pd.Series):
+                raise TypeError(f"Batch method for {getattr(product, 'name', product)} must return pd.Series, got {type(series).__name__}")
+            series_dict[product] = series.astype(float).reindex(idx)
         if not series_dict:
             return pd.DataFrame()
         result = pd.concat(series_dict, axis=1)
