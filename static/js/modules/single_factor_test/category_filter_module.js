@@ -12,6 +12,15 @@
     var treeInstance = null;
     var categoryTreeSizer = null;
 
+    function _hasMountedTree($container) {
+        if (!$container || !$container.length) return false;
+        try {
+            return !!$container.fancytree('getTree');
+        } catch (e) {
+            return false;
+        }
+    }
+
     // 用后端列表同步本地 submissions
     function syncFromServer(serverSubmissions) {
         // 保留下标映射：用 id 作为 key
@@ -398,6 +407,11 @@
             return;
         }
 
+        var $container = $("#tree-container");
+        if (!_hasMountedTree($container)) {
+            treeInstance = null;
+        }
+
         if (typeof window.setupResizableTreeContainer === 'function') {
             categoryTreeSizer = window.setupResizableTreeContainer({
                 outerSelector: '#category-tree-panel',
@@ -419,8 +433,15 @@
             });
         }
 
+        // 若之前已初始化，先销毁后重建（处理内容热替换后树丢失/失效）。
+        if (_hasMountedTree($container)) {
+            try {
+                $container.fancytree('destroy');
+            } catch (e) {}
+            treeInstance = null;
+        }
+
         // 清空容器，确保没有残留内容
-        var $container = $("#tree-container");
         $container.empty();  // 移除任何可能存在的占位文字
 
         // 可选：显示一个临时的 loading 提示（Fancytree 加载期间会显示自带 loading，但为了体验可以加一个）
@@ -457,7 +478,7 @@
         });
 
         // 提交按钮事件
-        $("#submit-selected").click(submitSelectedProducts);
+        $("#submit-selected").off('click').on('click', submitSelectedProducts);
 
         // 初始化 SortableJS 实现拖动排序
         var historyContainer = document.getElementById('submission-history');
@@ -722,6 +743,15 @@
             if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
         };
     }
+
+    window.ensureCategoryTreeReady = function() {
+        var $ = window.jQuery;
+        if (!$) return;
+        var $container = $("#tree-container");
+        if (!$container.length) return;
+        if (_hasMountedTree($container)) return;
+        initCategoryFilterModule(0);
+    };
 
     initCategoryFilterModule();
 })();

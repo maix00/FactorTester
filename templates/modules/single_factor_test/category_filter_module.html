@@ -1,5 +1,5 @@
 <!-- 产品类别摘要行 -->
-<div class="setting-summary-row" onclick="document.getElementById('category-drawer').classList.add('open');document.getElementById('user-badge').style.display='none'">
+<div class="setting-summary-row" onclick="document.getElementById('category-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.ensureCategoryTreeReady)window.ensureCategoryTreeReady()">
     <span class="setting-summary-label">🌳 产品类别</span>
     <span class="setting-summary-value multiline" id="category-summary-text">加载中…</span>
     <span class="setting-summary-arrow">编辑 ▶</span>
