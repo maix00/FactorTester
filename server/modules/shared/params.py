@@ -8,23 +8,7 @@ from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import current_user, get_session_params, save_session_params
 from . import shared_bp
-from .param_config import normalize_param_row, param_value_display
-
-
-def _build_factor_rows(ff, params_list):
-    factors = ff.get_factors(params_list=params_list)
-    rows = []
-    for idx, (factor, row) in enumerate(zip(factors, params_list)):
-        display_params = {}
-        for p in ff.params:
-            val = row.get(p.alias)
-            display_params[p.alias] = param_value_display(p, val)
-        rows.append({
-            'index': idx,
-            'factor_alias': factor.alias,
-            'params': display_params,
-        })
-    return rows
+from .param_config import build_factor_rows, normalize_param_row, param_value_display
 
 
 @shared_bp.route('/add_params', methods=['POST'])
@@ -47,7 +31,7 @@ def add_params():
             'success': True,
             'params_count': len(pl),
             'added_params': added_display,
-            'factor_rows': _build_factor_rows(ff, pl),
+            'factor_rows': build_factor_rows(ff, pl),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -64,7 +48,7 @@ def delete_params():
         if 0 <= factor_idx < len(pl):
             pl.pop(factor_idx)
         save_session_params(factor_family_alias, pl)
-        return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, pl)})
+        return jsonify({'success': True, 'factor_rows': build_factor_rows(ff, pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -82,6 +66,6 @@ def reorder_params():
             param = pl.pop(from_idx)
             pl.insert(to_idx, param)
         save_session_params(factor_family_alias, pl)
-        return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, pl)})
+        return jsonify({'success': True, 'factor_rows': build_factor_rows(ff, pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

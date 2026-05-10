@@ -19,7 +19,10 @@ from server.services.factor_registry import (
     get_factor_groups,
 )
 from server.services.runtime_state import current_user, get_session_params
-from server.modules.single_factor_test.view_helpers import get_factor_main_section_html
+from server.modules.single_factor_test.view_helpers import (
+    get_default_test_time_strings,
+    get_factor_main_section_html,
+)
 from . import sft_bp
 
 
@@ -130,16 +133,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
             param_aliases = [p.alias for p in params]
             session_params = get_session_params(display_alias, ff)
             factors = ff.get_factors(params_list=session_params)
-            start_date = getattr(__import__('Settings'), 'default_test_start_date', '2025-01-02')
-            end_date = getattr(__import__('Settings'), 'default_test_end_date', '2025-05-31')
-            import pandas as pd
-
-            start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else str(start_date)
-            end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, pd.Timestamp) else str(end_date)
-            import Settings
-
-            start_time = getattr(Settings, 'default_day_start_time', '09:30')
-            end_time = getattr(Settings, 'default_day_end_time', '15:00')
+            start_date, end_date, start_time, end_time = get_default_test_time_strings()
             return render_template(
                 'factor_main.html',
                 factor_family_alias=display_alias,

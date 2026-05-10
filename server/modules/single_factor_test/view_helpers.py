@@ -13,6 +13,16 @@ from server.services.factor_registry import factor_group_key, get_factor_family_
 from server.services.runtime_state import get_session_params
 
 
+def get_default_test_time_strings():
+    start_date = getattr(Settings, 'default_test_start_date', '2025-01-02')
+    end_date = getattr(Settings, 'default_test_end_date', '2025-05-31')
+    start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else str(start_date)
+    end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, pd.Timestamp) else str(end_date)
+    start_time = getattr(Settings, 'default_day_start_time', '09:30')
+    end_time = getattr(Settings, 'default_day_end_time', '15:00')
+    return start_date, end_date, start_time, end_time
+
+
 def build_group_html(
     groups,
     chinese_names: dict | None = None,
@@ -142,12 +152,7 @@ def get_factor_main_section_html(factor_family_alias):
         param_metas = [serialize_param_meta(param) for param in params]
         param_aliases = [param.alias for param in params]
         factors = factor_family.get_factors(params_list=get_session_params(factor_family_alias, factor_family))
-        start_date = getattr(Settings, 'default_test_start_date', '2020-01-01')
-        start_date = start_date.strftime('%Y-%m-%d') if isinstance(start_date, pd.Timestamp) else start_date
-        end_date = getattr(Settings, 'default_test_end_date', '2024-12-31')
-        end_date = end_date.strftime('%Y-%m-%d') if isinstance(end_date, pd.Timestamp) else end_date
-        start_time = getattr(Settings, 'default_day_start_time', '09:30')
-        end_time = getattr(Settings, 'default_day_end_time', '15:00')
+        start_date, end_date, start_time, end_time = get_default_test_time_strings()
         return render_template(
             'factor_main.html',
             factor_family_alias=factor_family_alias,
