@@ -17,13 +17,10 @@ from server.services.product_tree import (
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
-from .submission_helpers import resolve_products_from_paths, tester_to_dict
-
-
-def _valid_testers():
-    """返回当前有效（未被销毁）的 tester 列表。"""
-    with factor_testers_lock:
-        return [t for t in runtime_state.factor_testers if t.products and len(t.products) > 0]
+from .submission_helpers import (
+    resolve_products_from_paths,
+    submissions_payload,
+)
 
 
 @shared_bp.route('/api/tree-data')
@@ -37,10 +34,9 @@ def get_tree_data():
 def list_submissions():
     """返回当前全部有效的 FactorTester 列表（前端同步用）。"""
     try:
-        testers = _valid_testers()
         return jsonify({
             'success':     True,
-            'submissions': [tester_to_dict(t) for t in testers],
+            'submissions': submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -111,7 +107,7 @@ def submit_selected_products():
             'factor_tester_name':   factor_tester.name,
             'factor_tester_serial': f"#{id_time}",
             'count_desc':          f"{len(selected_products)} 个产品",
-            'submissions':         [tester_to_dict(t) for t in _valid_testers()],
+            'submissions':         submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -150,7 +146,7 @@ def delete_submission():
             assert len(runtime_state.factor_testers) == n - 1, "No submission deleted"
         return jsonify({
             'success':     True,
-            'submissions': [tester_to_dict(t) for t in _valid_testers()],
+            'submissions': submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -180,7 +176,7 @@ def clear_all_submissions():
             ]
         return jsonify({
             'success':     True,
-            'submissions': [tester_to_dict(t) for t in _valid_testers()],
+            'submissions': submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -199,7 +195,7 @@ def delete_path_of_submission():
         tester.products = sorted(list(set(selected_products)))
         return jsonify({
             'success':     True,
-            'submissions': [tester_to_dict(t) for t in _valid_testers()],
+            'submissions': submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -255,7 +251,7 @@ def replace_submissions():
         return jsonify({
             'success': True,
             'replaced_submissions': replaced,
-            'submissions': [tester_to_dict(t) for t in _valid_testers()],
+            'submissions': submissions_payload(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

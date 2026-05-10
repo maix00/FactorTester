@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import server.services.runtime_state as runtime_state
+from server.services.runtime_state import factor_testers_lock
 from server.services.product_tree import find_node_by_path, get_minimal_paths, tree
 
 
@@ -30,3 +32,14 @@ def resolve_products_from_paths(raw_paths: list[str]):
             selected_products.append(node)
     selected_products = sorted(list(set(selected_products)))
     return selected_paths, selected_products
+
+
+def valid_testers():
+    """Return active testers that still hold products."""
+    with factor_testers_lock:
+        return [t for t in runtime_state.factor_testers if t.products and len(t.products) > 0]
+
+
+def submissions_payload():
+    """Standard submissions list payload for frontend sync."""
+    return [tester_to_dict(t) for t in valid_testers()]
