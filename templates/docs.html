@@ -93,7 +93,7 @@
     <!-- 1. 项目概览 -->
     <div class="docs-section" id="overview">
         <h2>1. 项目概览</h2>
-        <p>因子工具箱是一个基于 <strong>Flask</strong> 的量化因子研究平台，专注于中国期货市场的因子挖掘与验证。系统提供单因子 IC 测试、分组回测、多因子合成等功能，支持参数模板、全局设置快照等便捷操作。</p>
+        <p>因子工具箱是一个基于 <strong>Flask</strong> 的量化因子研究平台，专注于中国期货市场的因子挖掘与验证。系统提供单因子 IC 测试、分组回测、多因子合成等功能，支持参数模板、单因子设置快照等便捷操作。</p>
         <h3>技术栈</h3>
         <table>
             <tr><th>层级</th><th>技术</th></tr>
@@ -141,7 +141,7 @@
             <tr><th>Blueprint</th><th>文件</th><th>职责</th></tr>
             <tr><td><code>auth_bp</code></td><td>server/auth.py</td><td>登录/注册/登出，首个注册用户自动为 Admin</td></tr>
             <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页(/)、单因子测试、多因子测试、技术文档</td></tr>
-            <tr><td><code>templates_bp</code></td><td>server/modules/templates/</td><td>参数/时间/全局模板的 CRUD</td></tr>
+            <tr><td><code>templates_bp</code></td><td>server/modules/templates/</td><td>参数/时间/单因子设置快照模板的 CRUD</td></tr>
             <tr><td><code>shared_bp</code></td><td>server/modules/shared/</td><td>因子数据、参数管理、产品提交、时间范围</td></tr>
             <tr><td><code>sft_bp</code></td><td>server/modules/single_factor_test/</td><td>IC 测试、分组回测</td></tr>
             <tr><td><code>mfa_bp</code></td><td>server/modules/multi_factor_analysis/</td><td>多因子合成与分析</td></tr>
@@ -194,7 +194,7 @@
             <tr><td><code>shared/time_range_module.html</code></td><td>时间范围选择，支持交易日模式、期货日夜盘、时区</td></tr>
             <tr><td><code>shared/latex_module.html</code></td><td>MathJax 渲染因子公式和文字说明</td></tr>
             <tr><td><code>single_factor_test/category_filter_module.html</code></td><td>树状产品选择器 (Fancytree)，产品路径提交</td></tr>
-            <tr><td><code>single_factor_test/global_template_module.html</code></td><td>全局设置快照：一键保存/加载所有设置组合</td></tr>
+            <tr><td><code>single_factor_test/global_template_module.html</code></td><td>单因子设置快照：一键保存/加载当前因子家族的设置组合</td></tr>
             <tr><td><code>single_factor_test/ic_test_module.html</code></td><td>IC 测试配置，自定义收益率频率</td></tr>
             <tr><td><code>single_factor_test/group_test_module.html</code></td><td>分组回测设置：分组数、手续费模式、多周期对比</td></tr>
         </table>
@@ -214,7 +214,7 @@
 
         <h3>3.4 设计模式</h3>
         <p><strong>抽屉式设置 (Drawer)：</strong>每个设置模块以可折叠的 <code>.settings-drawer-panel</code> 形式呈现，点击摘要行展开，不刷新页面。</p>
-        <p><strong>模板系统：</strong>参数、时间范围、全局设置有独立的 JSON 模板存储（<code>/api/*_templates</code>），支持命名、保存、加载、删除。</p>
+        <p><strong>模板系统：</strong>参数、时间范围、单因子设置快照有独立的 JSON 模板存储（<code>/api/*_templates</code>），支持命名、保存、加载、删除。</p>
         <p><strong>前端费率计算：</strong>分组回测中的费率敏感性分析在前端用 JS 实时重算累积净值和 Sharpe/MDD，无需重复请求后端。</p>
     </div>
 
@@ -248,7 +248,7 @@
             <tr><td>产品路径模板</td><td><code>/api/path_templates</code></td><td>产品树勾选状态</td></tr>
             <tr><td>时间范围模板</td><td><code>/api/time_templates</code></td><td>起止时间、交易日/盘面设置</td></tr>
             <tr><td>参数模板</td><td><code>/api/params_templates/&lt;alias&gt;</code></td><td>因子参数组列表</td></tr>
-            <tr><td>全局模板</td><td><code>/api/global_templates</code></td><td>完整快照（参数+时间+品种+费率+回测设置）</td></tr>
+            <tr><td>单因子设置快照</td><td><code>/api/single_factor_setting_templates</code></td><td>当前因子家族的完整快照（参数+时间+品种+费率+回测设置）</td></tr>
         </table>
         <p>每个资源均支持：<code>GET /</code>（列表）、<code>POST /</code>（创建）、<code>GET /&lt;id&gt;</code>（获取）、<code>PUT /&lt;id&gt;</code>（更新）、<code>DELETE /&lt;id&gt;</code>（删除）。模板按用户隔离存储，JSON 格式。</p>
 

@@ -723,7 +723,7 @@
 
         // ── 路径模板管理 END ──────────────────────────────────────────────────
 
-        // 暴露给全局模板模块
+        // 暴露给单因子设置快照模块
         window._getCurrentSubmissions = function() {
             return submissions;
         };

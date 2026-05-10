@@ -283,7 +283,7 @@ def update_params_template(ff_alias, tpl_id):
             if not name:
                 return jsonify({'success': False, 'error': '模板名称不能为空'})
             if tpl['name'].startswith('__global_'):
-                return jsonify({'success': False, 'error': '全局模板不允许重命名'})
+                return jsonify({'success': False, 'error': '设置快照关联参数模板不允许重命名'})
             tpl['name'] = name
         if 'params_list' in data:
             if not isinstance(data['params_list'], list) or len(data['params_list']) == 0:
@@ -359,17 +359,20 @@ def replace_params():
         return jsonify({'success': False, 'error': str(e)})
 
 
-# ── 全局模板 ──────────────────────────────────────────────────────────────────
+# ── 单因子测试设置快照模板 ────────────────────────────────────────────────────
+# 这里只处理单因子测试模块的某个因子家族设置快照。
+# 传入 user_storage 的 scope_key 在这里等于 factor_family_alias；
+# 其他模块可以用同一个存储 helper 赋予 scope_key 不同含义，例如因子库的 user_id。
+SINGLE_FACTOR_SETTING_TEMPLATE_KIND = 'global'
 
-# ── 全局模板 ──────────────────────────────────────────────────────────────────
-# scope_key: 隔离键，当前用因子家族 alias 作为值，后续可扩展为其他维度
+# 存储层仍使用 kind='global' 以复用既有数据文件，但业务语义不是全系统全局模板。
 
-@templates_bp.route('/api/global_templates/<scope_key>', methods=['GET'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['GET'])
 @login_required
-def list_global_templates(scope_key):
+def list_single_factor_setting_templates(factor_family_alias):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
     result = []
     for t in templates:
         snap = t.get('snapshot', {})
@@ -379,15 +382,15 @@ def list_global_templates(scope_key):
             'id': t['id'],
             'name': t['name'],
             'ff_alias': t.get('ff_alias', ''),
-            'scope_key': scope_key,
+            'factor_family_alias': factor_family_alias,
             'summary': summary,
         })
     return jsonify({'success': True, 'templates': result})
 
 
-@templates_bp.route('/api/global_templates/<scope_key>', methods=['POST'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>', methods=['POST'])
 @login_required
-def save_global_template(scope_key):
+def save_single_factor_setting_template(factor_family_alias):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     ff_alias = (data.get('ff_alias') or '').strip()
@@ -398,7 +401,7 @@ def save_global_template(scope_key):
         return jsonify({'success': False, 'error': '因子家族不能为空'})
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         new_id = _new_tpl_id()
         templates.append({
             'id': new_id,
@@ -406,29 +409,29 @@ def save_global_template(scope_key):
             'ff_alias': ff_alias,
             'snapshot': snapshot,
         })
-        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
+        _save_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, templates, scope_key=factor_family_alias)
     return jsonify({'success': True, 'id': new_id})
 
 
-@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['GET'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['GET'])
 @login_required
-def get_global_template(scope_key, tpl_id):
+def get_single_factor_setting_template(factor_family_alias, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
     tpl = next((t for t in templates if t['id'] == tpl_id), None)
     if not tpl:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
     return jsonify({'success': True, 'template': tpl})
 
 
-@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['PUT'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['PUT'])
 @login_required
-def update_global_template(scope_key, tpl_id):
+def update_single_factor_setting_template(factor_family_alias, tpl_id):
     data = request.get_json()
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         tpl = next((t for t in templates if t['id'] == tpl_id), None)
         if not tpl:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
@@ -439,34 +442,34 @@ def update_global_template(scope_key, tpl_id):
             tpl['name'] = name
         if 'snapshot' in data:
             tpl['snapshot'] = data['snapshot']
-        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
+        _save_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, templates, scope_key=factor_family_alias)
     return jsonify({'success': True})
 
 
-@templates_bp.route('/api/global_templates/<scope_key>/<tpl_id>', methods=['DELETE'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/<tpl_id>', methods=['DELETE'])
 @login_required
-def delete_global_template(scope_key, tpl_id):
+def delete_single_factor_setting_template(factor_family_alias, tpl_id):
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
         before = len(templates)
         templates = [t for t in templates if t['id'] != tpl_id]
         if len(templates) == before:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
-        _save_user_tpls(u, 'global', templates, scope_key=scope_key)
+        _save_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, templates, scope_key=factor_family_alias)
     return jsonify({'success': True})
 
 
-# ── scope 下模板覆盖的因子列表（按因子家族分组） ─────────────────────────
+# ── 当前因子家族设置模板覆盖的因子列表（按因子家族分组） ─────────────────
 
-@templates_bp.route('/api/global_templates/<scope_key>/factors', methods=['GET'])
+@templates_bp.route('/api/single_factor_setting_templates/<factor_family_alias>/factors', methods=['GET'])
 @login_required
-def list_scope_factors(scope_key):
-    """列出 scope_key 下所有全局模板覆盖的因子，
+def list_single_factor_setting_template_factors(factor_family_alias):
+    """列出某个单因子测试因子家族设置模板覆盖的因子，
     从模板的 ff_alias 映射到实际的公共/自定义因子详情，按 factor_family 分组。"""
     u = _require_user()
     with _get_user_file_lock(u):
-        templates = _load_user_tpls(u, 'global', scope_key=scope_key)
+        templates = _load_user_tpls(u, SINGLE_FACTOR_SETTING_TEMPLATE_KIND, scope_key=factor_family_alias)
 
     # 收集所有 ff_alias
     ff_aliases = set()
@@ -524,7 +527,7 @@ def list_scope_factors(scope_key):
 
     return jsonify({
         'success': True,
-        'scope_key': scope_key,
+        'factor_family_alias': factor_family_alias,
         'groups': grouped,
         'total_factors': sum(len(g['factors']) for g in grouped),
     })

@@ -379,7 +379,7 @@
         $pLbl.addEventListener('dblclick', function() {
             var id = $pSel.value; if (!id) return;
             var name = $pLbl.textContent;
-            if (name.indexOf('__global_') === 0) { pTplStatus('全局模板不允许重命名', false); return; }
+            if (name.indexOf('__global_') === 0) { pTplStatus('设置快照关联参数模板不允许重命名', false); return; }
             $pInp.value = name;
             $pInp.style.display = ''; $pInp.focus();
             $pLbl.style.display = 'none';
@@ -391,7 +391,7 @@
             var id = $pSel.value; if (!id) { $pInp.style.display = 'none'; return; }
             if (($pLbl.textContent || '').indexOf('__global_') === 0) {
                 $pInp.style.display = 'none'; $pLbl.style.display = '';
-                pTplStatus('全局模板不允许重命名', false); return;
+                pTplStatus('设置快照关联参数模板不允许重命名', false); return;
             }
             var newName = $pInp.value.trim();
             if (!newName) { $pInp.style.display = 'none'; $pLbl.style.display = ''; return; }
@@ -417,13 +417,13 @@
             loadSelectedParamsTemplate();
         });
 
-        // 暴露参数模板加载函数，供全局模板等外部模块调用
+        // 暴露参数模板加载函数，供单因子设置快照等外部模块调用
         // 用法：window._loadParamsTemplate() 加载下拉框选中的模板
         window._loadParamsTemplate = function() {
             return loadSelectedParamsTemplate();
         };
 
-        // 暴露参数模板保存函数，供全局模板等外部模块调用
+        // 暴露参数模板保存函数，供单因子设置快照等外部模块调用
         // 用法：window._saveCurrentParamsAsTemplate(name) 返回 Promise<{success, id}>
         window._saveCurrentParamsAsTemplate = function(name) {
             return fetch('/api/current_params/' + encodeURIComponent(factorAlias))

@@ -23,7 +23,12 @@ def user_template_path(
     ff_alias: str | None = None,
     scope_key: str | None = None,
 ) -> str:
-    """Return the JSON path for a user's template collection."""
+    """Return the JSON path for a user's template collection.
+
+    `scope_key` is the storage-level isolation key. Different modules may choose
+    different meanings for it, e.g. a single-factor-test FactorFamily alias or a
+    factor-library user_id. Keep this helper business-agnostic.
+    """
     directory = user_data_dir(username)
     if scope_key:
         directory = os.path.join(directory, f'{kind}_templates')

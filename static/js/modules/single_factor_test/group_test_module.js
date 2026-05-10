@@ -830,12 +830,12 @@
     var _feeTableData = [];          // 原始费率数据（从后端获取的，不可变）
     var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio}}
 
-    /** 获取当前费率修改（供全局模板 collectSnapshot 调用） */
+    /** 获取当前费率修改（供单因子设置快照 collectSnapshot 调用） */
     window._getFeeModifications = function() {
         return JSON.parse(JSON.stringify(_feeModifications));
     };
 
-    /** 应用费率修改（供全局模板 applySnapshot 调用） */
+    /** 应用费率修改（供单因子设置快照 applySnapshot 调用） */
     window._applyFeeModifications = function(mods) {
         _feeModifications = {};
         if (mods && typeof mods === 'object') {

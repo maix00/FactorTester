@@ -198,7 +198,9 @@ def _user_data_dir(username: str) -> str:
 def _user_tpl_path(username: str, kind: str, ff_alias: str | None = None, scope_key: str | None = None) -> str:
     """返回模板文件路径。
     
-    - 如果提供了 scope_key，模板按 scope_key 隔离存储到 {kind}_templates/{scope_key}.json
+    - scope_key 是模板存储隔离键，不绑定具体业务含义。
+      单因子测试可用因子家族 alias；因子库可用 user_id。
+      如果提供了 scope_key，模板按 scope_key 隔离存储到 {kind}_templates/{scope_key}.json
     - 否则兼容旧行为：ff_alias 仅对 params 类型有效，其他类型存到 {kind}_templates.json
     """
     return user_template_path(username, kind, ff_alias, scope_key=scope_key)
