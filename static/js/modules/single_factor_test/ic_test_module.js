@@ -702,6 +702,36 @@
     }
 
     // 运行 IC 测试（核心修改）
+    async function resolveSubmissionIdForIC(subId, submission) {
+        try {
+            const resp = await fetch('/api/list_submissions');
+            const data = await resp.json();
+            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
+                return String(subId);
+            }
+
+            const targetId = String(subId);
+            const exact = data.submissions.find(s => String(s.id) === targetId);
+            if (exact) return String(exact.id);
+
+            const localPaths = new Set((submission?.paths || []).map(String));
+            if (localPaths.size > 0) {
+                const matched = data.submissions.find(s => {
+                    const sp = new Set((s.selected_paths || []).map(String));
+                    if (sp.size !== localPaths.size) return false;
+                    for (const p of localPaths) {
+                        if (!sp.has(p)) return false;
+                    }
+                    return true;
+                });
+                if (matched) return String(matched.id);
+            }
+        } catch (e) {
+            console.warn('resolveSubmissionIdForIC failed:', e);
+        }
+        return String(subId);
+    }
+
     window.runIC = async function(subId) {
         const btn = document.getElementById(`run-ic-btn-${subId}`);
         const statusSpan = document.getElementById(`ic-status-${subId}`);
@@ -749,11 +779,12 @@
         }
 
         try {
+            const effectiveSubmissionId = await resolveSubmissionIdForIC(subId, submission);
             const response = await fetch('/run_ic_test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    submission_id: subId,
+                    submission_id: effectiveSubmissionId,
                     factor_family_alias: factorFamilyAlias,
                     paths: submission.paths,
                     factors: selectedFactors,  // 发送因子列表
