@@ -7,13 +7,13 @@
 """
 import os
 import traceback
-import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
+from .price_data_helpers import format_price_row
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,
@@ -294,29 +294,20 @@ def get_price_data():
 
             has_oi = oi_col in price_df.columns
 
-            result_data = []
-            for _, row in price_df.iterrows():
-                ts = pd.Timestamp(_scalar(row[time_col]))
-                time_str = ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
-                timestamp_ms = int(ts.timestamp() * 1000)
-
-                entry = {'time': time_str, 'timestamp': timestamp_ms}
-
-                def _val(col, dflt=None):
-                    v = row.get(col)
-                    if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
-                        return dflt
-                    return float(v)
-
-                entry['open']   = _val(o_col)
-                entry['high']   = _val(h_col)
-                entry['low']    = _val(l_col)
-                entry['close']  = _val(c_col)
-                entry['volume'] = _val(v_col, 0)
-                if has_oi:
-                    entry['open_interest'] = _val(oi_col, 0)
-
-                result_data.append(entry)
+            result_data = [
+                format_price_row(
+                    row=row,
+                    time_col=time_col,
+                    o_col=o_col,
+                    h_col=h_col,
+                    l_col=l_col,
+                    c_col=c_col,
+                    v_col=v_col,
+                    oi_col=oi_col if has_oi else None,
+                    freq_is_daily=freq_is_daily,
+                )
+                for _, row in price_df.iterrows()
+            ]
 
             return jsonify({
                 'success': True,
@@ -422,32 +413,22 @@ def get_price_data():
 
         freq_is_daily = freq.is_day_multiple()
 
-        result_data = []
-        for idx, row in price_df.iterrows():
-            ts_val: pd.Timestamp = pd.Timestamp(str(idx))
-            time_str = ts_val.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S')
-            timestamp_ms = int(ts_val.timestamp() * 1000)
-
-            entry = {
-                'time': time_str,
-                'timestamp': timestamp_ms,
-            }
-
-            def _val(col, dflt=None):
-                v = row.get(col)
-                if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
-                    return dflt
-                return float(v)
-
-            entry['open']   = _val(o_col)
-            entry['high']   = _val(h_col)
-            entry['low']    = _val(l_col)
-            entry['close']  = _val(c_col)
-            entry['volume'] = _val(v_col, 0)
-            if has_oi:
-                entry['open_interest'] = _val(oi_col, 0)
-
-            result_data.append(entry)
+        price_df_for_emit = price_df.copy()
+        price_df_for_emit['__time__'] = [pd.Timestamp(str(idx)) for idx in price_df_for_emit.index]
+        result_data = [
+            format_price_row(
+                row=row,
+                time_col='__time__',
+                o_col=o_col,
+                h_col=h_col,
+                l_col=l_col,
+                c_col=c_col,
+                v_col=v_col,
+                oi_col=oi_col if has_oi else None,
+                freq_is_daily=freq_is_daily,
+            )
+            for _, row in price_df_for_emit.iterrows()
+        ]
 
         active_source_used = selected_source
         if active_source_used is None:

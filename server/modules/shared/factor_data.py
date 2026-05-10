@@ -8,51 +8,19 @@ Shared factor data-query routes (any test module can use):
 import numpy as np
 import pandas as pd
 import traceback
-from types import SimpleNamespace
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import get_factor_tester, get_session_params
 from . import shared_bp
-
-
-def _match_product_column(table: pd.DataFrame | None, product) -> object | None:
-    """在表格列中匹配产品对象，兼容列为 Product 或字符串名称。"""
-    if not isinstance(table, pd.DataFrame) or table.empty:
-        return None
-    if product in table.columns:
-        return product
-    target_name = getattr(product, 'name', str(product))
-    target_alias = getattr(product, 'alias', target_name)
-    for col in table.columns:
-        col_name = getattr(col, 'name', str(col))
-        col_alias = getattr(col, 'alias', col_name)
-        if str(col_name) == str(target_name) or str(col_alias) == str(target_alias):
-            return col
-    return None
-
-
-def _column_names(table: pd.DataFrame | None) -> list[str]:
-    if not isinstance(table, pd.DataFrame) or table.empty:
-        return []
-    return [str(getattr(c, 'name', c)) for c in table.columns]
-
-
-def _find_factor(factors, factor_name: str | None, factor_alias: str | None):
-    if factor_alias not in (None, ''):
-        by_alias = next((f for f in factors if f.alias == factor_alias), None)
-        if by_alias is not None:
-            return by_alias
-    if factor_name not in (None, ''):
-        return next((f for f in factors if f.name == factor_name or f.alias == factor_name), None)
-    return None
-
-
-def _resolve_fe_table(tester_factor) -> pd.DataFrame | None:
-    """从 IC 测试阶段写入的 _ic_fe_intermediate 获取因子暴露表。"""
-    fe_table = getattr(tester_factor, '_ic_fe_intermediate', None)
-    if isinstance(fe_table, pd.DataFrame) and not fe_table.empty:
-        return fe_table
-    return None
+from .factor_data_helpers import (
+    clip_series_by_tester_range,
+    column_names as _column_names,
+    find_factor as _find_factor,
+    match_product_column as _match_product_column,
+    resolve_fe_table as _resolve_fe_table,
+    resolve_product_from_tester,
+    series_to_frontend,
+)
 
 
 @shared_bp.route('/api/factor_list')
@@ -94,9 +62,7 @@ def get_factor_series():
         if not target_factor:
             return jsonify({'error': '未找到因子'}), 404
         tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
-        product = next((p for p in tester.products if p.name == product_name), None)
-        if not product:
-            product = SimpleNamespace(name=product_name, alias=product_name)
+        product = resolve_product_from_tester(tester, product_name)
 
         # 优先使用 IC 测试阶段的 FE intermediate；若缺失，则按 _func_expr/source_table 回退并保持 Neg 语义。
         fe_table = _resolve_fe_table(tester_factor)
@@ -126,26 +92,9 @@ def get_factor_series():
         if series.empty:
             return jsonify({'error': '该产品在当前时间范围内无因子数据'}), 404
 
-        def _get_idx(s):
-            return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
-
-        def _loc(ts, idx):
-            tz = getattr(idx, 'tz', None)
-            return ts.tz_localize(tz) if tz and ts.tzinfo is None else (
-                ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
-
-        idx = _get_idx(series)
-        if tester.start_date is not None:
-            series = series[idx >= _loc(pd.Timestamp(tester.start_date), idx)]
-            idx = _get_idx(series)
-        if tester.end_date is not None:
-            series = series[idx <= _loc(pd.Timestamp(tester.end_date), idx)]
-        idx = _get_idx(series)
+        series = clip_series_by_tester_range(series, tester)
         _daily = tester_factor.freq is not None and tester_factor.freq.is_day_multiple()
-        dates_out = ([ts.strftime('%Y-%m-%d') for ts in idx] if _daily
-                     else (idx.view(np.int64) // 10**6).tolist())
-        values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
-                  for v in series.values.tolist()]
+        dates_out, values = series_to_frontend(series, _daily)
         return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
@@ -167,9 +116,7 @@ def get_return_series():
         if not factor:
             return jsonify({'error': '未找到因子'}), 404
         tester_factor = next((f for f in tester.factors if f.alias == factor.alias), factor)
-        product = next((p for p in tester.products if p.name == product_name), None)
-        if not product:
-            product = SimpleNamespace(name=product_name, alias=product_name)
+        product = resolve_product_from_tester(tester, product_name)
 
         # 优先使用 IC 测试阶段由 intermediate(RE) 回填的数据
         returns_table = tester.factor_returns.get(tester_factor)
@@ -190,26 +137,9 @@ def get_return_series():
         if series.empty:
             return jsonify({'error': '该产品在当前时间范围内无收益率数据'}), 404
 
-        def _get_idx(s):
-            return s.index.get_level_values(-1) if isinstance(s.index, pd.MultiIndex) else s.index
-
-        def _loc(ts, idx):
-            tz = getattr(idx, 'tz', None)
-            return ts.tz_localize(tz) if tz and ts.tzinfo is None else (
-                ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
-
-        idx = _get_idx(series)
-        if tester.start_date is not None:
-            series = series[idx >= _loc(pd.Timestamp(tester.start_date), idx)]
-            idx = _get_idx(series)
-        if tester.end_date is not None:
-            series = series[idx <= _loc(pd.Timestamp(tester.end_date), idx)]
-        idx = _get_idx(series)
+        series = clip_series_by_tester_range(series, tester)
         _daily = tester_factor.freq is not None and tester_factor.freq.is_day_multiple()
-        dates_out = ([ts.strftime('%Y-%m-%d') for ts in idx] if _daily
-                     else (idx.view(np.int64) // 10**6).tolist())
-        values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
-                  for v in series.values.tolist()]
+        dates_out, values = series_to_frontend(series, _daily)
         return jsonify({'dates': dates_out, 'values': values})
     except Exception as e:
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
