@@ -11,6 +11,32 @@
         return value == null ? '' : String(value);
     }
 
+    function getParamOptions(paramDef) {
+        return Array.isArray(paramDef?.options) ? paramDef.options : [];
+    }
+
+    function renderAddControl(paramDef, prefix) {
+        const alias = paramDef.alias;
+        const mode = paramDef.input_mode || 'text';
+        const options = getParamOptions(paramDef);
+        const def = getDefaultValue(paramDef);
+        const values = options.map(opt => String(opt.value));
+        if (options.length && mode === 'enum') {
+            return '<select id="' + prefix + escHtml(alias) + '">' +
+                options.map(opt => '<option value="' + escHtml(opt.value) + '"' + (String(opt.value) === def ? ' selected' : '') + '>' + escHtml(opt.label || opt.value) + '</option>').join('') +
+                '</select>';
+        }
+        if (options.length && mode === 'enum_custom') {
+            const custom = values.indexOf(def) === -1;
+            return '<select id="' + prefix + escHtml(alias) + '" data-custom-input-id="' + prefix + 'custom-' + escHtml(alias) + '">' +
+                options.map(opt => '<option value="' + escHtml(opt.value) + '"' + (String(opt.value) === def ? ' selected' : '') + '>' + escHtml(opt.label || opt.value) + '</option>').join('') +
+                '<option value="__custom__"' + (custom ? ' selected' : '') + '>其他...</option></select>' +
+                '<input type="text" id="' + prefix + 'custom-' + escHtml(alias) + '" value="' + (custom ? escHtml(def) : '') + '" style="' + (custom ? '' : 'display:none;') + 'margin-top:4px;">' +
+                (paramDef.type === 'FactorParam' ? '<button type="button" class="param-btn factor-param-picker-btn" data-param-prefix="' + escHtml(prefix) + '" data-param-alias="' + escHtml(alias) + '" style="margin-top:4px;">选择因子</button>' : '');
+        }
+        return '<input type="text" id="' + prefix + escHtml(alias) + '" value="' + escHtml(def) + '">';
+    }
+
     function buildAlias(familyAlias, aliases, row) {
         if (row && row.__factor_alias) return row.__factor_alias;
         const parts = [];
@@ -43,8 +69,7 @@
             let html = '<tr id="add_row"><td>' + escHtml(familyAlias) + '</td>';
             aliases.forEach(alias => {
                 const pd = params.find(p => p.alias === alias);
-                html += '<td><input type="text" id="param-new-' + escHtml(alias) + '" value="' +
-                    escHtml(getDefaultValue(pd)) + '"></td>';
+                html += '<td>' + renderAddControl(pd || { alias }, 'param-new-') + '</td>';
             });
             html += '<td><button class="param-btn" data-param-action="add">新增</button></td></tr>';
 
@@ -59,11 +84,36 @@
             });
             tbody.innerHTML = html;
 
-            tbody.querySelectorAll('#add_row input').forEach(input => {
-                input.addEventListener('keydown', event => {
+            tbody.querySelectorAll('#add_row input, #add_row select').forEach(control => {
+                control.addEventListener('keydown', event => {
                     if (event.key === 'Enter') {
                         event.preventDefault();
                         callbacks.add?.();
+                    }
+                });
+                if (control.tagName === 'SELECT') {
+                    control.addEventListener('change', () => {
+                        const custom = document.getElementById(control.dataset.customInputId || '');
+                        if (custom) custom.style.display = control.value === '__custom__' ? '' : 'none';
+                    });
+                }
+            });
+            tbody.querySelectorAll('.factor-param-picker-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const prefix = btn.dataset.paramPrefix || 'param-new-';
+                    const alias = btn.dataset.paramAlias || '';
+                    if (typeof window.openSharedFactorParamPicker === 'function') {
+                        window.openSharedFactorParamPicker(alias, value => {
+                            const select = document.getElementById(prefix + alias);
+                            const custom = document.getElementById(prefix + 'custom-' + alias);
+                            if (select) select.value = '__custom__';
+                            if (custom) {
+                                custom.value = value;
+                                custom.style.display = '';
+                            }
+                        });
+                    } else {
+                        alert('因子选择面板未加载');
                     }
                 });
             });
@@ -105,7 +155,12 @@
             aliases.forEach(alias => {
                 const input = document.getElementById(prefix + alias);
                 const pd = params.find(p => p.alias === alias);
-                row[alias] = input && input.value ? input.value : getDefaultValue(pd);
+                if (input && pd?.input_mode === 'enum_custom' && input.value === '__custom__') {
+                    const custom = document.getElementById(prefix + 'custom-' + alias);
+                    row[alias] = custom && custom.value ? custom.value : getDefaultValue(pd);
+                } else {
+                    row[alias] = input && input.value ? input.value : getDefaultValue(pd);
+                }
             });
             return row;
         },

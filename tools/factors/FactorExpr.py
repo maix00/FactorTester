@@ -950,6 +950,12 @@ class ParamRef(FactorExpr):
             if value is None:
                 resolved = ConstExpr(None)
             else:
+                if isinstance(value, (str, dict)):
+                    try:
+                        from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+                        value = resolve_factor_param_value(value)
+                    except Exception as exc:
+                        raise TypeError(f"参数 {self.param.alias} 无法解析为因子: {value}") from exc
                 if isinstance(value, Factor):
                     resolved = value._func_expr
                     factor = value
