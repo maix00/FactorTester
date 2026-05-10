@@ -31,96 +31,141 @@
             return params;
         }
 
-        // 刷新整个参数模块（不刷新页面），可选回调在替换完成后执行
-        window.reloadParamModule = function reloadParamModule(callback) {
-            if (typeof window.reloadSingleFactorContent === 'function') {
-                // 根因修复：参数增删会触发整块内容重载，导致其他抽屉状态被重建。
-                // 这里在重载前做快照，重载后恢复时间范围与产品分类提交记录。
-                var snapshot = {
-                    time: null,
-                    submissions: null,
-                };
+        function _escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
-                try {
-                    if (typeof window.getSharedRuntimeTimeRange === 'function') {
-                        snapshot.time = JSON.parse(JSON.stringify(window.getSharedRuntimeTimeRange()));
-                    }
-                } catch (e) {
-                    snapshot.time = null;
-                }
-
-                try {
-                    if (typeof window._getCurrentSubmissions === 'function') {
-                        snapshot.submissions = JSON.parse(JSON.stringify(window._getCurrentSubmissions() || []));
-                    }
-                } catch (e) {
-                    snapshot.submissions = null;
-                }
-
-                return window.reloadSingleFactorContent(function() {
-                    try {
-                        if (snapshot.time) {
-                            var setVal = function(id, val) {
-                                var el = document.getElementById(id);
-                                if (el && val !== null && val !== undefined) el.value = val;
-                            };
-                            if (snapshot.time.start_date) {
-                                var sp = snapshot.time.start_date.split('-');
-                                setVal('start_year', sp[0]);
-                                setVal('start_month', sp[1]);
-                                setVal('start_day', sp[2]);
-                            }
-                            if (snapshot.time.end_date) {
-                                var ep = snapshot.time.end_date.split('-');
-                                setVal('end_year', ep[0]);
-                                setVal('end_month', ep[1]);
-                                setVal('end_day', ep[2]);
-                            }
-                            if (snapshot.time.start_time) {
-                                var st = snapshot.time.start_time.split(':');
-                                setVal('start_hour', st[0]);
-                                setVal('start_minute', st[1]);
-                            }
-                            if (snapshot.time.end_time) {
-                                var et = snapshot.time.end_time.split(':');
-                                setVal('end_hour', et[0]);
-                                setVal('end_minute', et[1]);
-                            }
-                            setVal('timezone_input', snapshot.time.timezone);
-                            var isTd = document.getElementById('is_trading_day');
-                            var isDay = document.getElementById('is_cn_futures_day');
-                            var isNight = document.getElementById('is_cn_futures_night');
-                            if (isTd) isTd.checked = !!snapshot.time.is_trading_day;
-                            if (isDay) isDay.checked = !!snapshot.time.is_cn_futures_day;
-                            if (isNight) isNight.checked = !!snapshot.time.is_cn_futures_night;
-                            if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
-                        }
-
-                        if (snapshot.submissions && typeof window._applySubmissions === 'function') {
-                            window._applySubmissions(snapshot.submissions);
-                        }
-                    } catch (e) {
-                        console.error('恢复参数重载前状态失败:', e);
-                    }
-
-                    if (typeof callback === 'function') callback();
-                });
+        function renderFactorRows(rows) {
+            const tableBody = document.getElementById('factor_table_body');
+            if (!tableBody) return;
+            const addRow = document.getElementById('add_row');
+            Array.from(tableBody.querySelectorAll('tr')).forEach(function(tr) {
+                if (tr.id !== 'add_row') tr.remove();
+            });
+            if (!Array.isArray(rows) || rows.length === 0) {
+                if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+                return;
             }
+            rows.forEach(function(row) {
+                const tr = document.createElement('tr');
+                tr.setAttribute('draggable', 'true');
+                tr.setAttribute('data-factor-idx', String(row.index));
+
+                let html = '<td>' + _escapeHtml(row.factor_alias || '') + '</td>';
+                paramAliases.forEach(function(alias) {
+                    const v = row.params && row.params[alias] !== undefined ? row.params[alias] : '';
+                    html += '<td>' + _escapeHtml(v) + '</td>';
+                });
+                html += '<td><button class="param-btn param-btn-danger delete_factor_btn" data-factor-idx="' + String(row.index) + '">删除</button></td>';
+                tr.innerHTML = html;
+                tableBody.appendChild(tr);
+            });
+            if (addRow && addRow.parentNode === tableBody) {
+                tableBody.insertBefore(addRow, tableBody.firstChild);
+            }
+            if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+        }
+
+        window._renderParamFactorRows = renderFactorRows;
+
+        // 刷新参数模块：优先复用单因子页官方重载入口，确保当前因子上下文一致。
+        window.reloadParamModule = function reloadParamModule(callback) {
+            var snapshot = {
+                paramDrawerOpen: false,
+                time: null,
+                submissions: null,
+            };
+
+            try {
+                var paramDrawer = document.getElementById('param-drawer');
+                snapshot.paramDrawerOpen = !!(paramDrawer && paramDrawer.classList.contains('open'));
+            } catch (e) {}
+            try {
+                if (typeof window.getSharedRuntimeTimeRange === 'function') {
+                    snapshot.time = JSON.parse(JSON.stringify(window.getSharedRuntimeTimeRange()));
+                }
+            } catch (e) {}
+            try {
+                if (typeof window._getCurrentSubmissions === 'function') {
+                    snapshot.submissions = JSON.parse(JSON.stringify(window._getCurrentSubmissions() || []));
+                }
+            } catch (e) {}
+
+            var finish = function() {
+                try {
+                    if (snapshot.time) {
+                        var setVal = function(id, val) {
+                            var el = document.getElementById(id);
+                            if (el && val !== null && val !== undefined) el.value = val;
+                        };
+                        if (snapshot.time.start_date) {
+                            var sp = snapshot.time.start_date.split('-');
+                            setVal('start_year', sp[0]); setVal('start_month', sp[1]); setVal('start_day', sp[2]);
+                        }
+                        if (snapshot.time.end_date) {
+                            var ep = snapshot.time.end_date.split('-');
+                            setVal('end_year', ep[0]); setVal('end_month', ep[1]); setVal('end_day', ep[2]);
+                        }
+                        if (snapshot.time.start_time) {
+                            var st = snapshot.time.start_time.split(':');
+                            setVal('start_hour', st[0]); setVal('start_minute', st[1]);
+                        }
+                        if (snapshot.time.end_time) {
+                            var et = snapshot.time.end_time.split(':');
+                            setVal('end_hour', et[0]); setVal('end_minute', et[1]);
+                        }
+                        setVal('timezone_input', snapshot.time.timezone);
+                        var isTd = document.getElementById('is_trading_day');
+                        var isDay = document.getElementById('is_cn_futures_day');
+                        var isNight = document.getElementById('is_cn_futures_night');
+                        if (isTd) isTd.checked = !!snapshot.time.is_trading_day;
+                        if (isDay) isDay.checked = !!snapshot.time.is_cn_futures_day;
+                        if (isNight) isNight.checked = !!snapshot.time.is_cn_futures_night;
+                        if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
+                    }
+                    if (snapshot.submissions && typeof window._applySubmissions === 'function') {
+                        window._applySubmissions(snapshot.submissions);
+                    }
+                    if (snapshot.paramDrawerOpen) {
+                        var drawer = document.getElementById('param-drawer');
+                        var badge = document.getElementById('user-badge');
+                        if (drawer) drawer.classList.add('open');
+                        if (badge) badge.style.display = 'none';
+                    }
+                    if (typeof window._updateParamSummary === 'function') window._updateParamSummary();
+                } catch (e) {
+                    console.error('参数模块刷新后状态恢复失败:', e);
+                }
+                if (typeof callback === 'function') callback();
+            };
+
+            if (typeof window.reloadSingleFactorContent === 'function') {
+                return window.reloadSingleFactorContent(finish);
+            }
+
             return fetch(window.location.pathname + _buildFactorUrl(factorAlias))
                 .then(res => res.text())
                 .then(html => {
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(html, 'text/html');
                     const newModule = doc.getElementById('parameter_module');
-                    if (newModule) {
-                        const oldModule = document.getElementById('parameter_module');
-                        const imported = document.importNode(newModule, true);
-                        oldModule.parentNode.replaceChild(imported, oldModule);
-                        window.initParameterModule();  // 重新初始化事件
-                        if (typeof callback === 'function') callback();
+                    const oldModule = document.getElementById('parameter_module');
+                    if (!newModule || !oldModule || !oldModule.parentNode) {
+                        throw new Error('未找到参数模块节点，无法局部刷新');
                     }
+                    const imported = document.importNode(newModule, true);
+                    oldModule.parentNode.replaceChild(imported, oldModule);
+                    window.initParameterModule();
                 })
-                .catch(err => console.error('刷新参数模块失败:', err));
+                .catch(err => {
+                    console.error('刷新参数模块失败:', err);
+                })
+                .finally(finish);
         }
 
         // 绑定事件
@@ -149,27 +194,15 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        // 重新加载模块，加载完成后更新输入框为新添加的参数值
-                        reloadParamModule(function() {
-                            if (data.added_params) {
-                                paramAliases.forEach(function(alias) {
-                                    const input = document.getElementById('param_' + alias);
-                                    if (input && data.added_params[alias] !== undefined) {
-                                        input.value = data.added_params[alias];
-                                    }
-                                });
-                            }
-                            // 若已确认过时间，自动为新因子应用同一时间范围
-                            if (window._confirmedTimeData) {
-                                var timeData = Object.assign({}, window._confirmedTimeData);
-                                timeData.page_uuid = window._pageUuid || '';
-                                fetch('/set_time_range', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(timeData)
-                                }).catch(function() {});
-                            }
-                        });
+                        renderFactorRows(data.factor_rows || []);
+                        if (data.added_params) {
+                            paramAliases.forEach(function(alias) {
+                                const input = document.getElementById('param_' + alias);
+                                if (input && data.added_params[alias] !== undefined) {
+                                    input.value = data.added_params[alias];
+                                }
+                            });
+                        }
                         if (typeof window.refreshICModule === 'function') {
                             window.refreshICModule();
                         }
@@ -215,12 +248,14 @@
                     })
                     .then(res => res.json())
                     .then(data => {
-                        if (data.success)
-                            reloadParamModule();
+                        if (data.success) {
+                            renderFactorRows(data.factor_rows || []);
                             if (typeof window.refreshICModule === 'function') {
                                 window.refreshICModule();
                             }
-                        else alert('删除失败: ' + data.error);
+                        } else {
+                            alert('删除失败: ' + data.error);
+                        }
                     });
                 });
             }
@@ -275,12 +310,14 @@
                         })
                         .then(res => res.json())
                         .then(data => {
-                            if (data.success)
-                                reloadParamModule();
+                            if (data.success) {
+                                renderFactorRows(data.factor_rows || []);
                                 if (typeof window.refreshICModule === 'function') {
                                     window.refreshICModule();
                                 }
-                            else alert('排序失败: ' + data.error);
+                            } else {
+                                alert('排序失败: ' + data.error);
+                            }
                         });
                     }
                 });
@@ -478,9 +515,8 @@
                     body: JSON.stringify({ factor_family_alias: factorAlias, params_list: merged })
                 }).then(function(r) { return r.json(); }).then(function(res) {
                     if (!res.success) { pTplStatus('加载失败: ' + res.error, false); return; }
-                    reloadParamModule(function() {
-                        pTplStatus('✓ 已加载，新增 ' + addedCount + ' 组参数（跳过 ' + (tplList.length - addedCount) + ' 组重复）', true);
-                    });
+                    renderFactorRows(res.factor_rows || []);
+                    pTplStatus('✓ 已加载，新增 ' + addedCount + ' 组参数（跳过 ' + (tplList.length - addedCount) + ' 组重复）', true);
                     if (typeof window.refreshICModule === 'function') window.refreshICModule();
                 });
             });

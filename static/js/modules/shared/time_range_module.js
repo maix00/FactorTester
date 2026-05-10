@@ -170,9 +170,8 @@
     }
 
     // ---------- 提交时间范围 ----------
-    function confirmTimeRange() {
-        const data = Object.assign({ factor_family_alias: factorFamilyAlias }, getSharedRuntimeTimeRange());
-
+    function persistTimeRange(timeData) {
+        const data = Object.assign({ factor_family_alias: factorFamilyAlias }, timeData || getSharedRuntimeTimeRange());
         statusSpan.innerText = '保存中...';
         statusSpan.style.color = '#0078d4';
 
@@ -216,6 +215,10 @@
             statusSpan.innerText = '网络错误: ' + err.message;
             statusSpan.style.color = '#d40000';
         });
+    }
+
+    function confirmTimeRange() {
+        persistTimeRange(getSharedRuntimeTimeRange());
     }
 
     // 绑定输入框的 blur/input 事件
@@ -440,8 +443,7 @@
             .then(function(data) {
                 if (!data.success) { tTplStatus('加载失败: ' + data.error, false); return; }
                 applyTimeData(data.template.time_data);
-                confirmBtn.disabled = false;
-                confirmBtn.click();
+                persistTimeRange(getSharedRuntimeTimeRange());
                 tTplStatus('✓ 模板已加载', true);
             });
     });

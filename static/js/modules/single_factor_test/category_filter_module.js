@@ -559,45 +559,41 @@
                     if (!data.success) { tplStatus('加载失败: ' + data.error, false); return; }
                     var tplSubs = data.template.submissions;
                     if (!tplSubs || tplSubs.length === 0) { tplStatus('该模板没有提交记录', false); return; }
-                    // 清空后端
-                    var clr = await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
-                    var clrData = await clr.json();
-                    if (!clrData.success) { tplStatus('清空失败: ' + clrData.error, false); return; }
-                    // 清空前端
-                    submissions.length = 0;
-                    renderHistory();
-                    // 逐条重新提交
+                    var replaceData = await fetch('/replace_submissions', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            template_submissions: tplSubs,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    }).then(function(r) { return r.json(); });
+                    if (!replaceData.success) { tplStatus('加载失败: ' + (replaceData.error || '未知错误'), false); return; }
+
                     var timeRange = getCurrentTimeRange();
-                    for (var si = 0; si < tplSubs.length; si++) {
-                        var tplSub = tplSubs[si];
-                        var id_time = Date.now() + si;
-                        try {
-                            var res = await fetch('/submit_selected_products', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ selected_paths: tplSub.paths, id_time: id_time, page_uuid: window._pageUuid || '' })
-                            }).then(r => r.json());
-                            if (!res.success) { tplStatus('提交失败: ' + res.error, false); continue; }
-                            submissions.push({
-                                id: id_time,
-                                paths: res.selected_paths || tplSub.paths,
-                                pathsDescMap: {},
-                                factor_tester_name: res.factor_tester_name,
-                                factor_tester_serial: res.factor_tester_serial,
-                                count_desc: res.count_desc,
-                                timestamp: new Date().toLocaleTimeString(),
-                                start_date: timeRange.start_date,
-                                end_date: timeRange.end_date,
-                                start_time: timeRange.start_time,
-                                end_time: timeRange.end_time,
-                                label: tplSub.label || ''
-                            });
-                        } catch(e) { tplStatus('提交异常: ' + e.message, false); }
+                    var normalized = (replaceData.replaced_submissions || []).map(function(s) {
+                        return {
+                            id: s.id,
+                            paths: s.paths || [],
+                            pathsDescMap: {},
+                            factor_tester_name: s.factor_tester_name,
+                            factor_tester_serial: s.factor_tester_serial,
+                            count_desc: s.count_desc,
+                            timestamp: new Date().toLocaleTimeString(),
+                            start_date: timeRange.start_date,
+                            end_date: timeRange.end_date,
+                            start_time: timeRange.start_time,
+                            end_time: timeRange.end_time,
+                            label: s.label || ''
+                        };
+                    });
+                    if (typeof window._applySubmissions === 'function') {
+                        window._applySubmissions(normalized);
+                    } else {
+                        submissions = normalized;
+                        window.submissions = submissions;
+                        renderHistory();
                     }
-                    renderHistory();
-                    tplStatus('✓ 模板已加载（' + submissions.length + '条提交）', true);
-                    if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
-                    if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+                    tplStatus('✓ 模板已加载（' + normalized.length + '条提交）', true);
                 });
         });
 

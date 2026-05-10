@@ -10,6 +10,22 @@ from . import shared_bp
 from .param_config import normalize_param_row, param_value_display
 
 
+def _build_factor_rows(ff, params_list):
+    factors = ff.get_factors(params_list=params_list)
+    rows = []
+    for idx, (factor, row) in enumerate(zip(factors, params_list)):
+        display_params = {}
+        for p in ff.params:
+            val = row.get(p.alias)
+            display_params[p.alias] = param_value_display(p, val)
+        rows.append({
+            'index': idx,
+            'factor_alias': factor.alias,
+            'params': display_params,
+        })
+    return rows
+
+
 @shared_bp.route('/add_params', methods=['POST'])
 def add_params():
     data = request.get_json()
@@ -26,7 +42,12 @@ def add_params():
         for p in ff.params:
             val = new_params.get(p.alias)
             added_display[p.alias] = param_value_display(p, val)
-        return jsonify({'success': True, 'params_count': len(pl), 'added_params': added_display})
+        return jsonify({
+            'success': True,
+            'params_count': len(pl),
+            'added_params': added_display,
+            'factor_rows': _build_factor_rows(ff, pl),
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -42,7 +63,7 @@ def delete_params():
         if 0 <= factor_idx < len(pl):
             pl.pop(factor_idx)
         _save_session_params(factor_family_alias, pl)
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -60,6 +81,6 @@ def reorder_params():
             param = pl.pop(from_idx)
             pl.insert(to_idx, param)
         _save_session_params(factor_family_alias, pl)
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'factor_rows': _build_factor_rows(ff, pl)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

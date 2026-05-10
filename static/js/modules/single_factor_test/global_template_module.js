@@ -295,8 +295,10 @@
                             console.error('同步参数模板失败:', e);
                         });
                     }
-                    // 刷新参数模块 UI
-                    if (typeof window.reloadParamModule === 'function') {
+                    // 局部刷新参数表与外部摘要（统一走 replace_params 返回的最新因子行）
+                    if (typeof window._renderParamFactorRows === 'function' && Array.isArray(replaceData.factor_rows)) {
+                        window._renderParamFactorRows(replaceData.factor_rows);
+                    } else if (typeof window.reloadParamModule === 'function') {
                         await new Promise(function(resolve) {
                             window.reloadParamModule(resolve);
                         });
