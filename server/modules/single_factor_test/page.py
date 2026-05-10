@@ -7,11 +7,13 @@ import traceback
 
 from flask import jsonify, render_template, request
 
+from server.services.accounts import (
+    account_display_name,
+    can_view_user_scope,
+    get_account,
+)
 from server.shared import (
-    _account_display_name,
-    _can_view_user_scope,
     _current_user,
-    _get_account,
     get_chinese_names,
     get_factor_family_instance,
     get_factor_groups,
@@ -53,10 +55,10 @@ def _get_sidebar_custom_factors(username: str, include_subordinates: bool) -> li
     if include_subordinates:
         return _list_visible_custom_factors(username)
     custom = _list_custom_factors(username)
-    acct = _get_account(username) or {}
+    acct = get_account(username) or {}
     for factor in custom:
         factor['owner_username'] = username
-        factor['owner_alias'] = _account_display_name(acct) or '我'
+        factor['owner_alias'] = account_display_name(acct) or '我'
         factor['owner_organization_id'] = acct.get('organization_id') or ''
         factor['owner_organization_name'] = acct.get('organization_name') or ''
         factor['can_edit'] = True
@@ -125,7 +127,7 @@ def _render_single_factor_content(selected_name: str, factor_type: str = '', own
         if not username:
             return '<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">请先登录</div></div>'
         owner_username = (owner_username or username or '').strip()
-        if not _can_view_user_scope(username, owner_username):
+        if not can_view_user_scope(username, owner_username):
             return '<div class="section"><div class="section-title">错误</div><div style="color:#d40000;padding:20px;">无权查看该用户因子</div></div>'
         try:
             ff = get_factor_family_instance(selected_name, username=owner_username)

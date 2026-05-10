@@ -9,9 +9,11 @@ import time
 from server.modules.custom_factors.source_helpers import strip_factor_meta
 from server.modules.custom_factors.storage import custom_factor_dir
 from server.modules.shared.param_meta import serialize_param_meta
+from server.services.accounts import (
+    account_display_name,
+    visible_accounts_for,
+)
 from server.shared import (
-    _account_display_name,
-    _visible_accounts_for,
     get_factor_family_instance,
 )
 from tools.factors import FactorFamily
@@ -88,11 +90,11 @@ def list_custom_factors(username: str) -> list:
 
 def list_visible_custom_factors(username: str) -> list:
     factors = []
-    for account in _visible_accounts_for(username, include_self=True):
+    for account in visible_accounts_for(username, include_self=True):
         owner_username = account.get('username')
         if not owner_username:
             continue
-        owner_alias = _account_display_name(account)
+        owner_alias = account_display_name(account)
         for factor in list_custom_factors(owner_username):
             item = dict(factor)
             item['owner_username'] = owner_username

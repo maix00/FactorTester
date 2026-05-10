@@ -3,7 +3,8 @@ from pathlib import Path
 from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
-from server.shared import _current_user, _load_accounts, _accts_lock
+from server.services.accounts import accounts_lock, load_accounts
+from server.shared import _current_user
 from tools.base.IdleResourceManager import IdleResourceManager
 
 app = create_app()
@@ -102,8 +103,8 @@ def shutdown():
     username = _current_user()
     if not username:
         return jsonify({'success': False, 'error': '请先登录'}), 401
-    with _accts_lock:
-        accounts = _load_accounts()
+    with accounts_lock:
+        accounts = load_accounts()
     acct = next((a for a in accounts if a['username'] == username), None)
     if not acct or not acct.get('is_admin', False):
         return jsonify({'success': False, 'error': '无权限'}), 403

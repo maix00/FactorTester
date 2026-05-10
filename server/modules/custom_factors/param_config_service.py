@@ -11,10 +11,12 @@ from server.modules.custom_factors.param_config_store import (
     save_param_config,
 )
 from server.modules.shared.param_config import build_param_factor_item, serialize_param_rows
+from server.services.accounts import (
+    account_display_name,
+    get_account,
+    visible_accounts_for,
+)
 from server.shared import (
-    _account_display_name,
-    _get_account,
-    _visible_accounts_for,
     get_custom_factor_instance,
     get_factor_family_instance,
 )
@@ -89,7 +91,7 @@ def build_library_param_factor_item(
     owner_username = owner_account.get('username') or ''
     factor_family, meta = resolve_param_factor_family(owner_username, ff_alias, public_by_alias, custom_by_alias)
     account = dict(owner_account)
-    account['alias'] = _account_display_name(owner_account)
+    account['alias'] = account_display_name(owner_account)
     return build_param_factor_item(factor_family, row or {}, row_index, account, current_username, meta=meta, config=config)
 
 
@@ -120,11 +122,11 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
 
 def build_param_factor_overview(current_username: str, include_subordinates: bool) -> dict:
     accounts = (
-        _visible_accounts_for(current_username, include_self=True)
+        visible_accounts_for(current_username, include_self=True)
         if include_subordinates
-        else [_get_account(current_username) or {'username': current_username}]
+        else [get_account(current_username) or {'username': current_username}]
     )
-    current_account = _get_account(current_username) or {}
+    current_account = get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
 
@@ -179,8 +181,8 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
 
 
 def list_param_config_users(current_username: str, ff_alias: str) -> dict:
-    accounts = _visible_accounts_for(current_username, include_self=True)
-    current_account = _get_account(current_username) or {}
+    accounts = visible_accounts_for(current_username, include_self=True)
+    current_account = get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
     public_by_alias = alias_map(list_public_factors())
 
@@ -212,7 +214,7 @@ def list_param_config_users(current_username: str, ff_alias: str) -> dict:
                     continue
         users.append({
             'owner_username': owner_username,
-            'owner_alias': _account_display_name(account),
+            'owner_alias': account_display_name(account),
             'owner_organization_id': account.get('organization_id') or '',
             'owner_organization_name': account.get('organization_name') or '',
             'editable': owner_username == current_username,
@@ -235,6 +237,6 @@ def save_current_user_param_config(current_username: str, ff_alias: str, params_
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
     serialized_rows = serialize_param_rows(factor_family, params_list)
     config = save_param_config(current_username, ff_alias, serialized_rows)
-    account = _get_account(current_username) or {'username': current_username}
+    account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
     return config, factors

@@ -3,7 +3,7 @@ Shared global state and utility functions used across all server blueprints.
 No Flask routes live here – only state, helpers, and the login_required decorator.
 """
 from typing import TYPE_CHECKING, Any, Optional
-import sys, os, importlib.util, threading, time, uuid, hashlib, hmac, secrets, re, json as _json
+import sys, os, importlib.util, threading, time, uuid, re
 from functools import wraps
 from flask import request, jsonify, render_template, session, redirect
 
@@ -26,6 +26,7 @@ from server.services.user_storage import (
     user_data_dir,
     user_template_path,
 )
+from server.services.accounts import accounts_lock, load_accounts
 
 if TYPE_CHECKING:
     from tools.factors import FactorTester
@@ -164,20 +165,7 @@ def _save_session_params(ff_alias: str, params_list: list):
     with _params_store_lock:
         _params_store[store_key] = list(params_list)
 
-# ─── User system ──────────────────────────────────────────────────────────────
-_ACCTS_FILE = os.path.join(_USERS_DIR, 'accounts.json')
-_ORGS_FILE = os.path.join(_USERS_DIR, 'organizations.json')
-_accts_lock = threading.Lock()
-_orgs_lock = threading.Lock()
-
-DEFAULT_ORGANIZATION_ID = 'default'
-DEFAULT_ORGANIZATION_NAME = '默认机构'
-ROLE_SUPER_ADMIN = 'super_admin'
-ROLE_ORG_ADMIN = 'org_admin'
-ROLE_LEVEL_ADMIN = 'level_admin'
-ROLE_USER = 'user'
-ADMIN_ROLES = {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN}
-
+# ─── User-scoped file locks ───────────────────────────────────────────────────
 _user_file_locks: dict = {}
 _user_file_locks_meta = threading.Lock()
 
@@ -186,228 +174,6 @@ def _get_user_file_lock(username: str) -> threading.Lock:
         if username not in _user_file_locks:
             _user_file_locks[username] = threading.Lock()
         return _user_file_locks[username]
-
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 200_000).hex()
-
-def _verify_password(password: str, salt: str, stored_hash: str) -> bool:
-    return hmac.compare_digest(_hash_password(password, salt), stored_hash)
-
-def _load_accounts() -> list:
-    try:
-        if os.path.exists(_ACCTS_FILE):
-            with open(_ACCTS_FILE, 'r', encoding='utf-8') as f:
-                data = _json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
-
-def _save_accounts(accounts: list):
-    os.makedirs(os.path.dirname(_ACCTS_FILE), exist_ok=True)
-    with open(_ACCTS_FILE, 'w', encoding='utf-8') as f:
-        _json.dump(accounts, f, ensure_ascii=False, indent=2)
-
-def _load_organizations() -> list:
-    try:
-        if os.path.exists(_ORGS_FILE):
-            with open(_ORGS_FILE, 'r', encoding='utf-8') as f:
-                data = _json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception:
-        pass
-    return []
-
-def _save_organizations(organizations: list):
-    os.makedirs(os.path.dirname(_ORGS_FILE), exist_ok=True)
-    with open(_ORGS_FILE, 'w', encoding='utf-8') as f:
-        _json.dump(organizations, f, ensure_ascii=False, indent=2)
-
-def _slugify_org_id(name: str) -> str:
-    raw = re.sub(r'\s+', '_', (name or '').strip())
-    raw = re.sub(r'[^\w\u4e00-\u9fff-]', '', raw)
-    return raw or DEFAULT_ORGANIZATION_ID
-
-def _compose_account_username(organization_id: str, alias: str, serial: int) -> str:
-    """Canonical account id: {organization_id}${alias}@{serial}."""
-    org_id = (organization_id or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
-    return f'{org_id}${alias}@{serial}'
-
-def _next_account_username(accounts: list, organization_id: str, alias: str) -> str:
-    org_id = (organization_id or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
-    same_name = [
-        a for a in accounts
-        if (a.get('alias') or a.get('username')) == alias
-        and (a.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id
-    ]
-    serial = max(
-        (
-            int(a['username'].rsplit('@', 1)[1])
-            for a in same_name
-            if '@' in a.get('username', '') and a['username'].rsplit('@', 1)[1].isdigit()
-        ),
-        default=0,
-    ) + 1
-    return _compose_account_username(org_id, alias, serial)
-
-def _normalize_organization(org: dict) -> dict:
-    normalized = dict(org or {})
-    name = (normalized.get('name') or normalized.get('organization_name') or DEFAULT_ORGANIZATION_NAME).strip()
-    normalized['name'] = name
-    normalized['id'] = (normalized.get('id') or normalized.get('organization_id') or _slugify_org_id(name)).strip()
-    normalized.setdefault('description', '')
-    return normalized
-
-def _list_organizations_with_default() -> list:
-    with _orgs_lock:
-        organizations = [_normalize_organization(o) for o in _load_organizations()]
-    if not any(o.get('id') == DEFAULT_ORGANIZATION_ID for o in organizations):
-        organizations.insert(0, {'id': DEFAULT_ORGANIZATION_ID, 'name': DEFAULT_ORGANIZATION_NAME, 'description': '系统默认机构'})
-    return organizations
-
-def _normalize_account(acct: dict) -> dict:
-    """Return an account dict with organization and hierarchy fields populated.
-
-    旧账号文件只有 is_admin；这里不强制写回磁盘，保证历史数据可无感读取。
-    """
-    normalized = dict(acct or {})
-    normalized.setdefault('organization_id', DEFAULT_ORGANIZATION_ID)
-    normalized.setdefault('organization_name', DEFAULT_ORGANIZATION_NAME)
-    normalized.setdefault('parent_username', '')
-    if normalized.get('is_admin'):
-        # 历史账号里只有 is_admin 的，只有 True 被提升为超级管理员。
-        normalized.setdefault('role', ROLE_SUPER_ADMIN)
-    else:
-        normalized.setdefault('role', ROLE_USER)
-    normalized['is_admin'] = normalized.get('role') == ROLE_SUPER_ADMIN
-    return normalized
-
-def _normalize_accounts(accounts: list) -> list:
-    return [_normalize_account(a) for a in accounts]
-
-def _get_account(username: str | None) -> dict | None:
-    if not username:
-        return None
-    with _accts_lock:
-        accounts = _normalize_accounts(_load_accounts())
-    return next((a for a in accounts if a.get('username') == username), None)
-
-def _is_super_admin_account(acct: dict | None) -> bool:
-    return bool(acct and (acct.get('role') == ROLE_SUPER_ADMIN or acct.get('is_admin')))
-
-def _is_org_admin_account(acct: dict | None) -> bool:
-    return bool(acct and (acct.get('role') == ROLE_ORG_ADMIN or _is_super_admin_account(acct)))
-
-def _is_level_admin_account(acct: dict | None) -> bool:
-    return bool(acct and (acct.get('role') == ROLE_LEVEL_ADMIN or _is_org_admin_account(acct)))
-
-def _is_any_admin_account(acct: dict | None) -> bool:
-    return bool(acct and (acct.get('role') in ADMIN_ROLES or _is_super_admin_account(acct)))
-
-def _account_display_name(acct: dict | None) -> str:
-    if not acct:
-        return ''
-    return acct.get('alias') or acct.get('username') or ''
-
-def _visible_accounts_for(username: str | None, include_self: bool = True) -> list:
-    """Accounts whose user-level resources can be viewed by username.
-
-    普通用户：自己 + 直接下级。
-    层级管理员：自己 + 直接下级（管理权限也限直接下级）。
-    机构管理员：本机构用户。
-    超级管理员：全部用户。
-    """
-    if not username:
-        return []
-    with _accts_lock:
-        accounts = _normalize_accounts(_load_accounts())
-    current = next((a for a in accounts if a.get('username') == username), None)
-    if current is None:
-        return []
-    if _is_super_admin_account(current):
-        visible = accounts
-    elif current.get('role') == ROLE_ORG_ADMIN:
-        org_id = current.get('organization_id') or DEFAULT_ORGANIZATION_ID
-        visible = [a for a in accounts if (a.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id]
-    else:
-        visible = [a for a in accounts if a.get('parent_username') == username]
-        if include_self:
-            visible.insert(0, current)
-    if include_self and current not in visible:
-        visible.insert(0, current)
-    if not include_self:
-        visible = [a for a in visible if a.get('username') != username]
-    return visible
-
-def _visible_usernames_for(username: str | None, include_self: bool = True) -> list[str]:
-    return [a.get('username') for a in _visible_accounts_for(username, include_self=include_self) if a.get('username')]
-
-def _can_view_user_scope(current_username: str | None, target_username: str | None) -> bool:
-    if not current_username or not target_username:
-        return False
-    return target_username in set(_visible_usernames_for(current_username, include_self=True))
-
-def _direct_child_accounts_for(username: str | None) -> list:
-    if not username:
-        return []
-    with _accts_lock:
-        accounts = _normalize_accounts(_load_accounts())
-    return [a for a in accounts if a.get('parent_username') == username]
-
-def _can_manage_user_account(current_username: str | None, target_username: str | None) -> bool:
-    """Whether current user can edit target user's identity fields."""
-    if not current_username or not target_username or current_username == target_username:
-        return False
-    with _accts_lock:
-        accounts = _normalize_accounts(_load_accounts())
-    current = next((a for a in accounts if a.get('username') == current_username), None)
-    target = next((a for a in accounts if a.get('username') == target_username), None)
-    if not current or not target:
-        return False
-    if _is_super_admin_account(current):
-        return True
-    if _is_super_admin_account(target):
-        return False
-    if current.get('role') == ROLE_ORG_ADMIN:
-        return (current.get('organization_id') or DEFAULT_ORGANIZATION_ID) == (target.get('organization_id') or DEFAULT_ORGANIZATION_ID)
-    if current.get('role') == ROLE_LEVEL_ADMIN:
-        return target.get('parent_username') == current_username
-    return False
-
-def _serialize_account_public(acct: dict | None, current_username: str | None = None) -> dict:
-    normalized = _normalize_account(acct or {})
-    return {
-        'username': normalized.get('username', ''),
-        'alias': normalized.get('alias') or normalized.get('username', ''),
-        'role': normalized.get('role') or ROLE_USER,
-        'is_admin': normalized.get('role') == ROLE_SUPER_ADMIN,
-        'organization_id': normalized.get('organization_id') or DEFAULT_ORGANIZATION_ID,
-        'organization_name': normalized.get('organization_name') or DEFAULT_ORGANIZATION_NAME,
-        'parent_username': normalized.get('parent_username') or '',
-        'can_manage': _can_manage_user_account(current_username, normalized.get('username')) if current_username else False,
-    }
-
-def _visible_organizations_for(username: str | None) -> list:
-    acct = _get_account(username)
-    organizations = _list_organizations_with_default()
-    if not acct:
-        return []
-    if _is_super_admin_account(acct):
-        return organizations
-    org_id = acct.get('organization_id') or DEFAULT_ORGANIZATION_ID
-    return [o for o in organizations if o.get('id') == org_id]
-
-def _can_manage_organization(current_username: str | None, organization_id: str | None) -> bool:
-    acct = _get_account(current_username)
-    if not acct:
-        return False
-    if _is_super_admin_account(acct):
-        return True
-    if acct.get('role') == ROLE_ORG_ADMIN:
-        return (acct.get('organization_id') or DEFAULT_ORGANIZATION_ID) == (organization_id or DEFAULT_ORGANIZATION_ID)
-    return False
 
 def _current_user() -> str | None:
     return session.get('username')
@@ -418,8 +184,8 @@ def _current_user_obj():
     if not username:
         return None
     from tools.base.User import User
-    with _accts_lock:
-        accounts = _load_accounts()
+    with accounts_lock:
+        accounts = load_accounts()
     acct = next((a for a in accounts if a['username'] == username), None)
     is_admin = bool(acct and acct.get('is_admin', False))
     return User(name=username, is_admin=is_admin)

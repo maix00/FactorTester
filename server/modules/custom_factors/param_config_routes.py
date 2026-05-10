@@ -9,8 +9,8 @@ from server.modules.custom_factors.param_config_service import (
     save_current_user_param_config,
 )
 from server.modules.custom_factors.param_config_store import delete_param_config, load_param_config
+from server.services.accounts import can_view_user_scope
 from server.shared import (
-    _can_view_user_scope,
     _current_user,
     _get_user_file_lock,
     login_required,
@@ -38,7 +38,7 @@ def api_param_configs(ff_alias):
 @login_required
 def api_get_param_config(ff_alias, owner_username):
     username = _current_user()
-    if not _can_view_user_scope(username, owner_username):
+    if not can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
     config = load_param_config(owner_username, ff_alias)
     if not config:

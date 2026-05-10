@@ -3,17 +3,20 @@ Authentication Blueprint: login, logout, register, /api/me, and the
 before_app_request auth guard that previously lived on app directly.
 """
 import re
+import secrets
 from flask import Blueprint, request, jsonify, render_template, session, redirect
-from .shared import (
-    _accts_lock, _load_accounts, _save_accounts,
-    _verify_password, _hash_password,
-    _current_user, secrets,
-    _touch_session_activity, _check_session_idle, _cleanup_session_resource,
-    _current_user_obj, _factor_testers_lock, factor_testers,
-    _normalize_account, _serialize_account_public,
+from server.services.accounts import (
+    accounts_lock, load_accounts, save_accounts,
+    verify_password, hash_password,
+    normalize_account, serialize_account_public,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
     ROLE_SUPER_ADMIN, ROLE_USER,
-    _list_organizations_with_default, _next_account_username,
+    list_organizations_with_default, next_account_username,
+)
+from .shared import (
+    _current_user,
+    _touch_session_activity, _check_session_idle, _cleanup_session_resource,
+    _current_user_obj, _factor_testers_lock, factor_testers,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -64,8 +67,8 @@ def login():
     password = data.get('password') or ''
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
-    with _accts_lock:
-        accounts = _load_accounts()
+    with accounts_lock:
+        accounts = load_accounts()
     # 先精确匹配 username（如 '张三@1'），再按 alias 匹配（如 '张三'——仅当唯一时成功）
     acct = next((a for a in accounts if a['username'] == username), None)
     if acct is None:
@@ -74,14 +77,14 @@ def login():
             acct = candidates[0]
         elif len(candidates) > 1:
             return jsonify({'success': False, 'error': f'用户名 "{username}" 存在多个账号，请使用完整名称登录（如 {username}@1、{username}@2）', 'ambiguous': True, 'candidates': [c['username'] for c in candidates]}), 400
-    if acct is None or not _verify_password(password, acct['salt'], acct['hash']):
+    if acct is None or not verify_password(password, acct['salt'], acct['hash']):
         return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
     session.permanent = True   # 持久登录，依 app.permanent_session_lifetime 过期
     session['username'] = acct['username']
     # 默认不保持登录（用户可登录后手动勾选）
     session['keep_login'] = False
     _touch_session_activity()
-    acct = _normalize_account(acct)
+    acct = normalize_account(acct)
     return jsonify({
         'success': True,
         'username': acct['username'],
@@ -119,13 +122,13 @@ def register():
         return jsonify({'success': False, 'error': '用户名只能包含字母、数字、下划线或汉字，且不超过32字符'}), 400
     if len(password) < 6:
         return jsonify({'success': False, 'error': '密码至少6位'}), 400
-    org = next((o for o in _list_organizations_with_default() if o.get('id') == organization_id), None)
+    org = next((o for o in list_organizations_with_default() if o.get('id') == organization_id), None)
     if not org:
         return jsonify({'success': False, 'error': '机构不存在'}), 400
-    with _accts_lock:
-        accounts = _load_accounts()
+    with accounts_lock:
+        accounts = load_accounts()
         # 新账号 id 格式为 {organization_id}${alias}@{serial}
-        full_name = _next_account_username(accounts, organization_id, username)
+        full_name = next_account_username(accounts, organization_id, username)
         salt = secrets.token_hex(16)
         role = ROLE_SUPER_ADMIN if len(accounts) == 0 else ROLE_USER
         is_admin = role == ROLE_SUPER_ADMIN  # 第一个注册的用户自动成为超级管理员
@@ -133,14 +136,14 @@ def register():
             'username': full_name,
             'alias': username,
             'salt': salt,
-            'hash': _hash_password(password, salt),
+            'hash': hash_password(password, salt),
             'role': role,
             'is_admin': is_admin,
             'organization_id': organization_id,
             'organization_name': org.get('name') or DEFAULT_ORGANIZATION_NAME,
             'parent_username': '',
         })
-        _save_accounts(accounts)
+        save_accounts(accounts)
     session.permanent = True
     session['username'] = full_name
     return jsonify({'success': True, 'username': full_name, 'alias': username, 'role': role, 'is_admin': is_admin})
@@ -148,7 +151,7 @@ def register():
 @auth_bp.route('/api/organizations')
 def api_public_organizations():
     """Registration-time organization lookup. Creation remains admin-only."""
-    orgs = _list_organizations_with_default()
+    orgs = list_organizations_with_default()
     return jsonify({'success': True, 'organizations': orgs})
 
 @auth_bp.route('/api/me')
@@ -156,10 +159,10 @@ def api_me():
     username = _current_user()
     acct_public = None
     if username:
-        with _accts_lock:
-            accounts = _load_accounts()
+        with accounts_lock:
+            accounts = load_accounts()
         acct = next((a for a in accounts if a['username'] == username), None)
-        acct_public = _serialize_account_public(acct, current_username=username) if acct else None
+        acct_public = serialize_account_public(acct, current_username=username) if acct else None
     return jsonify({
         'username': username,
         'alias': (acct_public or {}).get('alias') if acct_public else None,

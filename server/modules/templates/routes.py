@@ -7,9 +7,13 @@ from server.shared import (
     _require_user, _get_user_file_lock,
     login_required,
     get_factor_family_instance, _get_session_params, _save_session_params,
-    _visible_accounts_for, _can_view_user_scope, _account_display_name,
 )
 from server.modules.shared.param_config import param_value_display
+from server.services.accounts import (
+    account_display_name,
+    can_view_user_scope,
+    visible_accounts_for,
+)
 from server.services.user_storage import load_user_templates, new_template_id, save_user_templates
 
 
@@ -198,7 +202,7 @@ def delete_time_template(tpl_id):
 def list_params_templates(ff_alias):
     u = _require_user()
     include_visible = request.args.get('include_visible') == '1'
-    accounts = _visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
+    accounts = visible_accounts_for(u, include_self=True) if include_visible else [{'username': u, 'alias': u}]
     current_acct = next((a for a in accounts if a.get('username') == u), None) or {}
     can_filter_organization = bool(current_acct.get('role') == 'super_admin' or current_acct.get('is_admin'))
     result = []
@@ -213,7 +217,7 @@ def list_params_templates(ff_alias):
                 'id': t['id'],
                 'name': t['name'],
                 'owner_username': owner,
-                'owner_alias': _account_display_name(acct),
+                'owner_alias': account_display_name(acct),
                 'owner_organization_id': acct.get('organization_id') or '',
                 'owner_organization_name': acct.get('organization_name') or '',
                 'editable': owner == u,
@@ -249,7 +253,7 @@ def save_params_template(ff_alias):
 def get_params_template(ff_alias, tpl_id):
     u = _require_user()
     owner_username = (request.args.get('owner_username') or u).strip()
-    if not _can_view_user_scope(u, owner_username):
+    if not can_view_user_scope(u, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
     with _get_user_file_lock(owner_username):
         templates = _load_user_tpls(owner_username, 'params', ff_alias)

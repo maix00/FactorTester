@@ -9,7 +9,8 @@ from server.modules.custom_factors.catalog import (
     list_public_factors,
     list_visible_custom_factors,
 )
-from server.shared import _current_user, _get_account, _load_accounts, login_required
+from server.services.accounts import get_account, load_accounts
+from server.shared import _current_user, login_required
 
 
 @cf_bp.route('/editor', methods=['GET'])
@@ -29,7 +30,7 @@ def api_list_factors():
         custom = list_visible_custom_factors(username)
     else:
         custom = list_custom_factors(username)
-        account = _get_account(username) or {}
+        account = get_account(username) or {}
         for factor in custom:
             factor['owner_username'] = username
             factor['owner_alias'] = '我'
@@ -39,7 +40,7 @@ def api_list_factors():
 
     is_admin = False
     if username:
-        for account in _load_accounts():
+        for account in load_accounts():
             if account.get('username') == username and account.get('is_admin'):
                 is_admin = True
                 break

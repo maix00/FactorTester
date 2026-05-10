@@ -111,7 +111,7 @@
 ├── server/                  # Flask 后端
 │   ├── core.py              # 核心路由 (首页/单因子/多因子/文档)
 │   ├── auth.py              # 用户认证
-│   ├── templates_bp.py      # 模板持久化 API
+│   ├── modules/templates/   # 模板持久化 API
 │   ├── shared.py            # 全局状态 & 工具函数
 │   └── modules/
 │       ├── shared/          # 共享模块 (因子数据/参数/产品/时间)
@@ -141,7 +141,7 @@
             <tr><th>Blueprint</th><th>文件</th><th>职责</th></tr>
             <tr><td><code>auth_bp</code></td><td>server/auth.py</td><td>登录/注册/登出，首个注册用户自动为 Admin</td></tr>
             <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页(/)、单因子测试、多因子测试、技术文档</td></tr>
-            <tr><td><code>templates_bp</code></td><td>server/templates_bp.py</td><td>参数/时间/全局模板的 CRUD</td></tr>
+            <tr><td><code>templates_bp</code></td><td>server/modules/templates/</td><td>参数/时间/全局模板的 CRUD</td></tr>
             <tr><td><code>shared_bp</code></td><td>server/modules/shared/</td><td>因子数据、参数管理、产品提交、时间范围</td></tr>
             <tr><td><code>sft_bp</code></td><td>server/modules/single_factor_test/</td><td>IC 测试、分组回测</td></tr>
             <tr><td><code>mfa_bp</code></td><td>server/modules/multi_factor_analysis/</td><td>多因子合成与分析</td></tr>
