@@ -25,12 +25,12 @@
         th { color: #6b7280; font-weight: 600; background: #fafafa; }
         th:nth-child(1), td:nth-child(1) { width: 22%; }
         th:nth-child(2), td:nth-child(2) { width: 14%; }
-        th:nth-child(3), td:nth-child(3) { width: 14%; }
-        th:nth-child(4), td:nth-child(4) { width: 1%; white-space: nowrap; }
-        th:nth-child(5), td:nth-child(5) { width: 49%; }
+        th:nth-child(3), td:nth-child(3) { width: 16%; }
+        th:nth-child(4), td:nth-child(4) { width: 48%; }
         td { overflow: hidden; text-overflow: ellipsis; }
         .pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: 12px; }
         .muted { color: #9ca3af; }
+        .role-op-cell { display: flex; flex-direction: column; gap: 8px; }
         .row-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
         .row-actions > * { min-width: 0; }
         .row-actions select { width: 100%; margin: 0; padding: 6px 8px; }
@@ -45,6 +45,13 @@
         .org-toggle .count { margin-left: auto; color: #98a2b3; font-weight: 500; font-size: 12px; }
         .org-user-row.collapsed { display: none; }
         .org-row.open .caret { transform: rotate(90deg); }
+        .org-admin-row { display:flex; gap:8px; align-items:center; margin-top:10px; }
+        .org-admin-row select { flex:1; margin:0; }
+        .danger { background:#fee2e2; color:#991b1b; }
+        .hier-card { margin-top: 18px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fcfdff; }
+        .hier-node { padding: 4px 0 4px 14px; border-left: 1px dashed #d0d5dd; margin-left: 8px; }
+        .hier-label { font-size: 12px; color:#334155; display:flex; gap:8px; align-items:center; }
+        .hier-role { color:#64748b; font-size:11px; }
         @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -79,6 +86,10 @@
                     <input id="new-org-desc" placeholder="可选">
                     <button class="secondary" style="margin-top:14px;width:100%;" onclick="createOrganization()">创建机构</button>
                     <div class="status" id="org-status"></div>
+                    <div class="org-admin-row">
+                        <select id="delete-org-id"></select>
+                        <button class="danger" onclick="deleteOrganization()">删除机构</button>
+                    </div>
                 </div>
             </div>
 
@@ -92,14 +103,17 @@
                             <th>用户</th>
                             <th>机构</th>
                             <th>上级</th>
-                            <th>角色</th>
-                            <th>操作</th>
+                            <th>角色/操作</th>
                         </tr>
                     </thead>
                     <tbody id="users-body">
-                        <tr><td colspan="5" class="muted">加载中...</td></tr>
+                        <tr><td colspan="4" class="muted">加载中...</td></tr>
                     </tbody>
                 </table>
+                <div class="hier-card">
+                    <h2 style="margin:0 0 8px;">层级树</h2>
+                    <div id="hierarchy-tree" class="muted">加载中...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -134,11 +148,17 @@
             document.getElementById('new-parent').innerHTML =
                 '<option value="">无上级</option>' + ctx.users.map(u => `<option value="${esc(u.username)}">${esc(u.alias)} (${esc(u.username)})</option>`).join('');
             document.getElementById('org-create-box').style.display = ctx.current_user.role === 'super_admin' ? '' : 'none';
+            const deletableOrgs = (ctx.organizations || []).filter(o => o.id !== 'default');
+            const deleteOrgSel = document.getElementById('delete-org-id');
+            if (deleteOrgSel) {
+                deleteOrgSel.innerHTML = '<option value="">选择机构</option>' + deletableOrgs.map(o => `<option value="${esc(o.id)}">${esc(o.name)} (${esc(o.id)})</option>`).join('');
+            }
             document.getElementById('role-note').innerHTML =
                 '超级管理员：管理全部机构与用户，并保留系统级权限。<br>' +
                 '机构管理员：管理本机构用户，可设置机构内层级。<br>' +
                 '层级管理员：管理自己的直接下级。<br>' +
                 '普通用户：不进入管理界面，但可在因子库查看自己与直接下级的因子配置。';
+            renderHierarchy();
         }
 
         function renderUsers() {
@@ -149,7 +169,7 @@
                 const groupId = 'org-group-' + group.key.replace(/[^a-zA-Z0-9_-]/g, '_');
                 if (ctx.current_user.role === 'super_admin') {
                     const isDefaultOpen = group.key === 'default';
-                    rows.push(`<tr class="org-row ${isDefaultOpen ? 'open' : ''}" id="${escAttr(groupId)}"><td colspan="5">
+                    rows.push(`<tr class="org-row ${isDefaultOpen ? 'open' : ''}" id="${escAttr(groupId)}"><td colspan="4">
                         <button class="org-toggle" onclick="toggleOrgGroup('${escAttr(groupId)}')">
                             <span class="caret">▶</span><span>${esc(group.label)}</span><span class="count">${group.users.length}</span>
                         </button>
@@ -165,14 +185,16 @@
                     <td><strong>${esc(u.alias)}</strong><br><span class="muted">${esc(u.username)}</span></td>
                     <td>${esc(u.organization_name || '')}</td>
                     <td>${u.parent_username ? esc(u.parent_username) : '<span class="muted">无</span>'}</td>
-                    <td><span class="pill">${esc(ctx.role_labels[u.role] || u.role)}</span></td>
-                    <td>${u.can_manage ? `<div class="row-actions">
-                        <select id="role-${escAttr(u.username)}">${roleOptions}</select>
-                        <select id="org-${escAttr(u.username)}">${orgOptions}</select>
-                        <select id="parent-${escAttr(u.username)}">${parentOptions}</select>
-                        <button class="secondary" onclick="updateUser('${escAttr(u.username)}')">保存</button>
-                        <button style="background:#fee2e2;color:#991b1b;" onclick="deleteUser('${escAttr(u.username)}', '${escAttr(u.alias)}')">删除</button>
-                    </div>` : '<span class="muted">不可管理</span>'}</td>
+                    <td>${u.can_manage ? `<div class="role-op-cell">
+                        <span class="pill">${esc(ctx.role_labels[u.role] || u.role)}</span>
+                        <div class="row-actions">
+                            <select id="role-${escAttr(u.username)}">${roleOptions}</select>
+                            <select id="org-${escAttr(u.username)}">${orgOptions}</select>
+                            <select id="parent-${escAttr(u.username)}">${parentOptions}</select>
+                            <button class="secondary" onclick="updateUser('${escAttr(u.username)}')">保存</button>
+                            <button style="background:#fee2e2;color:#991b1b;" onclick="deleteUser('${escAttr(u.username)}', '${escAttr(u.alias)}')">删除</button>
+                        </div>
+                    </div>` : `<div class="role-op-cell"><span class="pill">${esc(ctx.role_labels[u.role] || u.role)}</span><span class="muted">不可管理</span></div>`}</td>
                 </tr>`);
                 });
             });
@@ -218,6 +240,22 @@
             if (data.success) loadContext();
         }
 
+        async function deleteOrganization() {
+            const orgId = (document.getElementById('delete-org-id').value || '').trim();
+            const status = document.getElementById('org-status');
+            if (!orgId) {
+                status.textContent = '请选择要删除的机构';
+                return;
+            }
+            if (!confirm('确定删除机构「' + orgId + '」？机构下仍有用户时将拒绝删除。')) return;
+            status.textContent = '删除中...';
+            const data = await fetch('/admin/api/organizations/' + encodeURIComponent(orgId), {
+                method: 'DELETE',
+            }).then(r => r.json());
+            status.textContent = data.success ? '已删除机构' : (data.error || '删除失败');
+            if (data.success) loadContext();
+        }
+
         async function createUser() {
             const payload = {
                 alias: document.getElementById('new-alias').value.trim(),
@@ -255,12 +293,33 @@
         }
 
         async function deleteUser(username, alias) {
-            if (!confirm('确定删除用户「' + alias + '」？账号会被移除，但该用户的数据目录会保留。')) return;
+            if (!confirm('确定删除用户「' + alias + '」？账号会被移除，用户目录会自动归档。')) return;
             const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
                 method: 'DELETE',
             }).then(r => r.json());
             alert(data.success ? '已删除用户' : (data.error || '删除失败'));
             if (data.success) loadContext();
+        }
+
+        function renderHierarchy() {
+            const el = document.getElementById('hierarchy-tree');
+            if (!el) return;
+            const trees = ctx.hierarchy || [];
+            if (!trees.length) {
+                el.innerHTML = '<span class="muted">暂无层级数据</span>';
+                return;
+            }
+            function roleLabel(role) { return esc((ctx.role_labels && ctx.role_labels[role]) || role || ''); }
+            function renderNode(node) {
+                const children = Array.isArray(node.children) ? node.children : [];
+                let html = '<div class="hier-node"><div class="hier-label"><strong>' + esc(node.alias || node.username || '') + '</strong><span class="hier-role">' + roleLabel(node.role) + '</span><span class="muted">' + esc(node.organization_name || node.organization_id || '') + '</span></div>';
+                children.forEach(child => { html += renderNode(child); });
+                html += '</div>';
+                return html;
+            }
+            let html = '';
+            trees.forEach(root => { html += renderNode(root); });
+            el.innerHTML = html;
         }
 
         function esc(s) {

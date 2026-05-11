@@ -20,6 +20,7 @@ from server.services.accounts import (
 )
 from server.services.http_auth import login_required
 from server.services.runtime_state import require_user
+from server.services.user_storage import archive_user_dir
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -53,6 +54,34 @@ def _allowed_roles_for(manager: dict) -> set[str]:
     return set()
 
 
+def _build_hierarchy_tree(users: list[dict]) -> list[dict]:
+    by_username = {u.get('username'): dict(u) for u in users if u.get('username')}
+    children = {u.get('username'): [] for u in users if u.get('username')}
+    roots = []
+    for user in users:
+        username = user.get('username')
+        if not username:
+            continue
+        parent = (user.get('parent_username') or '').strip()
+        if parent and parent in children:
+            children[parent].append(username)
+        else:
+            roots.append(username)
+
+    def build_node(username: str) -> dict:
+        user = by_username[username]
+        return {
+            'username': user.get('username') or '',
+            'alias': user.get('alias') or user.get('username') or '',
+            'role': user.get('role') or ROLE_USER,
+            'organization_id': user.get('organization_id') or '',
+            'organization_name': user.get('organization_name') or '',
+            'children': [build_node(child) for child in children.get(username, [])],
+        }
+
+    return [build_node(root) for root in roots]
+
+
 @admin_bp.route('/users', methods=['GET'])
 @login_required
 def users_page():
@@ -70,12 +99,14 @@ def api_admin_context():
         return error
     accounts = [serialize_account_public(a, username) for a in visible_accounts_for(username, include_self=True)]
     orgs = visible_organizations_for(username)
+    hierarchy = _build_hierarchy_tree(accounts)
     return jsonify({
         'success': True,
         'current_user': serialize_account_public(acct, username),
         'role_labels': ROLE_LABELS,
         'organizations': orgs,
         'users': accounts,
+        'hierarchy': hierarchy,
     })
 
 
@@ -102,6 +133,31 @@ def api_create_organization():
     return jsonify({'success': True, 'organization': org})
 
 
+@admin_bp.route('/api/organizations/<path:organization_id>', methods=['DELETE'])
+@login_required
+def api_delete_organization(organization_id):
+    username, acct, error = _require_admin_account()
+    if error:
+        return error
+    if not is_super_admin_account(acct):
+        return jsonify({'success': False, 'error': '只有超级管理员可以删除机构'}), 403
+    organization_id = (organization_id or '').strip()
+    if not organization_id or organization_id == DEFAULT_ORGANIZATION_ID:
+        return jsonify({'success': False, 'error': '默认机构不能删除'}), 400
+    with accounts_lock:
+        accounts = normalize_accounts(load_accounts())
+        if any((a.get('organization_id') or DEFAULT_ORGANIZATION_ID) == organization_id for a in accounts):
+            return jsonify({'success': False, 'error': '该机构下仍有用户，无法删除'}), 400
+    with organizations_lock:
+        organizations = [normalize_organization(o) for o in load_organizations()]
+        before = len(organizations)
+        organizations = [o for o in organizations if o.get('id') != organization_id]
+        if len(organizations) == before:
+            return jsonify({'success': False, 'error': '机构不存在'}), 404
+        save_organizations(organizations)
+    return jsonify({'success': True})
+
+
 @admin_bp.route('/api/users', methods=['POST'])
 @login_required
 def api_create_user():
@@ -124,9 +180,17 @@ def api_create_user():
         return jsonify({'success': False, 'error': '不能创建该角色'}), 403
     if not can_manage_organization(username, organization_id):
         return jsonify({'success': False, 'error': '无权在该机构下创建用户'}), 403
-    if manager.get('role') == ROLE_LEVEL_ADMIN:
+    if parent_username and parent_username == username:
+        # allow admins to explicitly set themselves as parent
+        pass
+    elif manager.get('role') == ROLE_LEVEL_ADMIN:
         parent_username = username
-    if manager.get('role') == ROLE_ORG_ADMIN and parent_username and not can_manage_user_account(username, parent_username):
+    if (
+        manager.get('role') == ROLE_ORG_ADMIN
+        and parent_username
+        and parent_username != username
+        and not can_manage_user_account(username, parent_username)
+    ):
         return jsonify({'success': False, 'error': '无权指定该上级用户'}), 403
 
     org = next((o for o in list_organizations_with_default() if o.get('id') == organization_id), None)
@@ -186,7 +250,7 @@ def api_update_user(target_username):
             parent_username = (data.get('parent_username') or '').strip()
             if parent_username == target_username:
                 return jsonify({'success': False, 'error': '上级用户不能是自己'}), 400
-            if parent_username and not can_manage_user_account(username, parent_username):
+            if parent_username and parent_username != username and not can_manage_user_account(username, parent_username):
                 return jsonify({'success': False, 'error': '无权指定该上级用户'}), 403
             target['parent_username'] = parent_username
         if data.get('password'):
@@ -219,4 +283,5 @@ def api_delete_user(target_username):
             if acct.get('parent_username') == target_username:
                 acct['parent_username'] = ''
         save_accounts(accounts)
-    return jsonify({'success': True})
+    archived_path = archive_user_dir(target_username)
+    return jsonify({'success': True, 'archived_path': archived_path or ''})
