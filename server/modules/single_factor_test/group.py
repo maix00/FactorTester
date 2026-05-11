@@ -9,6 +9,7 @@ from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 import server.services.runtime_state as runtime_state
+from server.modules.shared.price_data_helpers import to_utc_epoch
 
 
 def _safe_float(v):
@@ -116,7 +117,7 @@ def run_group_test():
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
                 )
-                timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+                timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
                 _gross = getattr(tester, '_last_group_gross_returns_np', None)
                 gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
                 _fee_np = getattr(tester, '_last_fee_costs_np', None)
@@ -167,7 +168,7 @@ def run_group_test():
             fee=fee_uniform, fee_map=fee_map,
         )
 
-        timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+        timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
         _gross = getattr(tester, '_last_group_gross_returns_np', None)
         gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))

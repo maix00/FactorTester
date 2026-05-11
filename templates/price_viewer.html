@@ -191,6 +191,11 @@
 (function() {
     'use strict';
 
+    // Highcharts 时区配置：后端返回 UTC epoch，useUTC=false 使得 dateFormat/formatter 按浏览器本地时区显示
+    if (typeof Highcharts !== 'undefined') {
+        Highcharts.setOptions({ global: { useUTC: false } });
+    }
+
     let currentProduct = null;
     let currentAdjusted = false;
     let treeInstance = null;
@@ -653,34 +658,26 @@
             });
         }
 
-        // xAxis 标签格式：压缩文字并倾斜显示，避免密集时间轴互相覆盖。
-        var minLabelGap = isIntraday ? 96 : 84;
+        // xAxis 标签：直接用 new Date(utcEpoch) 按浏览器本地时区显示
         var xAxisOptions = {
             type: 'datetime',
-            tickPixelInterval: isIntraday ? 120 : 105,
             labels: {
                 rotation: -45,
                 align: 'right',
-                reserveSpace: true,
-                autoRotation: [-45],
-                autoRotationLimit: 60,
-                step: Math.max(1, Math.ceil((data.data || []).length / Math.max(6, Math.floor((container.clientWidth || 900) / minLabelGap)))),
                 style: {
                     fontSize: '10px',
-                    color: '#64748b',
-                    textOverflow: 'none',
-                    whiteSpace: 'nowrap'
+                    color: '#64748b'
                 },
                 formatter: function() {
                     var d = new Date(this.value);
-                    var dateStr = Highcharts.dateFormat('%Y-%m-%d', this.value);
+                    var hh = String(d.getHours()).padStart(2, '0');
+                    var mm = String(d.getMinutes()).padStart(2, '0');
+                    var M = String(d.getMonth() + 1).padStart(2, '0');
+                    var dd = String(d.getDate()).padStart(2, '0');
                     if (isIntraday) {
-                        var timeStr = Highcharts.dateFormat('%H:%M', this.value);
-                        return timeStr + ' ' + Highcharts.dateFormat('%m-%d', this.value);
+                        return hh + ':' + mm + '<br/>' + M + '-' + dd;
                     } else {
-                        var days = ['日','一','二','三','四','五','六'];
-                        var dayName = days[d.getDay()];
-                        return Highcharts.dateFormat('%m-%d', this.value) + ' 周' + dayName;
+                        return M + '-' + dd;
                     }
                 }
             },
@@ -706,18 +703,35 @@
             xAxis: xAxisOptions,
             yAxis: yAxisArr,
             tooltip: {
-                split: true,
-                valueDecimals: 2,
-                dateTimeLabelFormats: isIntraday ? {
-                    millisecond: '%H:%M:%S.%L',
-                    second: '%H:%M:%S',
-                    minute: '%H:%M',
-                    hour: '%H:%M'
-                } : {
-                    millisecond: '%Y-%m-%d',
-                    second: '%Y-%m-%d %H:%M',
-                    minute: '%Y-%m-%d %H:%M',
-                    hour: '%Y-%m-%d %H:%M'
+                shared: true,
+                useHTML: true,
+                formatter: function () {
+                    var d = new Date(this.x);
+                    var dateStr = isIntraday ?
+                        d.getFullYear() + '-' +
+                        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                        String(d.getDate()).padStart(2, '0') + ' ' +
+                        String(d.getHours()).padStart(2, '0') + ':' +
+                        String(d.getMinutes()).padStart(2, '0') + ':' +
+                        String(d.getSeconds()).padStart(2, '0') :
+                        d.getFullYear() + '-' +
+                        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                        String(d.getDate()).padStart(2, '0');
+                    var s = '<b>' + dateStr + '</b>';
+                    this.points.forEach(function (p) {
+                        if (p.series.type === 'candlestick') {
+                            s += '<br/><span style="font-weight:bold">开盘</span> ' + p.point.open.toFixed(2) +
+                                 '<br/><span style="font-weight:bold">最高</span> ' + p.point.high.toFixed(2) +
+                                 '<br/><span style="font-weight:bold">最低</span> ' + p.point.low.toFixed(2) +
+                                 '<br/><span style="font-weight:bold">收盘</span> ' + p.point.close.toFixed(2);
+                        } else {
+                            var decimals = p.series.tooltipOptions.valueDecimals;
+                            if (typeof decimals !== 'number') decimals = 2;
+                            var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
+                            s += '<br/>' + p.series.name + ': ' + val;
+                        }
+                    });
+                    return s;
                 }
             },
             series: seriesArr,

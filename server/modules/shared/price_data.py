@@ -13,7 +13,7 @@ from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
-from .price_data_helpers import format_price_row
+from .price_data_helpers import format_price_row, to_utc_epoch
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,
@@ -181,8 +181,8 @@ def get_contracts():
                 'has_data': _contract_has_data(uid),
                 'start': start.strftime('%Y-%m-%d') if start is not None else None,
                 'end': end.strftime('%Y-%m-%d') if end is not None else None,
-                'start_ts': int(start.timestamp() * 1000) if start is not None else None,
-                'end_ts': int(end.timestamp() * 1000) if end is not None else None,
+                'start_ts': to_utc_epoch(start) if start is not None else None,
+                'end_ts': to_utc_epoch(end) if end is not None else None,
             })
 
         return jsonify({
@@ -469,8 +469,8 @@ def get_price_data():
                                 'contract': str(_scalar(r['CONTRACT'])),
                                 'uid': uid,
                                 'has_data': _contract_has_data(uid),
-                                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
-                                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
+                                'start_ts': to_utc_epoch(s) if s is not None else None,
+                                'end_ts': to_utc_epoch(e) if e is not None else None,
                             })
             except Exception:
                 pass
