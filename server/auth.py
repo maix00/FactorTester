@@ -11,7 +11,7 @@ from server.services.accounts import (
     normalize_account, serialize_account_public,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
     ROLE_SUPER_ADMIN, ROLE_USER,
-    list_organizations_with_default, next_account_username,
+    list_organizations_with_default, next_account_username, root_level_id_for_org,
 )
 from server.services.runtime_state import (
     check_session_idle,
@@ -167,6 +167,7 @@ def register():
             'is_admin': is_admin,
             'organization_id': organization_id,
             'organization_name': org.get('name') or DEFAULT_ORGANIZATION_NAME,
+            'level_id': root_level_id_for_org(organization_id),
             'parent_username': '',
         })
         save_accounts(accounts)

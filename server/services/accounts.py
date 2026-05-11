@@ -14,8 +14,10 @@ from server.services.user_storage import USERS_DIR
 
 ACCOUNTS_FILE = os.path.join(USERS_DIR, 'accounts.json')
 ORGANIZATIONS_FILE = os.path.join(USERS_DIR, 'organizations.json')
+LEVELS_FILE = os.path.join(USERS_DIR, 'levels.json')
 accounts_lock = threading.Lock()
 organizations_lock = threading.Lock()
+levels_lock = threading.Lock()
 
 DEFAULT_ORGANIZATION_ID = 'default'
 DEFAULT_ORGANIZATION_NAME = '默认机构'
@@ -70,6 +72,24 @@ def save_organizations(organizations: list) -> None:
         json.dump(organizations, file, ensure_ascii=False, indent=2)
 
 
+def load_levels() -> list:
+    try:
+        if os.path.exists(LEVELS_FILE):
+            with open(LEVELS_FILE, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+
+def save_levels(levels: list) -> None:
+    os.makedirs(os.path.dirname(LEVELS_FILE), exist_ok=True)
+    with open(LEVELS_FILE, 'w', encoding='utf-8') as file:
+        json.dump(levels, file, ensure_ascii=False, indent=2)
+
+
 def slugify_org_id(name: str) -> str:
     raw = re.sub(r'\s+', '_', (name or '').strip())
     raw = re.sub(r'[^\w\u4e00-\u9fff-]', '', raw)
@@ -108,6 +128,51 @@ def normalize_organization(org: dict) -> dict:
     return normalized
 
 
+def normalize_level(level: dict) -> dict:
+    normalized = dict(level or {})
+    org_id = (normalized.get('organization_id') or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
+    normalized['organization_id'] = org_id
+    normalized['id'] = (normalized.get('id') or '').strip()
+    normalized['name'] = (normalized.get('name') or '').strip()
+    normalized['parent_level_id'] = (normalized.get('parent_level_id') or '').strip()
+    normalized['manager_username'] = (normalized.get('manager_username') or '').strip()
+    return normalized
+
+
+def normalize_levels(levels: list) -> list:
+    return [normalize_level(level) for level in levels]
+
+
+def root_level_id_for_org(organization_id: str) -> str:
+    return f'{organization_id}__ROOT'
+
+
+def ensure_root_levels(levels: list, organizations: list) -> list:
+    result = normalize_levels(levels)
+    existed = {level.get('id') for level in result}
+    for org in organizations:
+        org_id = (org.get('id') or DEFAULT_ORGANIZATION_ID).strip() or DEFAULT_ORGANIZATION_ID
+        rid = root_level_id_for_org(org_id)
+        if rid in existed:
+            continue
+        result.append({
+            'id': rid,
+            'organization_id': org_id,
+            'name': '默认层级',
+            'parent_level_id': '',
+            'manager_username': '',
+        })
+        existed.add(rid)
+    return result
+
+
+def list_levels_with_roots() -> list:
+    organizations = list_organizations_with_default()
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+    return ensure_root_levels(levels, organizations)
+
+
 def list_organizations_with_default() -> list:
     with organizations_lock:
         organizations = [normalize_organization(org) for org in load_organizations()]
@@ -125,6 +190,7 @@ def normalize_account(account: dict) -> dict:
     normalized.setdefault('organization_id', DEFAULT_ORGANIZATION_ID)
     normalized.setdefault('organization_name', DEFAULT_ORGANIZATION_NAME)
     normalized.setdefault('parent_username', '')
+    normalized.setdefault('level_id', '')
     if normalized.get('is_admin'):
         normalized.setdefault('role', ROLE_SUPER_ADMIN)
     else:
@@ -143,6 +209,22 @@ def get_account(username: str | None) -> dict | None:
     with accounts_lock:
         accounts = normalize_accounts(load_accounts())
     return next((account for account in accounts if account.get('username') == username), None)
+
+
+def _descendant_level_ids(levels: list, root_level_id: str) -> set[str]:
+    children = {}
+    for level in levels:
+        parent = level.get('parent_level_id') or ''
+        children.setdefault(parent, []).append(level.get('id') or '')
+    result = set()
+    stack = [root_level_id]
+    while stack:
+        node = stack.pop()
+        if not node or node in result:
+            continue
+        result.add(node)
+        stack.extend(children.get(node, []))
+    return result
 
 
 def is_super_admin_account(account: dict | None) -> bool:
@@ -175,16 +257,29 @@ def visible_accounts_for(username: str | None, include_self: bool = True) -> lis
     current = next((account for account in accounts if account.get('username') == username), None)
     if current is None:
         return []
+    levels = list_levels_with_roots()
+    org_id = current.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    current_level_id = current.get('level_id') or root_level_id_for_org(org_id)
     if is_super_admin_account(current):
         visible = accounts
     elif current.get('role') == ROLE_ORG_ADMIN:
-        org_id = current.get('organization_id') or DEFAULT_ORGANIZATION_ID
         visible = [
             account for account in accounts
             if (account.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id
         ]
+    elif current.get('role') == ROLE_LEVEL_ADMIN:
+        scope_levels = _descendant_level_ids(levels, current_level_id)
+        visible = [
+            account for account in accounts
+            if (account.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id
+            and ((account.get('level_id') or root_level_id_for_org(org_id)) in scope_levels)
+        ]
     else:
-        visible = [account for account in accounts if account.get('parent_username') == username]
+        visible = [
+            account for account in accounts
+            if (account.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id
+            and ((account.get('level_id') or root_level_id_for_org(org_id)) == current_level_id)
+        ]
         if include_self:
             visible.insert(0, current)
     if include_self and current not in visible:
@@ -225,18 +320,22 @@ def can_manage_user_account(current_username: str | None, target_username: str |
     target = next((account for account in accounts if account.get('username') == target_username), None)
     if not current or not target:
         return False
+    levels = list_levels_with_roots()
+    current_org = current.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    target_org = target.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    current_level = current.get('level_id') or root_level_id_for_org(current_org)
+    target_level = target.get('level_id') or root_level_id_for_org(target_org)
     if is_super_admin_account(current):
         return True
     if is_super_admin_account(target):
         return False
     if current.get('role') == ROLE_ORG_ADMIN:
-        return (
-            current.get('organization_id') or DEFAULT_ORGANIZATION_ID
-        ) == (
-            target.get('organization_id') or DEFAULT_ORGANIZATION_ID
-        )
+        return current_org == target_org
     if current.get('role') == ROLE_LEVEL_ADMIN:
-        return target.get('parent_username') == current_username
+        if current_org != target_org:
+            return False
+        scope_levels = _descendant_level_ids(levels, current_level)
+        return target_level in scope_levels
     return False
 
 
@@ -249,6 +348,7 @@ def serialize_account_public(account: dict | None, current_username: str | None 
         'is_admin': normalized.get('role') == ROLE_SUPER_ADMIN,
         'organization_id': normalized.get('organization_id') or DEFAULT_ORGANIZATION_ID,
         'organization_name': normalized.get('organization_name') or DEFAULT_ORGANIZATION_NAME,
+        'level_id': normalized.get('level_id') or '',
         'parent_username': normalized.get('parent_username') or '',
         'can_manage': can_manage_user_account(current_username, normalized.get('username')) if current_username else False,
     }
@@ -275,4 +375,25 @@ def can_manage_organization(current_username: str | None, organization_id: str |
         return (account.get('organization_id') or DEFAULT_ORGANIZATION_ID) == (
             organization_id or DEFAULT_ORGANIZATION_ID
         )
+    return False
+
+
+def can_manage_level(current_username: str | None, level_id: str | None) -> bool:
+    account = get_account(current_username)
+    if not account:
+        return False
+    if is_super_admin_account(account):
+        return True
+    levels = list_levels_with_roots()
+    target = next((level for level in levels if level.get('id') == (level_id or '')), None)
+    if target is None:
+        return False
+    account_org = account.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    target_org = target.get('organization_id') or DEFAULT_ORGANIZATION_ID
+    if account.get('role') == ROLE_ORG_ADMIN:
+        return account_org == target_org
+    if account.get('role') == ROLE_LEVEL_ADMIN:
+        account_level = account.get('level_id') or root_level_id_for_org(account_org)
+        scope_levels = _descendant_level_ids(levels, account_level)
+        return account_org == target_org and (target.get('id') or '') in scope_levels
     return False

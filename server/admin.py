@@ -16,7 +16,10 @@ from server.services.accounts import (
     ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER,
     is_super_admin_account, is_org_admin_account, is_level_admin_account,
     can_manage_user_account, can_manage_organization,
+    can_manage_level,
     next_account_username,
+    levels_lock, load_levels, save_levels, normalize_levels,
+    list_levels_with_roots, root_level_id_for_org,
 )
 from server.services.http_auth import login_required
 from server.services.runtime_state import require_user
@@ -54,32 +57,79 @@ def _allowed_roles_for(manager: dict) -> set[str]:
     return set()
 
 
-def _build_hierarchy_tree(users: list[dict]) -> list[dict]:
-    by_username = {u.get('username'): dict(u) for u in users if u.get('username')}
-    children = {u.get('username'): [] for u in users if u.get('username')}
-    roots = []
-    for user in users:
-        username = user.get('username')
-        if not username:
-            continue
-        parent = (user.get('parent_username') or '').strip()
-        if parent and parent in children:
-            children[parent].append(username)
-        else:
-            roots.append(username)
+def _would_create_level_cycle(levels: list[dict], level_id: str, new_parent_id: str) -> bool:
+    if not new_parent_id or new_parent_id == level_id:
+        return new_parent_id == level_id
+    parent_map = {str(level.get('id') or ''): str(level.get('parent_level_id') or '') for level in levels}
+    cursor = new_parent_id
+    seen: set[str] = set()
+    while cursor and cursor not in seen:
+        if cursor == level_id:
+            return True
+        seen.add(cursor)
+        cursor = parent_map.get(cursor, '')
+    return False
 
-    def build_node(username: str) -> dict:
-        user = by_username[username]
+
+def _build_hierarchy_tree(users: list[dict], organizations: list[dict], levels: list[dict], current_username: str) -> list[dict]:
+    users_by_level: dict[str, list[dict]] = {}
+    for user in users:
+        org_id = user.get('organization_id') or DEFAULT_ORGANIZATION_ID
+        level_id = user.get('level_id') or root_level_id_for_org(org_id)
+        users_by_level.setdefault(level_id, []).append(user)
+
+    levels_by_org: dict[str, list[dict]] = {}
+    for level in levels:
+        levels_by_org.setdefault(level.get('organization_id') or DEFAULT_ORGANIZATION_ID, []).append(level)
+
+    def build_level_node(level: dict, org_id: str, children_map: dict[str, list[dict]]) -> dict:
+        level_id = level.get('id') or ''
+        level_users = sorted(users_by_level.get(level_id, []), key=lambda u: (u.get('alias') or u.get('username') or ''))
+        user_nodes = []
+        for user in level_users:
+            username = user.get('username') or ''
+            user_nodes.append({
+                'node_type': 'user',
+                'username': username,
+                'alias': user.get('alias') or username,
+                'role': user.get('role') or ROLE_USER,
+                'organization_id': org_id,
+                'organization_name': user.get('organization_name') or '',
+                'level_id': level_id,
+                'can_manage': can_manage_user_account(current_username, username),
+            })
+        child_levels = [build_level_node(child, org_id, children_map) for child in children_map.get(level_id, [])]
         return {
-            'username': user.get('username') or '',
-            'alias': user.get('alias') or user.get('username') or '',
-            'role': user.get('role') or ROLE_USER,
-            'organization_id': user.get('organization_id') or '',
-            'organization_name': user.get('organization_name') or '',
-            'children': [build_node(child) for child in children.get(username, [])],
+            'node_type': 'level',
+            'id': level_id,
+            'name': level.get('name') or '',
+            'organization_id': org_id,
+            'manager_username': level.get('manager_username') or '',
+            'can_manage': can_manage_level(current_username, level_id),
+            'children': child_levels + user_nodes,
         }
 
-    return [build_node(root) for root in roots]
+    tree = []
+    for org in organizations:
+        org_id = org.get('id') or DEFAULT_ORGANIZATION_ID
+        org_levels = [level for level in levels_by_org.get(org_id, [])]
+        by_parent: dict[str, list[dict]] = {}
+        for level in org_levels:
+            parent = level.get('parent_level_id') or ''
+            by_parent.setdefault(parent, []).append(level)
+        for parent in by_parent:
+            by_parent[parent].sort(key=lambda level: (level.get('name') or '', level.get('id') or ''))
+        root_levels = by_parent.get('', [])
+        org_children = [build_level_node(level, org_id, by_parent) for level in root_levels]
+        tree.append({
+            'node_type': 'organization',
+            'id': org_id,
+            'name': org.get('name') or '',
+            'description': org.get('description') or '',
+            'can_manage': can_manage_organization(current_username, org_id),
+            'children': org_children,
+        })
+    return tree
 
 
 @admin_bp.route('/users', methods=['GET'])
@@ -99,12 +149,16 @@ def api_admin_context():
         return error
     accounts = [serialize_account_public(a, username) for a in visible_accounts_for(username, include_self=True)]
     orgs = visible_organizations_for(username)
-    hierarchy = _build_hierarchy_tree(accounts)
+    levels = list_levels_with_roots()
+    visible_org_ids = {org.get('id') for org in orgs}
+    levels = [level for level in levels if (level.get('organization_id') or DEFAULT_ORGANIZATION_ID) in visible_org_ids]
+    hierarchy = _build_hierarchy_tree(accounts, orgs, levels, username)
     return jsonify({
         'success': True,
         'current_user': serialize_account_public(acct, username),
         'role_labels': ROLE_LABELS,
         'organizations': orgs,
+        'levels': levels,
         'users': accounts,
         'hierarchy': hierarchy,
     })
@@ -130,6 +184,18 @@ def api_create_organization():
             return jsonify({'success': False, 'error': '机构已存在'}), 400
         organizations.append(org)
         save_organizations(organizations)
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+        root_id = root_level_id_for_org(org.get('id') or DEFAULT_ORGANIZATION_ID)
+        if not any(level.get('id') == root_id for level in levels):
+            levels.append({
+                'id': root_id,
+                'organization_id': org.get('id') or DEFAULT_ORGANIZATION_ID,
+                'name': '默认层级',
+                'parent_level_id': '',
+                'manager_username': '',
+            })
+            save_levels(levels)
     return jsonify({'success': True, 'organization': org})
 
 
@@ -161,6 +227,123 @@ def api_delete_organization(organization_id):
         if len(organizations) == before:
             return jsonify({'success': False, 'error': '机构不存在'}), 404
         save_organizations(organizations)
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+        levels = [level for level in levels if (level.get('organization_id') or DEFAULT_ORGANIZATION_ID) != organization_id]
+        save_levels(levels)
+    return jsonify({'success': True})
+
+
+@admin_bp.route('/api/levels', methods=['POST'])
+@login_required
+def api_create_level():
+    username, manager, error = _require_admin_account()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    org_id = (data.get('organization_id') or manager.get('organization_id') or DEFAULT_ORGANIZATION_ID).strip()
+    parent_level_id = (data.get('parent_level_id') or '').strip()
+    name = (data.get('name') or '').strip()
+    if parent_level_id:
+        if not can_manage_level(username, parent_level_id):
+            return jsonify({'success': False, 'error': '无权在该上级层级下新增子层级'}), 403
+    elif not can_manage_organization(username, org_id):
+        return jsonify({'success': False, 'error': '无权在该机构新增根层级'}), 403
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+        org_levels = [level for level in levels if (level.get('organization_id') or DEFAULT_ORGANIZATION_ID) == org_id]
+        if parent_level_id and not any(level.get('id') == parent_level_id for level in org_levels):
+            return jsonify({'success': False, 'error': '上级层级不存在'}), 400
+        base = (name or 'level').replace(' ', '_')
+        base = re.sub(r'[^\w\u4e00-\u9fff-]', '', base) or 'level'
+        level_id = f'{org_id}__{base}'
+        suffix = 1
+        existed = {level.get('id') for level in levels}
+        while level_id in existed:
+            suffix += 1
+            level_id = f'{org_id}__{base}_{suffix}'
+        level = {
+            'id': level_id,
+            'organization_id': org_id,
+            'name': name,
+            'parent_level_id': parent_level_id,
+            'manager_username': '',
+        }
+        levels.append(level)
+        save_levels(levels)
+    return jsonify({'success': True, 'level': level})
+
+
+@admin_bp.route('/api/levels/<path:level_id>', methods=['PUT'])
+@login_required
+def api_update_level(level_id):
+    username, _, error = _require_admin_account()
+    if error:
+        return error
+    if not can_manage_level(username, level_id):
+        return jsonify({'success': False, 'error': '无权管理该层级'}), 403
+    data = request.get_json(silent=True) or {}
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+        target = next((level for level in levels if level.get('id') == level_id), None)
+        if not target:
+            return jsonify({'success': False, 'error': '层级不存在'}), 404
+        org_id = target.get('organization_id') or DEFAULT_ORGANIZATION_ID
+        if 'name' in data:
+            target['name'] = (data.get('name') or '').strip()
+        if 'parent_level_id' in data:
+            parent_level_id = (data.get('parent_level_id') or '').strip()
+            if parent_level_id == level_id:
+                return jsonify({'success': False, 'error': '上级层级不能是自己'}), 400
+            if parent_level_id:
+                parent = next((level for level in levels if level.get('id') == parent_level_id), None)
+                if not parent or (parent.get('organization_id') or DEFAULT_ORGANIZATION_ID) != org_id:
+                    return jsonify({'success': False, 'error': '上级层级不存在或跨机构'}), 400
+                if _would_create_level_cycle(levels, level_id, parent_level_id):
+                    return jsonify({'success': False, 'error': '层级移动后会形成环路'}), 400
+            target['parent_level_id'] = parent_level_id
+        if 'manager_username' in data:
+            manager_username = (data.get('manager_username') or '').strip()
+            if manager_username and not can_manage_user_account(username, manager_username) and manager_username != username:
+                return jsonify({'success': False, 'error': '无权指定该层级管理员'}), 403
+            if manager_username:
+                with accounts_lock:
+                    accounts = normalize_accounts(load_accounts())
+                manager_account = next((a for a in accounts if a.get('username') == manager_username), None)
+                if manager_account is None:
+                    return jsonify({'success': False, 'error': '指定的层级管理员不存在'}), 404
+                manager_org = manager_account.get('organization_id') or DEFAULT_ORGANIZATION_ID
+                if manager_org != org_id:
+                    return jsonify({'success': False, 'error': '层级管理员必须属于同一机构'}), 400
+            target['manager_username'] = manager_username
+        save_levels(levels)
+    return jsonify({'success': True, 'level': target})
+
+
+@admin_bp.route('/api/levels/<path:level_id>', methods=['DELETE'])
+@login_required
+def api_delete_level(level_id):
+    username, _, error = _require_admin_account()
+    if error:
+        return error
+    if not can_manage_level(username, level_id):
+        return jsonify({'success': False, 'error': '无权删除该层级'}), 403
+    with levels_lock:
+        levels = normalize_levels(load_levels())
+        target = next((level for level in levels if level.get('id') == level_id), None)
+        if not target:
+            return jsonify({'success': False, 'error': '层级不存在'}), 404
+        if level_id == root_level_id_for_org(target.get('organization_id') or DEFAULT_ORGANIZATION_ID):
+            return jsonify({'success': False, 'error': '默认层级不能删除'}), 400
+        child_ids = {level.get('id') for level in levels if (level.get('parent_level_id') or '') == level_id}
+        with accounts_lock:
+            accounts = normalize_accounts(load_accounts())
+            if any((account.get('level_id') or '') == level_id for account in accounts):
+                return jsonify({'success': False, 'error': '层级下仍有用户，无法删除'}), 400
+            if child_ids:
+                return jsonify({'success': False, 'error': '层级下仍有子层级，无法删除'}), 400
+        levels = [level for level in levels if level.get('id') != level_id]
+        save_levels(levels)
     return jsonify({'success': True})
 
 
@@ -175,6 +358,7 @@ def api_create_user():
     password = data.get('password') or ''
     role = (data.get('role') or ROLE_USER).strip()
     parent_username = (data.get('parent_username') or '').strip()
+    level_id = (data.get('level_id') or '').strip()
     organization_id = (data.get('organization_id') or manager.get('organization_id') or DEFAULT_ORGANIZATION_ID).strip()
     organization_name = (data.get('organization_name') or '').strip()
 
@@ -186,6 +370,14 @@ def api_create_user():
         return jsonify({'success': False, 'error': '不能创建该角色'}), 403
     if not can_manage_organization(username, organization_id):
         return jsonify({'success': False, 'error': '无权在该机构下创建用户'}), 403
+    if not level_id:
+        level_id = root_level_id_for_org(organization_id)
+    levels = list_levels_with_roots()
+    target_level = next((level for level in levels if level.get('id') == level_id), None)
+    if not target_level or (target_level.get('organization_id') or DEFAULT_ORGANIZATION_ID) != organization_id:
+        return jsonify({'success': False, 'error': '层级不存在或不属于目标机构'}), 400
+    if not can_manage_level(username, level_id):
+        return jsonify({'success': False, 'error': '无权在该层级下创建用户'}), 403
     if parent_username and parent_username == username:
         # allow admins to explicitly set themselves as parent
         pass
@@ -207,6 +399,12 @@ def api_create_user():
 
     with accounts_lock:
         accounts = normalize_accounts(load_accounts())
+        if not parent_username:
+            levels = list_levels_with_roots()
+            level = next((lv for lv in levels if lv.get('id') == level_id), None)
+            level_manager = (level or {}).get('manager_username') or ''
+            if level_manager:
+                parent_username = level_manager
         full_name = next_account_username(accounts, organization_id, alias)
         salt = secrets.token_hex(16)
         account = {
@@ -218,6 +416,7 @@ def api_create_user():
             'is_admin': role == ROLE_SUPER_ADMIN,
             'organization_id': organization_id,
             'organization_name': organization_name,
+            'level_id': level_id,
             'parent_username': parent_username,
         }
         accounts.append(account)
@@ -252,6 +451,22 @@ def api_update_user(target_username):
             org = next((o for o in list_organizations_with_default() if o.get('id') == organization_id), None)
             target['organization_id'] = organization_id
             target['organization_name'] = (org or {}).get('name') or data.get('organization_name') or DEFAULT_ORGANIZATION_NAME
+            if not target.get('level_id'):
+                target['level_id'] = root_level_id_for_org(organization_id)
+        if 'level_id' in data:
+            level_id = (data.get('level_id') or '').strip()
+            if not level_id:
+                level_id = root_level_id_for_org(target.get('organization_id') or DEFAULT_ORGANIZATION_ID)
+            levels = list_levels_with_roots()
+            level = next((lv for lv in levels if lv.get('id') == level_id), None)
+            if not level:
+                return jsonify({'success': False, 'error': '目标层级不存在'}), 400
+            target_org = target.get('organization_id') or DEFAULT_ORGANIZATION_ID
+            if (level.get('organization_id') or DEFAULT_ORGANIZATION_ID) != target_org:
+                return jsonify({'success': False, 'error': '目标层级与用户机构不一致'}), 400
+            if not can_manage_level(username, level_id):
+                return jsonify({'success': False, 'error': '无权移动到该层级'}), 403
+            target['level_id'] = level_id
         if 'parent_username' in data:
             parent_username = (data.get('parent_username') or '').strip()
             if parent_username == target_username:
