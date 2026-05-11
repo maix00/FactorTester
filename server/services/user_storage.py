@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 
 
@@ -74,3 +75,23 @@ def save_user_templates(
 
 def new_template_id() -> str:
     return str(int(time.time() * 1000))
+
+
+def archive_user_dir(username: str) -> str | None:
+    """Move a user's storage directory into archive with timestamp suffix.
+
+    Returns archived directory path when moved, else None when source doesn't exist.
+    """
+    src = os.path.join(USERS_DIR, username)
+    if not os.path.isdir(src):
+        return None
+    archive_root = os.path.join(USERS_DIR, '_archived')
+    os.makedirs(archive_root, exist_ok=True)
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    dst = os.path.join(archive_root, f'{username}__{timestamp}')
+    suffix = 1
+    while os.path.exists(dst):
+        suffix += 1
+        dst = os.path.join(archive_root, f'{username}__{timestamp}_{suffix}')
+    shutil.move(src, dst)
+    return dst

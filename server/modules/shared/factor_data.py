@@ -12,6 +12,7 @@ from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import get_factor_tester, get_session_params
 from . import shared_bp
+from server.services.api_response import api_fail, api_ok, route_guard
 from .factor_data_helpers import (
     clip_series_by_tester_range,
     column_names as _column_names,
@@ -25,26 +26,24 @@ from .factor_data_helpers import (
 
 
 @shared_bp.route('/api/factor_list')
+@route_guard
 def factor_list():
     factor_family_alias = request.args.get('factor_family_alias')
     if not factor_family_alias:
-        return jsonify({'success': False, 'error': '缺少参数'})
-    try:
-        ff = get_factor_family_instance(factor_family_alias)
-        factors = ff.get_factors(params_list=get_session_params(factor_family_alias, ff))
-        factor_data = []
-        for f in factors:
-            factor_freq_param = f.family.params_dict.get('$F') if f.family else None
-            factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
-            factor_freq_str = (
-                factor_freq_param._value_space.alias(factor_freq_value)
-                if factor_freq_param is not None and factor_freq_value is not None
-                else ''
-            )
-            factor_data.append({'alias': f.alias, 'name': f.name, 'default_return_freq': factor_freq_str})
-        return jsonify({'success': True, 'factors': factor_data})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return api_fail('缺少参数')
+    ff = get_factor_family_instance(factor_family_alias)
+    factors = ff.get_factors(params_list=get_session_params(factor_family_alias, ff))
+    factor_data = []
+    for f in factors:
+        factor_freq_param = f.family.params_dict.get('$F') if f.family else None
+        factor_freq_value = factor_freq_param.get_value(f) if factor_freq_param is not None else None
+        factor_freq_str = (
+            factor_freq_param._value_space.alias(factor_freq_value)
+            if factor_freq_param is not None and factor_freq_value is not None
+            else ''
+        )
+        factor_data.append({'alias': f.alias, 'name': f.name, 'default_return_freq': factor_freq_str})
+    return api_ok({'factors': factor_data})
 
 
 @shared_bp.route('/get_factor_series', methods=['POST'])

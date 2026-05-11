@@ -6,46 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { margin: 0; background: #f5f7fb; color: #1f2937; font-family: "Avenir Next", "PingFang SC", sans-serif; }
-        .page { max-width: 1180px; margin: 34px auto; padding: 0 24px; }
-        .topbar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 22px; }
+        .page { max-width: 1280px; margin: 30px auto; padding: 0 20px 28px; }
+        .topbar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
         .topbar h1 { margin: 0; font-size: 24px; }
         .back { color: #2563eb; text-decoration: none; font-size: 13px; }
-        .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
-        .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15,23,42,.06); padding: 18px; }
-        .card h2 { margin: 0 0 14px; font-size: 16px; }
-        label { display: block; margin-top: 10px; font-size: 12px; color: #6b7280; }
-        input, select { width: 100%; box-sizing: border-box; margin-top: 4px; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
-        button { border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+        .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 8px 28px rgba(15,23,42,.06); padding: 14px; }
+        .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        .toolbar input, .toolbar select { border: 1px solid #d1d5db; border-radius: 8px; padding: 7px 10px; font-size: 13px; background: #fff; }
+        .toolbar button { border: 0; border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: 12px; }
         .primary { background: #2563eb; color: #fff; }
         .secondary { background: #eef2ff; color: #3730a3; }
-        .status { min-height: 18px; margin-top: 10px; color: #6b7280; font-size: 12px; }
-        .role-note { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; font-size: 12px; line-height: 1.7; color: #4b5563; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-        th, td { border-bottom: 1px solid #eef2f7; padding: 10px 8px; text-align: left; vertical-align: middle; }
-        th { color: #6b7280; font-weight: 600; background: #fafafa; }
-        th:nth-child(1), td:nth-child(1) { width: 22%; }
-        th:nth-child(2), td:nth-child(2) { width: 14%; }
-        th:nth-child(3), td:nth-child(3) { width: 14%; }
-        th:nth-child(4), td:nth-child(4) { width: 1%; white-space: nowrap; }
-        th:nth-child(5), td:nth-child(5) { width: 49%; }
-        td { overflow: hidden; text-overflow: ellipsis; }
-        .pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: 12px; }
+        .danger { background: #fee2e2; color: #991b1b; }
         .muted { color: #9ca3af; }
-        .row-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
-        .row-actions > * { min-width: 0; }
-        .row-actions select { width: 100%; margin: 0; padding: 6px 8px; }
-        .row-actions button { width: 100%; padding: 6px 8px; }
-        .org-row td { background: #f8fafc; padding: 0; }
-        .org-toggle {
-            width: 100%; display: flex; align-items: center; gap: 8px;
-            background: transparent; color: #344054; font-weight: 650;
-            padding: 10px 8px; text-align: left;
+        .hint { font-size: 12px; color: #475467; line-height: 1.6; margin: 8px 0 12px; }
+        .status { min-height: 18px; font-size: 12px; color: #475467; margin-bottom: 8px; }
+        .tree-root { border: 1px solid #e5e7eb; border-radius: 10px; background: #fcfdff; padding: 10px 10px 4px; }
+        .node { margin-left: 8px; border-left: 1px dashed #d0d5dd; padding: 6px 0 6px 12px; }
+        .node-header { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+        .caret { width: 14px; color: #98a2b3; cursor: pointer; user-select: none; }
+        .title { font-size: 13px; color: #1f2937; }
+        .meta { font-size: 11px; color: #667085; }
+        .tag { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: #f3f4f6; color: #374151; }
+        .actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px 22px; }
+        .actions button { border: 0; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 11px; }
+        .children { margin-left: 6px; }
+        .node.collapsed > .children { display: none; }
+        @media (max-width: 900px) {
+            .toolbar input, .toolbar select { width: 100%; }
         }
-        .org-toggle .caret { color: #98a2b3; font-size: 10px; width: 12px; }
-        .org-toggle .count { margin-left: auto; color: #98a2b3; font-weight: 500; font-size: 12px; }
-        .org-user-row.collapsed { display: none; }
-        .org-row.open .caret { transform: rotate(90deg); }
-        @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -53,213 +41,314 @@
         <div class="topbar">
             {% set back_link_class = 'back' %}
             {% include 'modules/shared/home_back_link.html' %}
-            <h1>用户与机构管理</h1>
+            <h1>用户与机构层级树</h1>
         </div>
-        <div class="grid">
-            <div class="card">
-                <h2>新建用户</h2>
-                <label>用户名</label>
-                <input id="new-alias" placeholder="例如：研究员A">
-                <label>初始密码</label>
-                <input id="new-password" type="password" placeholder="至少 6 位">
-                <label>角色</label>
-                <select id="new-role"></select>
-                <label>所属机构</label>
-                <select id="new-org"></select>
-                <label>上级用户</label>
-                <select id="new-parent"></select>
-                <button class="primary" style="margin-top:14px;width:100%;" onclick="createUser()">创建用户</button>
-                <div class="status" id="user-status"></div>
-
-                <div id="org-create-box" style="display:none;margin-top:22px;">
-                    <h2>新建机构</h2>
-                    <label>机构名称</label>
-                    <input id="new-org-name" placeholder="例如：量化一部">
-                    <label>说明</label>
-                    <input id="new-org-desc" placeholder="可选">
-                    <button class="secondary" style="margin-top:14px;width:100%;" onclick="createOrganization()">创建机构</button>
-                    <div class="status" id="org-status"></div>
-                </div>
+        <div class="panel">
+            <div class="toolbar">
+                <input id="new-org-name" placeholder="新机构名称">
+                <input id="new-org-desc" placeholder="机构说明（可选）">
+                <button class="primary" onclick="createOrganization()">新增机构</button>
+                <select id="delete-org-id"></select>
+                <button class="danger" onclick="deleteOrganization()">删除机构</button>
+                <button class="secondary" onclick="expandAll()">全部展开</button>
+                <button class="secondary" onclick="collapseAll()">全部收起</button>
             </div>
-
-            <div class="card">
-                <h2>权限边界</h2>
-                <div class="role-note" id="role-note"></div>
-                <h2 style="margin-top:18px;">用户列表</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>用户</th>
-                            <th>机构</th>
-                            <th>上级</th>
-                            <th>角色</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-body">
-                        <tr><td colspan="5" class="muted">加载中...</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            <div class="hint" id="scope-hint"></div>
+            <div class="status" id="status-text"></div>
+            <div class="tree-root" id="hierarchy-tree">加载中...</div>
         </div>
     </div>
 
     <script>
         let ctx = null;
-        const roleOrder = ['super_admin', 'org_admin', 'level_admin', 'user'];
 
         async function loadContext() {
             const data = await fetch('/admin/api/context').then(r => r.json());
             if (!data.success) {
-                document.body.innerHTML = '<p style="padding:40px;color:#b91c1c;">' + (data.error || '无权访问') + '</p>';
+                document.body.innerHTML = '<p style="padding:40px;color:#b91c1c;">' + esc(data.error || '无权访问') + '</p>';
                 return;
             }
             ctx = data;
-            renderControls();
-            renderUsers();
+            renderToolbar();
+            renderTree();
         }
 
-        function allowedRoles() {
-            const role = ctx.current_user.role;
-            if (role === 'super_admin') return roleOrder;
-            if (role === 'org_admin') return ['org_admin', 'level_admin', 'user'];
-            if (role === 'level_admin') return ['level_admin', 'user'];
-            return ['user'];
+        function setStatus(msg, ok) {
+            const el = document.getElementById('status-text');
+            el.textContent = msg || '';
+            el.style.color = ok ? '#16a34a' : '#b91c1c';
+            if (msg) {
+                setTimeout(function() {
+                    if (el.textContent === msg) el.textContent = '';
+                }, 2500);
+            }
         }
 
-        function renderControls() {
-            const roles = allowedRoles();
-            document.getElementById('new-role').innerHTML = roles.map(r => `<option value="${r}">${ctx.role_labels[r] || r}</option>`).join('');
-            document.getElementById('new-org').innerHTML = ctx.organizations.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
-            document.getElementById('new-parent').innerHTML =
-                '<option value="">无上级</option>' + ctx.users.map(u => `<option value="${esc(u.username)}">${esc(u.alias)} (${esc(u.username)})</option>`).join('');
-            document.getElementById('org-create-box').style.display = ctx.current_user.role === 'super_admin' ? '' : 'none';
-            document.getElementById('role-note').innerHTML =
-                '超级管理员：管理全部机构与用户，并保留系统级权限。<br>' +
-                '机构管理员：管理本机构用户，可设置机构内层级。<br>' +
-                '层级管理员：管理自己的直接下级。<br>' +
-                '普通用户：不进入管理界面，但可在因子库查看自己与直接下级的因子配置。';
+        function roleLabel(role) {
+            return (ctx.role_labels && ctx.role_labels[role]) || role || '';
         }
 
-        function renderUsers() {
-            const body = document.getElementById('users-body');
-            const rows = [];
-            const users = ctx.current_user.role === 'super_admin' ? groupUsersByOrganization(ctx.users) : [{key: '', label: '', users: ctx.users}];
-            users.forEach(group => {
-                const groupId = 'org-group-' + group.key.replace(/[^a-zA-Z0-9_-]/g, '_');
-                if (ctx.current_user.role === 'super_admin') {
-                    const isDefaultOpen = group.key === 'default';
-                    rows.push(`<tr class="org-row ${isDefaultOpen ? 'open' : ''}" id="${escAttr(groupId)}"><td colspan="5">
-                        <button class="org-toggle" onclick="toggleOrgGroup('${escAttr(groupId)}')">
-                            <span class="caret">▶</span><span>${esc(group.label)}</span><span class="count">${group.users.length}</span>
-                        </button>
-                    </td></tr>`);
-                }
-                group.users.forEach(u => {
-                const roleOptions = allowedRoles().map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${ctx.role_labels[r] || r}</option>`).join('');
-                const orgOptions = ctx.organizations.map(o => `<option value="${esc(o.id)}" ${u.organization_id === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
-                const parentOptions = '<option value="">无上级</option>' + ctx.users
-                    .filter(p => p.username !== u.username)
-                    .map(p => `<option value="${esc(p.username)}" ${u.parent_username === p.username ? 'selected' : ''}>${esc(p.alias)}</option>`).join('');
-                rows.push(`<tr class="${ctx.current_user.role === 'super_admin' ? 'org-user-row ' + (group.key === 'default' ? '' : 'collapsed ') + escAttr(groupId) : ''}">
-                    <td><strong>${esc(u.alias)}</strong><br><span class="muted">${esc(u.username)}</span></td>
-                    <td>${esc(u.organization_name || '')}</td>
-                    <td>${u.parent_username ? esc(u.parent_username) : '<span class="muted">无</span>'}</td>
-                    <td><span class="pill">${esc(ctx.role_labels[u.role] || u.role)}</span></td>
-                    <td>${u.can_manage ? `<div class="row-actions">
-                        <select id="role-${escAttr(u.username)}">${roleOptions}</select>
-                        <select id="org-${escAttr(u.username)}">${orgOptions}</select>
-                        <select id="parent-${escAttr(u.username)}">${parentOptions}</select>
-                        <button class="secondary" onclick="updateUser('${escAttr(u.username)}')">保存</button>
-                        <button style="background:#fee2e2;color:#991b1b;" onclick="deleteUser('${escAttr(u.username)}', '${escAttr(u.alias)}')">删除</button>
-                    </div>` : '<span class="muted">不可管理</span>'}</td>
-                </tr>`);
-                });
-            });
-            body.innerHTML = rows.join('');
+        function renderToolbar() {
+            const orgSel = document.getElementById('delete-org-id');
+            const orgs = (ctx.organizations || []).filter(o => (o.id || '') !== 'default');
+            orgSel.innerHTML = '<option value="">选择机构删除</option>' + orgs.map(o =>
+                '<option value="' + escAttr(o.id) + '">' + esc(o.name) + ' (' + esc(o.id) + ')</option>'
+            ).join('');
+
+            const current = ctx.current_user || {};
+            const role = current.role || '';
+            let scopeText = '';
+            if (role === 'super_admin') scopeText = '超级管理员：可见全部机构、全部层级、全部用户。';
+            else if (role === 'org_admin') scopeText = '机构管理员：可见并管理本机构全部层级与用户。';
+            else if (role === 'level_admin') scopeText = '层级管理员：可见并管理自己层级子树中的用户与层级。';
+            else scopeText = '普通用户：可见同机构同层级平级用户。';
+            document.getElementById('scope-hint').textContent = scopeText;
         }
 
-        function groupUsersByOrganization(users) {
-            const groups = {};
-            users.forEach(u => {
-                const key = u.organization_id || 'unknown';
-                if (!groups[key]) {
-                    groups[key] = {
-                        key,
-                        label: (u.organization_name || '未分机构') + ' (' + key + ')',
-                        users: [],
-                    };
-                }
-                groups[key].users.push(u);
-            });
-            return Object.values(groups).sort((a, b) => a.label.localeCompare(b.label));
+        function renderTree() {
+            const el = document.getElementById('hierarchy-tree');
+            const roots = ctx.hierarchy || [];
+            if (!roots.length) {
+                el.innerHTML = '<span class="muted">暂无数据</span>';
+                return;
+            }
+            el.innerHTML = roots.map(renderNode).join('');
         }
 
-        function toggleOrgGroup(groupId) {
-            const header = document.getElementById(groupId);
-            const open = !header.classList.contains('open');
-            header.classList.toggle('open', open);
-            document.querySelectorAll('.org-user-row.' + groupId).forEach(row => {
-                row.classList.toggle('collapsed', !open);
-            });
+        function renderNode(node) {
+            const type = node.node_type || '';
+            const children = Array.isArray(node.children) ? node.children : [];
+            const hasChildren = children.length > 0;
+            const caret = hasChildren ? '▼' : '';
+            const cls = 'node' + (hasChildren ? '' : ' leaf');
+            let title = '';
+            let meta = '';
+            if (type === 'organization') {
+                title = '机构：' + (node.name || node.id || '');
+                meta = node.id || '';
+            } else if (type === 'level') {
+                title = '层级：' + ((node.name || '').trim() || '(未命名)');
+                meta = node.id || '';
+            } else {
+                title = '用户：' + (node.alias || node.username || '');
+                meta = (node.username || '') + ' · ' + roleLabel(node.role || 'user');
+            }
+            let html = '<div class="' + cls + '">' +
+                '<div class="node-header">' +
+                '<span class="caret" onclick="toggleNode(this)">' + caret + '</span>' +
+                '<span class="title">' + esc(title) + '</span>' +
+                '<span class="meta">' + esc(meta) + '</span>' +
+                '</div>';
+
+            html += renderNodeActions(node);
+
+            if (hasChildren) {
+                html += '<div class="children">' + children.map(renderNode).join('') + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderNodeActions(node) {
+            const type = node.node_type || '';
+            const canManage = !!node.can_manage;
+            if (!canManage && type !== 'user') return '';
+            let actions = '';
+            if (type === 'organization') {
+                actions += '<button class="secondary" onclick="addLevel(\'' + escAttr(node.id || '') + '\', \'\')">新增下级层级</button>';
+                actions += '<button class="secondary" onclick="addUser(\'' + escAttr(node.id || '') + '\', \'' + escAttr(node.id + '__ROOT') + '\', \'\')">新增机构直属用户</button>';
+                actions += '<button class="danger" onclick="deleteOrganizationByNode(\'' + escAttr(node.id || '') + '\')">删除机构</button>';
+            } else if (type === 'level') {
+                actions += '<button class="secondary" onclick="addLevel(\'' + escAttr(node.organization_id || '') + '\', \'' + escAttr(node.id || '') + '\')">新增子层级</button>';
+                actions += '<button class="secondary" onclick="addUser(\'' + escAttr(node.organization_id || '') + '\', \'' + escAttr(node.id || '') + '\', \'\')">新增本层级用户</button>';
+                actions += '<button class="secondary" onclick="renameLevel(\'' + escAttr(node.id || '') + '\', \'' + escAttr(node.name || '') + '\')">重命名</button>';
+                actions += '<button class="secondary" onclick="moveLevel(\'' + escAttr(node.id || '') + '\')">移动层级</button>';
+                actions += '<button class="secondary" onclick="setLevelManager(\'' + escAttr(node.id || '') + '\', \'' + escAttr(node.manager_username || '') + '\')">指定层级管理员</button>';
+                actions += '<button class="danger" onclick="deleteLevel(\'' + escAttr(node.id || '') + '\')">删除层级</button>';
+            } else if (type === 'user' && node.can_manage) {
+                actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'org_admin\')">设机构管理员</button>';
+                actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'level_admin\')">设层级管理员</button>';
+                actions += '<button class="secondary" onclick="setUserRole(\'' + escAttr(node.username || '') + '\', \'user\')">设普通用户</button>';
+                actions += '<button class="secondary" onclick="moveUserLevel(\'' + escAttr(node.username || '') + '\')">移动所属层级</button>';
+                actions += '<button class="danger" onclick="deleteUserNode(\'' + escAttr(node.username || '') + '\', \'' + escAttr(node.alias || node.username || '') + '\')">删除用户</button>';
+            }
+            if (!actions) return '';
+            return '<div class="actions">' + actions + '</div>';
+        }
+
+        function toggleNode(caretEl) {
+            const node = caretEl.closest('.node');
+            if (!node || node.classList.contains('leaf')) return;
+            const collapsed = node.classList.toggle('collapsed');
+            caretEl.textContent = collapsed ? '▶' : '▼';
+        }
+
+        function expandAll() {
+            document.querySelectorAll('.node.collapsed').forEach(n => n.classList.remove('collapsed'));
+            document.querySelectorAll('.node .caret').forEach(c => { if (c.textContent.trim()) c.textContent = '▼'; });
+        }
+
+        function collapseAll() {
+            document.querySelectorAll('.node').forEach(n => { if (!n.classList.contains('leaf')) n.classList.add('collapsed'); });
+            document.querySelectorAll('.node .caret').forEach(c => { if (c.textContent.trim()) c.textContent = '▶'; });
         }
 
         async function createOrganization() {
-            const name = document.getElementById('new-org-name').value.trim();
-            const description = document.getElementById('new-org-desc').value.trim();
-            const status = document.getElementById('org-status');
-            status.textContent = '创建中...';
+            const name = (document.getElementById('new-org-name').value || '').trim();
+            const description = (document.getElementById('new-org-desc').value || '').trim();
             const data = await fetch('/admin/api/organizations', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name, description}),
             }).then(r => r.json());
-            status.textContent = data.success ? '已创建机构' : (data.error || '创建失败');
-            if (data.success) loadContext();
-        }
-
-        async function createUser() {
-            const payload = {
-                alias: document.getElementById('new-alias').value.trim(),
-                password: document.getElementById('new-password').value,
-                role: document.getElementById('new-role').value,
-                organization_id: document.getElementById('new-org').value,
-                parent_username: document.getElementById('new-parent').value,
-            };
-            const status = document.getElementById('user-status');
-            status.textContent = '创建中...';
-            const data = await fetch('/admin/api/users', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload),
-            }).then(r => r.json());
-            status.textContent = data.success ? '已创建用户' : (data.error || '创建失败');
+            setStatus(data.success ? '机构已创建' : (data.error || '创建失败'), data.success);
             if (data.success) {
-                document.getElementById('new-password').value = '';
+                document.getElementById('new-org-name').value = '';
+                document.getElementById('new-org-desc').value = '';
                 loadContext();
             }
         }
 
-        async function updateUser(username) {
+        async function deleteOrganization() {
+            const orgId = (document.getElementById('delete-org-id').value || '').trim();
+            if (!orgId) return setStatus('请选择机构', false);
+            await deleteOrganizationByNode(orgId);
+        }
+
+        async function deleteOrganizationByNode(orgId) {
+            const adminPassword = prompt('请输入超级管理员密码：');
+            if (!adminPassword) return;
+            if (!confirm('确认删除机构 ' + orgId + ' ?')) return;
+            const data = await fetch('/admin/api/organizations/' + encodeURIComponent(orgId), {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({admin_password: adminPassword}),
+            }).then(r => r.json());
+            setStatus(data.success ? '机构已删除' : (data.error || '删除失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function addLevel(orgId, parentLevelId) {
+            const name = prompt('层级名称（可留空）：', '') || '';
+            const data = await fetch('/admin/api/levels', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({organization_id: orgId, parent_level_id: parentLevelId || '', name}),
+            }).then(r => r.json());
+            setStatus(data.success ? '层级已新增' : (data.error || '新增失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function renameLevel(levelId, currentName) {
+            const name = prompt('新的层级名称（可留空）：', currentName || '');
+            if (name === null) return;
+            const data = await fetch('/admin/api/levels/' + encodeURIComponent(levelId), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name}),
+            }).then(r => r.json());
+            setStatus(data.success ? '层级名称已更新' : (data.error || '更新失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function moveLevel(levelId) {
+            const targetParent = prompt('请输入新的上级层级 ID（留空表示升为根层级）：', '') || '';
+            const data = await fetch('/admin/api/levels/' + encodeURIComponent(levelId), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({parent_level_id: targetParent}),
+            }).then(r => r.json());
+            setStatus(data.success ? '层级已移动' : (data.error || '移动失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function setLevelManager(levelId, currentManager) {
+            const manager = prompt('请输入层级管理员 username（留空清空）：', currentManager || '');
+            if (manager === null) return;
+            const data = await fetch('/admin/api/levels/' + encodeURIComponent(levelId), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({manager_username: manager.trim()}),
+            }).then(r => r.json());
+            setStatus(data.success ? '层级管理员已更新' : (data.error || '更新失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function deleteLevel(levelId) {
+            if (!confirm('确认删除层级 ' + levelId + ' ?')) return;
+            const data = await fetch('/admin/api/levels/' + encodeURIComponent(levelId), {
+                method: 'DELETE',
+            }).then(r => r.json());
+            setStatus(data.success ? '层级已删除' : (data.error || '删除失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function addUser(orgId, levelId, parentUsername) {
+            const alias = (prompt('请输入用户名称（别名）：') || '').trim();
+            if (!alias) return;
+            const password = prompt('请输入初始密码（至少6位）：') || '';
+            if (!password || password.length < 6) return setStatus('密码至少6位', false);
+            const role = (prompt('请输入角色（user / level_admin / org_admin）：', 'user') || 'user').trim();
+            const data = await fetch('/admin/api/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    alias,
+                    password,
+                    role,
+                    organization_id: orgId,
+                    level_id: levelId,
+                    parent_username: parentUsername || '',
+                }),
+            }).then(r => r.json());
+            setStatus(data.success ? '用户已创建' : (data.error || '创建失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        function findUser(username) {
+            return (ctx.users || []).find(u => u.username === username) || null;
+        }
+
+        async function setUserRole(username, role) {
+            const user = findUser(username);
+            if (!user) return;
             const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    role: document.getElementById('role-' + username).value,
-                    organization_id: document.getElementById('org-' + username).value,
-                    parent_username: document.getElementById('parent-' + username).value,
+                    role,
+                    organization_id: user.organization_id || '',
+                    level_id: user.level_id || '',
+                    parent_username: user.parent_username || '',
                 }),
             }).then(r => r.json());
-            alert(data.success ? '已保存' : (data.error || '保存失败'));
+            setStatus(data.success ? '用户角色已更新' : (data.error || '更新失败'), data.success);
             if (data.success) loadContext();
         }
 
-        async function deleteUser(username, alias) {
-            if (!confirm('确定删除用户「' + alias + '」？账号会被移除，但该用户的数据目录会保留。')) return;
+        async function moveUserLevel(username) {
+            const user = findUser(username);
+            if (!user) return;
+            const targetLevelId = (prompt('请输入目标层级 ID：', user.level_id || '') || '').trim();
+            if (!targetLevelId) return;
             const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
-                method: 'DELETE',
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    role: user.role || 'user',
+                    organization_id: user.organization_id || '',
+                    level_id: targetLevelId,
+                    parent_username: user.parent_username || '',
+                }),
             }).then(r => r.json());
-            alert(data.success ? '已删除用户' : (data.error || '删除失败'));
+            setStatus(data.success ? '用户层级已更新' : (data.error || '更新失败'), data.success);
+            if (data.success) loadContext();
+        }
+
+        async function deleteUserNode(username, alias) {
+            if (!confirm('确认删除用户 ' + alias + ' ?')) return;
+            const data = await fetch('/admin/api/users/' + encodeURIComponent(username), { method: 'DELETE' }).then(r => r.json());
+            setStatus(data.success ? '用户已删除' : (data.error || '删除失败'), data.success);
             if (data.success) loadContext();
         }
 
@@ -269,6 +358,7 @@
             return d.innerHTML;
         }
         function escAttr(s) { return String(s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
         loadContext();
     </script>
 </body>

@@ -168,6 +168,7 @@ def run_ic_test():
                     }
                 ic_param_map[key].append(factor)
 
+        _saved_products = tester.products.copy() if hasattr(tester, 'products') else None
         try:
             tester.products = all_products.copy()
             param_items = list(ic_param_map.items())
@@ -177,67 +178,34 @@ def run_ic_test():
                 result = run_ic_for_factor(tester, param_payloads[key], factor_list)
                 return key, result
 
-            if len(param_items) > 1:
-                token = _active_tester.get()
+            # Issue #3: Serialize computation to avoid ThreadPoolExecutor concurrent mutations
+            for key, factor_list in param_items:
+                lag_i = int(key[-1])
+                _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
+                for factor in factor_list:
+                    series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
+                    stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
 
-                def _worker(item: Tuple[tuple, List[Factor]]):
-                    _active_tester.set(token)
-                    return _calc_one_group(item)
+                    if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
+                        object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
 
-                with ThreadPoolExecutor(max_workers=min(8, len(param_items))) as pool:
-                    futures = {pool.submit(_worker, item): item for item in param_items}
-                    for future in as_completed(futures):
-                        key, result = future.result()
-                        lag_i = int(key[-1])
-                        factor_list, ic_series, stats, re_table, fe_table = result
-                        for factor in factor_list:
-                            series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
-                            stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
-
-                            if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
-                                object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
-
-                            if lag_i == primary_ic_lag:
-                                tester.factor_ic_series[factor] = ic_series.copy()
-                                tester.factor_ic_stats[factor] = stats.copy()
-                                if not re_table.empty:
-                                    tester.factor_returns[factor] = re_table.copy()
-                                if not fe_table.empty:
-                                    tester.factor_tables[factor] = fe_table.copy()
-                                    object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
-
-                                p_names = _extract_product_names(fe_table, re_table)
-                                if p_names:
-                                    for p_name in p_names:
-                                        if p_name not in selected_product_names:
-                                            selected_product_names.append(p_name)
-            else:
-                for key, factor_list in param_items:
-                    lag_i = int(key[-1])
-                    _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
-                    for factor in factor_list:
-                        series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
-                        stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
-
-                        if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
+                    if lag_i == primary_ic_lag:
+                        tester.factor_ic_series[factor] = ic_series.copy()
+                        tester.factor_ic_stats[factor] = stats.copy()
+                        if not re_table.empty:
+                            tester.factor_returns[factor] = re_table.copy()
+                        if not fe_table.empty:
+                            tester.factor_tables[factor] = fe_table.copy()
                             object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
 
-                        if lag_i == primary_ic_lag:
-                            tester.factor_ic_series[factor] = ic_series.copy()
-                            tester.factor_ic_stats[factor] = stats.copy()
-                            if not re_table.empty:
-                                tester.factor_returns[factor] = re_table.copy()
-                            if not fe_table.empty:
-                                tester.factor_tables[factor] = fe_table.copy()
-                                object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
-
-                            p_names = _extract_product_names(fe_table, re_table)
-                            if p_names:
-                                for p_name in p_names:
-                                    if p_name not in selected_product_names:
-                                        selected_product_names.append(p_name)
+                        p_names = _extract_product_names(fe_table, re_table)
+                        if p_names:
+                            for p_name in p_names:
+                                if p_name not in selected_product_names:
+                                    selected_product_names.append(p_name)
         except Exception as e:
-            tester.products = all_products.copy()
+            if _saved_products is not None:
+                tester.products = _saved_products
             return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
         product_map: Dict[str, Any] = {}
@@ -260,6 +228,7 @@ def run_ic_test():
             resolved_seen.add(obj_id)
             resolved_products.add(p_obj)
 
+        # Issue #1: Restore original products after updating to resolved set
         tester.products = resolved_products if resolved_products else all_products.copy()
 
         ic_stats_all = pd.DataFrame({
@@ -440,5 +409,8 @@ def run_ic_test():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
+        # Issue #1: Restore original products state before exiting
+        if _saved_products is not None:
+            tester.products = _saved_products
         if _token is not None:
             _active_tester.reset(_token)

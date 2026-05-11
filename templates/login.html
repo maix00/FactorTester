@@ -82,10 +82,10 @@
             if (data.success) {
                 window.location.href = '/';
             } else {
-                errorEl.textContent = data.error || '操作失败';
+                errorEl.textContent = data.error || (isRegister ? '注册失败' : '登录失败');
             }
         } catch (e) {
-            errorEl.textContent = '网络错误，请重试';
+            errorEl.textContent = '请求失败: ' + e.message;
         }
     }
 

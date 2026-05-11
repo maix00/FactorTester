@@ -4,6 +4,7 @@ CN Futures specific endpoints.
 """
 import os, sys, traceback
 from flask import request, jsonify
+from server.services.api_response import api_fail
 from . import cn_futures_bp
 
 
@@ -21,4 +22,4 @@ def get_fee_table():
         return jsonify({'success': True, 'rows': rows})
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return api_fail(str(e), status_code=500)

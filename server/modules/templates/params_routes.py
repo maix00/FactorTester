@@ -4,6 +4,7 @@ import pandas as pd
 from flask import jsonify, request
 
 from server.modules.templates import templates_bp
+from server.services.api_response import api_ok, route_guard
 from server.modules.templates.common import build_factor_rows, load_template_list, new_template_id, save_template_list
 from server.services.accounts import account_display_name, can_view_user_scope, visible_accounts_for
 from server.services.factor_registry import get_factor_family_instance
@@ -137,38 +138,34 @@ def _serialize_params(params_list):
 
 @templates_bp.route('/api/current_params/<ff_alias>', methods=['GET'])
 @login_required
+@route_guard
 def get_current_params(ff_alias):
-    try:
-        factor_family = get_factor_family_instance(ff_alias)
-        params_list = get_session_params(ff_alias, factor_family)
-        return jsonify({'success': True, 'params_list': _serialize_params(params_list)})
-    except Exception as exc:
-        return jsonify({'success': False, 'error': str(exc)})
+    factor_family = get_factor_family_instance(ff_alias)
+    params_list = get_session_params(ff_alias, factor_family)
+    return api_ok({'params_list': _serialize_params(params_list)})
 
 
 @templates_bp.route('/replace_params', methods=['POST'])
 @login_required
+@route_guard
 def replace_params():
     data = request.get_json()
     ff_alias = data.get('factor_family_alias')
     params_list = data.get('params_list', [])
-    try:
-        factor_family = get_factor_family_instance(ff_alias)
-        seen = set()
-        new_params_list = []
-        for params in params_list:
-            factor_family._check_in_space(**params)
-            new_params = {
-                param.alias: param._value_space.rectify(params[param.alias])
-                if param.alias in params
-                else param.default_value
-                for param in factor_family.params
-            }
-            key = tuple(str(new_params.get(param.alias, '')) for param in factor_family.params)
-            if key not in seen:
-                seen.add(key)
-                new_params_list.append(new_params)
-        save_session_params(ff_alias, new_params_list)
-        return jsonify({'success': True, 'factor_rows': build_factor_rows(factor_family, new_params_list)})
-    except Exception as exc:
-        return jsonify({'success': False, 'error': str(exc)})
+    factor_family = get_factor_family_instance(ff_alias)
+    seen = set()
+    new_params_list = []
+    for params in params_list:
+        factor_family._check_in_space(**params)
+        new_params = {
+            param.alias: param._value_space.rectify(params[param.alias])
+            if param.alias in params
+            else param.default_value
+            for param in factor_family.params
+        }
+        key = tuple(str(new_params.get(param.alias, '')) for param in factor_family.params)
+        if key not in seen:
+            seen.add(key)
+            new_params_list.append(new_params)
+    save_session_params(ff_alias, new_params_list)
+    return api_ok({'factor_rows': build_factor_rows(factor_family, new_params_list)})

@@ -11,7 +11,7 @@ from server.services.accounts import (
     normalize_account, serialize_account_public,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
     ROLE_SUPER_ADMIN, ROLE_USER,
-    list_organizations_with_default, next_account_username,
+    list_organizations_with_default, next_account_username, root_level_id_for_org,
 )
 from server.services.runtime_state import (
     check_session_idle,
@@ -87,7 +87,7 @@ def login():
     session['username'] = acct['username']
     # 默认不保持登录（用户可登录后手动勾选）
     session['keep_login'] = False
-    _touch_session_activity()
+    touch_session_activity()
     acct = normalize_account(acct)
     return jsonify({
         'success': True,
@@ -112,6 +112,29 @@ def logout():
     cleanup_session_resource(session.get('_sid', ''))
     session.clear()
     return jsonify({'success': True})
+
+
+
+
+
+@auth_bp.route('/api/me')
+def api_me():
+    username = current_user()
+    acct_public = None
+    if username:
+        with accounts_lock:
+            accounts = load_accounts()
+        acct = next((a for a in accounts if a['username'] == username), None)
+        acct_public = serialize_account_public(acct, current_username=username) if acct else None
+    return jsonify({
+        'username': username,
+        'alias': (acct_public or {}).get('alias') if acct_public else None,
+        'role': (acct_public or {}).get('role'),
+        'organization_id': (acct_public or {}).get('organization_id'),
+        'organization_name': (acct_public or {}).get('organization_name'),
+        'is_admin': bool((acct_public or {}).get('is_admin')),
+        'keep_login': bool(session.get('keep_login')),
+    })
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -144,6 +167,7 @@ def register():
             'is_admin': is_admin,
             'organization_id': organization_id,
             'organization_name': org.get('name') or DEFAULT_ORGANIZATION_NAME,
+            'level_id': root_level_id_for_org(organization_id),
             'parent_username': '',
         })
         save_accounts(accounts)
@@ -156,25 +180,6 @@ def api_public_organizations():
     """Registration-time organization lookup. Creation remains admin-only."""
     orgs = list_organizations_with_default()
     return jsonify({'success': True, 'organizations': orgs})
-
-@auth_bp.route('/api/me')
-def api_me():
-    username = current_user()
-    acct_public = None
-    if username:
-        with accounts_lock:
-            accounts = load_accounts()
-        acct = next((a for a in accounts if a['username'] == username), None)
-        acct_public = serialize_account_public(acct, current_username=username) if acct else None
-    return jsonify({
-        'username': username,
-        'alias': (acct_public or {}).get('alias') if acct_public else None,
-        'role': (acct_public or {}).get('role'),
-        'organization_id': (acct_public or {}).get('organization_id'),
-        'organization_name': (acct_public or {}).get('organization_name'),
-        'is_admin': bool((acct_public or {}).get('is_admin')),
-        'keep_login': bool(session.get('keep_login')),
-    })
 
 @auth_bp.route('/api/keep_login', methods=['POST'])
 def api_keep_login():
