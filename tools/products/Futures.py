@@ -42,20 +42,20 @@ class Futures(AdjustableProductMixin, Product):
 
     实例属性：
         roller_info      (DataFrame|None) : 当前品种的合约映射切片（从全局缓存筛选），闲置后随缓存释放
-        FuturesContractClass (type)       : 用于创建具体合约对象的类
+        contract_class   (type)           : 用于创建具体合约对象的类
     """
     _ROLLER_INFO_IDLE_TTL = 10  # 全局缓存闲置多少秒后释放
 
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None,
                  roller_info_path: Optional[str] = None,
                  term_structure_path: Optional[str] = None,
-                 FuturesContractClass: type = FuturesContract, *args, **kwargs):
+                 contract_class: type = FuturesContract, *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(name, point_value, currency, *args, **kwargs)
             self.roller_info_path = roller_info_path
             self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None
-            self.FuturesContractClass = FuturesContractClass
+            self.contract_class = contract_class
 
     def _ensure_roller_info(self):
         """
@@ -85,6 +85,55 @@ class Futures(AdjustableProductMixin, Product):
         # 切片：只保留当前品种
         subset = cast(pd.DataFrame, ri[ri['PRODUCT'] == self.name]).sort_values(by=['STARTDATE'])
         self.roller_info = subset if not subset.empty else None
+
+    # ── 合约列表 ──────────────────────────────────────────────────────────
+
+    def get_contract_list(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        覆写 AdjustableProductMixin.get_contract_list。
+
+        优先从 roller_info 获取合约列表（含 STARTDATE/ENDDATE 精确字段）；
+        roller_info 不可用时回退到父类的 term structure 聚合。
+        """
+        self._ensure_roller_info()
+        if self.roller_info is not None and not self.roller_info.empty:
+            return self._get_contract_list_from_roller_info(start_date, end_date)
+        return super().get_contract_list(start_date, end_date)
+
+    def _get_contract_list_from_roller_info(
+        self,
+        start_date: Optional[str],
+        end_date: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        req_start = pd.Timestamp(start_date).normalize() if start_date else None
+        req_end = pd.Timestamp(end_date).normalize() if end_date else None
+
+        contracts = []
+        for _, row in self.roller_info.iterrows():
+            s_val = row.get('STARTDATE')
+            e_val = row.get('ENDDATE')
+            s = pd.Timestamp(s_val) if pd.notna(s_val) else None
+            e = pd.Timestamp(e_val) if pd.notna(e_val) else None
+
+            if req_start is not None and e is not None and e.normalize() < req_start:
+                continue
+            if req_end is not None and s is not None and s.normalize() > req_end:
+                continue
+
+            uid = str(row['CONTRACT_UID'])
+            contracts.append({
+                'contract': str(row['CONTRACT']),
+                'uid': uid,
+                'start': s.strftime('%Y-%m-%d') if s is not None else None,
+                'end': e.strftime('%Y-%m-%d') if e is not None else None,
+                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
+                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
+            })
+        return contracts
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
         """
@@ -132,7 +181,7 @@ class Futures(AdjustableProductMixin, Product):
         contract_id = self.get_contract_id_from_trading_day(trading_day)
         if not contract_id:
             return None
-        return self.FuturesContractClass(contract_id)
+        return self.contract_class(contract_id)
 
     def iter_roller_contract_rows(self) -> Iterable[pd.Series]:
         """按 STARTDATE 顺序遍历当前 Futures 的主力切换行。"""
@@ -147,7 +196,7 @@ class Futures(AdjustableProductMixin, Product):
         for row in self.iter_roller_contract_rows():
             contract_id = str(row.get('CONTRACT_UID') or row.get('CONTRACT') or '')
             if contract_id:
-                contracts.append(self.FuturesContractClass(contract_id))
+                contracts.append(self.contract_class(contract_id))
         return contracts
 
     def get_roller_contracts_from_trading_day(self, trading_day: datetime | str, n: int = 1) -> List[FuturesContract]:
@@ -169,7 +218,7 @@ class Futures(AdjustableProductMixin, Product):
         for _, r in rows.iterrows():
             contract_id = str(r.get('CONTRACT_UID') or r.get('CONTRACT') or '')
             if contract_id:
-                contracts.append(self.FuturesContractClass(contract_id))
+                contracts.append(self.contract_class(contract_id))
         return contracts
 
     def get_nth_roller_contract_from_trading_day(self, trading_day: datetime | str, n: int = 0) -> Optional[FuturesContract]:

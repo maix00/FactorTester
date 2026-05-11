@@ -1,15 +1,17 @@
 """
 产品展示名工具
 
-提供 product_display_name(p) → {'name': str, 'desc': str}，
+提供:
+- product_display_name(p) → {'name': str, 'desc': str}
+- get_contract_desc(contract_uid) → str
+- get_product_contracts(product, start_date, end_date) → list[dict]
 统一所有需要在前端展示产品名的地方。
 """
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from tools.products.Product import Product
 from tools.products.AdjustableTermStructure import (
-    AdjustableContractMixin,
     AdjustableProductMixin,
     lookup_contract_product,
 )
@@ -24,40 +26,33 @@ def product_display_name(product: Any) -> Dict[str, str]:
     - desc: 中文描述（如 '沪深300指数期货'）
 
     对于 AdjustableContractMixin 合约，若自身无 desc 则通过
-    AdjustableTermStructure 的工具函数查找父品种的 desc。
+    term structure 查找父品种的 desc。
     """
     name = getattr(product, 'name', str(product))
     desc = getattr(product, 'desc', '')
 
     # 如果自身没有 desc，尝试从父品种获取
     if not desc:
-        desc = _try_inherit_desc_from_term_structure(product)
+        contract_uid = getattr(product, 'name', str(product))
+        if contract_uid:
+            desc = get_contract_desc(contract_uid)
 
     return {'name': name, 'desc': desc or name}
 
 
-def _try_inherit_desc_from_term_structure(product: Any) -> str:
+def get_contract_desc(contract_uid: str) -> str:
     """
-    对 AdjustableContractMixin 合约，通过 term structure store 查找父品种的 desc。
+    根据合约 UID 查找父品种的中文描述。
 
-    流程：
-    1. 确认对象是 AdjustableContractMixin（is_term_contract() == True）
-    2. 收集所有 AdjustableProductMixin 实例的 term_structure_path
-    3. 用 lookup_contract_product() 查 contract_uid → product_name
-    4. 用 Product.get(product_name) 获取品种实例的 desc
+    适用场景：
+    - product_display_name：合约自身无 desc 时继承父品种 desc
+    - get_product_contracts：为合约列表补充 desc
+
+    返回 '' 如果找不到或对应品种无 desc。
     """
-    # 只有 AdjustableContractMixin 合约才需要继承
-    is_contract = getattr(product, 'is_term_contract', None)
-    if callable(is_contract):
-        is_contract = is_contract()
-    if not is_contract or not isinstance(product, AdjustableContractMixin):
-        return ''
-
-    contract_uid = getattr(product, 'name', str(product))
     if not contract_uid:
         return ''
 
-    # 收集所有已知的 term_structure_path
     paths = _get_term_structure_paths()
     if not paths:
         return ''
@@ -74,6 +69,31 @@ def _try_inherit_desc_from_term_structure(product: Any) -> str:
 
     return ''
 
+
+def get_product_contracts(
+    product: Any,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    返回产品在日期范围内的合约列表。
+
+    委托给 product.get_contract_list()（AdjustableProductMixin 默认实现
+    基于 term structure 聚合；Futures 子类覆写为 roller_info），
+    然后为每个元素补充 `desc` 字段。
+
+    返回：
+        [{contract, uid, start, end, start_ts, end_ts, desc}, ...]
+    """
+    contracts = product.get_contract_list(start_date=start_date, end_date=end_date)
+    for c in contracts:
+        c['desc'] = get_contract_desc(c['uid'])
+    return contracts
+
+
+# ---------------------------------------------------------------------------
+# 内部 helpers
+# ---------------------------------------------------------------------------
 
 # 缓存已收集的 term_structure_path 列表
 _term_structure_paths_cache: Optional[list] = None

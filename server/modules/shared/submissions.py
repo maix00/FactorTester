@@ -22,6 +22,7 @@ from .submission_helpers import (
     submissions_payload,
 )
 from server.services.api_response import api_fail, api_ok, route_guard
+from tools.products.Futures import FuturesContract
 
 
 @shared_bp.route('/api/tree-data')
@@ -58,7 +59,8 @@ def get_products():
         prod_name = getattr(prod, 'name', str(prod))
         prod_desc = getattr(prod, 'desc', '')
         prod_code = getattr(prod, 'code', None)
-        child_nodes.append({
+        is_contract = isinstance(prod, FuturesContract)
+        node_data = {
             'title':        prod_name,
             'key':          f"{original_path}/{prod_id}",
             'checkbox':     leaf_checkbox,
@@ -68,7 +70,16 @@ def get_products():
             'desc':         prod_desc,
             'product_name': prod_name,
             'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
-        })
+        }
+        if is_contract:
+            node_data['product_type'] = 'contract'
+            node_data['contract_uid'] = prod_name
+            # 合约自身通常无 desc，继承父品种的 desc
+            if not prod_desc:
+                from tools.products.product_utils import get_contract_desc
+                prod_desc = get_contract_desc(prod_name)
+                node_data['desc'] = prod_desc
+        child_nodes.append(node_data)
     return jsonify(child_nodes)
 
 

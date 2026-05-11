@@ -443,11 +443,14 @@
             }
         }
 
-        // 切换品种：重置合约表格
+        // 切换品种：重置合约表格、数据源下拉框（避免跨品种粒度泄露）
         document.querySelector('#pv-contract-table tbody').innerHTML = '';
         document.getElementById('pv-contract-table-container').style.display = 'none';
         currentContracts = [];
         highlightedRow = null;
+        // 重置数据源为"自动"，避免合约粒度的源泄露到品种请求
+        var dsSelect = document.getElementById('pv-data-source');
+        if (dsSelect) dsSelect.value = '';
 
         var isContract = info.type === 'contract' || info.product_type === 'contract' || info.contract_uid;
         if (isContract) updatePriceTypeControl(false, false);

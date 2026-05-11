@@ -114,6 +114,7 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
             self.set_time_cols_mapping(kwargs.get('time_cols_mapping', {}))
             self.set_data_cols_mapping(kwargs.get('data_cols_mapping', {}))
 
+
     # ── 路径委托 ──
     def get_path(self, obj: UniqueObject) -> str:
         """通过内部 PathResolver 获取对象路径。"""

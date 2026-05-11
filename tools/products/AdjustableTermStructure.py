@@ -113,12 +113,68 @@ class AdjustableProductMixin:
         df = self.get_term_structure(trading_day, depth=depth)
         if df.empty:
             return []
-        contract_cls = getattr(self, 'FuturesContractClass')
+        contract_cls = getattr(self, 'contract_class')
         return [contract_cls(uid) for uid in df[TERM_CONTRACT_UID_COL].dropna().astype(str)]
 
     def get_nth_term_contract(self, trading_day: Any, n: int = 0) -> Optional[Any]:
         contracts = self.get_term_structure_contracts(trading_day, depth=int(n) + 1)
         return contracts[int(n)] if len(contracts) > int(n) else None
+
+    def get_contract_list(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取品种的全部合约列表（去重，按开始日期排序）。
+
+        默认实现：从 TermStructureStore 按 (CONTRACT_UID, min/max TRADING_DAY) 聚合。
+        子类（如 Futures）可覆写以使用 roller_info 等更精确的数据源。
+
+        返回：
+            [{contract, uid, desc, start, end, start_ts, end_ts}, ...]
+        """
+        import pandas as _pd
+
+        store = self.get_term_structure_store()
+        df = store.load(
+            product=getattr(self, 'name', ''),
+            columns=[TERM_CONTRACT_UID_COL, TERM_CONTRACT_COL, TERM_TRADING_DAY_COL],
+        )
+        if df.empty:
+            return []
+
+        grouped = df.groupby(TERM_CONTRACT_UID_COL).agg({
+            TERM_CONTRACT_COL: 'first',
+            TERM_TRADING_DAY_COL: ['min', 'max'],
+        })
+        grouped.columns = [c[-1] for c in grouped.columns]
+        grouped = grouped.sort_values('min')
+
+        req_start = _pd.Timestamp(start_date).normalize() if start_date else None
+        req_end = _pd.Timestamp(end_date).normalize() if end_date else None
+
+        contracts = []
+        for uid, row in grouped.iterrows():
+            t_min = row['min']
+            t_max = row['max']
+
+            if req_start is not None and t_max.normalize() < req_start:
+                continue
+            if req_end is not None and t_min.normalize() > req_end:
+                continue
+
+            uid_str = str(uid)
+            contracts.append({
+                'contract': str(row['first']),
+                'uid': uid_str,
+                'start': t_min.strftime('%Y-%m-%d'),
+                'end': t_max.strftime('%Y-%m-%d'),
+                'start_ts': int(t_min.timestamp() * 1000),
+                'end_ts': int(t_max.timestamp() * 1000),
+            })
+
+        return contracts
 
     def term_spread(self, trading_day: Any, near_rank: int = 0, far_rank: int = 1, column: str = 'CLOSE') -> float:
         """Return near - far for one product/date from the snapshot table."""
