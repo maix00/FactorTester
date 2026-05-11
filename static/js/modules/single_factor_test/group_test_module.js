@@ -188,8 +188,10 @@
                 var display;
                 if (val === null || val === undefined) {
                     display = '—';
-                } else if (name === 'Avg Turnover') {
+                } else if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
                     display = (val * 100).toFixed(1) + '%';
+                } else if (name === 'Avg Position Changes') {
+                    display = val.toFixed(1);
                 } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
                     display = val.toFixed(2) + '%';
                 } else if (name.includes('Ratio') || name === 'Skewness' || name === 'Kurtosis') {
@@ -490,6 +492,12 @@
             'Skewness': '偏度：收益率分布的偏斜程度',
             'Kurtosis': '峰度：收益率分布的尾部厚度',
             'Avg Turnover': '平均换手率：相邻两期持仓变动的比例',
+            'Avg Turnover Accel': '成交加速度：短期成交加速相对长期的变化',
+            'Up Ratio': '上涨占比：上涨波幅相对总波幅的比例',
+            'Avg Position Changes': '平均持仓变化数：平均每期新增或退出的品种数',
+            'Avg Turnover Accel': '成交加速度：衡量交易活跃度的变化趋势',
+            'Up Ratio': '上涨占比：累计上涨幅度占累计总波动幅度的比例',
+            'Avg Position Changes': '平均持仓变化数：单期平均新增或退出的品种数',
         };
         var metricMathExprs = {
             'Total Return': '$$R_{\\text{total}} = \\prod_t (1+r_t) - 1$$',
@@ -503,6 +511,9 @@
             'Skewness': '$$S = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^3$$',
             'Kurtosis': '$$K = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^4 - 3$$',
             'Avg Turnover': '$$\\text{Turnover} = \\frac{|\\text{持仓变动}|}{\\text{平均持仓数}}$$',
+            'Avg Turnover Accel': '$$\\text{Accel} = \\frac{\\text{MA}(\\text{TO}, N_s)}{\\text{MA}(\\text{TO}, N_l)} - 1$$',
+            'Up Ratio': '$$\\text{UpRatio} = \\frac{\\sum \\max(r_i, 0)}{\\sum |r_i|}$$',
+            'Avg Position Changes': '$$\\bar{C} = \\frac{1}{n}\\sum_{t=1}^n (|\\text{new}_t| + |\\text{exit}_t|)$$',
         };
 
         // 收集分组标签
@@ -532,8 +543,10 @@
                 var val = metrics[g][name];
                 var style = isLS ? ' style="background:#f0f0f0;"' : '';
                 if (typeof val === 'number') {
-                    if (name === 'Avg Turnover') {
+                    if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
                         val = (val * 100).toFixed(1) + '%';
+                    } else if (name === 'Avg Position Changes') {
+                        val = val.toFixed(1);
                     } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
                         val = val.toFixed(2) + '%';
                     } else if (name.includes('Ratio')) {

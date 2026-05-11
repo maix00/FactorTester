@@ -77,33 +77,35 @@
     <!-- 费率抽屉 -->
     <div class="settings-drawer-overlay" id="group-fee-drawer">
         <div class="settings-drawer-panel group-fee-drawer-panel">
-            <button class="drawer-close-btn" id="group-fee-drawer-close">✕ 关闭</button>
-            <h5 style="margin-bottom:12px;">📋 按品种手续费率</h5>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-                <button id="drawer_fetch_fee_btn" class="btn btn-outline-primary btn-sm">获取费率</button>
-                <button id="drawer_reset_fee_btn" class="btn btn-outline-warning btn-sm" title="恢复所有费率为获取时的原始值">↺ 恢复原始值</button>
-                <span id="drawer_fee_fetch_status" style="font-size:12px;color:#888;"></span>
-            </div>
-            <div class="group-fee-table-wrap" style="overflow:auto;max-height:72vh;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
-                <table id="fee_table" style="border-collapse:collapse;width:100%;font-size:12px;">
-                    <thead>
-                        <tr style="background:#f7fbff;position:sticky;top:0;z-index:2;">
-                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种代码</th>
-                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种名称</th>
-                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">交易所</th>
-                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">乘数</th>
-                            <th id="fee_col_open" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">开仓比率</th>
-                            <th id="fee_col_close" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">平仓比率</th>
-                            <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">双边合计（%）</th>
-                        </tr>
-                    </thead>
-                    <tbody id="fee_table_body">
-                        <tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无费率数据，请点击"获取费率"</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div style="margin-top:8px;font-size:12px;color:#888;">
-                提示：可手动修改开仓比率和平仓比率，修改过的单元格会以 <span style="background:#fff3cd;padding:1px 4px;border-radius:3px;">黄色背景</span> 标记。修改仅在当前会话有效，不保存到后端。
+            <div class="drawer-inner-container">
+                <button class="drawer-close-btn" id="group-fee-drawer-close">✕ 关闭</button>
+                <h5 style="margin-bottom:12px;">📋 按品种手续费率</h5>
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+                    <button id="drawer_fetch_fee_btn" class="btn btn-outline-primary btn-sm">获取费率</button>
+                    <button id="drawer_reset_fee_btn" class="btn btn-outline-warning btn-sm" title="恢复所有费率为获取时的原始值">↺ 恢复原始值</button>
+                    <span id="drawer_fee_fetch_status" style="font-size:12px;color:#888;"></span>
+                </div>
+                <div class="group-fee-table-wrap" style="overflow:auto;max-height:72vh;border:1px solid #e8edf3;border-radius:8px;background:#fff;">
+                    <table id="fee_table" style="border-collapse:collapse;width:100%;font-size:12px;">
+                        <thead>
+                            <tr style="background:#f7fbff;position:sticky;top:0;z-index:2;">
+                                <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种代码</th>
+                                <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">品种名称</th>
+                                <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">交易所</th>
+                                <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">乘数</th>
+                                <th id="fee_col_open" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">开仓比率</th>
+                                <th id="fee_col_close" style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">平仓比率</th>
+                                <th style="padding:8px 10px;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;white-space:nowrap;">双边合计（%）</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fee_table_body">
+                            <tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无费率数据，请点击"获取费率"</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:8px;font-size:12px;color:#888;">
+                    提示：可手动修改开仓比率和平仓比率，修改过的单元格会以 <span style="background:#fff3cd;padding:1px 4px;border-radius:3px;">黄色背景</span> 标记。修改仅在当前会话有效，不保存到后端。
+                </div>
             </div>
         </div>
     </div>
@@ -141,18 +143,22 @@
         </div>
     </div>
 
-    <!-- 分组快照抽屉：页面级右侧滑入 -->
-    <div class="settings-drawer-overlay" id="group-snapshot-drawer">
-        <div class="settings-drawer-panel">
-            <button class="drawer-close-btn" id="group-snapshot-drawer-close">✕ 关闭</button>
-            <h5 style="margin-bottom:12px;" id="snapshot_title">📋 分组持仓快照</h5>
-            <div style="overflow-x:auto;">
-                <table class="ic-table" style="width:100%;font-size:12px;">
-                    <thead id="snapshot_head"></thead>
-                    <tbody id="snapshot_body"></tbody>
-                </table>
+    <!-- 分组快照抽屉：从下方滑出 -->
+    <div id="group-snapshot-drawer">
+        <div id="group-snapshot-drawer-header">
+            <strong id="snapshot_title" style="font-size:14px;color:#0f4c81;">📋 分组持仓快照</strong>
+            <button id="group-snapshot-drawer-close" style="border:none;background:none;font-size:18px;cursor:pointer;color:#888;">✕</button>
+        </div>
+        <div id="group-snapshot-drawer-body">
+            <div class="drawer-inner-container">
+                <div style="overflow-x:auto;">
+                    <table class="ic-table" style="width:100%;font-size:12px;">
+                        <thead id="snapshot_head"></thead>
+                        <tbody id="snapshot_body"></tbody>
+                    </table>
+                </div>
+                <div id="snapshot_flow_stats" style="margin-top:12px;font-size:13px;color:#555;"></div>
             </div>
-            <div id="snapshot_flow_stats" style="margin-top:12px;font-size:13px;color:#555;"></div>
         </div>
     </div>
 </div>
