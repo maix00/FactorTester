@@ -95,6 +95,10 @@ def run_group_test():
 
         # ─── 如果是多周期对比 ───
         if return_freqs and isinstance(return_freqs, list) and len(return_freqs) > 0:
+            # Issue #2: Save original frequency state before multi-horizon loop
+            _saved_factor_freq = tester.factor_return_freqs.get(factor)
+            _saved_factor_returns = dict(tester.factor_returns) if hasattr(tester, 'factor_returns') else {}
+            
             multi_horizon_results = []
             for rf_str in return_freqs:
                 try:
@@ -141,6 +145,18 @@ def run_group_test():
                     'ls_metrics': ls_metric,
                     'report': report_df.to_dict(orient='index') if not report_df.empty else {},
                 })
+            
+            # Issue #2: Restore original frequency state after multi-horizon loop
+            if _saved_factor_freq is not None:
+                tester.factor_return_freqs[factor] = _saved_factor_freq
+            else:
+                tester.factor_return_freqs.pop(factor, None)
+            # Restore factor_returns to saved state (without current factor's multi-horizon residue)
+            if _saved_factor_returns and factor in _saved_factor_returns:
+                tester.factor_returns[factor] = _saved_factor_returns[factor]
+            elif factor in tester.factor_returns:
+                tester.factor_returns.pop(factor)
+            
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups})
 
         # ─── 原有单频率逻辑 ───
