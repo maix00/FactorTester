@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>价格序列查看 — GTHT</title>
+    <title>序列查看 — GTHT</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -116,7 +116,7 @@
     <div class="pv-header">
         {% set back_link_class = 'back-link' %}
         {% include 'modules/shared/home_back_link.html' %}
-        <h1>📈 价格序列查看</h1>
+        <h1>📈 序列查看</h1>
     </div>
 
     <div class="pv-layout">
@@ -124,7 +124,7 @@
         <div class="pv-sidebar" id="pv-sidebar">
             <h3>📋 品种列表</h3>
             <div style="margin-bottom: 8px; color: #586069; font-size: 12px;">
-                树状结构，点击叶子节点查看价格
+                树状结构，点击叶子节点查看序列
             </div>
             <!-- Fancytree 容器 -->
             <div id="pv-tree-container" style="flex:1 1 auto; min-height:0; box-sizing:border-box; overflow:auto; border:1px solid #e1e4e8; border-radius:8px; padding:8px; background:#fff;"></div>
@@ -161,7 +161,7 @@
                 <div id="pv-chart-container" class="pv-chart-container">
                     <div class="pv-empty">
                         <div class="icon">📊</div>
-                        <div>从左侧列表选择品种查看价格走势</div>
+                        <div>从左侧列表选择品种查看序列</div>
                     </div>
                 </div>
                 <!-- 合约列表表格（仅 Futures 类品种显示） -->

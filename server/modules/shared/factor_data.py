@@ -42,7 +42,14 @@ def factor_list():
             if factor_freq_param is not None and factor_freq_value is not None
             else ''
         )
-        factor_data.append({'alias': f.alias, 'name': f.name, 'default_return_freq': factor_freq_str})
+        factor_freq = f.freq
+        factor_freq_str2 = factor_freq.name if factor_freq is not None else ''
+        factor_data.append({
+            'alias': f.alias,
+            'name': f.name,
+            'default_return_freq': factor_freq_str,
+            'freq': factor_freq_str2,
+        })
     return api_ok({'factors': factor_data})
 
 

@@ -14,10 +14,16 @@ def row_value_as_float(row, col: str, default=None):
 
 
 def format_price_row(row, time_col: str, o_col: str, h_col: str, l_col: str, c_col: str, v_col: str,
-                     oi_col: str | None, freq_is_daily: bool):
+                     oi_col: str | None, freq_is_daily: bool, timezone: str = 'Asia/Shanghai'):
     ts = pd.Timestamp(row[time_col])
+    # 统一转为 UTC epoch，确保前端按浏览器本地时区正确渲染：
+    # - 日内数据（有时区）：tz_convert('UTC') 后 timestamp()
+    # - 日频数据（无时区）：先 tz_localize(product时区) 再 tz_convert('UTC') 后 timestamp()
+    if ts.tz is None:
+        ts = ts.tz_localize(timezone)
+    ts = ts.tz_convert('UTC')
     entry = {
-        'time': ts.strftime('%Y-%m-%d' if freq_is_daily else '%Y-%m-%d %H:%M:%S'),
+        'time': ts.isoformat(),
         'timestamp': int(ts.timestamp() * 1000),
         'open': row_value_as_float(row, o_col),
         'high': row_value_as_float(row, h_col),

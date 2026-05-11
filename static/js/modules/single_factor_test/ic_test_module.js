@@ -355,11 +355,12 @@
         }
     }
 
-    function buildPriceRequestPayload(selectedProduct, submission, adjusted, isTermContractProduct) {
+    function buildPriceRequestPayload(selectedProduct, submission, adjusted, isTermContractProduct, freq) {
         const body = {
             adjusted: adjusted,
             start_date: submission.start_date,
-            end_date: submission.end_date
+            end_date: submission.end_date,
+            freq: freq || ''
         };
         if (isTermContractProduct) {
             body.contract_uid = selectedProduct;
@@ -833,7 +834,7 @@
             // 主价格序列改为复用价格查看模块链路，保证连续性
             const priceApi = await fetch('/api/get_price_data', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, submission, adjusted, isTermContractProduct))
+                body: JSON.stringify(buildPriceRequestPayload(testerPrimary || product, submission, adjusted, isTermContractProduct, freq))
             }).then(r => r.json());
 
             const priceData = priceApiToSeries(priceApi);

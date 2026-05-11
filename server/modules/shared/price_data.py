@@ -1,5 +1,5 @@
 """
-价格序列查看 API
+序列查看 API
   GET  /api/list_product_names  — 获取所有可查看价格的品种名称列表
   GET  /api/product_tree        — 获取产品类别树（复用 CategoryTree，支持多产品类型）
   GET  /api/get_contracts       — 获取主力品种对应的合约列表
@@ -292,6 +292,9 @@ def get_price_data():
 
             has_oi = oi_col in price_df.columns
 
+            # 获取合约所属产品的时区（用于 naive datetime 的 localize）
+            contract_tz = getattr(contract_product, 'timezone', None) or 'Asia/Shanghai'
+
             result_data = [
                 format_price_row(
                     row=row,
@@ -303,6 +306,7 @@ def get_price_data():
                     v_col=v_col,
                     oi_col=oi_col if has_oi else None,
                     freq_is_daily=freq_is_daily,
+                    timezone=contract_tz,
                 )
                 for _, row in price_df.iterrows()
             ]
@@ -389,9 +393,12 @@ def get_price_data():
         if not isinstance(price_df.index, pd.DatetimeIndex):
             price_df.index = pd.to_datetime(price_df.index.get_level_values(-1))
 
-        # 如果有时区，转为 UTC 后去时区
-        if getattr(price_df.index, 'tz', None) is not None:
-            price_df.index = price_df.index.tz_convert('UTC').tz_localize(None)
+        # 时区统一：日内数据统一到 product 时区，日频数据保持 naive
+        # format_price_row 会将所有时间统一转为 UTC epoch，前端按浏览器本地时区渲染
+        idx_tz = getattr(price_df.index, 'tz', None)
+        product_tz = getattr(product, 'timezone', None) or 'Asia/Shanghai'
+        if idx_tz is not None and str(idx_tz) != product_tz:
+            price_df.index = price_df.index.tz_convert(product_tz)
 
         # 提取 OHLCV + 可选 OI 列
         if adjusted:
@@ -409,7 +416,7 @@ def get_price_data():
         freq_is_daily = freq.is_day_multiple()
 
         price_df_for_emit = price_df.copy()
-        price_df_for_emit['__time__'] = [pd.Timestamp(str(idx)) for idx in price_df_for_emit.index]
+        price_df_for_emit['__time__'] = [idx for idx in price_df_for_emit.index]
         result_data = [
             format_price_row(
                 row=row,
@@ -421,6 +428,7 @@ def get_price_data():
                 v_col=v_col,
                 oi_col=oi_col if has_oi else None,
                 freq_is_daily=freq_is_daily,
+                timezone=product_tz,
             )
             for _, row in price_df_for_emit.iterrows()
         ]

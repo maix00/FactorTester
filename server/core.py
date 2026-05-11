@@ -18,7 +18,7 @@ def multi_factor():
 
 @core_bp.route('/price_viewer', methods=['GET'])
 def price_viewer():
-    """价格序列查看页面。"""
+    """序列查看页面。"""
     return render_template('price_viewer.html')
 
 
