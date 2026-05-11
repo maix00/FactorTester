@@ -167,7 +167,7 @@
         }
 
         function goModule(url) {
-            if (_currentUser) { location.href = url; }
+            if (_currentUser || url === '/docs') { location.href = url; }
             else { openLoginModal(url); }
         }
 
