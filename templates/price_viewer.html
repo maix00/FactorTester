@@ -396,13 +396,6 @@
                 if (productName && node.data.has_data !== false) {
                     selectProduct(productName, node.data || {});
                 }
-            },
-            click: function(event, data) {
-                if (data.targetType === 'title' || data.targetType === 'icon') {
-                    var node = data.node;
-                    var productName = node.data.product_name || extractProductName(node);
-                    if (productName && node.data.has_data !== false) selectProduct(productName, node.data || {});
-                }
             }
         });
     }
