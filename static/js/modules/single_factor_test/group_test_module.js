@@ -2,6 +2,11 @@
  * 分组测试模块独立脚本
  */
 (function() {
+    // 时区：后端返回 UTC epoch，useUTC=false 按浏览器本地时区显示
+    if (typeof Highcharts !== 'undefined') {
+        Highcharts.setOptions({ global: { useUTC: false } });
+    }
+
     // ---------- 显示日期修正提示 ----------
     function showDateHint(input, message) {
         var container = input.closest('div');
@@ -237,12 +242,43 @@
             return opts;
         });
         
+        // 判断是否为日内频率：相邻 timestamps 差值 < 1天
+        var isIntraday = false;
+        if (groups.length > 0 && groups[0].timestamps && groups[0].timestamps.length >= 2) {
+            var ts = groups[0].timestamps;
+            isIntraday = (ts[1] - ts[0]) < 86400000; // < 1天
+        }
+
         Highcharts.stockChart(container, {
             chart: { zoomType: 'x' },
             title: { text: '分组累计收益（初始净值 = 1）' },
             xAxis: { type: 'datetime' },
             yAxis: { title: { text: '净值' }, crosshair: true },
-            tooltip: { shared: true, valueDecimals: 4, xDateFormat: '%Y-%m-%d' },
+            tooltip: {
+                shared: true,
+                valueDecimals: 4,
+                useHTML: true,
+                formatter: function () {
+                    var d = new Date(this.x);
+                    var dateStr = isIntraday
+                        ? d.getFullYear() + '-' +
+                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                          String(d.getDate()).padStart(2, '0') + ' ' +
+                          String(d.getHours()).padStart(2, '0') + ':' +
+                          String(d.getMinutes()).padStart(2, '0')
+                        : d.getFullYear() + '-' +
+                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                          String(d.getDate()).padStart(2, '0');
+                    var s = '<b>' + dateStr + '</b>';
+                    this.points.forEach(function (p) {
+                        var decimals = p.series.tooltipOptions.valueDecimals;
+                        if (typeof decimals !== 'number') decimals = 4;
+                        var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
+                        s += '<br/>' + p.series.name + ': ' + val;
+                    });
+                    return s;
+                }
+            },
             series: series,
             navigator: { enabled: true },
             scrollbar: { enabled: true },
