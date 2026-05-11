@@ -11,7 +11,7 @@ from server.services.accounts import (
     normalize_accounts, normalize_organization, list_organizations_with_default,
     visible_accounts_for, visible_organizations_for,
     serialize_account_public, get_account,
-    hash_password,
+    hash_password, verify_password,
     DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME,
     ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER,
     is_super_admin_account, is_org_admin_account, is_level_admin_account,
@@ -141,6 +141,12 @@ def api_delete_organization(organization_id):
         return error
     if not is_super_admin_account(acct):
         return jsonify({'success': False, 'error': '只有超级管理员可以删除机构'}), 403
+    data = request.get_json(silent=True) or {}
+    admin_password = data.get('admin_password') or ''
+    if not admin_password:
+        return jsonify({'success': False, 'error': '请输入超级管理员密码'}), 400
+    if not verify_password(admin_password, acct.get('salt') or '', acct.get('hash') or ''):
+        return jsonify({'success': False, 'error': '超级管理员密码错误'}), 403
     organization_id = (organization_id or '').strip()
     if not organization_id or organization_id == DEFAULT_ORGANIZATION_ID:
         return jsonify({'success': False, 'error': '默认机构不能删除'}), 400

@@ -49,9 +49,17 @@
         .org-admin-row select { flex:1; margin:0; }
         .danger { background:#fee2e2; color:#991b1b; }
         .hier-card { margin-top: 18px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fcfdff; }
+        .hier-toolbar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+        .hier-toolbar input, .hier-toolbar select { margin:0; width:auto; min-width:120px; }
+        .hier-toolbar button { padding:6px 10px; font-size:12px; }
         .hier-node { padding: 4px 0 4px 14px; border-left: 1px dashed #d0d5dd; margin-left: 8px; }
         .hier-label { font-size: 12px; color:#334155; display:flex; gap:8px; align-items:center; }
         .hier-role { color:#64748b; font-size:11px; }
+        .hier-caret { width: 12px; display:inline-block; color:#94a3b8; cursor:pointer; user-select:none; }
+        .hier-children { margin-left: 8px; }
+        .hier-node.collapsed > .hier-children { display: none; }
+        .hier-actions { display:flex; gap:6px; margin:6px 0 2px 20px; flex-wrap:wrap; }
+        .hier-actions button { padding:4px 8px; font-size:11px; border-radius:6px; }
         @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -112,6 +120,15 @@
                 </table>
                 <div class="hier-card">
                     <h2 style="margin:0 0 8px;">层级树</h2>
+                    <div class="hier-toolbar">
+                        <input id="hier-org-name" placeholder="新机构名称">
+                        <input id="hier-org-desc" placeholder="机构说明（可选）">
+                        <button class="secondary" onclick="createOrganizationFromTree()">新增机构</button>
+                        <select id="hier-delete-org-id"></select>
+                        <button class="danger" onclick="deleteOrganizationFromTree()">删除机构</button>
+                        <button class="secondary" onclick="expandAllHierarchy()">全部展开</button>
+                        <button class="secondary" onclick="collapseAllHierarchy()">全部收起</button>
+                    </div>
                     <div id="hierarchy-tree" class="muted">加载中...</div>
                 </div>
             </div>
@@ -152,6 +169,10 @@
             const deleteOrgSel = document.getElementById('delete-org-id');
             if (deleteOrgSel) {
                 deleteOrgSel.innerHTML = '<option value="">选择机构</option>' + deletableOrgs.map(o => `<option value="${esc(o.id)}">${esc(o.name)} (${esc(o.id)})</option>`).join('');
+            }
+            const treeDeleteOrgSel = document.getElementById('hier-delete-org-id');
+            if (treeDeleteOrgSel) {
+                treeDeleteOrgSel.innerHTML = '<option value="">树中删除机构</option>' + deletableOrgs.map(o => `<option value="${esc(o.id)}">${esc(o.name)} (${esc(o.id)})</option>`).join('');
             }
             document.getElementById('role-note').innerHTML =
                 '超级管理员：管理全部机构与用户，并保留系统级权限。<br>' +
@@ -240,6 +261,16 @@
             if (data.success) loadContext();
         }
 
+        async function createOrganizationFromTree() {
+            const nameEl = document.getElementById('hier-org-name');
+            const descEl = document.getElementById('hier-org-desc');
+            document.getElementById('new-org-name').value = (nameEl.value || '').trim();
+            document.getElementById('new-org-desc').value = (descEl.value || '').trim();
+            await createOrganization();
+            nameEl.value = '';
+            descEl.value = '';
+        }
+
         async function deleteOrganization() {
             const orgId = (document.getElementById('delete-org-id').value || '').trim();
             const status = document.getElementById('org-status');
@@ -247,13 +278,24 @@
                 status.textContent = '请选择要删除的机构';
                 return;
             }
+            const adminPassword = prompt('请输入超级管理员密码以确认删除机构：');
+            if (!adminPassword) return;
             if (!confirm('确定删除机构「' + orgId + '」？机构下仍有用户时将拒绝删除。')) return;
             status.textContent = '删除中...';
             const data = await fetch('/admin/api/organizations/' + encodeURIComponent(orgId), {
                 method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({admin_password: adminPassword}),
             }).then(r => r.json());
             status.textContent = data.success ? '已删除机构' : (data.error || '删除失败');
             if (data.success) loadContext();
+        }
+
+        async function deleteOrganizationFromTree() {
+            const src = document.getElementById('hier-delete-org-id');
+            const dst = document.getElementById('delete-org-id');
+            if (src && dst) dst.value = src.value;
+            await deleteOrganization();
         }
 
         async function createUser() {
@@ -278,6 +320,31 @@
             }
         }
 
+        async function createUserFromTree(parentUsername, organizationId) {
+            const alias = (prompt('请输入新用户名称（别名）：') || '').trim();
+            if (!alias) return;
+            const password = prompt('请输入初始密码（至少6位）：') || '';
+            if (!password || password.length < 6) {
+                alert('密码至少6位');
+                return;
+            }
+            const role = prompt('请输入角色（user / level_admin / org_admin）：', 'user') || 'user';
+            const payload = {
+                alias: alias,
+                password: password,
+                role: role.trim(),
+                organization_id: organizationId || (ctx.current_user.organization_id || 'default'),
+                parent_username: parentUsername || '',
+            };
+            const data = await fetch('/admin/api/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            }).then(r => r.json());
+            alert(data.success ? '已创建用户' : (data.error || '创建失败'));
+            if (data.success) loadContext();
+        }
+
         async function updateUser(username) {
             const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
                 method: 'PUT',
@@ -292,6 +359,26 @@
             if (data.success) loadContext();
         }
 
+        function _findUser(username) {
+            return (ctx.users || []).find(u => u.username === username) || null;
+        }
+
+        async function setUserRoleFromTree(username, role) {
+            const u = _findUser(username);
+            if (!u) return;
+            const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    role: role,
+                    organization_id: u.organization_id || '',
+                    parent_username: u.parent_username || '',
+                }),
+            }).then(r => r.json());
+            alert(data.success ? '角色已更新' : (data.error || '更新失败'));
+            if (data.success) loadContext();
+        }
+
         async function deleteUser(username, alias) {
             if (!confirm('确定删除用户「' + alias + '」？账号会被移除，用户目录会自动归档。')) return;
             const data = await fetch('/admin/api/users/' + encodeURIComponent(username), {
@@ -299,6 +386,10 @@
             }).then(r => r.json());
             alert(data.success ? '已删除用户' : (data.error || '删除失败'));
             if (data.success) loadContext();
+        }
+
+        function deleteUserFromTree(username, alias) {
+            deleteUser(username, alias);
         }
 
         function renderHierarchy() {
@@ -312,14 +403,57 @@
             function roleLabel(role) { return esc((ctx.role_labels && ctx.role_labels[role]) || role || ''); }
             function renderNode(node) {
                 const children = Array.isArray(node.children) ? node.children : [];
-                let html = '<div class="hier-node"><div class="hier-label"><strong>' + esc(node.alias || node.username || '') + '</strong><span class="hier-role">' + roleLabel(node.role) + '</span><span class="muted">' + esc(node.organization_name || node.organization_id || '') + '</span></div>';
-                children.forEach(child => { html += renderNode(child); });
+                const hasChildren = children.length > 0;
+                const userObj = _findUser(node.username);
+                const canManage = !!(userObj && userObj.can_manage);
+                let html = '<div class="hier-node' + (hasChildren ? '' : ' leaf') + '"><div class="hier-label">' +
+                    '<span class="hier-caret" onclick="toggleHierarchyNode(this)">' + (hasChildren ? '▼' : '') + '</span>' +
+                    '<strong>' + esc(node.alias || node.username || '') + '</strong><span class="hier-role">' + roleLabel(node.role) + '</span><span class="muted">' + esc(node.organization_name || node.organization_id || '') + '</span></div>';
+                if (canManage) {
+                    html += '<div class="hier-actions">' +
+                        '<button class="secondary" onclick="createUserFromTree(\'' + escAttr(node.username) + '\', \'' + escAttr(node.organization_id || '') + '\')">新增下级</button>' +
+                        '<button class="secondary" onclick="setUserRoleFromTree(\'' + escAttr(node.username) + '\', \'org_admin\')">设机构管理员</button>' +
+                        '<button class="secondary" onclick="setUserRoleFromTree(\'' + escAttr(node.username) + '\', \'level_admin\')">设层级管理员</button>' +
+                        '<button class="secondary" onclick="setUserRoleFromTree(\'' + escAttr(node.username) + '\', \'user\')">设普通用户</button>' +
+                        '<button class="danger" onclick="deleteUserFromTree(\'' + escAttr(node.username) + '\', \'' + escAttr(node.alias || node.username || '') + '\')">删除节点</button>' +
+                        '</div>';
+                }
+                if (hasChildren) {
+                    html += '<div class="hier-children">';
+                    children.forEach(child => { html += renderNode(child); });
+                    html += '</div>';
+                }
                 html += '</div>';
                 return html;
             }
             let html = '';
             trees.forEach(root => { html += renderNode(root); });
             el.innerHTML = html;
+        }
+
+        function toggleHierarchyNode(caretEl) {
+            const node = caretEl.closest('.hier-node');
+            if (!node || node.classList.contains('leaf')) return;
+            const collapsed = node.classList.toggle('collapsed');
+            caretEl.textContent = collapsed ? '▶' : '▼';
+        }
+
+        function expandAllHierarchy() {
+            document.querySelectorAll('#hierarchy-tree .hier-node.collapsed').forEach(node => {
+                node.classList.remove('collapsed');
+            });
+            document.querySelectorAll('#hierarchy-tree .hier-caret').forEach(caret => {
+                if (caret.textContent && caret.textContent.trim()) caret.textContent = '▼';
+            });
+        }
+
+        function collapseAllHierarchy() {
+            document.querySelectorAll('#hierarchy-tree .hier-node').forEach(node => {
+                if (!node.classList.contains('leaf')) node.classList.add('collapsed');
+            });
+            document.querySelectorAll('#hierarchy-tree .hier-caret').forEach(caret => {
+                if (caret.textContent && caret.textContent.trim()) caret.textContent = '▶';
+            });
         }
 
         function esc(s) {
