@@ -448,26 +448,42 @@
 
         var groups = data.groups || [];
 
+        // 每组列等宽：标签列 40px，剩余平分
+        var colWidth = groups.length > 0 ? (100 / groups.length).toFixed(2) + '%' : '100%';
+
         // 表头：每组一列（不含 LS）
-        var headHtml = '<tr><th></th>';
+        var headHtml = '<tr><th style="width:40px;"></th>';
         groups.forEach(function(g) {
-            headHtml += '<th>' + g.name + ' <span style="font-weight:normal;color:#888;">(' + g.count + '品种)</span></th>';
+            headHtml += '<th style="width:' + colWidth + ';">' + g.name + ' <span style="font-weight:normal;color:#888;">(' + g.count + '品种)</span></th>';
         });
         headHtml += '</tr>';
         document.getElementById('snapshot_head').innerHTML = headHtml;
+
+        // helper：渲染一个产品对象 {name, desc} → HTML
+        function _renderProduct(p) {
+            if (!p) return '';
+            if (typeof p === 'string') return p;
+            if (p.desc && p.desc !== p.name) {
+                return '<span title="' + p.name + '">' + p.name + ' <span style="color:#888;font-size:11px;">' + p.desc + '</span></span>';
+            }
+            return p.name || '';
+        }
 
         // 出入标记最多的行数
         var maxRows = Math.max.apply(null, groups.map(function(g) {
             return Math.max(g.products_in.length, g.products_out.length, g.products.length);
         }));
 
+        var tdStyleFull = 'style="width:' + colWidth + ';"';
+        var tdStyleWidth = 'width:' + colWidth + ';';
+
         var bodyHtml = '';
         for (var i = 0; i < maxRows; i++) {
             bodyHtml += '<tr>';
             bodyHtml += '<td style="color:#888;font-size:11px;">' + (i === 0 ? '持仓' : '') + '</td>';
             groups.forEach(function(g) {
-                var p = i < g.products.length ? g.products[i] : '';
-                bodyHtml += '<td>' + p + '</td>';
+                var p = i < g.products.length ? g.products[i] : null;
+                bodyHtml += '<td ' + tdStyleFull + '>' + _renderProduct(p) + '</td>';
             });
             bodyHtml += '</tr>';
         }
@@ -479,8 +495,8 @@
             bodyHtml += '<tr>';
             bodyHtml += '<td style="color:#888;font-size:11px;"></td>';
             groups.forEach(function(g) {
-                var p = j < g.products_in.length ? g.products_in[j] : '';
-                bodyHtml += '<td style="color:#28a745;">' + p + '</td>';
+                var p = j < g.products_in.length ? g.products_in[j] : null;
+                bodyHtml += '<td style="color:#28a745;' + tdStyleWidth + '">' + _renderProduct(p) + '</td>';
             });
             bodyHtml += '</tr>';
         }
@@ -492,8 +508,8 @@
             bodyHtml += '<tr>';
             bodyHtml += '<td style="color:#888;font-size:11px;"></td>';
             groups.forEach(function(g) {
-                var p = k < g.products_out.length ? g.products_out[k] : '';
-                bodyHtml += '<td style="color:#d40000;">' + p + '</td>';
+                var p = k < g.products_out.length ? g.products_out[k] : null;
+                bodyHtml += '<td style="color:#d40000;' + tdStyleWidth + '">' + _renderProduct(p) + '</td>';
             });
             bodyHtml += '</tr>';
         }

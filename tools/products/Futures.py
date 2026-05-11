@@ -15,7 +15,13 @@ from tools.base.IdleResourceManager import IdleResourceManager
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,
+    TermStructureStore,
 )
+
+
+class FuturesTermStructureStore(TermStructureStore):
+    """期货期限结构快照表读取器。继承自通用 TermStructureStore，可扩展期货专属方法。"""
+    pass
 
 
 class FuturesContract(AdjustableContractMixin, Product):

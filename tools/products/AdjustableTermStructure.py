@@ -30,8 +30,12 @@ TERM_IS_MAIN_COL = 'IS_MAIN'
 
 
 @dataclass(frozen=True)
-class FuturesTermStructureStore:
-    """Reader for a futures term-structure snapshot table."""
+class TermStructureStore:
+    """通用期限结构快照表读取器。
+
+    子类化后可针对特定品种类型（期货/期权等）添加专属方法。
+    当前提供核心的 load() 和 contract_pool()。
+    """
 
     path: str
 
@@ -64,6 +68,9 @@ class FuturesTermStructureStore:
         return df
 
 
+
+
+
 class AdjustableContractMixin:
     """Base mixin for contract-like products that can participate in adjustment chains."""
 
@@ -91,11 +98,11 @@ class AdjustableProductMixin:
     def get_term_structure_path(self) -> Optional[str]:
         return getattr(self, 'term_structure_path', None)
 
-    def get_term_structure_store(self) -> FuturesTermStructureStore:
+    def get_term_structure_store(self) -> TermStructureStore:
         path = self.get_term_structure_path()
         if not path:
             raise ValueError(f"term_structure_path not set for {getattr(self, 'name', type(self).__name__)}")
-        return FuturesTermStructureStore(path)
+        return TermStructureStore(path)
 
     def get_term_structure(self, trading_day: Any, depth: Optional[int] = None) -> pd.DataFrame:
         """Return contracts for this product/date ordered by maturity."""
@@ -253,3 +260,46 @@ class AdjustableProductMixin:
         slopes = cast(pd.Series, slopes)
         out.loc[slopes.index.intersection(out.index)] = slopes.reindex(slopes.index.intersection(out.index)).astype(float)
         return out
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 模块级工具：按 CONTRACT_UID 查找 PRODUCT（用于合约 → 品种 desc 继承）
+# ═══════════════════════════════════════════════════════════════════
+
+# {path: {contract_uid: product_name}}
+_contract_product_cache: dict = {}
+
+
+def get_contract_product_map(path: str) -> dict:
+    """
+    从 term structure parquet 构建 {contract_uid: product_name} 映射。
+
+    结果按 path 缓存（term structure parquet 不常变），多次调用不重复 I/O。
+    """
+    if path not in _contract_product_cache:
+        store = TermStructureStore(path)
+        df = store.load(columns=[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL])
+        if df.empty:
+            _contract_product_cache[path] = {}
+        else:
+            # 去重：每个 contract_uid 只保留第一个 product
+            mapping = {}
+            for _, row in df[[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL]].iterrows():
+                uid = str(row[TERM_CONTRACT_UID_COL])
+                if uid not in mapping:
+                    mapping[uid] = str(row[TERM_PRODUCT_COL])
+            _contract_product_cache[path] = mapping
+    return _contract_product_cache[path]
+
+
+def lookup_contract_product(contract_uid: str, term_structure_paths: list) -> Optional[str]:
+    """
+    在所有 term structure path 中查找 contract_uid 所属的 PRODUCT。
+
+    返回找到的第一个 PRODUCT 名，未找到返回 None。
+    """
+    for path in term_structure_paths:
+        mapping = get_contract_product_map(path)
+        if contract_uid in mapping:
+            return mapping[contract_uid]
+    return None

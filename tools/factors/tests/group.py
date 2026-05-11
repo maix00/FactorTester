@@ -229,7 +229,7 @@ def test_by_group_single_factor(
         membership_np[t] = current_members
 
     products_dict = {
-        g: {index_list[t]: [getattr(valid_cols[i], "name", str(valid_cols[i]))
+        g: {index_list[t]: [valid_cols[i]
                              for i in np.where(membership_np[t, g])[0]]
             for t in range(T)}
         for g in range(n_groups)

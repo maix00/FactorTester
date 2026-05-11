@@ -298,25 +298,35 @@ def get_group_snapshot():
         current_pos = sorted_entries.index(best_idx_entry)
         prev_entry = sorted_entries[current_pos - 1] if current_pos > 0 else None
 
+        from tools.products.product_utils import product_display_name
+
         n_groups = len(products_dict)
         groups_detail = []
         for g in range(n_groups):
-            # 防御：确保所有产品名都是字符串（有些是 CNFutures 等对象）
-            def _to_name(x):
-                return getattr(x, 'name', str(x))
-
             current_raw = products_dict[g].get(best_idx_entry, [])
-            current_set = set(_to_name(x) for x in current_raw)
+            current_display = [product_display_name(x) for x in current_raw]
+            # 按 name 排序
+            current_display.sort(key=lambda d: d['name'])
+
             if prev_entry is not None:
                 prev_raw = products_dict[g].get(prev_entry, [])
-                prev_set = set(_to_name(x) for x in prev_raw)
-                products_in = sorted(current_set - prev_set)
-                products_out = sorted(prev_set - current_set)
-                # turnover rate
-                prev_count = len(prev_set)
-                curr_count = len(current_set)
+                prev_display = [product_display_name(x) for x in prev_raw]
+                prev_names = set(d['name'] for d in prev_display)
+                curr_names = set(d['name'] for d in current_display)
+
+                in_names = sorted(curr_names - prev_names)
+                out_names = sorted(prev_names - curr_names)
+
+                # 新进/退出：从 current_display / prev_display 中查找完整信息
+                _name_map = {d['name']: d for d in current_display}
+                _prev_name_map = {d['name']: d for d in prev_display}
+                products_in = [_name_map[n] for n in in_names]
+                products_out = [_prev_name_map[n] for n in out_names]
+
+                prev_count = len(prev_raw)
+                curr_count = len(current_raw)
                 avg_count = (prev_count + curr_count) / 2.0
-                changed = len(products_in) + len(products_out)
+                changed = len(in_names) + len(out_names)
                 turnover_rate = round(changed / (2.0 * avg_count), 4) if avg_count > 0 else 0.0
             else:
                 products_in = []
@@ -325,11 +335,11 @@ def get_group_snapshot():
 
             groups_detail.append({
                 'name': f'Group {g+1}',
-                'products': sorted(current_set),
+                'products': current_display,
                 'products_in': products_in,
                 'products_out': products_out,
                 'turnover_rate': turnover_rate,
-                'count': len(current_set),
+                'count': len(current_display),
             })
 
         # 所有时间点（epoch 毫秒），用于前/后导航
