@@ -146,7 +146,11 @@
     <!-- 分组快照抽屉：从下方滑出 -->
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
-            <strong id="snapshot_title" style="font-size:14px;color:#0f4c81;">📋 分组持仓快照</strong>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button id="snapshot-prev-btn" style="border:1px solid #ccc;background:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:13px;color:#0f4c81;" title="上一个时点">◀ 前一个</button>
+                <button id="snapshot-next-btn" style="border:1px solid #ccc;background:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:13px;color:#0f4c81;" title="下一个时点">后一个 ▶</button>
+                <strong id="snapshot_title" style="font-size:14px;color:#0f4c81;">📋 分组持仓快照</strong>
+            </div>
             <button id="group-snapshot-drawer-close" style="border:none;background:none;font-size:18px;cursor:pointer;color:#888;">✕</button>
         </div>
         <div id="group-snapshot-drawer-body">

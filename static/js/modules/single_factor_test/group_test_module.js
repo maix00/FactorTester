@@ -322,13 +322,23 @@
         });
     }
 
-    // ---------- 获取并展示分组快照（页面级右侧抽屉） ----------
+    // ---------- 快照导航状态 ----------
+    var _snapshotTimestamps = [];  // 所有可用时间点（epoch ms）
+    var _snapshotCurrentMs = null; // 当前显示的时间点
+
+    // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
         var context = getCurrentContext();
         if (!context) return;
 
-        // 取整，避免浮点
         timestampMs = Math.round(timestampMs);
+        _snapshotCurrentMs = timestampMs;
+
+        // 加载中：禁用导航按钮并显示加载提示
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
+        if (prevBtn) { prevBtn.disabled = true; prevBtn.textContent = '⏳ 加载中...'; prevBtn.style.opacity = '0.6'; }
+        if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = '⏳ 加载中...'; nextBtn.style.opacity = '0.6'; }
 
         fetch('/get_group_snapshot', {
             method: 'POST',
@@ -345,10 +355,15 @@
                 document.getElementById('snapshot_head').innerHTML = '';
                 document.getElementById('snapshot_body').innerHTML = '<tr><td colspan="10" style="color:#d40000;">' + data.error + '</td></tr>';
                 document.getElementById('snapshot_flow_stats').innerHTML = '';
+                _updateSnapshotNavButtons(null);
                 openSnapshotDrawer();
                 return;
             }
-            renderGroupSnapshot(data, timestampMs);
+            _snapshotTimestamps = data.all_timestamps_ms || [];
+            // 使用后端返回的精确时间戳（closest_ms），而非前端不精确的传入值
+            _snapshotCurrentMs = data.timestamp_ms;
+            renderGroupSnapshot(data, data.timestamp_ms);
+            _updateSnapshotNavButtons(data);
             openSnapshotDrawer();
         })
         .catch(function(err) {
@@ -356,8 +371,43 @@
             document.getElementById('snapshot_head').innerHTML = '';
             document.getElementById('snapshot_body').innerHTML = '<tr><td colspan="10" style="color:#d40000;">请求失败: ' + err.message + '</td></tr>';
             document.getElementById('snapshot_flow_stats').innerHTML = '';
+            _updateSnapshotNavButtons(null);
             openSnapshotDrawer();
         });
+    }
+
+    /** 更新前/后导航按钮状态 */
+    function _updateSnapshotNavButtons(data) {
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
+        if (!prevBtn || !nextBtn) return;
+
+        // 恢复按钮文字（可能被加载状态覆盖）
+        prevBtn.textContent = '◀ 前一个';
+        nextBtn.textContent = '后一个 ▶';
+
+        if (!data) {
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            prevBtn.style.opacity = '0.4';
+            nextBtn.style.opacity = '0.4';
+            return;
+        }
+
+        prevBtn.disabled = !data.has_prev;
+        nextBtn.disabled = !data.has_next;
+        prevBtn.style.opacity = data.has_prev ? '1' : '0.4';
+        nextBtn.style.opacity = data.has_next ? '1' : '0.4';
+    }
+
+    /** 导航到上一个/下一个时点 */
+    function navigateSnapshot(direction) {
+        if (!_snapshotTimestamps.length) return;
+        var idx = _snapshotTimestamps.indexOf(_snapshotCurrentMs);
+        if (idx < 0) return;
+        var newIdx = idx + (direction === 'next' ? 1 : -1);
+        if (newIdx < 0 || newIdx >= _snapshotTimestamps.length) return;
+        fetchGroupSnapshot(_snapshotTimestamps[newIdx]);
     }
 
     function openSnapshotDrawer() {
@@ -370,11 +420,15 @@
         if (overlay) overlay.classList.remove('open');
     }
 
-    /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击） */
+    /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击 + 前/后导航） */
     function bindSnapshotDrawerEvents() {
         var overlay = document.getElementById('group-snapshot-drawer');
         var closeBtn = document.getElementById('group-snapshot-drawer-close');
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
         if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
+        if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
+        if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });
         if (overlay) overlay.addEventListener('click', function(e) {
             if (e.target === overlay) closeSnapshotDrawer();
         });

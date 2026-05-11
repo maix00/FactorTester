@@ -332,11 +332,21 @@ def get_group_snapshot():
                 'count': len(current_set),
             })
 
+        # 所有时间点（epoch 毫秒），用于前/后导航
+        all_timestamps_ms = sorted(set(
+            int(ts_epoch * 1000) for ts_epoch, _idx in all_times
+        ))
+        # 用最接近的 all_timestamps_ms 条目（而非前端传来的不精确 timestamp_ms）
+        closest_ms = min(all_timestamps_ms, key=lambda x: abs(x - int(timestamp_ms)))
+        current_index = all_timestamps_ms.index(closest_ms)
+
         return jsonify({
             'success': True,
             'groups': groups_detail,
-            'timestamp_ms': timestamp_ms,
+            'timestamp_ms': closest_ms,
             'has_prev': prev_entry is not None,
+            'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
+            'all_timestamps_ms': all_timestamps_ms,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
