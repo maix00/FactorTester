@@ -1,9 +1,24 @@
+"""
+Flask 应用工厂模块。
+
+create_app() 负责：
+  1. 设置模板/静态文件路径（开发模式和 PyInstaller 打包模式自适应）
+  2. 设置 session secret key 和过期时间（30天）
+  3. 注册所有 Blueprint（auth / core / shared / sft / mfa / cn_futures / cf / admin）
+"""
 import sys, os
 from datetime import timedelta
 from flask import Flask
 
 
 def create_app() -> Flask:
+    """
+    创建并配置 Flask 应用。
+
+    自动解析项目根目录（server/ 的父级），支持：
+      - 开发模式：__file__ 指向源码文件
+      - 打包模式：sys.frozen 为 True 时使用 PyInstaller 的 _MEIPASS
+    """
     # Project root is one level above this package (server/)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if getattr(sys, 'frozen', False):
@@ -21,6 +36,7 @@ def create_app() -> Flask:
     app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
 
+    # ── 注册 8 个 Blueprint ──
     from server.auth import auth_bp
     from server.core import core_bp
     from server.modules.templates import templates_bp

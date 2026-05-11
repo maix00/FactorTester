@@ -1,6 +1,14 @@
 """
-Authentication Blueprint: login, logout, register, /api/me, and the
-before_app_request auth guard that previously lived on app directly.
+Authentication Blueprint — 登录/登出/注册 + 全局请求认证守卫。
+
+核心职责：
+  - before_app_request: 全局认证检查，区分公开端点/已登录/未登录/超时四种情况
+  - login: 支持 alias 模糊匹配（张三）和完整 username 精确匹配（张三@1）
+  - logout: 清理 FactorTester 实例 + session 资源
+  - register: 新建用户（需管理员权限）
+  - api_me / api_keep_login / api_public_organizations: 前端状态同步 API
+
+PUBLIC_ENDPOINTS: 不要求登录的端点集合，包含文档系统和静态资源。
 """
 import re
 import secrets
@@ -30,7 +38,13 @@ def _check_login():
     PUBLIC_ENDPOINTS = {
         'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login',
         'auth.api_public_organizations', 'auth.logout',
-        'core.home', 'core.docs', 'core.docs_tools', 'core.docs_tool_detail',
+        'core.home',
+        'core.docs', 'core.docs_single_factor', 'core.docs_multi_factor',
+        'core.docs_price_viewer', 'core.docs_factor_editor',
+        'core.docs_data_dictionary',
+        'core.docs_dev', 'core.docs_dev_backend', 'core.docs_dev_frontend',
+        'core.docs_dev_data_pipeline', 'core.docs_dev_deployment',
+        'core.docs_tools', 'core.docs_tool_detail',
         'static',
     }
     ep = request.endpoint

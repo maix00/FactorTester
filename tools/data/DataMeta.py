@@ -1,15 +1,24 @@
-# =============================================================================
-# tools/data/DataMeta.py
-# 数据元信息模块
-#
-# DataMeta 是围绕特定 Product + DataFreq 的 DataFrame 的薄封装层：
-#   - 管理数据加载、时间列处理、列名映射、时间索引构建
-#   - 支持按 StartCalcPointParam 过滤历史数据
-#   - 支持复权计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
-#
-# DataFrame 缓存统一委托给 IdleResourceManager（基于访问时间的自动回收）。
-# 不保留 self.data 属性，避免双重缓存。
-# =============================================================================
+"""
+DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
+
+核心职责：
+  - 懒加载 DataFrame（委托 IdleResourceManager 按 (namespace, path) 缓存）
+  - 列名映射（原始 Parquet 列名 → DataColumn 标准枚举）
+  - 时间索引构建（将日期列 + 时间列组合为 MultiIndex）
+  - 复权价格计算（OPEN_ADJUSTED / CLOSE_ADJUSTED 等）
+  - 按 DataSource 过滤可用频率
+
+使用方式：
+  product.DAY1.load()   # 自动缓存，5 分钟无访问后释放
+  product.DAY1.get_data_slice(start, end)  # 时间范围切片
+
+缓存策略：
+  - IdleResourceManager 统一管理，namespace='datameta'
+  - 同一 parquet 文件被多个品种共享时只加载一次
+  - 默认 300 秒 TTL，每次访问自动刷新时间戳
+
+注意：本对象不保留 self.data 属性，所有数据通过 IdleResourceManager 存取。
+"""
 from __future__ import annotations
 
 from typing import List, Dict, Optional, Tuple, Any

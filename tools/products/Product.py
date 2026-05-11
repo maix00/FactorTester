@@ -1,13 +1,13 @@
-# =============================================================================
-# tools/products/Product.py
-# 金融产品基类模块
-#
-# Product 是所有可交易产品的抽象基类，主要责责：
-#   - 持有各频率的 DataMeta（如 product.MIN1、product.DAY1）
-#   - 封装数据访问、频率选择、时间切片、价格获取等
-#   - 管理 StartCalcPointParam（各阶段计算起始时间）
-# 实际使用中一般会通过 CNFutures 等具体子类访问。
-# =============================================================================
+"""
+Product 抽象基类 — 所有金融产品的统一接口。
+
+核心职责：
+  - 为每个 DataFreq 自动创建 DataMeta 对象（如 product.MIN1 / product.DAY1）
+  - 封装数据可用性判断（list_available_freqs / list_available_datasources）
+  - 在后台与 IdleResourceManager 协作，按需加载和回收 DataFrame
+
+子类：Futures (tools/products/Futures.py) → CNFutures (sources/LocalCNFutures/)
+"""
 from typing import List, Optional, Any, TYPE_CHECKING
 import pandas as pd
 

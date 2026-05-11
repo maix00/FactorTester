@@ -1,5 +1,15 @@
-// static/js/base.js
+/**
+ * static/js/base.js
+ * 全局共享的工具函数和页面初始化逻辑。
+ *
+ * 函数列表：
+ *   searchFactors()         — 因子搜索（回车触发），携带 include_subordinates 参数
+ *   shutdownServer()        — 管理员关闭服务器（POST /shutdown）
+ *   pad(n)                  — 数字补零到两位
+ *   formatNumber(v, [dec])  — 数值格式化：null→—, 整数不显示小数, 否则默认6位
+ */
 
+/** 因子搜索：收集搜索框输入，拼 URL 参数后跳转 */
 function searchFactors() {
     var query = document.getElementById('search').value;
     var includeSubordinates = document.getElementById('include-subordinates')?.checked;

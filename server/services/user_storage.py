@@ -1,4 +1,22 @@
-"""Filesystem storage helpers for per-user server data."""
+"""
+用户文件系统存储助手。
+
+目录结构：
+  ../data/
+    users/
+      <username>/                    ← user_data_dir() 返回
+        params_templates/            ← 参数模板 JSON
+          <FactorFamily>.json
+        <kind>_templates.json        ← 其他类型的模板
+      _archived/                     ← archive_user_dir() 归档目标
+        <username>__<timestamp>/
+
+核心函数：
+  user_data_dir(username)            用户根目录（自动创建）
+  user_template_path(...)            模板文件路径（按 kind / scope_key / ff_alias 分路径）
+  load_user_templates / save_user_templates   JSON 格式读写
+  archive_user_dir(username)         带时间戳归档（用于注销用户）
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,18 @@
-"""FactorFamily loading, caching, and invalidation helpers."""
+"""
+FactorFamily 加载、缓存与失效管理。
+
+三级缓存策略：
+  1. _factor_family_cache       —— 公共因子（Factors/ 目录下的 .py 文件）全局单例缓存
+  2. _custom_factor_cache       —— 自定义因子（用户目录 custom_factors/）按 (username, id) 缓存
+  3. _chinese_names_cache       —— 因子的中文名（desc 属性）一次性加载缓存
+
+核心函数：
+  get_factor_family_instance()  加载因子族实例 → 先查公共因子缓存，再查自定义因子
+  invalidate_factor_family_cache()  失效特定的或全部公共因子缓存
+  invalidate_custom_factor_cache()  失效特定用户的或某用户全部的的自定义因子缓存
+  get_factor_groups()           返回按前缀分组的因子名列表（Mm/Oi/Vl/Vp 等）
+  factor_group_key()            从类名提取分组前缀（MmRet → Mm）
+"""
 
 from __future__ import annotations
 

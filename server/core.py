@@ -1,4 +1,12 @@
-"""Core Blueprint: application entry point."""
+"""
+Core Blueprint — 应用入口和页面路由。
+
+负责：
+  - 首页 (/) 及三大功能页面（多因子、价格查看）渲染
+  - /docs/* 文档体系全体路由（用户手册、开发者指南、数据字典、工具类源码）
+  - 数据字典页动态调用 data_dictionary 扫描器
+  - 工具类源码页 AST 解析 + 折叠渲染
+"""
 
 from flask import Blueprint, render_template
 
@@ -24,8 +32,70 @@ def price_viewer():
 
 @core_bp.route('/docs', methods=['GET'])
 def docs():
-    """Documentation landing page."""
-    return render_template('docs.html')
+    """用户手册首页。"""
+    return render_template('docs/user_manual_home.html')
+
+
+@core_bp.route('/docs/single-factor', methods=['GET'])
+def docs_single_factor():
+    """用户手册 - 单因子测试。"""
+    return render_template('docs/user_manual_single_factor.html')
+
+
+@core_bp.route('/docs/multi-factor', methods=['GET'])
+def docs_multi_factor():
+    """用户手册 - 多因子分析。"""
+    return render_template('docs/user_manual_multi_factor.html')
+
+
+@core_bp.route('/docs/price-viewer', methods=['GET'])
+def docs_price_viewer():
+    """用户手册 - 价格查看。"""
+    return render_template('docs/user_manual_price_viewer.html')
+
+
+@core_bp.route('/docs/factor-editor', methods=['GET'])
+def docs_factor_editor():
+    """用户手册 - 因子管理。"""
+    return render_template('docs/user_manual_factor_editor.html')
+
+
+@core_bp.route('/docs/data-dictionary', methods=['GET'])
+def docs_data_dictionary():
+    """数据字典 — 全量字段清单（SOE 合规审计用）。"""
+    from server.services.data_dictionary import build_data_dictionary, data_dictionary_to_dict
+    dd = build_data_dictionary()
+    return render_template('docs/data_dictionary.html', dd=data_dictionary_to_dict(dd))
+
+
+@core_bp.route('/docs/dev', methods=['GET'])
+def docs_dev():
+    """开发者指南首页。"""
+    return render_template('docs/dev_home.html')
+
+
+@core_bp.route('/docs/dev/backend', methods=['GET'])
+def docs_dev_backend():
+    """开发者指南 - 后端架构。"""
+    return render_template('docs/dev_backend.html')
+
+
+@core_bp.route('/docs/dev/frontend', methods=['GET'])
+def docs_dev_frontend():
+    """开发者指南 - 前端架构。"""
+    return render_template('docs/dev_frontend.html')
+
+
+@core_bp.route('/docs/dev/data-pipeline', methods=['GET'])
+def docs_dev_data_pipeline():
+    """开发者指南 - 数据管线。"""
+    return render_template('docs/dev_data_pipeline.html')
+
+
+@core_bp.route('/docs/dev/deployment', methods=['GET'])
+def docs_dev_deployment():
+    """开发者指南 - 部署配置。"""
+    return render_template('docs/dev_deployment.html')
 
 
 @core_bp.route('/docs/tools', methods=['GET'])
