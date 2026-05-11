@@ -47,7 +47,7 @@ def list_product_names():
                 'desc': desc,
                 'code': code or name.split('.')[0] if '.' in name else name,
                 'exchange': name.split('.')[1] if '.' in name and '@' not in name.split('.')[1] else name.split('.')[1].split('@')[0] if '.' in name else '',
-                'type': 'product',
+                'product_type': 'product',
             })
         return jsonify({'success': True, 'products': result})
     except Exception as e:
