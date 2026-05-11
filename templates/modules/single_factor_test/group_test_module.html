@@ -140,6 +140,21 @@
             </table>
         </div>
     </div>
+
+    <!-- 分组快照抽屉：页面级右侧滑入 -->
+    <div class="settings-drawer-overlay" id="group-snapshot-drawer">
+        <div class="settings-drawer-panel">
+            <button class="drawer-close-btn" id="group-snapshot-drawer-close">✕ 关闭</button>
+            <h5 style="margin-bottom:12px;" id="snapshot_title">📋 分组持仓快照</h5>
+            <div style="overflow-x:auto;">
+                <table class="ic-table" style="width:100%;font-size:12px;">
+                    <thead id="snapshot_head"></thead>
+                    <tbody id="snapshot_body"></tbody>
+                </table>
+            </div>
+            <div id="snapshot_flow_stats" style="margin-top:12px;font-size:13px;color:#555;"></div>
+        </div>
+    </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>

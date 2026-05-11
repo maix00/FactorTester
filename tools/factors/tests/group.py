@@ -229,7 +229,8 @@ def test_by_group_single_factor(
         membership_np[t] = current_members
 
     products_dict = {
-        g: {index_list[t]: [valid_cols[i] for i in np.where(membership_np[t, g])[0]]
+        g: {index_list[t]: [getattr(valid_cols[i], "name", str(valid_cols[i]))
+                             for i in np.where(membership_np[t, g])[0]]
             for t in range(T)}
         for g in range(n_groups)
     }
@@ -297,6 +298,8 @@ def test_by_group_single_factor(
 
     tester._last_fee_costs_np = fee_costs_np
     tester._last_group_gross_returns_np = group_gross_returns_np
+    tester._last_group_products = products_dict  # {g: {t_index: [product_names]}}
+    tester._last_group_valid_cols = valid_cols    # 品种名称列表（按列顺序）
 
     returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 
