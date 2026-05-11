@@ -30,7 +30,6 @@ class UniqueObject(ABC):
     设计原则：
       - 以 (name, structural_key) 为 key，通过 WeakValueDictionary 实现进程内去重。
       - name = {alias}:{uuid}，所有对象统一用 uuid，不再使用序列号。
-      - 数据级缓存由 IdleResourceManager 管理（按路径缓存 DataFrame + 自动回收）。
     '''
 
     # ── 本地弱引用缓存 ──

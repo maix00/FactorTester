@@ -57,7 +57,7 @@ class Factor(UniqueObject, FactorExpr):
         products       (set)         : 参与计算的 Product 集合（从 source_table 列提取）
         freq           (DataFreq)    : 信号频率（从 table 索引的 _SIGNAL@ 层级推断）
         returns        (DataFrame)   : 因子对应的收益率序列（calc_returns 后设置）
-        source_data_freq (DataFreq)  : 数据源频率（从 family 继承）
+        _source_freq   (DataFreq)    : 数据源频率（从 family 继承）
     """
 
     # 运行时动态属性（calc 后设置）

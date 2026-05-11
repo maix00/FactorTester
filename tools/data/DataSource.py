@@ -143,7 +143,7 @@ class DataSource(UniqueObject, metaclass=DataSourceMeta):
         return list(cls._data_sources.values())
     
     def delete(self):
-        """部除本数据源并从元类字典中移除。"""
+        """删除本数据源并从元类字典中移除。"""
         DataSourceMeta._data_sources.pop(self.alias, None)
         super().delete()
 

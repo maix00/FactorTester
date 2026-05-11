@@ -3,8 +3,8 @@ Account, organization, and hierarchy permission helpers.
 
 数据模型：
   accounts.json      — 用户列表 [{username, alias, hash, salt, role, organization_id, ...}]
-  organizations.json — 机构列表 [{id, name, levels: [{id, name}]}]
-  levels.json        — 层级列表（树形结构，每个节点带 children）
+  organizations.json — 机构列表 [{id, name}]
+  levels.json        — 层级列表（树形结构，每个节点带 children，关联 organization_id）
 
 角色体系：
   super_admin   — 超级管理员（全局权限）

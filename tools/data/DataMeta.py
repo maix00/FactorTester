@@ -9,8 +9,8 @@ DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
   - 按 DataSource 过滤可用频率
 
 使用方式：
-  product.DAY1.load()   # 自动缓存，5 分钟无访问后释放
-  product.DAY1.get_data_slice(start, end)  # 时间范围切片
+  product.DAY1.load_data()                   # 自动缓存，5 分钟无访问后释放
+  product.DAY1.get_data(start=..., end=...)  # 时间范围切片
 
 缓存策略：
   - IdleResourceManager 统一管理，namespace='datameta'
