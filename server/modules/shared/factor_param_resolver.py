@@ -16,6 +16,10 @@ def resolve_factor_param_value(value):
         alias = str(value or '').strip()
         if not alias:
             raise ValueError('FactorParam 为空')
+        # FactorParam._value_space.alias() 对 dict 用 [...] 包裹；
+        # 前端回传的是 display 值，需要去掉方括号再匹配 factor_alias。
+        if alias.startswith('[') and alias.endswith(']'):
+            alias = alias[1:-1]
         item = _find_visible_factor(alias)
 
     family_alias = item.get('factor_family_alias') or item.get('factor_family_name')

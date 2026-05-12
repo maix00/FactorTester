@@ -25,12 +25,19 @@ _SKIP_RELOAD = {
     'tools.base.UniqueObject',
     'tools.base.IdleResourceManager',
 }
+# 前缀匹配 — 整个子树都不参与热重载（单元测试勿 reload）
+_SKIP_RELOAD_PREFIXES = ('tests.',)
+
+def _is_skip_reload(name: str) -> bool:
+    if name in _SKIP_RELOAD:
+        return True
+    return any(name.startswith(p) for p in _SKIP_RELOAD_PREFIXES)
 
 def _get_watched_modules() -> dict[str, float]:
     """返回所有可监控模块及其源文件的当前 mtime。"""
     result = {}
     for name, mod in sorted(sys.modules.items()):
-        if name in _SKIP_RELOAD:
+        if _is_skip_reload(name):
             continue
         if name not in _WATCH_EXACT and not any(name.startswith(p) for p in _WATCH_PREFIXES):
             continue
@@ -46,7 +53,7 @@ def _reload_changed_modules(old_mtimes: dict[str, float]) -> list[str]:
     # 找出所有变化的模块
     changed = []
     for name, mod in sorted(sys.modules.items()):
-        if name in _SKIP_RELOAD:
+        if _is_skip_reload(name):
             continue
         if name not in _WATCH_EXACT and not any(name.startswith(p) for p in _WATCH_PREFIXES):
             continue

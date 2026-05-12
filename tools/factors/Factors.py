@@ -297,7 +297,11 @@ class Factor(UniqueObject, FactorExpr):
         return self.table
     
     def _collect_intermediates_from_cache(self) -> None:
-        """遍历表达式树，将 _intermediate_factor_data 中的 sk 映射到别名。"""
+        """遍历表达式树，将 _intermediate_factor_data 中的 sk 映射到别名。
+
+        规则：同一个 as_intermediate(name) 必须映射到同一个 structural_key；
+        若不同 structural_key 的节点使用了相同的 intermediate name，直接报错。
+        """
         self._intermediate_alias_index.clear()
         seen: Set[Tuple] = set()
         stack: List[FactorExpr] = [self._expr]
@@ -312,6 +316,13 @@ class Factor(UniqueObject, FactorExpr):
             if getattr(node, '_is_intermediate', False):
                 name = getattr(node, '_intermediate_name', None)
                 if name and sk in self._intermediate_factor_data:
+                    existing_sk = self._intermediate_alias_index.get(name)
+                    if existing_sk is not None and existing_sk != sk:
+                        raise ValueError(
+                            f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
+                            f"不能再用 structural_key={sk} 注册。"
+                            f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
+                        )
                     self._intermediate_alias_index[name] = sk
 
             for opnd in reversed(list(getattr(node, '_operands', ()))):

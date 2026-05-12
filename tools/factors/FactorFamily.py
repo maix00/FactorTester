@@ -31,6 +31,7 @@ from tools.factors.FactorExpr import (
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools import UniqueObject, DataMeta
 from tools.parameters import Parameter
+from tools.parameters.Parameter import FactorParam
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
@@ -270,11 +271,14 @@ class FactorFamily(UniqueObject, FactorExpr):
         parts = []
         for key in ordered_keys:
             value = normalized[key]
-            val_alias = self.params_dict[key]._value_space.alias(value)
+            param = self.params_dict[key]
+            val_alias = param._value_space.alias(value)
             if val_alias:
                 if key == '$Rev':
                     if val_alias == '1':
                         parts.append(key)
+                elif isinstance(param, FactorParam):
+                    parts.append(f"{key}:[{val_alias}]")
                 else:
                     parts.append(f"{key}:{val_alias}")
         params_str = '|'.join(parts)

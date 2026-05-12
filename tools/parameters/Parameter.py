@@ -272,25 +272,20 @@ class FactorParam(TypeParam):
         def alias_value(value: Any) -> str:
             if value is None:
                 return ''
-            def wrap_alias(text: Any) -> str:
-                t = str(text).strip()
-                if not t:
-                    return ''
-                return f"[{t}]"
             if isinstance(value, dict):
-                return wrap_alias(value.get('factor_alias') or value.get('alias') or value)
+                return value.get('factor_alias') or value.get('alias') or str(value)
             if is_datacolumn_like(value):
-                return wrap_alias(DataColumn(value).value)
+                return DataColumn(value).value
             if isinstance(value, ColumnRef):
-                return wrap_alias(value.column.value)
+                return value.column.value
             if isinstance(value, FactorExpr):
                 try:
-                    return wrap_alias(value._get_alias())
+                    return value._get_alias()
                 except Exception:
                     pass
             if isinstance(value, ParamRef):
-                return wrap_alias(getattr(value.param, 'alias', str(value)))
-            return wrap_alias(getattr(value, 'alias', str(value)))
+                return getattr(value.param, 'alias', str(value))
+            return getattr(value, 'alias', str(value))
 
         space = ValueSpace(
             contains=contains,
