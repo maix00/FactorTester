@@ -177,14 +177,6 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 - `UniqueObject.alias`：纯类名（如 `MmRet`）— 用于查找
 - `user_prefix`：公共因子用 `$COMMON`，自定义因子用 `用户名@序号`
 
-### 已知坑位
-
-> 已解决的坑位移至 Agent 记忆（`/memories/`）。以下为当前仍在生效的约束：
-
-- **evaluate() 签名**：统一使用 `EvaluateContext` ctx 参数（see Issue #2），不再有 5 种签名变体
-- **中间因子命名**：`as_intermediate(name)` 冲突直接报错 — 不做自动后缀
-- **多品种**：禁止用第一个品种的 `DataMeta` 转换 `Timedelta` / `DataFreq` 窗口；必须按品种解析，按 `day_periods` 分组收敛
-
 ---
 
 > 任务跟踪以 [GitHub Issues](https://github.com/maix00/FactorTester/issues) 为准。
