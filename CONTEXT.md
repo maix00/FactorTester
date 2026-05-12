@@ -71,6 +71,14 @@ DSL 核心。三层结构：
 
 因子树中的命名子表达式。`as_intermediate(name)` 标记节点 — 其结果存入 `FactorData`，可在不同品种 / 时间范围间复用。规则：相同 `as_intermediate(name)` 必须映射到相同 `structural_key`；冲突直接报错（不自动加后缀）。
 
+### 参数空间 (Parameter Space)
+
+一个因子族的所有可调参数的取值域。由 `ordered_param_deps`（含 `$F`、`$Rev`、`$P` 等）定义维度，每个维度有默认值和取值范围。参数空间的每一点对应一个具体的因子配置（一组参数值），通过 `get_factor(**params)` 实例化。
+
+### 向量化批量计算 (Vectorized Batch Evaluate)
+
+不将参数配置逐个 `resolve → Factor → evaluate`，而是在表达式层面将 `ParamRef` 替换为 `ConstExpr(np.array([...]))`，使 `evaluate()` 的返回 DataFrame 天然携带参数维度（shape: 参数数 × 品种 × 时间）。算子层（RollingOp、ShiftOp）通过广播机制支持数组 window/periods。详见 ADR-004。
+
 ---
 
 ## 架构总览
