@@ -2,6 +2,7 @@
 Group test endpoint: /run_group_test /run_multi_horizon_group_test
 """
 import math, traceback
+from typing import cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
@@ -268,10 +269,10 @@ def get_group_snapshot():
             ts = _signal_time(idx_entry)
             # 统一转为 naive epoch 秒用于比较
             if isinstance(ts, pd.Timestamp):
-                ts_epoch = ts.tz_localize(None) if ts.tzinfo else ts
-                ts_epoch = ts_epoch.timestamp()
+                ts_no_tz_untyped = ts.tz_localize(None) if ts.tzinfo else ts
+                ts_epoch = pd.Timestamp(ts_no_tz_untyped).value // 10**9
             elif hasattr(ts, 'timestamp'):
-                ts_epoch = pd.Timestamp(ts).timestamp()
+                ts_epoch = pd.Timestamp(ts).value // 10**9
             else:
                 ts_epoch = float(ts)
             all_times.append((ts_epoch, idx_entry))

@@ -10,6 +10,7 @@ Shared submission / product-tree routes:
 """
 from flask import request, jsonify
 import time
+from typing import Any, cast
 from server.services import product_tree
 from server.services.product_tree import (
     convert_to_fancytree, find_node_by_path, get_minimal_paths, tree,
@@ -100,7 +101,7 @@ def submit_selected_products():
     factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
     factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
     if page_uuid:
-        factor_tester._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
+        cast(Any, factor_tester)._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
     if user is not None:
         user.add_tester(factor_tester)
     with factor_testers_lock:
@@ -231,7 +232,7 @@ def replace_submissions():
             factor_tester = FactorTester(products=selected_products, alias=alias, time_range=(_start, _end), user=user)
             factor_tester.selected_paths = selected_paths
             if page_uuid:
-                factor_tester._page_uuid = page_uuid
+                cast(Any, factor_tester)._page_uuid = page_uuid
             if user is not None:
                 user.add_tester(factor_tester)
             runtime_state.factor_testers.append(factor_tester)

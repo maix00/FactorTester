@@ -21,7 +21,7 @@ def get_default_time_range():
     start_str = start.strftime('%Y-%m-%d') if isinstance(start, pd.Timestamp) else start
     end_str   = end.strftime('%Y-%m-%d')   if isinstance(end,   pd.Timestamp) else end
     if hasattr(Settings, 'timezone'):
-        timezone = Settings.timezone
+        timezone = getattr(Settings, 'timezone')
     elif isinstance(start, pd.Timestamp) and start.tz is not None:
         timezone = str(start.tz)
     else:
