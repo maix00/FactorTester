@@ -7,8 +7,6 @@
 #
 # 默认本地实现（LocalPathResolver）完全兼容现有行为；
 # 分布式部署时替换为 Redis / RPC / S3 实现即可，上层代码零改动。
-#
-# 注：DataFrame 缓存已统一到 IdleResourceManager。
 # =============================================================================
 from __future__ import annotations
 

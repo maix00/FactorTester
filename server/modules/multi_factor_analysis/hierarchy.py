@@ -9,6 +9,7 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
+from server.modules.shared.price_data_helpers import to_utc_epoch
 from . import mfa_bp
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import get_session_params
@@ -215,7 +216,7 @@ def run_mfa_hierarchy():
                         for ti in range(min(len(b_idx), len(cum_curve))):
                             t_val = b_idx[ti]
                             if hasattr(t_val, 'timestamp'):
-                                ts_list.append(t_val.timestamp())
+                                ts_list.append(to_utc_epoch(t_val))
                             elif isinstance(t_val, (int, float)):
                                 ts_list.append(t_val)
                             else:

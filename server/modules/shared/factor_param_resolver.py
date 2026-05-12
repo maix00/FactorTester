@@ -16,6 +16,10 @@ def resolve_factor_param_value(value):
         alias = str(value or '').strip()
         if not alias:
             raise ValueError('FactorParam 为空')
+        # FactorParam._value_space.alias() 对 dict 用 [...] 包裹；
+        # 前端回传的是 display 值，需要去掉方括号再匹配 factor_alias。
+        if alias.startswith('[') and alias.endswith(']'):
+            alias = alias[1:-1]
         item = _find_visible_factor(alias)
 
     family_alias = item.get('factor_family_alias') or item.get('factor_family_name')
@@ -30,8 +34,20 @@ def resolve_factor_param_value(value):
 
 
 def _find_visible_factor(alias: str) -> dict:
+    import re
     payload = build_param_factor_overview(current_user(), include_subordinates=True)
-    matches = [item for item in payload.get('factors', []) if item.get('factor_alias') == alias]
+    
+    def _normalize(a: str) -> str:
+        """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""
+        return re.sub(r'\|?\$F:[^|]+', '', a).strip()
+    
+    normalized_alias = _normalize(alias)
+    matches = [item for item in payload.get('factors', [])
+               if _normalize(item.get('factor_alias') or '') == normalized_alias]
+    if not matches:
+        # 兼容：直接前缀匹配（去掉 $F 后 lookup_alias 是 factor_alias 的前缀）
+        matches = [item for item in payload.get('factors', [])
+                   if _normalize(item.get('factor_alias') or '').startswith(normalized_alias)]
     if not matches:
         raise ValueError(f'因子库中找不到因子: {alias}')
     return matches[0]

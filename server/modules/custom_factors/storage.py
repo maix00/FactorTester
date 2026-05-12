@@ -41,6 +41,29 @@ def save_public_factor_source(factor_id: str, source_code: str) -> None:
         file.write(source_code)
 
 
+def rename_factor_source(username: str, old_factor_id: str, new_factor_id: str) -> bool:
+    """Rename a custom factor file (and any companion .json/__pycache__)."""
+    old_path = factor_path(username, old_factor_id)
+    if not os.path.exists(old_path):
+        return False
+    new_path = factor_path(username, new_factor_id)
+    os.rename(old_path, new_path)
+
+    # Also rename companion .json if present
+    old_json = os.path.join(custom_factor_dir(username), f'{old_factor_id}.json')
+    if os.path.exists(old_json):
+        new_json = os.path.join(custom_factor_dir(username), f'{new_factor_id}.json')
+        os.rename(old_json, new_json)
+
+    # Clear __pycache__ to avoid stale .pyc interference
+    pycache = os.path.join(custom_factor_dir(username), '__pycache__')
+    if os.path.isdir(pycache):
+        import shutil
+        shutil.rmtree(pycache, ignore_errors=True)
+
+    return True
+
+
 def delete_factor_source(username: str, factor_id: str) -> bool:
     path = factor_path(username, factor_id)
     if os.path.exists(path):

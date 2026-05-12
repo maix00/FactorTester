@@ -1,5 +1,5 @@
 """
-价格序列查看 API
+序列查看 API
   GET  /api/list_product_names  — 获取所有可查看价格的品种名称列表
   GET  /api/product_tree        — 获取产品类别树（复用 CategoryTree，支持多产品类型）
   GET  /api/get_contracts       — 获取主力品种对应的合约列表
@@ -13,7 +13,8 @@ from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
-from .price_data_helpers import format_price_row
+from tools.products.product_utils import get_contract_desc, get_product_contracts
+from .price_data_helpers import format_price_row, to_utc_epoch
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,
@@ -24,10 +25,8 @@ from server.modules.shared.price_services import (
     contract_has_data as _contract_has_data,
     find_contract_product as _find_contract_product,
     find_product as _find_product,
-    scalar as _scalar,
     supports_adjusted_price as _supports_adjusted_price,
     supports_term_structure as _supports_term_structure,
-    timestamp_or_none as _timestamp_or_none,
 )
 
 
@@ -48,7 +47,7 @@ def list_product_names():
                 'desc': desc,
                 'code': code or name.split('.')[0] if '.' in name else name,
                 'exchange': name.split('.')[1] if '.' in name and '@' not in name.split('.')[1] else name.split('.')[1].split('@')[0] if '.' in name else '',
-                'type': 'product',
+                'product_type': 'product',
             })
         return jsonify({'success': True, 'products': result})
     except Exception as e:
@@ -112,7 +111,7 @@ def get_contracts():
         {
             success: true,
             product: 'A.DCE',
-            contracts: [{ contract: 'A2505.DCE', uid: 'DCE|F|A|2505', start: '...', end: '...' }, ...]
+            contracts: [{ contract: 'A2505.DCE', uid: 'DCE|F|A|2505', desc: '...', start: '...', end: '...', has_data: true }, ...]
         }
     """
     product_name = request.args.get('product')
@@ -123,7 +122,6 @@ def get_contracts():
     end_date = request.args.get('end_date')
 
     try:
-        # 先找到 product 对象，确定数据源
         products = _cached_products()
         product = _find_product(products, product_name)
 
@@ -139,51 +137,11 @@ def get_contracts():
                 'contracts': [],
             })
 
-        # 通过实例加载 roller_info（带全局缓存、闲置自动释放）
-        ensure_roller_info = getattr(product, '_ensure_roller_info', None)
-        if not callable(ensure_roller_info):
-            return jsonify({
-                'success': True,
-                'product': product_name,
-                'supports_term_structure': True,
-                'has_term_structure': True,
-                'contracts': [],
-            })
-        ensure_roller_info()
-        subset = product.roller_info
-        if subset is None or subset.empty:
-            return jsonify({
-                'success': True,
-                'product': product_name,
-                'supports_term_structure': True,
-                'has_term_structure': True,
-                'contracts': [],
-            })
+        contracts = get_product_contracts(product, start_date=start_date, end_date=end_date)
 
-        req_start = pd.Timestamp(start_date).normalize() if start_date else None
-        req_end = pd.Timestamp(end_date).normalize() if end_date else None
-
-        contracts = []
-        for _, row in subset.iterrows():
-            start = _timestamp_or_none(row['STARTDATE'])
-            end = _timestamp_or_none(row['ENDDATE'])
-
-            # 只返回与请求时间范围有重叠的合约
-            if req_start is not None and end is not None and end.normalize() < req_start:
-                continue
-            if req_end is not None and start is not None and start.normalize() > req_end:
-                continue
-
-            uid = str(_scalar(row['CONTRACT_UID']))
-            contracts.append({
-                'contract': str(_scalar(row['CONTRACT'])),
-                'uid': uid,
-                'has_data': _contract_has_data(uid),
-                'start': start.strftime('%Y-%m-%d') if start is not None else None,
-                'end': end.strftime('%Y-%m-%d') if end is not None else None,
-                'start_ts': int(start.timestamp() * 1000) if start is not None else None,
-                'end_ts': int(end.timestamp() * 1000) if end is not None else None,
-            })
+        # 补充 has_data（合约价格文件是否存在）
+        for c in contracts:
+            c['has_data'] = _contract_has_data(c['uid'])
 
         return jsonify({
             'success': True,
@@ -292,6 +250,9 @@ def get_price_data():
 
             has_oi = oi_col in price_df.columns
 
+            # 获取合约所属产品的时区（用于 naive datetime 的 localize）
+            contract_tz = getattr(contract_product, 'timezone', None) or 'Asia/Shanghai'
+
             result_data = [
                 format_price_row(
                     row=row,
@@ -303,6 +264,7 @@ def get_price_data():
                     v_col=v_col,
                     oi_col=oi_col if has_oi else None,
                     freq_is_daily=freq_is_daily,
+                    timezone=contract_tz,
                 )
                 for _, row in price_df.iterrows()
             ]
@@ -389,9 +351,12 @@ def get_price_data():
         if not isinstance(price_df.index, pd.DatetimeIndex):
             price_df.index = pd.to_datetime(price_df.index.get_level_values(-1))
 
-        # 如果有时区，转为 UTC 后去时区
-        if getattr(price_df.index, 'tz', None) is not None:
-            price_df.index = price_df.index.tz_convert('UTC').tz_localize(None)
+        # 时区统一：日内数据统一到 product 时区，日频数据保持 naive
+        # format_price_row 会将所有时间统一转为 UTC epoch，前端按浏览器本地时区渲染
+        idx_tz = getattr(price_df.index, 'tz', None)
+        product_tz = getattr(product, 'timezone', None) or 'Asia/Shanghai'
+        if idx_tz is not None and str(idx_tz) != product_tz:
+            price_df.index = price_df.index.tz_convert(product_tz)
 
         # 提取 OHLCV + 可选 OI 列
         if adjusted:
@@ -409,7 +374,7 @@ def get_price_data():
         freq_is_daily = freq.is_day_multiple()
 
         price_df_for_emit = price_df.copy()
-        price_df_for_emit['__time__'] = [pd.Timestamp(str(idx)) for idx in price_df_for_emit.index]
+        price_df_for_emit['__time__'] = [idx for idx in price_df_for_emit.index]
         result_data = [
             format_price_row(
                 row=row,
@@ -421,6 +386,7 @@ def get_price_data():
                 v_col=v_col,
                 oi_col=oi_col if has_oi else None,
                 freq_is_daily=freq_is_daily,
+                timezone=product_tz,
             )
             for _, row in price_df_for_emit.iterrows()
         ]
@@ -449,21 +415,16 @@ def get_price_data():
         contracts = []
         if supports_term_structure:
             try:
-                ensure_roller_info = getattr(product, '_ensure_roller_info', None)
-                if callable(ensure_roller_info):
-                    ensure_roller_info()
-                    ri = product.roller_info
-                    if ri is not None:
-                        for _, r in ri.iterrows():
-                            s, e = _timestamp_or_none(r['STARTDATE']), _timestamp_or_none(r['ENDDATE'])
-                            uid = str(_scalar(r['CONTRACT_UID']))
-                            contracts.append({
-                                'contract': str(_scalar(r['CONTRACT'])),
-                                'uid': uid,
-                                'has_data': _contract_has_data(uid),
-                                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
-                                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
-                            })
+                from tools.products.product_utils import get_product_contracts
+                raw = get_product_contracts(product)
+                for c in raw:
+                    contracts.append({
+                        'contract': c['contract'],
+                        'uid': c['uid'],
+                        'has_data': _contract_has_data(c['uid']),
+                        'start_ts': c.get('start_ts'),
+                        'end_ts': c.get('end_ts'),
+                    })
             except Exception:
                 pass
 
@@ -474,7 +435,7 @@ def get_price_data():
             'success': True,
             'product': product_name,
             'desc': getattr(product, 'desc', product_name),
-            'is_futures': isinstance(product, Futures),
+            'product_type': 'futures' if isinstance(product, Futures) else 'product',
             'is_term_contract': False,
             'adjusted': adjusted,
             'supports_adjusted': supports_adjusted,

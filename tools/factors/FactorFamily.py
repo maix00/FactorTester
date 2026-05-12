@@ -31,6 +31,7 @@ from tools.factors.FactorExpr import (
 from tools.factors.Parameters import FactorFreqParam, ReverseParam, ReturnFreqParam, FactorNextPeriodReturns
 from tools import UniqueObject, DataMeta
 from tools.parameters import Parameter
+from tools.parameters.Parameter import FactorParam
 
 from Settings import sift_volume_ratio, default_plot_test_end_date, default_plot_test_start_date, default_test_end_date, default_test_start_date, factor_info_path
 
@@ -45,24 +46,20 @@ class FactorFamily(UniqueObject, FactorExpr):
     """
     因子族基类 — 含参数的表达式模板 + 信号对齐。
 
-    FactorFamily 继承 FactorExpr（它是带 ParamRef 的表达式树）
-    和 UniqueObject（全局唯一命名对象）。
+    继承链：UniqueObject（全局唯一实例管理）+ FactorExpr（表达式树定义与求值）。
 
-    支持两种使用方式：
-        1. 声明式（推荐）— 子类定义 factor_expr() 静态方法，自动从表达式树收集参数
-        2. 命令式 — 直接传入 expr= 表达式树和 extra_params=
+    使用方式：
+      1. 声明式（推荐）— 子类重写 factor_expr()，返回表达式树，params 自动从 ParamRef 节点收集
+      2. 命令式 — 直接传入 expr= 和 extra_params=
 
-    功能：
-      - func() — 表达式批量求值 + 信号对齐
-      - get_factor() / get_factors() — 创建 Factor 实例（已解析，无参数）
-      - test()  — 一键 IC / 分组收益测试并持久化
-      - 中间因子管理 — evaluate() 时自动缓存子表达式结果
+    核心流程：
+      get_factor(**params) → Factor（已解析 = 无 ParamRef，可直接 evaluate）
+      test(products, time_range) → IC + 分组回测 + 结果持久化
 
-    类属性：
-        math_expr    (str)  : 因子公式的 LaTeX 字符串
-        desc         (str)  : 因子简短描述
-        description  (str)  : 因子详细说明（Markdown）
-        params       (list) : 参数对象列表（子类覆盖或从 factor_expr 自动收集）
+    关键属性：
+        math_expr (LaTeX), desc (中文名), description (Markdown)
+        basepoint / daily_basepoint / end_session_skip — 信号对齐配置
+        depends_on  — 中间因子依赖声明
     """
     _runtime_ctx: threading.local
     _source_freqs_lock: threading.Lock
@@ -274,11 +271,14 @@ class FactorFamily(UniqueObject, FactorExpr):
         parts = []
         for key in ordered_keys:
             value = normalized[key]
-            val_alias = self.params_dict[key]._value_space.alias(value)
+            param = self.params_dict[key]
+            val_alias = param._value_space.alias(value)
             if val_alias:
                 if key == '$Rev':
                     if val_alias == '1':
                         parts.append(key)
+                elif isinstance(param, FactorParam):
+                    parts.append(f"{key}:[{val_alias}]")
                 else:
                     parts.append(f"{key}:{val_alias}")
         params_str = '|'.join(parts)

@@ -5,10 +5,11 @@ import math, traceback
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
-from tools.factors.FactorTester import _active_tester
+from tools.factors.FactorTester import _active_tester, _signal_time
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 import server.services.runtime_state as runtime_state
+from server.modules.shared.price_data_helpers import to_utc_epoch
 
 
 def _safe_float(v):
@@ -110,13 +111,12 @@ def run_group_test():
                 else:
                     tester.factor_return_freqs.pop(factor, None)
                 tester.factor_returns.pop(factor, None)
-                from tools.factors.FactorTester import _signal_time
                 _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
                     factors=factor, n_groups=n_groups, time_range=time_range,
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
                 )
-                timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+                timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
                 _gross = getattr(tester, '_last_group_gross_returns_np', None)
                 gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
                 _fee_np = getattr(tester, '_last_fee_costs_np', None)
@@ -160,14 +160,13 @@ def run_group_test():
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups})
 
         # ─── 原有单频率逻辑 ───
-        from tools.factors.FactorTester import _signal_time
         _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
             factors=factor, n_groups=n_groups, time_range=time_range,
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
         )
 
-        timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+        timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
         _gross = getattr(tester, '_last_group_gross_returns_np', None)
         gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
@@ -226,3 +225,138 @@ def run_group_test():
     finally:
         if _gt_token is not None:
             _active_tester.reset(_gt_token)
+
+
+@sft_bp.route('/get_group_snapshot', methods=['POST'])
+def get_group_snapshot():
+    """获取某个时刻各分组的产品列表及与上一时刻的进出变化。
+    
+    请求参数：
+        submission_id : 提交 ID
+        timestamp_ms  : 目标时刻（UTC epoch 毫秒）
+    
+    返回：{
+        groups: [{
+            name, 
+            products: [...],        // 当前持仓
+            products_in: [...],     // 新进（上一时刻没有，当前有）
+            products_out: [...],    // 退出（上一时刻有，当前没有）
+            turnover_rate: float,   // 换手率
+        }, ...]
+    }
+    """
+    data = request.get_json()
+    submission_id = data.get('submission_id')
+    timestamp_ms  = data.get('timestamp_ms')
+    if not submission_id or not timestamp_ms:
+        return jsonify({'success': False, 'error': '缺少 submission_id 或 timestamp_ms'}), 400
+
+    try:
+        tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
+        if not tester:
+            return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
+
+        products_dict = getattr(tester, '_last_group_products', None)
+        valid_cols = getattr(tester, '_last_group_valid_cols', None)
+        if not products_dict or not valid_cols:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+
+        # 找到最接近的时刻
+        # products_dict: {group_idx: {index_entry: [product_names]}}
+        # index_entry 可能是 Timestamp 或 tuple
+        first_group = next(iter(products_dict.values()))
+        all_times = []
+        for idx_entry in first_group.keys():
+            ts = _signal_time(idx_entry)
+            # 统一转为 naive epoch 秒用于比较
+            if isinstance(ts, pd.Timestamp):
+                ts_epoch = ts.tz_localize(None) if ts.tzinfo else ts
+                ts_epoch = ts_epoch.timestamp()
+            elif hasattr(ts, 'timestamp'):
+                ts_epoch = pd.Timestamp(ts).timestamp()
+            else:
+                ts_epoch = float(ts)
+            all_times.append((ts_epoch, idx_entry))
+
+        # 前端传来的 UTC epoch 毫秒
+        target_epoch = float(timestamp_ms) / 1000.0
+
+        # 找最近的
+        best_idx_entry = None
+        best_diff = float('inf')
+        for ts_epoch, idx_entry in all_times:
+            diff = abs(ts_epoch - target_epoch)
+            if diff < best_diff:
+                best_diff = diff
+                best_idx_entry = idx_entry
+
+        if best_idx_entry is None:
+            return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
+
+        # 找到上一时刻
+        sorted_entries = sorted(first_group.keys(), key=lambda e: _signal_time(e))
+        current_pos = sorted_entries.index(best_idx_entry)
+        prev_entry = sorted_entries[current_pos - 1] if current_pos > 0 else None
+
+        from tools.products.product_utils import product_display_name
+
+        n_groups = len(products_dict)
+        groups_detail = []
+        for g in range(n_groups):
+            current_raw = products_dict[g].get(best_idx_entry, [])
+            current_display = [product_display_name(x) for x in current_raw]
+            # 按 name 排序
+            current_display.sort(key=lambda d: d['name'])
+
+            if prev_entry is not None:
+                prev_raw = products_dict[g].get(prev_entry, [])
+                prev_display = [product_display_name(x) for x in prev_raw]
+                prev_names = set(d['name'] for d in prev_display)
+                curr_names = set(d['name'] for d in current_display)
+
+                in_names = sorted(curr_names - prev_names)
+                out_names = sorted(prev_names - curr_names)
+
+                # 新进/退出：从 current_display / prev_display 中查找完整信息
+                _name_map = {d['name']: d for d in current_display}
+                _prev_name_map = {d['name']: d for d in prev_display}
+                products_in = [_name_map[n] for n in in_names]
+                products_out = [_prev_name_map[n] for n in out_names]
+
+                prev_count = len(prev_raw)
+                curr_count = len(current_raw)
+                avg_count = (prev_count + curr_count) / 2.0
+                changed = len(in_names) + len(out_names)
+                turnover_rate = round(changed / (2.0 * avg_count), 4) if avg_count > 0 else 0.0
+            else:
+                products_in = []
+                products_out = []
+                turnover_rate = 0.0
+
+            groups_detail.append({
+                'name': f'Group {g+1}',
+                'products': current_display,
+                'products_in': products_in,
+                'products_out': products_out,
+                'turnover_rate': turnover_rate,
+                'count': len(current_display),
+            })
+
+        # 所有时间点（epoch 毫秒），用于前/后导航
+        all_timestamps_ms = sorted(set(
+            int(ts_epoch * 1000) for ts_epoch, _idx in all_times
+        ))
+        # 用最接近的 all_timestamps_ms 条目（而非前端传来的不精确 timestamp_ms）
+        closest_ms = min(all_timestamps_ms, key=lambda x: abs(x - int(timestamp_ms)))
+        current_index = all_timestamps_ms.index(closest_ms)
+
+        return jsonify({
+            'success': True,
+            'groups': groups_detail,
+            'timestamp_ms': closest_ms,
+            'has_prev': prev_entry is not None,
+            'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
+            'all_timestamps_ms': all_timestamps_ms,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

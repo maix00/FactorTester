@@ -1,4 +1,21 @@
-"""Account, organization, and hierarchy permission helpers."""
+"""
+Account, organization, and hierarchy permission helpers.
+
+数据模型：
+  accounts.json      — 用户列表 [{username, alias, hash, salt, role, organization_id, ...}]
+  organizations.json — 机构列表 [{id, name}]
+  levels.json        — 层级列表（树形结构，每个节点带 children，关联 organization_id）
+
+角色体系：
+  super_admin   — 超级管理员（全局权限）
+  org_admin     — 机构管理员（管理本机构用户）
+  level_admin   — 层级管理员（管理本层级及下属）
+  user          — 普通用户（默认角色）
+
+密码安全：
+  - PBKDF2-HMAC-SHA256 + 随机 salt + 200k 迭代
+  - 验证使用 hmac.compare_digest 防时序攻击
+"""
 
 from __future__ import annotations
 

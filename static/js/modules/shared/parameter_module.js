@@ -1,8 +1,15 @@
 /**
- * 参数模块独立脚本（无自定义滑块版本）
- * 仅处理新增、删除、拖拽排序，滚动使用浏览器原生滚动条
+ * parameter_module.js
+ * 共享参数模块 — 处理因子参数的增删改、拖拽排序、自动同步后端。
+ *
+ * 后端 API：
+ *   POST /add_params     — 添加一组参数值
+ *   POST /delete_params  — 删除指定行参数
+ *   POST /reorder_params — 拖拽排序参数行
+ *
+ * 数据流：
+ *   前端操作 → fetch API → 后端 session 存储 → 返回更新后的 factor_rows → 重新渲染
  */
-
 (function() {
     function initParameterModule() {
         const moduleElem = document.getElementById('parameter_module');

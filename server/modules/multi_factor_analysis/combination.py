@@ -12,6 +12,7 @@ from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from tools.factors.Factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
+from server.modules.shared.price_data_helpers import to_utc_epoch
 from . import mfa_bp
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import get_session_params
@@ -279,7 +280,7 @@ def run_mfa_combination():
             fee=0.0, fee_map={},
         )
 
-        timestamps = [int(_signal_time(d).timestamp() * 1000) for d in idx_list]
+        timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
         groups_data = []
         for g in range(n_groups):

@@ -76,8 +76,8 @@
             </div>
             <div class="module-card" onclick="goModule('/price_viewer')">
                 <div class="card-icon">📈</div>
-                <div class="card-title">价格序列查看</div>
-                <div class="card-desc">查看产品历史价格走势（复权/非复权）</div>
+                <div class="card-title">序列查看</div>
+                <div class="card-desc">查看产品历史价格、成交量、持仓量走势</div>
             </div>
             <div class="module-card" onclick="goModule('/custom-factors/editor')">
                 <div class="card-icon">🧬</div>
@@ -167,7 +167,7 @@
         }
 
         function goModule(url) {
-            if (_currentUser) { location.href = url; }
+            if (_currentUser || url === '/docs') { location.href = url; }
             else { openLoginModal(url); }
         }
 

@@ -23,6 +23,7 @@ from .factor_data_helpers import (
     resolve_product_from_tester,
     series_to_frontend,
 )
+from .price_data_helpers import to_utc_epoch
 
 
 @shared_bp.route('/api/factor_list')
@@ -42,7 +43,14 @@ def factor_list():
             if factor_freq_param is not None and factor_freq_value is not None
             else ''
         )
-        factor_data.append({'alias': f.alias, 'name': f.name, 'default_return_freq': factor_freq_str})
+        factor_freq = f.freq
+        factor_freq_str2 = factor_freq.name if factor_freq is not None else ''
+        factor_data.append({
+            'alias': f.alias,
+            'name': f.name,
+            'default_return_freq': factor_freq_str,
+            'freq': factor_freq_str2,
+        })
     return api_ok({'factors': factor_data})
 
 
@@ -332,7 +340,7 @@ def get_factor_distribution():
 
         return jsonify({
             'success': True,
-            'timestamp': int(actual_ts.timestamp() * 1000) if hasattr(actual_ts, 'timestamp') else timestamp_ms,  # type: ignore[union-attr]
+            'timestamp': to_utc_epoch(actual_ts) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
             'n': n,
             'stats': {'mean': mean, 'std': std, 'min': mn, 'max': mx, 'skewness': skew, 'kurtosis': kurt, 'percentiles': pcts},
             'values': sorted(values, key=lambda v: v['value']),

@@ -272,25 +272,26 @@ class FactorParam(TypeParam):
         def alias_value(value: Any) -> str:
             if value is None:
                 return ''
-            def wrap_alias(text: Any) -> str:
-                t = str(text).strip()
-                if not t:
-                    return ''
-                return f"[{t}]"
+            def _strip_freq(v: str) -> str:
+                """从别名中移除 |$F:xxx 部分（FactorParam 的子因子无 SignalAlign，$F 无意义）。"""
+                import re
+                return re.sub(r'\|?\$F:[^|]+', '', v)
             if isinstance(value, dict):
-                return wrap_alias(value.get('factor_alias') or value.get('alias') or value)
+                raw = value.get('factor_alias') or value.get('alias') or str(value)
+                return _strip_freq(raw)
             if is_datacolumn_like(value):
-                return wrap_alias(DataColumn(value).value)
+                return DataColumn(value).value
             if isinstance(value, ColumnRef):
-                return wrap_alias(value.column.value)
+                return value.column.value
             if isinstance(value, FactorExpr):
                 try:
-                    return wrap_alias(value._get_alias())
+                    return value._get_alias()
                 except Exception:
                     pass
             if isinstance(value, ParamRef):
-                return wrap_alias(getattr(value.param, 'alias', str(value)))
-            return wrap_alias(getattr(value, 'alias', str(value)))
+                return getattr(value.param, 'alias', str(value))
+            raw = getattr(value, 'alias', str(value))
+            return _strip_freq(raw)
 
         space = ValueSpace(
             contains=contains,

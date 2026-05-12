@@ -1,3 +1,18 @@
+/**
+ * single_factor_shell.js
+ * 单因子测试页面外壳 — 因子列表加载、选择、tab 切换。
+ *
+ * 全局状态：
+ *   _sftFactorFamilies[]        — 完整因子列表（public + custom）
+ *   _sftGroupedFactorFamilies{} — 按类别分组的因子
+ *   _sftCurrentFactorId         — 当前选中因子 id
+ *   _sftCurrentFactorType       — 'public' / 'custom'
+ *
+ * 生命周期：
+ *   DOMContentLoaded → initSingleFactorShell()
+ *     → loadSingleFactorFamilyList()    (GET /single_factor_test/api/list)
+ *     → selectSingleFactorFamily(id)    (加载 IC + 分组回测模块)
+ */
 let _sftFactorFamilies = [];
 let _sftGroupedFactorFamilies = {};
 let _sftCurrentFactorId = '';

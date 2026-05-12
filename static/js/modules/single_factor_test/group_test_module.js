@@ -2,6 +2,11 @@
  * 分组测试模块独立脚本
  */
 (function() {
+    // 时区：后端返回 UTC epoch，useUTC=false 按浏览器本地时区显示
+    if (typeof Highcharts !== 'undefined') {
+        Highcharts.setOptions({ global: { useUTC: false } });
+    }
+
     // ---------- 显示日期修正提示 ----------
     function showDateHint(input, message) {
         var container = input.closest('div');
@@ -183,8 +188,10 @@
                 var display;
                 if (val === null || val === undefined) {
                     display = '—';
-                } else if (name === 'Avg Turnover') {
+                } else if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
                     display = (val * 100).toFixed(1) + '%';
+                } else if (name === 'Avg Position Changes') {
+                    display = val.toFixed(1);
                 } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
                     display = val.toFixed(2) + '%';
                 } else if (name.includes('Ratio') || name === 'Skewness' || name === 'Kurtosis') {
@@ -207,11 +214,14 @@
         if (chartContainer) chartContainer.style.display = 'none';
         if (metricsContainer) metricsContainer.style.display = 'none';
         if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
+        closeSnapshotDrawer();
         var status = document.getElementById('group_test_status');
         if (status) status.innerHTML = '';
     }
 
     // ---------- 绘制分组累计收益曲线 ----------
+    var _groupChart = null;  // 当前图表引用
+
     function drawGroupChart(groups) {
         var container = document.getElementById('group_chart_container');
         if (!container || !groups || groups.length === 0) {
@@ -237,12 +247,64 @@
             return opts;
         });
         
-        Highcharts.stockChart(container, {
-            chart: { zoomType: 'x' },
+        // 判断是否为日内频率：相邻 timestamps 差值 < 1天
+        var isIntraday = false;
+        if (groups.length > 0 && groups[0].timestamps && groups[0].timestamps.length >= 2) {
+            var ts = groups[0].timestamps;
+            isIntraday = (ts[1] - ts[0]) < 86400000; // < 1天
+        }
+
+        _groupChart = Highcharts.stockChart(container, {
+            chart: { 
+                zoomType: 'x',
+                events: {
+                    click: function(e) {
+                        // 点击图表获取最近数据点的分组快照
+                        var xVal = e.xAxis[0].value;
+                        fetchGroupSnapshot(xVal);
+                    }
+                }
+            },
             title: { text: '分组累计收益（初始净值 = 1）' },
             xAxis: { type: 'datetime' },
             yAxis: { title: { text: '净值' }, crosshair: true },
-            tooltip: { shared: true, valueDecimals: 4, xDateFormat: '%Y-%m-%d' },
+            plotOptions: {
+                series: {
+                    cursor: 'pointer',
+                    point: {
+                        events: {
+                            click: function() {
+                                fetchGroupSnapshot(this.x);
+                            }
+                        }
+                    }
+                }
+            },
+            tooltip: {
+                shared: true,
+                valueDecimals: 4,
+                useHTML: true,
+                formatter: function () {
+                    var d = new Date(this.x);
+                    var dateStr = isIntraday
+                        ? d.getFullYear() + '-' +
+                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                          String(d.getDate()).padStart(2, '0') + ' ' +
+                          String(d.getHours()).padStart(2, '0') + ':' +
+                          String(d.getMinutes()).padStart(2, '0')
+                        : d.getFullYear() + '-' +
+                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                          String(d.getDate()).padStart(2, '0');
+                    var s = '<b>' + dateStr + '</b>';
+                    this.points.forEach(function (p) {
+                        var decimals = p.series.tooltipOptions.valueDecimals;
+                        if (typeof decimals !== 'number') decimals = 4;
+                        var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
+                        s += '<br/>' + p.series.name + ': ' + val;
+                    });
+                    return s;
+                }
+            },
             series: series,
             navigator: { enabled: true },
             scrollbar: { enabled: true },
@@ -258,6 +320,217 @@
                 ]
             }
         });
+    }
+
+    // ---------- 快照导航状态 ----------
+    var _snapshotTimestamps = [];  // 所有可用时间点（epoch ms）
+    var _snapshotCurrentMs = null; // 当前显示的时间点
+
+    // ---------- 获取并展示分组快照 ----------
+    function fetchGroupSnapshot(timestampMs) {
+        var context = getCurrentContext();
+        if (!context) return;
+
+        timestampMs = Math.round(timestampMs);
+        _snapshotCurrentMs = timestampMs;
+
+        // 加载中：禁用导航按钮并显示加载提示
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
+        if (prevBtn) { prevBtn.disabled = true; prevBtn.textContent = '⏳ 加载中...'; prevBtn.style.opacity = '0.6'; }
+        if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = '⏳ 加载中...'; nextBtn.style.opacity = '0.6'; }
+
+        fetch('/get_group_snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                submission_id: context.submission_id,
+                timestamp_ms: timestampMs
+            })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
+                document.getElementById('snapshot_head').innerHTML = '';
+                document.getElementById('snapshot_body').innerHTML = '<tr><td colspan="10" style="color:#d40000;">' + data.error + '</td></tr>';
+                document.getElementById('snapshot_flow_stats').innerHTML = '';
+                _updateSnapshotNavButtons(null);
+                openSnapshotDrawer();
+                return;
+            }
+            _snapshotTimestamps = data.all_timestamps_ms || [];
+            // 使用后端返回的精确时间戳（closest_ms），而非前端不精确的传入值
+            _snapshotCurrentMs = data.timestamp_ms;
+            renderGroupSnapshot(data, data.timestamp_ms);
+            _updateSnapshotNavButtons(data);
+            openSnapshotDrawer();
+        })
+        .catch(function(err) {
+            document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
+            document.getElementById('snapshot_head').innerHTML = '';
+            document.getElementById('snapshot_body').innerHTML = '<tr><td colspan="10" style="color:#d40000;">请求失败: ' + err.message + '</td></tr>';
+            document.getElementById('snapshot_flow_stats').innerHTML = '';
+            _updateSnapshotNavButtons(null);
+            openSnapshotDrawer();
+        });
+    }
+
+    /** 更新前/后导航按钮状态 */
+    function _updateSnapshotNavButtons(data) {
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
+        if (!prevBtn || !nextBtn) return;
+
+        // 恢复按钮文字（可能被加载状态覆盖）
+        prevBtn.textContent = '◀ 前一个';
+        nextBtn.textContent = '后一个 ▶';
+
+        if (!data) {
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            prevBtn.style.opacity = '0.4';
+            nextBtn.style.opacity = '0.4';
+            return;
+        }
+
+        prevBtn.disabled = !data.has_prev;
+        nextBtn.disabled = !data.has_next;
+        prevBtn.style.opacity = data.has_prev ? '1' : '0.4';
+        nextBtn.style.opacity = data.has_next ? '1' : '0.4';
+    }
+
+    /** 导航到上一个/下一个时点 */
+    function navigateSnapshot(direction) {
+        if (!_snapshotTimestamps.length) return;
+        var idx = _snapshotTimestamps.indexOf(_snapshotCurrentMs);
+        if (idx < 0) return;
+        var newIdx = idx + (direction === 'next' ? 1 : -1);
+        if (newIdx < 0 || newIdx >= _snapshotTimestamps.length) return;
+        fetchGroupSnapshot(_snapshotTimestamps[newIdx]);
+    }
+
+    function openSnapshotDrawer() {
+        var overlay = document.getElementById('group-snapshot-drawer');
+        if (overlay) overlay.classList.add('open');
+    }
+
+    function closeSnapshotDrawer() {
+        var overlay = document.getElementById('group-snapshot-drawer');
+        if (overlay) overlay.classList.remove('open');
+    }
+
+    /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击 + 前/后导航） */
+    function bindSnapshotDrawerEvents() {
+        var overlay = document.getElementById('group-snapshot-drawer');
+        var closeBtn = document.getElementById('group-snapshot-drawer-close');
+        var prevBtn = document.getElementById('snapshot-prev-btn');
+        var nextBtn = document.getElementById('snapshot-next-btn');
+        if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
+        if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
+        if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });
+        if (overlay) overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) closeSnapshotDrawer();
+        });
+    }
+
+    /** 渲染分组快照抽屉内容 */
+    function renderGroupSnapshot(data, timestampMs) {
+        // 标题：显示时刻
+        var d = new Date(timestampMs);
+        var timeStr = d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0') + ' ' +
+            String(d.getHours()).padStart(2, '0') + ':' +
+            String(d.getMinutes()).padStart(2, '0') + ':' +
+            String(d.getSeconds()).padStart(2, '0');
+        document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + timeStr;
+
+        var groups = data.groups || [];
+
+        // 每组列等宽：标签列 40px，剩余平分
+        var colWidth = groups.length > 0 ? (100 / groups.length).toFixed(2) + '%' : '100%';
+
+        // 表头：每组一列（不含 LS）
+        var headHtml = '<tr><th style="width:40px;"></th>';
+        groups.forEach(function(g) {
+            headHtml += '<th style="width:' + colWidth + ';">' + g.name + ' <span style="font-weight:normal;color:#888;">(' + g.count + '品种)</span></th>';
+        });
+        headHtml += '</tr>';
+        document.getElementById('snapshot_head').innerHTML = headHtml;
+
+        // helper：渲染一个产品对象 {name, desc} → HTML
+        function _renderProduct(p) {
+            if (!p) return '';
+            if (typeof p === 'string') return p;
+            if (p.desc && p.desc !== p.name) {
+                return '<span title="' + p.name + '">' + p.name + ' <span style="color:#888;font-size:11px;">' + p.desc + '</span></span>';
+            }
+            return p.name || '';
+        }
+
+        // 出入标记最多的行数
+        var maxRows = Math.max.apply(null, groups.map(function(g) {
+            return Math.max(g.products_in.length, g.products_out.length, g.products.length);
+        }));
+
+        var tdStyleFull = 'style="width:' + colWidth + ';"';
+        var tdStyleWidth = 'width:' + colWidth + ';';
+
+        var bodyHtml = '';
+        for (var i = 0; i < maxRows; i++) {
+            bodyHtml += '<tr>';
+            bodyHtml += '<td style="color:#888;font-size:11px;">' + (i === 0 ? '持仓' : '') + '</td>';
+            groups.forEach(function(g) {
+                var p = i < g.products.length ? g.products[i] : null;
+                bodyHtml += '<td ' + tdStyleFull + '>' + _renderProduct(p) + '</td>';
+            });
+            bodyHtml += '</tr>';
+        }
+
+        // 分隔行
+        bodyHtml += '<tr style="border-top:2px solid #e5e7eb;"><td colspan="' + (groups.length + 1) + '" style="font-weight:600;color:#28a745;padding-top:8px;">📥 新进（相对于上一时点）</td></tr>';
+        var maxIn = Math.max.apply(null, groups.map(function(g) { return g.products_in.length; }));
+        for (var j = 0; j < Math.max(maxIn, 1); j++) {
+            bodyHtml += '<tr>';
+            bodyHtml += '<td style="color:#888;font-size:11px;"></td>';
+            groups.forEach(function(g) {
+                var p = j < g.products_in.length ? g.products_in[j] : null;
+                bodyHtml += '<td style="color:#28a745;' + tdStyleWidth + '">' + _renderProduct(p) + '</td>';
+            });
+            bodyHtml += '</tr>';
+        }
+
+        // 退出行
+        bodyHtml += '<tr style="border-top:2px solid #e5e7eb;"><td colspan="' + (groups.length + 1) + '" style="font-weight:600;color:#d40000;padding-top:8px;">📤 退出（相对于上一时点）</td></tr>';
+        var maxOut = Math.max.apply(null, groups.map(function(g) { return g.products_out.length; }));
+        for (var k = 0; k < Math.max(maxOut, 1); k++) {
+            bodyHtml += '<tr>';
+            bodyHtml += '<td style="color:#888;font-size:11px;"></td>';
+            groups.forEach(function(g) {
+                var p = k < g.products_out.length ? g.products_out[k] : null;
+                bodyHtml += '<td style="color:#d40000;' + tdStyleWidth + '">' + _renderProduct(p) + '</td>';
+            });
+            bodyHtml += '</tr>';
+        }
+
+        document.getElementById('snapshot_body').innerHTML = bodyHtml;
+
+        // 流动统计
+        var totalChanged = 0, totalCount = 0;
+        groups.forEach(function(g) {
+            totalChanged += g.products_in.length + g.products_out.length;
+            totalCount += g.count;
+        });
+        var avgTurnover = totalCount > 0 ? (totalChanged / (2.0 * totalCount) * 100).toFixed(1) : '0.0';
+
+        var statsHtml = '<b>总体流动统计：</b>';
+        statsHtml += '全组换手率 ≈ ' + avgTurnover + '% &nbsp;|&nbsp;';
+        statsHtml += '总进出品种数 = ' + totalChanged;
+        if (!data.has_prev) {
+            statsHtml += ' &nbsp;<span style="color:#888;">（无上一时点数据，无法计算进出）</span>';
+        }
+        document.getElementById('snapshot_flow_stats').innerHTML = statsHtml;
     }
 
     // ---------- 渲染统计指标表格 ----------
@@ -289,6 +562,12 @@
             'Skewness': '偏度：收益率分布的偏斜程度',
             'Kurtosis': '峰度：收益率分布的尾部厚度',
             'Avg Turnover': '平均换手率：相邻两期持仓变动的比例',
+            'Avg Turnover Accel': '成交加速度：短期成交加速相对长期的变化',
+            'Up Ratio': '上涨占比：上涨波幅相对总波幅的比例',
+            'Avg Position Changes': '平均持仓变化数：平均每期新增或退出的品种数',
+            'Avg Turnover Accel': '成交加速度：衡量交易活跃度的变化趋势',
+            'Up Ratio': '上涨占比：累计上涨幅度占累计总波动幅度的比例',
+            'Avg Position Changes': '平均持仓变化数：单期平均新增或退出的品种数',
         };
         var metricMathExprs = {
             'Total Return': '$$R_{\\text{total}} = \\prod_t (1+r_t) - 1$$',
@@ -302,6 +581,9 @@
             'Skewness': '$$S = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^3$$',
             'Kurtosis': '$$K = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^4 - 3$$',
             'Avg Turnover': '$$\\text{Turnover} = \\frac{|\\text{持仓变动}|}{\\text{平均持仓数}}$$',
+            'Avg Turnover Accel': '$$\\text{Accel} = \\frac{\\text{MA}(\\text{TO}, N_s)}{\\text{MA}(\\text{TO}, N_l)} - 1$$',
+            'Up Ratio': '$$\\text{UpRatio} = \\frac{\\sum \\max(r_i, 0)}{\\sum |r_i|}$$',
+            'Avg Position Changes': '$$\\bar{C} = \\frac{1}{n}\\sum_{t=1}^n (|\\text{new}_t| + |\\text{exit}_t|)$$',
         };
 
         // 收集分组标签
@@ -331,8 +613,10 @@
                 var val = metrics[g][name];
                 var style = isLS ? ' style="background:#f0f0f0;"' : '';
                 if (typeof val === 'number') {
-                    if (name === 'Avg Turnover') {
+                    if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
                         val = (val * 100).toFixed(1) + '%';
+                    } else if (name === 'Avg Position Changes') {
+                        val = val.toFixed(1);
                     } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
                         val = val.toFixed(2) + '%';
                     } else if (name.includes('Ratio')) {
@@ -547,6 +831,7 @@
                 var metricsContainer = document.getElementById('group_metrics_container');
                 if (chartContainer) chartContainer.style.display = 'none';
                 if (metricsContainer) metricsContainer.style.display = 'none';
+                closeSnapshotDrawer();
                 // 清空缓存
                 _lastGrossData = null;
                 _lastMetrics = null;
@@ -1137,6 +1422,7 @@
         bindICModuleEvents();
         bindTimeSyncListeners();
         bindFeeControls();
+        bindSnapshotDrawerEvents();
         syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
         setTimeout(syncFromTimeModule, 0);
