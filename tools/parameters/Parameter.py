@@ -272,8 +272,13 @@ class FactorParam(TypeParam):
         def alias_value(value: Any) -> str:
             if value is None:
                 return ''
+            def _strip_freq(v: str) -> str:
+                """从别名中移除 |$F:xxx 部分（FactorParam 的子因子无 SignalAlign，$F 无意义）。"""
+                import re
+                return re.sub(r'\|?\$F:[^|]+', '', v)
             if isinstance(value, dict):
-                return value.get('factor_alias') or value.get('alias') or str(value)
+                raw = value.get('factor_alias') or value.get('alias') or str(value)
+                return _strip_freq(raw)
             if is_datacolumn_like(value):
                 return DataColumn(value).value
             if isinstance(value, ColumnRef):
@@ -285,7 +290,8 @@ class FactorParam(TypeParam):
                     pass
             if isinstance(value, ParamRef):
                 return getattr(value.param, 'alias', str(value))
-            return getattr(value, 'alias', str(value))
+            raw = getattr(value, 'alias', str(value))
+            return _strip_freq(raw)
 
         space = ValueSpace(
             contains=contains,
