@@ -63,6 +63,92 @@ master ────────────────────────�
 - **`fix/issue-N-xxx`**：每个 GitHub Issue 从 `feat` 切出独立分支。完成后 merge 回 `feat`，删除该分支。
 - **禁止**：直接在 `master` 上 commit；不要推 `feat` 及其他工作分支到远程（远程只保留 `master`）。
 
+### Flask 服务器隔离（git worktree）
+
+Agent 在 `fix/issue-*` 分支上改代码时，Flask 从独立的 `master` 目录运行，互不干扰：
+
+```bash
+# 一次性：创建 master 独立 worktree
+git worktree add ../Codes-master-server master
+```
+
+两个 VS Code 窗口：
+1. **窗口 A**：打开 `~/Codes/` — agent 工作区，`feat`/`fix/issue-*` 分支，断点会漂移
+2. **窗口 B**：打开 `~/Codes-master-server/` — 始终 `master`，F5 启动 `Flask: start_server`，设断点调试
+
+> 窗口 B 需单独复制或创建 `.vscode/launch.json`（内容同窗口 A 的 `Flask: start_server`）。
+
+| 目录 | 分支 | 用途 |
+|------|------|------|
+| `~/Codes/` | `feat` / `fix/issue-*` | agent 工作区 |
+| `~/Codes-master-server/` | `master`（worktree） | Flask 服务器 |
+
+### 多 Agent 并行工作区（`.workspace/`）
+
+当多个 agent 同时操作不同 Issue 时，每个 agent 在 `.workspace/` 下拥有独立 worktree，互不干扰。
+
+#### 目录结构
+
+```
+Codes/
+  .workspace/                  ← git ignored，每个 agent 一个子目录
+    fix/issue-2-factor-result/ ← agent A 的 fix 分支 worktree
+    fix/issue-3-ic-test/       ← agent B 的 fix 分支 worktree
+    ...
+```
+> 注：`~/Codes/` 本身在 `feat` 分支，作为所有 agent 的共享基线。不需在 `.workspace/` 下重复创建 `feat` worktree。
+
+#### Agent 首次启动流程
+
+> **前提**：你的 VS Code 窗口已经打开 `~/Codes/` 并位于 `feat` 分支。
+> `feat` 已被当前窗口作为 worktree 使用，**不会再在 `.workspace/` 下重复创建 `feat` 的 worktree**。
+
+1. **确保 `.workspace/` 已加入 `.gitignore`**（仓库已配置，无需再改）
+2. **在当前 `~/Codes/`（feat 分支）上创建 fix 分支，并在 `.workspace/` 下为其创建独立 worktree**：
+   ```bash
+   cd ~/Codes
+   mkdir -p .workspace
+   git checkout -b fix/issue-<N>-<描述>          # 从 feat 创建 fix 分支
+   git worktree add .workspace/fix/issue-<N>-<描述> fix/issue-<N>-<描述>  # 为 fix 分支建 worktree
+   ```
+   ⚠️ **然后立刻切回 `feat`**，让原窗口继续使用 `feat`：
+   ```bash
+   git checkout feat
+   ```
+3. **在 `.workspace/` 下的独立 worktree 中工作**：
+   ```bash
+   cd .workspace/fix/issue-<N>-<描述>
+   # 修改代码、运行测试、提交
+   ```
+   > 此时你有两个目录：`~/Codes/` 在 `feat` 分支，`.workspace/fix/issue-<N>-<描述>/` 在 fix 分支。互不干扰。
+
+#### Agent 完成任务后
+
+```bash
+# 1. 在 worktree 内 commit
+cd .workspace/fix/issue-<N>-<描述>
+git add .
+git commit -m "<type>: <描述> (refs #<N>)"
+
+# 2. 回到主目录的 feat，合并 fix 分支
+cd ~/Codes
+git checkout feat
+git merge fix/issue-<N>-<描述>
+git branch -d fix/issue-<N>-<描述>
+
+# 3. 删除 worktree（在主目录执行）
+git worktree remove .workspace/fix/issue-<N>-<描述>
+rm -rf .workspace/fix/issue-<N>-<描述>
+```
+
+#### 关键规则
+
+- ✅ 每个 agent 在自己的 `.workspace/fix/issue-*` 下操作，互不干扰
+- ✅ 所有 worktree 共享同一个 `.git`，merge 无障碍
+- ✅ `.workspace/` 已被 gitignore，不会污染仓库
+- ❌ 不要在 `.workspace/` 下直接 `git push`（远程只保留 `master`）
+- ❌ 不要跨 agent 的 worktree 互相修改文件
+
 ### Git + GitHub CLI 自动化工作流
 
 > 只依赖 `git` + `gh`，不需要 GitKraken。
