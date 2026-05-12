@@ -9,15 +9,13 @@
 ## Issue 驱动的开发工作流
 
 ```
-  TODO.md ──→ GitHub Issues ──→ 逐个实现 ──→ git commit + close issue
-  (索引)       (独立可抓取)       (见下方规则)
+  GitHub Issues ──→ 逐个实现 ──→ git commit + close issue
+  (独立可抓取)       (见下方规则)
 ```
 
-### 1. 任务来源：`TODO.md`
+### 1. 任务来源：GitHub Issues
 
-- `TODO.md` 是**轻量索引**，每条指向对应的 GitHub Issue。
-- 当新任务产生时，先写 TODO.md 条目，再同步到 GitHub Issue。
-- 完成一条后，在 TODO.md 将 `⬜` 改为 `✅`，附上 commit/PR 引用。
+- 所有任务以 GitHub Issues 为准，`gh issue list` 或 `gh issue view <N>` 查看。
 
 ### 2. Issue 创建规范
 
@@ -48,6 +46,10 @@
 
 ## 分支策略
 
+- **根目录**：`/Users/maxdeux/Documents/GTHT/Codes/`（此后记为 `~/Codes/`）
+- **远程仓库**：`origin` → `https://github.com/maix00/FactorTester.git`
+- **`.gitignore`**：已配置忽略 `.workspace/`、`.workspace/.lock`、`.DS_Store`、`__pycache__/`、`.env` 等常用项
+
 ```
 master ────────────────────────── (线上唯一分支，稳定版本)
   │
@@ -62,6 +64,39 @@ master ────────────────────────�
 - **`feat`**：本地持续开发分支。所有新功能先到 `feat`，稳定后整体 merge 到 `master` 并 push。
 - **`fix/issue-N-xxx`**：每个 GitHub Issue 从 `feat` 切出独立分支。完成后 merge 回 `feat`，删除该分支。
 - **禁止**：直接在 `master` 上 commit；不要推 `feat` 及其他工作分支到远程（远程只保留 `master`）。
+
+### 更新 AGENTS.md 自身（同步到所有分支和远程）
+
+AGENTS.md 是全仓共用的 Agent 配置文件。更新它时，需要 **只提交 AGENTS.md 而不带入其他变更**，并推送到远程：
+
+```bash
+# 0. 确认当前在 feat 分支
+cd ~/Codes
+git checkout feat
+
+# 1. 将 AGENTS.md（及 .gitignore 等纯配置）单独 staged
+git add AGENTS.md .gitignore   # 只加配置文件
+# 暂存其他未提交的变更（包括 untracked）
+git stash --include-untracked --keep-index
+
+# 2. 提交并展示 diff 摘要
+git diff --cached --stat
+git commit -m "docs: <描述>"
+
+# 3. 恢复其他文件的变更
+git stash pop
+
+# 4. 同步到 master（因为 master 被 Codes-master-server worktree 占用，需在该目录操作）
+cd ~/Codes-master-server
+git merge feat --no-ff -m "docs: <描述>"
+git push origin master
+
+# 5. 切回 feat
+cd ~/Codes
+git checkout feat
+```
+
+> 注意：`master` 在远程且被 `Codes-master-server` worktree 占用，不能直接在 `~/Codes/` 里 checkout master。必须在 `~/Codes-master-server/` 目录中执行 merge 和 push。
 
 ### Flask 服务器隔离（git worktree）
 
@@ -87,6 +122,28 @@ git worktree add ../Codes-master-server master
 
 当多个 agent 同时操作不同 Issue 时，每个 agent 在 `.workspace/` 下拥有独立 worktree，互不干扰。
 
+#### ⚠️ 并发控制（强制）
+
+- **Agent 开始任何修改前，必须显式向人类确认："当前是否有其他 agent 正在执行 Issue？"**
+- 人类确认"无其他人"或"其他人已暂停"后，agent 才能继续。
+- 如果人类说"等一下，先让 agent X 完成" → agent 等待，不执行任何写操作。
+- 同一时间**只允许一个 agent 做写操作**（commit / merge / push），读操作不受限制。
+
+#### Agent 互斥锁（文件锁）
+
+通过 `.workspace/.lock` 文件实现简单的互斥：
+
+```bash
+# Agent 启动时获取锁
+echo "<agent描述> — Issue #<N>" > .workspace/.lock
+
+# Agent 完成任务后释放锁
+rm .workspace/.lock
+```
+
+> 如果 `.workspace/.lock` 已存在，agent 必须先询问人类是否强制抢占，或等待释放。
+> `.workspace/.lock` 已加入 `.gitignore`，不会提交到仓库。
+
 #### 目录结构
 
 ```
@@ -108,13 +165,11 @@ Codes/
    ```bash
    cd ~/Codes
    mkdir -p .workspace
-   git checkout -b fix/issue-<N>-<描述>          # 从 feat 创建 fix 分支
-   git worktree add .workspace/fix/issue-<N>-<描述> fix/issue-<N>-<描述>  # 为 fix 分支建 worktree
+   git branch fix/issue-<N>-<描述> feat               # ✅ 创建分支但不切换（feat 仍是当前分支）
+   git worktree add .workspace/fix/issue-<N>-<描述> fix/issue-<N>-<描述>  # 在 .workspace 下建 worktree
    ```
-   ⚠️ **然后立刻切回 `feat`**，让原窗口继续使用 `feat`：
-   ```bash
-   git checkout feat
-   ```
+   > ⚠️ **不能用 `git checkout -b`** — 那会把当前目录切到新分支，导致 `git worktree add` 报 `already used by worktree`。
+   > 正确做法：`git branch <新分支> feat` + `git worktree add .workspace/... <新分支>`。
 3. **在 `.workspace/` 下的独立 worktree 中工作**：
    ```bash
    cd .workspace/fix/issue-<N>-<描述>
