@@ -164,7 +164,7 @@ def run_ic_test():
                         'RF': effective_freq.value,
                         'S': shift,
                         'Lag': lag_i,
-                        'F': effective_freq.value,
+                        '$F': effective_freq.value,
                     }
                 ic_param_map[key].append(factor)
 

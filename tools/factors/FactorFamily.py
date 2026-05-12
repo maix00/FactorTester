@@ -194,19 +194,17 @@ class FactorFamily(UniqueObject, FactorExpr):
 
     def _normalize_param_kwargs(self, **kwargs) -> dict:
         """
-        归一化参数别名：当输入键不存在时，尝试在带/不带 '$' 形式间互转。
+        归一化参数别名：补全遗漏的 '$' 前缀。
 
-        例如：F -> $F，Rev -> $Rev。
+        Issue #5: 移除双向转换逻辑，只保留 $ 前缀补全（F → $F, Rev → $Rev）。
+        HTTP 接入层负责使用规范形式 $F/$Rev。
         """
         normalized = {}
         for key, value in kwargs.items():
             target_key = key
-            if key == 'Rev':
-                target_key = '$Rev'
             if key not in self.params_dict:
-                if key.startswith('$') and key[1:] in self.params_dict:
-                    target_key = key[1:]
-                elif not key.startswith('$') and f'${key}' in self.params_dict:
+                # 补全 $ 前缀：F → $F, Rev → $Rev
+                if not key.startswith('$') and f'${key}' in self.params_dict:
                     target_key = f'${key}'
             if target_key in normalized and normalized[target_key] != value:
                 raise ValueError(f"Conflicting values for parameter {target_key}")
