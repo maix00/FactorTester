@@ -163,7 +163,13 @@ def replace_params():
             else param.default_value
             for param in factor_family.params
         }
-        key = tuple(str(new_params.get(param.alias, '')) for param in factor_family.params)
+        # Clean $F suffix from FactorParam string values
+        from server.modules.shared.param_config import _clean_factor_alias
+        for param in factor_family.params:
+            v = new_params.get(param.alias)
+            if isinstance(v, str) and '|$F:' in v:
+                new_params[param.alias] = _clean_factor_alias(v)
+        key = factor_family.get_alias(**new_params)
         if key not in seen:
             seen.add(key)
             new_params_list.append(new_params)

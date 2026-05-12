@@ -6,6 +6,18 @@ session, while the factor library stores one user-scoped config per family.
 
 from __future__ import annotations
 
+import re
+
+
+def _clean_factor_alias(value: str) -> str:
+    """Remove |$F:xxx suffix from a nested factor alias string.
+
+    FactorParam values may carry $F fragments from upstream serialisation
+    (e.g. 'PrOHLCMean|C:CA|H:HA|L:LA|O:OA|$F:1m').  Stripping them ensures
+    dict equality and dedup work correctly across /add_params and /replace_params.
+    """
+    return re.sub(r'\|?\$F:[^|]+', '', value)
+
 
 def normalize_param_rows(factor_family, params_list: list) -> list:
     normalized_rows = []
@@ -14,10 +26,17 @@ def normalize_param_rows(factor_family, params_list: list) -> list:
             raise ValueError('参数行必须是对象')
         normalized = factor_family._normalize_param_kwargs(**params)
         factor_family._check_in_space(**normalized)
-        normalized_rows.append({
-            p.alias: p._value_space.rectify(normalized[p.alias]) if p.alias in normalized else p.default_value
-            for p in factor_family.params
-        })
+        row = {}
+        for p in factor_family.params:
+            if p.alias in normalized:
+                v = p._value_space.rectify(normalized[p.alias])
+            else:
+                v = p.default_value
+            # Clean $F suffix from FactorParam string values (see _clean_factor_alias)
+            if isinstance(v, str) and '|$F:' in v:
+                v = _clean_factor_alias(v)
+            row[p.alias] = v
+        normalized_rows.append(row)
     return normalized_rows
 
 

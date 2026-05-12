@@ -304,6 +304,10 @@
                             window.reloadParamModule(resolve);
                         });
                     }
+                    // 刷新收益率频率选项（因子列表变化后需要重新推导可用频率）
+                    if (typeof window.refreshICModule === 'function') {
+                        window.refreshICModule();
+                    }
                 }
             } catch (e) {
                 alert('恢复参数异常: ' + e.message);
