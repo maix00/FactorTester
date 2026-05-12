@@ -9,7 +9,7 @@
 import pandas as pd
 from abc import ABCMeta
 from re import findall
-from typing import Any
+from typing import Any, cast
 from weakref import WeakValueDictionary
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -90,12 +90,14 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
                     warnings.filterwarnings("ignore", category=Pandas4Warning)
                     # 尝试直接解析为 pd.Timedelta，并转为标准名称
                     value = pd.Timedelta(freq)
+                    if not isinstance(value, pd.Timedelta):
+                        value = pd.Timedelta(0)
                     if value == pd.Timedelta(0):
                         name = '0'
                     elif value > pd.Timedelta(0):
-                        name = ''.join(f"{units[k]}{v}" for k, v in value.components._asdict().items() if v > 0)
+                        name = ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, value), 'components')._asdict().items() if v > 0)
                     else:
-                        name = '-' + ''.join(f"{units[k]}{v}" for k, v in (-value).components._asdict().items() if v > 0)
+                        name = '-' + ''.join(f"{units[k]}{v}" for k, v in getattr(cast(pd.Timedelta, -value), 'components')._asdict().items() if v > 0)
             except:
                 # 如果无法直接解析，尝试按 DataFreq 名称格式解析，如 'MIN30' → '30min'
                 assert isinstance(freq, str)
@@ -109,10 +111,10 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
                 instance = super().__new__(cls, name=name)
             if not hasattr(instance, '_initialized'):
                 # 首次创建时写入属性
-                instance.value = value
-                instance.name = name
-                instance.alias = 'DataFreq:' + name
-                instance._initialized = True
+                object.__setattr__(instance, 'value', value)
+                object.__setattr__(instance, 'name', name)
+                object.__setattr__(instance, 'alias', 'DataFreq:' + name)
+                object.__setattr__(instance, '_initialized', True)
             return instance
         else:
             raise ValueError("Invalid frequency format")
@@ -125,7 +127,7 @@ class DataFreq(UniqueObject, metaclass=DataFreqMeta):
     @property
     def subday(self) -> pd.Timedelta:
         """小于一天的频率部分, 如 90min → 1min, 36h → 12h, -36h → 12h"""
-        return self.value - pd.Timedelta(days=self.days)
+        return cast(pd.Timedelta, self.value - pd.Timedelta(days=self.days))
     
     @property
     def is_multiples_of_day(self) -> bool:

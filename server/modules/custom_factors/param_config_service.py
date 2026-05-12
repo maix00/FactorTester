@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import cast
 
 from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
 from server.modules.custom_factors.param_config_store import (
@@ -24,8 +25,9 @@ from server.services.factor_registry import (
 
 
 def template_time_from_id(template: dict) -> str:
-    if template.get('updated_at'):
-        return template.get('updated_at')
+    updated_at = cast(str | None, template.get('updated_at'))
+    if updated_at:
+        return updated_at
     try:
         timestamp = int(str(template.get('id', ''))[:13]) / 1000
         return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))

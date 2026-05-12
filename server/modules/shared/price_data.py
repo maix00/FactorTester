@@ -5,8 +5,10 @@
   GET  /api/get_contracts       — 获取主力品种对应的合约列表
   POST /api/get_price_data      — 获取指定品种的价格序列（复权/非复权，支持合约级别）
 """
+from __future__ import annotations
 import os
 import traceback
+from typing import cast
 import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
@@ -225,6 +227,7 @@ def get_price_data():
                     volume=('volume', 'sum'),
                     open_interest=('open_interest', 'last'),
                 ).reset_index().rename(columns={'trading_day': 'time_idx'})
+                price_df = cast(pd.DataFrame, price_df)
                 o_col, h_col, l_col, c_col, v_col = 'open', 'high', 'low', 'close', 'volume'
                 oi_col = 'open_interest'
                 time_col = 'time_idx'
@@ -245,6 +248,7 @@ def get_price_data():
                 end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
                 price_df = price_df[price_df[time_col] <= end_ts]
 
+            price_df = cast(pd.DataFrame, price_df)  # narrow from ndarray union
             if price_df.empty:
                 return jsonify({'success': False, 'error': '指定范围内无合约价格数据'}), 404
 

@@ -1,6 +1,7 @@
 """Resolve serialized FactorParam selections from the visible factor library."""
 
 from __future__ import annotations
+from typing import cast
 
 from server.modules.custom_factors.param_config_service import build_param_factor_overview
 from server.modules.shared.param_config import normalize_param_row
@@ -35,7 +36,8 @@ def resolve_factor_param_value(value):
 
 def _find_visible_factor(alias: str) -> dict:
     import re
-    payload = build_param_factor_overview(current_user(), include_subordinates=True)
+    username = cast(str, current_user())
+    payload = build_param_factor_overview(username, include_subordinates=True)
     
     def _normalize(a: str) -> str:
         """去掉 $F:xxx 后做匹配，因为 FactorParam 的子因子无独立 SignalAlign。"""

@@ -1,8 +1,10 @@
 """
 Admin Blueprint: organization and user hierarchy management.
 """
+from __future__ import annotations
 import re
 import secrets
+from typing import Any, cast
 from flask import Blueprint, request, jsonify, render_template
 
 from server.services.accounts import (
@@ -35,7 +37,7 @@ ROLE_LABELS = {
 }
 
 
-def _require_admin_account():
+def _require_admin_account() -> tuple[str, dict[str, Any] | None, Any]:
     username = require_user()
     acct = get_account(username)
     if not (is_super_admin_account(acct) or is_org_admin_account(acct) or is_level_admin_account(acct)):
@@ -47,7 +49,9 @@ def _validate_alias(alias: str) -> bool:
     return bool(re.match(r'^[A-Za-z0-9_\u4e00-\u9fff]{1,32}$', alias or ''))
 
 
-def _allowed_roles_for(manager: dict) -> set[str]:
+def _allowed_roles_for(manager: dict[str, Any] | None) -> set[str]:
+    if manager is None:
+        return set()
     if is_super_admin_account(manager):
         return {ROLE_SUPER_ADMIN, ROLE_ORG_ADMIN, ROLE_LEVEL_ADMIN, ROLE_USER}
     if manager.get('role') == ROLE_ORG_ADMIN:
@@ -147,6 +151,7 @@ def api_admin_context():
     username, acct, error = _require_admin_account()
     if error:
         return error
+    assert acct is not None
     accounts = [serialize_account_public(a, username) for a in visible_accounts_for(username, include_self=True)]
     orgs = visible_organizations_for(username)
     levels = list_levels_with_roots()
@@ -170,6 +175,7 @@ def api_create_organization():
     username, acct, error = _require_admin_account()
     if error:
         return error
+    assert acct is not None
     if not is_super_admin_account(acct):
         return jsonify({'success': False, 'error': '只有超级管理员可以新建机构'}), 403
     data = request.get_json(silent=True) or {}
@@ -205,6 +211,7 @@ def api_delete_organization(organization_id):
     username, acct, error = _require_admin_account()
     if error:
         return error
+    assert acct is not None
     if not is_super_admin_account(acct):
         return jsonify({'success': False, 'error': '只有超级管理员可以删除机构'}), 403
     data = request.get_json(silent=True) or {}
@@ -240,6 +247,7 @@ def api_create_level():
     username, manager, error = _require_admin_account()
     if error:
         return error
+    assert manager is not None
     data = request.get_json(silent=True) or {}
     org_id = (data.get('organization_id') or manager.get('organization_id') or DEFAULT_ORGANIZATION_ID).strip()
     parent_level_id = (data.get('parent_level_id') or '').strip()
@@ -353,6 +361,7 @@ def api_create_user():
     username, manager, error = _require_admin_account()
     if error:
         return error
+    assert manager is not None
     data = request.get_json(silent=True) or {}
     alias = (data.get('alias') or '').strip()
     password = data.get('password') or ''
@@ -430,6 +439,7 @@ def api_update_user(target_username):
     username, manager, error = _require_admin_account()
     if error:
         return error
+    assert manager is not None
     if not can_manage_user_account(username, target_username):
         return jsonify({'success': False, 'error': '无权管理该用户'}), 403
     data = request.get_json(silent=True) or {}

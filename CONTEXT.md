@@ -7,7 +7,7 @@
 
 ## 这是什么
 
-FactorTester 是一个面向中国期货市场的量化因子研究与回测平台。提供：
+FactorTester 是一个量化因子研究与回测平台，面向期货及多资产类别。目前已支持中国期货市场，架构预留了多品种、多频率、多数据源的扩展能力。提供：
 
 - **单因子测试** — 单因子的 IC 分析 + 分组收益回测
 - **多因子分析** — 相关性矩阵、因子合成、IC 热力图、分层回测
@@ -77,7 +77,7 @@ DSL 核心。三层结构：
 
 ### 中间因子 (Intermediate Factor)
 
-因子树中的命名子表达式。`as_intermediate(name)` 标记节点 — 其结果存入 `FactorData`，可在不同品种 / 时间范围间复用。规则：相同 `as_intermediate(name)` 必须映射到相同 `structural_key`；冲突直接报错（不自动加后缀）。
+因子树中的命名子表达式。`as_intermediate(name)` 标记节点 — 其结果存入 `Factor._intermediate_factor_data`，可在不同品种 / 时间范围间复用。规则：相同 `as_intermediate(name)` 必须映射到相同 `structural_key`；冲突直接报错（不自动加后缀）。
 
 ### 参数空间 (Parameter Space)
 
@@ -177,20 +177,6 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 - `UniqueObject.alias`：纯类名（如 `MmRet`）— 用于查找
 - `user_prefix`：公共因子用 `$COMMON`，自定义因子用 `用户名@序号`
 
-### 已知坑位
-
-> 已解决的坑位移至 Agent 记忆（`/memories/`）。以下为当前仍在生效的约束：
-
-- **evaluate() 签名**：统一使用 `EvaluateContext` ctx 参数（see Issue #2），不再有 5 种签名变体
-- **中间因子命名**：`as_intermediate(name)` 冲突直接报错 — 不做自动后缀
-- **多品种**：禁止用第一个品种的 `DataMeta` 转换 `Timedelta` / `DataFreq` 窗口；必须按品种解析，按 `day_periods` 分组收敛
-
 ---
 
-## 当前 TODO
-
-> `todo.md` 已废弃。任务跟踪以 [GitHub Issues](https://github.com/maix00/FactorTester/issues) 为准。
-
-### 已完成
-- [x] 2026-05-08：RollingOp 首个 operand 为 ParamRef 时 `to_latex` 走 `\color{red}` 而非打印 `ParamRef[...]`
-- [x] 2026-05-08：前端新增因子时，文件名与代码编辑器中的 class 名保持一致 |
+> 任务跟踪以 [GitHub Issues](https://github.com/maix00/FactorTester/issues) 为准。

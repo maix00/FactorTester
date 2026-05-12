@@ -109,15 +109,17 @@ class Futures(AdjustableProductMixin, Product):
         start_date: Optional[str],
         end_date: Optional[str],
     ) -> List[Dict[str, Any]]:
-        req_start = pd.Timestamp(start_date).normalize() if start_date else None
-        req_end = pd.Timestamp(end_date).normalize() if end_date else None
+        req_start: Optional[pd.Timestamp] = getattr(pd.Timestamp(start_date), 'normalize')() if start_date else None
+        req_end: Optional[pd.Timestamp] = getattr(pd.Timestamp(end_date), 'normalize')() if end_date else None
 
         contracts = []
-        for _, row in self.roller_info.iterrows():
+        if self.roller_info is None:
+            return contracts
+        for _, row in cast(pd.DataFrame, self.roller_info).iterrows():
             s_val = row.get('STARTDATE')
             e_val = row.get('ENDDATE')
-            s = pd.Timestamp(s_val) if pd.notna(s_val) else None
-            e = pd.Timestamp(e_val) if pd.notna(e_val) else None
+            s = cast('Optional[pd.Timestamp]', pd.Timestamp(s_val)) if s_val is not None and cast(bool, pd.notna(s_val)) else None
+            e = cast('Optional[pd.Timestamp]', pd.Timestamp(e_val)) if e_val is not None and cast(bool, pd.notna(e_val)) else None
 
             if req_start is not None and e is not None and e.normalize() < req_start:
                 continue
@@ -212,7 +214,12 @@ class Futures(AdjustableProductMixin, Product):
         if self.roller_info is None:
             return []
         loc = self.roller_info.index.get_loc(row.name)
-        idx = int(loc.start if isinstance(loc, slice) else loc[0] if hasattr(loc, '__len__') else loc)
+        if isinstance(loc, slice):
+            idx = int(loc.start)
+        elif isinstance(loc, int):
+            idx = loc
+        else:
+            idx = int(loc[0])
         rows = self.roller_info.iloc[idx:idx + max(1, int(n))]
         contracts = []
         for _, r in rows.iterrows():

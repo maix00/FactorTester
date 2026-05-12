@@ -21,7 +21,7 @@ DataMeta — 围绕 Product + DataFreq 的 DataFrame 薄封装层。
 """
 from __future__ import annotations
 
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -101,7 +101,7 @@ class DataMeta(UniqueObject):
             return self._day_periods
         df = self.get_data()
         idx_level = df.index.get_level_values(-1)
-        dates = pd.Series(pd.DatetimeIndex(idx_level).date)
+        dates = pd.Series(getattr(pd.DatetimeIndex(idx_level), 'date'))
         day_boundaries = np.diff(np.where(dates != dates.shift(1))[0])
         if len(day_boundaries) == 0:
             self._day_periods = int(len(df))
@@ -224,7 +224,7 @@ class DataMeta(UniqueObject):
                 for col in time_index:
                     if col not in df.columns:
                         raise ValueError(f"Column {col} not found in data")
-            return df
+            return cast(pd.DataFrame, df)
 
         # 通过 IdleResourceManager 缓存
         manager = IdleResourceManager.get_instance()
@@ -316,8 +316,8 @@ class DataMeta(UniqueObject):
             else:
                 if ts.tzinfo is not None:
                     ts = ts.tz_convert('UTC').tz_localize(None)
-            data = data[idx >= ts]
-        return data.copy() if copy else data
+            data = cast(pd.DataFrame, data[idx >= ts])
+        return cast(pd.DataFrame, data.copy()) if copy else data
     
     @staticmethod
     def _get_adjusted_col_name(col: str) -> str:

@@ -5,6 +5,7 @@ Shared factor data-query routes (any test module can use):
   POST /get_return_series
   POST /get_price_series
 """
+from typing import Any
 import numpy as np
 import pandas as pd
 import traceback
@@ -308,7 +309,7 @@ def get_factor_distribution():
             return jsonify({'error': f'未找到 {ts_compare} 附近的因子数据，最近差 {nearest_diff}'}), 404
 
         row = table.iloc[nearest_i]
-        actual_ts = idx[nearest_i]
+        actual_ts: Any = idx[nearest_i]
         values = []
         for col, val in row.items():
             if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):

@@ -1,4 +1,6 @@
 """Routes for custom-factor catalog pages and read-only factor metadata."""
+from __future__ import annotations
+from typing import Any, cast
 
 from flask import jsonify, render_template, request
 
@@ -24,7 +26,7 @@ def editor_page():
 @cf_bp.route('/api/list', methods=['GET'])
 @login_required
 def api_list_factors():
-    username = current_user()
+    username = cast(str, current_user())
     public = list_public_factors()
     include_subordinates = request.args.get('include_subordinates') == '1'
     if include_subordinates:

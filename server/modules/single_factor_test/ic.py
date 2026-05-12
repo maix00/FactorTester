@@ -4,7 +4,7 @@ IC test endpoint: /run_ic_test
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import traceback
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -63,6 +63,8 @@ def _is_term_contract_product(product: Any) -> bool:
 
 @sft_bp.route('/run_ic_test', methods=['POST'])
 def run_ic_test():
+    _saved_products = None
+    tester = None
     data = request.get_json(silent=True) or {}
     submission_id = data.get('submission_id')
     factor_family_alias = data.get('factor_family_alias')
@@ -240,6 +242,9 @@ def run_ic_test():
         indices = ic_stats_all.index.tolist()
         for i, row in enumerate(rows):
             row['index'] = indices[i]
+            for k, v in list(row.items()):
+                if isinstance(v, float) and (pd.isna(v) or np.isinf(v)):
+                    row[k] = None
 
         ic_decay_results: Dict[str, List[dict]] = {}
         if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
@@ -292,11 +297,11 @@ def run_ic_test():
             ic_s = (tester.results[factor].ic_series if factor in tester.results else pd.Series(dtype=float)).dropna()
             signal_ts = _extract_signal_index(ic_s.index) if len(ic_s) > 0 else pd.DatetimeIndex([])
             is_daily = factor.freq is not None and factor.freq.is_day_multiple()
-            dates = (
-                [ts.strftime('%Y-%m-%d') for ts in signal_ts]
-                if is_daily
-                else (signal_ts.view(np.int64) // 10**6).tolist()
-            )
+            if is_daily:
+                dates = [ts.strftime('%Y-%m-%d') for ts in signal_ts]
+            else:
+                raw = cast(np.ndarray, signal_ts.view(np.int64))
+                dates = cast('list[str | int]', (raw // 10**6).tolist())
             vals = [
                 None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
                 for v in ic_s.values.tolist()
@@ -309,7 +314,7 @@ def run_ic_test():
                     nlags = min(20, max(1, len(ic_s) // 2 - 1))
                     acf_vals = acf(ic_s.values, nlags=nlags, fft=False)
                     autocorr = [
-                        {'lag': i, 'ac': round(float(v), 6)}
+                        {'lag': i, 'ac': _safe_round(v)}
                         for i, v in enumerate(acf_vals[1:], start=1)
                     ]
                 except Exception:
@@ -330,9 +335,9 @@ def run_ic_test():
                         r = (m / std_win) if std_win != 0 else None
                         r_mean.append(_safe_round(m))
                         r_ir.append(_safe_round(r))
-                        ts_i = signal_ts[i]
+                        ts_i: Any = signal_ts[i]
                         if hasattr(ts_i, 'strftime'):
-                            r_dates.append(ts_i.strftime('%Y-%m-%d') if is_daily else int(ts_i.value // 10**6))
+                            r_dates.append(ts_i.strftime('%Y-%m-%d') if is_daily else int(cast(np.int64, ts_i.value) // 10**6))
                         else:
                             r_dates.append(str(ts_i))
                     rolling_ic = {
@@ -367,11 +372,12 @@ def run_ic_test():
                 for lag_i in ic_lags:
                     lag_series = series_by_factor_lag.get(factor, {}).get(lag_i, pd.Series(dtype=float)).dropna()
                     lag_ts = _extract_signal_index(lag_series.index) if len(lag_series) > 0 else pd.DatetimeIndex([])
-                    lag_dates = (
-                        [ts.strftime('%Y-%m-%d') for ts in lag_ts]
-                        if is_daily
-                        else (lag_ts.view(np.int64) // 10**6).tolist()
-                    )
+                    lag_dates: list[str | int]
+                    if is_daily:
+                        lag_dates = [ts.strftime('%Y-%m-%d') for ts in lag_ts]
+                    else:
+                        raw = cast(np.ndarray, lag_ts.view(np.int64))
+                        lag_dates = cast('list[str | int]', (raw // 10**6).tolist())
                     lag_vals = [
                         None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
                         for v in lag_series.values.tolist()
@@ -411,7 +417,7 @@ def run_ic_test():
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
         # Issue #1: Restore original products state before exiting
-        if _saved_products is not None:
+        if _saved_products is not None and tester is not None:
             tester.products = _saved_products
         if _token is not None:
             _active_tester.reset(_token)
