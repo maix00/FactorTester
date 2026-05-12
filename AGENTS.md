@@ -45,3 +45,84 @@
 
 - 任何非平凡的架构决策（如"保留而非移除"、"选 A 不选 B"）写 `docs/adr/` 记录。
 - ADR 编号递增：`001-xxx.md`, `002-xxx.md`, ...
+
+## Git + GitHub CLI 自动化工作流
+
+> 只依赖 `git` + `gh`，不需要 GitKraken。
+
+### 0. 前提检查
+
+开始前检查环境：
+
+```bash
+git --version
+gh --version
+gh auth status
+git remote -v
+git status
+```
+
+如果 `gh auth status` 未登录，提示先运行 `gh auth login`。
+
+### 1. 读取 Issue
+
+```bash
+gh issue view <号码> --comments
+```
+
+总结：Issue 要求 → 涉及文件 → 修改方案 → 是否需要测试 → 有无不明确之处。
+
+### 2. 创建工作分支
+
+```bash
+git checkout main && git pull
+git checkout -b fix/issue-<号码>-<简短描述>
+```
+
+### 3. 修改代码
+
+修改前看状态：`git status && git diff`
+
+修改后必须运行项目检查（根据 `package.json` / `pyproject.toml` / `Makefile` 自动判断）。
+
+### 4. 提交 Commit
+
+提交前展示 `git diff --stat` 摘要：
+
+```bash
+git add .
+git commit -m "<type>: <描述> (refs #<号码>)"
+```
+
+### 5. 推送 + 创建 PR
+
+```bash
+git push -u origin fix/issue-<号码>-<简短描述>
+gh pr create \
+  --title "<type>: <描述> (closes #<号码>)" \
+  --body "Closes #<号码>
+
+## Summary
+- ...
+
+## Tests
+- ..."
+```
+
+PR body 中 `Closes #<号码>` 会在 PR 合并后自动关闭 Issue。
+
+### 6. 直接关闭 Issue（仅明确要求时）
+
+```bash
+gh issue close <号码> --comment "Fixed in commit <hash>." --reason completed
+```
+
+### 安全规则
+
+- ❌ 不 force push
+- ❌ 不擅自删除分支
+- ❌ 不擅自关闭 Issue（PR 中 `Closes #` 自动关闭除外）
+- ❌ 不提交 secrets / token / 密码 / `.env`
+- ✅ 大改动前先解释计划
+- ✅ 每次 commit 前展示 `git diff` 摘要
+- ✅ 测试失败先修复，修不了说明原因
