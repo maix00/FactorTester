@@ -283,11 +283,12 @@ class Factor(UniqueObject, FactorExpr):
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
-        # ── 5. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
+        # ── 5. 同步到 tester（向后兼容：_DictAccessor 代理 FactorRunResult） ──
         t = Factor._get_active_tester()
         if t is not None:
-            t.factor_source_tables[self] = self.source_table
-            t.factor_tables[self] = result
+            r = t._get_result(self)
+            r.source_table = self.source_table
+            r.table = result
         else:
             self._data = result
 

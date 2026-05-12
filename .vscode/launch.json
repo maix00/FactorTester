@@ -5,7 +5,8 @@
             "name": "Flask: start_server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/start_server.py",
+            "program": "${workspaceFolder}/../Codes-master-server/start_server.py",
+            "cwd": "${workspaceFolder}/../Codes-master-server",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {

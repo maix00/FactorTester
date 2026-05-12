@@ -367,7 +367,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             if return_freq is not None:
                 t = Factor._get_active_tester()
                 if t is not None:
-                    t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
+                    t._get_result(factor).return_freq = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
 
         self.factors = factors

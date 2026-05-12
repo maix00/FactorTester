@@ -120,19 +120,6 @@ def shutdown():
     return '', 200
 
 
-def _is_master_branch() -> bool:
-    """检测当前是否在 master 分支上。"""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-            capture_output=True, text=True, timeout=2,
-        )
-        return result.stdout.strip() == 'master'
-    except Exception:
-        return False
-
-
 def run_flask_server(port=8000, directory='.'):
     os.chdir(directory)
     url = f"http://localhost:{port}/"
@@ -142,23 +129,14 @@ def run_flask_server(port=8000, directory='.'):
     IdleResourceManager.get_instance().start(idle_timeout=10, scan_interval=5)
     print("IdleResourceManager started.")
 
-    on_master = _is_master_branch()
-
-    # 开发模式：仅在 master 分支上使用时启热重载
+    # 开发模式：使用 Flask 内置服务器 + 热重载
     if os.environ.get('FLASK_DEBUG') == '1':
-        if on_master:
-            print("开发模式 (Flask debug=True, 热重载已启用)")
-            app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
-        else:
-            print("开发模式 (Flask debug=True, 非 master 分支 — 热重载已禁用)")
-            app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
+        print("开发模式 (Flask debug=True, 热重载已启用)")
+        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=True)
     else:
         print(f"生产模式 (waitress, threads=8)")
-        # 仅 master 分支启用热插拔文件监控
-        if on_master:
-            _start_hot_reload_watcher(interval=3.0)
-        else:
-            print("非 master 分支 — 热插拔文件监控已禁用")
+        # 启动热插拔文件监控
+        _start_hot_reload_watcher(interval=3.0)
         def open_browser():
             time.sleep(1)
             webbrowser.open(url)

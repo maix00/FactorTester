@@ -190,12 +190,13 @@ def run_ic_test():
                         object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
 
                     if lag_i == primary_ic_lag:
-                        tester.factor_ic_series[factor] = ic_series.copy()
-                        tester.factor_ic_stats[factor] = stats.copy()
+                        r = tester._get_result(factor)
+                        r.ic_series = ic_series.copy()
+                        r.ic_stats = stats.copy()
                         if not re_table.empty:
-                            tester.factor_returns[factor] = re_table.copy()
+                            r.returns = re_table.copy()
                         if not fe_table.empty:
-                            tester.factor_tables[factor] = fe_table.copy()
+                            r.table = fe_table.copy()
                             object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
 
                         p_names = _extract_product_names(fe_table, re_table)
@@ -232,7 +233,7 @@ def run_ic_test():
         tester.products = resolved_products if resolved_products else all_products.copy()
 
         ic_stats_all = pd.DataFrame({
-            f.alias: tester.factor_ic_stats.get(f, pd.Series(dtype=float)) for f in factors
+            f.alias: (tester.results[f].ic_stats if f in tester.results else pd.Series(dtype=float)) for f in factors
         })
         columns = ic_stats_all.columns.tolist()
         rows = ic_stats_all.to_dict(orient='records')
@@ -243,7 +244,7 @@ def run_ic_test():
         ic_decay_results: Dict[str, List[dict]] = {}
         if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
             for factor in factors:
-                base_ic = tester.factor_ic_series.get(factor, pd.Series(dtype=float)).dropna()
+                base_ic = (tester.results[factor].ic_series if factor in tester.results else pd.Series(dtype=float)).dropna()
                 decay_list: List[dict] = []
                 for lag in ic_decay_lags:
                     try:
@@ -288,7 +289,7 @@ def run_ic_test():
         }
 
         for factor in factors:
-            ic_s = tester.factor_ic_series.get(factor, pd.Series(dtype=float)).dropna()
+            ic_s = (tester.results[factor].ic_series if factor in tester.results else pd.Series(dtype=float)).dropna()
             signal_ts = _extract_signal_index(ic_s.index) if len(ic_s) > 0 else pd.DatetimeIndex([])
             is_daily = factor.freq is not None and factor.freq.is_day_multiple()
             dates = (
