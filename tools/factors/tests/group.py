@@ -59,7 +59,7 @@ def ensure_factor_returns(
         RF=rf_value,
         S=shift,
         Lag=0,
-        F=factor.freq.value,
+        **{'$F': factor.freq.value},
     )
     ic_factor.clear()
     ic_factor.evaluate(tester.products, freq=factor._source_freq)
@@ -131,12 +131,17 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
         # Temporarily mark _source_expr as intermediate and inject IC data
         source_expr = factor._source_expr
         was_intermediate = source_expr._is_intermediate
+        sk = source_expr._structural_key()
         source_expr._is_intermediate = True
-        factor._intermediate_factor_data[source_expr._structural_key()] = raw_ic.copy()
+        factor._intermediate_factor_data[sk] = raw_ic.copy()
         try:
             factor.evaluate(tester.products)
         finally:
             source_expr._is_intermediate = was_intermediate
+            # 清理注入的缓存，避免污染后续 evaluate() 调用
+            factor._intermediate_factor_data.pop(sk, None)
+            # 同时清理 factor.table 缓存，确保下次重新计算
+            factor.clear()
         return factor.table.copy(deep=False)
 
     factor.evaluate(tester.products)
@@ -260,13 +265,24 @@ def test_by_group_single_factor(
     membership_np = np.zeros((T, n_groups, P), dtype=bool)
     current_members = np.zeros((n_groups, P), dtype=bool)
 
+    # ── 按列的首部 NaN 填充（仅用于多时段品种检测，不覆盖 table_np）──
+    # 某些品种在中途才上市，首部全为 NaN，不应被误判为"多时段品种"
+    # 策略：对每列找到第一个有效值的行号，将其之前的 NaN 填 0.0
+    not_nan = ~np.isnan(table_np)                   # (T, P)
+    first_valid = np.argmax(not_nan, axis=0)          # (P,)  每列第一个非NaN行号；全NaN列=0
+    col_has_any = not_nan.any(axis=0)                 # (P,)  哪些列有至少一个有效值
+    row_idx = np.arange(T, dtype=int)[:, np.newaxis]  # (T, 1)
+    head_mask = (row_idx < first_valid[np.newaxis, :]) & col_has_any[np.newaxis, :]  # (T, P)
+    table_filled_np = np.where(head_mask, 0.0, table_np)
+
     # ── 多时段品种检测 ──
-    # 截断后，若存在"部分品种有信号、部分无信号"的混合行 → 品种交易时段不同
-    _mixed_mask = np.any(np.isnan(table_np), axis=1) & (~np.all(np.isnan(table_np), axis=1))
+    # 使用填充后的 table_filled_np，排除首部未上市品种的干扰
+    _mixed_mask = np.any(np.isnan(table_filled_np), axis=1) & (~np.all(np.isnan(table_filled_np), axis=1))
     multi_session_active = bool(_mixed_mask.any())
     if multi_session_active:
-        # 统计哪些品种在哪些行缺失
-        _missing_cols = np.where(np.any(np.isnan(table_np) & ~_all_nan_mid[:, np.newaxis], axis=0))[0]
+        # 统计真正缺失的品种（排除首部未上市部分）
+        _after_head_nan = np.isnan(table_filled_np) & ~head_mask          # (T, P) 只保留首部之后的NaN
+        _missing_cols = np.where(np.any(_after_head_nan, axis=0))[0]       # 哪些列在首部之后有NaN
         _missing_names = [str(valid_cols[i]) for i in _missing_cols]
         print(
             f"[INFO] {factor.alias}: 检测到 {int(_mixed_mask.sum())}/{T} 期存在部分品种缺失信号 "
