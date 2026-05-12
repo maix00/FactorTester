@@ -31,13 +31,16 @@
 2. **检查 `docs/adr/`** — 是否已有相关架构决策
 3. **读 `memory` (`/memories/repo/`)** — 之前是否有相关经验记录
 4. **按顺序执行 TODO.md 中的 Issue** — #2 → #3 → #4 → #5 → #6，因为 #3-4 依赖 #2（FactorRunResult），#5-6 相对独立
-5. **每个 Issue 完成后**：更新 TODO.md 状态 + git commit + 关闭 Issue
+5. **每个 Issue 完成后**：git commit + 关闭 Issue（不要手动改 `TODO.md`，它已被 GitHub Issues 取代）
 
 ### 4. Commit 规范
 
 - 格式：`<type>: <简短描述> (refs #issue号码)`
 - type: `refactor` / `fix` / `feat` / `docs` / `test`
 - 示例：`refactor: extract FactorRunResult from 8 tester dicts (refs #2)`
+
+> 📌 **人类确认标识**：任何需要人类决策的回复中，用 `🛑 **需要人类确认**` 作为醒目前缀，并在操作前等待人类回复。
+> 例如：`🛑 **需要人类确认**：是否继续执行 merge feat → master 并 push？`
 
 ### 5. 决策记录
 
@@ -49,6 +52,7 @@
 - **根目录**：`/Users/maxdeux/Documents/GTHT/Codes/`（此后记为 `~/Codes/`）
 - **远程仓库**：`origin` → `https://github.com/maix00/FactorTester.git`
 - **`.gitignore`**：已配置忽略 `.workspace/`、`.workspace/.lock`、`.DS_Store`、`__pycache__/`、`.env` 等常用项
+- **`TODO.md`**：已废弃，任务跟踪以 GitHub Issues 为准。如果 repo 中仍存在 `todo.md`，应删除。
 
 ```
 master ────────────────────────── (线上唯一分支，稳定版本)
@@ -124,10 +128,18 @@ git worktree add ../Codes-master-server master
 
 #### ⚠️ 并发控制（强制）
 
+> 🛑🛑🛑 **以下规则必须严格遵守，违规可能导致并发冲突、数据丢失。** 🛑🛑🛑
+
+**权限判断（Agent 第一步）**：
+- Agent 启动时先判定自身执行环境：
+  - **VS Code / 低权限模式**：可以正常执行命令和提交代码。仅在 merge feat → master + push 前标 `🛑 **人类确认标识**`，不需要暂停。
+  - **Codex / 高权限模式**：不得直接运行任何写操作（commit / merge / push）。每个操作前标 `🛑 **需要人类确认**`，等人类回复"继续"后执行。
+
 - **Agent 开始任何修改前，必须显式向人类确认："当前是否有其他 agent 正在执行 Issue？"**
 - 人类确认"无其他人"或"其他人已暂停"后，agent 才能继续。
 - 如果人类说"等一下，先让 agent X 完成" → agent 等待，不执行任何写操作。
 - 同一时间**只允许一个 agent 做写操作**（commit / merge / push），读操作不受限制。
+- ⚠️ **merge feat → master + push 是高风险操作**，执行前必须再次向人类确认。
 
 #### Agent 互斥锁（文件锁）
 
