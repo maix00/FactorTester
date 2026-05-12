@@ -101,17 +101,45 @@ def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFra
 
 
 def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
-    """Get the factor exposure table for group testing, reusing raw IC FE when present."""
-    raw_fe = getattr(factor, "_ic_fe_intermediate", None)
-    if not isinstance(raw_fe, pd.DataFrame) or raw_fe.empty:
-        raw_fe = tester.factor_tables.get(factor)
-    if isinstance(raw_fe, pd.DataFrame) and not raw_fe.empty:
-        if isinstance(raw_fe.index, pd.MultiIndex) and any(str(n).startswith("_SIGNAL") for n in raw_fe.index.names):
-            return raw_fe.copy(deep=False)
-        return align_table_for_group(factor, raw_fe)
+    """Get the factor exposure table for group testing.
 
-    if factor.table is None or factor.table.empty:
-        factor.evaluate(tester.products)
+    Data source priority:
+      1. factor.table (already computed via factor.evaluate()) — correctly includes
+         SignalAlign + $Rev (Neg) because _expr = neg(SignalAlign(func_expr, ...)).
+      2. tester.factor_tables.get(factor) — same as above, from FactorRunResult.table.
+      3. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
+
+    IMPORTANT: _ic_fe_intermediate is the raw IC intermediate FE data (no $Rev, no
+    SignalAlign). It must NOT be used directly.  Instead, inject it as the
+    pre-computed value for factor._source_expr so that factor.evaluate() reuses
+    the data but still applies SignalAlign + Neg correctly.
+
+    This works by temporarily marking _source_expr as _is_intermediate,
+    injecting the cache into factor._intermediate_factor_data, calling
+    factor.evaluate(), then restoring the flag.
+    """
+    # Prefer already-computed aligned + negated table
+    if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
+        return factor.table.copy(deep=False)
+
+    cached = tester.factor_tables.get(factor)
+    if isinstance(cached, pd.DataFrame) and not cached.empty:
+        return cached.copy(deep=False)
+
+    raw_ic = getattr(factor, '_ic_fe_intermediate', None)
+    if isinstance(raw_ic, pd.DataFrame) and not raw_ic.empty:
+        # Temporarily mark _source_expr as intermediate and inject IC data
+        source_expr = factor._source_expr
+        was_intermediate = source_expr._is_intermediate
+        source_expr._is_intermediate = True
+        factor._intermediate_factor_data[source_expr._structural_key()] = raw_ic.copy()
+        try:
+            factor.evaluate(tester.products)
+        finally:
+            source_expr._is_intermediate = was_intermediate
+        return factor.table.copy(deep=False)
+
+    factor.evaluate(tester.products)
     return factor.table.copy(deep=False)
 
 
