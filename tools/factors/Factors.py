@@ -238,6 +238,10 @@ class Factor(UniqueObject, FactorExpr):
 
         self._source_freq = freq
 
+        # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
+        _tester = Factor._get_active_tester()
+        start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
+
         # ── 预加载：收集需要的列，每个品种只读一次 ──
         from tools.data.DataMeta import DataMeta
 
@@ -247,7 +251,7 @@ class Factor(UniqueObject, FactorExpr):
         if columns:
             for p in products:
                 dm: DataMeta = getattr(p, freq.name)
-                data = dm.get_and_adjust_cols(columns, copy=False)
+                data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
 
@@ -255,7 +259,8 @@ class Factor(UniqueObject, FactorExpr):
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
-        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded, cache=self._intermediate_factor_data)
+        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
+                                     cache=self._intermediate_factor_data, start_calc_point=start_calc_point)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
@@ -284,9 +289,8 @@ class Factor(UniqueObject, FactorExpr):
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
         # ── 5. 同步到 tester（向后兼容：_DictAccessor 代理 FactorRunResult） ──
-        t = Factor._get_active_tester()
-        if t is not None:
-            r = t._get_result(self)
+        if _tester is not None:
+            r = _tester._get_result(self)
             r.source_table = self.source_table
             r.table = result
         else:

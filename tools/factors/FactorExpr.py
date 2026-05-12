@@ -51,12 +51,14 @@ class EvaluateContext(NamedTuple):
     """因子表达式求值所需的所有上下文参数。
 
     Issue #2: 将 5 种 _evaluate() 签名变体统一为 ctx: EvaluateContext。
+    Issue #3: 新增 start_calc_point，替代 DataMeta 对 _active_tester 的隐式依赖。
     """
     products: Sequence['Product']
     freq: DataFreq
     source: Optional['DataSource'] = None
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
+    start_calc_point: Optional[Any] = None  # pd.Timestamp or None
 
 
 VISUAL_OPERATOR_GROUPS = [
@@ -351,6 +353,7 @@ class FactorExpr:
                 source=kwargs.get('source', None),
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
+                start_calc_point=kwargs.get('start_calc_point', None),
             )
         cache = ctx.cache
         sk = self._structural_key()
@@ -903,7 +906,7 @@ class ColumnRef(FactorExpr):
             col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA
 
             # 使用 get_and_adjust_cols 确保复权列（如 CLOSE_ADJUSTED）被自动计算
-            data = dm.get_and_adjust_cols([col_name], copy=False)
+            data = dm.get_and_adjust_cols([col_name], copy=False, start_calc_point=ctx.start_calc_point)
             if data.empty:
                 continue
             series_dict[p] = data[col_name]
