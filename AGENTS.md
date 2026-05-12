@@ -46,7 +46,24 @@
 - 任何非平凡的架构决策（如"保留而非移除"、"选 A 不选 B"）写 `docs/adr/` 记录。
 - ADR 编号递增：`001-xxx.md`, `002-xxx.md`, ...
 
-## Git + GitHub CLI 自动化工作流
+## 分支策略
+
+```
+master ────────────────────────── (线上唯一分支，稳定版本)
+  │
+  └── feat ───────────────────── (本地持续开发基线，稳定后 merge → master)
+         │
+         ├── fix/issue-1-xxx     (每个 Issue 独立分支，完成后 merge → feat)
+         ├── fix/issue-2-xxx
+         └── ...
+```
+
+- **`master`**：线上唯一分支，永远稳定。只在 `feat` 稳定后 merge。
+- **`feat`**：本地持续开发分支。所有新功能先到 `feat`，稳定后整体 merge 到 `master` 并 push。
+- **`fix/issue-N-xxx`**：每个 GitHub Issue 从 `feat` 切出独立分支。完成后 merge 回 `feat`，删除该分支。
+- **禁止**：直接在 `master` 上 commit；不要推 `feat` 及其他工作分支到远程（远程只保留 `master`）。
+
+### Git + GitHub CLI 自动化工作流
 
 > 只依赖 `git` + `gh`，不需要 GitKraken。
 
@@ -70,12 +87,10 @@ git status
 gh issue view <号码> --comments
 ```
 
-总结：Issue 要求 → 涉及文件 → 修改方案 → 是否需要测试 → 有无不明确之处。
-
 ### 2. 创建工作分支
 
 ```bash
-git checkout main && git pull
+git checkout feat && git pull origin master  # 确保 feat 基于最新 master
 git checkout -b fix/issue-<号码>-<简短描述>
 ```
 
@@ -83,7 +98,7 @@ git checkout -b fix/issue-<号码>-<简短描述>
 
 修改前看状态：`git status && git diff`
 
-修改后必须运行项目检查（根据 `package.json` / `pyproject.toml` / `Makefile` 自动判断）。
+修改后必须运行项目检查（根据项目类型自动判断，如 `pytest`）。
 
 ### 4. 提交 Commit
 
@@ -94,35 +109,16 @@ git add .
 git commit -m "<type>: <描述> (refs #<号码>)"
 ```
 
-### 5. 推送 + 创建 PR
+### 5. 合并回 feat
 
 ```bash
-git push -u origin fix/issue-<号码>-<简短描述>
-gh pr create \
-  --title "<type>: <描述> (closes #<号码>)" \
-  --body "Closes #<号码>
-
-## Summary
-- ...
-
-## Tests
-- ..."
+git checkout feat && git merge fix/issue-<号码>-<简短描述>
+git branch -d fix/issue-<号码>-<简短描述>
 ```
 
-PR body 中 `Closes #<号码>` 会在 PR 合并后自动关闭 Issue。
-
-### 6. 直接关闭 Issue（仅明确要求时）
+全部 Issue 完成后，`feat → master`：
 
 ```bash
-gh issue close <号码> --comment "Fixed in commit <hash>." --reason completed
+git checkout master && git merge feat --no-ff
+git push origin master
 ```
-
-### 安全规则
-
-- ❌ 不 force push
-- ❌ 不擅自删除分支
-- ❌ 不擅自关闭 Issue（PR 中 `Closes #` 自动关闭除外）
-- ❌ 不提交 secrets / token / 密码 / `.env`
-- ✅ 大改动前先解释计划
-- ✅ 每次 commit 前展示 `git diff` 摘要
-- ✅ 测试失败先修复，修不了说明原因
