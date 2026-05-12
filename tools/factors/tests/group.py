@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -139,20 +139,20 @@ def test_by_group_single_factor(
     returns_for_group = align_table_for_group(factor, raw_returns)
     assert not returns_for_group.empty
 
-    table_src = get_factor_table_for_group(tester, factor).copy(deep=False)
-    returns_src = returns_for_group.copy(deep=False)
+    table_src: pd.DataFrame = cast(pd.DataFrame, get_factor_table_for_group(tester, factor).copy(deep=False))
+    returns_src: pd.DataFrame = cast(pd.DataFrame, returns_for_group.copy(deep=False))
     table_src.index = _extract_signal_index(table_src.index)
     returns_src.index = _extract_signal_index(returns_src.index)
     if start_date is not None:
         _sd = _align_ts_to_index(start_date, table_src.index)
-        table_src = table_src[table_src.index >= _sd]
+        table_src = cast(pd.DataFrame, table_src[table_src.index >= _sd])
         _sd = _align_ts_to_index(start_date, returns_src.index)
-        returns_src = returns_src[returns_src.index >= _sd]
+        returns_src = cast(pd.DataFrame, returns_src[returns_src.index >= _sd])
     if end_date is not None:
         _ed = _align_ts_to_index(end_date, table_src.index)
-        table_src = table_src[table_src.index <= _ed]
+        table_src = cast(pd.DataFrame, table_src[table_src.index <= _ed])
         _ed = _align_ts_to_index(end_date, returns_src.index)
-        returns_src = returns_src[returns_src.index <= _ed]
+        returns_src = cast(pd.DataFrame, returns_src[returns_src.index <= _ed])
 
     common_index = table_src.index.intersection(returns_src.index)
     if len(common_index) == 0:

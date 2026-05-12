@@ -18,7 +18,7 @@ import os
 import threading
 import uuid
 import pandas as pd
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
 from tools.factors.Factors import Factor
 from tools.factors.FactorTester import FactorTester, get_factor_tester
@@ -75,7 +75,7 @@ class FactorFamily(UniqueObject, FactorExpr):
     basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
     daily_basepoint: 'str|None' = None       # 日倍频基准点（时间字符串，如 '15:00:00'），None 则用 basepoint
     end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
-    end_session_gap: pd.Timedelta = pd.Timedelta('3hours')  # 盘间间隔阈值
+    end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))  # 盘间间隔阈值
 
     _expr: Optional[FactorExpr] = None
     _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
@@ -152,8 +152,9 @@ class FactorFamily(UniqueObject, FactorExpr):
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
             instance.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
             instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
-            instance.end_session_gap = (end_session_gap if end_session_gap is not None
-                                    else getattr(cls, 'end_session_gap', pd.Timedelta('3hours')))
+            object.__setattr__(instance, 'end_session_gap',
+                               end_session_gap if end_session_gap is not None
+                               else getattr(cls, 'end_session_gap', cast(pd.Timedelta, pd.Timedelta('3hours'))))
 
             # 覆盖默认信号频率
             if _signal_freq != '1d':

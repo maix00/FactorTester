@@ -1,7 +1,10 @@
 import pandas as pd
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 
 from tools.parameters.Parameter import Parameter, ValueSpace
+
+if TYPE_CHECKING:
+    from tools.base.UniqueObject import UniqueObject
 
 class DateOrTimeParam(Parameter):
     def __init__(self, alias: Optional[str] = None,
@@ -49,7 +52,7 @@ class DateOrTimeParam(Parameter):
         import datetime
         return type(value) is datetime.date
 
-    def is_time(self, object: Optional[UniqueObject] = None, value: Optional[Any] = None, **kwargs) -> bool:
+    def is_time(self, object: 'Optional[UniqueObject]' = None, value: Optional[Any] = None, **kwargs) -> bool:
         value = self.get_value(object) if object is not None else self._rectify_value(value, **kwargs)
         assert value is not None, "Either object or value must be provided"
         import datetime

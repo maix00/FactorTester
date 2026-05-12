@@ -29,7 +29,7 @@
 import numpy as np
 import pandas as pd
 import uuid
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, Sequence, cast
 
 from tools import UniqueObject, DataFreq
 from tools.products.Product import Product
@@ -282,8 +282,8 @@ class Factor(UniqueObject, FactorExpr):
         self._data = result
 
         # ── 4. 删除无贡献的列 ──
-        nunique = result.nunique(dropna=True)
-        col_todrop = nunique[nunique <= 1].index.tolist()
+        nunique: pd.Series = cast(pd.Series, result.nunique(dropna=True))
+        col_todrop = cast(pd.Index, cast(pd.Series, nunique[nunique <= 1]).index).tolist()
         result.drop(columns=col_todrop, inplace=True)
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
