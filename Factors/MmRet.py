@@ -7,8 +7,8 @@
 # =============================================================================
 import os, sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.factors import FactorFamily
-from tools.parameters import DataColumnParam, WindowParam
+from tools.parameters import FactorParam
+from tools.factors import FactorFamily, FactorFreqParam
 
 
 class MmRet(FactorFamily):
@@ -17,8 +17,9 @@ class MmRet(FactorFamily):
 
     @staticmethod
     def factor_expr():
-        P = DataColumnParam('P', default_value='CA')
-        return P.delta('$F') / P.shift('$F')
+        P = FactorParam('P', default_value='CA')
+        F = FactorFreqParam
+        return P.delta(F) / P.shift(F)
 
     desc = '收益率动量'
     description = """

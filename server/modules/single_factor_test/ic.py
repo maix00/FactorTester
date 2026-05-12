@@ -240,6 +240,9 @@ def run_ic_test():
         indices = ic_stats_all.index.tolist()
         for i, row in enumerate(rows):
             row['index'] = indices[i]
+            for k, v in list(row.items()):
+                if isinstance(v, float) and (pd.isna(v) or np.isinf(v)):
+                    row[k] = None
 
         ic_decay_results: Dict[str, List[dict]] = {}
         if isinstance(ic_decay_lags, list) and len(ic_decay_lags) > 0:
@@ -309,7 +312,7 @@ def run_ic_test():
                     nlags = min(20, max(1, len(ic_s) // 2 - 1))
                     acf_vals = acf(ic_s.values, nlags=nlags, fft=False)
                     autocorr = [
-                        {'lag': i, 'ac': round(float(v), 6)}
+                        {'lag': i, 'ac': _safe_round(v)}
                         for i, v in enumerate(acf_vals[1:], start=1)
                     ]
                 except Exception:
