@@ -20,8 +20,11 @@ def add_params():
     params = data.get('params', {})
     ff = get_factor_family_instance(factor_family_alias, username=current_user())
     new_params = normalize_param_row(ff, params)
+    new_alias = ff.get_alias(**new_params)
     pl = get_session_params(factor_family_alias, ff)
-    if new_params not in pl:
+    # Dedup by factor alias (same as /replace_params), not by dict equality
+    existing_aliases = {ff.get_alias(**p) for p in pl}
+    if new_alias not in existing_aliases:
         pl.append(new_params)
     save_session_params(factor_family_alias, pl)
     added_display = {}
