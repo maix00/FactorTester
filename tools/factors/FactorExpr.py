@@ -33,7 +33,7 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
+    TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple, Union, cast
 )
 
 from tools.data.DataColumn import DataColumn
@@ -44,6 +44,21 @@ if TYPE_CHECKING:
     from tools.data.DataSource import DataSource
     from tools.data.DataMeta import DataMeta
     from tools.parameters.Parameter import Parameter
+
+
+# ── 求值上下文（统一 evaluate/_evaluate 签名） ──
+class EvaluateContext(NamedTuple):
+    """因子表达式求值所需的所有上下文参数。
+
+    Issue #2: 将 5 种 _evaluate() 签名变体统一为 ctx: EvaluateContext。
+    Issue #3: 新增 start_calc_point，替代 DataMeta 对 _active_tester 的隐式依赖。
+    """
+    products: Sequence['Product']
+    freq: DataFreq
+    source: Optional['DataSource'] = None
+    cache: Optional[Dict[Any, Any]] = None
+    preloaded: Optional[Dict[Any, pd.DataFrame]] = None
+    start_calc_point: Optional[Any] = None  # pd.Timestamp or None
 
 
 VISUAL_OPERATOR_GROUPS = [
@@ -324,18 +339,32 @@ class FactorExpr:
         """将 ParamRef → 对应的 ConstExpr 或 ColumnRef（取决于参数值类型）。"""
         return self
 
-    def evaluate(self, *args, **kwargs) -> pd.DataFrame:
-        """求值：对给定品种集合和数据频率，计算因子值。"""
-        cache = kwargs.get('cache', None)
+    def evaluate(self, *args, ctx: Optional['EvaluateContext'] = None, **kwargs) -> pd.DataFrame:
+        """求值：对给定品种集合和数据频率，计算因子值。
+
+        支持两种调用方式（Issue #2 迁移过渡期兼容）：
+          - 新式: expr.evaluate(ctx=EvaluateContext(products, freq, ...))
+          - 旧式: expr.evaluate(products, freq, source=..., cache=..., preloaded=...)
+        """
+        if ctx is None:
+            ctx = EvaluateContext(
+                products=args[0] if len(args) > 0 else kwargs.get('products'),
+                freq=args[1] if len(args) > 1 else kwargs.get('freq'),
+                source=kwargs.get('source', None),
+                cache=kwargs.get('cache', None),
+                preloaded=kwargs.get('preloaded', None),
+                start_calc_point=kwargs.get('start_calc_point', None),
+            )
+        cache = ctx.cache
         sk = self._structural_key()
         if self._is_intermediate and cache is not None and sk in cache:
             return cache[sk]
-        result = self._evaluate(*args, **kwargs)
+        result = self._evaluate(ctx)
         if self._is_intermediate and cache is not None:
             cache[sk] = result
         return result
     
-    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         """求值：对给定品种集合和数据频率，计算因子值。"""
         raise NotImplementedError
 
@@ -351,31 +380,31 @@ class FactorExpr:
         """
         raise NotImplementedError
 
-    def _iter_intermediate_nodes(self) -> List['FactorExpr']:
-        """按依赖顺序收集中间表达式节点（去重）。
+    def iter_intermediate_nodes(self) -> 'Iterator[FactorExpr]':
+        """遍历表达式树，按后序（子依赖在前）产出所有 _is_intermediate 节点。
 
-        Returns:
-            nodes: 子依赖在前、父节点在后的 intermediate 节点列表。
+        Yields:
+            node: 每个唯一的 intermediate 节点（按 structural_key 去重）。
         """
-        nodes: List[FactorExpr] = []
         seen: set[tuple] = set()
+        stack: List[FactorExpr] = [self]
+        post: List[FactorExpr] = []
 
-        def visit(node: FactorExpr):
+        while stack:
+            node = stack.pop()
             sk = node._structural_key()
             if sk in seen:
-                return
+                continue
             seen.add(sk)
 
-            ops = list(getattr(node, '_operands', ()))
-            for op in ops:
-                visit(op)
+            post.append(node)
+            for opnd in reversed(list(getattr(node, '_operands', ()))):
+                stack.append(opnd)
 
+        # 后序遍历：子节点先产出
+        for node in reversed(post):
             if node._is_intermediate:
-                nodes.append(node)
-
-        visit(self)
-
-        return nodes
+                yield node
 
     def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
@@ -389,7 +418,7 @@ class FactorExpr:
         其中 X_t 的定义中，已定义的 intermediate 用其符号替代。
         否则退化为 _to_latex()。
         """
-        nodes = self._iter_intermediate_nodes()
+        nodes = list(self.iter_intermediate_nodes())
         if not nodes:
             return self._to_latex()
 
@@ -740,8 +769,8 @@ class OperandExpr(FactorExpr):
 
     # ── 通用求值 ──
 
-    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
-        values = [opnd.evaluate(*args, **kwargs) for opnd in self.operands]
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        values = [opnd.evaluate(ctx=ctx) for opnd in self.operands]
         return self._apply_op(values)
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
@@ -841,12 +870,14 @@ class ColumnRef(FactorExpr):
         else:
             return None
 
-    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
         from tools.data.DataMeta import DataMeta
+
+        products = ctx.products
+        freq = ctx.freq
+        source = ctx.source
+        preloaded = ctx.preloaded
 
         series_dict = {}
         for p in products:
@@ -875,7 +906,7 @@ class ColumnRef(FactorExpr):
             col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA
 
             # 使用 get_and_adjust_cols 确保复权列（如 CLOSE_ADJUSTED）被自动计算
-            data = dm.get_and_adjust_cols([col_name], copy=False)
+            data = dm.get_and_adjust_cols([col_name], copy=False, start_calc_point=ctx.start_calc_point)
             if data.empty:
                 continue
             series_dict[p] = data[col_name]
@@ -930,7 +961,7 @@ class ParamRef(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
-    def _evaluate(self, *args, **kwargs) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         raise RuntimeError("ParamRef._evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
 
     def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
@@ -1010,7 +1041,7 @@ class ConstExpr(FactorExpr):
     def is_leaf_ref(self) -> bool:
         return True
 
-    def _evaluate(self, **kwargs) -> Any:
+    def _evaluate(self, ctx: EvaluateContext) -> Any:
         return self.value
 
     @property
@@ -1153,33 +1184,29 @@ class RollingOp(OperandExpr):
         parts.append(p)
         return "_".join(parts)
 
-    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict['FactorExpr', pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
         # 先求值数据 operands（非 window）
-        data_vals = [opnd.evaluate(products=products, freq=freq, source=source,
-                       cache=cache, preloaded=preloaded)
-                     for opnd in self.operands[1:]]
+        data_vals = [opnd.evaluate(ctx=ctx) for opnd in self.operands[1:]]
         
         periods_expr = self.operands[0]
-        if not isinstance(periods_expr, ConstExpr):
-            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source, cache=cache, preloaded=preloaded)
-            assert isinstance(periods_val, ConstExpr)
-            periods_val = periods_val.value
-        else:
+        if isinstance(periods_expr, ConstExpr):
             periods_val = periods_expr.value
-        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=[p for p in products if p in data_vals[0].columns])
+        else:
+            periods_val = periods_expr.evaluate(ctx=ctx)
+            # 非 ConstExpr 求值后可能直接返回标量或 ConstExpr
+            if isinstance(periods_val, ConstExpr):
+                periods_val = periods_val.value
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=ctx.freq, products=[p for p in ctx.products if p in data_vals[0].columns])
         if common:
-            result = self._apply_rolling(common_periods, *data_vals, freq=freq)  # type: ignore[arg-type]
+            result = self._apply_rolling(common_periods, *data_vals, freq=ctx.freq)  # type: ignore[arg-type]
         else:
             # 按照有相同的 periods 的产品分组，分别 shift 后再合并
             unique_periods = set(product_periods.values())
             periods_products_map = {p: [product for product, period in product_periods.items() if period == p] for p in unique_periods}
             result_parts = []
             for p, products_group in periods_products_map.items():
-                result_parts.append(self._apply_rolling(p, *[dv[products_group] for dv in data_vals], freq=freq))  # type: ignore[arg-type]
+                result_parts.append(self._apply_rolling(p, *[dv[products_group] for dv in data_vals], freq=ctx.freq))  # type: ignore[arg-type]
             result = pd.concat(result_parts, axis=1)
 
         return result
@@ -1206,21 +1233,17 @@ class ShiftOp(OperandExpr):
 
     # ── evaluate：覆盖 OperandExpr 默认实现 ──
 
-    def _evaluate(self, products: Sequence['Product'], freq: DataFreq,
-                 source: Optional['DataSource'] = None,
-                 cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-                 preloaded: Optional[Dict[Any, pd.DataFrame]] = None, *args, **kwargs) -> pd.DataFrame:
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
 
         # 先求 operand（DataFrame）
-        operand_val = self.operands[1].evaluate(products=products, freq=freq, source=source,
-                            cache=cache, preloaded=preloaded)
+        operand_val = self.operands[1].evaluate(ctx=ctx)
 
         periods_expr = self.operands[0]
         if not isinstance(periods_expr, ConstExpr):
-            periods_val = periods_expr.evaluate(products=products, freq=freq, source=source, cache=cache, preloaded=preloaded)
+            periods_val = periods_expr.evaluate(ctx=ctx)
         else:
             periods_val = periods_expr.value
-        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=freq, products=[p for p in products if p in operand_val.columns])
+        common, common_periods, product_periods = _resolve_windows(window=periods_val, freq=ctx.freq, products=[p for p in ctx.products if p in operand_val.columns])
         if common:
             result = operand_val.shift(int(common_periods))
         else:
@@ -1850,18 +1873,10 @@ class TermStructureOp(OperandExpr):
         column = self._column_name(self.operands[1])
         return 0, 1, depth, column
 
-    def _evaluate(
-        self,
-        products: Sequence['Product'],
-        freq: DataFreq,
-        source: Optional['DataSource'] = None,
-        cache: Optional[Dict[FactorExpr, pd.DataFrame]] = None,
-        preloaded: Optional[Dict[Any, pd.DataFrame]] = None,
-        *args,
-        **kwargs,
-    ) -> pd.DataFrame:
-        del source, cache, preloaded, args, kwargs
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         near_rank, far_rank, depth, column = self._term_param_values()
+        products = ctx.products
+        freq = ctx.freq
         series_dict = {}
         for product in products:
             supports_term_structure = getattr(product, 'supports_term_structure', None)

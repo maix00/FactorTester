@@ -253,8 +253,10 @@ class DataMeta(UniqueObject):
     def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
         """
         获取 DataFrame（通过 IdleResourceManager 缓存 + 自动回收）。
-        start_calc_point: 可选 Timestamp（带时区），为 None 时不进行截断。
+        start_calc_point: 可选 Timestamp（带时区），为 None 时不截断。
         copy=True 时返回副本，避免外部修改影响缓存。
+
+        Issue #3: start_calc_point 必须显式传入，不再隐式从 _active_tester 读取。
         """
         if 'data' in kwargs and kwargs['data'] is not None:
             data = kwargs['data']
@@ -263,8 +265,6 @@ class DataMeta(UniqueObject):
 
         if start_calc_point is not None:
             data = self._filter_data_by_start_calc_point(data, time=start_calc_point)
-        else:
-            data = self._filter_data_by_start_calc_point(data)
         return data.copy() if copy else data
     
     def get_level_index(self, level: Any, **kwargs) -> pd.Index:
@@ -281,38 +281,19 @@ class DataMeta(UniqueObject):
             level = next((lvl for lvl in index.names if str(lvl).split('@')[-1] == DataFreq(level).name), None)
             return index.get_level_values(level)
 
-    def _process_start_calc_point(self, object: Optional[UniqueObject] = None, **kwargs) -> Tuple[Optional[Any], Optional[bool]]:
-        # 优先从 ContextVar 活跃 FactorTester 读取 start_calc_point（并发安全）
-        try:
-            from tools.factors.FactorTester import _active_tester
-            tester = _active_tester.get()
-            if tester is not None and tester.start_calc_point is not None:
-                ts = pd.Timestamp(tester.start_calc_point)
-                time_is_date = (ts.hour == 0 and ts.minute == 0 and ts.second == 0)
-                return ts, time_is_date
-        except ImportError:
-            pass
-        # 兜底：从 kwargs 读取显式传入的 StartCalcPointParam
-        from tools.parameters import DateOrTimeParam
-        StartCalcPointParam = kwargs.get('StartCalcPointParam', None)
-        if StartCalcPointParam is not None:
-            assert isinstance(StartCalcPointParam, DateOrTimeParam)
-            time = StartCalcPointParam.default_value
-            time_is_date = StartCalcPointParam.is_date(object=StartCalcPointParam, value=time)
-            return time, time_is_date
-        return None, None
-    
     def _filter_data_by_start_calc_point(self, data: pd.DataFrame, time_col: Optional[str] = None,
                                         time: Optional[Any] = None, time_is_date: Optional[bool] = None,
-                                        copy: bool = False, **kwargs) -> pd.DataFrame:
+                                        copy: bool = False) -> pd.DataFrame:
         """
         按起始时间截断数据。
         time 可是带时区的 Timestamp，与索引比较时自动对齐时区。
+
+        Issue #3: time 参数必须显式传入，不再通过 _active_tester 隐式获取。
         """
         if data.empty:
             return data
-        if time is None or time_is_date is None:
-            time, time_is_date = self._process_start_calc_point(object=self, **kwargs)
+        if time is None:
+            return data.copy() if copy else data
         if time is not None:
             ts = pd.Timestamp(time)
             if time_col is None:
@@ -350,14 +331,14 @@ class DataMeta(UniqueObject):
     def _check_is_adjusted(col: str) -> bool:
         return col.endswith("_ADJUSTED")
 
-    def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True) -> pd.DataFrame:
+    def get_and_adjust_cols(self, cols: List[str]|str, copy: bool = True, start_calc_point: Optional[Any] = None) -> pd.DataFrame:
         if not isinstance(cols, list):
             cols = [cols]
         cols = list(set(cols))
 
         from tools.products.Futures import Futures
 
-        df = self.get_data(copy=copy)
+        df = self.get_data(copy=copy, start_calc_point=start_calc_point)
         if df.empty:
             return df
         if not isinstance(self.object, Futures):

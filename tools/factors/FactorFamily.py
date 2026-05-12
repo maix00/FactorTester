@@ -194,23 +194,20 @@ class FactorFamily(UniqueObject, FactorExpr):
 
     def _normalize_param_kwargs(self, **kwargs) -> dict:
         """
-        归一化参数别名：当输入键不存在时，尝试在带/不带 '$' 形式间互转。
+        参数名校验：F 和 $F 是完全独立的参数，不做任何自动转换。
 
-        例如：F -> $F，Rev -> $Rev。
+        Issue #5: 取消 F→$F/Rev→$Rev 补全，调用方负责使用正确的参数名。
         """
         normalized = {}
         for key, value in kwargs.items():
-            target_key = key
-            if key == 'Rev':
-                target_key = '$Rev'
             if key not in self.params_dict:
-                if key.startswith('$') and key[1:] in self.params_dict:
-                    target_key = key[1:]
-                elif not key.startswith('$') and f'${key}' in self.params_dict:
-                    target_key = f'${key}'
-            if target_key in normalized and normalized[target_key] != value:
-                raise ValueError(f"Conflicting values for parameter {target_key}")
-            normalized[target_key] = value
+                raise ValueError(
+                    f"Unknown parameter '{key}' for factor family '{self.alias}'. "
+                    f"Available: {list(self.params_dict.keys())}"
+                )
+            if key in normalized and normalized[key] != value:
+                raise ValueError(f"Conflicting values for parameter {key}")
+            normalized[key] = value
         return normalized
 
     def change_param_default_value(self, **kwargs):
@@ -331,14 +328,14 @@ class FactorFamily(UniqueObject, FactorExpr):
             factor_alias = self.get_alias(**current_params)
 
             # 提取元参数
-            signal_freq = current_params.get('$F', current_params.get('F', '1d'))
-            is_reversed: bool = current_params.get('$Rev', current_params.get('Rev', False))
+            signal_freq = current_params.get('$F', '1d')
+            is_reversed: bool = current_params.get('$Rev', False)
 
             # 构建 param_values（排除已提取的元参数）
             param_values = {
                 p.alias: current_params[p.alias]
                 for p in self.params
-                if p.alias in current_params and p.alias not in ('$F', 'F', '$Rev', 'Rev')
+                if p.alias in current_params and p.alias not in ('$F', '$Rev')
             }
 
             # 解析表达式树：将 ParamRef 替换为实际值 → func_expr（纯因子逻辑，不含对齐）
@@ -367,7 +364,7 @@ class FactorFamily(UniqueObject, FactorExpr):
             if return_freq is not None:
                 t = Factor._get_active_tester()
                 if t is not None:
-                    t.factor_return_freqs[factor] = ReturnFreqParam._value_space.rectify(return_freq)
+                    t._get_result(factor).return_freq = ReturnFreqParam._value_space.rectify(return_freq)
             factors.append(factor)
 
         self.factors = factors

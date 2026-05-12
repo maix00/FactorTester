@@ -238,6 +238,10 @@ class Factor(UniqueObject, FactorExpr):
 
         self._source_freq = freq
 
+        # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
+        _tester = Factor._get_active_tester()
+        start_calc_point = _tester.start_calc_point if _tester is not None and hasattr(_tester, 'start_calc_point') else None
+
         # ── 预加载：收集需要的列，每个品种只读一次 ──
         from tools.data.DataMeta import DataMeta
 
@@ -247,7 +251,7 @@ class Factor(UniqueObject, FactorExpr):
         if columns:
             for p in products:
                 dm: DataMeta = getattr(p, freq.name)
-                data = dm.get_and_adjust_cols(columns, copy=False)
+                data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
 
@@ -255,7 +259,8 @@ class Factor(UniqueObject, FactorExpr):
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
-        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded, cache=self._intermediate_factor_data)
+        result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
+                                     cache=self._intermediate_factor_data, start_calc_point=start_calc_point)
 
         # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
@@ -283,11 +288,11 @@ class Factor(UniqueObject, FactorExpr):
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
-        # ── 5. 同步到 tester 字典（向后兼容 FactorTester 读取） ──
-        t = Factor._get_active_tester()
-        if t is not None:
-            t.factor_source_tables[self] = self.source_table
-            t.factor_tables[self] = result
+        # ── 5. 同步到 tester（向后兼容：_DictAccessor 代理 FactorRunResult） ──
+        if _tester is not None:
+            r = _tester._get_result(self)
+            r.source_table = self.source_table
+            r.table = result
         else:
             self._data = result
 
@@ -303,30 +308,19 @@ class Factor(UniqueObject, FactorExpr):
         若不同 structural_key 的节点使用了相同的 intermediate name，直接报错。
         """
         self._intermediate_alias_index.clear()
-        seen: Set[Tuple] = set()
-        stack: List[FactorExpr] = [self._expr]
 
-        while stack:
-            node = stack.pop()
+        for node in self._expr.iter_intermediate_nodes():
+            name = node._intermediate_name
             sk = node._structural_key()
-            if sk in seen:
-                continue
-            seen.add(sk)
-
-            if getattr(node, '_is_intermediate', False):
-                name = getattr(node, '_intermediate_name', None)
-                if name and sk in self._intermediate_factor_data:
-                    existing_sk = self._intermediate_alias_index.get(name)
-                    if existing_sk is not None and existing_sk != sk:
-                        raise ValueError(
-                            f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
-                            f"不能再用 structural_key={sk} 注册。"
-                            f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
-                        )
-                    self._intermediate_alias_index[name] = sk
-
-            for opnd in reversed(list(getattr(node, '_operands', ()))):
-                stack.append(opnd)
+            if name and sk in self._intermediate_factor_data:
+                existing_sk = self._intermediate_alias_index.get(name)
+                if existing_sk is not None and existing_sk != sk:
+                    raise ValueError(
+                        f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
+                        f"不能再用 structural_key={sk} 注册。"
+                        f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
+                    )
+                self._intermediate_alias_index[name] = sk
     
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """

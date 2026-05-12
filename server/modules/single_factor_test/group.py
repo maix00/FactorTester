@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester, _signal_time
+from tools.factors.FactorRunResult import FactorRunResult
 from tools.data.DataFreq import DataFreq
 from . import sft_bp
 import server.services.runtime_state as runtime_state
@@ -96,9 +97,10 @@ def run_group_test():
 
         # ─── 如果是多周期对比 ───
         if return_freqs and isinstance(return_freqs, list) and len(return_freqs) > 0:
-            # Issue #2: Save original frequency state before multi-horizon loop
-            _saved_factor_freq = tester.factor_return_freqs.get(factor)
-            _saved_factor_returns = dict(tester.factor_returns) if hasattr(tester, 'factor_returns') else {}
+            # Save original FactorRunResult state before multi-horizon loop
+            _saved = factor in tester.results
+            _saved_freq = tester.results.get(factor, FactorRunResult()).return_freq
+            _saved_returns = tester.results.get(factor, FactorRunResult()).returns.copy() if _saved else pd.DataFrame()
             
             multi_horizon_results = []
             for rf_str in return_freqs:
@@ -106,16 +108,18 @@ def run_group_test():
                     freq = DataFreq(rf_str) if rf_str else None
                 except Exception:
                     freq = None
+                r = tester._get_result(factor)
                 if freq is not None:
-                    tester.factor_return_freqs[factor] = freq
+                    r.return_freq = freq
                 else:
-                    tester.factor_return_freqs.pop(factor, None)
-                tester.factor_returns.pop(factor, None)
+                    r.return_freq = None
+                r.returns = pd.DataFrame()
                 _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
                     factors=factor, n_groups=n_groups, time_range=time_range,
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
                 )
+                # ... (computation logic unchanged) ...
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
                 _gross = getattr(tester, '_last_group_gross_returns_np', None)
                 gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
@@ -146,16 +150,10 @@ def run_group_test():
                     'report': report_df.to_dict(orient='index') if not report_df.empty else {},
                 })
             
-            # Issue #2: Restore original frequency state after multi-horizon loop
-            if _saved_factor_freq is not None:
-                tester.factor_return_freqs[factor] = _saved_factor_freq
-            else:
-                tester.factor_return_freqs.pop(factor, None)
-            # Restore factor_returns to saved state (without current factor's multi-horizon residue)
-            if _saved_factor_returns and factor in _saved_factor_returns:
-                tester.factor_returns[factor] = _saved_factor_returns[factor]
-            elif factor in tester.factor_returns:
-                tester.factor_returns.pop(factor)
+            # Restore original FactorRunResult state after multi-horizon loop
+            if factor in tester.results:
+                tester.results[factor].return_freq = _saved_freq
+                tester.results[factor].returns = _saved_returns
             
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups})
 

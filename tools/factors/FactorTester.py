@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Optional, Sequence, Tuple, Callable, Any, Set,
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.factors import Factor, FactorFamily
+from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
 from tools import UniqueObject, DataColumn, DataFreq
 from tools.base.User import User
@@ -167,13 +168,15 @@ class FactorTester(UniqueObject):
             self.sync_signal_index_replaced: Optional[pd.Index] = None
             self._sync_lock = threading.Lock()
             # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
-            self.factor_source_tables: Dict['Factor', pd.DataFrame] = {}
-            self.factor_tables: Dict['Factor', pd.DataFrame] = {}
-            self.factor_returns: Dict['Factor', pd.DataFrame] = {}
-            self.factor_return_freqs: Dict['Factor', Any] = {}
-            self.factor_ic_series: Dict['Factor', pd.Series] = {}
-            self.factor_ic_stats: Dict['Factor', pd.Series] = {}
-            self.factor_reports: Dict['Factor', pd.DataFrame] = {}
+            self.results: Dict['Factor', FactorRunResult] = {}
+            # ── 向后兼容 dict 代理（Issue #1 迁移完成后删除） ──
+            self.factor_source_tables = _DictAccessor(self.results, 'source_table')
+            self.factor_tables = _DictAccessor(self.results, 'table')
+            self.factor_returns = _DictAccessor(self.results, 'returns')
+            self.factor_return_freqs = _DictAccessor(self.results, 'return_freq')
+            self.factor_ic_series = _DictAccessor(self.results, 'ic_series')
+            self.factor_ic_stats = _DictAccessor(self.results, 'ic_stats')
+            self.factor_reports = _DictAccessor(self.results, 'reports')  # 已废弃
             if time_range is not None:
                 self.update_time_range(time_range)
             else:
@@ -209,14 +212,8 @@ class FactorTester(UniqueObject):
                 f.delete()
             except Exception:
                 pass
-        # 清空 per-factor 缓存 dict
-        self.factor_source_tables.clear()
-        self.factor_tables.clear()
-        self.factor_returns.clear()
-        self.factor_return_freqs.clear()
-        self.factor_ic_series.clear()
-        self.factor_ic_stats.clear()
-        self.factor_reports.clear()
+        # 清空 per-factor 缓存
+        self.results.clear()
         self.factors.clear()
         self.products = set()
         self.all_products = set()
@@ -234,6 +231,12 @@ class FactorTester(UniqueObject):
             self.logger.info(f"FactorTester {self.alias} deleted")
         except Exception:
             pass
+
+    def _get_result(self, factor: 'Factor') -> FactorRunResult:
+        """获取或创建 factor 对应的 FactorRunResult（公用的访问入口）。"""
+        if factor not in self.results:
+            self.results[factor] = FactorRunResult()
+        return self.results[factor]
 
     def update_time_range(self, time_range: Tuple):
         """更新测试时间区间并记录日志。start_calc_point 与 start_date 为同一概念。"""
@@ -355,6 +358,61 @@ class FactorTester(UniqueObject):
             **kwargs,
         )
     
+
+# ── 向后兼容：映射到 FactorRunResult 字段的 dict 代理 ──
+class _DictAccessor:
+    """代理 self.results[factor].field，提供完整的 dict 接口供旧代码兼容。
+
+    Issue #1 迁移完成后可删除。
+    """
+
+    def __init__(self, results: Dict, field: str) -> None:
+        self._results = results
+        self._field = field
+
+    def _ensure(self, factor: Any) -> Any:
+        if factor not in self._results:
+            self._results[factor] = FactorRunResult()
+        return self._results[factor]
+
+    def __getitem__(self, factor: Any) -> Any:
+        return getattr(self._results.get(factor, FactorRunResult()), self._field)
+
+    def __setitem__(self, factor: Any, value: Any) -> None:
+        setattr(self._ensure(factor), self._field, value)
+
+    def get(self, factor: Any, default: Any = None) -> Any:
+        if factor in self._results:
+            return getattr(self._results[factor], self._field)
+        return default
+
+    def pop(self, factor: Any, default: Any = None) -> Any:
+        result = self._results.get(factor)
+        if result is None:
+            return default
+        old = getattr(result, self._field)
+        setattr(result, self._field, default)
+        return old
+
+    def clear(self) -> None:
+        for r in self._results.values():
+            setattr(r, self._field, None)
+
+    def __contains__(self, factor: Any) -> bool:
+        return factor in self._results
+
+    def items(self):
+        return ((f, getattr(r, self._field)) for f, r in self._results.items())
+
+    def __iter__(self):
+        return iter(self._results)
+
+    def __len__(self) -> int:
+        return len(self._results)
+
+    def __repr__(self) -> str:
+        return f"<_DictAccessor field={self._field} len={len(self._results)}>"
+
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
     """

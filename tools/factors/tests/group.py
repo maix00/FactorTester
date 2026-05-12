@@ -21,17 +21,18 @@ def ensure_factor_returns(
     factor: Factor,
     returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
 ) -> pd.DataFrame:
-    """Ensure tester.factor_returns has the raw RE returns table for factor."""
-    desired_freq = tester.factor_return_freqs.get(factor)
+    """Ensure tester.results[factor].returns has the raw RE returns table for factor."""
+    r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
+    desired_freq = r.return_freq if r is not None else None
     if desired_freq is None:
         desired_freq = factor.freq
     desired_key = getattr(desired_freq, "name", None) or str(desired_freq)
     returns_col_key = returns_col.value.name if isinstance(returns_col, FactorNextPeriodReturns) else str(returns_col)
 
-    cached = tester.factor_returns.get(factor, pd.DataFrame())
+    cached = r.returns if r is not None else pd.DataFrame()
     cached_freq = getattr(factor, "_return_freq_cached", None)
     cached_col = getattr(factor, "_return_col_cached", None)
-    freq_matches = cached_freq == desired_key or (cached_freq is None and factor not in tester.factor_return_freqs)
+    freq_matches = cached_freq == desired_key or (cached_freq is None and (r is None or r.return_freq is None))
     col_matches = cached_col == returns_col_key or cached_col is None
     if isinstance(cached, pd.DataFrame) and not cached.empty and freq_matches and col_matches:
         object.__setattr__(factor, "_return_freq_cached", desired_key)
@@ -66,7 +67,8 @@ def ensure_factor_returns(
     raw_returns = ic_factor.get_intermediate("RE")
     if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
         raise ValueError(f"{factor.alias}: 无法生成收益率数据")
-    tester.factor_returns[factor] = raw_returns
+    if r is not None:
+        r.returns = raw_returns
     object.__setattr__(factor, "_return_freq_cached", desired_key)
     object.__setattr__(factor, "_return_col_cached", returns_col_key)
     return raw_returns
@@ -408,7 +410,8 @@ def test_by_group_single_factor(
         if plot_show:
             plt.show()
 
-    tester.factor_reports[factor] = report_df
+    if hasattr(tester, '_get_result'):
+        tester._get_result(factor).returns = returns_dict
     return products_dict, returns_dict, report_df, cumulative_returns_np, index_list
 
 
