@@ -304,30 +304,19 @@ class Factor(UniqueObject, FactorExpr):
         若不同 structural_key 的节点使用了相同的 intermediate name，直接报错。
         """
         self._intermediate_alias_index.clear()
-        seen: Set[Tuple] = set()
-        stack: List[FactorExpr] = [self._expr]
 
-        while stack:
-            node = stack.pop()
+        for node in self._expr.iter_intermediate_nodes():
+            name = node._intermediate_name
             sk = node._structural_key()
-            if sk in seen:
-                continue
-            seen.add(sk)
-
-            if getattr(node, '_is_intermediate', False):
-                name = getattr(node, '_intermediate_name', None)
-                if name and sk in self._intermediate_factor_data:
-                    existing_sk = self._intermediate_alias_index.get(name)
-                    if existing_sk is not None and existing_sk != sk:
-                        raise ValueError(
-                            f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
-                            f"不能再用 structural_key={sk} 注册。"
-                            f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
-                        )
-                    self._intermediate_alias_index[name] = sk
-
-            for opnd in reversed(list(getattr(node, '_operands', ()))):
-                stack.append(opnd)
+            if name and sk in self._intermediate_factor_data:
+                existing_sk = self._intermediate_alias_index.get(name)
+                if existing_sk is not None and existing_sk != sk:
+                    raise ValueError(
+                        f"中间因子名称冲突：'{name}' 已被 structural_key={existing_sk} 注册，"
+                        f"不能再用 structural_key={sk} 注册。"
+                        f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
+                    )
+                self._intermediate_alias_index[name] = sk
     
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """

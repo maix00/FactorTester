@@ -351,31 +351,31 @@ class FactorExpr:
         """
         raise NotImplementedError
 
-    def _iter_intermediate_nodes(self) -> List['FactorExpr']:
-        """按依赖顺序收集中间表达式节点（去重）。
+    def iter_intermediate_nodes(self) -> 'Iterator[FactorExpr]':
+        """遍历表达式树，按后序（子依赖在前）产出所有 _is_intermediate 节点。
 
-        Returns:
-            nodes: 子依赖在前、父节点在后的 intermediate 节点列表。
+        Yields:
+            node: 每个唯一的 intermediate 节点（按 structural_key 去重）。
         """
-        nodes: List[FactorExpr] = []
         seen: set[tuple] = set()
+        stack: List[FactorExpr] = [self]
+        post: List[FactorExpr] = []
 
-        def visit(node: FactorExpr):
+        while stack:
+            node = stack.pop()
             sk = node._structural_key()
             if sk in seen:
-                return
+                continue
             seen.add(sk)
 
-            ops = list(getattr(node, '_operands', ()))
-            for op in ops:
-                visit(op)
+            post.append(node)
+            for opnd in reversed(list(getattr(node, '_operands', ()))):
+                stack.append(opnd)
 
+        # 后序遍历：子节点先产出
+        for node in reversed(post):
             if node._is_intermediate:
-                nodes.append(node)
-
-        visit(self)
-
-        return nodes
+                yield node
 
     def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
@@ -389,7 +389,7 @@ class FactorExpr:
         其中 X_t 的定义中，已定义的 intermediate 用其符号替代。
         否则退化为 _to_latex()。
         """
-        nodes = self._iter_intermediate_nodes()
+        nodes = list(self.iter_intermediate_nodes())
         if not nodes:
             return self._to_latex()
 
