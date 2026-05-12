@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -58,7 +58,7 @@ def timestamp_or_none(value: Any) -> pd.Timestamp | None:
     value = scalar(value)
     if pd.isna(value):
         return None
-    return pd.Timestamp(value)
+    return cast(pd.Timestamp, pd.Timestamp(value))
 
 
 def build_price_viewer_tree() -> CategoryTree:

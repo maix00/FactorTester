@@ -33,7 +33,7 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple, Union, cast
+    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple, Optional, Sequence, Set, Tuple, Union, cast
 )
 
 from tools.data.DataColumn import DataColumn
@@ -348,8 +348,8 @@ class FactorExpr:
         """
         if ctx is None:
             ctx = EvaluateContext(
-                products=args[0] if len(args) > 0 else kwargs.get('products'),
-                freq=args[1] if len(args) > 1 else kwargs.get('freq'),
+                products=cast('Sequence[Product]', args[0] if len(args) > 0 else kwargs.get('products')),
+                freq=cast(DataFreq, args[1] if len(args) > 1 else kwargs.get('freq')),
                 source=kwargs.get('source', None),
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
@@ -387,8 +387,8 @@ class FactorExpr:
             node: 每个唯一的 intermediate 节点（按 structural_key 去重）。
         """
         seen: set[tuple] = set()
-        stack: List[FactorExpr] = [self]
-        post: List[FactorExpr] = []
+        stack: list[FactorExpr] = [self]
+        post: list[FactorExpr] = []
 
         while stack:
             node = stack.pop()
@@ -1121,7 +1121,7 @@ class RollingOp(OperandExpr):
 
         if self.op in self._OP_MAP:
             func = self._OP_MAP[self.op]
-            return dfs[0].apply(func, axis=0, args=(window,))
+            return cast(pd.DataFrame, dfs[0].apply(func, axis=0, args=(window,)))
 
         # 二元
         if self.op in ('rolling_corr', 'rolling_cov'):
@@ -1825,7 +1825,7 @@ class TermStructureOp(OperandExpr):
         days = pd.DatetimeIndex(ts)
         if days.tz is not None:
             days = days.tz_localize(None)
-        return days.normalize()
+        return getattr(days, 'normalize')()
 
     @staticmethod
     def _const_operand_value(expr: FactorExpr) -> Any:
@@ -1989,7 +1989,7 @@ def signal_align(
     basepoint: 'str|Callable' = 'last',
     daily_basepoint: 'str|None' = None,
     end_session_skip: bool = True,
-    end_session_gap: pd.Timedelta = pd.Timedelta('3hours'),
+    end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours')),
 ) -> pd.DataFrame:
     """
     将原始数据对齐到等间隔信号时间点。
@@ -2029,13 +2029,14 @@ def signal_align(
     # 确定各组的基准点位置
     if freq_dc.is_day_multiple and daily_basepoint is not None:
         try:
-            base_time = pd.Timestamp(daily_basepoint).time()
+            bp_ts = pd.Timestamp(daily_basepoint)
+            base_time = getattr(bp_ts, 'time')()
         except Exception:
             raise ValueError(
                 f"Invalid time basepoint '{daily_basepoint}'. "
                 f"Must be a time string like '09:01:00' or '15:00:00'")
         series = data.groupby(idx_name).transform(
-            lambda x: pd.DatetimeIndex(x.index.get_level_values(-1)).time == base_time)
+            lambda x: getattr(pd.DatetimeIndex(x.index.get_level_values(-1)), 'time') == base_time)
     elif isinstance(bp, str):
         bp_lower = bp.lower()
         if bp_lower == 'last':
@@ -2053,28 +2054,30 @@ def signal_align(
     assert isinstance(series, pd.Series) and series.dtype == bool, \
         "basepoint function must return a boolean Series"
 
-    basepoint_pos = series.reset_index(drop=True).index[series]
+    bp_series: pd.Series = cast(pd.Series, series)
+    basepoint_pos: pd.Series = cast(pd.Series, bp_series.reset_index(drop=True).index[bp_series])
 
     # 从基准点按 multiple 间隔取信号点
     if end_skip and isinstance(freq_dc.value, pd.Timedelta) and freq_dc.value < pd.Timedelta('1day'):
         last_col_name = index_names[-1]
-        last_col = data.index.get_level_values(last_col_name).to_series().reset_index(drop=True)
-        end_session_pos = last_col[last_col.shift(-1) - last_col >= end_gap].index
-        signal_map_mask = basepoint_pos.isin({
+        last_col: pd.Series = cast(pd.Series, data.index.get_level_values(last_col_name).to_series().reset_index(drop=True))
+        _last_col_filtered: pd.Series = cast(pd.Series, last_col[last_col.shift(-1) - last_col >= end_gap])
+        end_session_pos: pd.Index = cast(pd.Index, _last_col_filtered.index)
+        signal_map_mask = cast(pd.Series, basepoint_pos.isin({
             i
             for start, end in zip(
-                [0] + (end_session_pos[:-1].values + 1).tolist(),
+                [0] + (cast(np.ndarray, end_session_pos[:-1].values) + 1).tolist(),
                 end_session_pos
             )
             for i in range(start + multiple - 1, end + 1, multiple)
             if start + multiple - 1 <= end
-        })
+        }))
     else:
-        idx = basepoint_pos.to_series().reset_index(drop=True).index
-        signal_map_mask = (idx % multiple == multiple - 1)
+        idx: pd.Series = cast(pd.Series, basepoint_pos.to_series().reset_index(drop=True).index)
+        signal_map_mask = cast(pd.Series, idx % multiple == multiple - 1)
 
-    signal_pos = basepoint_pos[signal_map_mask]
-    signal_map = idx_series.index.isin(signal_pos)
+    signal_pos: pd.Series = cast(pd.Series, basepoint_pos[cast(pd.Series, signal_map_mask)])
+    signal_map = cast(pd.Series, idx_series.index.isin(signal_pos))
 
     # 构建新的索引
     signal_name = f'_SIGNAL@{freq_dc.name}'
@@ -2094,7 +2097,7 @@ def signal_align(
         names=left_names + [signal_name] + right_names
     ).dropna()
 
-    result = data[signal_map].copy()
+    result = cast(pd.DataFrame, data[cast(pd.Series, signal_map)]).copy()
     result.index = new_index
     return result
 
@@ -2126,7 +2129,7 @@ class SignalAlign(CompositeExpr):
                  basepoint: 'str|Callable' = 'last',
                  daily_basepoint: 'str|None' = None,
                  end_session_skip: bool = True,
-                 end_session_gap: pd.Timedelta = pd.Timedelta('3hours')):
+                 end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))):
         super().__init__('SIGNAL_ALIGN', operand)
         self.signal_freq = signal_freq
         self.basepoint = basepoint
@@ -2151,7 +2154,7 @@ class SignalAlign(CompositeExpr):
             basepoint=self.basepoint,
             daily_basepoint=self.daily_basepoint,
             end_session_skip=self.end_session_skip,
-            end_session_gap=self.end_session_gap,
+            end_session_gap=cast(pd.Timedelta, self.end_session_gap),
         )
 
     # ── 展示 ──

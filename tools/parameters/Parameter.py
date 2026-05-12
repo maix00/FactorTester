@@ -13,7 +13,7 @@
 # 避免了多因子同时使用同一参数对象时的数据污染。
 # =============================================================================
 import pandas as pd
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, cast
 from weakref import WeakKeyDictionary
 
 from tools import UniqueObject
@@ -93,12 +93,12 @@ class ValueSpace:
         return cls(
             contains=contains,
             rectify=pd.Timedelta,
-            alias=lambda v: _format_timedelta(pd.Timedelta(v))
+            alias=lambda v: _format_timedelta(cast(pd.Timedelta, pd.Timedelta(v)))
         )
 
 
 def _format_timedelta(td: pd.Timedelta) -> str:
-    c = td.components
+    c = getattr(td, 'components')
     units = {'days': 'd', 'hours': 'h', 'minutes': 'm', 'seconds': 's',
              'milliseconds': 'ms', 'microseconds': 'us', 'nanoseconds': 'ns'}
     return ''.join(f"{v}{units[k]}" for k, v in c._asdict().items() if v > 0) or '0'

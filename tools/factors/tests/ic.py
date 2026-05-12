@@ -66,15 +66,17 @@ def run_ic_for_factor(
     ic_factor.evaluate(tester.products, source_freq=sample_factor._source_freq)
 
     ic_series = cast(pd.Series, ic_factor.table["IC"])
+    if not isinstance(ic_series, pd.Series):
+        ic_series = cast(pd.Series, pd.Series(ic_series))
 
     if tester.start_date is not None and len(ic_series) > 0:
-        idx_ts = ic_series.index.get_level_values(-1)
+        idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
         ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
-        ic_series = ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)]
+        ic_series = cast(pd.Series, ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)])
     if tester.end_date is not None and len(ic_series) > 0:
-        idx_ts = ic_series.index.get_level_values(-1)
+        idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
         ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
-        ic_series = ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)]
+        ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
 
     re_table = ic_factor.get_intermediate("RE")
     fe_table = ic_factor.get_intermediate("FE")
@@ -83,5 +85,5 @@ def run_ic_for_factor(
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()
     fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
 
-    return factor_list, ic_series, stats, re_table, fe_table
+    return factor_list, ic_series, cast(pd.Series, stats), cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table)
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+from typing import List, cast
 
+from tools.base.UniqueObject import UniqueObject
+from tools.products.Futures import FuturesContract
 import Settings as Settings
 
 
@@ -188,26 +191,27 @@ def build_submission_tree():
         futures = Settings.get_all_products()
 
         contract_to_future = map_contracts_to_futures(
-            contracts,
+            cast(List[FuturesContract], contracts),
             futures,
             contract_key=lambda c: _contract_code_exchange(c, exchange_map),
             futures_key=_future_code_exchange,
         )
 
+        contracts_fc = cast(List[FuturesContract], contracts)
         sector_category = make_contract_category_from_futures_category(
             CNFuturesSectorCategory,
             CNFuturesContract,
-            contracts,
+            contracts_fc,
             contract_to_future,
         )
         daynight_category = make_contract_category_from_futures_category(
             CNFuturesDayNightTimeCategory,
             CNFuturesContract,
-            contracts,
+            contracts_fc,
             contract_to_future,
         )
         contract_tree = (sector_category * daynight_category).get_tree_with_parents(
-            all_objects=contracts,
+            all_objects=cast(List[UniqueObject], contracts),
             ancester=Product,
         )
         return combine_trees(product_tree, contract_tree).tree

@@ -2,7 +2,9 @@
 因子相关性矩阵
   POST /run_mfa_correlation  — Spearman + Pearson 相关性矩阵
 """
+from __future__ import annotations
 import math, traceback
+from typing import Any, Optional, cast
 import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester
@@ -44,19 +46,19 @@ def run_mfa_correlation():
         _token = _active_tester.set(tester)
 
         # 收集每个因子的截面数据（对齐时间）
-        factor_series = {}
-        all_index = None
+        factor_series: dict[str, pd.Series] = {}
+        all_index: Optional[pd.Index] = None
         for f in factors:
             if f.table is None or f.table.empty:
                 continue
             tbl = f.table
             if isinstance(tbl, pd.DataFrame):
                 if isinstance(tbl.index, pd.MultiIndex):
-                    s = tbl.mean(axis=1).groupby(level=0).mean()
+                    s: pd.Series = cast(pd.Series, tbl.mean(axis=1).groupby(level=0).mean())
                 else:
-                    s = tbl.mean(axis=1)
+                    s = cast(pd.Series, tbl.mean(axis=1))
             else:
-                s = tbl
+                s = cast(pd.Series, tbl)
             factor_series[f.alias] = s.dropna()
             if all_index is None:
                 all_index = factor_series[f.alias].index
@@ -67,11 +69,11 @@ def run_mfa_correlation():
             return jsonify({'success': False, 'error': '因子间重叠时间点太少，无法计算相关性'}), 400
 
         # 对齐数据
-        aligned = {}
+        aligned: dict[str, pd.Series] = {}
         for alias, s in factor_series.items():
             aligned[alias] = s.reindex(all_index)
 
-        df = pd.DataFrame(aligned).dropna()
+        df: pd.DataFrame = cast(pd.DataFrame, pd.DataFrame(aligned).dropna())
         n_obs = len(df)
         if n_obs < 10:
             return jsonify({'success': False, 'error': f'有效观测点不足 ({n_obs}), 需要至少10个'}), 400
@@ -79,8 +81,9 @@ def run_mfa_correlation():
         aliases_sorted = [f.alias for f in factors if f.alias in df.columns]
 
         # Spearman & Pearson
-        spearman_corr = df[aliases_sorted].corr(method='spearman')
-        pearson_corr  = df[aliases_sorted].corr(method='pearson')
+        selected: pd.DataFrame = cast(pd.DataFrame, df[aliases_sorted])
+        spearman_corr: pd.DataFrame = cast(pd.DataFrame, selected.corr(method='spearman'))
+        pearson_corr: pd.DataFrame = cast(pd.DataFrame, selected.corr(method='pearson'))
 
         def _corr_to_matrix(corr_df, factor_list):
             names = factor_list

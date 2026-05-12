@@ -52,7 +52,7 @@ def api_validate_expr():
 
     source_code = (data.get('source_code') or '').strip()
     factor_id = (data.get('factor_id') or '').strip()
-    owner_username = (data.get('owner_username') or username).strip()
+    owner_username = (data.get('owner_username') or username or '').strip()
 
     if not source_code and factor_id:
         if not can_view_user_scope(username, owner_username):

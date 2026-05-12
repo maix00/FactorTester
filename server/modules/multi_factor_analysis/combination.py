@@ -2,7 +2,11 @@
 因子合成回测
   POST /run_mfa_combination  — 等权/IC加权/IR加权/最大夏普/最小方差/风险平价  + 分组回测
 """
+from __future__ import annotations
+
 import math, traceback
+from typing import Any, Optional, cast
+
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
@@ -12,6 +16,7 @@ from tools.data.DataFreq import DataFreq
 from tools.factors.FactorTester import _signal_time
 from tools.factors.Factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors import CrossSectionIC
 from server.modules.shared.price_data_helpers import to_utc_epoch
 from . import mfa_bp
 import server.services.runtime_state as runtime_state
@@ -20,21 +25,21 @@ from server.services.factor_registry import get_factor_family_instance
 
 
 # ── 辅助：对齐因子截面 ──────────────────────────────────────
-def _align_factor_sections(factors):
+def _align_factor_sections(factors: list[Factor]) -> tuple[pd.DataFrame, list[str]]:
     """收集各因子截面值，对齐时间索引。返回 (DataFrame, aliases_present)。"""
-    factor_series = {}
-    all_index = None
+    factor_series: dict[str, pd.Series] = {}
+    all_index: Optional[pd.Index] = None
     for f in factors:
         if f.table is None or f.table.empty:
             continue
         tbl = f.table
         if isinstance(tbl, pd.DataFrame):
             if isinstance(tbl.index, pd.MultiIndex):
-                s = tbl.mean(axis=1).groupby(level=0).mean()
+                s: pd.Series = cast(pd.Series, tbl.mean(axis=1).groupby(level=0).mean())
             else:
-                s = tbl.mean(axis=1)
+                s = cast(pd.Series, tbl.mean(axis=1))
         else:
-            s = tbl
+            s = cast(pd.Series, tbl)
         factor_series[f.alias] = s.dropna()
         if all_index is None:
             all_index = factor_series[f.alias].index
@@ -44,16 +49,18 @@ def _align_factor_sections(factors):
     if all_index is None or len(all_index) < 10:
         raise ValueError(f'因子间重叠时间点不足 ({len(all_index) if all_index is not None else 0})')
 
-    aligned = {a: s.reindex(all_index) for a, s in factor_series.items()}
-    df = pd.DataFrame(aligned)
-    aliases_present = [a for a in [f.alias for f in factors] if a in df.columns]
+    aligned: dict[str, pd.Series] = {a: s.reindex(all_index) for a, s in factor_series.items()}
+    df: pd.DataFrame = pd.DataFrame(aligned)
+    aliases_present: list[str] = [a for a in [f.alias for f in factors] if a in df.columns]
     if len(aliases_present) < 2:
         raise ValueError(f'对齐后有效因子不足2个')
-    return df, aliases_present
+    return cast(pd.DataFrame, df), cast('list[str]', aliases_present)
 
 
 # ── 组合优化权重 ────────────────────────────────────────────
-def _optimize_weights(returns_df, method='max_sharpe', lambda_reg=0.01):
+def _optimize_weights(
+    returns_df: pd.DataFrame, method: str = 'max_sharpe', lambda_reg: float = 0.01
+) -> tuple[np.ndarray, dict[str, float]]:
     """
     基于因子历史收益率估算协方差矩阵，优化组合权重。
 
@@ -121,9 +128,11 @@ def _optimize_weights(returns_df, method='max_sharpe', lambda_reg=0.01):
                    'sharpe': round(float(sharpe), 4)}
 
 
-def _estimate_factor_returns(tester, factors, freq):
+def _estimate_factor_returns(
+    tester: Any, factors: list[Factor], freq: Any
+) -> dict[str, pd.Series]:
     """估计每个因子的"模拟组合收益序列"（因子 Z-score × 下期收益 cross-sectional mean）。"""
-    ret_series = {}
+    ret_series: dict[str, pd.Series] = {}
     for f in factors:
         if f.table is None or f.table.empty:
             continue
@@ -132,12 +141,12 @@ def _estimate_factor_returns(tester, factors, freq):
             tbl = f.table
             if isinstance(tbl, pd.DataFrame):
                 if isinstance(tbl.index, pd.MultiIndex):
-                    s = tbl.mean(axis=1).groupby(level=0).mean()
+                    s_raw: pd.Series = cast(pd.Series, tbl.mean(axis=1).groupby(level=0).mean())
                 else:
-                    s = tbl.mean(axis=1)
+                    s_raw = cast(pd.Series, tbl.mean(axis=1))
             else:
-                s = tbl
-            z = ((s - s.mean()) / s.std()).fillna(0)
+                s_raw = cast(pd.Series, tbl)
+            z: pd.Series = cast(pd.Series, ((s_raw - s_raw.mean()) / s_raw.std()).fillna(0))
 
             # 获取下期收益
             cached_returns = tester.factor_returns.get(f, pd.DataFrame())
@@ -146,16 +155,16 @@ def _estimate_factor_returns(tester, factors, freq):
             ret_df = tester.factor_returns.get(f, pd.DataFrame())
             if isinstance(ret_df, pd.DataFrame):
                 if isinstance(ret_df.index, pd.MultiIndex):
-                    r_s = ret_df.mean(axis=1).groupby(level=0).mean()
+                    r_s: pd.Series = cast(pd.Series, ret_df.mean(axis=1).groupby(level=0).mean())
                 else:
-                    r_s = ret_df.mean(axis=1)
+                    r_s = cast(pd.Series, ret_df.mean(axis=1))
             else:
-                r_s = ret_df
+                r_s = cast(pd.Series, ret_df)
 
             common = z.index.intersection(r_s.index)
             if len(common) > 1:
                 # 因子模拟组合收益 ≈ sign(z) * r (简化版：Z-score 加权截面收益)
-                ret_series[f.alias] = (z.loc[common] * r_s.loc[common]).dropna()
+                ret_series[f.alias] = cast(pd.Series, (z.loc[common] * r_s.loc[common]).dropna())
         except Exception:
             pass
     return ret_series
@@ -215,9 +224,9 @@ def run_mfa_combination():
                     ic_family = CrossSectionIC()
                     ic_factor = ic_family.get_factor(FE=f, SC=returns_col, RF=freq)
                     ic_factor.evaluate(tester.products, source_freq=f._source_freq)
-                    ic_s = ic_factor.table['IC'].dropna()
-                    m_val = float(ic_s.mean()) if len(ic_s) > 0 else 0.0
-                    s_val = float(ic_s.std()) if len(ic_s) > 0 else 1.0
+                    ic_s: pd.Series = cast(pd.Series, ic_factor.table['IC'].dropna())
+                    m_val = float(cast(float, ic_s.mean())) if len(ic_s) > 0 else 0.0
+                    s_val = float(cast(float, ic_s.std())) if len(ic_s) > 0 else 1.0
                     ic_means[f.alias] = m_val
                     ir_vals_dict[f.alias] = max(m_val / s_val if s_val > 0 else 0, 0.001)
                 except Exception:
@@ -244,13 +253,13 @@ def run_mfa_combination():
             ret_series = _estimate_factor_returns(tester,
                 [f for f in factors if f.alias in aliases_present], freq)
             # 对齐各因子收益率序列
-            ret_df = pd.DataFrame(ret_series).dropna()
+            ret_df: pd.DataFrame = cast(pd.DataFrame, pd.DataFrame(ret_series).dropna())
             if ret_df.shape[0] < 30:
                 return jsonify({'success': False,
                     'error': f'因子收益率重叠样本不足 ({ret_df.shape[0]}), 需要至少30'}), 400
 
             # 仅保留 aliases_present 中存在的列
-            ret_df = ret_df[[a for a in aliases_present if a in ret_df.columns]]
+            ret_df = cast(pd.DataFrame, ret_df[[a for a in aliases_present if a in ret_df.columns]])
             if ret_df.shape[1] < 2:
                 return jsonify({'success': False, 'error': '对齐后有效因子收益率不足2列'}), 400
 
@@ -269,9 +278,10 @@ def run_mfa_combination():
                 composite += w * df_z[alias]
 
         # 4. 分组回测
-        composite_factor = Factor(name='composite', family=factor_family)
+        from tools.factors.FactorExpr import ConstExpr as _ConstExpr
+        composite_factor: Factor = Factor(_ConstExpr(0.0), alias='composite', family=factor_family)
         composite_factor.table = composite.to_frame(name='_COMPOSITE_')
-        composite_factor.freq = factors[0].freq if factors[0].freq else factor_family.get_default_freq()
+        # composite_factor.freq = factors[0].freq if factors[0].freq else factor_family.get_default_freq()
         composite_factor.calc_returns(next_return=True, return_freq=freq)
 
         _returns, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
@@ -324,15 +334,5 @@ def run_mfa_combination():
             resp['optimization_metrics'] = optimization_metrics
 
         return jsonify(resp)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
-
-        return jsonify({
-            'success': True,
-            'method': method,
-            'weights': {a: round(float(w), 6) for a, w in weights.items()},
-            'n_groups': n_groups,
-            'groups': groups_data,
-        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500

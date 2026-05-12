@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 import numpy as np
 import pandas as pd
 
@@ -79,8 +80,11 @@ def clip_series_by_tester_range(series, tester):
 
 def series_to_frontend(series, is_daily: bool):
     idx = series.index.get_level_values(-1) if isinstance(series.index, pd.MultiIndex) else series.index
-    dates_out = ([ts.strftime('%Y-%m-%d') for ts in idx] if is_daily
-                 else (idx.view(np.int64) // 10**6).tolist())
+    if is_daily:
+        dates_out = [ts.strftime('%Y-%m-%d') for ts in idx]
+    else:
+        raw = cast(np.ndarray, idx.view(np.int64))
+        dates_out = cast('list[int]', (raw // 10**6).tolist())
     values = [None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v))) else v
               for v in series.values.tolist()]
     return dates_out, values

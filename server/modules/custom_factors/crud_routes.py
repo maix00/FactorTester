@@ -1,7 +1,8 @@
 """Routes for creating, updating, reading, and deleting factor sources."""
-
+from __future__ import annotations
 import os
 import re
+from typing import cast
 
 from flask import jsonify, request
 
@@ -37,10 +38,20 @@ def _current_user_is_super_admin() -> bool:
     return is_super_admin_account(get_account(current_user()))
 
 
+def _username():
+    """Return current username or None if not logged in."""
+    u = current_user()
+    if u is None:
+        return None
+    return u
+
+
 @cf_bp.route('/api/create', methods=['POST'])
 @login_required
 def api_create_factor():
-    username = current_user()
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json(silent=True) or {}
 
     source_code = (data.get('source_code') or '').strip()
@@ -81,7 +92,9 @@ def api_create_factor():
 @cf_bp.route('/api/update/<factor_id>', methods=['POST'])
 @login_required
 def api_update_factor(factor_id):
-    username = current_user()
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
@@ -196,7 +209,9 @@ def api_update_public_factor(factor_id):
 @cf_bp.route('/api/delete/<factor_id>', methods=['POST'])
 @login_required
 def api_delete_factor(factor_id):
-    username = current_user()
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
     existing_source = load_factor_source(username, factor_id)
     if existing_source is None:
         return jsonify({'success': False, 'error': '因子不存在'}), 404
@@ -215,8 +230,10 @@ def api_delete_factor(factor_id):
 @cf_bp.route('/api/get/<factor_id>', methods=['GET'])
 @login_required
 def api_get_factor(factor_id):
-    username = current_user()
-    owner_username = (request.args.get('owner_username') or username).strip()
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    owner_username = cast(str, (request.args.get('owner_username') or username)).strip()
     if not can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户因子'}), 403
     source = load_factor_source(owner_username, factor_id)

@@ -8,7 +8,7 @@ Product 抽象基类 — 所有金融产品的统一接口。
 
 子类：Futures (tools/products/Futures.py) → CNFutures (sources/LocalCNFutures/)
 """
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import List, Optional, Any, TYPE_CHECKING, cast
 import pandas as pd
 
 from tools.base.UniqueObject import UniqueObject
@@ -170,9 +170,9 @@ class Product(UniqueObject):
             time_col_level = time_cols.index(time_col)
             if time_range is None:
                 if copy:
-                    return data[target_cols].copy()
+                    return cast(pd.DataFrame, data[target_cols].copy())
                 else:
-                    return data[target_cols]
+                    return cast(pd.DataFrame, data[target_cols])
             if not isinstance(time_range, (list, tuple)):
                 time_range = [time_range]
             assert len(time_range) <= 2 and len(time_range) > 0

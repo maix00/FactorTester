@@ -13,7 +13,7 @@ Each row represents one tradable contract for one product on one trading day.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional, cast
+from typing import Any, Dict, Iterable, List, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -149,19 +149,20 @@ class AdjustableProductMixin:
             TERM_TRADING_DAY_COL: ['min', 'max'],
         })
         grouped.columns = [c[-1] for c in grouped.columns]
-        grouped = grouped.sort_values('min')
+        grouped = cast(pd.DataFrame, grouped)
+        grouped = cast(pd.DataFrame, grouped.sort_values(by='min'))
 
-        req_start = _pd.Timestamp(start_date).normalize() if start_date else None
-        req_end = _pd.Timestamp(end_date).normalize() if end_date else None
+        req_start: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(start_date)).normalize() if start_date else None
+        req_end: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize() if end_date else None
 
         contracts = []
         for uid, row in grouped.iterrows():
-            t_min = row['min']
-            t_max = row['max']
+            t_min: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['min'])))
+            t_max: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['max'])))
 
-            if req_start is not None and t_max.normalize() < req_start:
+            if req_start is not None and cast(pd.Timestamp, t_max.normalize()) < req_start:
                 continue
-            if req_end is not None and t_min.normalize() > req_end:
+            if req_end is not None and cast(pd.Timestamp, t_min.normalize()) > req_end:
                 continue
 
             uid_str = str(uid)
@@ -215,7 +216,8 @@ class AdjustableProductMixin:
         # timestamps (often tz-aware from market data) to the same representation.
         if idx.tz is not None:
             idx = idx.tz_localize(None)
-        return idx.normalize().unique().sort_values()
+        normalized = getattr(idx, 'normalize')()
+        return cast(pd.DatetimeIndex, normalized).unique().sort_values()
 
     def _load_term_structure_days(self, trading_days: Iterable[Any], *, depth: Optional[int] = None) -> pd.DataFrame:
         days = self._normalize_trading_days(trading_days)
@@ -224,13 +226,13 @@ class AdjustableProductMixin:
         df = self.get_term_structure_store().load(product=getattr(self, 'name'))
         if df.empty:
             return df
-        day_set = set(days)
-        df = df[df[TERM_TRADING_DAY_COL].isin(day_set)]
+        day_set: set[pd.Timestamp] = set(days)
+        df = cast(pd.DataFrame, df[df[TERM_TRADING_DAY_COL].isin(list(day_set))])
         if df.empty:
             return df
-        df = df.sort_values([TERM_TRADING_DAY_COL, TERM_RANK_COL])
+        df = cast(pd.DataFrame, df.sort_values(by=[TERM_TRADING_DAY_COL, TERM_RANK_COL]))
         if depth is not None:
-            df = df[df[TERM_RANK_COL] < int(depth)]
+            df = cast(pd.DataFrame, df[df[TERM_RANK_COL] < int(depth)])
         return df
 
     def term_spread_series(
@@ -252,8 +254,8 @@ class AdjustableProductMixin:
         if df.empty:
             return out
 
-        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
-        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        near = cast(pd.DataFrame, df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]]).set_index(TERM_TRADING_DAY_COL)[column]
+        far = cast(pd.DataFrame, df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]]).set_index(TERM_TRADING_DAY_COL)[column]
         out.loc[near.index.intersection(out.index)] = (near - far).reindex(near.index.intersection(out.index)).astype(float)
         return out
 
@@ -276,8 +278,8 @@ class AdjustableProductMixin:
         if df.empty:
             return out
 
-        near = df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
-        far = df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]].set_index(TERM_TRADING_DAY_COL)[column]
+        near = cast(pd.DataFrame, df[df[TERM_RANK_COL] == near_rank][[TERM_TRADING_DAY_COL, column]]).set_index(TERM_TRADING_DAY_COL)[column]
+        far = cast(pd.DataFrame, df[df[TERM_RANK_COL] == far_rank][[TERM_TRADING_DAY_COL, column]]).set_index(TERM_TRADING_DAY_COL)[column]
         ratio = (near / far) - 1.0
         ratio = ratio.where(far != 0)
         out.loc[ratio.index.intersection(out.index)] = ratio.reindex(ratio.index.intersection(out.index)).astype(float)

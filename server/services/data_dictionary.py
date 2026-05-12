@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util  # noqa: F401 — pyright needs this to recognise importlib.util
 import inspect
 import os
 import re

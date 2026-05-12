@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
@@ -29,8 +31,8 @@ def row_value_as_float(row, col: str, default=None):
 
 def format_price_row(row, time_col: str, o_col: str, h_col: str, l_col: str, c_col: str, v_col: str,
                      oi_col: str | None, freq_is_daily: bool, timezone: str = 'Asia/Shanghai'):
-    ts = pd.Timestamp(row[time_col])
-    entry = {
+    ts: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(row[time_col]))
+    entry: dict = {
         'time': ts.tz_localize(timezone).tz_convert('UTC').isoformat() if ts.tz is None else ts.tz_convert('UTC').isoformat(),
         'timestamp': to_utc_epoch(ts, timezone),
         'open': row_value_as_float(row, o_col),
