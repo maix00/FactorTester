@@ -39,9 +39,6 @@
 - type: `refactor` / `fix` / `feat` / `docs` / `test`
 - 示例：`refactor: extract FactorRunResult from 8 tester dicts (refs #2)`
 
-> 📌 **人类确认标识**：任何需要人类决策的回复中，用 `🛑 **需要人类确认**` 作为醒目前缀，并在操作前等待人类回复。
-> 例如：`🛑 **需要人类确认**：是否继续执行 merge feat → master 并 push？`
-
 ### 5. 决策记录
 
 - 任何非平凡的架构决策（如"保留而非移除"、"选 A 不选 B"）写 `docs/adr/` 记录。
@@ -51,7 +48,7 @@
 
 - **根目录**：`/Users/maxdeux/Documents/GTHT/Codes/`（此后记为 `~/Codes/`）
 - **远程仓库**：`origin` → `https://github.com/maix00/FactorTester.git`
-- **`.gitignore`**：已配置忽略 `.workspace/`、`.workspace/.lock`、`.DS_Store`、`__pycache__/`、`.env` 等常用项
+- **`.gitignore`**：已配置忽略 `.workspace/`、`.DS_Store`、`__pycache__/`、`.env` 等常用项
 - **`TODO.md`**：已废弃，任务跟踪以 GitHub Issues 为准。如果 repo 中仍存在 `todo.md`，应删除。
 
 ```
@@ -71,7 +68,7 @@ master ────────────────────────�
 
 ### 更新 AGENTS.md 自身（同步到所有分支和远程）
 
-AGENTS.md 是全仓共用的 Agent 配置文件。更新它时，需要 **只提交 AGENTS.md 而不带入其他变更**，并推送到远程：
+AGENTS.md 是全仓共用的 Agent 配置文件。更新它时，由人类调度（同一时间只让一个 agent 改），**只提交 AGENTS.md 而不带入其他变更**，并推送到远程：
 
 ```bash
 # 0. 确认当前在 feat 分支
@@ -130,31 +127,15 @@ git worktree add ../Codes-master-server master
 
 > 🛑🛑🛑 **以下规则必须严格遵守，违规可能导致并发冲突、数据丢失。** 🛑🛑🛑
 
-**权限判断（Agent 第一步）**：
-- Agent 启动时先判定自身执行环境：
-  - **VS Code / 低权限模式**：可以正常执行命令和提交代码。仅在 merge feat → master + push 前标 `🛑 **人类确认标识**`，不需要暂停。
-  - **Codex / 高权限模式**：不得直接运行任何写操作（commit / merge / push）。每个操作前标 `🛑 **需要人类确认**`，等人类回复"继续"后执行。
+**权限分层（Agent 启动时自我判定）**：
+- **VS Code Agent（低权限）**：可以正常执行命令和提交代码。merge feat → master + push 前输出提示语句，不暂停等待。
+- **Codex Agent（高权限）**：不得直接运行任何写操作（commit / merge / push / 创建文件 / rm）。每个写操作前输出提示语句，等人类回复"继续"后执行。
 
-- **Agent 开始任何修改前，必须显式向人类确认："当前是否有其他 agent 正在执行 Issue？"**
-- 人类确认"无其他人"或"其他人已暂停"后，agent 才能继续。
-- 如果人类说"等一下，先让 agent X 完成" → agent 等待，不执行任何写操作。
-- 同一时间**只允许一个 agent 做写操作**（commit / merge / push），读操作不受限制。
-- ⚠️ **merge feat → master + push 是高风险操作**，执行前必须再次向人类确认。
-
-#### Agent 互斥锁（文件锁）
-
-通过 `.workspace/.lock` 文件实现简单的互斥：
-
-```bash
-# Agent 启动时获取锁
-echo "<agent描述> — Issue #<N>" > .workspace/.lock
-
-# Agent 完成任务后释放锁
-rm .workspace/.lock
-```
-
-> 如果 `.workspace/.lock` 已存在，agent 必须先询问人类是否强制抢占，或等待释放。
-> `.workspace/.lock` 已加入 `.gitignore`，不会提交到仓库。
+**人类调度（唯一并发控制）**：
+- 人类负责分配 Issue 给 agent，不给同一个 Issue 分配给多个 agent。
+- 每个 Issue 的 fix 分支 + worktree 用 Issue 编号唯一标识：`fix/issue-<N>-<描述>` / `.workspace/fix/issue-<N>-<描述>/`。
+- Agent 检查 `.workspace/fix/issue-<N>-<描述>/` 是否已存在 → 存在则说明已有 agent 在处理该 Issue，Agent 应停止并提示人类。
+- 不需要额外锁：Issue 编号天然隔离，worktree 目录存在即互斥。
 
 #### 目录结构
 
@@ -172,6 +153,7 @@ Codes/
 > **前提**：你的 VS Code 窗口已经打开 `~/Codes/` 并位于 `feat` 分支。
 > `feat` 已被当前窗口作为 worktree 使用，**不会再在 `.workspace/` 下重复创建 `feat` 的 worktree**。
 
+0. **必须在 GitHub 上创建 Issue**（`gh issue create`），标记 `ready-for-agent`。不创建 Issue 不得开始修改代码。
 1. **确保 `.workspace/` 已加入 `.gitignore`**（仓库已配置，无需再改）
 2. **在当前 `~/Codes/`（feat 分支）上创建 fix 分支，并在 `.workspace/` 下为其创建独立 worktree**：
    ```bash
