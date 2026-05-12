@@ -122,3 +122,13 @@ git branch -d fix/issue-<号码>-<简短描述>
 git checkout master && git merge feat --no-ff
 git push origin master
 ```
+
+### 安全规则
+
+- ❌ 不 force push
+- ❌ 不擅自删除远程分支
+- ❌ 不擅自关闭 Issue
+- ❌ 不提交 secrets / token / 密码 / `.env`
+- ✅ 大改动前先解释计划
+- ✅ 每次 commit 前展示 `git diff` 摘要
+- ✅ 测试失败先修复，修不了说明原因
