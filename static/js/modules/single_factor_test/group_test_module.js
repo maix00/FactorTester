@@ -206,6 +206,40 @@
         document.getElementById('multi_horizon_body').innerHTML = bodyHtml;
     }
 
+    // ---------- 多时段品种策略提示面板 ----------
+    function updateStrategyPanel(multiSessionActive, usedMode) {
+        var panel = document.getElementById('strategy_info_panel');
+        var icon = document.getElementById('strategy_icon');
+        var title = document.getElementById('strategy_title');
+        var body = document.getElementById('strategy_body');
+        if (!panel || !icon || !title || !body) return;
+
+        if (multiSessionActive) {
+            panel.style.display = 'block';
+            panel.style.background = '#fff8e6';
+            panel.style.borderLeftColor = '#e6a817';
+            icon.textContent = '⚠️';
+            title.textContent = '检测到含不同交易时段的产品';
+            var modeLabel = {
+                'each_period': '每期等权再平衡',
+                'buy_and_hold': '组内持仓不动',
+                'recycle': '资金回收再分配'
+            }[usedMode] || usedMode;
+            body.innerHTML = '所选再平衡模式 <b>' + modeLabel + '</b> 仅在 <u>所有产品均有信号</u> 的期数中生效。<br>'
+                + '在部分产品无信号（含 NaN）的混合期数中，自动切换为 <b>多时段品种策略</b>：<br>'
+                + '• 保护无信号品种的持仓不动<br>'
+                + '• 仅对有信号的品种进行交易和再平衡<br>'
+                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）';
+        } else {
+            panel.style.display = 'block';
+            panel.style.background = '#eef7ee';
+            panel.style.borderLeftColor = '#2e7d32';
+            icon.textContent = '✅';
+            title.textContent = '所有产品具有统一的交易时段';
+            body.textContent = '所有产品在所有期数中均有信号，您选择的再平衡模式将在每期中正常生效。';
+        }
+    }
+
     // ---------- 清空测试结果 ----------
     function clearResults() {
         var chartContainer = document.getElementById('group_chart_container');
@@ -804,7 +838,8 @@
                 use_closetoday: use_closetoday,
                 start_date: start_date,
                 end_date: end_date,
-                return_freqs: return_freqs.length > 0 ? return_freqs : null
+                return_freqs: return_freqs.length > 0 ? return_freqs : null,
+                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'each_period'
             })
         })
         .then(function(res) { return res.json(); })
@@ -826,6 +861,8 @@
             if (data.multi_horizon) {
                 statusSpan.innerHTML = '✓ 多周期对比完成（' + data.results.length + ' 个频率）';
                 statusSpan.style.color = '#28a745';
+                // 多时段品种策略提示
+                updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
                 // 隐藏单频率图表和指标表
                 var chartContainer = document.getElementById('group_chart_container');
                 var metricsContainer = document.getElementById('group_metrics_container');
@@ -842,6 +879,10 @@
 
             statusSpan.innerHTML = '✓ 分组测试完成';
             statusSpan.style.color = '#28a745';
+
+            // ── 多时段品种策略提示 ──
+            updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
+
             // 缓存原始数据，供成本敏感性滑条使用
             _lastGrossData = data.groups;  // 每组含 gross_returns / fee_costs
             _lastMetrics = data.metrics;

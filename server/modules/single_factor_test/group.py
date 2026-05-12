@@ -59,6 +59,7 @@ def run_group_test():
     fee_uniform    = float(data.get('fee', 0.0) or 0.0) / 100.0
     fee_map_raw: dict = data.get('fee_map', {})
     use_closetoday: bool = bool(data.get('use_closetoday', False))
+    rebalance_mode: str = str(data.get('rebalance_mode', 'each_period') or 'each_period')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
     # 多周期对比：传入 return_freqs 数组，如 ["1d","3d","5d","10d"]
@@ -119,6 +120,7 @@ def run_group_test():
                     factors=factor, n_groups=n_groups, time_range=time_range,
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
+                    rebalance_mode=rebalance_mode,
                 )
                 # ... (computation logic unchanged) ...
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -156,13 +158,16 @@ def run_group_test():
                 tester.results[factor].return_freq = _saved_freq
                 tester.results[factor].returns = _saved_returns
             
-            return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups})
+            return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups,
+                            'multi_session_active': getattr(tester, '_last_multi_session_active', False),
+                            'rebalance_mode': rebalance_mode})
 
         # ─── 原有单频率逻辑 ───
         _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
             factors=factor, n_groups=n_groups, time_range=time_range,
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
+            rebalance_mode=rebalance_mode,
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -218,7 +223,9 @@ def run_group_test():
             }
         metrics['LS'] = ls_metric
 
-        return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups})
+        return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups,
+                        'multi_session_active': getattr(tester, '_last_multi_session_active', False),
+                        'rebalance_mode': rebalance_mode})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:

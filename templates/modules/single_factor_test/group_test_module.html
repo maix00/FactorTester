@@ -8,6 +8,26 @@
             <input type="number" id="group_count" value="5" min="2" max="10" step="1" style="width:70px;">
         </div>
 
+        <div style="display:flex;align-items:center;gap:6px;">
+            <label style="margin-bottom:0;white-space:nowrap;">再平衡模式：</label>
+            <select id="rebalance_mode" style="width:180px;">
+                <option value="each_period" selected>每期等权再平衡</option>
+                <option value="buy_and_hold">组内持仓不动</option>
+                <option value="recycle">资金回收再分配</option>
+            </select>
+        </div>
+
+        <!-- 策略说明面板（运行后动态填充） -->
+        <div id="strategy_info_panel" style="display:none;flex:1 1 100%;margin-top:10px;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
+            <div style="display:flex;align-items:flex-start;gap:8px;">
+                <span id="strategy_icon" style="font-size:18px;"></span>
+                <div>
+                    <strong id="strategy_title" style="font-size:14px;"></strong>
+                    <div id="strategy_body" style="margin-top:4px;color:#555;"></div>
+                </div>
+            </div>
+        </div>
+
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <label style="margin-bottom:0;white-space:nowrap;">手续费：</label>
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
