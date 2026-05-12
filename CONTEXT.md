@@ -47,7 +47,11 @@ FactorTester 是一个面向中国期货市场的量化因子研究与回测平�
 
 ### 已解析因子 (Factor)
 
-参数全部解析后的 `FactorFamily` — 不再含有 `ParamRef`。由 `FactorFamily.get_factor()` 创建。持有 `_resolved_expr`（纯表达式树）、`signal_freq`、`is_reversed`。计算结果缓存在 `source_table`（原始高频数据）和 `table`（信号对齐后）。继承 `UniqueObject` — 相同 structural key = 同一实例。
+参数全部解析后的 `FactorFamily` — 不再含有 `ParamRef`。由 `FactorFamily.get_factor()` 创建。其表达式树被剥离外层 SignalAlign/Neg 后分为：
+- `_func_expr`：含取反的纯因子逻辑
+- `_source_expr`：不含取反的因子逻辑
+
+计算结果缓存在 `_source_data`（原始高频数据，未对齐）和 `_data`（信号对齐后）。继承 `UniqueObject` — 相同 structural key = 同一实例。
 
 ### 表达式树 (FactorExpr)
 
@@ -63,9 +67,13 @@ DSL 核心。三层结构：
 
 原始因子值在数据源频率（如 1 分钟）下计算，然后对齐到信号频率（如日频）。`SignalAlign` 在可配置的 `basepoint`（last / first tick）采样，并可跳过盘间间隔（`end_session_skip`）。
 
-### 因子数据缓存 (FactorData)
+### 因子数据缓存
 
-去重层：相同表达式树（按 `structural_key`）产生相同结果 — 只算一次，全局复用。由 `FactorTester` 管理的全局 `FactorData` 注册表。
+去重层：相同表达式树（按 `structural_key`）产生相同结果 — 只算一次，全局复用。
+- `Factor._source_data`：表达式求值的原始结果（高频，未对齐）
+- `Factor._data`：信号对齐后的结果
+- `Factor._intermediate_factor_data`：中间因子缓存，按 structural_key 索引
+- `FactorTester._factor_results`：管理所有 FactorRunResult 实例
 
 ### 中间因子 (Intermediate Factor)
 
@@ -160,7 +168,7 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 1. `_factor_family_cache` — 公共因子全局单例（线程安全）
 2. `_custom_factor_cache` — 自定义因子按用户缓存，键为 `(username, id)`
 3. `_chinese_names_cache` — 因子描述一次性加载
-4. `FactorData` — 表达式结果按 `structural_key` 去重，由 `FactorTester` 管理
+4. `Factor._source_data` / `_intermediate_factor_data` — 表达式结果按 `structural_key` 去重
 5. `IdleResourceManager` — DataFrame 缓存，5 分钟 TTL，namespace=`datameta`
 
 ### 命名约定
@@ -171,23 +179,17 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 
 ### 已知坑位
 
-1. **evaluate() 签名**：改 `ConstExpr.evaluate(freq, dm)` 签名时必须同步更新 `RollingOp` / `ShiftOp` 中的所有调用方 — 混用会抛 `TypeError`
-2. **API 批量重命名**：避免在测试中盲用 `.std(` 式批量替换 — 会把 `DataFrame.std(axis=1)` 也替换成 DSL 名
-3. **中间因子命名**：`as_intermediate(name)` 冲突直接报错 — 不做自动后缀，以免数据查找歧义
-4. **多品种**：禁止用第一个品种的 `DataMeta` 转换 `Timedelta` / `DataFreq` 窗口；必须按品种解析，按 `day_periods` 分组收敛
-5. **缓存作用域**：纯表达式的全局中间缓存可能在不同品种集合间泄漏旧 `source_table`；重用时需刷新
-6. **类标记继承**：基类的 `hide` 标记若通过 `getattr` 继承，会意外隐藏具体子类；仅基类标记用 `cls.__dict__` 检查
+> 已解决的坑位移至 Agent 记忆（`/memories/`）。以下为当前仍在生效的约束：
+
+- **evaluate() 签名**：统一使用 `EvaluateContext` ctx 参数（see Issue #2），不再有 5 种签名变体
+- **中间因子命名**：`as_intermediate(name)` 冲突直接报错 — 不做自动后缀
+- **多品种**：禁止用第一个品种的 `DataMeta` 转换 `Timedelta` / `DataFreq` 窗口；必须按品种解析，按 `day_periods` 分组收敛
 
 ---
 
-## 当前 TODO（来自 `todo.md`）
+## 当前 TODO
 
-### P1 — 用户与机构管理
-- [ ] 用户列表表头：合并「角色」和「操作」列 → 「角色/操作」
-- [ ] 删除用户 → 处理 `../users/x`（删除或归档）；归档时处理用户名占用
-- [ ] 机构删除与层级删除能力缺失（确认业务规则后补齐）
-- [ ] 用户创建时可指定上级为自己（超管/机构管理员/层级管理员均支持）
-- [ ] 机构内层级树展示（超管视角）
+> `todo.md` 已废弃。任务跟踪以 [GitHub Issues](https://github.com/maix00/FactorTester/issues) 为准。
 
 ### 已完成
 - [x] 2026-05-08：RollingOp 首个 operand 为 ParamRef 时 `to_latex` 走 `\color{red}` 而非打印 `ParamRef[...]`
