@@ -911,7 +911,7 @@ class ColumnRef(FactorExpr):
                 continue
             series_dict[p] = data[col_name]
 
-        result = pd.concat(series_dict, axis=1)
+        result = (result := pd.concat(series_dict, axis=1)).sort_values(by=result.index.names[-1])
         result.columns = list(series_dict.keys())
 
         return result

@@ -198,7 +198,10 @@ def run_ic_test():
                         if not re_table.empty:
                             r.returns = re_table.copy()
                         if not fe_table.empty:
-                            r.table = fe_table.copy()
+                            # 注意：不要覆盖 r.table！r.table 由 factor.evaluate()
+                            # 在 calc_factor() 中写入，包含正确的 SignalAlign + $Rev。
+                            # fe_table 是 CrossSectionIC._func_expr 的中间值，
+                            # 未经 SignalAlign 对齐，覆盖会导致分组测试拿到未对齐数据。
                             object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
 
                         p_names = _extract_product_names(fe_table, re_table)

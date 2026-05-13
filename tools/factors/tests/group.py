@@ -59,10 +59,10 @@ def ensure_factor_returns(
         RF=rf_value,
         S=shift,
         Lag=0,
-        F=factor.freq.value,
+        **{'$F': factor.freq.value},
     )
     ic_factor.clear()
-    ic_factor.evaluate(tester.products, freq=factor._source_freq)
+    ic_factor.evaluate(tester.products)
 
     raw_returns = ic_factor.get_intermediate("RE")
     if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
@@ -101,17 +101,36 @@ def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFra
 
 
 def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
-    """Get the factor exposure table for group testing, reusing raw IC FE when present."""
-    raw_fe = getattr(factor, "_ic_fe_intermediate", None)
-    if not isinstance(raw_fe, pd.DataFrame) or raw_fe.empty:
-        raw_fe = tester.factor_tables.get(factor)
-    if isinstance(raw_fe, pd.DataFrame) and not raw_fe.empty:
-        if isinstance(raw_fe.index, pd.MultiIndex) and any(str(n).startswith("_SIGNAL") for n in raw_fe.index.names):
-            return raw_fe.copy(deep=False)
-        return align_table_for_group(factor, raw_fe)
+    """Get the factor exposure table for group testing.
 
-    if factor.table is None or factor.table.empty:
-        factor.evaluate(tester.products)
+    Data source priority:
+      1. factor.table (already computed via factor.evaluate()) — correctly includes
+         SignalAlign + $Rev (Neg) because _expr = neg(SignalAlign(func_expr, ...)).
+      2. tester.factor_tables.get(factor) — FactorRunResult.table, should be same
+         as #1 (both set by factor.evaluate() in calc_factor()).  Falls through
+         if FactorRunResult.table was overwritten by stale IC test data.
+      3. _ic_fe_intermediate (already includes $Rev via _func_expr = neg(source_expr))
+         → apply SignalAlign directly and return.
+      4. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
+    """
+    # # Prefer already-computed aligned + negated table
+    # if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
+    #     return factor.table.copy(deep=False)
+
+    # cached = tester.factor_tables.get(factor)
+    # if isinstance(cached, pd.DataFrame) and not cached.empty:
+    #     return cached.copy(deep=False)
+
+    # raw_ic = getattr(factor, '_ic_fe_intermediate', None)
+    # if isinstance(raw_ic, pd.DataFrame) and not raw_ic.empty:
+    #     # _ic_fe_intermediate is factor._func_expr = neg(source_expr) — already
+    #     # includes $Rev negation.  Apply SignalAlign directly (same as the
+    #     # align_table_for_group helper) and return, skipping factor.evaluate()
+    #     # which would apply neg() again via the _expr = neg(SignalAlign(…)) tree.
+    #     aligned = align_table_for_group(factor, raw_ic)
+    #     return aligned.copy(deep=False)
+
+    factor.evaluate(tester.products)
     return factor.table.copy(deep=False)
 
 
@@ -130,8 +149,22 @@ def test_by_group_single_factor(
     sift_volume_ratio: Optional[float] = None,
     fee: float = 0.0,
     fee_map: dict = {},
+    rebalance_mode: str = "each_period",
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-    """Single-factor group test core logic."""
+    """Single-factor group test core logic.
+
+    rebalance_mode:
+      - "each_period":   每期等权再平衡 — 所有组成员每期重新平分资金（默认）
+      - "buy_and_hold":  组内持仓不动 — 只在产品进出组时才买卖
+      - "recycle":       资金回收再分配 — 新产品用退出产品的资金，不够再等权补足
+
+    多时段品种自动检测：
+      当 table_np 中出现某些时刻部分品种有信号、部分品种无信号（isnan_fac 混合）时，
+      自动启用"多时段品种策略"，此时 rebalance_mode 参数被忽略：
+      - 信号缺失品种不被踢出组，其持仓金额保持不变
+      - 进出分组只在有信号的组内进行
+      - 某组只有入没有出 → 该组当期冻结，不交易
+    """
     start_date = pd.to_datetime(time_range[0]) if time_range is not None else tester.start_date
     end_date = pd.to_datetime(time_range[1]) if time_range is not None else tester.end_date
 
@@ -170,7 +203,7 @@ def test_by_group_single_factor(
 
     all_cols = list(table_src.columns)
     ret_cols = list(returns_src.columns)
-    valid_cols = [c for c in all_cols if c in set(ret_cols)]
+    valid_cols = list(set((valid := table_src.isna().all(axis=0))[~valid].index).intersection(set(ret_cols)))
     if not valid_cols:
         raise ValueError(
             f"{factor.alias}: 因子表和收益表没有共同品种列；"
@@ -179,6 +212,36 @@ def test_by_group_single_factor(
 
     table_np = table_src[valid_cols].to_numpy(dtype=float)
     returns_np = returns_src[valid_cols].to_numpy(dtype=float)
+
+    # ── 首尾全 NaN 行截断 ──
+    # 数据首尾可能存在所有品种均为 NaN 的行（数据尚未开始或已结束），截断之
+    _all_nan = np.all(np.isnan(table_np), axis=1)  # (T,) — 整行全 NaN
+    _first_valid = int(np.argmin(_all_nan))  # 第一个非全NaN行（argmin找到第一个False=0）
+    _last_valid = int(len(_all_nan) - 1 - np.argmin(_all_nan[::-1]))  # 最后一个非全NaN行
+
+    if _all_nan.all():
+        raise ValueError(f"{factor.alias}: 因子值序列全部为 NaN，无法进行分组测试。")
+
+    # 截断首尾全 NaN 行
+    if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
+        trim_start = _first_valid
+        trim_end = _last_valid + 1
+        table_np = table_np[trim_start:trim_end]
+        returns_np = returns_np[trim_start:trim_end]
+        table_src = table_src.iloc[trim_start:trim_end]
+        returns_src = returns_src.iloc[trim_start:trim_end]
+        print(f"[INFO] {factor.alias}: 截断首尾全 NaN 行 {trim_start} 行首 + {len(_all_nan) - trim_end} 行尾")
+
+    # ── 中间全 NaN 行检测 ──
+    # 截断后，中间不应再出现整行全 NaN
+    _all_nan_mid = np.all(np.isnan(table_np), axis=1)
+    if _all_nan_mid.any():
+        bad_indices = [str(table_src.index[i]) for i in np.where(_all_nan_mid)[0]]
+        raise ValueError(
+            f"{factor.alias}: 因子值序列在以下 {len(bad_indices)} 个时点全部品种为 NaN，"
+            f"非首尾全空行，可能是数据异常：{bad_indices[:5]}{'...' if len(bad_indices) > 5 else ''}"
+        )
+
     index_list = list(table_src.index)
     T = len(index_list)
 
@@ -187,6 +250,32 @@ def test_by_group_single_factor(
     P = len(valid_cols)
     membership_np = np.zeros((T, n_groups, P), dtype=bool)
     current_members = np.zeros((n_groups, P), dtype=bool)
+
+    # ── 按列的首部 NaN 填充（仅用于多时段品种检测，不覆盖 table_np）──
+    # 某些品种在中途才上市，首部全为 NaN，不应被误判为"多时段品种"
+    # 策略：对每列找到第一个有效值的行号，将其之前的 NaN 填 0.0
+    not_nan = ~np.isnan(table_np)                   # (T, P)
+    first_valid = np.argmax(not_nan, axis=0)          # (P,)  每列第一个非NaN行号；全NaN列=0
+    col_has_any = np.asarray(not_nan.any(axis=0), dtype=bool)  # (P,)  哪些列有至少一个有效值，强制为array避免P=1时标量化
+    row_idx = np.arange(T, dtype=int)[:, np.newaxis]  # (T, 1)
+    head_mask = (row_idx < first_valid[np.newaxis, :]) & col_has_any[np.newaxis, :]  # (T, P)
+    table_filled_np = np.where(head_mask, 0.0, table_np)
+
+    # ── 多时段品种检测 ──
+    # 使用填充后的 table_filled_np，排除首部未上市品种的干扰
+    _mixed_mask = np.any(np.isnan(table_filled_np), axis=1) & (~np.all(np.isnan(table_filled_np), axis=1))
+    multi_session_active = bool(_mixed_mask.any())
+    if multi_session_active:
+        # 统计真正缺失的品种（排除首部未上市部分）
+        _after_head_nan = np.isnan(table_filled_np) & ~head_mask          # (T, P) 只保留首部之后的NaN
+        _missing_cols = np.where(np.any(_after_head_nan, axis=0))[0]       # 哪些列在首部之后有NaN
+        _missing_names = [str(valid_cols[i]) for i in _missing_cols]
+        print(
+            f"[INFO] {factor.alias}: 检测到 {int(_mixed_mask.sum())}/{T} 期存在部分品种缺失信号 "
+            f"（{len(_missing_names)} 个品种有缺失：{', '.join(_missing_names[:5])}"
+            f"{'...' if len(_missing_names) > 5 else ''}），"
+            f"自动启用多时段品种策略，忽略 rebalance_mode='{rebalance_mode}'。"
+        )
 
     for t in tqdm(range(T), desc="Testing by group for factor " + factor.alias):
         row = table_np[t]
@@ -205,6 +294,10 @@ def test_by_group_single_factor(
 
         if t == 0:
             carry_members = np.zeros((n_groups, P), dtype=bool)
+        elif multi_session_active:
+            # 多时段策略：信号缺失品种保留在当前组中，不被踢出
+            # isnan_fac=True 表示该品种本期无信号 → 保留
+            carry_members = current_members & (~isbad_ret[np.newaxis, :])
         else:
             carry_members = current_members & isnan_ret[np.newaxis, :] & (~isbad_ret[np.newaxis, :])
 
@@ -259,49 +352,219 @@ def test_by_group_single_factor(
     fee_costs_np = np.zeros((T, n_groups), dtype=float)
     group_returns_np = np.zeros((T, n_groups), dtype=float)
 
-    for g in range(n_groups):
-        wealth = 1.0
-        prev_end_amounts = np.zeros(P, dtype=float)
-        for t in range(T):
-            curr_mask = membership_np[t, g]
-            curr_count = int(member_counts[t, g])
-            wealth_before_trade = float(wealth)
+    _VALID_MODES = frozenset({"each_period", "buy_and_hold", "recycle"})
+    if rebalance_mode not in _VALID_MODES:
+        raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
 
-            if wealth_before_trade <= 0:
-                prev_end_amounts = np.zeros(P, dtype=float)
-                continue
+    # ── 逐期矩阵化收益计算 ──
+    # 所有组并行处理：prev_end_amounts: (n_groups, P), wealth: (n_groups,)
+    wealth = np.ones(n_groups, dtype=float)
+    prev_end_amounts = np.zeros((n_groups, P), dtype=float)
 
-            if curr_count > 0:
-                target_amounts = curr_mask.astype(float) * (wealth_before_trade / curr_count)
-            else:
-                target_amounts = np.zeros(P, dtype=float)
+    # 多时段：预计算每期哪些品种有因子信号
+    fac_has_signal = ~np.isnan(table_np)  # (T, P)
 
-            buy_amounts = np.clip(target_amounts - prev_end_amounts, 0.0, None)
-            sell_amounts = np.clip(prev_end_amounts - target_amounts, 0.0, None)
-            fee_amount = float((buy_amounts * open_fee_vec + sell_amounts * close_fee_vec).sum())
-            fee_ratio = fee_amount / wealth_before_trade
+    # 记录每期多时段策略触发的组（用于报告）
+    multi_session_triggered_count = 0
 
-            if curr_count > 0:
-                gross_ret = float((target_amounts / wealth_before_trade * returns_filled[t]).sum())
-            else:
-                gross_ret = 0.0
+    for t in range(T):
+        curr_mask_all = membership_np[t]          # (n_groups, P) bool
+        curr_count_all = member_counts[t]          # (n_groups,) float
+        wealth_before_trade = wealth.copy()        # (n_groups,)
 
-            net_ret = (1.0 - fee_ratio) * (1.0 + gross_ret) - 1.0
-            wealth = wealth_before_trade * (1.0 + net_ret)
+        # ── 本期是否触发多时段逻辑 ──
+        # 判断标准：当期存在部分品种有信号、部分品种无信号（混合行）
+        has_signal_t = fac_has_signal[t]           # (P,) bool
+        is_mixed_t = multi_session_active and has_signal_t.any() and (~has_signal_t).any()
 
-            group_gross_returns_np[t, g] = gross_ret
-            fee_costs_np[t, g] = fee_ratio
-            group_returns_np[t, g] = net_ret
+        # ── 计算 target_amounts: (n_groups, P) ──
+        target_amounts = np.zeros((n_groups, P), dtype=float)
 
-            if curr_count > 0:
-                prev_end_amounts = target_amounts * (1.0 + returns_filled[t]) * (1.0 - fee_ratio)
-            else:
-                prev_end_amounts = np.zeros(P, dtype=float)
+        # --- 空组：curr_count == 0 ---
+        empty_mask = curr_count_all == 0           # (n_groups,)
+        non_empty_mask = ~empty_mask
+
+        if empty_mask.any():
+            # 空组清仓，卖出所有 prev_end_amounts
+            sell_empty = prev_end_amounts[empty_mask]  # (n_empty, P)
+            fee_empty = (sell_empty * close_fee_vec[np.newaxis, :]).sum(axis=1)  # (n_empty,)
+            fee_ratio_empty = np.where(wealth_before_trade[empty_mask] > 0,
+                                       fee_empty / wealth_before_trade[empty_mask], 0.0)
+            net_ret_empty = (1.0 - fee_ratio_empty) * (1.0 + 0.0) - 1.0
+            wealth[empty_mask] = wealth_before_trade[empty_mask] * (1.0 + net_ret_empty)
+            group_gross_returns_np[t, empty_mask] = 0.0
+            fee_costs_np[t, empty_mask] = fee_ratio_empty
+            group_returns_np[t, empty_mask] = net_ret_empty
+            prev_end_amounts[empty_mask] = 0.0
+
+        if not non_empty_mask.any():
+            continue
+
+        # --- 非空组 ---
+        ne_idx = np.where(non_empty_mask)[0]
+
+        if is_mixed_t:
+            # ===== 多时段品种策略（逐期自适应）=====
+            multi_session_triggered_count += 1
+
+            prev_mask_all = prev_end_amounts > 0    # (n_groups, P) — 上期持仓
+
+            # 对非空组逐组计算（因涉及跨品种资金转移，需知道每组的 staying/exiting/entering）
+            for g in ne_idx:
+                cm = curr_mask_all[g]                # (P,) — 当期成员
+                pm = prev_mask_all[g]                # (P,) — 上期持仓
+                pa = prev_end_amounts[g]             # (P,) — 上期金额
+                wb = wealth_before_trade[g]
+
+                staying = cm & pm
+                exiting = pm & (~cm)
+                entering = cm & (~pm)
+
+                # 退出产品中：有信号的卖出，无信号的保留金额
+                exiting_sig = exiting & has_signal_t
+                exiting_nosig = exiting & (~has_signal_t)
+
+                # 进入产品中：只有有信号的才真正进入
+                entering_sig = entering & has_signal_t
+                n_entering = int(entering_sig.sum())
+
+                # 卖出有信号的退出产品（扣除手续费）
+                sell_exit = pa * exiting_sig.astype(float)
+                sell_gross = float(sell_exit.sum())
+                sell_fee_exit = float((sell_exit * close_fee_vec).sum())
+                recycled = max(0.0, sell_gross - sell_fee_exit)
+
+                tg = np.zeros(P, dtype=float)
+
+                # 无信号的退出产品：保留金额
+                if exiting_nosig.any():
+                    tg += pa * exiting_nosig.astype(float)
+                # 留存产品：保留金额
+                if staying.any():
+                    tg += pa * staying.astype(float)
+                # 新进入者：用回收资金买入
+                if n_entering > 0 and recycled > 0:
+                    tg += entering_sig.astype(float) * (recycled / n_entering)
+
+                # 归一化到 wealth_before_trade
+                total_tg = float(tg.sum())
+                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
+                    tg *= (wb / total_tg)
+
+                target_amounts[g] = tg
+
+        elif rebalance_mode == "each_period":
+            # 每期等权：所有组成员重新平分资金
+            for g in ne_idx:
+                cm = curr_mask_all[g]
+                cc = curr_count_all[g]
+                if cc > 0:
+                    target_amounts[g] = cm.astype(float) * (wealth_before_trade[g] / cc)
+
+        elif rebalance_mode == "buy_and_hold":
+            # 持仓不动：只在进出时调仓
+            prev_mask_all = prev_end_amounts > 0
+            for g in ne_idx:
+                cm = curr_mask_all[g]
+                pm = prev_mask_all[g]
+                pa = prev_end_amounts[g]
+                wb = wealth_before_trade[g]
+                cc = curr_count_all[g]
+
+                staying = cm & pm
+                exiting = pm & (~cm)
+                entering = cm & (~pm)
+                n_ent = int(entering.sum())
+
+                sell_exit = pa * exiting.astype(float)
+                released = float(sell_exit.sum())
+
+                tg = np.zeros(P, dtype=float)
+                if staying.any():
+                    tg += pa * staying.astype(float)
+                if n_ent > 0 and released > 0:
+                    tg += entering.astype(float) * (released / n_ent)
+                elif n_ent > 0 and wb > 0:
+                    tg = cm.astype(float) * (wb / cc)
+
+                total_tg = float(tg.sum())
+                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
+                    tg *= (wb / total_tg)
+
+                target_amounts[g] = tg
+
+        elif rebalance_mode == "recycle":
+            # 资金回收再分配
+            prev_mask_all = prev_end_amounts > 0
+            for g in ne_idx:
+                cm = curr_mask_all[g]
+                pm = prev_mask_all[g]
+                pa = prev_end_amounts[g]
+                wb = wealth_before_trade[g]
+                cc = curr_count_all[g]
+
+                staying = cm & pm
+                exiting = pm & (~cm)
+                entering = cm & (~pm)
+                n_ent = int(entering.sum())
+                n_stay = int(staying.sum())
+
+                sell_exit = pa * exiting.astype(float)
+                recycled = float(sell_exit.sum())
+
+                tg = np.zeros(P, dtype=float)
+                if n_ent > 0:
+                    if recycled > 0:
+                        tg += entering.astype(float) * (recycled / n_ent)
+                    else:
+                        tg += entering.astype(float) * (wb / cc)
+                if n_stay > 0:
+                    tg += pa * staying.astype(float)
+
+                total_tg = float(tg.sum())
+                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
+                    tg *= (wb / total_tg)
+
+                target_amounts[g] = tg
+
+        else:
+            raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
+
+        # ── 统一计算买卖/手续费/收益（矩阵运算，所有非空组）──
+        ne_target = target_amounts[ne_idx]           # (n_ne, P)
+        ne_prev = prev_end_amounts[ne_idx]           # (n_ne, P)
+        ne_wb = wealth_before_trade[ne_idx]          # (n_ne,)
+        ne_cc = curr_count_all[ne_idx]               # (n_ne,)
+        ne_ret = returns_filled[t]                   # (P,) — 本期收益
+
+        buy = np.clip(ne_target - ne_prev, 0.0, None)   # (n_ne, P)
+        sell = np.clip(ne_prev - ne_target, 0.0, None)  # (n_ne, P)
+        fee = (buy * open_fee_vec[np.newaxis, :] + sell * close_fee_vec[np.newaxis, :]).sum(axis=1)  # (n_ne,)
+        fee_ratio = fee / ne_wb
+
+        # 总收益
+        gross = (ne_target / ne_wb[:, np.newaxis] * ne_ret[np.newaxis, :]).sum(axis=1)  # (n_ne,)
+        net_ret = (1.0 - fee_ratio) * (1.0 + gross) - 1.0
+
+        wealth[ne_idx] = ne_wb * (1.0 + net_ret)
+        group_gross_returns_np[t, ne_idx] = gross
+        fee_costs_np[t, ne_idx] = fee_ratio
+        group_returns_np[t, ne_idx] = net_ret
+
+        # 更新 prev_end_amounts
+        ne_cc_safe = np.where(ne_cc > 0, ne_cc, 1.0)
+        new_prev = ne_target * (1.0 + ne_ret[np.newaxis, :]) * (1.0 - fee_ratio[:, np.newaxis])
+        new_prev[ne_cc == 0] = 0.0
+        prev_end_amounts[ne_idx] = new_prev
+
+    if multi_session_active:
+        print(f"[INFO] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
     tester._last_fee_costs_np = fee_costs_np
     tester._last_group_gross_returns_np = group_gross_returns_np
     tester._last_group_products = products_dict  # {g: {t_index: [product_names]}}
     tester._last_group_valid_cols = valid_cols    # 品种名称列表（按列顺序）
+    tester._last_multi_session_active = multi_session_active  # 是否启用了多时段策略
 
     returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 
@@ -430,9 +693,16 @@ def test_by_group(
     sift_volume_ratio: Optional[float] = None,
     fee: float = 0.0,
     fee_map: dict = {},
+    rebalance_mode: str = "each_period",
     **kwargs,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-    """Run group test for one or more factors."""
+    """Run group test for one or more factors.
+
+    rebalance_mode:
+      - \"each_period\":   每期等权再平衡（默认）
+      - \"buy_and_hold\":  组内持仓不动
+      - \"recycle\":       资金回收再分配
+    """
     factors = [factors] if isinstance(factors, Factor) else (factors if factors is not None else tester.factors)
     assert isinstance(factors, list), f"factors must be a list, got {type(factors)}"
 
@@ -459,6 +729,7 @@ def test_by_group(
             sift_volume_ratio=sift_volume_ratio,
             fee=fee,
             fee_map=fee_map,
+            rebalance_mode=rebalance_mode,
         )
 
     cum_np_out: Optional[np.ndarray] = None
