@@ -188,9 +188,6 @@ def run_ic_test():
                     series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
                     stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
 
-                    if not fe_table.empty and getattr(factor, '_ic_fe_intermediate', None) is None:
-                        object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
-
                     if lag_i == primary_ic_lag:
                         r = tester._get_result(factor)
                         r.ic_series = ic_series.copy()
@@ -198,11 +195,10 @@ def run_ic_test():
                         if not re_table.empty:
                             r.returns = re_table.copy()
                         if not fe_table.empty:
-                            # 注意：不要覆盖 r.table！r.table 由 factor.evaluate()
-                            # 在 calc_factor() 中写入，包含正确的 SignalAlign + $Rev。
-                            # fe_table 是 CrossSectionIC._func_expr 的中间值，
-                            # 未经 SignalAlign 对齐，覆盖会导致分组测试拿到未对齐数据。
-                            object.__setattr__(factor, '_ic_fe_intermediate', fe_table.copy())
+                            # func_table 是 computed property，从 source_table + _func_expr 推导
+                            # 这里确保 source_table 已存储（由 factor.evaluate() 写入），
+                            # func_table 即可通过 r.func_table 获取
+                            pass
 
                         p_names = _extract_product_names(fe_table, re_table)
                         if p_names:
@@ -350,7 +346,7 @@ def run_ic_test():
                         'ir': r_ir,
                     }
 
-            fe_table = getattr(factor, '_ic_fe_intermediate', None)
+            fe_table = fe_table  # IC 内部局部变量，仅用于提取产品列表
             products = []
             for p in sorted(tester.products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
                 p_name = str(getattr(p, 'name', p))

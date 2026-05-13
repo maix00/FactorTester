@@ -106,10 +106,9 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     Data source priority:
       1. factor.table (already computed via factor.evaluate()) — correctly includes
          SignalAlign + $Rev (Neg) because _expr = neg(SignalAlign(func_expr, ...)).
-      2. tester.factor_tables.get(factor) — FactorRunResult.table, should be same
-         as #1 (both set by factor.evaluate() in calc_factor()).  Falls through
-         if FactorRunResult.table was overwritten by stale IC test data.
-      3. _ic_fe_intermediate (already includes $Rev via _func_expr = neg(source_expr))
+      2. FactorRunResult.table — should be same as #1 (both set by factor.evaluate()
+         in calc_factor()).
+      3. func_table (already includes $Rev via _func_expr = neg(source_expr))
          → apply SignalAlign directly and return.
       4. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
     """
@@ -117,17 +116,17 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     # if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
     #     return factor.table.copy(deep=False)
 
-    # cached = tester.factor_tables.get(factor)
+    # cached = tester.results[factor].table if factor in tester.results else None
     # if isinstance(cached, pd.DataFrame) and not cached.empty:
     #     return cached.copy(deep=False)
 
-    # raw_ic = getattr(factor, '_ic_fe_intermediate', None)
-    # if isinstance(raw_ic, pd.DataFrame) and not raw_ic.empty:
-    #     # _ic_fe_intermediate is factor._func_expr = neg(source_expr) — already
+    # r = tester.results.get(factor)
+    # if r is not None and isinstance(r.func_table, pd.DataFrame) and not r.func_table.empty:
+    #     # func_table is factor._func_expr = neg(source_expr) — already
     #     # includes $Rev negation.  Apply SignalAlign directly (same as the
     #     # align_table_for_group helper) and return, skipping factor.evaluate()
     #     # which would apply neg() again via the _expr = neg(SignalAlign(…)) tree.
-    #     aligned = align_table_for_group(factor, raw_ic)
+    #     aligned = align_table_for_group(factor, r.func_table)
     #     return aligned.copy(deep=False)
 
     factor.evaluate(tester.products)

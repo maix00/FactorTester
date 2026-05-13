@@ -109,8 +109,35 @@ class FactorFamily(UniqueObject, FactorExpr):
         if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
+            _from_factor_expr = False
             if _expr is None and hasattr(cls, 'factor_expr'):
                 _expr = getattr(cls, 'factor_expr')()
+                _from_factor_expr = True
+
+            # 声明式因子自动剥离 factor_expr() 最外层自然 neg，并将 $Rev 默认值设为 1
+            # 处理两种情况：
+            #   1. 真正的最外层 neg：return -expr          → 剥离 neg, $Rev 默认=1
+            #   2. 分子带 neg 的分式：return -A / B        → 剥离分子 neg, $Rev 默认=1
+            # 例：MmMADevRat 定义 return -P.rolling_mean(N)/(P+1e-10)
+            #     → 剥离后 _expr = P.rolling_mean(N)/(P+1e-10)，$Rev 默认=1
+            _has_natural_neg = False
+            if _from_factor_expr and _expr is not None:
+                if isinstance(_expr, CompositeExpr) and _expr.op == 'neg':
+                    # 情况 1：最外层即 neg
+                    _expr = _expr.operands[0]
+                    _has_natural_neg = True
+                elif isinstance(_expr, CompositeExpr) and len(_expr.operands) > 0:
+                    # 情况 2：检查第一个操作数是否 neg
+                    first_op = _expr.operands[0]
+                    if isinstance(first_op, CompositeExpr) and first_op.op == 'neg':
+                        # 剥离第一个操作数的 neg，用 -1 乘法实现等价变换（如果 op 支持）
+                        if _expr.op in ('div', 'mul'):
+                            _expr = CompositeExpr(
+                                _expr.op,
+                                first_op.operands[0],
+                                *_expr.operands[1:],
+                            )
+                            _has_natural_neg = True
 
             cls.params = list(_expr.ordered_param_deps) if _expr is not None else []
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
@@ -125,8 +152,6 @@ class FactorFamily(UniqueObject, FactorExpr):
                 # 否则：旧式因子，手动实现 func()/params，不需要 expr，允许继续
 
             # 声明式因子：从表达式树自动收集参数（避免子类重复声明 params 列表）
-            _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
-                                    and hasattr(cls, 'factor_expr'))
             if _from_factor_expr:
                 assert _expr is not None  # _from_factor_expr 保证了 factor_expr 已被调用且成功
                 for param in _expr.ordered_param_deps:
@@ -170,6 +195,12 @@ class FactorFamily(UniqueObject, FactorExpr):
             if '$Rev' not in existing_aliases:
                 cls.params.append(ReverseParam)
             instance.params_dict = {param.alias: param for param in instance.params}
+
+            # 声明式因子有自然 neg（最外层或分子）→ $Rev 默认值设为 1
+            # 剥离自然 neg 后，默认行为通过 $Rev=1 保持与原因子定义一致
+            if _has_natural_neg:
+                instance.change_param_default_value(**{'$Rev': True})
+            
             instance.set_default_params()             # 以各参数默认值初始化 _params_list
             instance.factors = []       # 最近一批生成的 Factor 实例
             instance._initialized = True

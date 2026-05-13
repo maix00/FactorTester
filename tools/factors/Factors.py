@@ -81,7 +81,14 @@ class Factor(UniqueObject, FactorExpr):
         self._intermediate_alias_index.clear()
 
     def _strip_outer_and_set_freq(self, expr: FactorExpr, preserve_neg: bool, set_freq: bool = False) -> FactorExpr:
-        """剥离表达式外层的 SignalAlign 和 Neg (如果存在)"""
+        """剥离 $Rev 产生的 neg(SignalAlign(...)) 包装层（不处理因子定义的自然 neg）。
+
+        因子定义的自然最外层 neg 已在 FactorFamily.__new__ 中被剥离，
+        此处仅处理 get_factors() 中 is_reversed 产生的 neg(SignalAlign(...)) 包装。
+        
+        preserve_neg=True  → _func_expr：剥离 SignalAlign，保留 $Rev 的 neg 包裹
+        preserve_neg=False → _source_expr：同时剥离 SignalAlign 和 $Rev 的 neg
+        """
         if isinstance(expr, SignalAlign):
             if set_freq:
                 self._freq = DataFreq(expr.signal_freq)
