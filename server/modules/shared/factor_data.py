@@ -95,11 +95,22 @@ def get_factor_series():
             if fb_col is not None and not factor_table.empty:
                 series = factor_table[fb_col].dropna()
             else:
-                available = _column_names(fe_table)[:10]
-                return jsonify({
-                    'error': '未找到可用的因子截面数据，请先运行 IC 测试后再加载',
-                    'available_products': available,
-                }), 400
+                # 最后回退：调 factor.evaluate() 生成数据
+                try:
+                    tester_factor.evaluate(tester.products)
+                    r2 = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+                    fallback_table = r2.table if r2 is not None and not r2.table.empty else pd.DataFrame()
+                    fb2_col = _match_product_column(fallback_table, product)
+                    if fb2_col is not None and not fallback_table.empty:
+                        series = fallback_table[fb2_col].dropna()
+                except Exception:
+                    pass
+                if series is None:
+                    available = _column_names(fe_table)[:10]
+                    return jsonify({
+                        'error': '未找到可用的因子截面数据，请先运行 IC 测试后再加载',
+                        'available_products': available,
+                    }), 400
 
         assert series is not None
         if series.empty:
@@ -302,6 +313,15 @@ def get_factor_distribution():
 
         tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
         table = _resolve_fe_table(tester_factor, tester)
+        if not isinstance(table, pd.DataFrame) or table.empty:
+            # fallback: 尝试调 factor.evaluate()
+            try:
+                tester_factor.evaluate(tester.products)
+                r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+                if r is not None and not r.table.empty:
+                    table = r.table
+            except Exception:
+                pass
         if not isinstance(table, pd.DataFrame) or table.empty:
             return jsonify({'error': '未找到可用的因子截面数据，请先运行 IC 测试后再查看分布'}), 400
 
