@@ -1978,6 +1978,8 @@ HIGH_RAW = ColumnRef(DataColumn.HIGH)
 LOW_RAW = ColumnRef(DataColumn.LOW)
 CLOSE_RAW = ColumnRef(DataColumn.CLOSE)
 
+SMALL_VAL = ConstExpr(1e-10)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 信号对齐工具函数 & 表达式节点

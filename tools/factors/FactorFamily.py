@@ -74,12 +74,14 @@ class FactorFamily(UniqueObject, FactorExpr):
     # ── 信号对齐参数（类属性，可在子类或实例上覆盖） ──
     basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
     daily_basepoint: 'str|None' = None       # 日倍频基准点（时间字符串，如 '15:00:00'），None 则用 basepoint
-    end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
+    end_session_skip: bool = False             # 是否跳过盘间间隔（仅子日频生效）
     end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))  # 盘间间隔阈值
 
     _expr: Optional[FactorExpr] = None
     _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
     _source_freqs_seen: set[DataFreq] = set()
+    _has_natural_neg: bool = False
+    _instance_signal_freq: str = '1d'
 
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
@@ -176,15 +178,11 @@ class FactorFamily(UniqueObject, FactorExpr):
             # 信号对齐参数（None 则从类属性取默认值）
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
             instance.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
-            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
+            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', False)
             object.__setattr__(instance, 'end_session_gap',
                                end_session_gap if end_session_gap is not None
                                else getattr(cls, 'end_session_gap', cast(pd.Timedelta, pd.Timedelta('3hours'))))
 
-            # 覆盖默认信号频率
-            if _signal_freq != '1d':
-                instance.change_param_default_value(**{'$F': _signal_freq})
-            
             instance._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
             instance._source_freqs_lock = threading.Lock()
             instance._source_freqs_seen = set()
@@ -196,11 +194,11 @@ class FactorFamily(UniqueObject, FactorExpr):
                 cls.params.append(ReverseParam)
             instance.params_dict = {param.alias: param for param in instance.params}
 
-            # 声明式因子有自然 neg（最外层或分子）→ $Rev 默认值设为 1
-            # 剥离自然 neg 后，默认行为通过 $Rev=1 保持与原因子定义一致
-            if _has_natural_neg:
-                instance.change_param_default_value(**{'$Rev': True})
-            
+            # 保存自然 neg 和 signal_freq 覆盖信息，供 set_default_params 使用
+            # 不通过 change_param_default_value 修改全局单例的 default_value
+            instance._has_natural_neg = _has_natural_neg
+            instance._instance_signal_freq = _signal_freq
+
             instance.set_default_params()             # 以各参数默认值初始化 _params_list
             instance.factors = []       # 最近一批生成的 Factor 实例
             instance._initialized = True
@@ -221,8 +219,17 @@ class FactorFamily(UniqueObject, FactorExpr):
         return None
 
     def set_default_params(self):
-        """用各参数默认值初始化 _params_list（仅一组默认参数组合）。"""
+        """用各参数默认值初始化 _params_list（仅一组默认参数组合）。
+        
+        自然 neg 和 signal_freq 覆盖通过 _params_list 中的值体现，
+        不修改全局单例 Parameter 的 default_value。
+        """
         self._params_list = [{p.alias: p.default_value for p in self.params}]
+        params = self._params_list[0]
+        if getattr(self, '_has_natural_neg', False):
+            params['$Rev'] = True
+        if getattr(self, '_instance_signal_freq', '1d') != '1d':
+            params['$F'] = self._instance_signal_freq
 
     def _normalize_param_kwargs(self, **kwargs) -> dict:
         """
@@ -346,7 +353,10 @@ class FactorFamily(UniqueObject, FactorExpr):
         if params_list is not None:
             _pl = params_list
         elif normalized_kwargs:
-            _pl = [{p.alias: p.default_value for p in self.params}]
+            _pl = [{
+                p.alias: normalized_kwargs[p.alias] if p.alias in normalized_kwargs else p.default_value
+                for p in self.params
+            }]
         else:
             _pl = self._params_list
 
