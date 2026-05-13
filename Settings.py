@@ -15,6 +15,11 @@ import pandas as pd
 # 按成交量 top-k 筛选时保留的品种比例（0~1）
 sift_volume_ratio = 0.8
 
+# IC 测试是否并行计算（默认 True，可设为 False 降级排错）
+IC_PARALLEL: bool = True
+# IC 并行计算的最大线程数
+IC_PARALLEL_MAX_WORKERS: int = 8
+
 # IC 测试的默认日期区间（带时区）
 default_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
