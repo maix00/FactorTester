@@ -169,7 +169,7 @@ class DataMeta(UniqueObject):
             if col not in df.columns:
                 raise ValueError(f"Column {col} not found in data")
             df[col] = pd.to_datetime(df[col])
-        df = df.set_index(time_index)
+        df = df.set_index(time_index).sort_index()
 
         # 时区处理
         index = df.index

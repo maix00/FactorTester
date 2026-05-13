@@ -62,7 +62,7 @@ def ensure_factor_returns(
         **{'$F': factor.freq.value},
     )
     ic_factor.clear()
-    ic_factor.evaluate(tester.products, freq=factor._source_freq)
+    ic_factor.evaluate(tester.products)
 
     raw_returns = ic_factor.get_intermediate("RE")
     if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
@@ -106,43 +106,29 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     Data source priority:
       1. factor.table (already computed via factor.evaluate()) — correctly includes
          SignalAlign + $Rev (Neg) because _expr = neg(SignalAlign(func_expr, ...)).
-      2. tester.factor_tables.get(factor) — same as above, from FactorRunResult.table.
-      3. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
-
-    IMPORTANT: _ic_fe_intermediate is the raw IC intermediate FE data (no $Rev, no
-    SignalAlign). It must NOT be used directly.  Instead, inject it as the
-    pre-computed value for factor._source_expr so that factor.evaluate() reuses
-    the data but still applies SignalAlign + Neg correctly.
-
-    This works by temporarily marking _source_expr as _is_intermediate,
-    injecting the cache into factor._intermediate_factor_data, calling
-    factor.evaluate(), then restoring the flag.
+      2. tester.factor_tables.get(factor) — FactorRunResult.table, should be same
+         as #1 (both set by factor.evaluate() in calc_factor()).  Falls through
+         if FactorRunResult.table was overwritten by stale IC test data.
+      3. _ic_fe_intermediate (already includes $Rev via _func_expr = neg(source_expr))
+         → apply SignalAlign directly and return.
+      4. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
     """
-    # Prefer already-computed aligned + negated table
-    if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
-        return factor.table.copy(deep=False)
+    # # Prefer already-computed aligned + negated table
+    # if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
+    #     return factor.table.copy(deep=False)
 
-    cached = tester.factor_tables.get(factor)
-    if isinstance(cached, pd.DataFrame) and not cached.empty:
-        return cached.copy(deep=False)
+    # cached = tester.factor_tables.get(factor)
+    # if isinstance(cached, pd.DataFrame) and not cached.empty:
+    #     return cached.copy(deep=False)
 
-    raw_ic = getattr(factor, '_ic_fe_intermediate', None)
-    if isinstance(raw_ic, pd.DataFrame) and not raw_ic.empty:
-        # Temporarily mark _source_expr as intermediate and inject IC data
-        source_expr = factor._source_expr
-        was_intermediate = source_expr._is_intermediate
-        sk = source_expr._structural_key()
-        source_expr._is_intermediate = True
-        factor._intermediate_factor_data[sk] = raw_ic.copy()
-        try:
-            factor.evaluate(tester.products)
-        finally:
-            source_expr._is_intermediate = was_intermediate
-            # 清理注入的缓存，避免污染后续 evaluate() 调用
-            factor._intermediate_factor_data.pop(sk, None)
-            # 同时清理 factor.table 缓存，确保下次重新计算
-            factor.clear()
-        return factor.table.copy(deep=False)
+    # raw_ic = getattr(factor, '_ic_fe_intermediate', None)
+    # if isinstance(raw_ic, pd.DataFrame) and not raw_ic.empty:
+    #     # _ic_fe_intermediate is factor._func_expr = neg(source_expr) — already
+    #     # includes $Rev negation.  Apply SignalAlign directly (same as the
+    #     # align_table_for_group helper) and return, skipping factor.evaluate()
+    #     # which would apply neg() again via the _expr = neg(SignalAlign(…)) tree.
+    #     aligned = align_table_for_group(factor, raw_ic)
+    #     return aligned.copy(deep=False)
 
     factor.evaluate(tester.products)
     return factor.table.copy(deep=False)
@@ -217,7 +203,7 @@ def test_by_group_single_factor(
 
     all_cols = list(table_src.columns)
     ret_cols = list(returns_src.columns)
-    valid_cols = [c for c in all_cols if c in set(ret_cols)]
+    valid_cols = list(set((valid := table_src.isna().all(axis=0))[~valid].index).intersection(set(ret_cols)))
     if not valid_cols:
         raise ValueError(
             f"{factor.alias}: 因子表和收益表没有共同品种列；"
@@ -270,7 +256,7 @@ def test_by_group_single_factor(
     # 策略：对每列找到第一个有效值的行号，将其之前的 NaN 填 0.0
     not_nan = ~np.isnan(table_np)                   # (T, P)
     first_valid = np.argmax(not_nan, axis=0)          # (P,)  每列第一个非NaN行号；全NaN列=0
-    col_has_any = not_nan.any(axis=0)                 # (P,)  哪些列有至少一个有效值
+    col_has_any = np.asarray(not_nan.any(axis=0), dtype=bool)  # (P,)  哪些列有至少一个有效值，强制为array避免P=1时标量化
     row_idx = np.arange(T, dtype=int)[:, np.newaxis]  # (T, 1)
     head_mask = (row_idx < first_valid[np.newaxis, :]) & col_has_any[np.newaxis, :]  # (T, P)
     table_filled_np = np.where(head_mask, 0.0, table_np)
