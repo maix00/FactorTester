@@ -74,12 +74,14 @@ class FactorFamily(UniqueObject, FactorExpr):
     # ── 信号对齐参数（类属性，可在子类或实例上覆盖） ──
     basepoint: 'str|Callable' = 'last'       # 通用信号基准点：'last'/'first'/callable
     daily_basepoint: 'str|None' = None       # 日倍频基准点（时间字符串，如 '15:00:00'），None 则用 basepoint
-    end_session_skip: bool = True             # 是否跳过盘间间隔（仅子日频生效）
+    end_session_skip: bool = False             # 是否跳过盘间间隔（仅子日频生效）
     end_session_gap: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta('3hours'))  # 盘间间隔阈值
 
     _expr: Optional[FactorExpr] = None
     _source_freq: Any = ''   # 从表达式树解析出的原始数据频率名称（如 '1d'、'1m'）
     _source_freqs_seen: set[DataFreq] = set()
+    _has_natural_neg: bool = False
+    _instance_signal_freq: str = '1d'
 
     def __new__(cls, alias: Optional[str] = None, 
                  expr: Optional[FactorExpr] = None,
@@ -109,8 +111,35 @@ class FactorFamily(UniqueObject, FactorExpr):
         if not hasattr(instance, '_initialized'):
             _expr = expr if expr is not None else getattr(cls, 'expression', None)
             # 声明式因子：expression 类属性未设置时，尝试调用 factor_expr() 静态方法
+            _from_factor_expr = False
             if _expr is None and hasattr(cls, 'factor_expr'):
                 _expr = getattr(cls, 'factor_expr')()
+                _from_factor_expr = True
+
+            # 声明式因子自动剥离 factor_expr() 最外层自然 neg，并将 $Rev 默认值设为 1
+            # 处理两种情况：
+            #   1. 真正的最外层 neg：return -expr          → 剥离 neg, $Rev 默认=1
+            #   2. 分子带 neg 的分式：return -A / B        → 剥离分子 neg, $Rev 默认=1
+            # 例：MmMADevRat 定义 return -P.rolling_mean(N)/(P+1e-10)
+            #     → 剥离后 _expr = P.rolling_mean(N)/(P+1e-10)，$Rev 默认=1
+            _has_natural_neg = False
+            if _from_factor_expr and _expr is not None:
+                if isinstance(_expr, CompositeExpr) and _expr.op == 'neg':
+                    # 情况 1：最外层即 neg
+                    _expr = _expr.operands[0]
+                    _has_natural_neg = True
+                elif isinstance(_expr, CompositeExpr) and len(_expr.operands) > 0:
+                    # 情况 2：检查第一个操作数是否 neg
+                    first_op = _expr.operands[0]
+                    if isinstance(first_op, CompositeExpr) and first_op.op == 'neg':
+                        # 剥离第一个操作数的 neg，用 -1 乘法实现等价变换（如果 op 支持）
+                        if _expr.op in ('div', 'mul'):
+                            _expr = CompositeExpr(
+                                _expr.op,
+                                first_op.operands[0],
+                                *_expr.operands[1:],
+                            )
+                            _has_natural_neg = True
 
             cls.params = list(_expr.ordered_param_deps) if _expr is not None else []
             _source_freq = source_freq if source_freq is not None else getattr(cls, 'source_freq', None)
@@ -125,8 +154,6 @@ class FactorFamily(UniqueObject, FactorExpr):
                 # 否则：旧式因子，手动实现 func()/params，不需要 expr，允许继续
 
             # 声明式因子：从表达式树自动收集参数（避免子类重复声明 params 列表）
-            _from_factor_expr = (expr is None and getattr(cls, 'expression', None) is None
-                                    and hasattr(cls, 'factor_expr'))
             if _from_factor_expr:
                 assert _expr is not None  # _from_factor_expr 保证了 factor_expr 已被调用且成功
                 for param in _expr.ordered_param_deps:
@@ -151,15 +178,11 @@ class FactorFamily(UniqueObject, FactorExpr):
             # 信号对齐参数（None 则从类属性取默认值）
             instance.basepoint = basepoint if basepoint is not None else getattr(cls, 'basepoint', 'last')
             instance.daily_basepoint = daily_basepoint if daily_basepoint is not None else getattr(cls, 'daily_basepoint', None)
-            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', True)
+            instance.end_session_skip = end_session_skip if end_session_skip is not None else getattr(cls, 'end_session_skip', False)
             object.__setattr__(instance, 'end_session_gap',
                                end_session_gap if end_session_gap is not None
                                else getattr(cls, 'end_session_gap', cast(pd.Timedelta, pd.Timedelta('3hours'))))
 
-            # 覆盖默认信号频率
-            if _signal_freq != '1d':
-                instance.change_param_default_value(**{'$F': _signal_freq})
-            
             instance._runtime_ctx = threading.local()  # 运行时线程本地上下文（如当前 signal freq）
             instance._source_freqs_lock = threading.Lock()
             instance._source_freqs_seen = set()
@@ -170,6 +193,12 @@ class FactorFamily(UniqueObject, FactorExpr):
             if '$Rev' not in existing_aliases:
                 cls.params.append(ReverseParam)
             instance.params_dict = {param.alias: param for param in instance.params}
+
+            # 保存自然 neg 和 signal_freq 覆盖信息，供 set_default_params 使用
+            # 不通过 change_param_default_value 修改全局单例的 default_value
+            instance._has_natural_neg = _has_natural_neg
+            instance._instance_signal_freq = _signal_freq
+
             instance.set_default_params()             # 以各参数默认值初始化 _params_list
             instance.factors = []       # 最近一批生成的 Factor 实例
             instance._initialized = True
@@ -190,8 +219,17 @@ class FactorFamily(UniqueObject, FactorExpr):
         return None
 
     def set_default_params(self):
-        """用各参数默认值初始化 _params_list（仅一组默认参数组合）。"""
+        """用各参数默认值初始化 _params_list（仅一组默认参数组合）。
+        
+        自然 neg 和 signal_freq 覆盖通过 _params_list 中的值体现，
+        不修改全局单例 Parameter 的 default_value。
+        """
         self._params_list = [{p.alias: p.default_value for p in self.params}]
+        params = self._params_list[0]
+        if getattr(self, '_has_natural_neg', False):
+            params['$Rev'] = True
+        if getattr(self, '_instance_signal_freq', '1d') != '1d':
+            params['$F'] = self._instance_signal_freq
 
     def _normalize_param_kwargs(self, **kwargs) -> dict:
         """
@@ -315,7 +353,10 @@ class FactorFamily(UniqueObject, FactorExpr):
         if params_list is not None:
             _pl = params_list
         elif normalized_kwargs:
-            _pl = [{p.alias: p.default_value for p in self.params}]
+            _pl = [{
+                p.alias: normalized_kwargs[p.alias] if p.alias in normalized_kwargs else p.default_value
+                for p in self.params
+            }]
         else:
             _pl = self._params_list
 
