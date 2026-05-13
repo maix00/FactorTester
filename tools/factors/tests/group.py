@@ -31,7 +31,7 @@ def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFra
 
     signal_node = _find_signal_align(factor._expr)
     if signal_node is None:
-        return raw_table.copy(deep=False)
+        return raw_table
     return signal_align(
         raw_table,
         signal_node.signal_freq,
@@ -53,12 +53,11 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     r = tester.results.get(factor) if hasattr(tester, 'results') else None
     if r is not None:
         if isinstance(r.table, pd.DataFrame) and not r.table.empty:
-            return cast(pd.DataFrame, r.table.copy(deep=False))
+            return cast(pd.DataFrame, r.table)
         if isinstance(getattr(r, 'func_table', None), pd.DataFrame) and not cast(pd.DataFrame, r.func_table).empty:
             # func_table already includes $Rev negation via _func_expr = neg(source_expr)
             # → apply SignalAlign directly, skip factor.evaluate()
-            aligned = align_table_for_group(factor, r.func_table)
-            return aligned.copy(deep=False)
+            return align_table_for_group(factor, r.func_table)
 
     # 最后兜底：重新计算
     return factor.evaluate(tester.products)
