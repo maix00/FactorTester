@@ -337,6 +337,9 @@ class Factor(UniqueObject, FactorExpr):
                         f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
                     )
                 self._intermediate_alias_index[name] = sk
+                # 将局部 cache 中的数据同步到 _intermediate_factor_data，
+                # 使 get_intermediate() 在有 tester 时也能查到 intermediate 数据
+                self._intermediate_factor_data[sk] = cache[sk]
     
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """
