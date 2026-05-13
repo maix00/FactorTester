@@ -45,7 +45,7 @@ class FactorRunResult:
         "_factor",
         "_source_table",
         "table",
-        "returns",
+        "_returns",
         "_return_freq",
         "ic_series",
         "ic_stats",
@@ -55,7 +55,7 @@ class FactorRunResult:
         self._factor: Optional[Factor] = factor
         self._source_table: pd.DataFrame = pd.DataFrame()
         self.table: pd.DataFrame = pd.DataFrame()
-        self.returns: pd.DataFrame = pd.DataFrame()
+        self._returns: pd.DataFrame = pd.DataFrame()
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
         self.ic_stats: pd.Series = pd.Series(dtype=float)
@@ -92,6 +92,16 @@ class FactorRunResult:
         if isinstance(node, CompositeExpr) and node.op == 'neg':
             return -self._source_table
         return self._source_table
+
+    # ── returns ──
+
+    @property
+    def returns(self) -> pd.DataFrame:
+        return self._returns
+
+    @returns.setter
+    def returns(self, value: pd.DataFrame) -> None:
+        self._returns = value
 
     # ── return_freq ──
     @property

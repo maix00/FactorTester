@@ -16,70 +16,6 @@ from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
 
 
-def ensure_factor_returns(
-    tester: Any,
-    factor: Factor,
-    returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-) -> pd.DataFrame:
-    """Ensure tester.results[factor].returns has the raw RE returns table for factor."""
-    r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
-    desired_freq = r.return_freq if r is not None else None
-    if desired_freq is None:
-        desired_freq = factor.freq
-    desired_key = getattr(desired_freq, "name", None) or str(desired_freq)
-    returns_col_key = returns_col.value.name if isinstance(returns_col, FactorNextPeriodReturns) else str(returns_col)
-
-    cached = r.returns if r is not None else pd.DataFrame()
-    cached_freq = getattr(factor, "_return_freq_cached", None)
-    cached_col = getattr(factor, "_return_col_cached", None)
-    # 若 products 已变化（列数不匹配），缓存失效
-    products_count = len(tester.products) if hasattr(tester, 'products') else None
-    if isinstance(cached, pd.DataFrame) and not cached.empty and cached.shape[1] != products_count:
-        cached = pd.DataFrame()
-        object.__setattr__(factor, "_return_freq_cached", None)
-        object.__setattr__(factor, "_return_col_cached", None)
-    freq_matches = cached_freq == desired_key or (cached_freq is None and (r is None or r.return_freq is None))
-    col_matches = cached_col == returns_col_key or cached_col is None
-    if isinstance(cached, pd.DataFrame) and not cached.empty and freq_matches and col_matches:
-        object.__setattr__(factor, "_return_freq_cached", desired_key)
-        object.__setattr__(factor, "_return_col_cached", returns_col_key)
-        return cached
-
-    if factor.table is None or factor.table.empty:
-        factor.evaluate(tester.products)
-
-    from tools.factors.FactorFamily import CrossSectionIC
-
-    try:
-        rf_value = desired_freq.value if isinstance(desired_freq, DataFreq) else desired_freq
-    except Exception:
-        rf_value = factor.freq.value
-
-    data_col = returns_col.value if isinstance(returns_col, FactorNextPeriodReturns) else returns_col
-    shift = 0 if data_col.name.startswith("OPEN") else 1
-
-    ic_family = CrossSectionIC()
-    ic_factor = ic_family.get_factor(
-        FE=factor,
-        SC=data_col,
-        RF=rf_value,
-        S=shift,
-        Lag=0,
-        **{'$F': factor.freq.value},
-    )
-    ic_factor.clear()
-    ic_factor.evaluate(tester.products)
-
-    raw_returns = ic_factor.get_intermediate("RE")
-    if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
-        raise ValueError(f"{factor.alias}: 无法生成收益率数据")
-    if r is not None:
-        r.returns = raw_returns
-    object.__setattr__(factor, "_return_freq_cached", desired_key)
-    object.__setattr__(factor, "_return_col_cached", returns_col_key)
-    return raw_returns
-
-
 def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFrame:
     """Temporarily project a raw FE/RE table onto factor signal timestamps."""
     from tools.factors.FactorExpr import SignalAlign, signal_align
@@ -173,7 +109,10 @@ def test_by_group_single_factor(
     start_date = pd.to_datetime(time_range[0]) if time_range is not None else tester.start_date
     end_date = pd.to_datetime(time_range[1]) if time_range is not None else tester.end_date
 
-    raw_returns = ensure_factor_returns(tester, factor, returns_col=returns_col)
+    r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
+    if r is None or r.returns.empty:
+        raise ValueError(f"{factor.alias}: returns 未计算，请先运行 IC 测试")
+    raw_returns = r.returns
     returns_for_group = align_table_for_group(factor, raw_returns)
     assert not returns_for_group.empty
 
