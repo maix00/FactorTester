@@ -75,6 +75,14 @@ def get_factor_series():
 
         # 优先从 FactorRunResult.func_table 获取 FE intermediate（含 $Rev，无 SignalAlign）
         r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+        
+        # DIAG: if not found, try matching by alias
+        if r is None and hasattr(tester, 'results'):
+            for k in tester.results:
+                if getattr(k, 'alias', None) == target_factor.alias:
+                    r = tester.results[k]
+                    break
+        
         fe_table = r.func_table if r is not None and not r.func_table.empty else pd.DataFrame()
         fe_col = _match_product_column(fe_table, product)
 
@@ -144,6 +152,11 @@ def get_return_series():
 
         # 优先从 FactorRunResult.returns 获取 IC 测试阶段的 RE intermediate 数据
         r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+        if r is None and hasattr(tester, 'results'):
+            for k in tester.results:
+                if getattr(k, 'alias', None) == factor.alias:
+                    r = tester.results[k]
+                    break
         returns_table = r.returns if r is not None and not r.returns.empty else pd.DataFrame()
         if returns_table.empty:
             returns_table = next(
