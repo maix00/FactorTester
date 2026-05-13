@@ -283,8 +283,6 @@ def _build_ic_response(
         resolved_seen.add(obj_id)
         resolved_products.add(p_obj)
 
-    tester.products = resolved_products if resolved_products else all_products.copy()
-
     # ── IC stats 表 ──
     ic_stats_all = pd.DataFrame({
         f.alias: (tester.results[f].ic_stats if f in tester.results else pd.Series(dtype=float))
@@ -390,7 +388,8 @@ def _build_ic_response(
 
         # products
         products = []
-        for p in sorted(tester.products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
+        final_products = resolved_products if resolved_products else all_products
+        for p in sorted(final_products, key=lambda p: str(getattr(p, 'alias', getattr(p, 'name', p)))):
             p_name = str(getattr(p, 'name', p))
             p_desc = str(getattr(p, 'desc', p_name))
             products.append({
@@ -536,7 +535,6 @@ def run_ic_test():
     """IC 测试（JSON 一次性返回）。"""
     data = request.get_json(silent=True) or {}
     _token = None
-    _saved_products = None
     tester = None
 
     try:
@@ -557,8 +555,6 @@ def run_ic_test():
          ic_decay_lags, rolling_window, ic_lags, primary_ic_lag) = \
             _prepare_ic_compute(data, tester, factor_family, all_factors)
 
-        _saved_products = tester.products.copy() if hasattr(tester, 'products') else None
-        tester.products = all_products.copy()
         param_items = list(ic_param_map.items())
 
         compute = _compute_ic_groups(
@@ -575,8 +571,6 @@ def run_ic_test():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
-        if _saved_products is not None and tester is not None:
-            tester.products = _saved_products
         if _token is not None:
             _active_tester.reset(_token)
 
@@ -607,7 +601,6 @@ def run_ic_test_stream():
     emitter = SSEProgressEmitter()
 
     def _compute_and_emit():
-        _saved_products = None
         _token = None
         try:
             (factors, paths_hash, all_products, ic_param_map, param_payloads,
@@ -618,8 +611,6 @@ def run_ic_test_stream():
             tester.sync_signal_index_replaced = None
             _token = _active_tester.set(tester)
 
-            _saved_products = tester.products.copy() if hasattr(tester, 'products') else None
-            tester.products = all_products.copy()
             param_items = list(ic_param_map.items())
 
             compute = _compute_ic_groups(
@@ -634,8 +625,6 @@ def run_ic_test_stream():
         except Exception as e:
             emitter.emit_error(str(e), traceback=traceback.format_exc())
         finally:
-            if _saved_products is not None:
-                tester.products = _saved_products
             if _token is not None:
                 _active_tester.reset(_token)
             emitter.close()
