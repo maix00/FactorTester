@@ -71,6 +71,11 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     #     aligned = align_table_for_group(factor, r.func_table)
     #     return aligned.copy(deep=False)
 
+    # ── 清空 intermediate 缓存以防跨 tester 污染 ──
+    # _intermediate_factor_data 的 key 是 structural_key，不含 products，
+    # 不同 tester 的不同产品集可能缓存错误的中间结果。
+    factor._intermediate_factor_data.clear()
+
     factor.evaluate(tester.products)
     return factor.table.copy(deep=False)
 
