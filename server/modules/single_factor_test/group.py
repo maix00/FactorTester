@@ -65,10 +65,15 @@ def run_group_test():
     # 多周期对比：传入 return_freqs 数组，如 ["1d","3d","5d","10d"]
     return_freqs: list = data.get('return_freqs', None)
     _gt_token = None
+    _saved_products = None
     try:
         tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
         if not tester:
             return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
+
+        # 快照 products 以防并发请求（如 IC 测试或 delete_path）修改共享的 tester.products
+        _saved_products = tester.products.copy()
+        tester.products = set(_saved_products)
 
         factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
         if not factor:
@@ -229,6 +234,8 @@ def run_group_test():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
+        if _saved_products is not None:
+            tester.products = _saved_products
         if _gt_token is not None:
             _active_tester.reset(_gt_token)
 
