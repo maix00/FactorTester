@@ -454,3 +454,10 @@ th {
     min-width: 40px;
     text-align: right;
 }
+
+/* 分组测试最佳值单元格高亮 */
+.group-best-cell {
+    font-weight: 700;
+    color: #1a7a1a;
+    background: #e8f5e9;
+}

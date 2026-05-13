@@ -262,14 +262,24 @@ class Factor(UniqueObject, FactorExpr):
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
 
+        # ── 获取/创建 FactorRunResult；选择缓存目标 ──
+        # 有 tester → 局部 dict（每次 evaluate() 调用独立，不跨 tester 污染）
+        # 无 tester → 回退到 _intermediate_factor_data（仅用于独立 Factor，如 CrossSectionIC）
+        if _tester is not None:
+            r = _tester._get_result(self)
+            _intermediate_cache: dict = {}
+        else:
+            r = FactorRunResult(factor=self)
+            _intermediate_cache = self._intermediate_factor_data
+
         # ── 1. 表达式求值 ──
         # _expr = neg(SignalAlign(func_expr, ...)) 或 SignalAlign(func_expr, ...)
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
-                                     cache=self._intermediate_factor_data, start_calc_point=start_calc_point)
+                                     cache=_intermediate_cache, start_calc_point=start_calc_point)
 
-        # ── 2. FactorData 去重存储（存未对齐的原始数据） ──
+        # ── 2. 提取未对齐的原始数据 ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
         raw_data: pd.DataFrame = result  # fallback
         node = self._expr
@@ -283,43 +293,42 @@ class Factor(UniqueObject, FactorExpr):
                 node = operands[0]
             else:
                 break
-        self._source_data = raw_data
 
-        # ── 3. 对齐表（pandas CoW：零拷贝引用） ──
-        self._data = result
-
-        # ── 4. 删除无贡献的列 ──
+        # ── 3. 删除无贡献的列 ──
         nunique: pd.Series = cast(pd.Series, result.nunique(dropna=True))
         col_todrop = cast(pd.Index, cast(pd.Series, nunique[nunique <= 1]).index).tolist()
         result.drop(columns=col_todrop, inplace=True)
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 
-        # ── 5. 同步到 tester（向后兼容：_DictAccessor 代理 FactorRunResult） ──
+        # ── 4. 全部数据写入 FactorRunResult（per-tester 隔离）──
         if _tester is not None:
             r = _tester._get_result(self)
-            r.source_table = self.source_table
+            r.source_table = raw_data
             r.table = result
         else:
+            # 无 tester（如 CrossSectionIC 独立 evaluate）：写入 Factor 本地缓存
+            self._source_data = raw_data
             self._data = result
 
-        # ── 6. 收集中间因子别名索引 ──
-        self._collect_intermediates_from_cache()
+        # ── 5. 收集中间因子别名索引 ──
+        self._collect_intermediates_from_cache(_intermediate_cache)
 
-        return self.table
+        return result
     
-    def _collect_intermediates_from_cache(self) -> None:
-        """遍历表达式树，将 _intermediate_factor_data 中的 sk 映射到别名。
+    def _collect_intermediates_from_cache(self, cache: Optional[dict] = None) -> None:
+        """遍历表达式树，将中间缓存中的 sk 映射到别名。
 
-        规则：同一个 as_intermediate(name) 必须映射到同一个 structural_key；
-        若不同 structural_key 的节点使用了相同的 intermediate name，直接报错。
+        cache: 表达式求值缓存（有 tester 时为局部 dict，无 tester 时为 _intermediate_factor_data）。
         """
+        if cache is None:
+            return
         self._intermediate_alias_index.clear()
 
         for node in self._expr.iter_intermediate_nodes():
             name = node._intermediate_name
             sk = node._structural_key()
-            if name and sk in self._intermediate_factor_data:
+            if name and sk in cache:
                 existing_sk = self._intermediate_alias_index.get(name)
                 if existing_sk is not None and existing_sk != sk:
                     raise ValueError(
@@ -328,24 +337,31 @@ class Factor(UniqueObject, FactorExpr):
                         f"每个 as_intermediate(name) 必须对应唯一表达式结构。"
                     )
                 self._intermediate_alias_index[name] = sk
+                # 将局部 cache 中的数据同步到 _intermediate_factor_data，
+                # 使 get_intermediate() 在有 tester 时也能查到 intermediate 数据
+                self._intermediate_factor_data[sk] = cache[sk]
     
     def get_intermediate(self, key: Union[str, Tuple]) -> Optional[pd.DataFrame]:
         """
         获取中间因子数据（原始未对齐 DataFrame）。
 
+        无 tester 时从 _intermediate_factor_data 获取（如 CrossSectionIC 独立 evaluate）。
+        有 tester 时：用 _func_expr 对 FactorRunResult.func_table 做 SignalAlign 对齐。
+
         key 支持两种形式：
           - str: 按 .as_intermediate() 注册的名称查找，如 'FE', 'RE'
           - Tuple (structural_key): 按表达式结构 key 直接查找
-
-        返回 DataFrame 或 None。
         """
         if isinstance(key, str):
             sk = self._intermediate_alias_index.get(key)
-            if sk is not None:
-                return self._intermediate_factor_data.get(sk)
-            return None
-        # key 是 structural_key (tuple)
-        return self._intermediate_factor_data.get(key)
+            if sk is None:
+                return None
+        else:
+            sk = key
+        result = self._intermediate_factor_data.get(sk)
+        if isinstance(result, dict):
+            return pd.DataFrame(result)
+        return result
     
     @property
     def freq(self) -> DataFreq:
@@ -367,12 +383,22 @@ class Factor(UniqueObject, FactorExpr):
     
     @property
     def source_table(self) -> pd.DataFrame:
+        tester = self._get_active_tester()
+        if tester is not None:
+            r = tester.results.get(self) if hasattr(tester, 'results') else None
+            if r is not None and hasattr(r, 'source_table') and not r.source_table.empty:
+                return r.source_table
         if self._source_data is not None:
             return self._source_data
         return pd.DataFrame()
 
     @property
     def table(self) -> pd.DataFrame:
+        tester = self._get_active_tester()
+        if tester is not None:
+            r = tester.results.get(self) if hasattr(tester, 'results') else None
+            if r is not None and not r.table.empty:
+                return r.table
         if self._data is not None:
             return self._data
         return pd.DataFrame()

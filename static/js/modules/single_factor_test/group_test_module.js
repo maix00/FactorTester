@@ -179,11 +179,31 @@
         document.getElementById('multi_horizon_head').innerHTML = headHtml;
 
         // 表体：每行一个指标
+        var MH_METRIC_DIR = {
+            'Total Return': 1, 'Annual Return': 1, 'Sharpe Ratio': 1, 'Calmar Ratio': 1,
+            'Win Rate': 1, 'Mean Return': 1, 'Skewness': 1,
+            'Volatility': -1, 'Max Drawdown': -1, 'Kurtosis': -1,
+            'Avg Turnover': -1, 'Avg Turnover Accel': -1, 'Avg Position Changes': -1, 'Up Ratio': 1
+        };
+        function mhBestColIdx(vals, metricName) {
+            var dir = MH_METRIC_DIR[metricName];
+            var best = -1, bestVal = null;
+            for (var i = 0; i < vals.length; i++) {
+                if (vals[i] === null || vals[i] === undefined) continue;
+                if (best === -1 || (dir >= 0 ? vals[i] > bestVal : vals[i] < bestVal)) {
+                    best = i; bestVal = vals[i];
+                }
+            }
+            return best;
+        }
         var bodyHtml = '';
         allMetricNames.forEach(function(name) {
             var cnName = metricNamesCN[name] || name;
+            // 收集原始数值找最佳
+            var rawVals = results.map(function(r) { return (r.ls_metrics && r.ls_metrics[name] !== undefined) ? r.ls_metrics[name] : null; });
+            var best = mhBestColIdx(rawVals, name);
             bodyHtml += '<tr><td style="font-weight:600;">' + cnName + '</td>';
-            results.forEach(function(r) {
+            results.forEach(function(r, ri) {
                 var val = (r.ls_metrics && r.ls_metrics[name] !== undefined) ? r.ls_metrics[name] : null;
                 var display;
                 if (val === null || val === undefined) {
@@ -199,7 +219,8 @@
                 } else {
                     display = val.toFixed(4);
                 }
-                bodyHtml += '<td>' + display + '</td>';
+                var cellClass = (ri === best) ? ' class="group-best-cell"' : '';
+                bodyHtml += '<td' + cellClass + '>' + display + '</td>';
             });
             bodyHtml += '</tr>';
         });
@@ -637,15 +658,45 @@
         theadHtml += '</tr>';
         document.getElementById('metrics_head').innerHTML = theadHtml;
         
+        // 最佳值方向：1 = 越大越好，-1 = 越小越好
+        var METRIC_DIR = {
+            'Total Return': 1, 'Annual Return': 1, 'Sharpe Ratio': 1, 'Calmar Ratio': 1,
+            'Win Rate': 1, 'Mean Return': 1, 'Skewness': 1,
+            'Volatility': -1, 'Max Drawdown': -1, 'Kurtosis': -1,
+            'Avg Turnover': -1, 'Avg Turnover Accel': -1, 'Avg Position Changes': -1, 'Up Ratio': 1
+        };
+        // 辅助：找最佳值索引（传入 metricName 避免闭包混淆）
+        function bestColIdx(values, metricName) {
+            var dir = METRIC_DIR[metricName];
+            if (dir === undefined) return -1;
+            var best = -1, bestVal = null;
+            for (var i = 0; i < values.length; i++) {
+                if (values[i] === null || values[i] === undefined) continue;
+                if (best === -1 || (dir >= 0 ? values[i] > bestVal : values[i] < bestVal)) {
+                    best = i; bestVal = values[i];
+                }
+            }
+            return best;
+        }
+
         // 表体：每行一个指标
         var tbodyHtml = '';
         metricNames.forEach(function(name) {
             var cnName = metricNamesCN[name] || name;
-            tbodyHtml += '<tr><td class="metric-name-cell" data-metric="' + name.replace(/"/g, '&quot;') + '" style="cursor:pointer;position:relative;">' + cnName + '</td>';
+            // 收集原始数值找最佳
+            var rawVals = [];
             groupLabels.forEach(function(g) {
+                rawVals.push(metrics[g][name]);
+            });
+            var best = bestColIdx(rawVals, name);
+
+            tbodyHtml += '<tr><td class="metric-name-cell" data-metric="' + name.replace(/"/g, '&quot;') + '" style="cursor:pointer;position:relative;">' + cnName + '</td>';
+            groupLabels.forEach(function(g, gi) {
                 var isLS = (g === 'LS');
                 var val = metrics[g][name];
+                var cellClass = (gi === best) ? ' class="group-best-cell"' : '';
                 var style = isLS ? ' style="background:#f0f0f0;"' : '';
+                if (cellClass && isLS) style = ' class="group-best-cell" style="background:#e8f5e9;"';
                 if (typeof val === 'number') {
                     if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
                         val = (val * 100).toFixed(1) + '%';
@@ -661,7 +712,7 @@
                 } else if (val === null || val === undefined) {
                     val = '—';
                 }
-                tbodyHtml += '<td' + style + '>' + val + '</td>';
+                tbodyHtml += '<td' + (cellClass || style) + '>' + val + '</td>';
             });
             tbodyHtml += '</tr>';
         });
