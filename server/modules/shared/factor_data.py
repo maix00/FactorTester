@@ -73,22 +73,26 @@ def get_factor_series():
         tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
         product = resolve_product_from_tester(tester, product_name)
 
-        # 优先使用 IC 测试阶段的 FE intermediate；若缺失，则按 _func_expr/source_table 回退并保持 Neg 语义。
-        fe_table = _resolve_fe_table(tester_factor)
+        # 优先从 FactorRunResult.func_table 获取 FE intermediate（含 $Rev，无 SignalAlign）
+        r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+        fe_table = r.func_table if r is not None and not r.func_table.empty else pd.DataFrame()
         fe_col = _match_product_column(fe_table, product)
 
         series = None
-        if fe_col is not None and isinstance(fe_table, pd.DataFrame):
+        if fe_col is not None and not fe_table.empty:
             series = fe_table[fe_col].dropna()
         else:
-            factor_table = tester.factor_tables.get(tester_factor)
-            if factor_table is None:
+            # 回退：用 FactorRunResult.table（含 SignalAlign，有 $Rev）
+            factor_table = r.table if r is not None and not r.table.empty else pd.DataFrame()
+            if factor_table.empty:
                 factor_table = next(
-                    (v for k, v in tester.factor_tables.items() if getattr(k, 'alias', None) == target_factor.alias),
-                    None,
+                    (v.table for k, v in tester.results.items()
+                     if isinstance(v.table, pd.DataFrame) and not v.table.empty
+                     and getattr(k, 'alias', None) == target_factor.alias),
+                    pd.DataFrame(),
                 )
             fb_col = _match_product_column(factor_table, product)
-            if fb_col is not None and isinstance(factor_table, pd.DataFrame):
+            if fb_col is not None and not factor_table.empty:
                 series = factor_table[fb_col].dropna()
             else:
                 available = _column_names(fe_table)[:10]
@@ -127,12 +131,15 @@ def get_return_series():
         tester_factor = next((f for f in tester.factors if f.alias == factor.alias), factor)
         product = resolve_product_from_tester(tester, product_name)
 
-        # 优先使用 IC 测试阶段由 intermediate(RE) 回填的数据
-        returns_table = tester.factor_returns.get(tester_factor)
-        if returns_table is None:
+        # 优先从 FactorRunResult.returns 获取 IC 测试阶段的 RE intermediate 数据
+        r = tester.results.get(tester_factor) if hasattr(tester, 'results') else None
+        returns_table = r.returns if r is not None and not r.returns.empty else pd.DataFrame()
+        if returns_table.empty:
             returns_table = next(
-                (v for k, v in tester.factor_returns.items() if getattr(k, 'alias', None) == factor.alias),
-                None,
+                (v.returns for k, v in tester.results.items()
+                 if isinstance(v.returns, pd.DataFrame) and not v.returns.empty
+                 and getattr(k, 'alias', None) == factor.alias),
+                pd.DataFrame(),
             )
         ret_col = _match_product_column(returns_table, product)
         if ret_col is not None and isinstance(returns_table, pd.DataFrame):
@@ -294,7 +301,7 @@ def get_factor_distribution():
             return jsonify({'error': '未找到因子'}), 404
 
         tester_factor = next((f for f in tester.factors if f.alias == target_factor.alias), target_factor)
-        table = _resolve_fe_table(tester_factor)
+        table = _resolve_fe_table(tester_factor, tester)
         if not isinstance(table, pd.DataFrame) or table.empty:
             return jsonify({'error': '未找到可用的因子截面数据，请先运行 IC 测试后再查看分布'}), 400
 

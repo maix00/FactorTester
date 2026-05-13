@@ -40,11 +40,15 @@ def find_factor(factors, factor_name: str | None, factor_alias: str | None):
     return None
 
 
-def resolve_fe_table(tester_factor) -> pd.DataFrame | None:
-    """Read FE table cached during IC tests."""
-    fe_table = getattr(tester_factor, '_ic_fe_intermediate', None)
-    if isinstance(fe_table, pd.DataFrame) and not fe_table.empty:
-        return fe_table
+def resolve_fe_table(tester_factor, tester=None) -> pd.DataFrame | None:
+    """Read FE table from FactorRunResult.func_table (IC test intermediate).
+    
+    func_table = _func_expr.evaluate() result: includes $Rev (if applicable), no SignalAlign.
+    """
+    if tester is not None and hasattr(tester, 'results'):
+        r = tester.results.get(tester_factor)
+        if r is not None and not r.func_table.empty:
+            return r.func_table
     return None
 
 

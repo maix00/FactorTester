@@ -104,7 +104,7 @@ def test_by_group_single_factor(
     returns_for_group = align_table_for_group(factor, raw_returns)
     assert not returns_for_group.empty
 
-    table_src: pd.DataFrame = cast(pd.DataFrame, get_factor_table_for_group(tester, factor).copy(deep=False))
+    table_src: pd.DataFrame = cast(pd.DataFrame, get_factor_table_for_group(tester, factor))
     returns_src: pd.DataFrame = cast(pd.DataFrame, returns_for_group.copy(deep=False))
     table_src.index = _extract_signal_index(table_src.index)
     returns_src.index = _extract_signal_index(returns_src.index)

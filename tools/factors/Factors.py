@@ -377,12 +377,22 @@ class Factor(UniqueObject, FactorExpr):
     
     @property
     def source_table(self) -> pd.DataFrame:
+        tester = self._get_active_tester()
+        if tester is not None:
+            r = tester.results.get(self) if hasattr(tester, 'results') else None
+            if r is not None and hasattr(r, 'source_table') and not r.source_table.empty:
+                return r.source_table
         if self._source_data is not None:
             return self._source_data
         return pd.DataFrame()
 
     @property
     def table(self) -> pd.DataFrame:
+        tester = self._get_active_tester()
+        if tester is not None:
+            r = tester.results.get(self) if hasattr(tester, 'results') else None
+            if r is not None and not r.table.empty:
+                return r.table
         if self._data is not None:
             return self._data
         return pd.DataFrame()
