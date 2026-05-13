@@ -46,38 +46,22 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     """Get the factor exposure table for group testing.
 
     Data source priority:
-      1. factor.table (already computed via factor.evaluate()) — correctly includes
-         SignalAlign + $Rev (Neg) because _expr = neg(SignalAlign(func_expr, ...)).
-      2. FactorRunResult.table — should be same as #1 (both set by factor.evaluate()
-         in calc_factor()).
-      3. func_table (already includes $Rev via _func_expr = neg(source_expr))
-         → apply SignalAlign directly and return.
-      4. factor.evaluate(tester.products) — compute fresh with full $Rev + SignalAlign.
+      1. FactorRunResult.table — tester-scoped, no cross-tester pollution.
+      2. factor.evaluate(tester.products) — compute fresh (last resort).
     """
-    # # Prefer already-computed aligned + negated table
-    # if isinstance(factor.table, pd.DataFrame) and not factor.table.empty:
-    #     return factor.table.copy(deep=False)
+    # 优先从 tester 隔离的 FactorRunResult 获取
+    r = tester.results.get(factor) if hasattr(tester, 'results') else None
+    if r is not None:
+        if isinstance(r.table, pd.DataFrame) and not r.table.empty:
+            return cast(pd.DataFrame, r.table.copy(deep=False))
+        if isinstance(getattr(r, 'func_table', None), pd.DataFrame) and not cast(pd.DataFrame, r.func_table).empty:
+            # func_table already includes $Rev negation via _func_expr = neg(source_expr)
+            # → apply SignalAlign directly, skip factor.evaluate()
+            aligned = align_table_for_group(factor, r.func_table)
+            return aligned.copy(deep=False)
 
-    # cached = tester.results[factor].table if factor in tester.results else None
-    # if isinstance(cached, pd.DataFrame) and not cached.empty:
-    #     return cached.copy(deep=False)
-
-    # r = tester.results.get(factor)
-    # if r is not None and isinstance(r.func_table, pd.DataFrame) and not r.func_table.empty:
-    #     # func_table is factor._func_expr = neg(source_expr) — already
-    #     # includes $Rev negation.  Apply SignalAlign directly (same as the
-    #     # align_table_for_group helper) and return, skipping factor.evaluate()
-    #     # which would apply neg() again via the _expr = neg(SignalAlign(…)) tree.
-    #     aligned = align_table_for_group(factor, r.func_table)
-    #     return aligned.copy(deep=False)
-
-    # ── 清空 intermediate 缓存以防跨 tester 污染 ──
-    # _intermediate_factor_data 的 key 是 structural_key，不含 products，
-    # 不同 tester 的不同产品集可能缓存错误的中间结果。
-    factor._intermediate_factor_data.clear()
-
-    factor.evaluate(tester.products)
-    return factor.table.copy(deep=False)
+    # 最后兜底：重新计算
+    return factor.evaluate(tester.products)
 
 
 def test_by_group_single_factor(
