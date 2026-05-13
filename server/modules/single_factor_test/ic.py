@@ -180,31 +180,66 @@ def run_ic_test():
                 result = run_ic_for_factor(tester, param_payloads[key], factor_list)
                 return key, result
 
-            # Issue #3: Serialize computation to avoid ThreadPoolExecutor concurrent mutations
-            for key, factor_list in param_items:
-                lag_i = int(key[-1])
-                _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
-                for factor in factor_list:
-                    series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
-                    stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+            # 并行计算 IC（ThreadPoolExecutor），结果在主线程串行合并，避免并发写入
+            import Settings
+            use_parallel = (
+                getattr(Settings, 'IC_PARALLEL', True)
+                and len(param_items) > 1
+            )
 
-                    if lag_i == primary_ic_lag:
-                        r = tester._get_result(factor)
-                        r.ic_series = ic_series.copy()
-                        r.ic_stats = stats.copy()
-                        if not re_table.empty:
-                            r.returns = re_table.copy()
-                        if not fe_table.empty:
-                            # func_table 是 computed property，从 source_table + _func_expr 推导
-                            # 这里确保 source_table 已存储（由 factor.evaluate() 写入），
-                            # func_table 即可通过 r.func_table 获取
-                            pass
+            if use_parallel:
+                token = _active_tester.get()
+                max_workers = min(
+                    getattr(Settings, 'IC_PARALLEL_MAX_WORKERS', 8),
+                    len(param_items),
+                )
 
-                        p_names = _extract_product_names(fe_table, re_table)
-                        if p_names:
-                            for p_name in p_names:
-                                if p_name not in selected_product_names:
-                                    selected_product_names.append(p_name)
+                def _worker(item: Tuple[tuple, List[Factor]]):
+                    _active_tester.set(token)
+                    return _calc_one_group(item)
+
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {pool.submit(_worker, item): item for item in param_items}
+                    for future in as_completed(futures):
+                        key, result = future.result()
+                        lag_i = int(key[-1])
+                        factor_list, ic_series, stats, re_table, fe_table = result
+                        for factor in factor_list:
+                            series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
+                            stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+
+                            if lag_i == primary_ic_lag:
+                                r = tester._get_result(factor)
+                                r.ic_series = ic_series.copy()
+                                r.ic_stats = stats.copy()
+                                if not re_table.empty:
+                                    r.returns = re_table.copy()
+
+                                p_names = _extract_product_names(fe_table, re_table)
+                                if p_names:
+                                    for p_name in p_names:
+                                        if p_name not in selected_product_names:
+                                            selected_product_names.append(p_name)
+            else:
+                for key, factor_list in param_items:
+                    lag_i = int(key[-1])
+                    _, ic_series, stats, re_table, fe_table = run_ic_for_factor(tester, param_payloads[key], factor_list)
+                    for factor in factor_list:
+                        series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
+                        stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
+
+                        if lag_i == primary_ic_lag:
+                            r = tester._get_result(factor)
+                            r.ic_series = ic_series.copy()
+                            r.ic_stats = stats.copy()
+                            if not re_table.empty:
+                                r.returns = re_table.copy()
+
+                            p_names = _extract_product_names(fe_table, re_table)
+                            if p_names:
+                                for p_name in p_names:
+                                    if p_name not in selected_product_names:
+                                        selected_product_names.append(p_name)
         except Exception as e:
             if _saved_products is not None:
                 tester.products = _saved_products
