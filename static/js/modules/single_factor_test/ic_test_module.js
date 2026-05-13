@@ -1098,24 +1098,105 @@
 
         try {
             const effectiveSubmissionId = await resolveSubmissionIdForIC(subId, submission);
-            const response = await fetch('/run_ic_test', {
+
+            // 显示进度条
+            const progressBarId = `ic-progress-${subId}`;
+            let progressDiv = document.getElementById(progressBarId);
+            if (!progressDiv) {
+                progressDiv = document.createElement('div');
+                progressDiv.id = progressBarId;
+                progressDiv.className = 'ic-progress-container';
+                progressDiv.innerHTML = `
+                    <div class="ic-progress-bar-bg">
+                        <div class="ic-progress-bar-fill" id="${progressBarId}-fill"></div>
+                    </div>
+                    <span class="ic-progress-text" id="${progressBarId}-text">0/0</span>
+                `;
+                resultDiv.parentNode.insertBefore(progressDiv, resultDiv);
+            }
+
+            const body = JSON.stringify({
+                submission_id: effectiveSubmissionId,
+                factor_family_alias: factorFamilyAlias,
+                paths: submission.paths,
+                factors: selectedFactors,
+                ic_decay_lags: ic_decay_lags,
+                rolling_window: rolling_window
+            });
+
+            const sseResponse = await fetch('/run_ic_test_stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    submission_id: effectiveSubmissionId,
-                    factor_family_alias: factorFamilyAlias,
-                    paths: submission.paths,
-                    factors: selectedFactors,  // 发送因子列表
-                    ic_decay_lags: ic_decay_lags,
-                    rolling_window: rolling_window
-                })
+                body: body
             });
-            const data = await response.json();
-            btn.disabled = false;
-            if (!data.success) {
-                statusSpan.innerText = '✗ IC测试失败: ' + data.error;
+
+            if (!sseResponse.ok) {
+                btn.disabled = false;
+                statusSpan.innerText = '✗ IC测试失败: HTTP ' + sseResponse.status;
                 statusSpan.style.color = '#d40000';
-                if (data.traceback) {
+                return;
+            }
+
+            const reader = sseResponse.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let lastEvent = '';
+            let data = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // 保留未完成的行
+
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        lastEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        try {
+                            const payload = JSON.parse(line.slice(6));
+                            if (lastEvent === 'start') {
+                                const fill = document.getElementById(`${progressBarId}-fill`);
+                                const text = document.getElementById(`${progressBarId}-text`);
+                                if (fill) fill.style.width = '0%';
+                                if (text) {
+                                    const groups = payload.groups || payload.total;
+                                    text.textContent = `0/${payload.total} 节点 (${groups} 组)`;
+                                }
+                            } else if (lastEvent === 'progress') {
+                                const fill = document.getElementById(`${progressBarId}-fill`);
+                                const text = document.getElementById(`${progressBarId}-text`);
+                                const phase = payload.phase || '';
+                                if (phase === 'eval') {
+                                    // 节点级进度：显示 completed/total 节点
+                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
+                                    if (text) text.textContent = `${payload.completed}/${payload.total} 节点`;
+                                } else {
+                                    // group_done 等其他阶段：显示组级进度
+                                    if (fill) fill.style.width = (payload.completed / payload.total * 100) + '%';
+                                    if (text) text.textContent = `第 ${payload.completed}/${payload.total} 组完成`;
+                                }
+                            } else if (lastEvent === 'result') {
+                                data = payload;
+                            } else if (lastEvent === 'error') {
+                                data = payload;
+                            }
+                        } catch (e) {
+                            // skip malformed JSON
+                        }
+                    }
+                }
+            }
+
+            // 清理进度条
+            if (progressDiv) progressDiv.remove();
+
+            btn.disabled = false;
+            if (!data || !data.success) {
+                statusSpan.innerText = '✗ IC测试失败: ' + (data?.error || '未知错误');
+                statusSpan.style.color = '#d40000';
+                if (data?.traceback) {
                     resultDiv.innerHTML = `<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:12px;overflow:auto;white-space:pre-wrap;">${data.traceback.replace(/</g,'&lt;')}</pre>`;
                 }
                 return;

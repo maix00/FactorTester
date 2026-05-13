@@ -30,6 +30,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import threading
 import pandas as pd
 import numpy as np
 from typing import (
@@ -362,6 +363,12 @@ class FactorExpr:
         result = self._evaluate(ctx)
         if self._is_intermediate and cache is not None:
             cache[sk] = result
+        # 全局求值进度：每次完成一个节点的实际计算后递增
+        try:
+            from server.services.eval_progress import bump as _bump
+            _bump()
+        except ImportError:
+            pass
         return result
     
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
@@ -1406,22 +1413,30 @@ class CrossSectionalOp(OperandExpr):
 
     @staticmethod
     def _apply_spearman(left_df: pd.DataFrame, right_df: pd.DataFrame) -> pd.DataFrame:
-        common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
-        common_cols = left_df.columns.intersection(right_df.columns)
-
-        if len(common_idx) == 0 or len(common_cols) == 0:
-            empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
-            result = pd.DataFrame({'IC': []}, index=empty_idx)
-            result.index.names = left_df.index.names
-            return result
-
-        l = left_df.loc[common_idx, common_cols]
-        r = right_df.loc[common_idx, common_cols]
+        # 快速路径：两个 DataFrame 的 MultiIndex 和 columns 完全相同时，
+        # 跳过昂贵的 .loc[common_idx, common_cols]（节省 ~2s 的 index intersection + reindex）
+        if left_df.index.equals(right_df.index) and left_df.columns.equals(right_df.columns):
+            idx = left_df.index
+            cols = left_df.columns
+            l_df = left_df
+            r_df = right_df
+        else:
+            common_idx = pd.Index(left_df.index).intersection(pd.Index(right_df.index))
+            common_cols = left_df.columns.intersection(right_df.columns)
+            if len(common_idx) == 0 or len(common_cols) == 0:
+                empty_idx = pd.Index([], name=left_df.index.names[-1] if left_df.index.names else None)
+                result = pd.DataFrame({'IC': []}, index=empty_idx)
+                result.index.names = left_df.index.names
+                return result
+            idx = common_idx
+            cols = common_cols
+            l_df = left_df.loc[idx, cols]
+            r_df = right_df.loc[idx, cols]
 
         # Spearman = Pearson(rank(x), rank(y)); 按行（横截面）一次性向量化计算。
-        valid = l.notna() & r.notna()
-        l_rank = l.where(valid).rank(axis=1, method='average', na_option='keep')
-        r_rank = r.where(valid).rank(axis=1, method='average', na_option='keep')
+        valid = l_df.notna() & r_df.notna()
+        l_rank = l_df.where(valid).rank(axis=1, method='average', na_option='keep')
+        r_rank = r_df.where(valid).rank(axis=1, method='average', na_option='keep')
 
         x = l_rank.to_numpy(dtype=float)
         y = r_rank.to_numpy(dtype=float)
@@ -1445,7 +1460,7 @@ class CrossSectionalOp(OperandExpr):
 
         ic[(n <= 1) | (den <= 0)] = np.nan
 
-        result = pd.DataFrame({'IC': ic}, index=l.index)
+        result = pd.DataFrame({'IC': ic}, index=idx)
         result.index.names = left_df.index.names
         return result
 

@@ -426,3 +426,31 @@ th {
     outline: 2px dashed #4a90d9;
     outline-offset: -2px;
 }
+
+/* IC 进度条 */
+.ic-progress-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0;
+}
+.ic-progress-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.ic-progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4a90d9, #6cb4ee);
+    border-radius: 4px;
+    transition: width 0.2s ease;
+}
+.ic-progress-text {
+    font-size: 12px;
+    color: #666;
+    min-width: 40px;
+    text-align: right;
+}
