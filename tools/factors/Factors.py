@@ -358,7 +358,10 @@ class Factor(UniqueObject, FactorExpr):
                 return None
         else:
             sk = key
-        return self._intermediate_factor_data.get(sk)
+        result = self._intermediate_factor_data.get(sk)
+        if isinstance(result, dict):
+            return pd.DataFrame(result)
+        return result
     
     @property
     def freq(self) -> DataFreq:

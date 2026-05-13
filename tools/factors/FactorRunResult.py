@@ -90,6 +90,11 @@ class FactorRunResult:
     @source_table.setter
     def source_table(self, value: pd.DataFrame) -> None:
         """写入 source_table（无 $Rev）。同时清空 _func_table（避免冲突）。"""
+        if not isinstance(value, pd.DataFrame):
+            if isinstance(value, dict):
+                value = pd.DataFrame(value)
+            else:
+                raise TypeError(f"source_table must be pd.DataFrame, got {type(value).__name__}")
         self._source_table = value
         self._func_table = pd.DataFrame()
 
@@ -110,6 +115,11 @@ class FactorRunResult:
     @func_table.setter
     def func_table(self, value: pd.DataFrame) -> None:
         """写入 func_table（可能有 $Rev）。同时清空 _source_table（避免冲突）。"""
+        if not isinstance(value, pd.DataFrame):
+            if isinstance(value, dict):
+                value = pd.DataFrame(value)
+            else:
+                raise TypeError(f"func_table must be pd.DataFrame, got {type(value).__name__}")
         self._func_table = value
         self._source_table = pd.DataFrame()
 
@@ -121,6 +131,11 @@ class FactorRunResult:
 
     @returns.setter
     def returns(self, value: pd.DataFrame) -> None:
+        if not isinstance(value, pd.DataFrame):
+            if isinstance(value, dict):
+                value = pd.DataFrame(value)
+            else:
+                raise TypeError(f"returns must be pd.DataFrame, got {type(value).__name__}")
         self._returns = value
 
     # ── return_freq ──
