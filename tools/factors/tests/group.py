@@ -20,6 +20,9 @@ def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFra
     """Temporarily project a raw FE/RE table onto factor signal timestamps."""
     from tools.factors.FactorExpr import SignalAlign, signal_align
 
+    if raw_table is None or (isinstance(raw_table, pd.DataFrame) and raw_table.empty):
+        return pd.DataFrame() if isinstance(raw_table, pd.DataFrame) else raw_table
+
     def _find_signal_align(node: Any) -> Optional[SignalAlign]:
         if isinstance(node, SignalAlign):
             return node
@@ -101,7 +104,15 @@ def test_by_group_single_factor(
     if r is None or r.returns.empty:
         raise ValueError(f"{factor.alias}: returns 未计算，请先运行 IC 测试")
     raw_returns = r.returns
-    returns_for_group = align_table_for_group(factor, raw_returns)
+    try:
+        returns_for_group = align_table_for_group(factor, raw_returns)
+    except Exception as e:
+        raise ValueError(
+            f"{factor.alias}: align_table_for_group 失败 — "
+            f"returns shape={raw_returns.shape}, "
+            f"index names={list(raw_returns.index.names) if hasattr(raw_returns.index, 'names') else 'N/A'}, "
+            f"error: {e}"
+        ) from e
     assert not returns_for_group.empty
 
     table_src: pd.DataFrame = cast(pd.DataFrame, get_factor_table_for_group(tester, factor))
