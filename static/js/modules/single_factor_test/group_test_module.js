@@ -658,19 +658,21 @@
         theadHtml += '</tr>';
         document.getElementById('metrics_head').innerHTML = theadHtml;
         
-        // 最佳值方向：1 = 越大越好，-1 = 越小越好 (或绝对值越小越好)
+        // 最佳值方向：1 = 越大越好，-1 = 越小越好
         var METRIC_DIR = {
             'Total Return': 1, 'Annual Return': 1, 'Sharpe Ratio': 1, 'Calmar Ratio': 1,
             'Win Rate': 1, 'Mean Return': 1, 'Skewness': 1,
             'Volatility': -1, 'Max Drawdown': -1, 'Kurtosis': -1,
             'Avg Turnover': -1, 'Avg Turnover Accel': -1, 'Avg Position Changes': -1, 'Up Ratio': 1
         };
-        // 辅助：找最佳值索引
-        function bestColIdx(values) {
+        // 辅助：找最佳值索引（传入 metricName 避免闭包混淆）
+        function bestColIdx(values, metricName) {
+            var dir = METRIC_DIR[metricName];
+            if (dir === undefined) return -1;
             var best = -1, bestVal = null;
             for (var i = 0; i < values.length; i++) {
                 if (values[i] === null || values[i] === undefined) continue;
-                if (best === -1 || (METRIC_DIR[name] >= 0 ? values[i] > bestVal : values[i] < bestVal)) {
+                if (best === -1 || (dir >= 0 ? values[i] > bestVal : values[i] < bestVal)) {
                     best = i; bestVal = values[i];
                 }
             }
@@ -686,7 +688,7 @@
             groupLabels.forEach(function(g) {
                 rawVals.push(metrics[g][name]);
             });
-            var best = bestColIdx(rawVals);
+            var best = bestColIdx(rawVals, name);
 
             tbodyHtml += '<tr><td class="metric-name-cell" data-metric="' + name.replace(/"/g, '&quot;') + '" style="cursor:pointer;position:relative;">' + cnName + '</td>';
             groupLabels.forEach(function(g, gi) {

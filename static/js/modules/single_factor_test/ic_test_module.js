@@ -533,16 +533,28 @@
         });
     }
 
-    // 统计量最优方向：越大越好=1，越小越好=-1
+    // 统计量最优方向：越大越好=1，越小越好=-1（key 对应后端 ic_stats 返回的 index）
     var IC_METRIC_DIRECTION = {
-        'IC Mean': 1,
-        'IC Std': -1,
+        'mean': 1,
+        'std': -1,
         'IR': 1,
-        'Rank IC': 1,
-        'Rank IC Std': -1,
-        'Rank IR': 1,
-        'IC>0 Ratio': 1,
+        't_stat': 1,
+        'max': 1,
+        'min': -1,
+        'ac1': 1,
         'half_life': -1
+    };
+
+    // index → 显示名映射
+    var IC_METRIC_LABELS = {
+        'mean': 'IC Mean',
+        'std': 'IC Std',
+        'IR': 'IR',
+        't_stat': 't-stat',
+        'max': 'IC Max',
+        'min': 'IC Min',
+        'ac1': 'IC AC1',
+        'half_life': 'Half-Life'
     };
 
     function _getBestValIdx(values, metricName) {
@@ -577,30 +589,33 @@
             }
         }
         var activeIdx = subId ? (window._icActiveFactorIdx[subId] || 0) : 0;
-        var html = '<div class="ic-table-wrap"><table class="ic-table"><thead><tr>';
+        var html = '<div class="ic-table-wrap" style="margin-bottom:16px;"><table class="ic-table"><thead><tr>';
         data.ic_stats.columns.forEach(function(col, i) {
             var isIdx = i === 0;
             var isActive = !isIdx && (i - 1 === activeIdx);
             var draggable = !isIdx ? ' draggable="true"' : '';
             var dataColIdx = !isIdx ? ' data-col-idx="' + (i - 1) + '"' : '';
             var activeClass = isActive ? ' ic-active-factor' : '';
-            html += '<th class="' + (isIdx ? 'idx-col' : 'draggable-col') + activeClass + '"' + draggable + dataColIdx + '>' + col + '</th>';
+            var label = isIdx ? '统计量' : col;
+            html += '<th class="' + (isIdx ? 'idx-col' : 'draggable-col') + activeClass + '"' + draggable + dataColIdx + '>' + label + '</th>';
         });
         html += '</tr></thead><tbody>';
         data.ic_stats.rows.forEach(function(row) {
             // 找该行最优值列（不含 index 列）
             var factorCols = data.ic_stats.columns.slice(1);
             var factorVals = factorCols.map(function(c) { return row[c]; });
-            var firstKey = Object.keys(row)[0];
-            var rowMetric = data.ic_stats.columns[0];
-            var bestColIdx = _getBestValIdx(factorVals, row[firstKey] !== undefined ? firstKey : rowMetric);
+            var metricName = row['index'] || '';
+            var bestColIdx = _getBestValIdx(factorVals, metricName);
             html += '<tr>';
             data.ic_stats.columns.forEach(function(col, i) {
                 var val = row[col];
                 var display;
-                if (val === null || val === undefined || val === '') {
+                if (i === 0) {
+                    // 第一列是统计量名，使用可读标签
+                    display = IC_METRIC_LABELS[val] || String(val);
+                } else if (val === null || val === undefined || val === '') {
                     display = '—';
-                } else if (col === 'half_life' && !isFinite(val)) {
+                } else if (metricName === 'half_life' && !isFinite(val)) {
                     display = '∞';
                 } else if (typeof val === 'number') {
                     display = Number.isInteger(val) ? val : val.toFixed(6);
