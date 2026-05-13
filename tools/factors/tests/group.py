@@ -32,6 +32,12 @@ def ensure_factor_returns(
     cached = r.returns if r is not None else pd.DataFrame()
     cached_freq = getattr(factor, "_return_freq_cached", None)
     cached_col = getattr(factor, "_return_col_cached", None)
+    # 若 products 已变化（列数不匹配），缓存失效
+    products_count = len(tester.products) if hasattr(tester, 'products') else None
+    if isinstance(cached, pd.DataFrame) and not cached.empty and cached.shape[1] != products_count:
+        cached = pd.DataFrame()
+        object.__setattr__(factor, "_return_freq_cached", None)
+        object.__setattr__(factor, "_return_col_cached", None)
     freq_matches = cached_freq == desired_key or (cached_freq is None and (r is None or r.return_freq is None))
     col_matches = cached_col == returns_col_key or cached_col is None
     if isinstance(cached, pd.DataFrame) and not cached.empty and freq_matches and col_matches:
