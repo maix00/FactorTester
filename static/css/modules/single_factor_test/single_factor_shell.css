@@ -53,6 +53,35 @@
     font-size: 15px;
 }
 
+.single-factor-body .settings-drawer-overlay {
+    align-items: center;
+    box-sizing: border-box;
+    justify-content: center;
+    padding: 24px;
+}
+
+.single-factor-body .settings-drawer-overlay.open {
+    display: flex;
+}
+
+.single-factor-body .settings-drawer-panel {
+    bottom: auto;
+    max-height: 88vh;
+    max-width: 92vw;
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: scale(0.98);
+    transition: transform 0.18s cubic-bezier(.4, 0, .2, 1);
+    width: min(980px, 92vw);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.20);
+}
+
+.single-factor-body .settings-drawer-overlay.open .settings-drawer-panel {
+    transform: scale(1);
+}
+
 .single-factor-body #group-fee-drawer .group-fee-drawer-panel {
     width: min(1180px, 96vw);
     max-width: 96vw;

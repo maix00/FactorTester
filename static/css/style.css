@@ -257,7 +257,9 @@ th {
 }
 .settings-drawer-panel {
     position: fixed;
-    top: 0; right: 0; bottom: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
     width: 72%;
     max-width: 980px;
     min-width: 320px;

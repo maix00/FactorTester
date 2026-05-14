@@ -14,6 +14,7 @@ from server.modules.products.product_group_store import (
     reorder_product_groups,
     update_product_group,
 )
+from server.modules.custom_factors.param_config_store import rename_scope
 from server.services.http_auth import login_required
 from server.services.runtime_state import require_user
 
@@ -93,6 +94,7 @@ def rename_product_group_view(name):
     group = rename_product_group(username, name, new_name)
     if group is None:
         return jsonify({'success': False, 'error': '重命名失败：名称已存在或产品组不存在'}), 400
+    rename_scope(username, name, new_name)
     return jsonify({'success': True, 'group': group})
 
 

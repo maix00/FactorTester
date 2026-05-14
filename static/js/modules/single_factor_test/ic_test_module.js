@@ -1764,11 +1764,12 @@
         try {
             var resp = await fetch('/custom-factors/api/param-config-scopes');
             var data = await resp.json();
-            var scopes = data.success ? (data.scopes || []) : [];
+            var scopes = data.success ? (data.product_groups || data.scopes || []) : [];
             if (scopes.indexOf('default') === -1) scopes.unshift('default');
 
             var scopeOptions = scopes.map(function(s) {
-                return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
+                var label = (!s || s === 'default') ? '默认产品组' : s;
+                return '<option value="' + esc(s) + '">' + esc(label) + '</option>';
             }).join('');
 
             popover.innerHTML = ''
@@ -1777,7 +1778,7 @@
                 + '<div style="font-size:12px;color:#666;margin-top:4px;">' + esc(factorAlias) + '</div>'
                 + '</div>'
                 + '<div style="padding:12px 16px;">'
-                + '<label style="font-size:12px;color:#333;display:block;margin-bottom:4px;">目标产品组 (scope)</label>'
+                + '<label style="font-size:12px;color:#333;display:block;margin-bottom:4px;">目标产品组</label>'
                 + '<select class="form-select" id="add-to-lib-scope-select" style="width:100%;">' + scopeOptions + '</select>'
                 + '</div>'
                 + '<div style="padding:0 16px 14px;display:flex;gap:8px;justify-content:flex-end;">'
@@ -1801,7 +1802,7 @@
                 var addResp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ factor_alias: factorAlias, scope_key: scopeKey })
+                    body: JSON.stringify({ factor_alias: factorAlias, product_group: scopeKey })
                 });
                 var addData = await addResp.json();
                 if (msgEl) {
