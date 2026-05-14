@@ -58,10 +58,15 @@ def list_product_names():
 
 @shared_bp.route('/api/product_tree')
 def get_product_tree():
-    """返回产品类别树（Fancytree 格式），支持所有产品类型。"""
+    """返回产品类别树（Fancytree 格式），支持所有产品类型。
+    
+    Query params:
+        checkbox: 1/true  → 所有节点显示 checkbox（默认不显示）
+    """
     try:
         cat_tree = _cached_product_tree()
-        fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=False)
+        checkbox = request.args.get('checkbox', '').lower() in ('1', 'true')
+        fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=checkbox)
         return jsonify(fancytree_data)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500

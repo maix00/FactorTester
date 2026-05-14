@@ -1,6 +1,7 @@
 """Product group (产品组) storage helpers.
 
-A product_group is a named collection of product paths: { name, paths: [...], updated_at }.
+A product_group is a named collection of tree paths: { name, paths: [...], updated_at }.
+Paths are tree node keys (e.g. "单因子测试/农产品/豆类"), resolved to products on read.
 Storage: {user_data}/product_groups.json  (single JSON array per user)
 """
 from __future__ import annotations
@@ -9,7 +10,32 @@ import json
 import os
 import time
 
+from server.services.product_tree import get_minimal_paths
 from server.services.user_storage import user_data_dir
+
+
+def _resolve_group_products(paths: list) -> list:
+    """Resolve tree paths to deduped product objects. Returns product name strings."""
+    from server.modules.shared.price_services import cached_product_tree
+    from server.services.product_tree import find_node_by_path
+    minimal = get_minimal_paths([p for p in paths if isinstance(p, str) and p.strip()])
+    tree = cached_product_tree().tree
+    products = []
+    for path in minimal:
+        node = find_node_by_path(tree, path.split('/'))
+        if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
+            products.extend(node['$OBJECTS$'])
+        elif node is not None:
+            products.append(node)
+    # 去重并返回产品名
+    seen = set()
+    result = []
+    for p in products:
+        name = getattr(p, 'name', str(p))
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return sorted(result)
 
 
 def _groups_path(username: str) -> str:
@@ -23,6 +49,13 @@ def load_product_groups(username: str) -> list:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, list):
+                dirty = False
+                for g in data:
+                    if 'product_names' not in g:
+                        _enrich_group(g)
+                        dirty = True
+                if dirty:
+                    save_product_groups(username, data)
                 return data
     except Exception:
         pass
@@ -44,6 +77,19 @@ def find_group_by_name(groups: list, name: str) -> int:
     return -1
 
 
+def _enrich_group(group: dict) -> dict:
+    """Attach path_count, product_names, product_count to a group dict."""
+    paths = group.get('paths', [])
+    group['path_count'] = len(paths)
+    try:
+        group['product_names'] = _resolve_group_products(paths)
+        group['product_count'] = len(group['product_names'])
+    except Exception:
+        group['product_names'] = []
+        group['product_count'] = 0
+    return group
+
+
 def create_product_group(username: str, name: str, paths: list) -> dict | None:
     name = name.strip()
     if not name:
@@ -56,6 +102,7 @@ def create_product_group(username: str, name: str, paths: list) -> dict | None:
         'paths': [p for p in paths if isinstance(p, str) and p.strip()],
         'updated_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
     }
+    group = _enrich_group(group)  # 固化 product_names/product_count
     groups.append(group)
     save_product_groups(username, groups)
     return group
@@ -69,6 +116,8 @@ def update_product_group(username: str, name: str, paths: list = None) -> dict |
     group = groups[idx]
     if paths is not None:
         group['paths'] = [p for p in paths if isinstance(p, str) and p.strip()]
+        group = _enrich_group(group)  # 重新解析
+        groups[idx] = group
     group['updated_at'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
     save_product_groups(username, groups)
     return group
