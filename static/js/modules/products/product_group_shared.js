@@ -216,15 +216,22 @@
         var showAddButton = !!opts.showAddButton;
         var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;
+        var reverseItems = opts.reverseItems !== false;
 
         // 构建完整渲染列表：占位项在最前（替代加号行），已有项倒序
         var renderItems = [];
         if (newItemPlaceholder) {
             renderItems.push({ name: newItemPlaceholder.name, paths: [], _placeholder: true });
         }
-        // items 倒序：最新在前
-        for (var i = items.length - 1; i >= 0; i--) {
-            renderItems.push(items[i]);
+        if (reverseItems) {
+            // items 倒序：最新在前
+            for (var i = items.length - 1; i >= 0; i--) {
+                renderItems.push(items[i]);
+            }
+        } else {
+            for (var j = 0; j < items.length; j++) {
+                renderItems.push(items[j]);
+            }
         }
 
         var html = '';
@@ -243,6 +250,8 @@
             html += '<div class="pg-expandable-list" style="font-size:13px;">';
             renderItems.forEach(function(item, idx) {
             var name = item.name || '';
+            var title = item._displayName || name;
+            var editValue = item._editValue != null ? item._editValue : title;
             var paths = item.paths || [];
             var isPlaceholder = !!item._placeholder;
             var isSel = (!isPlaceholder && !!selected[name]);
@@ -250,7 +259,7 @@
             var isEditing = isPlaceholder || !!editing[name];
             var isFromGroup = !!item._fromGroup;
             var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
-            var showSave = (isSel || isPlaceholderSelected) && !isFromGroup && mode !== 'import';
+            var showSave = (isSel || isPlaceholderSelected) && mode !== 'import';
             var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
             var pathCount = paths.length;
 
@@ -278,11 +287,14 @@
             }
             // 名称 or 编辑框
             if (isEditing) {
-                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;margin:0;">';
+                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(editValue) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;margin:0;">';
             } else {
-                html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';cursor:text;">' + _escHtml(name) + '</span>';
+                html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(title) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';cursor:text;">' + _escHtml(title) + '</span>';
                 if (isFromGroup) {
                     html += '<span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">产品组</span>';
+                }
+                if (isSel && mode !== 'import') {
+                    html += '<span style="background:#e7f1ff;color:#145da0;border:1px solid #9cc7f2;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">编辑中</span>';
                 }
             }
             html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + pathCount + '条)</span>';
@@ -309,7 +321,7 @@
                     html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
                     html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                     html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
-                    if (!item._fromGroup && mode !== 'readonly' && mode !== 'import') {
+                    if (mode !== 'readonly' && mode !== 'import') {
                         html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
                     }
                     html += '</div>';
@@ -382,7 +394,7 @@
                             ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
                             ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                             ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
-                            if (!item._fromGroup && mode !== 'readonly' && mode !== 'import') {
+                            if (mode !== 'readonly' && mode !== 'import') {
                                 ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
                             }
                             ph += '</div>';

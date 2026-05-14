@@ -195,14 +195,18 @@
         // displayName 必须唯一，用 sub.id 保证唯一性以支持单选编辑模式
         var expItems = submissions.map(function(sub, i) {
             var isFromGroup = !!sub.product_group;
-            var displayName;
+            var editableLabel = sub.label || sub.product_group || ('#' + (i + 1) + ' ' + (sub.factor_tester_serial || ''));
+            var visibleName;
             if (isFromGroup) {
-                displayName = '📦 ' + sub.product_group + ' (ID:' + sub.id + ')';
+                visibleName = '📦 ' + editableLabel;
             } else {
-                displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
+                visibleName = editableLabel;
             }
+            var displayName = visibleName + ' (ID:' + sub.id + ')';
             return {
                 name: displayName,
+                _displayName: visibleName,
+                _editValue: editableLabel,
                 paths: sub.paths || [],
                 _index: i,
                 _sub: sub,

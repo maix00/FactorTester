@@ -16,6 +16,33 @@
     var categoryTreeSizer = null;
     var $moduleContainer = null;  // PS.render() 的容器
 
+    function submissionEditableLabel(sub, index) {
+        if (!sub) return '';
+        return sub.label || sub.product_group || ('#' + (index + 1) + ' ' + (sub.factor_tester_serial || ''));
+    }
+
+    function submissionDisplayName(sub, index) {
+        var label = submissionEditableLabel(sub, index);
+        var visibleName = sub.product_group ? ('📦 ' + label) : label;
+        return visibleName + ' (ID:' + sub.id + ')';
+    }
+
+    function setEditingHint(sub) {
+        if (!$moduleContainer || !$moduleContainer.length || !window.ProductSelector) return;
+        if (sub) {
+            var idx = submissions.indexOf(sub);
+            window.ProductSelector.updateLeftHint($moduleContainer, '正在编辑：' + submissionEditableLabel(sub, idx) + '；调整左侧勾选后点击保存');
+        } else {
+            window.ProductSelector.updateLeftHint($moduleContainer, '树状结构，勾选叶子节点或分类后提交');
+        }
+    }
+
+    function flashChangeStatus(message, ok) {
+        var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
+        $s.html(message).css('color', ok === false ? '#d40000' : '#28a745');
+        setTimeout(function() { $s.html(''); }, 3000);
+    }
+
     function escHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -43,6 +70,7 @@
                 var merged = old.data;
                 merged.product_count = s.product_count;
                 merged.factor_tester_serial = s.factor_tester_serial;
+                merged.label = s.label || merged.label || '';
                 merged.product_group = s.product_group || merged.product_group || '';
                 merged.selected_paths = s.selected_paths;
                 merged.paths = s.selected_paths || merged.paths;
@@ -56,6 +84,7 @@
                 pathsDescMap: {},
                 factor_tester_name: s.name,
                 factor_tester_serial: s.factor_tester_serial,
+                label: s.label || '',
                 product_count: s.product_count,
                 product_group: s.product_group || '',
                 count_desc: s.product_count + ' 个产品',
@@ -159,8 +188,12 @@
                             if (data.success) {
                                 inlineEditingName = null;
                                 editingName = null;
+                                setEditingHint(null);
+                                flashChangeStatus('✓ 已保存');
                                 if (data.submissions) syncFromServer(data.submissions);
                                 else renderHistory();
+                            } else {
+                                flashChangeStatus('✗ 保存失败: ' + (data.error || '未知错误'), false);
                             }
                         });
                     } else if (newName !== name) {
@@ -175,8 +208,12 @@
                             if (data.success) {
                                 inlineEditingName = null;
                                 editingName = null;
+                                setEditingHint(null);
+                                flashChangeStatus('✓ 已重命名');
                                 if (data.submissions) syncFromServer(data.submissions);
                                 else renderHistory();
+                            } else {
+                                flashChangeStatus('✗ 重命名失败: ' + (data.error || '未知错误'), false);
                             }
                         });
                     } else {
@@ -194,27 +231,38 @@
             onToggleEdit: function(displayName) {
                 // displayName → sub.id（CF 用 id 做键）
                 var sub = submissions.find(function(s) {
-                    var dn = s.product_group ? ('📦 ' + s.product_group + ' (ID:' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
-                    return dn === displayName;
+                    return submissionDisplayName(s, submissions.indexOf(s)) === displayName;
                 });
                 var subId = sub ? sub.id : displayName;
                 if (editingName === subId) {
                     editingName = null;
                     inlineEditingName = null;
+                    if (treeInstance) {
+                        window.ProductSelector.clearChecks(treeInstance);
+                    }
+                    setEditingHint(null);
                 } else {
                     editingName = subId;
                     inlineEditingName = null;  // 新选中不退输入框
                     newItemPlaceholderName = null;
+                    if (treeInstance) {
+                        window.ProductSelector.clearChecks(treeInstance);
+                        if (sub && sub.paths) {
+                            window.ProductSelector.restoreChecks(treeInstance, sub.paths);
+                        }
+                    }
+                    setEditingHint(sub);
                 }
                 renderHistory();
             },
             onEditName: function(displayName) {
                 var sub = submissions.find(function(s) {
-                    var dn = s.product_group ? ('📦 ' + s.product_group + ' (ID:' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
-                    return dn === displayName;
+                    return submissionDisplayName(s, submissions.indexOf(s)) === displayName;
                 });
                 var subId = sub ? sub.id : displayName;
+                editingName = subId;
                 inlineEditingName = subId;
+                setEditingHint(sub || null);
                 renderHistory();
             },
             onImportGroup: function() {

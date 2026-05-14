@@ -23,6 +23,18 @@
 
     var $overlay = $('#pg-overlay');
 
+    function setManagerHint(name) {
+        if (!$managerRoot || !$managerRoot.length) return;
+        PS.updateLeftHint($managerRoot, name ? ('正在编辑：' + name + '；调整左侧勾选后点击保存') : '点击路径组以编辑 → 勾选品种 → 保存');
+    }
+
+    function flashStatus(message, ok) {
+        if (!$managerRoot || !$managerRoot.length) return;
+        var $s = PS.getChangeStatusEl($managerRoot);
+        $s.html(message).css('color', ok === false ? '#d40000' : '#28a745');
+        setTimeout(function() { $s.html(''); }, 3000);
+    }
+
     function renderGroupList() {
         var $container = PS.getSubmissionContainer($managerRoot);
         if (!$container || !$container.length) return;
@@ -50,6 +62,7 @@
                 showAddButton: true,
                 newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
                 dragHandle: '.pg-exp-grip',
+                reverseItems: false,
                 onAdd: function() {
                     if (newItemPlaceholderName) return;
                     selectedName = null;
@@ -59,6 +72,7 @@
                     newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                     allGroupPaths = [];
                     PS.clearChecks(groupTree);
+                    setManagerHint(newItemPlaceholderName);
                     renderGroupList();
                 },
                 onToggle: function(name) {
@@ -68,6 +82,7 @@
                     selectedName = (selectedName === name) ? null : name;
                     if (selectedName) {
                         PS.clearChecks(groupTree);
+                        setManagerHint(selectedName);
                         PG.fetchGroupDetail(name).then(function(g) {
                             if (g && g.paths) {
                                 allGroupPaths = g.paths.slice();
@@ -77,6 +92,7 @@
                     } else {
                         allGroupPaths = [];
                         PS.clearChecks(groupTree);
+                        setManagerHint(null);
                     }
                     renderGroupList();
                 },
@@ -89,7 +105,16 @@
                     renderGroupList();
                 },
                 onEditName: function(name) {
+                    selectedName = name;
                     editingName = name;
+                    PS.clearChecks(groupTree);
+                    PG.fetchGroupDetail(name).then(function(g) {
+                        if (g && g.paths) {
+                            allGroupPaths = g.paths.slice();
+                            PS.restoreChecks(groupTree, allGroupPaths);
+                        }
+                    });
+                    setManagerHint(name);
                     renderGroupList();
                 },
                 onSave: function(name, newName, isPlaceholder) {
@@ -111,9 +136,11 @@
                                 newItemPlaceholderName = null;
                                 selectedName = null;
                                 editingName = null;
+                                setManagerHint(null);
+                                flashStatus('✓ 产品组已创建');
                                 renderGroupList();
                             } else {
-                                alert('保存失败: ' + (resp.error || '未知错误'));
+                                flashStatus('✗ 保存失败: ' + (resp.error || '未知错误'), false);
                             }
                         });
                         return;
@@ -128,6 +155,8 @@
                                 if (expandedNames[name]) { delete expandedNames[name]; expandedNames[newName] = true; }
                                 selectedName = null;
                                 editingName = null;
+                                setManagerHint(null);
+                                flashStatus('✓ 已重命名');
                                 renderGroupList();
                             });
                         } else {
@@ -147,21 +176,23 @@
                             if (resp && resp.success) {
                                 selectedName = null;
                                 editingName = null;
+                                setManagerHint(null);
+                                flashStatus('✓ 已保存');
                                 renderGroupList();
                             } else {
-                                alert('保存失败: ' + ((resp && resp.error) || '未知错误'));
+                                flashStatus('✗ 保存失败: ' + ((resp && resp.error) || '未知错误'), false);
                             }
                         });
                     } else if (exists) {
                         PG.updateGroup(name, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = null; editingName = null; renderGroupList(); }
-                            else { alert('保存失败: ' + (resp.error || '未知错误')); }
+                            if (resp.success) { selectedName = null; editingName = null; setManagerHint(null); flashStatus('✓ 已保存'); renderGroupList(); }
+                            else { flashStatus('✗ 保存失败: ' + (resp.error || '未知错误'), false); }
                         });
                     } else {
                         // New
                         PG.createGroup(newName, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = null; editingName = null; renderGroupList(); }
-                            else { alert('保存失败: ' + (resp.error || '未知错误')); }
+                            if (resp.success) { selectedName = null; editingName = null; setManagerHint(null); flashStatus('✓ 产品组已创建'); renderGroupList(); }
+                            else { flashStatus('✗ 保存失败: ' + (resp.error || '未知错误'), false); }
                         });
                     }
                 },
@@ -178,6 +209,8 @@
                         if (selectedName === name) { selectedName = null; allGroupPaths = []; PS.clearChecks(groupTree); }
                         editingName = null;
                         delete expandedNames[name];
+                        setManagerHint(null);
+                        flashStatus('✓ 已删除');
                         renderGroupList();
                     });
                 },
@@ -187,11 +220,20 @@
                     PG.renameGroup(oldName, newName).then(function() {
                         if (selectedName === oldName) selectedName = newName;
                         if (expandedNames[oldName]) { delete expandedNames[oldName]; expandedNames[newName] = true; }
+                        flashStatus('✓ 已重命名');
                         renderGroupList();
                     });
                 },
                 onReorder: function(names) {
-                    PG.reorderGroups(names).then(function() {});
+                    var visible = {};
+                    names.forEach(function(n) { visible[n] = true; });
+                    var fullOrder = names.slice();
+                    groups.forEach(function(g) {
+                        if (!visible[g.name]) fullOrder.push(g.name);
+                    });
+                    PG.reorderGroups(fullOrder).then(function(resp) {
+                        flashStatus(resp && resp.success ? '✓ 顺序已更新' : '✗ 排序失败', !!(resp && resp.success));
+                    });
                 }
             });
         });
@@ -204,6 +246,7 @@
         expandedNames = {};
         allGroupPaths = [];
         groups = [];
+        setManagerHint(null);
 
         if (!$('#ps-manager-root').find('.ps-body').length) {
             PS.render($('#ps-manager-root'), {

@@ -6,6 +6,8 @@ Shared submission routes:
   POST /delete_submission
   POST /clear_all_submissions
   POST /delete_path_of_submission
+  POST /update_submission_paths
+  POST /rename_submission
 """
 from flask import request, jsonify
 import time
@@ -131,6 +133,39 @@ def reorder_submissions():
         if len(runtime_state.factor_testers) != n:
             return api_fail(f'排序失败: 期望{n}条，实际匹配{len(runtime_state.factor_testers)}条')
     return api_ok()
+
+
+@shared_bp.route('/update_submission_paths', methods=['POST'])
+@route_guard
+def update_submission_paths():
+    data = request.get_json()
+    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
+    selected_paths = data.get('selected_paths', [])
+    new_name = (data.get('new_name') or '').strip()
+    tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
+    assert tester is not None, "Submission not found"
+    selected_paths, selected_products = resolve_products_from_paths(selected_paths)
+    assert selected_paths, "未选择任何产品路径"
+    tester.products = sorted(list(set(selected_products)))
+    tester.selected_paths = selected_paths
+    if new_name:
+        tester.label = new_name
+    return api_ok({'submissions': submissions_payload()})
+
+
+@shared_bp.route('/rename_submission', methods=['POST'])
+@route_guard
+def rename_submission():
+    data = request.get_json()
+    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
+    new_name = (data.get('new_name') or '').strip()
+    assert new_name, "新名称不能为空"
+    tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
+    assert tester is not None, "Submission not found"
+    tester.label = new_name
+    return api_ok({'submissions': submissions_payload()})
 
 
 @shared_bp.route('/delete_submission', methods=['POST'])
