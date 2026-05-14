@@ -160,9 +160,9 @@ def _merge_ic_result(
             r.ic_series = ic_series.copy()
             r.ic_stats = stats.copy()
             if not re_table.empty:
-                r.returns = re_table.copy()
+                r.returns = re_table
             if not fe_table.empty:
-                r.func_table = fe_table.copy()
+                r.func_table = fe_table
             p_names = _extract_product_names(fe_table, re_table)
             if p_names:
                 for p_name in p_names:

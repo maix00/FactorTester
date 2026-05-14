@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, 
 from tools import UniqueObject, DataFreq
 from tools.products.Product import Product
 from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr
+from tools.factors.FactorRunResult import FactorRunResult
 
 if TYPE_CHECKING:
     from tools.factors.FactorFamily import FactorFamily

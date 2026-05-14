@@ -81,8 +81,6 @@ class FactorRunResult:
         """
         if not self._source_table.empty:
             return self._source_table
-        if self._func_table.empty:
-            return self._func_table
         if self._has_neg():
             return -self._func_table
         return self._func_table
@@ -106,8 +104,6 @@ class FactorRunResult:
         """
         if not self._func_table.empty:
             return self._func_table
-        if self._source_table.empty:
-            return self._source_table
         if self._has_neg():
             return -self._source_table
         return self._source_table

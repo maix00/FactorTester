@@ -66,6 +66,7 @@ def run_group_test():
     return_freqs: list = data.get('return_freqs', None)
     _gt_token = None
     _saved_products = None
+    tester = None
     try:
         tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
         if not tester:
