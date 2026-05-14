@@ -9,6 +9,7 @@
     window.submissions = submissions;
     window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
+    var newItemPlaceholderName = null;  // 当前 placeholder 名称，null = 无
     var treeInstance = null;
     var categoryTreeSizer = null;
     var $moduleContainer = null;  // PS.render() 的容器
@@ -97,8 +98,29 @@
         if (!$container || !$container.length) return;
 
         window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
+            newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
             onAdd: function() {
-                submitSelectedProducts();
+                // 已有 placeholder 时不重复添加
+                if (newItemPlaceholderName) return;
+                var now = new Date();
+                var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+                newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+                renderHistory();
+            },
+            onInsertPlaceholder: function(name) {
+                // PG 的 onSave 对 placeholder 时调此回调 → 二阶段：先暂存名字，有路径则真提交
+                newItemPlaceholderName = name;
+                var selNodes = treeInstance ? treeInstance.getSelectedNodes() : [];
+                if (selNodes.length > 0) {
+                    // 有选中路径 → 真正提交
+                    submitSelectedProducts();
+                    newItemPlaceholderName = null;
+                }
+                renderHistory();
+            },
+            onDeletePlaceholder: function() {
+                newItemPlaceholderName = null;
+                renderHistory();
             },
             onImportGroup: function() {
                 window.ProductSelector.openGroupImport(function(groupName, paths) {
@@ -381,7 +403,8 @@
         }
 
 
-        // 从产品组导入已由 renderSubmissionHistory 的 actionBar 处理，无需额外绑定。
+        // 初始渲染历史记录（确保 actionBar 始终可见）
+        renderHistory();
 
         // 暴露给单因子设置快照模块
         window._getCurrentSubmissions = function() {

@@ -18,6 +18,7 @@
     var selectedName = null;
     var expandedNames = {};
     var groups = [];
+    var newItemPlaceholderName = null;  // placeholder 名称，null = 无
 
     var $overlay = $('#pg-overlay');
 
@@ -46,13 +47,13 @@
                 expanded: expandedNames,
                 editing: editing,
                 showAddButton: true,
+                newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
                 dragHandle: '.pg-exp-grip',
                 onAdd: function() {
+                    if (newItemPlaceholderName) return;
                     var now = new Date();
                     var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
-                    var defaultName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
-                    groups.push({ name: defaultName, paths: [], path_count: 0 });
-                    selectedName = defaultName;
+                    newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                     allGroupPaths = [];
                     PS.clearChecks(groupTree);
                     renderGroupList();
@@ -85,6 +86,29 @@
                 onSave: function(name, newName) {
                     newName = (newName || '').trim();
                     if (!newName) { alert('组名不能为空'); return; }
+
+                    var isPh = newItemPlaceholderName && newItemPlaceholderName === name;
+                    if (isPh) {
+                        // 暂存新名称
+                        newItemPlaceholderName = newName;
+                        if (!allGroupPaths.length) {
+                            // 还没有路径 → 只改名字，保持 placeholder
+                            renderGroupList();
+                            return;
+                        }
+                        // 有路径 → 真正创建，清 placeholder
+                        PG.createGroup(newName, allGroupPaths).then(function(resp) {
+                            if (resp.success) {
+                                newItemPlaceholderName = null;
+                                selectedName = newName;
+                                renderGroupList();
+                            } else {
+                                alert('保存失败: ' + (resp.error || '未知错误'));
+                            }
+                        });
+                        return;
+                    }
+
                     if (!allGroupPaths.length) { alert('请在左侧树中勾选至少一个品种'); return; }
 
                     var exists = groups.some(function(g) { return g.name === name; });
@@ -114,6 +138,12 @@
                     }
                 },
                 onDelete: function(name) {
+                    // placeholder 删除 → 恢复加号行
+                    if (newItemPlaceholderName && newItemPlaceholderName === name) {
+                        newItemPlaceholderName = null;
+                        renderGroupList();
+                        return;
+                    }
                     if (!confirm('删除产品组 "' + name + '"？')) return;
                     PG.deleteGroup(name).then(function() {
                         if (selectedName === name) { selectedName = null; allGroupPaths = []; PS.clearChecks(groupTree); }

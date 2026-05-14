@@ -198,6 +198,7 @@
      *   expanded: {name: true}  -- 展开状态
      *   editing: {name: true}   -- 正在编辑（名称变 input）
      *   showAddButton: true     -- 顶部显示 + 号方块
+     *   newItemPlaceholder: {name} | null  -- 底部编辑中的空新方块（最多一个，由 onAdd 设置）
      *   dragHandle: '.cls'      -- SortableJS handle（null = 不可拖拽）
      *   onAdd()                 -- + 号点击回调
      *   onToggle(name)          -- 点击选中/取消
@@ -215,34 +216,58 @@
         var expanded = opts.expanded || {};
         var editing = opts.editing || {};
         var showAddButton = !!opts.showAddButton;
+        var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;
+
+        // 构建完整渲染列表：占位项在最前（替代加号行），已有项倒序
+        var renderItems = [];
+        if (newItemPlaceholder) {
+            renderItems.push({ name: newItemPlaceholder.name, paths: [], _placeholder: true });
+        }
+        // items 倒序：最新在前
+        for (var i = items.length - 1; i >= 0; i--) {
+            renderItems.push(items[i]);
+        }
 
         var html = '';
 
-        // ── + 号方块（固定在顶部，不属于可拖拽列表） ──
-        if (showAddButton) {
-            html += '<div class="pg-exp-add-btn" style="display:flex;align-items:center;justify-content:center;height:36px;margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;cursor:pointer;background:#fafbfc;color:#888;font-size:20px;transition:background 0.15s,border-color 0.15s;" title="新增产品组">+</div>';
+        // ── + 号方块（仅在无 placeholder 时显示） ──
+        if (showAddButton && !newItemPlaceholder) {
+            html += '<div class="pg-exp-add-block" style="margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;background:#fafbfc;padding:8px 12px;display:flex;align-items:center;">';
+            html += '<button class="pg-exp-add-act" style="width:28px;height:28px;border-radius:50%;border:1.5px solid #aaa;background:transparent;color:#888;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;" title="新增">+</button>';
+            html += '</div>';
         }
 
-        if (!items || !items.length) {
+        if (!renderItems.length) {
             html += '<div style="color:#888;text-align:center;padding:12px;">暂无数据</div>';
+            $container.html(html);
         } else {
             html += '<div id="pg-expandable-list" style="font-size:13px;">';
-            items.forEach(function(item, idx) {
+            renderItems.forEach(function(item, idx) {
             var name = item.name || '';
             var paths = item.paths || [];
-            var isSel = !!selected[name];
-            var isExp = !!expanded[name];
-            var isEditing = !!editing[name];
+            var isPlaceholder = !!item._placeholder;
+            var isSel = !isPlaceholder && !!selected[name];
+            var isExp = !isPlaceholder && !!expanded[name];
+            var isEditing = isPlaceholder || !!editing[name];
             var pathCount = paths.length;
 
-            html += '<div class="pg-exp-item" data-name="' + _escHtml(name) + '" data-idx="' + idx + '" style="border-radius:6px;margin-bottom:6px;overflow:hidden;'
-                + (isSel ? 'background:#d0e4ff;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
-                + '">';
+            // 占位方块：虚线框 + 浅背景
+            var itemStyle = 'border-radius:6px;margin-bottom:6px;overflow:hidden;';
+            if (isPlaceholder) {
+                itemStyle += 'border:2px dashed #c0c7d0;background:#fdfdfd;';
+            } else if (isSel) {
+                itemStyle += 'background:#d0e4ff;border:2px solid #4a90d9;';
+            } else {
+                itemStyle += 'background:#f6f8fa;border:1px solid #e1e4e8;';
+            }
+
+            html += '<div class="pg-exp-item" data-name="' + _escHtml(name) + '" data-idx="' + idx + '" data-placeholder="' + (isPlaceholder ? '1' : '0') + '" style="' + itemStyle + '">';
 
             // ── 主行：拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
             html += '<div class="pg-exp-header" style="display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:34px;">';
-            if (dragHandle) {
+            // 占位项没有拖拽手柄
+            if (dragHandle && !isPlaceholder) {
                 html += '<i class="fas fa-grip-vertical ' + dragHandle.replace('.','') + '" style="color:#888;cursor:grab;flex-shrink:0;"></i>';
             }
             // 名称 or 编辑框
@@ -253,14 +278,18 @@
             }
             html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + pathCount + '条)</span>';
 
-            // 操作图标：从左到右 — 保存 / 展开 / 删除
-            if (mode === 'manage') {
-                html += '<button class="pg-exp-save" data-name="' + _escHtml(name) + '" title="保存" style="background:none;border:none;color:#0078d4;cursor:pointer;font-size:14px;flex-shrink:0;"><i class="fas fa-save"></i></button>';
+            // 操作图标组（紧凑排列）
+            html += '<span class="pg-exp-actions" style="display:flex;align-items:center;gap:2px;flex-shrink:0;">';
+            if (mode === 'manage' || isPlaceholder) {
+                html += '<button class="pg-exp-save" data-name="' + _escHtml(name) + '" title="保存" style="background:none;border:none;color:#0078d4;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;"><i class="fas fa-save"></i></button>';
             }
-            html += '<button class="pg-exp-toggle" data-name="' + _escHtml(name) + '" title="展开/收起" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;flex-shrink:0;">' + (isExp ? '&#9650;' : '&#9660;') + '</button>';
-            if (mode === 'manage' || mode === 'readonly') {
-                html += '<button class="pg-exp-del" data-name="' + _escHtml(name) + '" title="删除" style="background:none;border:none;color:#d00;cursor:pointer;font-size:14px;flex-shrink:0;"><i class="fas fa-trash"></i></button>';
+            if (!isPlaceholder) {
+                html += '<button class="pg-exp-toggle" data-name="' + _escHtml(name) + '" title="展开/收起" style="background:none;border:none;color:#888;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;">' + (isExp ? '&#9650;' : '&#9660;') + '</button>';
             }
+            if (mode === 'manage' || mode === 'readonly' || isPlaceholder) {
+                html += '<button class="pg-exp-del" data-name="' + _escHtml(name) + '" title="删除" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;"><i class="fas fa-trash"></i></button>';
+            }
+            html += '</span>';
             html += '</div>';
 
             // ── 展开区域：路径 + 产品 ──
@@ -283,10 +312,11 @@
 
         $container.html(html);
         }
+        // 注意：空列表分支在上面已调用 $container.html(html)
 
         // ── + 号点击 ──
         if (showAddButton) {
-            $container.off('click.pgexp', '.pg-exp-add-btn').on('click.pgexp', '.pg-exp-add-btn', function(e) {
+            $container.off('click.pgexp', '.pg-exp-add-act').on('click.pgexp', '.pg-exp-add-act', function(e) {
                 e.stopPropagation();
                 if (opts.onAdd) opts.onAdd();
             });
@@ -385,14 +415,17 @@
                 });
         });
 
-        // 名称输入框：Enter 触发保存
+        // 名称输入框：Enter 触发保存（占位项）或重命名（已有项）
         $container.off('keydown.pgexp', '.pg-exp-name-input').on('keydown.pgexp', '.pg-exp-name-input', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                var name = $(this).data('name');
                 var $inp = $(this);
+                var name = $inp.data('name');
                 var newName = $inp.val().trim();
-                if (newName && newName !== name && opts.onRename) {
+                var isPlaceholder = $inp.closest('.pg-exp-item').data('placeholder') === 1;
+                if (isPlaceholder && newName && opts.onSave) {
+                    opts.onSave(name, newName);
+                } else if (newName && newName !== name && opts.onRename) {
                     opts.onRename(name, newName);
                 }
             }

@@ -180,19 +180,10 @@
         var onPathClick = callbacks.onPathClick || function() {};
         var onAdd = callbacks.onAdd || null;
         var onImportGroup = callbacks.onImportGroup || null;
+        var newItemPlaceholder = callbacks.newItemPlaceholder || null;  // {name} | null
 
-        // ── 顶部操作栏：+ 添加 + 从产品组导入，并列 ──
-        var actionBar = '';
-        if (onAdd || onImportGroup) {
-            actionBar += '<div class="ps-sub-action-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
-            if (onAdd) {
-                actionBar += '<div class="pg-exp-add-btn" style="display:flex;align-items:center;justify-content:center;height:36px;padding:0 16px;border:2px dashed #d0d5dd;border-radius:6px;cursor:pointer;background:#fafbfc;color:#888;font-size:14px;transition:background 0.15s,border-color 0.15s;flex-shrink:0;" title="提交选中产品到列表">+ 添加</div>';
-            }
-            if (onImportGroup) {
-                actionBar += '<button class="ps-import-group-btn" style="height:36px;padding:0 14px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;flex-shrink:0;">📥 从产品组导入</button>';
-            }
-            actionBar += '</div>';
-        }
+        var onInsertPlaceholder = callbacks.onInsertPlaceholder || null;
+        var onDeletePlaceholder = callbacks.onDeletePlaceholder || null;
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         var expItems = submissions.map(function(sub, i) {
@@ -222,8 +213,21 @@
             selected: {},
             expanded: expExpanded,
             editing: {},
-            showAddButton: false,
+            showAddButton: !!(onAdd || onImportGroup),
+            newItemPlaceholder: newItemPlaceholder,
             dragHandle: '.pg-exp-grip',
+            onAdd: function() {
+                if (onAdd) onAdd();
+            },
+            onSave: function(name, newName) {
+                // 判断是 placeholder 还是已有项
+                var isPh = newItemPlaceholder && newItemPlaceholder.name === name;
+                if (isPh && onInsertPlaceholder) {
+                    onInsertPlaceholder(newName);
+                } else if (!isPh && onAdd) {
+                    onAdd();
+                }
+            },
             onExpand: function(name) {
                 var found = expItems.find(function(item) { return item.name === name; });
                 if (found) {
@@ -237,18 +241,22 @@
                 }
             },
             onDelete: function(name) {
+                // placeholder 删除 → 通知调用方恢复加号行
+                var isPh = newItemPlaceholder && newItemPlaceholder.name === name;
+                if (isPh && onDeletePlaceholder) {
+                    onDeletePlaceholder();
+                    return;
+                }
                 var found = expItems.find(function(item) { return item.name === name; });
                 if (found) onDeleteSub(found._index);
             },
             onReorder: function(names) {
-                // 用 names 反推出新的 submissions 顺序
                 var newOrder = [];
                 names.forEach(function(n) {
                     for (var i = 0; i < expItems.length; i++) {
                         if (expItems[i].name === n) { newOrder.push(i); break; }
                     }
                 });
-                // 重建 submissions 数组
                 var reordered = [];
                 newOrder.forEach(function(oldIdx) {
                     reordered.push(submissions[oldIdx]);
@@ -259,30 +267,16 @@
             }
         });
 
-        // 路径产品加载：绑定路径头点击
-        $container.off('click.pgexp', '.pg-exp-path-hdr').on('click.pgexp', '.pg-exp-path-hdr', function(e) {
-            e.stopPropagation();
-            var $hdr = $(this);
-            var path = $hdr.text().trim();
-            var $prods = $hdr.siblings('.pg-exp-path-prods');
-            if ($prods.is(':visible')) {
-                $prods.slideUp(150);
-                return;
+        // 从产品组导入按钮（在 PG 的加号块之后独立插入，因为 PG 不知道导入按钮）
+        if (onImportGroup) {
+            // PG 的加号块用 .pg-exp-add-block 标记，导入按钮追加到其后
+            var $addBlock = $container.find('.pg-exp-add-block');
+            if ($addBlock.length) {
+                $addBlock.append('<button class="ps-import-group-btn" style="height:28px;padding:0 12px;margin-left:8px;border:none;border-radius:5px;background:#6c63ff;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0;">📥 从产品组导入</button>');
             }
-            $prods.html('加载中...').slideDown(150);
-            onPathClick(path, -1, -1);
-        });
-
-        // ── 顶部操作栏事件 ──
-        if (actionBar) {
-            $container.prepend(actionBar);
-            $container.find('.pg-exp-add-btn').off('click.psadd').on('click.psadd', function(e) {
+            $container.find('.ps-import-group-btn').off('click.psaction').on('click.psaction', function(e) {
                 e.stopPropagation();
-                if (onAdd) onAdd();
-            });
-            $container.find('.ps-import-group-btn').off('click.psimport').on('click.psimport', function(e) {
-                e.stopPropagation();
-                if (onImportGroup) onImportGroup();
+                onImportGroup();
             });
         }
     }
