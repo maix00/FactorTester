@@ -24,10 +24,10 @@ def multi_factor():
     return render_template('multi_factor.html')
 
 
-@core_bp.route('/price_viewer', methods=['GET'])
-def price_viewer():
-    """序列查看页面。"""
-    return render_template('price_viewer.html')
+@core_bp.route('/products', methods=['GET'])
+def products():
+    """产品管理 & 序列查看页面。"""
+    return render_template('products.html')
 
 
 @core_bp.route('/docs', methods=['GET'])

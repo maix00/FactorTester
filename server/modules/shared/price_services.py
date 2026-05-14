@@ -38,8 +38,8 @@ def cached_contracts():
 
 
 @lru_cache(maxsize=1)
-def cached_price_viewer_tree() -> CategoryTree:
-    return build_price_viewer_tree()
+def cached_product_tree() -> CategoryTree:
+    return build_product_tree()
 
 
 def contract_data_path(contract_uid: str) -> str:
@@ -61,8 +61,8 @@ def timestamp_or_none(value: Any) -> pd.Timestamp | None:
     return cast(pd.Timestamp, pd.Timestamp(value))
 
 
-def build_price_viewer_tree() -> CategoryTree:
-    """价格页产品树：原品种分类 + 合约类型继承链。"""
+def build_product_tree() -> CategoryTree:
+    """产品树：原品种分类 + 合约类型继承链。"""
     product_tree = get_cat_tree()
     contracts = list(cached_contracts())
     contract_tree = get_contract_category_tree(contracts)
