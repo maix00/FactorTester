@@ -7,7 +7,10 @@ from typing import cast
 
 from server.modules.custom_factors.catalog import list_custom_factors, list_public_factors
 from server.modules.custom_factors.param_config_store import (
+    DEFAULT_SCOPE_KEY,
     list_param_config_aliases,
+    list_param_config_scopes,
+    list_all_aliases_across_scopes,
     load_param_config,
     save_param_config,
 )
@@ -106,7 +109,7 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
     return factors
 
 
-def build_param_factor_overview(current_username: str, include_subordinates: bool) -> dict:
+def build_param_factor_overview(current_username: str, include_subordinates: bool, scope_key: str | None = None, factor_family_alias: str | None = None) -> dict:
     accounts = (
         visible_accounts_for(current_username, include_self=True)
         if include_subordinates
@@ -123,31 +126,43 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
         if not owner_username:
             continue
         custom_by_alias = alias_map(list_custom_factors(owner_username))
-        for ff_alias in list_param_config_aliases(owner_username):
-            config = load_param_config(owner_username, ff_alias)
-            if not config:
-                continue
-            params_list = config.get('params_list') or []
-            for row_index, row in enumerate(params_list):
-                try:
-                    items.append(build_library_param_factor_item(
-                        current_username,
-                        account,
-                        ff_alias,
-                        config,
-                        row if isinstance(row, dict) else {},
-                        row_index,
-                        public_by_alias,
-                        custom_by_alias,
-                    ))
-                except Exception as exc:
-                    errors.append({
-                        'owner_username': owner_username,
-                        'factor_family_alias': ff_alias,
-                        'template_name': config.get('name') or '',
-                        'row_index': row_index,
-                        'error': str(exc),
-                    })
+        # Determine which scopes to iterate
+        if scope_key:
+            scope_keys = [scope_key] if scope_key in list_param_config_scopes(owner_username) else []
+        else:
+            scope_keys = list_param_config_scopes(owner_username)
+
+        for sk in scope_keys:
+            for ff_alias in list_param_config_aliases(owner_username, sk):
+                if factor_family_alias and ff_alias != factor_family_alias:
+                    continue
+                config = load_param_config(owner_username, ff_alias, sk)
+                if not config:
+                    continue
+                params_list = config.get('params_list') or []
+                for row_index, row in enumerate(params_list):
+                    try:
+                        item = build_library_param_factor_item(
+                            current_username,
+                            account,
+                            ff_alias,
+                            config,
+                            row if isinstance(row, dict) else {},
+                            row_index,
+                            public_by_alias,
+                            custom_by_alias,
+                        )
+                        item['scope_key'] = sk
+                        items.append(item)
+                    except Exception as exc:
+                        errors.append({
+                            'owner_username': owner_username,
+                            'scope_key': sk,
+                            'factor_family_alias': ff_alias,
+                            'template_name': config.get('name') or '',
+                            'row_index': row_index,
+                            'error': str(exc),
+                        })
 
     items.sort(key=lambda factor: (
         factor_group_key(str(factor.get('factor_family_alias') or factor.get('factor_family_name') or '')),
@@ -163,10 +178,11 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
         'include_subordinates': include_subordinates,
         'current_username': current_username,
         'can_filter_organization': can_filter_organization,
+        'scopes': list_param_config_scopes(current_username),
     }
 
 
-def list_param_config_users(current_username: str, ff_alias: str) -> dict:
+def list_param_config_users(current_username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> dict:
     accounts = visible_accounts_for(current_username, include_self=True)
     current_account = get_account(current_username) or {}
     can_filter_organization = bool(current_account.get('role') == 'super_admin' or current_account.get('is_admin'))
@@ -177,7 +193,7 @@ def list_param_config_users(current_username: str, ff_alias: str) -> dict:
         owner_username = account.get('username')
         if not owner_username:
             continue
-        config = load_param_config(owner_username, ff_alias)
+        config = load_param_config(owner_username, ff_alias, scope_key)
         factors = []
         custom_by_alias = alias_map(list_custom_factors(owner_username))
         if config:
@@ -216,13 +232,14 @@ def list_param_config_users(current_username: str, ff_alias: str) -> dict:
     return {
         'users': users,
         'can_filter_organization': can_filter_organization,
+        'scope_key': scope_key,
     }
 
 
-def save_current_user_param_config(current_username: str, ff_alias: str, params_list: list) -> tuple[dict, list]:
+def save_current_user_param_config(current_username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> tuple[dict, list]:
     factor_family = get_factor_family_instance(ff_alias, username=current_username)
     serialized_rows = serialize_param_rows(factor_family, params_list)
-    config = save_param_config(current_username, ff_alias, serialized_rows)
+    config = save_param_config(current_username, ff_alias, serialized_rows, scope_key)
     account = get_account(current_username) or {'username': current_username}
     factors = build_factor_library_config_factors(current_username, account, ff_alias, config)
     return config, factors

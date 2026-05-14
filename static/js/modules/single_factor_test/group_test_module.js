@@ -1547,7 +1547,7 @@
             var showClass = idx === 0 ? 'show active' : '';
             var tabId = 'group-tab-' + sub.id;
             var panelId = 'group-panel-' + sub.id;
-            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.label || ('测试器' + (idx+1))) + '</button></li>';
+            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.label || ('测试器' + (idx+1))) + (sub.product_group ? ' 📦' : '') + '</button></li>';
 
             // 第二级：因子选项卡
             var factorTabsHtml = '';
@@ -1585,7 +1585,148 @@
                 trigger.addEventListener('click', function(e) { e.preventDefault(); tab.show(); });
             });
         }
+
+        // ── 长按因子选项卡 → 添加到因子库 ──
+        bindGroupFactorTabLongPress();
     };
+
+    // ── 长按因子选项卡辅助函数 ──
+    function bindGroupFactorTabLongPress() {
+        var allFactorTabs = document.querySelectorAll('.factor-tabs-container .nav-link');
+        allFactorTabs.forEach(function(btn) {
+            addGroupFactorLongPress(btn);
+        });
+    }
+
+    function addGroupFactorLongPress(btn) {
+        var longPressTimer = null;
+        var longPressFired = false;
+
+        function cancelLongPress() {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            longPressFired = false;
+        }
+
+        btn.addEventListener('pointerdown', function(e) {
+            longPressFired = false;
+            longPressTimer = setTimeout(function() {
+                longPressFired = true;
+                var factorAlias = btn.textContent.trim();
+                if (!factorAlias) return;
+                showGroupAddToLibraryPopover(btn, factorAlias);
+            }, 600);
+        });
+
+        btn.addEventListener('pointermove', function(e) {
+            if (longPressTimer && Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) > 5) {
+                cancelLongPress();
+            }
+        });
+
+        btn.addEventListener('pointerup', function() { cancelLongPress(); });
+        btn.addEventListener('pointercancel', function() { cancelLongPress(); });
+        btn.addEventListener('pointerleave', function() { cancelLongPress(); });
+    }
+
+    async function showGroupAddToLibraryPopover(anchor, factorAlias) {
+        var existing = document.querySelector('.group-add-to-library-popover');
+        if (existing) existing.remove();
+
+        var popover = document.createElement('div');
+        popover.className = 'group-add-to-library-popover';
+        popover.innerHTML = '<div style="padding:12px;text-align:center;color:#aaa;">加载中...</div>';
+        document.body.appendChild(popover);
+
+        var rect = anchor.getBoundingClientRect();
+        popover.style.cssText = 'position:fixed;z-index:4000;background:#fff;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);min-width:280px;max-width:360px;overflow:hidden;left:' + Math.min(rect.left, window.innerWidth - 310) + 'px;top:' + (rect.bottom + 6) + 'px;';
+
+        var factorFamilyAlias = window.factorFamilyAlias || '';
+
+        try {
+            var resp = await fetch('/custom-factors/api/param-config-scopes');
+            var data = await resp.json();
+            var scopes = data.success ? (data.scopes || []) : [];
+            if (scopes.indexOf('default') === -1) scopes.unshift('default');
+
+            var scopeOptions = scopes.map(function(s) {
+                return '<option value="' + escGrp(s) + '">' + escGrp(s) + '</option>';
+            }).join('');
+
+            popover.innerHTML = ''
+                + '<div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;">'
+                + '<strong style="font-size:14px;">📌 添加到因子库</strong>'
+                + '<div style="font-size:12px;color:#666;margin-top:4px;">' + escGrp(factorAlias) + '</div>'
+                + '</div>'
+                + '<div style="padding:12px 16px;">'
+                + '<label style="font-size:12px;color:#333;display:block;margin-bottom:4px;">目标产品组 (scope)</label>'
+                + '<select class="form-select" id="group-add-to-lib-scope-select" style="width:100%;">' + scopeOptions + '</select>'
+                + '</div>'
+                + '<div style="padding:0 16px 14px;display:flex;gap:8px;justify-content:flex-end;">'
+                + '<button type="button" class="param-btn" id="group-add-to-lib-cancel">取消</button>'
+                + '<button type="button" class="param-btn btn-primary" id="group-add-to-lib-confirm">确认添加</button>'
+                + '</div>'
+                + '<div id="group-add-to-lib-msg" style="padding:0 16px 12px;font-size:12px;display:none;"></div>';
+        } catch (e) {
+            popover.innerHTML = '<div style="padding:16px;color:#d40000;">加载失败</div>';
+        }
+
+        popover.querySelector('#group-add-to-lib-cancel').addEventListener('click', function() {
+            popover.remove();
+        });
+        popover.querySelector('#group-add-to-lib-confirm').addEventListener('click', async function() {
+            var scopeSelect = popover.querySelector('#group-add-to-lib-scope-select');
+            var scopeKey = scopeSelect ? scopeSelect.value : 'default';
+            var msgEl = popover.querySelector('#group-add-to-lib-msg');
+            try {
+                var addResp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ factor_alias: factorAlias, scope_key: scopeKey })
+                });
+                var addData = await addResp.json();
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    if (addData.success) {
+                        if (addData.skipped) {
+                            msgEl.style.color = '#b08800';
+                            msgEl.textContent = addData.message || '已存在，跳过';
+                        } else {
+                            msgEl.style.color = '#28a745';
+                            msgEl.textContent = '✅ 已添加到因子库';
+                        }
+                    } else {
+                        msgEl.style.color = '#d40000';
+                        msgEl.textContent = '✗ ' + (addData.error || '添加失败');
+                    }
+                }
+                setTimeout(function() { popover.remove(); }, 1500);
+            } catch (e) {
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.color = '#d40000';
+                    msgEl.textContent = '✗ 网络错误';
+                }
+            }
+        });
+
+        setTimeout(function() {
+            document.addEventListener('pointerdown', function closeGrp(e) {
+                if (!popover.contains(e.target) && e.target !== anchor) {
+                    popover.remove();
+                    document.removeEventListener('pointerdown', closeGrp);
+                }
+            });
+        }, 100);
+    }
+
+    function escGrp(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

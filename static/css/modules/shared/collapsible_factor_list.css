@@ -1,6 +1,28 @@
+.collapsible-factor-scope,
 .collapsible-factor-group,
 .collapsible-factor-owner {
     margin: 2px 0;
+}
+
+.collapsible-factor-scope > .collapsible-factor-header {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    padding: 9px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.collapsible-factor-scope > .collapsible-factor-header:hover {
+    background: #eef2f7;
+    color: #0f172a;
+}
+
+.collapsible-factor-scope > .collapsible-factor-body {
+    margin-left: 10px;
+    border-left: 2px solid #e2e8f0;
+    padding-left: 10px;
 }
 
 .collapsible-factor-header {

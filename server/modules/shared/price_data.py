@@ -21,7 +21,7 @@ from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,
     cached_contracts as _cached_contracts,
-    cached_price_viewer_tree as _cached_price_viewer_tree,
+    cached_product_tree as _cached_product_tree,
     cached_products as _cached_products,
     contract_data_path as _contract_data_path,
     contract_has_data as _contract_has_data,
@@ -58,10 +58,15 @@ def list_product_names():
 
 @shared_bp.route('/api/product_tree')
 def get_product_tree():
-    """返回产品类别树（Fancytree 格式），支持所有产品类型。"""
+    """返回产品类别树（Fancytree 格式），支持所有产品类型。
+    
+    Query params:
+        checkbox: 1/true  → 所有节点显示 checkbox（默认不显示）
+    """
     try:
-        cat_tree = _cached_price_viewer_tree()
-        fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=False)
+        cat_tree = _cached_product_tree()
+        checkbox = request.args.get('checkbox', '').lower() in ('1', 'true')
+        fancytree_data = convert_to_fancytree(cat_tree.tree, checkbox_default=checkbox)
         return jsonify(fancytree_data)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
@@ -74,7 +79,7 @@ def get_contract_tree():
         path = request.args.get('path')
         if path:
             node_path = path[:-10] if path.endswith('/_products') else path
-            node = find_node_by_path(_cached_price_viewer_tree().tree, node_path.split('/'))
+            node = find_node_by_path(_cached_product_tree().tree, node_path.split('/'))
             contracts = node.get('$OBJECTS$', []) if isinstance(node, dict) else ([node] if node else [])
         else:
             contracts = _cached_contracts()

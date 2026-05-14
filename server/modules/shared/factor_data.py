@@ -34,7 +34,21 @@ def factor_list():
     if not factor_family_alias:
         return api_fail('缺少参数')
     ff = get_factor_family_instance(factor_family_alias)
-    factors = ff.get_factors(params_list=get_session_params(factor_family_alias, ff))
+    params_list = get_session_params(factor_family_alias, ff)
+    factors = ff.get_factors(params_list=params_list)
+    # 构建 alias -> category 映射（从 session params 行中读取）
+    alias_to_category = {}
+    if isinstance(params_list, list):
+        for row in params_list:
+            if not isinstance(row, dict):
+                continue
+            cat = (row.get('category') or '').strip()
+            if cat:
+                try:
+                    alias = ff.get_alias(**{k: v for k, v in row.items() if k != 'category'})
+                    alias_to_category[alias] = cat
+                except Exception:
+                    continue
     factor_data = []
     for f in factors:
         factor_freq_param = f.family.params_dict.get('$F') if f.family else None
@@ -51,6 +65,7 @@ def factor_list():
             'name': f.name,
             'default_return_freq': factor_freq_str,
             'freq': factor_freq_str2,
+            'category': alias_to_category.get(f.alias, ''),
         })
     return api_ok({'factors': factor_data})
 

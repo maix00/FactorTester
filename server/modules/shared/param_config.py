@@ -75,15 +75,21 @@ def serialize_param_rows(factor_family, params_list: list) -> list:
     normalized_rows = normalize_param_rows(factor_family, params_list)
     rows = []
     seen_aliases = set()
-    for row in normalized_rows:
+    for idx, row in enumerate(normalized_rows):
         factor_alias = factor_family.get_alias(**row)
         if factor_alias in seen_aliases:
             continue
         seen_aliases.add(factor_alias)
-        rows.append({
+        item = {
             p.alias: param_value_display(p, row.get(p.alias))
             for p in factor_family.params
-        })
+        }
+        # 保留条目级 category（如果原始 params_list 中提供）
+        if idx < len(params_list) and isinstance(params_list[idx], dict):
+            cat = (params_list[idx].get('category') or '').strip()
+            if cat:
+                item['category'] = cat
+        rows.append(item)
     return rows
 
 
@@ -108,6 +114,9 @@ def build_param_factor_item(
         for p in factor_family.params
     ]
     source = meta.get('source') or 'unknown'
+    # 条目级 category 优先于因子家族 meta category
+    row_category = params.get('category', '') if isinstance(params, dict) else ''
+    family_category = meta.get('category') or ''
     return {
         'id': f"{owner_username}:{getattr(factor_family, 'alias', '')}:{config.get('id')}:{row_idx}",
         'factor_alias': factor_family.get_alias(**normalized_row),
@@ -115,7 +124,7 @@ def build_param_factor_item(
         'factor_family_id': meta.get('id') or getattr(factor_family, 'alias', ''),
         'factor_family_name': meta.get('name') or getattr(factor_family, 'alias', ''),
         'chinese_name': meta.get('chinese_name') or '',
-        'category': meta.get('category') or '',
+        'category': row_category or family_category,
         'source': source,
         'source_label': '公共因子' if source == 'public' else ('自定义因子' if source == 'custom' else '未知来源'),
         'template_id': config.get('id') or '',

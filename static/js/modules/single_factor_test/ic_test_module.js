@@ -1299,6 +1299,9 @@
                         }
                     });
 
+                    // ── 长按添加因子到因子库 ──
+                    bindLongPressAddToLibrary(th, subId);
+
                     // 拖拽开始
                     th.addEventListener('dragstart', function(e) {
                         const colIdx = parseInt(this.getAttribute('data-col-idx'));
@@ -1388,7 +1391,7 @@
         const summaryRow = document.getElementById('ic-freq-summary-row');
         if (!tbody || !summaryText) return;
         if (!factors || factors.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="2" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
             summaryText.textContent = '暂无因子数据';
             return;
         }
@@ -1399,8 +1402,10 @@
         factors.forEach(f => {
             const defaultReturnFreq = f.default_return_freq || '';
             const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
+            const cat = (f.category || '').trim();
             rows += `<tr>
                 <td><label><input type="checkbox" class="factor-checkbox" data-factor-alias="${f.alias}" checked> ${f.name}</label></td>
+                <td style="color:#667085;font-size:12px;">${cat}</td>
                 <td>
                     <input
                         type="text"
@@ -1468,7 +1473,8 @@
             const showClass = idx === 0 ? 'show active' : '';
             const tabId = `ic-tab-${sub.id}`;
             const panelId = `ic-panel-${sub.id}`;
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.label || sub.factor_tester_serial || ('测试器' + (idx+1))}</button></li>`;
+            const pgBadge = sub.product_group ? ' 📦' : '';
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.label || sub.factor_tester_serial || ('测试器' + (idx+1))}${pgBadge}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
@@ -1698,4 +1704,146 @@
         });
     }
 
+    // ── 长按因子列头 → 添加到因子库 ──
+    function bindLongPressAddToLibrary(th, subId) {
+        let longPressTimer = null;
+        let longPressFired = false;
+
+        function getFactorAliasFromHeader() {
+            var colIdx = parseInt(th.getAttribute('data-col-idx'));
+            if (isNaN(colIdx)) return null;
+            var factors = window._icDataFactors && window._icDataFactors[subId];
+            if (!factors || colIdx >= factors.length) return null;
+            return factors[colIdx].alias || factors[colIdx].name || null;
+        }
+
+        function cancelLongPress() {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            longPressFired = false;
+        }
+
+        th.addEventListener('pointerdown', function(e) {
+            longPressFired = false;
+            longPressTimer = setTimeout(function() {
+                longPressFired = true;
+                var factorAlias = getFactorAliasFromHeader();
+                if (!factorAlias) return;
+                showAddToLibraryPopover(th, factorAlias);
+            }, 600);
+        });
+
+        th.addEventListener('pointermove', function(e) {
+            if (longPressTimer && Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) > 5) {
+                cancelLongPress();
+            }
+        });
+
+        th.addEventListener('pointerup', function() { cancelLongPress(); });
+        th.addEventListener('pointercancel', function() { cancelLongPress(); });
+        th.addEventListener('pointerleave', function() { cancelLongPress(); });
+    }
+
+    async function showAddToLibraryPopover(anchor, factorAlias) {
+        // 移除已有 popover
+        var existing = document.querySelector('.ic-add-to-library-popover');
+        if (existing) existing.remove();
+
+        var popover = document.createElement('div');
+        popover.className = 'ic-add-to-library-popover';
+        popover.innerHTML = '<div style="padding:12px;text-align:center;color:#aaa;">加载中...</div>';
+        document.body.appendChild(popover);
+
+        // 定位在 anchor 下方
+        var rect = anchor.getBoundingClientRect();
+        popover.style.cssText = 'position:fixed;z-index:4000;background:#fff;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);min-width:280px;max-width:360px;overflow:hidden;left:' + Math.min(rect.left, window.innerWidth - 310) + 'px;top:' + (rect.bottom + 6) + 'px;';
+
+        // 加载 scope 列表
+        try {
+            var resp = await fetch('/custom-factors/api/param-config-scopes');
+            var data = await resp.json();
+            var scopes = data.success ? (data.scopes || []) : [];
+            if (scopes.indexOf('default') === -1) scopes.unshift('default');
+
+            var scopeOptions = scopes.map(function(s) {
+                return '<option value="' + esc(s) + '">' + esc(s) + '</option>';
+            }).join('');
+
+            popover.innerHTML = ''
+                + '<div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;">'
+                + '<strong style="font-size:14px;">📌 添加到因子库</strong>'
+                + '<div style="font-size:12px;color:#666;margin-top:4px;">' + esc(factorAlias) + '</div>'
+                + '</div>'
+                + '<div style="padding:12px 16px;">'
+                + '<label style="font-size:12px;color:#333;display:block;margin-bottom:4px;">目标产品组 (scope)</label>'
+                + '<select class="form-select" id="add-to-lib-scope-select" style="width:100%;">' + scopeOptions + '</select>'
+                + '</div>'
+                + '<div style="padding:0 16px 14px;display:flex;gap:8px;justify-content:flex-end;">'
+                + '<button type="button" class="param-btn" id="add-to-lib-cancel">取消</button>'
+                + '<button type="button" class="param-btn btn-primary" id="add-to-lib-confirm">确认添加</button>'
+                + '</div>'
+                + '<div id="add-to-lib-msg" style="padding:0 16px 12px;font-size:12px;display:none;"></div>';
+        } catch (e) {
+            popover.innerHTML = '<div style="padding:16px;color:#d40000;">加载失败</div>';
+        }
+
+        // 事件
+        popover.querySelector('#add-to-lib-cancel').addEventListener('click', function() {
+            popover.remove();
+        });
+        popover.querySelector('#add-to-lib-confirm').addEventListener('click', async function() {
+            var scopeSelect = popover.querySelector('#add-to-lib-scope-select');
+            var scopeKey = scopeSelect ? scopeSelect.value : 'default';
+            var msgEl = popover.querySelector('#add-to-lib-msg');
+            try {
+                var addResp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ factor_alias: factorAlias, scope_key: scopeKey })
+                });
+                var addData = await addResp.json();
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    if (addData.success) {
+                        if (addData.skipped) {
+                            msgEl.style.color = '#b08800';
+                            msgEl.textContent = addData.message || '已存在，跳过';
+                        } else {
+                            msgEl.style.color = '#28a745';
+                            msgEl.textContent = '✅ 已添加到因子库';
+                        }
+                    } else {
+                        msgEl.style.color = '#d40000';
+                        msgEl.textContent = '✗ ' + (addData.error || '添加失败');
+                    }
+                }
+                setTimeout(function() { popover.remove(); }, 1500);
+            } catch (e) {
+                if (msgEl) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.color = '#d40000';
+                    msgEl.textContent = '✗ 网络错误';
+                }
+            }
+        });
+
+        // 点击外部关闭
+        function closeOnOutside(e) {
+            if (!popover.contains(e.target) && e.target !== anchor) {
+                popover.remove();
+                document.removeEventListener('pointerdown', closeOnOutside);
+            }
+        }
+        setTimeout(function() {
+            document.addEventListener('pointerdown', closeOnOutside);
+        }, 100);
+    }
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
 })();

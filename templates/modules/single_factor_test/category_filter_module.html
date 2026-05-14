@@ -63,6 +63,8 @@
                     <button id="tpl-save-btn" title="将当前所有提交路径保存为新模板" style="font-size:12px; padding:3px 10px; background:#28a745; color:#fff; border:none; border-radius:5px; cursor:pointer;">另存为…</button>
                     <button id="tpl-update-btn" title="用当前所有提交路径覆盖选中模板" style="font-size:12px; padding:3px 10px; background:#fd7e14; color:#fff; border:none; border-radius:5px; cursor:pointer;">更新</button>
                     <button id="tpl-delete-btn" title="删除选中模板" style="font-size:12px; padding:3px 10px; background:transparent; color:#d00; border:1px solid #faa; border-radius:5px; cursor:pointer;">删除</button>
+                    <span style="color:#ccc; margin:0 2px;">|</span>
+                    <button id="pg-import-btn" title="从产品组导入路径" style="font-size:12px; padding:3px 10px; background:#6c63ff; color:#fff; border:none; border-radius:5px; cursor:pointer;">📥 从产品组导入</button>
                     <span id="tpl-status" style="font-size:12px; white-space:nowrap;"></span>
                 </div>
             </div>
@@ -80,6 +82,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
 <script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
 
+<script src="{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/category_filter_module.js') }}"></script>
 
     </div><!-- /.settings-drawer-panel -->

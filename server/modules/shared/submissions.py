@@ -1,6 +1,5 @@
 """
-Shared submission / product-tree routes:
-  GET  /api/tree-data
+Shared submission routes:
   GET  /get_products
   POST /submit_selected_products
   POST /reorder_submissions
@@ -11,9 +10,8 @@ Shared submission / product-tree routes:
 from flask import request, jsonify
 import time
 from typing import Any, cast
-from server.services import product_tree
 from server.services.product_tree import (
-    convert_to_fancytree, find_node_by_path, get_minimal_paths, tree,
+    find_node_by_path, get_minimal_paths,
 )
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
@@ -22,15 +20,9 @@ from .submission_helpers import (
     resolve_products_from_paths,
     submissions_payload,
 )
+from server.modules.products.product_group_store import load_product_groups
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
-
-
-@shared_bp.route('/api/tree-data')
-def get_tree_data():
-    if product_tree.fancytree_cache is None:
-        product_tree.fancytree_cache = convert_to_fancytree(tree, checkbox_default=True)
-    return jsonify(product_tree.fancytree_cache)
 
 
 @shared_bp.route('/api/list_submissions')
@@ -47,9 +39,11 @@ def get_products():
         return jsonify([])
     # 叶节点 checkbox 默认 True，可通过 ?checkbox=false 关闭
     leaf_checkbox = request.args.get('checkbox', 'true').lower() != 'false'
+    from server.modules.shared.price_services import cached_product_tree
+    search_tree = cached_product_tree().tree
     node_path = original_path[:-10] if original_path.endswith('/_products') else original_path
     parts = node_path.split('/')
-    node = find_node_by_path(tree, parts)
+    node = find_node_by_path(search_tree, parts)
     if node is None:
         return jsonify([])
     objects = node.get('$OBJECTS$', []) if isinstance(node, dict) else [node]
@@ -207,8 +201,11 @@ def replace_submissions():
         return api_fail('template_submissions 必须是列表')
 
     from tools.factors.FactorTester import FactorTester
+    from server.modules.products.product_group_store import load_product_groups
     user = runtime_state.current_user_obj()
     replaced = []
+    # 预加载 product_groups（仅当有 submission 引用 group 时查询一次）
+    groups_cache = None
     with factor_testers_lock:
         for tester in runtime_state.factor_testers:
             tester_puuid = getattr(tester, '_page_uuid', None)
@@ -223,7 +220,17 @@ def replace_submissions():
         ]
 
         for i, sub in enumerate(tpl_submissions):
-            selected_paths = sub.get('paths') if isinstance(sub, dict) else []
+            if not isinstance(sub, dict):
+                continue
+            # 解析 paths：优先 product_group，其次 paths
+            selected_paths = sub.get('paths', []) if isinstance(sub.get('paths'), list) else []
+            group_name = sub.get('product_group', '') if isinstance(sub.get('product_group'), str) else ''
+            if group_name:
+                if groups_cache is None:
+                    groups_cache = load_product_groups(user.username)
+                group = next((g for g in groups_cache if g.get('name') == group_name), None)
+                if group and isinstance(group.get('paths'), list):
+                    selected_paths = group['paths']
             if not isinstance(selected_paths, list) or len(selected_paths) == 0:
                 continue
             selected_paths, selected_products = resolve_products_from_paths(selected_paths)
@@ -239,7 +246,8 @@ def replace_submissions():
             replaced.append({
                 'id': alias,
                 'paths': selected_paths,
-                'label': sub.get('label', '') if isinstance(sub, dict) else '',
+                'label': sub.get('label', ''),
+                'product_group': group_name,
                 'factor_tester_name': factor_tester.name,
                 'factor_tester_serial': f"#{alias}",
                 'count_desc': f"{len(selected_products)} 个产品",

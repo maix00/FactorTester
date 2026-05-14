@@ -39,21 +39,18 @@
     function render() {
         const body = document.getElementById('shared-factor-param-picker-body');
         const q = (document.getElementById('shared-factor-param-picker-search')?.value || '').trim().toLowerCase();
-        const visible = items.filter(item => {
-            if (!q) return true;
-            return [item.factor_alias, item.factor_family_alias, item.factor_family_name, item.chinese_name, item.owner_alias, item.owner_username]
-                .join(' ').toLowerCase().includes(q);
-        });
-        if (!visible.length) {
-            body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">暂无可选因子。请先在因子库保存参数配置。</div>';
-            return;
+        if (typeof window.renderFactorPickerTable === 'function') {
+            window.renderFactorPickerTable(items, body, {
+                searchQuery: q,
+                emptyMessage: '暂无可选因子。请先在因子库保存参数配置。',
+                pickAttribute: 'shared-factor-param-pick',
+                pickValue: 'factor_alias',
+                pickLabel: '选择',
+            });
+        } else {
+            // 降级：如果 all_factors_overview.js 未加载，用内联简单表格
+            body.innerHTML = '<div style="color:#d40000;text-align:center;">因子表格模块未加载</div>';
         }
-        let html = '<table class="param-table" style="width:100%;"><thead><tr><th>因子</th><th>家族</th><th>参数</th><th>所有者</th><th>操作</th></tr></thead><tbody>';
-        visible.forEach(item => {
-            const params = (item.params || []).map(p => '<span style="display:inline-block;margin:1px 4px 1px 0;color:#667085;">' + esc(p.alias) + ':' + esc(p.value) + '</span>').join('');
-            html += '<tr><td><strong>' + esc(item.factor_alias) + '</strong></td><td>' + esc(item.factor_family_alias || item.factor_family_name) + '<div style="color:#888;font-size:12px;">' + esc(item.chinese_name) + '</div></td><td>' + (params || '<span style="color:#aaa;">无</span>') + '</td><td>' + esc(item.owner_alias || item.owner_username) + '</td><td><button type="button" class="param-btn" data-shared-factor-param-pick="' + esc(item.factor_alias) + '">选择</button></td></tr>';
-        });
-        body.innerHTML = html + '</tbody></table>';
     }
 
     window.openSharedFactorParamPicker = async function(alias, onPick) {

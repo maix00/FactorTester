@@ -52,6 +52,11 @@ def user_template_path(
     if scope_key:
         directory = os.path.join(directory, f'{kind}_templates')
         os.makedirs(directory, exist_ok=True)
+        if ff_alias:
+            # 两级：{kind}_templates/{scope_key}/{ff_alias}.json
+            directory = os.path.join(directory, scope_key)
+            os.makedirs(directory, exist_ok=True)
+            return os.path.join(directory, f'{ff_alias}.json')
         return os.path.join(directory, f'{scope_key}.json')
     if kind == 'params' and ff_alias:
         directory = os.path.join(directory, 'params_templates')
@@ -93,6 +98,72 @@ def save_user_templates(
 
 def new_template_id() -> str:
     return str(int(time.time() * 1000))
+
+
+def migrate_templates_on_rename(old_name: str, new_name: str) -> int:
+    """Rename templates after a FactorFamily is renamed.
+
+    Scans ALL user directories and:
+    1. Renames global_templates/{old_name}.json → {new_name}.json
+    2. Renames params_templates/{old_name}.json → {new_name}.json
+    3. In any global_templates/*.json, updates ff_alias fields
+       referencing old_name → new_name
+
+    Returns number of files touched.
+    """
+    touched = 0
+    if not os.path.isdir(USERS_DIR):
+        return touched
+
+    for username in os.listdir(USERS_DIR):
+        if username.startswith('_') or username.startswith('.'):
+            continue
+        user_dir = os.path.join(USERS_DIR, username)
+        if not os.path.isdir(user_dir):
+            continue
+
+        # 1. Rename global_templates (scope_key-based)
+        global_dir = os.path.join(user_dir, 'global_templates')
+        if os.path.isdir(global_dir):
+            old_path = os.path.join(global_dir, f'{old_name}.json')
+            new_path = os.path.join(global_dir, f'{new_name}.json')
+            if os.path.isfile(old_path) and not os.path.exists(new_path):
+                shutil.move(old_path, new_path)
+                touched += 1
+
+        # 2. Rename params_templates (ff_alias-based)
+        params_dir = os.path.join(user_dir, 'params_templates')
+        if os.path.isdir(params_dir):
+            old_path = os.path.join(params_dir, f'{old_name}.json')
+            new_path = os.path.join(params_dir, f'{new_name}.json')
+            if os.path.isfile(old_path) and not os.path.exists(new_path):
+                shutil.move(old_path, new_path)
+                touched += 1
+
+        # 3. Update ff_alias inside all global_templates JSON files
+        if os.path.isdir(global_dir):
+            for fname in os.listdir(global_dir):
+                if not fname.endswith('.json'):
+                    continue
+                fpath = os.path.join(global_dir, fname)
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if not isinstance(data, list):
+                        continue
+                    changed = False
+                    for tmpl in data:
+                        if isinstance(tmpl, dict) and tmpl.get('ff_alias') == old_name:
+                            tmpl['ff_alias'] = new_name
+                            changed = True
+                    if changed:
+                        with open(fpath, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        touched += 1
+                except Exception:
+                    continue
+
+    return touched
 
 
 def archive_user_dir(username: str) -> str | None:

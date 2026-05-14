@@ -49,12 +49,20 @@ function renderScopeFactorsOverview() {
     }
 
     const visibleFactors = filterAllFactorsByOwner(data.factors);
-    const groups = {};
+
+    // 第一级：按 scope_key 分组
+    const scopeGroups = {};
     visibleFactors.forEach(f => {
-        const group = getGroup(f.factor_family_alias || f.factor_family_name || f.factor_alias);
-        if (!groups[group]) groups[group] = [];
-        groups[group].push(f);
+        const sk = f.scope_key || '默认';
+        if (!scopeGroups[sk]) scopeGroups[sk] = [];
+        scopeGroups[sk].push(f);
     });
+    const scopeKeys = Object.keys(scopeGroups).sort((a, b) => {
+        if (a === 'default' || a === '默认') return 1;
+        if (b === 'default' || b === '默认') return -1;
+        return a.localeCompare(b);
+    });
+
     let totalPublic = 0, totalCustom = 0, totalUnknown = 0;
     const ownersSeen = new Set();
     const templatesSeen = new Set();
@@ -69,9 +77,9 @@ function renderScopeFactorsOverview() {
     let html = renderAllFactorsControls();
     html += '<div class="all-factors-stats">';
     html += '<div class="all-factors-stat">显示: <strong>' + visibleFactors.length + '</strong> / ' + data.factors.length + ' 个参数配置因子</div>';
+    html += '<div class="all-factors-stat">产品组: <strong>' + scopeKeys.length + '</strong></div>';
     html += '<div class="all-factors-stat">用户: <strong>' + ownersSeen.size + '</strong></div>';
     html += '<div class="all-factors-stat">配置: <strong>' + templatesSeen.size + '</strong></div>';
-    html += '<div class="all-factors-stat">因子家族: <strong>' + Object.keys(groups).length + '</strong></div>';
     html += '<div class="all-factors-stat">公共/自定义/未知: <strong>' + totalPublic + '/' + totalCustom + '/' + totalUnknown + '</strong></div>';
     html += '</div>';
     if (data.errors && data.errors.length) {
@@ -82,39 +90,54 @@ function renderScopeFactorsOverview() {
         return;
     }
 
-    for (const group of Object.keys(groups).sort()) {
-        const items = groups[group].sort(compareAllFactorsForDisplay);
-        const owners = {};
-        items.forEach(f => {
-            const ownerKey = getAllFactorOwnerSortKey(f);
-            if (!owners[ownerKey]) owners[ownerKey] = [];
-            owners[ownerKey].push(f);
+    for (const sk of scopeKeys) {
+        const scopeItems = scopeGroups[sk];
+        // 第二级：按 group（因子家族前缀）分组
+        const groups = {};
+        scopeItems.forEach(f => {
+            const group = getGroup(f.factor_family_alias || f.factor_family_name || f.factor_alias);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(f);
         });
-        html += '<div class="collapsible-factor-node collapsible-factor-group">';
-        html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
-            escHtml(group) + '</span><span class="collapsible-factor-count">' + items.length + '</span></button><div class="collapsible-factor-body">';
-        for (const ownerKey of Object.keys(owners).sort()) {
-            const ownerItems = owners[ownerKey];
-            html += '<div class="collapsible-factor-node collapsible-factor-owner">';
+        html += '<div class="collapsible-factor-node collapsible-factor-scope">';
+        html += '<button class="collapsible-factor-header scope-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
+            escHtml(sk) + '</span><span class="collapsible-factor-count">' + scopeItems.length + '</span></button><div class="collapsible-factor-body">';
+
+        for (const group of Object.keys(groups).sort()) {
+            const items = groups[group].sort(compareAllFactorsForDisplay);
+            const owners = {};
+            items.forEach(f => {
+                const ownerKey = getAllFactorOwnerSortKey(f);
+                if (!owners[ownerKey]) owners[ownerKey] = [];
+                owners[ownerKey].push(f);
+            });
+            html += '<div class="collapsible-factor-node collapsible-factor-group">';
             html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
-                escHtml(getAllFactorOwnerLabel(ownerItems[0])) + '</span><span class="collapsible-factor-count">' + ownerItems.length + '</span></button><div class="collapsible-factor-body">';
-            html += '<table class="all-factors-table"><thead><tr>';
-            html += '<th>因子</th><th>因子家族</th><th>参数配置</th><th>参数</th><th>所有者</th><th>来源</th><th>更新时间</th>';
-            html += '</tr></thead><tbody>';
-            for (const f of ownerItems) {
-                html += '<tr>';
-                html += '<td><strong class="all-factors-alias">' + escHtml(f.factor_alias || '—') + '</strong></td>';
-                html += '<td><div>' + escHtml(f.factor_family_alias || f.factor_family_name || '—') + '</div><div class="all-factors-subtext">' + escHtml(f.chinese_name || f.category || '') + '</div></td>';
-                html += '<td><div>' + escHtml(f.template_name || '—') + '</div><div class="all-factors-subtext">第 ' + (Number(f.template_row_index || 0) + 1) + ' 行</div></td>';
-                html += '<td>' + renderParamsSummary(f.params || []) + '</td>';
-                html += '<td>' + escHtml(getAllFactorOwnerLabel(f)) + '</td>';
-                const sourceLabel = getAllFactorOwnerLabel(f);
-                const sourceClass = f.source === 'public' ? 'tag-public' : (f.source === 'custom' ? 'tag-custom' : 'tag-unknown');
-                html += '<td><span class="tag ' + sourceClass + '">' + escHtml(f.source_label || sourceLabel) + '</span></td>';
-                html += '<td style="color:#888;font-size:12px;">' + escHtml(f.updated_at || '—') + '</td>';
-                html += '</tr>';
+                escHtml(group) + '</span><span class="collapsible-factor-count">' + items.length + '</span></button><div class="collapsible-factor-body">';
+            for (const ownerKey of Object.keys(owners).sort()) {
+                const ownerItems = owners[ownerKey];
+                html += '<div class="collapsible-factor-node collapsible-factor-owner">';
+                html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
+                    escHtml(getAllFactorOwnerLabel(ownerItems[0])) + '</span><span class="collapsible-factor-count">' + ownerItems.length + '</span></button><div class="collapsible-factor-body">';
+                html += '<table class="all-factors-table"><thead><tr>';
+                html += '<th>因子</th><th>因子家族</th><th>参数配置</th><th>参数</th><th>所有者</th><th>来源</th><th>更新时间</th>';
+                html += '</tr></thead><tbody>';
+                for (const f of ownerItems) {
+                    html += '<tr>';
+                    html += '<td><strong class="all-factors-alias">' + escHtml(f.factor_alias || '—') + '</strong></td>';
+                    html += '<td><div>' + escHtml(f.factor_family_alias || f.factor_family_name || '—') + '</div><div class="all-factors-subtext">' + escHtml(f.chinese_name || f.category || '') + '</div></td>';
+                    html += '<td><div>' + escHtml(f.template_name || '—') + '</div><div class="all-factors-subtext">第 ' + (Number(f.template_row_index || 0) + 1) + ' 行</div></td>';
+                    html += '<td>' + renderParamsSummary(f.params || []) + '</td>';
+                    html += '<td>' + escHtml(getAllFactorOwnerLabel(f)) + '</td>';
+                    const sourceLabel = getAllFactorOwnerLabel(f);
+                    const sourceClass = f.source === 'public' ? 'tag-public' : (f.source === 'custom' ? 'tag-custom' : 'tag-unknown');
+                    html += '<td><span class="tag ' + sourceClass + '">' + escHtml(f.source_label || sourceLabel) + '</span></td>';
+                    html += '<td style="color:#888;font-size:12px;">' + escHtml(f.updated_at || '—') + '</td>';
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div></div>';
             }
-            html += '</tbody></table></div></div>';
+            html += '</div></div>';
         }
         html += '</div></div>';
     }
@@ -230,3 +253,112 @@ function compareAllFactorsForDisplay(a, b) {
         (a.factor_alias || '').localeCompare(b.factor_alias || '')
     );
 }
+
+// ── 通用因子选择表格（scope 分组 + 搜索过滤 + 选择按钮）──
+// 供 factor_param_picker.js 和所有需要"从因子库选择因子"的场景复用
+
+/**
+ * 在 containerEl 内渲染带 scope 分组的因子选择表格
+ * @param {Array} items - param-factor-overview 返回的 factor items
+ * @param {HTMLElement} containerEl - 渲染目标容器
+ * @param {Object} opts
+ * @param {string}  opts.searchQuery - 当前搜索词（空字符串 = 不过滤）
+ * @param {string}  opts.emptyMessage - 空结果提示，默认 "暂无可选因子"
+ * @param {string}  opts.pickAttribute - 选择按钮的 data-* 属性名，默认 "shared-factor-param-pick"
+ * @param {string}  opts.pickValue - 选择按钮的值取 item 的哪个字段，默认 "factor_alias"
+ * @param {string}  opts.pickLabel - 选择按钮文字，默认 "选择"
+ * @param {Function} opts.onRender - 渲染完成后回调，用于绑定事件
+ */
+function renderFactorPickerTable(items, containerEl, opts) {
+    opts = opts || {};
+    const searchQuery = (opts.searchQuery || '').trim().toLowerCase();
+    const pickAttr = opts.pickAttribute || 'shared-factor-param-pick';
+    const pickValueField = opts.pickValue || 'factor_alias';
+    const pickLabel = opts.pickLabel || '选择';
+
+    const visible = items.filter(function(item) {
+        if (!searchQuery) return true;
+        return [item.factor_alias, item.factor_family_alias, item.factor_family_name,
+            item.chinese_name, item.owner_alias, item.owner_username, item.scope_key, item.category]
+            .join(' ').toLowerCase().indexOf(searchQuery) !== -1;
+    });
+
+    if (!visible.length) {
+        containerEl.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">' +
+            escHtml(opts.emptyMessage || '暂无可选因子。请先在因子库保存参数配置。') + '</div>';
+        return;
+    }
+
+    // 按 scope_key 分组
+    var scopes = {};
+    visible.forEach(function(item) {
+        var sk = item.scope_key || '默认';
+        if (!scopes[sk]) scopes[sk] = [];
+        scopes[sk].push(item);
+    });
+    var scopeKeys = Object.keys(scopes).sort(function(a, b) {
+        if (a === 'default' || a === '默认') return 1;
+        if (b === 'default' || b === '默认') return -1;
+        return a.localeCompare(b);
+    });
+
+    var hasSearch = searchQuery.length > 0;
+    var html = '';
+    scopeKeys.forEach(function(sk, si) {
+        var groupItems = scopes[sk];
+        var expanded = hasSearch || (si === 0 && scopeKeys.length === 1);
+        var caretClass = expanded ? 'caret-open' : 'caret-closed';
+        var bodyStyle = expanded ? '' : 'display:none;';
+        html += '<div class="picker-scope-node">';
+        html += '<div class="picker-scope-header" data-scope-toggle="' + escHtml(sk) + '" style="display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer;border-bottom:1px solid #f0f0f0;">';
+        html += '<span class="picker-caret ' + caretClass + '" data-scope="' + escHtml(sk) + '"></span>';
+        html += '<strong style="font-size:14px;color:#1e293b;">' + escHtml(sk) + '</strong>';
+        html += '<span style="color:#888;font-size:12px;">(' + groupItems.length + ')</span>';
+        html += '</div>';
+        html += '<div class="picker-scope-body" data-scope-body="' + escHtml(sk) + '" style="' + bodyStyle + '">';
+        html += '<table class="param-table" style="width:100%;"><thead><tr>';
+        html += '<th>因子</th><th>家族</th><th>类别</th><th>参数</th><th>所有者</th><th>操作</th>';
+        html += '</tr></thead><tbody>';
+        groupItems.forEach(function(item) {
+            var params = (item.params || []).map(function(p) {
+                return '<span style="display:inline-block;margin:1px 4px 1px 0;color:#667085;">' +
+                    escHtml(p.alias) + ':' + escHtml(p.value) + '</span>';
+            }).join('');
+            var pickVal = escAttr(item[pickValueField] || '');
+            html += '<tr>';
+            html += '<td><strong>' + escHtml(item.factor_alias) + '</strong></td>';
+            html += '<td>' + escHtml(item.factor_family_alias || item.factor_family_name || '') +
+                '<div style="color:#888;font-size:12px;">' + escHtml(item.chinese_name || '') + '</div></td>';
+            html += '<td style="color:#667085;font-size:12px;">' + escHtml(item.category || '') + '</td>';
+            html += '<td>' + (params || '<span style="color:#aaa;">无</span>') + '</td>';
+            html += '<td>' + escHtml(item.owner_alias || item.owner_username || '') + '</td>';
+            html += '<td><button type="button" class="param-btn" data-' + pickAttr + '="' + pickVal + '">' +
+                escHtml(pickLabel) + '</button></td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+    });
+    containerEl.innerHTML = html;
+
+    // 绑定折叠事件
+    containerEl.querySelectorAll('[data-scope-toggle]').forEach(function(header) {
+        header.addEventListener('click', function() {
+            var sk = this.dataset.scopeToggle;
+            var caret = containerEl.querySelector('.picker-caret[data-scope="' + sk.replace(/"/g, '\\"') + '"]');
+            var scopeBody = containerEl.querySelector('[data-scope-body="' + sk.replace(/"/g, '\\"') + '"]');
+            if (!scopeBody) return;
+            var isOpen = scopeBody.style.display !== 'none';
+            if (isOpen) {
+                scopeBody.style.display = 'none';
+                if (caret) { caret.classList.remove('caret-open'); caret.classList.add('caret-closed'); }
+            } else {
+                scopeBody.style.display = '';
+                if (caret) { caret.classList.remove('caret-closed'); caret.classList.add('caret-open'); }
+            }
+        });
+    });
+
+    if (typeof opts.onRender === 'function') opts.onRender();
+}
+
+window.renderFactorPickerTable = renderFactorPickerTable;
