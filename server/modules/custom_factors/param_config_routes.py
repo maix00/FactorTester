@@ -71,8 +71,8 @@ def api_save_param_config(ff_alias):
         return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json() or {}
     params_list = data.get('params_list', [])
-    if not isinstance(params_list, list) or len(params_list) == 0:
-        return jsonify({'success': False, 'error': '参数列表不能为空'})
+    if not isinstance(params_list, list):
+        return jsonify({'success': False, 'error': '参数列表格式无效'})
     with get_user_file_lock(username):
         config, factors = save_current_user_param_config(username, ff_alias, params_list)
     return api_ok({'config': config, 'factors': factors})
