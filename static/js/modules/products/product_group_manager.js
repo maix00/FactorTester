@@ -87,7 +87,7 @@
                 },
                 onExitEdit: function(name, newName, isPlaceholder) {
                     newName = (newName || '').trim();
-                    if (!newName) { alert('组名不能为空'); return; }
+                    if (!newName) { selectedName = null; renderGroupList(); return; }
 
                     var isPh = isPlaceholder || (newItemPlaceholderName && newItemPlaceholderName === name);
                     if (isPh) {
@@ -204,7 +204,7 @@
 
             PS.initLeftTree($managerRoot, {
                 onInit: function(tree) { groupTree = tree; },
-                onSelect: function(paths) { allGroupPaths = paths; }
+                onSelect: function(paths) { allGroupPaths = paths; renderGroupList(); }
             });
 
             if (typeof window.setupResizableTreeContainer === 'function' && !categoryTreeSizer) {

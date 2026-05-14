@@ -262,8 +262,14 @@
 
             html += '<div class="pg-exp-item" data-name="' + _escHtml(name) + '" data-idx="' + idx + '" data-placeholder="' + (isPlaceholder ? '1' : '0') + '" style="' + itemStyle + '">';
 
-            // ── 主行：拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
+            // ── 主行：展开按钮 + 拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
             html += '<div class="pg-exp-header" style="display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:34px;">';
+            // 展开/折叠按钮
+            if (!isPlaceholder) {
+                html += '<span class="pg-exp-toggle" data-name="' + _escHtml(name) + '" style="cursor:pointer;font-size:12px;flex-shrink:0;color:#666;width:16px;text-align:center;display:inline-block;">' + (isExp ? '&#9650;' : '&#9660;') + '</span>';
+            } else {
+                html += '<span style="width:16px;flex-shrink:0;"></span>';  // 占位对齐
+            }
             // 占位项没有拖拽手柄
             if (dragHandle && !isPlaceholder) {
                 html += '<i class="fas fa-grip-vertical ' + dragHandle.replace('.','') + '" style="color:#888;cursor:grab;flex-shrink:0;"></i>';
