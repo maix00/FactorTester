@@ -112,7 +112,7 @@
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                 renderHistory();
             },
-            onSave: function(name, newName, isPlaceholder) {
+            onSave: function(name, newName, isPlaceholder, subId) {
                 newName = (newName || '').trim();
                 if (!newName) { editingName = null; renderHistory(); return; }
 
@@ -127,11 +127,8 @@
                     }
                     renderHistory();
                 } else {
-                    // 已有记录：有路径 → 更新路径 + 改名；无路径 → 仅改名
-                    var found = submissions.find(function(s) {
-                        var dn = s.product_group ? ('📦 ' + s.product_group + ' (' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
-                        return dn === name;
-                    });
+                    // 已有记录：用 subId 精确查找
+                    var found = submissions.find(function(s) { return String(s.id) === String(subId); });
                     if (!found) { editingName = null; renderHistory(); return; }
 
                     var minimalPaths = [];
@@ -203,6 +200,8 @@
                             return;
                         }
                         if (submitResp.submissions) syncFromServer(submitResp.submissions);
+                        editingName = null;
+                        newItemPlaceholderName = null;
                         renderHistory();
                         refreshSubmissionDependents();
                     });

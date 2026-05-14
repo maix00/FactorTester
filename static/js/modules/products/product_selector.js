@@ -195,7 +195,7 @@
             var isFromGroup = !!sub.product_group;
             var displayName;
             if (isFromGroup) {
-                displayName = '📦 ' + sub.product_group + ' (' + sub.id + ')';
+                displayName = '📦 ' + sub.product_group;
             } else {
                 displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
             }
@@ -216,7 +216,11 @@
         });
 
         var editing = {};
-        if (editingName) editing[editingName] = true;
+        if (editingName) {
+            // editingName 存的是 sub.id，需要映射到 displayName
+            var editItem = expItems.find(function(item) { return String(item._sub.id) === String(editingName); });
+            if (editItem) editing[editItem.name] = true;
+        }
 
         PG.renderExpandableGroupList(expItems, $container, {
             mode: 'manage',
@@ -230,19 +234,21 @@
                 if (onAdd) onAdd();
             },
             onToggle: function(name) {
-                // 点击已有记录行 → 进入编辑模式（改名）
+                // 点击已有记录行 → 进入编辑模式（改名），传 id 而非 displayName
                 if (name && name !== (newItemPlaceholder && newItemPlaceholder.name) && onToggleEdit) {
-                    onToggleEdit(name);
+                    var found = expItems.find(function(item) { return item.name === name; });
+                    if (found) onToggleEdit(found._sub.id);
                 }
             },
-            onSave: function(name, newName) {
-                // 统一保存：区分 placeholder 和已有记录
-                var isPh = newItemPlaceholder && newItemPlaceholder.name === name;
+            onSave: function(name, newName, isPlaceholder) {
+                // name 是 displayName，按 expItems 反查 _sub.id
+                var found = expItems.find(function(item) { return item.name === name; });
+                var subId = found ? found._sub.id : null;
                 if (onSave) {
-                    onSave(name, newName, isPh);
-                } else if (isPh && onInsertPlaceholder) {
+                    onSave(name, newName, isPlaceholder, subId);
+                } else if (isPlaceholder && onInsertPlaceholder) {
                     onInsertPlaceholder(newName);
-                } else if (!isPh && onRename) {
+                } else if (!isPlaceholder && onRename) {
                     onRename(name, newName);
                 }
             },
