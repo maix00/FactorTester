@@ -89,10 +89,10 @@
 
                     var isPh = newItemPlaceholderName && newItemPlaceholderName === name;
                     if (isPh) {
-                        // 暂存新名称
                         newItemPlaceholderName = newName;
                         if (!allGroupPaths.length) {
-                            // 还没有路径 → 只改名字，保持 placeholder
+                            // 还没有路径 → 仅改名，退出编辑（保持 placeholder 待后续添加路径）
+                            selectedName = null;
                             renderGroupList();
                             return;
                         }
@@ -109,7 +109,22 @@
                         return;
                     }
 
-                    if (!allGroupPaths.length) { alert('请在左侧树中勾选至少一个品种'); return; }
+                    // 已有记录
+                    if (!allGroupPaths.length) {
+                        // 无路径选中 → 仅改名
+                        if (newName !== name) {
+                            PG.renameGroup(name, newName).then(function() {
+                                if (selectedName === name) selectedName = newName;
+                                if (expandedNames[name]) { delete expandedNames[name]; expandedNames[newName] = true; }
+                                selectedName = null;
+                                renderGroupList();
+                            });
+                        } else {
+                            selectedName = null;
+                            renderGroupList();
+                        }
+                        return;
+                    }
 
                     var exists = groups.some(function(g) { return g.name === name; });
                     if (exists && newName !== name) {

@@ -185,6 +185,7 @@
         var onInsertPlaceholder = callbacks.onInsertPlaceholder || null;
         var onDeletePlaceholder = callbacks.onDeletePlaceholder || null;
         var onRename = callbacks.onRename || null;
+        var onSave = callbacks.onSave || null;                 // 统一保存回调（替代 onInsertPlaceholder/onRename）
         var editingName = callbacks.editingName || null;       // 当前编辑中的记录名
         var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式
 
@@ -232,9 +233,11 @@
                 }
             },
             onSave: function(name, newName) {
-                // placeholder → 二阶段（先改名，有路径才真正提交）
+                // 统一保存：区分 placeholder 和已有记录
                 var isPh = newItemPlaceholder && newItemPlaceholder.name === name;
-                if (isPh && onInsertPlaceholder) {
+                if (onSave) {
+                    onSave(name, newName, isPh);
+                } else if (isPh && onInsertPlaceholder) {
                     onInsertPlaceholder(newName);
                 } else if (!isPh && onRename) {
                     onRename(name, newName);

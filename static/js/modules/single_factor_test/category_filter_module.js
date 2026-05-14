@@ -109,16 +109,66 @@
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                 renderHistory();
             },
-            onInsertPlaceholder: function(name) {
-                // PG 的 onSave 对 placeholder 时调此回调 → 二阶段：先暂存名字，有路径则真提交
-                newItemPlaceholderName = name;
-                var selNodes = treeInstance ? treeInstance.getSelectedNodes() : [];
-                if (selNodes.length > 0) {
-                    // 有选中路径 → 真正提交
-                    submitSelectedProducts();
-                    newItemPlaceholderName = null;
+            onSave: function(name, newName, isPlaceholder) {
+                newName = (newName || '').trim();
+                if (!newName) { editingName = null; renderHistory(); return; }
+
+                if (isPlaceholder) {
+                    // placeholder：有路径 → 提交；无路径 → 仅改名保持 placeholder
+                    newItemPlaceholderName = newName;
+                    var selNodes = treeInstance ? treeInstance.getSelectedNodes() : [];
+                    if (selNodes.length > 0) {
+                        submitSelectedProducts();
+                        newItemPlaceholderName = null;
+                        editingName = null;
+                    }
+                    renderHistory();
+                } else {
+                    // 已有记录：有路径 → 更新路径 + 改名；无路径 → 仅改名
+                    var found = submissions.find(function(s) {
+                        var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                        return dn === name;
+                    });
+                    if (!found) { editingName = null; renderHistory(); return; }
+
+                    var minimalPaths = [];
+                    if (treeInstance) {
+                        var sel = treeInstance.getSelectedNodes();
+                        var keySet = new Set(sel.map(function(n) { return n.key; }));
+                        minimalPaths = sel.filter(function(n) {
+                            var p = n.parent;
+                            while (p && p.key) { if (keySet.has(p.key)) return false; p = p.parent; }
+                            return true;
+                        }).map(function(n) { return n.key; });
+                    }
+
+                    if (minimalPaths.length > 0) {
+                        // 有选中路径 → 更新
+                        fetch('/update_submission_paths', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ id_time: found.id, selected_paths: minimalPaths, new_name: newName })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.success && data.submissions) syncFromServer(data.submissions);
+                        });
+                    } else if (newName !== name) {
+                        // 无路径 → 仅改名
+                        found.product_group = newName;
+                        fetch('/rename_submission', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ id_time: found.id, new_name: newName })
+                        })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.success && data.submissions) syncFromServer(data.submissions);
+                        });
+                    }
+                    editingName = null;
+                    renderHistory();
                 }
-                renderHistory();
             },
             onDeletePlaceholder: function() {
                 newItemPlaceholderName = null;
@@ -126,29 +176,6 @@
             },
             onToggleEdit: function(name) {
                 editingName = (editingName === name) ? null : name;
-                renderHistory();
-            },
-            onRename: function(oldName, newName) {
-                newName = (newName || '').trim();
-                if (!newName || newName === oldName) { editingName = null; renderHistory(); return; }
-                // 找到对应记录，调后端改名
-                var found = submissions.find(function(s) {
-                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
-                    return dn === oldName;
-                });
-                if (found) {
-                    found.product_group = newName;
-                    fetch('/rename_submission', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ id_time: found.id, new_name: newName })
-                    })
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.success && data.submissions) syncFromServer(data.submissions);
-                    });
-                }
-                editingName = null;
                 renderHistory();
             },
             onImportGroup: function() {
