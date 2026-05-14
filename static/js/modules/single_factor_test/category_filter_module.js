@@ -95,6 +95,7 @@
         var html = '';
         submissions.forEach(function(sub, index) {
             var isExpanded = expandedState[index] || {};
+            var productGroup = sub.product_group || '';
             html += '<div class="submission-item" data-index="' + index + '" style="width:100%; box-sizing:border-box; border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
             html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 36px 8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8; min-height:52px;">';
             var labelHtml = sub.label
@@ -132,7 +133,7 @@
                 html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; min-width:0; overflow-wrap:anywhere; word-break:break-word;">';
                 html += '          <div style="display:flex;align-items:flex-start;">';
                 html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word;">' + pathDisplay + '</span>';
-                html += '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>';
+                html += (productGroup ? '' : '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>');
                 html += '          </div>';
                 html += '        </td>';
                 html += '      </tr>';
@@ -925,7 +926,7 @@
             // 默认选中第一个 group
             if (groups.length > 0) selectGroup(groups[0].name);
 
-            // Confirm: 创建 submission 并关闭
+            // Confirm: 调后端创建 FactorTester，然后同步 submissions
             $confirmBtn.on('click', async function() {
                 if (!importSelectedGroup) return;
                 var detailResp = await fetch('/api/product-groups/' + encodeURIComponent(importSelectedGroup)).then(function(r) { return r.json(); });
@@ -933,25 +934,33 @@
                     alert('产品组路径为空');
                     return;
                 }
-                var timeRange = getCurrentTimeRange();
+                var paths = detailResp.group.paths;
                 var newId = 'pg-' + Date.now();
-                submissions.push({
-                    id: newId,
-                    paths: detailResp.group.paths.slice(),
-                    pathsDescMap: {},
-                    label: importSelectedGroup,
-                    product_group: importSelectedGroup,
-                    count_desc: detailResp.group.paths.length + ' 个产品',
-                    timestamp: new Date().toLocaleTimeString(),
-                    start_date: timeRange.start_date,
-                    end_date: timeRange.end_date,
-                    start_time: timeRange.start_time,
-                    end_time: timeRange.end_time,
-                    factor_tester_name: importSelectedGroup,
-                    factor_tester_serial: '#' + newId
-                });
-                window.submissions = submissions;
-                window.submissionRecords = submissions;
+
+                // 调后端创建 FactorTester
+                var submitResp = await fetch('/submit_selected_products', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        selected_paths: paths,
+                        id_time: newId,
+                        page_uuid: window._pageUuid || ''
+                    })
+                }).then(function(r) { return r.json(); });
+
+                if (!submitResp.success) {
+                    alert('提交失败: ' + (submitResp.error || '未知错误'));
+                    return;
+                }
+
+                // 用后端返回的 submissions 同步本地状态
+                syncFromServer(submitResp.submissions || []);
+                // 找到新创建的 submission 并打 product_group 标签
+                var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
+                if (newSub) {
+                    newSub.product_group = importSelectedGroup;
+                    newSub.label = importSelectedGroup;
+                }
                 renderHistory();
                 refreshSubmissionDependents();
                 closeImportOverlay();

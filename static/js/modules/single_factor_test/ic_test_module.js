@@ -1473,7 +1473,8 @@
             const showClass = idx === 0 ? 'show active' : '';
             const tabId = `ic-tab-${sub.id}`;
             const panelId = `ic-panel-${sub.id}`;
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.label || sub.factor_tester_serial || ('测试器' + (idx+1))}</button></li>`;
+            const pgBadge = sub.product_group ? ' 📦' : '';
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${sub.label || sub.factor_tester_serial || ('测试器' + (idx+1))}${pgBadge}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">

@@ -1547,7 +1547,7 @@
             var showClass = idx === 0 ? 'show active' : '';
             var tabId = 'group-tab-' + sub.id;
             var panelId = 'group-panel-' + sub.id;
-            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.label || ('测试器' + (idx+1))) + '</button></li>';
+            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.label || ('测试器' + (idx+1))) + (sub.product_group ? ' 📦' : '') + '</button></li>';
 
             // 第二级：因子选项卡
             var factorTabsHtml = '';
