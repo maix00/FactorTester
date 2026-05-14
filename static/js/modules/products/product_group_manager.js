@@ -62,7 +62,6 @@
                 showAddButton: true,
                 newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
                 dragHandle: '.pg-exp-grip',
-                reverseItems: false,
                 onAdd: function() {
                     if (newItemPlaceholderName) return;
                     selectedName = null;

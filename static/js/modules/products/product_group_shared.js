@@ -216,22 +216,15 @@
         var showAddButton = !!opts.showAddButton;
         var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;
-        var reverseItems = opts.reverseItems !== false;
 
         // 构建完整渲染列表：占位项在最前（替代加号行），已有项倒序
         var renderItems = [];
         if (newItemPlaceholder) {
             renderItems.push({ name: newItemPlaceholder.name, paths: [], _placeholder: true });
         }
-        if (reverseItems) {
-            // items 倒序：最新在前
-            for (var i = items.length - 1; i >= 0; i--) {
-                renderItems.push(items[i]);
-            }
-        } else {
-            for (var j = 0; j < items.length; j++) {
-                renderItems.push(items[j]);
-            }
+        // items 倒序：最新在前
+        for (var i = items.length - 1; i >= 0; i--) {
+            renderItems.push(items[i]);
         }
 
         var html = '';
