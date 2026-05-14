@@ -204,7 +204,7 @@
 
             PS.initLeftTree($managerRoot, {
                 onInit: function(tree) { groupTree = tree; },
-                onSelect: function(paths) { allGroupPaths = paths; renderGroupList(); }
+                onSelect: function(paths) { allGroupPaths = paths; }
             });
 
             if (typeof window.setupResizableTreeContainer === 'function' && !categoryTreeSizer) {

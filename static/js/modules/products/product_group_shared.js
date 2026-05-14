@@ -466,6 +466,18 @@
                 if (opts.onExitEdit) opts.onExitEdit(name, newName, isPlaceholder);
             });
 
+        // 单击空白区域 → 退出编辑
+        $(document).off('click.pg-exit-edit').on('click.pg-exit-edit', function(e) {
+            var $editingInp = $container.find('.pg-exp-name-input');
+            if (!$editingInp.length) return;
+            if ($(e.target).closest('.pg-expandable-list').length) return;
+            var name = $editingInp.data('name');
+            var newName = $editingInp.val().trim();
+            if (!newName) return;
+            var isPlaceholder = String($editingInp.closest('.pg-exp-item').data('placeholder')) === '1';
+            if (opts.onExitEdit) opts.onExitEdit(name, newName, isPlaceholder);
+        });
+
         // SortableJS 拖拽
         if (dragHandle && window.Sortable) {
             var el = $container.find('.pg-expandable-list')[0];
