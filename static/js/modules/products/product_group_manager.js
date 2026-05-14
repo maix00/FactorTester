@@ -19,6 +19,9 @@
     var $managerRoot = null;
     var pathExpandedState = {};   // 组详情中每条路径的展开状态
     var categoryTreeSizer = null;
+    var selectedGroups = {};      // Ctrl/Cmd+点击多选: {name: true}
+    var lastClickedGroup = null;  // 最后点击的组名（用于 Shift+点击范围选择）
+    var wasDragging = false;      // SortableJS 拖拽标志位
 
     var $overlay = $('#pg-overlay');
 
@@ -34,20 +37,28 @@
             return;
         }
 
-        updateRightTitle('📋 已选路径列表');
+        updateRightTitle('📋 产品组列表（Ctrl/Cmd+点击多选）');
 
         PG.fetchGroups().then(function(groups) {
+            var searchText = ($('#pg-search-input').val() || '').toLowerCase();
+            var filtered = groups;
+            if (searchText) {
+                filtered = groups.filter(function(g) {
+                    return g.name.toLowerCase().indexOf(searchText) !== -1;
+                });
+            }
+
             var html = '';
-            if (groups && groups.length) {
+            if (filtered.length) {
                 html += '<div id="pg-group-list" style="font-size:13px;">';
-                groups.forEach(function(g, i) {
-                    var isActive = g.name === currentGroupName;
+                filtered.forEach(function(g) {
+                    var isSelected = !!selectedGroups[g.name];
                     html += '<div class="pg-group-item" data-name="' + _esc(g.name) + '" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;margin-bottom:4px;border-radius:6px;cursor:pointer;'
-                        + (isActive ? 'background:#e8f0fe;font-weight:600;' : 'background:#f6f8fa;')
-                        + 'border:1px solid ' + (isActive ? '#4a90d9' : '#e1e4e8') + ';">';
+                        + (isSelected ? 'background:#d0e4ff;font-weight:600;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
+                        + '">';
                     html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
                     html += '<i class="fas fa-grip-vertical" style="color:#888;cursor:grab;flex-shrink:0;position:relative;z-index:1;"></i>';
-                    html += '<span class="pg-group-name" title="单击查看路径 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
+                    html += '<span class="pg-group-name" title="单击查看路径 / Ctrl+点击多选 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
                     html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
                     html += '</div>';
                     html += '<button class="pg-group-del" data-name="' + _esc(g.name) + '" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;flex-shrink:0;margin-left:4px;"><i class="fas fa-trash"></i></button>';
@@ -55,7 +66,7 @@
                 });
                 html += '</div>';
             } else {
-                html = '<div style="color:#888;text-align:center;padding:20px;">暂无产品组，在左侧树中勾选路径后点击保存</div>';
+                html = '<div style="color:#888;text-align:center;padding:20px;">' + (searchText ? '无匹配产品组' : '暂无产品组，在左侧树中勾选路径后点击保存') + '</div>';
             }
             $container.html(html);
 
@@ -66,37 +77,56 @@
                 window.Sortable.create(el, {
                     animation: 150,
                     handle: '.fa-grip-vertical',
+                    onStart: function() {
+                        wasDragging = true;
+                    },
                     onEnd: function() {
                         var names = [];
                         $('#pg-group-list .pg-group-item').each(function() {
                             names.push($(this).data('name'));
                         });
-                        PG.reorderGroups(names).then(function() {
-                            // reorder 完成后不需要额外操作
-                        });
+                        PG.reorderGroups(names).then(function() {});
+                        // 延迟清除标志位，确保 click 事件在 mouseup 后才触发时能读到
+                        setTimeout(function() { wasDragging = false; }, 50);
                     }
                 });
             }
 
-            // 事件绑定：单击有 300ms 延时以区分双击重命名
-            var clickTimer = null;
+            // Ctrl/Cmd+点击多选 + 普通单击查看
             $container.find('.pg-group-item').on('click', function(e) {
+                if (wasDragging) return;
                 if ($(e.target).closest('.pg-group-del').length) return;
                 if ($(e.target).closest('.fa-grip-vertical').length) return;
+
                 var $item = $(this);
                 var name = $item.data('name');
-                if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; } // 双击：取消单击
-                clickTimer = setTimeout(function() {
-                    clickTimer = null;
+                var isCtrl = e.ctrlKey || e.metaKey;
+
+                if (isCtrl) {
+                    // Ctrl/Cmd+点击：切换选中
+                    if (selectedGroups[name]) {
+                        delete selectedGroups[name];
+                    } else {
+                        selectedGroups[name] = true;
+                    }
+                    lastClickedGroup = name;
+                    currentGroupName = null;
+                    currentGroupDetail = null;
+                    pathExpandedState = {};
+                    renderGroupList();
+                } else {
+                    // 普通单击：清除多选，查看该组路径详情
+                    selectedGroups = {};
+                    lastClickedGroup = name;
                     loadGroupForEdit(name);
-                }, 300);
+                }
             });
 
-            // 双击重命名（内联替换，避免 DOM 插入触发 blur）
+            // 双击重命名
             $container.find('.pg-group-name').on('dblclick', function(e) {
                 e.stopPropagation();
                 e.preventDefault();
-                if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+                wasDragging = false;
                 var $name = $(this);
                 var oldName = $name.text().trim();
                 var $inp = $('<input type="text" style="font-size:13px;padding:2px 6px;border:1px solid #4a90d9;border-radius:4px;width:100%;box-sizing:border-box;">')
@@ -111,6 +141,10 @@
                             if (currentGroupName === oldName) currentGroupName = newName;
                             if (currentGroupDetail && currentGroupDetail.name === oldName) {
                                 currentGroupDetail.name = newName;
+                            }
+                            if (selectedGroups[oldName]) {
+                                delete selectedGroups[oldName];
+                                selectedGroups[newName] = true;
                             }
                             renderGroupList();
                         });
@@ -131,6 +165,34 @@
                     }
                 });
             });
+
+            // 删除按钮
+            $container.find('.pg-group-del').off('click').on('click', function(e) {
+                e.stopPropagation();
+                var name = $(this).data('name');
+                if (!confirm('删除产品组 "' + name + '"？')) return;
+                PG.deleteGroup(name).then(function() {
+                    if (currentGroupName === name) { currentGroupName = null; allGroupPaths = []; currentGroupDetail = null; pathExpandedState = {}; }
+                    delete selectedGroups[name];
+                    renderGroupList();
+                    PS.clearChecks(groupTree);
+                });
+            });
+        });
+    }
+
+    // 搜索过滤：重新渲染组列表（保持多选状态）
+    function filterGroupList(searchText) {
+        var $container = PS.getSubmissionContainer($managerRoot);
+        if (!$container || !$container.length) return;
+        var $items = $container.find('.pg-group-item');
+        if (!searchText) {
+            $items.show();
+            return;
+        }
+        $items.each(function() {
+            var name = ($(this).data('name') || '').toLowerCase();
+            $(this).toggle(name.indexOf(searchText) !== -1);
         });
     }
 
@@ -221,17 +283,7 @@
         });
     }
 
-    // ── 组删除 ────────────────────────────────────────────────────────────
-
-    $(document).on('click', '.pg-group-del', async function(e) {
-        e.stopPropagation();
-        var name = $(this).data('name');
-        if (!confirm('删除产品组 "' + name + '"？')) return;
-        await PG.deleteGroup(name);
-        if (currentGroupName === name) { currentGroupName = null; allGroupPaths = []; currentGroupDetail = null; pathExpandedState = {}; }
-        renderGroupList();
-        PS.clearChecks(groupTree);
-    });
+    // ── 组删除（在 renderGroupList 中绑定） ───────────────────────────────
 
     // ── 加载组用于编辑 ────────────────────────────────────────────────────
 
@@ -242,6 +294,7 @@
         allGroupPaths = group.paths || [];
         currentGroupDetail = { name: name, paths: allGroupPaths };
         pathExpandedState = {};
+        selectedGroups = {};
         PS.clearChecks(groupTree);
         PS.restoreChecks(groupTree, allGroupPaths);
         renderGroupList();
@@ -282,6 +335,8 @@
         currentGroupDetail = null;
         pathExpandedState = {};
         allGroupPaths = [];
+        selectedGroups = {};
+        wasDragging = false;
 
         // 如果还没渲染，用 PS.render 生成统一两栏布局
         if (!$('#ps-manager-root').find('.ps-body').length) {
@@ -290,7 +345,8 @@
                 submitLabel: '💾 保存产品组',
                 onSubmit: doSave,
                 headerBtns: '<button id="pg-overlay-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>',
-                toolbar: '<input id="pg-new-name" placeholder="新组名..." style="padding:6px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:150px;" maxlength="30">'
+                toolbar: '<input id="pg-search-input" type="text" placeholder="🔍 搜索产品组..." style="padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:180px;" maxlength="50">'
+                    + '<input id="pg-new-name" placeholder="新组名..." style="padding:6px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:150px;" maxlength="30">'
                     + '<span style="font-size:12px;color:#666;">或从右侧列表点击已有组编辑</span>'
             });
             $managerRoot = $('#ps-manager-root');
@@ -324,6 +380,11 @@
 
             // 关闭按钮
             $('#pg-overlay-close').on('click', closeOverlay);
+            // 搜索框：输入时过滤组列表
+            $('#pg-search-input').on('input', function() {
+                filterGroupList($(this).val().toLowerCase());
+            });
+
             // 新组名输入回车即保存
             $('#pg-new-name').on('keydown', function(e) {
                 if (e.key === 'Enter') {

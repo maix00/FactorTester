@@ -317,59 +317,122 @@
                 alert('暂无产品组，请先在产品管理页面创建。');
                 return;
             }
+            var selectedNames = {};
+
             var html = '<div id="ps-import-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;">'
-                + '<div style="background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.2);width:700px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;">'
-                + '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e1e4e8;">'
+                + '<div style="background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.2);width:520px;max-width:95vw;max-height:75vh;display:flex;flex-direction:column;">'
+                // Header
+                + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e1e4e8;">'
                 + '<h3 style="margin:0;font-size:16px;">📥 从产品组导入</h3>'
                 + '<button id="ps-import-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>'
                 + '</div>'
-                + '<div style="display:flex;flex:1;min-height:0;overflow:hidden;">'
-                + '<div style="width:200px;min-width:160px;border-right:1px solid #e1e4e8;overflow-y:auto;padding:12px;">'
-                + '<div id="ps-import-group-list" style="font-size:13px;">' + PG.renderGroupListHTML(groups, null, {showDelete:false, itemClass:'ps-import-item'}) + '</div>'
+                // Toolbar: 搜索 + 导入按钮
+                + '<div style="display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid #e1e4e8;background:#f6f8fa;">'
+                + '<input id="ps-import-search" type="text" placeholder="🔍 搜索产品组..." style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;" maxlength="50">'
+                + '<button id="ps-import-confirm" style="padding:6px 18px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;" disabled>导入选中 (0)</button>'
                 + '</div>'
-                + '<div style="flex:1;overflow-y:auto;padding:16px;">'
-                + '<div id="ps-import-detail" style="color:#888;text-align:center;padding:40px 0;">← 选择左侧产品组查看详情</div>'
+                // Body: 组列表（与产品组管理同风格）
+                + '<div id="ps-import-body" style="flex:1;overflow-y:auto;padding:12px 20px;min-height:200px;">'
+                + '<div style="color:#888;text-align:center;padding:40px 0;">加载产品组列表...</div>'
                 + '</div>'
-                + '</div>'
-                + '<div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid #e1e4e8;">'
+                // Footer
+                + '<div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid #e1e4e8;">'
                 + '<button id="ps-import-cancel" style="padding:6px 18px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:13px;">取消</button>'
-                + '<button id="ps-import-confirm" style="padding:6px 18px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;" disabled>导入</button>'
                 + '</div></div></div>';
 
             var $ov = $(html).appendTo('body');
-            var selectedName = null;
 
             function close() { $ov.remove(); }
             $('#ps-import-close, #ps-import-cancel').on('click', close);
             $ov.on('click', function(e) { if (e.target === this) close(); });
 
-            var $detail = $('#ps-import-detail');
             var $confirm = $('#ps-import-confirm');
+            var $body = $('#ps-import-body');
+            var $search = $('#ps-import-search');
 
-            $('#ps-import-group-list').on('click', '.ps-import-item', function() {
-                var name = $(this).data('name');
-                selectedName = name;
-                $confirm.prop('disabled', false);
-                $('#ps-import-group-list').find('.ps-import-item').css({background:'',fontWeight:''});
-                $(this).css({background:'#e8f0fe',fontWeight:'600'});
-                PG.fetchGroupDetail(name).then(function(g) {
-                    if (g) {
-                        $detail.empty();
-                        PG.renderGroupDetail(g, $detail, g.name);
+            function updateConfirmButton() {
+                var count = Object.keys(selectedNames).length;
+                $confirm.text('导入选中 (' + count + ')').prop('disabled', count === 0);
+            }
+
+            function renderImportList(filterText) {
+                filterText = (filterText || '').toLowerCase();
+                var filtered = groups;
+                if (filterText) {
+                    filtered = groups.filter(function(g) {
+                        return g.name.toLowerCase().indexOf(filterText) !== -1;
+                    });
+                }
+
+                var html = '';
+                if (filtered.length) {
+                    filtered.forEach(function(g) {
+                        var isSelected = !!selectedNames[g.name];
+                        html += '<div class="ps-import-item" data-name="' + _escHtml(g.name) + '" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;margin-bottom:4px;border-radius:6px;cursor:pointer;'
+                            + (isSelected ? 'background:#d0e4ff;font-weight:600;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
+                            + '">';
+                        html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
+                        html += '<i class="fas fa-grip-vertical" style="color:#aaa;flex-shrink:0;"></i>';
+                        html += '<span class="ps-import-name" title="Ctrl/Cmd+点击多选" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escHtml(g.name) + '</span>';
+                        html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                } else {
+                    html = '<div style="color:#888;text-align:center;padding:40px 0;">' + (filterText ? '无匹配产品组' : '暂无产品组') + '</div>';
+                }
+                $body.html(html);
+
+                // 绑定点击：Ctrl/Cmd+点击多选
+                $body.find('.ps-import-item').on('click', function(e) {
+                    var name = $(this).data('name');
+                    var isCtrl = e.ctrlKey || e.metaKey;
+                    if (isCtrl) {
+                        // 切换选中
+                        if (selectedNames[name]) {
+                            delete selectedNames[name];
+                        } else {
+                            selectedNames[name] = true;
+                        }
+                    } else {
+                        // 普通单击：清除其他选中，只选当前
+                        selectedNames = {};
+                        selectedNames[name] = true;
                     }
+                    updateConfirmButton();
+                    renderImportList($search.val());
                 });
+            }
+
+            // 搜索过滤
+            $search.on('input', function() {
+                renderImportList($(this).val());
             });
 
+            // 导入确认
             $confirm.on('click', function() {
-                if (!selectedName) return;
-                PG.fetchGroupDetail(selectedName).then(function(g) {
-                    if (!g || !g.paths) { alert('产品组路径为空'); return; }
-                    onImport(selectedName, g.paths);
+                var names = Object.keys(selectedNames);
+                if (!names.length) return;
+                // 收集所有选中组的路径并去重
+                var pathSet = {};
+                var importGroupName = names.length === 1 ? names[0] : (names[0] + ' 等' + names.length + '组');
+                var promises = names.map(function(n) {
+                    return PG.fetchGroupDetail(n).then(function(g) {
+                        if (g && g.paths) {
+                            g.paths.forEach(function(p) { pathSet[p] = true; });
+                        }
+                    });
+                });
+                Promise.all(promises).then(function() {
+                    var allPaths = Object.keys(pathSet);
+                    if (!allPaths.length) { alert('选中的产品组没有路径'); return; }
+                    onImport(importGroupName, allPaths);
                     close();
                 });
             });
 
-            if (groups.length > 0) $('#ps-import-group-list').find('.ps-import-item').first().trigger('click');
+            updateConfirmButton();
+            renderImportList('');
         });
     }
 
