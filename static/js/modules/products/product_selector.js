@@ -179,132 +179,89 @@
         var onLabelChange = callbacks.onLabelChange || function() {};
         var onPathClick = callbacks.onPathClick || function() {};
 
-        var html = '';
-        submissions.forEach(function(sub, index) {
-            var isExpanded = expandedState[index] || {};
-            html += '<div class="submission-item" data-index="' + index + '" style="border:1px solid #e1e4e8;border-radius:8px;margin-bottom:12px;background:#fff;overflow:hidden;">';
-            html += '<div class="submission-header" style="background:#f6f8fa;padding:8px 36px 8px 12px;cursor:move;position:relative;border-bottom:1px solid #e1e4e8;">';
-            var lblHtml = sub.label
-                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + _escHtml(sub.label) + '</span>'
-                : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
-            var lblInp = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + _escHtml(sub.label||'') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;">';
-            html += '<div style="font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:4px;">'
-                + '<i class="fas fa-grip-vertical" style="color:#888;"></i>'
-                + '<strong>#' + (index+1) + '</strong>'
-                + '<span>' + _escHtml(sub.factor_tester_serial || '') + '</span>'
-                + '<span style="color:#888;font-size:12px;">(' + _escHtml(sub.timestamp || '') + ')</span>'
-                + (sub.count_desc ? ' <span style="color:#d00;">' + _escHtml(sub.count_desc) + '</span>' : '')
-                + '</div>';
-            html += '<div style="line-height:24px;min-height:24px;">' + lblHtml + lblInp;
-            if (sub.product_group) {
-                html += ' <span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;">📦 ' + _escHtml(sub.product_group) + '</span>';
-            }
-            html += '</div>';
-            html += '<button class="delete-submission" data-index="' + index + '" style="position:absolute;right:8px;bottom:8px;background:none;border:none;color:#d00;cursor:pointer;font-size:14px;"><i class="fas fa-trash"></i></button>';
-            html += '</div>';
+        // 映射成 expandable 格式：name = #N + factor_tester_serial
+        var expItems = submissions.map(function(sub, i) {
+            return {
+                name: '#' + (i + 1) + ' ' + (sub.factor_tester_serial || ''),
+                paths: sub.paths || [],
+                _index: i,
+                _sub: sub
+            };
+        });
 
-            html += '<div style="padding:8px 12px;overflow-x:auto;">';
-            html += '<table style="width:100%;border-collapse:collapse;">';
-            sub.paths.forEach(function(path, pi) {
-                var expanded = isExpanded[path] || false;
-                var pathDisplay = path;
-                if (sub.pathsDescMap && sub.pathsDescMap[path]) {
-                    pathDisplay = path + ' <span style="color:#888;font-size:12px;">' + _escHtml(sub.pathsDescMap[path]) + '</span>';
+        var expExpanded = {};
+        Object.keys(expandedState).forEach(function(k) {
+            var sub = submissions[k];
+            if (!sub) return;
+            var name = '#' + (parseInt(k)+1) + ' ' + (sub.factor_tester_serial || '');
+            expExpanded[name] = true;
+        });
+
+        PG.renderExpandableGroupList(expItems, $container, {
+            mode: 'readonly',
+            selected: {},
+            expanded: expExpanded,
+            editing: {},
+            showAddButton: false,
+            dragHandle: '.pg-exp-grip',
+            onExpand: function(name) {
+                var idx = -1;
+                for (var i = 0; i < expItems.length; i++) {
+                    if (expItems[i].name === name) { idx = i; break; }
                 }
-                html += '<tr class="path-row" data-path="' + _escHtml(path) + '" data-sub-index="' + index + '" data-path-index="' + pi + '">';
-                html += '<td style="padding:4px 0;border-bottom:1px solid #f0f0f0;">';
-                html += '<div style="display:flex;align-items:flex-start;">';
-                html += '<span class="path-text" style="cursor:pointer;font-size:13px;margin-left:6px;flex:1;word-break:break-word;">' + pathDisplay + '</span>';
-                if (!sub.product_group) {
-                    html += '<button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pi + '" style="flex-shrink:0;background:none;border:none;color:#d00;cursor:pointer;padding:0 8px;"><i class="fas fa-times"></i></button>';
+                if (idx >= 0 && expandedState[idx]) {
+                    // mark all paths expanded
+                    (expandedState[idx] || {})._all = true;
                 }
-                html += '</div></td></tr>';
-                if (expanded) {
-                    html += '<tr class="product-detail-row" id="detail-' + index + '-' + pi + '">';
-                    html += '<td style="padding:8px 0 8px 20px;background:#fafbfc;"><div class="loading-products" style="font-size:13px;">加载中...</div></td></tr>';
+            },
+            onCollapse: function(name) {
+                var idx = -1;
+                for (var i = 0; i < expItems.length; i++) {
+                    if (expItems[i].name === name) { idx = i; break; }
                 }
-            });
-            html += '</table></div>';
-            html += '</div>';
-        });
-
-        $container.html(html || '<div style="color:#888;text-align:center;padding:20px;">暂无提交记录</div>');
-
-        $container.find('.path-text').off('click').on('click', function() {
-            var $row = $(this).closest('tr.path-row');
-            var subIndex = $row.data('sub-index');
-            var path = $row.data('path');
-            var pathIndex = $row.data('path-index');
-            var expanded = expandedState[subIndex] || {};
-            if (expanded[path]) {
-                $('#detail-' + subIndex + '-' + pathIndex).remove();
-                delete expanded[path];
-            } else {
-                expanded[path] = true;
-                var detailHtml = '<tr class="product-detail-row" id="detail-' + subIndex + '-' + pathIndex + '">'
-                    + '<td style="padding:8px 0 8px 20px;background:#fafbfc;">'
-                    + '<div class="loading-products" style="font-size:13px;">加载中...</div></td></tr>';
-                $row.after(detailHtml);
-                onPathClick(path, subIndex, pathIndex);
-            }
-            expandedState[subIndex] = expanded;
-        });
-
-        $container.find('.delete-path').off('click').on('click', function() {
-            onDeletePath(
-                parseInt($(this).data('sub-index'), 10),
-                parseInt($(this).data('path-index'), 10)
-            );
-        });
-
-        $container.find('.delete-submission').off('click').on('click', function() {
-            onDeleteSub(parseInt($(this).data('index'), 10));
-        });
-
-        $container.off('click.rename').on('click.rename', '.sub-label-text, .sub-label-add', function() {
-            var idx = $(this).data('index');
-            $(this).hide();
-            $container.find('.sub-label-input[data-index="' + idx + '"]').show().focus().select();
-        });
-
-        function commitLabelEdit($inp) {
-            var idx = parseInt($inp.data('index'), 10);
-            var val = $inp.val().trim();
-            if (idx >= 0 && idx < submissions.length) {
-                submissions[idx].label = val || '';
-            }
-            $inp.hide();
-            var $lbl = $container.find('.sub-label-text[data-index="' + idx + '"], .sub-label-add[data-index="' + idx + '"]');
-            if (val) {
-                $lbl.replaceWith('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + _escHtml(val) + '</span>');
-            } else {
-                $lbl.replaceWith('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>');
-            }
-            onLabelChange(idx, val);
-        }
-
-        $container.off('keydown.rename').on('keydown.rename', '.sub-label-input', function(e) {
-            if (e.key === 'Enter') commitLabelEdit($(this));
-            if (e.key === 'Escape') { $(this).hide(); $container.find('.sub-label-text[data-index="' + $(this).data('index') + '"], .sub-label-add[data-index="' + $(this).data('index') + '"]').show(); }
-        });
-
-        $container.off('blur.rename').on('blur.rename', '.sub-label-input', function() {
-            if ($(this).is(':visible')) commitLabelEdit($(this));
-        });
-
-        var el = $container[0];
-        if (el && window.Sortable) {
-            if (el._sortable) el._sortable.destroy();
-            window.Sortable.create(el, {
-                animation: 150,
-                handle: '.submission-header',
-                onEnd: function(evt) {
-                    var moved = submissions.splice(evt.oldIndex, 1)[0];
-                    submissions.splice(evt.newIndex, 0, moved);
-                    onReorder();
+                if (idx >= 0) {
+                    expandedState[idx] = {};
                 }
-            });
-        }
+            },
+            onDelete: function(name) {
+                var idx = -1;
+                for (var i = 0; i < expItems.length; i++) {
+                    if (expItems[i].name === name) { idx = i; break; }
+                }
+                if (idx >= 0) onDeleteSub(idx);
+            },
+            onReorder: function(names) {
+                // 用 names 反推出新的 submissions 顺序
+                var newOrder = [];
+                names.forEach(function(n) {
+                    for (var i = 0; i < expItems.length; i++) {
+                        if (expItems[i].name === n) { newOrder.push(i); break; }
+                    }
+                });
+                // 重建 submissions 数组
+                var reordered = [];
+                newOrder.forEach(function(oldIdx) {
+                    reordered.push(submissions[oldIdx]);
+                });
+                submissions.length = 0;
+                reordered.forEach(function(s) { submissions.push(s); });
+                onReorder();
+            }
+        });
+
+        // 路径产品加载：绑定路径头点击
+        $container.off('click.pgexp', '.pg-exp-path-hdr').on('click.pgexp', '.pg-exp-path-hdr', function(e) {
+            e.stopPropagation();
+            var $hdr = $(this);
+            var path = $hdr.text().trim();
+            var $prods = $hdr.siblings('.pg-exp-path-prods');
+            if ($prods.is(':visible')) {
+                $prods.slideUp(150);
+                return;
+            }
+            $prods.html('加载中...').slideDown(150);
+            onPathClick(path, -1, -1);
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -318,28 +275,21 @@
                 return;
             }
             var selectedNames = {};
+            var expandedNames = {};
 
             var html = '<div id="ps-import-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;">'
                 + '<div style="background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.2);width:520px;max-width:95vw;max-height:75vh;display:flex;flex-direction:column;">'
-                // Header
                 + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e1e4e8;">'
                 + '<h3 style="margin:0;font-size:16px;">📥 从产品组导入</h3>'
                 + '<button id="ps-import-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>'
                 + '</div>'
-                // Toolbar: 搜索 + 导入按钮
                 + '<div style="display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid #e1e4e8;background:#f6f8fa;">'
                 + '<input id="ps-import-search" type="text" placeholder="🔍 搜索产品组..." style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;" maxlength="50">'
                 + '<button id="ps-import-confirm" style="padding:6px 18px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;" disabled>导入选中 (0)</button>'
                 + '</div>'
-                // Body: 组列表（与产品组管理同风格）
                 + '<div id="ps-import-body" style="flex:1;overflow-y:auto;padding:12px 20px;min-height:200px;">'
                 + '<div style="color:#888;text-align:center;padding:40px 0;">加载产品组列表...</div>'
                 + '</div>'
-                // 路径详情面板
-                + '<div id="ps-import-detail" style="max-height:200px;overflow-y:auto;padding:0 20px 12px 20px;border-top:1px solid #e1e4e8;">'
-                + '<div style="color:#888;text-align:center;padding:20px;">点击产品组查看路径</div>'
-                + '</div>'
-                // Footer
                 + '<div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid #e1e4e8;">'
                 + '<button id="ps-import-cancel" style="padding:6px 18px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:13px;">取消</button>'
                 + '</div></div></div>';
@@ -368,68 +318,39 @@
                     });
                 }
 
-                var html = '';
-                if (filtered.length) {
-                    filtered.forEach(function(g) {
-                        var isSelected = !!selectedNames[g.name];
-                        html += '<div class="ps-import-item" data-name="' + _escHtml(g.name) + '" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;margin-bottom:4px;border-radius:6px;cursor:pointer;'
-                            + (isSelected ? 'background:#d0e4ff;font-weight:600;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
-                            + '">';
-                        html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
-                        html += '<i class="fas fa-grip-vertical" style="color:#aaa;flex-shrink:0;"></i>';
-                        html += '<span class="ps-import-name" title="点击多选 / 选中后查看路径" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escHtml(g.name) + '</span>';
-                        html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
-                        html += '</div>';
-                        html += '</div>';
-                    });
-                } else {
-                    html = '<div style="color:#888;text-align:center;padding:40px 0;">' + (filterText ? '无匹配产品组' : '暂无产品组') + '</div>';
-                }
-                $body.html(html);
-
-                // 绑定点击：直接点击切换多选；选中组后展示路径详情
-                $body.find('.ps-import-item').on('click', function(e) {
-                    var name = $(this).data('name');
-                    // 直接点击切换选中
-                    if (selectedNames[name]) {
-                        delete selectedNames[name];
-                    } else {
-                        selectedNames[name] = true;
+                PG.renderExpandableGroupList(filtered, $body, {
+                    mode: 'import',
+                    selected: selectedNames,
+                    expanded: expandedNames,
+                    dragHandle: null,
+                    showAddButton: false,
+                    onToggle: function(name) {
+                        if (selectedNames[name]) {
+                            delete selectedNames[name];
+                        } else {
+                            selectedNames[name] = true;
+                        }
+                        updateConfirmButton();
+                        renderImportList($search.val());
+                    },
+                    onExpand: function(name) {
+                        expandedNames[name] = true;
+                        renderImportList($search.val());
+                    },
+                    onCollapse: function(name) {
+                        delete expandedNames[name];
+                        renderImportList($search.val());
                     }
-                    updateConfirmButton();
-                    renderImportList($search.val());
-                    // 展开选中组的路径详情
-                    renderImportDetail(selectedNames);
                 });
             }
 
-            // 渲染选中组的路径详情（列表下方）
-            function renderImportDetail(selected) {
-                var names = Object.keys(selected);
-                var $detail = $('#ps-import-detail');
-                if (!names.length) {
-                    $detail.html('<div style="color:#888;text-align:center;padding:20px;">点击产品组查看路径</div>');
-                    return;
-                }
-                // 取第一个选中组加载详情
-                var first = names[0];
-                $detail.html('<div style="color:#888;text-align:center;padding:20px;">加载中...</div>');
-                PG.fetchGroupDetail(first).then(function(g) {
-                    if (!g) return;
-                    PG.renderGroupDetail(g, $detail, names.length > 1 ? (first + ' 等' + names.length + '组') : first);
-                });
-            }
-
-            // 搜索过滤
             $search.on('input', function() {
                 renderImportList($(this).val());
             });
 
-            // 导入确认
             $confirm.on('click', function() {
                 var names = Object.keys(selectedNames);
                 if (!names.length) return;
-                // 收集所有选中组的路径并去重
                 var pathSet = {};
                 var importGroupName = names.length === 1 ? names[0] : (names[0] + ' 等' + names.length + '组');
                 var promises = names.map(function(n) {

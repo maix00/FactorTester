@@ -188,6 +188,208 @@
     }
 
     /**
+     * 渲染可展开的产品组列表（统一 UI：管理/导入/抽屉）。
+     *
+     * items: [{name, paths:[], meta...}, ...]
+     * $container: jQuery 容器
+     * opts:
+     *   mode: 'manage' | 'import' | 'readonly'
+     *   selected: {name: true}  -- 选中状态
+     *   expanded: {name: true}  -- 展开状态
+     *   editing: {name: true}   -- 正在编辑（名称变 input）
+     *   showAddButton: true     -- 顶部显示 + 号方块
+     *   dragHandle: '.cls'      -- SortableJS handle（null = 不可拖拽）
+     *   onAdd()                 -- + 号点击回调
+     *   onToggle(name)          -- 点击选中/取消
+     *   onExpand(name)          -- 展开回调
+     *   onCollapse(name)        -- 折叠回调
+     *   onSave(name)            -- 管理模式：保存按钮
+     *   onDelete(name)          -- 删除按钮
+     *   onRename(old, new)      -- 重命名完成
+     *   onReorder(names)        -- 拖拽排序完成
+     */
+    function renderExpandableGroupList(items, $container, opts) {
+        opts = opts || {};
+        var mode = opts.mode || 'readonly';
+        var selected = opts.selected || {};
+        var expanded = opts.expanded || {};
+        var editing = opts.editing || {};
+        var showAddButton = !!opts.showAddButton;
+        var dragHandle = opts.dragHandle || null;
+
+        var html = '';
+
+        // ── + 号方块（固定在顶部，不属于可拖拽列表） ──
+        if (showAddButton) {
+            html += '<div class="pg-exp-add-btn" style="display:flex;align-items:center;justify-content:center;height:36px;margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;cursor:pointer;background:#fafbfc;color:#888;font-size:20px;transition:background 0.15s,border-color 0.15s;" title="新增产品组">+</div>';
+        }
+
+        if (!items || !items.length) {
+            html += '<div style="color:#888;text-align:center;padding:12px;">暂无数据</div>';
+        } else {
+            html += '<div id="pg-expandable-list" style="font-size:13px;">';
+            items.forEach(function(item, idx) {
+            var name = item.name || '';
+            var paths = item.paths || [];
+            var isSel = !!selected[name];
+            var isExp = !!expanded[name];
+            var isEditing = !!editing[name];
+            var pathCount = paths.length;
+
+            html += '<div class="pg-exp-item" data-name="' + _escHtml(name) + '" data-idx="' + idx + '" style="border-radius:6px;margin-bottom:6px;overflow:hidden;'
+                + (isSel ? 'background:#d0e4ff;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
+                + '">';
+
+            // ── 主行：拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
+            html += '<div class="pg-exp-header" style="display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:34px;">';
+            if (dragHandle) {
+                html += '<i class="fas fa-grip-vertical ' + dragHandle.replace('.','') + '" style="color:#888;cursor:grab;flex-shrink:0;"></i>';
+            }
+            // 名称 or 编辑框
+            if (isEditing) {
+                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;padding:3px 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;">';
+            } else {
+                html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';">' + _escHtml(name) + '</span>';
+            }
+            html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + pathCount + '条)</span>';
+
+            // 操作图标：从左到右 — 保存 / 展开 / 删除
+            if (mode === 'manage') {
+                html += '<button class="pg-exp-save" data-name="' + _escHtml(name) + '" title="保存" style="background:none;border:none;color:#0078d4;cursor:pointer;font-size:14px;flex-shrink:0;"><i class="fas fa-save"></i></button>';
+            }
+            html += '<button class="pg-exp-toggle" data-name="' + _escHtml(name) + '" title="展开/收起" style="background:none;border:none;color:#888;cursor:pointer;font-size:14px;flex-shrink:0;">' + (isExp ? '&#9650;' : '&#9660;') + '</button>';
+            if (mode === 'manage' || mode === 'readonly') {
+                html += '<button class="pg-exp-del" data-name="' + _escHtml(name) + '" title="删除" style="background:none;border:none;color:#d00;cursor:pointer;font-size:14px;flex-shrink:0;"><i class="fas fa-trash"></i></button>';
+            }
+            html += '</div>';
+
+            // ── 展开区域：路径 + 产品 ──
+            html += '<div class="pg-exp-body" data-name="' + _escHtml(name) + '" style="' + (isExp ? '' : 'display:none;') + 'padding:0 10px 8px 10px;background:#fafbfc;border-top:1px solid #e1e4e8;">';
+            if (isExp) {
+                html += '<div class="pg-exp-paths" style="padding-top:6px;">';
+                paths.forEach(function(path, pi) {
+                    html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
+                    html += '<div class="pg-exp-path-hdr" style="padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">' + _escHtml(path) + '</div>';
+                    html += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+            html += '</div>';
+
+            html += '</div>'; // .pg-exp-item
+        });
+        html += '</div>';
+
+        $container.html(html);
+        }
+
+        // ── + 号点击 ──
+        if (showAddButton) {
+            $container.off('click.pgexp', '.pg-exp-add-btn').on('click.pgexp', '.pg-exp-add-btn', function(e) {
+                e.stopPropagation();
+                if (opts.onAdd) opts.onAdd();
+            });
+        }
+
+        // ── 事件绑定 ──
+
+        // 点击主行 → toggle 选中
+        $container.off('click.pgexp', '.pg-exp-header').on('click.pgexp', '.pg-exp-header', function(e) {
+            if ($(e.target).closest('button').length) return; // 按钮不触发
+            if ($(e.target).closest('input').length) return;   // 输入框不触发
+            var name = $(this).closest('.pg-exp-item').data('name');
+            if (opts.onToggle) opts.onToggle(name);
+        });
+
+        // 展开/折叠
+        $container.off('click.pgexp', '.pg-exp-toggle').on('click.pgexp', '.pg-exp-toggle', function(e) {
+            e.stopPropagation();
+            var name = $(this).data('name');
+            if (opts.onExpand && !expanded[name]) opts.onExpand(name);
+            else if (opts.onCollapse && expanded[name]) opts.onCollapse(name);
+        });
+
+        // 保存（管理模式）
+        $container.off('click.pgexp', '.pg-exp-save').on('click.pgexp', '.pg-exp-save', function(e) {
+            e.stopPropagation();
+            var name = $(this).data('name');
+            // 先提交编辑框内的新名称
+            var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
+            var newName = $inp.length ? $inp.val().trim() : name;
+            if (opts.onSave) opts.onSave(name, newName);
+        });
+
+        // 删除
+        $container.off('click.pgexp', '.pg-exp-del').on('click.pgexp', '.pg-exp-del', function(e) {
+            e.stopPropagation();
+            var name = $(this).data('name');
+            if (opts.onDelete) opts.onDelete(name);
+        });
+
+        // 路径展开（异步加载产品）
+        $container.off('click.pgexp', '.pg-exp-path-hdr').on('click.pgexp', '.pg-exp-path-hdr', function(e) {
+            e.stopPropagation();
+            var $hdr = $(this);
+            var path = $hdr.closest('.pg-exp-path-item').find('.pg-exp-path-hdr').text().trim();
+            var $prods = $hdr.siblings('.pg-exp-path-prods');
+            if ($prods.is(':visible')) {
+                $prods.slideUp(150);
+                return;
+            }
+            $prods.html('加载中...').slideDown(150);
+            $.get('/get_products', { path: path })
+                .done(function(data) {
+                    if (data && data.length) {
+                        var h = '<div style="font-size:12px;">';
+                        data.forEach(function(prod) {
+                            h += '<div style="padding:2px 0;">' + _escHtml(prod.title || prod.name || '') + (prod.desc ? ' <span style="color:#888;font-size:10px;">' + _escHtml(prod.desc) + '</span>' : '') + '</div>';
+                        });
+                        h += '</div>';
+                        $prods.html(h);
+                    } else {
+                        $prods.html('<span style="color:#888;">无产品</span>');
+                    }
+                })
+                .fail(function() {
+                    $prods.html('<span style="color:#d00;">加载失败</span>');
+                });
+        });
+
+        // 名称输入框：Enter 触发保存
+        $container.off('keydown.pgexp', '.pg-exp-name-input').on('keydown.pgexp', '.pg-exp-name-input', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var name = $(this).data('name');
+                var $inp = $(this);
+                var newName = $inp.val().trim();
+                if (newName && newName !== name && opts.onRename) {
+                    opts.onRename(name, newName);
+                }
+            }
+        });
+
+        // SortableJS 拖拽
+        if (dragHandle && window.Sortable) {
+            var el = document.getElementById('pg-expandable-list');
+            if (el) {
+                if (el._sortable) el._sortable.destroy();
+                window.Sortable.create(el, {
+                    animation: 150,
+                    handle: dragHandle,
+                    onEnd: function() {
+                        var names = [];
+                        $('#pg-expandable-list .pg-exp-item').each(function() {
+                            names.push($(this).data('name'));
+                        });
+                        if (opts.onReorder) opts.onReorder(names);
+                    }
+                });
+            }
+        }
+    }
+
+    /**
      * 渲染产品组完整详情：路径列表 + 点击路径加载产品。
      * 整个内容替换到 $container 中，并绑定路径点击事件。
      * @param {object} group - {paths: [...], ...}
@@ -227,7 +429,8 @@
         renderProductDetailHTML: renderProductDetailHTML,
         renderPathListHTML: renderPathListHTML,
         loadProductsForPath: loadProductsForPath,
-        renderGroupDetail: renderGroupDetail
+        renderGroupDetail: renderGroupDetail,
+        renderExpandableGroupList: renderExpandableGroupList
     };
 
 })(jQuery, window);
