@@ -72,6 +72,7 @@ def assemble_factor_source(
     class_name = class_match.group(1) if class_match else 'MyFactor'
     base_class = class_match.group(2).strip() if class_match else 'FactorFamily'
 
+    class_body_prefix = []  # lines between class def and factor_expr (e.g. #sym:...)
     body_lines = []
     in_factor_expr = False
     factor_expr_indent = ''
@@ -80,15 +81,21 @@ def assemble_factor_source(
             in_factor_expr = True
             factor_expr_indent = line[:len(line) - len(line.lstrip())]
             continue
-        if in_factor_expr:
+        if not in_factor_expr:
             stripped = line.strip()
-            if stripped:
-                line_indent = line[:len(line) - len(line.lstrip())]
-                if len(line_indent) <= len(factor_expr_indent):
-                    break
-                if re.match(r'^\s*(desc|description|category)\s*=', line):
-                    continue
-            body_lines.append(line)
+            # keep non-empty, non-metadata lines as class body prefix
+            if stripped and not re.match(r'^\s*(desc|description|category)\s*=', line):
+                class_body_prefix.append(line)
+            continue
+        # in_factor_expr
+        stripped = line.strip()
+        if stripped:
+            line_indent = line[:len(line) - len(line.lstrip())]
+            if len(line_indent) <= len(factor_expr_indent):
+                break
+            if re.match(r'^\s*(desc|description|category)\s*=', line):
+                continue
+        body_lines.append(line)
 
     parts = []
     parts.extend(import_lines)
@@ -102,6 +109,9 @@ def assemble_factor_source(
 
     indent = '    '
     parts.append(f'class {class_name}({base_class}):')
+    # preserve user's class body lines before factor_expr (e.g. #sym: comments)
+    for pl in class_body_prefix:
+        parts.append(pl if pl.startswith(indent) else indent + pl)
     parts.append(f'{indent}@staticmethod')
     parts.append(f'{indent}def factor_expr():')
     for bl in body_lines:
