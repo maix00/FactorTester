@@ -266,7 +266,9 @@
                     }
                 }
             } else {
-                statusSpan.html('提交失败: ' + (data.error || '未知错误')).css('color', '#d40000');
+                var errMsg = '提交失败: ' + (data.error || '未知错误');
+                statusSpan.html(errMsg).css('color', '#d40000');
+                alert(errMsg);
             }
             setTimeout(function() { statusSpan.html(''); }, 3000);
         });

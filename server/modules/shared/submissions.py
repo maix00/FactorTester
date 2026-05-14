@@ -121,9 +121,14 @@ def reorder_submissions():
     new_order = data.get('new_order', [])
     with factor_testers_lock:
         n = len(runtime_state.factor_testers)
-        alias_to_tester = {t.alias: t for t in runtime_state.factor_testers}
+        # 构建 core_id → tester 映射（前端使用去掉用户前缀的 core_id）
+        alias_to_tester = {}
+        for t in runtime_state.factor_testers:
+            core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+            alias_to_tester[core_id] = t
         runtime_state.factor_testers[:] = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
-        assert len(runtime_state.factor_testers) == n, "Reordered list length mismatch"
+        if len(runtime_state.factor_testers) != n:
+            return api_fail(f'排序失败: 期望{n}条，实际匹配{len(runtime_state.factor_testers)}条')
     return api_ok()
 
 

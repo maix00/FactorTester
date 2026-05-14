@@ -131,3 +131,29 @@ def delete_product_group(username: str, name: str) -> bool:
     groups.pop(idx)
     save_product_groups(username, groups)
     return True
+
+
+def rename_product_group(username: str, old_name: str, new_name: str) -> dict | None:
+    new_name = new_name.strip()
+    if not new_name:
+        return None
+    groups = load_product_groups(username)
+    idx = find_group_by_name(groups, old_name)
+    if idx < 0:
+        return None
+    if old_name != new_name and find_group_by_name(groups, new_name) >= 0:
+        return None  # duplicate
+    groups[idx]['name'] = new_name
+    groups[idx]['updated_at'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    save_product_groups(username, groups)
+    return groups[idx]
+
+
+def reorder_product_groups(username: str, names: list) -> bool:
+    groups = load_product_groups(username)
+    name_to_group = {g.get('name'): g for g in groups}
+    reordered = [name_to_group[n] for n in names if n in name_to_group]
+    if len(reordered) != len(groups):
+        return False
+    save_product_groups(username, reordered)
+    return True
