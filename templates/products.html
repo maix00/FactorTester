@@ -187,29 +187,8 @@
 <!-- ── Product Group Overlay ── -->
 <div id="pg-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:999; justify-content:center; align-items:center;">
     <div style="background:#fff; border-radius:12px; width:min(90vw, 800px); max-height:85vh; display:flex; flex-direction:column; box-shadow:0 8px 40px rgba(0,0,0,0.18);">
-        <!-- Header -->
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #e2e8f0;">
-            <h3 style="margin:0; font-size:16px;">📦 产品组管理</h3>
-            <button id="pg-overlay-close" style="background:none; border:none; font-size:20px; cursor:pointer; color:#888;">&times;</button>
-        </div>
-        <!-- Body: 2-column -->
-        <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
-            <!-- Left: group list → path list → product list -->
-            <div style="width:260px; min-width:220px; border-right:1px solid #e2e8f0; display:flex; flex-direction:column; padding:12px; overflow:hidden;">
-                <div style="display:flex; gap:6px; margin-bottom:10px; flex-shrink:0;">
-                    <input id="pg-new-name" placeholder="新组名..." style="flex:1; min-width:0; padding:6px 8px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px;" maxlength="30">
-                    <button id="pg-btn-save" style="padding:6px 12px; font-size:12px; border:1px solid #4a90d9; border-radius:4px; background:#4a90d9; color:#fff; cursor:pointer; white-space:nowrap; flex-shrink:0;">💾 保存</button>
-                </div>
-                <div id="pg-group-list" style="overflow-y:auto; overflow-x:hidden; font-size:12px; word-break:break-all; flex-shrink:0; max-height:40%;"></div>
-                <!-- Group detail panel: 路径列表 + 点击路径展开产品（由 renderGroupDetail 渲染） -->
-                <div id="pg-group-detail" style="display:none; flex:1; overflow-y:auto; border-top:1px solid #e2e8f0; margin-top:8px; padding-top:8px; min-height:0;"></div>
-            </div>
-            <!-- Right: tree picker -->
-            <div style="flex:1; display:flex; flex-direction:column; padding:12px; min-width:0; overflow:hidden;">
-                <div style="font-size:12px; color:#666; margin-bottom:6px; flex-shrink:0;">勾选品种加入当前组（已选：<span id="pg-selected-count">0</span>）</div>
-                <div id="pg-tree-container" style="flex:1; overflow:auto; border:1px solid #e1e4e8; border-radius:6px; padding:6px; background:#fafbfc; min-width:0;"></div>
-            </div>
-        </div>
+        <!-- 内容由 ProductGroupManager 通过 PS.render() 生成 -->
+        <div id="ps-manager-root" style="flex:1; min-height:0; overflow:hidden;"></div>
     </div>
 </div>
 
