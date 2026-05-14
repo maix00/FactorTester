@@ -77,14 +77,13 @@ def get_default_time():
 
 
 def get_current_time(page_uuid: Optional[str] = None):
-    """获取当前页面绑定的运行时时间范围，否则返回 Settings 默认值。"""
+    """获取当前页面绑定的运行时时间范围。无记录时返回 None。"""
     if page_uuid:
         with page_time_store_lock:
             entry = page_time_store.get(page_uuid)
             if entry is not None:
                 return entry
-    start, end = get_default_time()
-    return start, end, start
+    return None
 
 
 def set_runtime_time(page_uuid: str, start, end, start_calc=None):
