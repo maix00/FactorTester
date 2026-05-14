@@ -12,6 +12,10 @@
     var treeInstance = null;
     var categoryTreeSizer = null;
 
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     function _hasMountedTree($container) {
         if (!$container || !$container.length) return false;
         try {
@@ -106,7 +110,12 @@
                 + (sub.count_desc ? ' <span style="color:#d00;flex-shrink:0;">' + sub.count_desc + '</span>' : '')
                 + '</div>';
             // 标签名称行：span 和 input 同行，inline-block 避免抖动
-            html += '    <div style="line-height:24px; min-height:24px;">' + labelHtml + labelInput + '</div>';
+            html += '    <div style="line-height:24px; min-height:24px;">' + labelHtml + labelInput;
+            // product_group 徽章
+            if (sub.product_group) {
+                html += ' <span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;vertical-align:middle;display:inline-block;line-height:18px;">📦 ' + escHtml(sub.product_group) + '</span>';
+            }
+            html += '</div>';
             // 删除按钮放在 header 右下角
             html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
             html += '  </div>';
@@ -612,7 +621,8 @@
                             end_date: timeRange.end_date,
                             start_time: timeRange.start_time,
                             end_time: timeRange.end_time,
-                            label: s.label || ''
+                            label: s.label || '',
+                            product_group: s.product_group || ''
                         };
                     });
                     if (typeof window._applySubmissions === 'function') {
@@ -629,7 +639,17 @@
         });
 
         function collectSubmissionsForTemplate() {
-            return submissions.map(function(s) { return { label: s.label || '', paths: s.paths.slice() }; });
+            return submissions.map(function(s) {
+                var entry = { label: s.label || '' };
+                if (s.product_group) {
+                    entry.product_group = s.product_group;
+                    // 也带上 paths 作为 fallback（模板加载时优先用 product_group）
+                    entry.paths = (s.paths || []).slice();
+                } else {
+                    entry.paths = (s.paths || []).slice();
+                }
+                return entry;
+            });
         }
 
         // 另存为新模板
@@ -753,6 +773,192 @@
         });
 
         // ── 路径模板管理 END ──────────────────────────────────────────────────
+
+        // ── 从产品组导入 ─────────────────────────────────────────────────────
+
+        // 产品组导入 picker overlay（独立于 products 页面）
+        var importOverlay = null;
+        var importGroupTree = null;
+        var importSelectedGroup = null;  // 当前选中要导入的 group name
+
+        function closeImportOverlay() {
+            if (importOverlay) { importOverlay.remove(); importOverlay = null; }
+            importGroupTree = null;
+            importSelectedGroup = null;
+        }
+
+        $('#pg-import-btn').on('click', async function() {
+            // 获取用户的所有 product_groups
+            var resp;
+            try {
+                resp = await fetch('/api/product-groups').then(function(r) { return r.json(); });
+            } catch (e) {
+                alert('获取产品组列表失败');
+                return;
+            }
+            var groups = (resp && resp.groups) ? resp.groups : [];
+            if (groups.length === 0) {
+                alert('暂无产品组，请先在产品管理页面创建。');
+                return;
+            }
+
+            // 构建 overlay HTML（左侧 group 列表 + 右侧只读产品树）
+            var groupsHtml = groups.map(function(g) {
+                var cnt = g.path_count || (g.paths ? g.paths.length : 0);
+                return '<div class="pg-import-item" data-name="' + escHtml(g.name) + '" style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; margin-bottom:3px; border-radius:6px; cursor:pointer; font-size:13px; border:1px solid transparent; transition:background 0.15s;">' +
+                    '<span style="font-weight:500;">' + escHtml(g.name) + '</span>' +
+                    '<span style="color:#888; font-size:11px;">' + cnt + ' 品种</span>' +
+                '</div>';
+            }).join('');
+
+            var html = '<div id="pg-import-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:10000;">' +
+                '<div style="background:#fff; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.2); width:800px; max-width:95vw; max-height:80vh; display:flex; flex-direction:column;">' +
+                // Header
+                '<div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #e1e4e8;">' +
+                '<h3 style="margin:0; font-size:16px;">📥 从产品组导入</h3>' +
+                '<button id="pg-import-close" style="background:none; border:none; font-size:20px; cursor:pointer; color:#888; line-height:1;">&times;</button>' +
+                '</div>' +
+                // Body: 2-column layout
+                '<div style="display:flex; flex:1; overflow:hidden;">' +
+                // Left: group list
+                '<div style="width:240px; min-width:180px; border-right:1px solid #e1e4e8; padding:12px; overflow-y:auto;">' +
+                '<div style="font-size:12px; color:#888; margin-bottom:8px;">产品组列表</div>' +
+                '<div id="pg-import-group-list">' + groupsHtml + '</div>' +
+                '</div>' +
+                // Right: tree preview
+                '<div style="flex:1; padding:12px; overflow-y:auto;">' +
+                '<div style="font-size:12px; color:#888; margin-bottom:8px;">' +
+                '<span id="pg-import-tree-title">选择一个产品组查看路径</span>' +
+                '<span id="pg-import-path-count" style="margin-left:8px; color:#6c63ff; font-weight:600;"></span>' +
+                '</div>' +
+                '<div id="pg-import-tree-container" style="border:1px solid #e1e4e8; border-radius:8px; padding:8px; min-height:200px; background:#fafbfc;"></div>' +
+                '</div>' +
+                '</div>' +
+                // Footer
+                '<div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid #e1e4e8;">' +
+                '<button id="pg-import-cancel" style="padding:6px 18px; border:1px solid #ddd; border-radius:6px; background:#fff; cursor:pointer; font-size:13px;">取消</button>' +
+                '<button id="pg-import-confirm" style="padding:6px 18px; border:none; border-radius:6px; background:#6c63ff; color:#fff; cursor:pointer; font-size:13px;" disabled>导入</button>' +
+                '</div>' +
+                '</div></div>';
+
+            importOverlay = $(html);
+            importSelectedGroup = null;
+            $('body').append(importOverlay);
+
+            // Bind close events
+            $('#pg-import-close, #pg-import-cancel').on('click', closeImportOverlay);
+            $('#pg-import-overlay').on('click', function(e) { if (e.target === this) closeImportOverlay(); });
+
+            // Group list: click to select & preview
+            var $importList = $('#pg-import-group-list');
+            var $confirmBtn = $('#pg-import-confirm');
+            var $treeTitle = $('#pg-import-tree-title');
+            var $pathCount = $('#pg-import-path-count');
+            var $treeContainer = $('#pg-import-tree-container');
+
+            function selectGroup(groupName) {
+                importSelectedGroup = groupName;
+                $confirmBtn.prop('disabled', false);
+                // 高亮选中项
+                $importList.find('.pg-import-item').each(function() {
+                    var $item = $(this);
+                    if ($item.data('name') === groupName) {
+                        $item.css({background:'#e8f0fe', borderColor:'#6c63ff', fontWeight:'600'});
+                    } else {
+                        $item.css({background:'transparent', borderColor:'transparent', fontWeight:'500'});
+                    }
+                });
+                // 加载 group 详情并渲染树
+                loadGroupPreview(groupName);
+            }
+
+            async function loadGroupPreview(groupName) {
+                $treeTitle.text('加载中...');
+                $pathCount.text('');
+                var detailResp = await fetch('/api/product-groups/' + encodeURIComponent(groupName)).then(function(r) { return r.json(); });
+                if (!detailResp.group || !detailResp.group.paths) {
+                    $treeTitle.text('加载失败');
+                    return;
+                }
+                var paths = detailResp.group.paths;
+                $treeTitle.text(groupName);
+                $pathCount.text(paths.length + ' 个品种');
+
+                // 销毁旧树，重建
+                if (importGroupTree) {
+                    try { importGroupTree.destroy(); } catch(e) {}
+                    importGroupTree = null;
+                }
+                $treeContainer.empty();
+                $treeContainer.fancytree({
+                    source: {url: '/api/product_tree'},
+                    checkbox: false,
+                    selectMode: 2,
+                    init: function(event, data) {
+                        importGroupTree = data.tree;
+                    },
+                    lazyLoad: function(event, data) {
+                        var node = data.node;
+                        if (node.key && node.key.indexOf('CNFuturesContract') >= 0) {
+                            data.result = { url: '/api/contract_tree', data: {path: node.key} };
+                            return;
+                        }
+                        data.result = { url: '/get_products', data: {path: node.key, checkbox: 'true'} };
+                    },
+                    loadChildren: function(event, data) {
+                        // 高亮 group 包含的 product_name 节点
+                        if (importGroupTree) {
+                            importGroupTree.visit(function(node) {
+                                if (node.data && node.data.product_name && paths.indexOf(node.data.product_name) >= 0) {
+                                    $(node.span).css({background:'#f0e6ff', borderRadius:'3px', padding:'0 2px'});
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            $importList.on('click', '.pg-import-item', function() {
+                selectGroup($(this).data('name'));
+            });
+
+            // 默认选中第一个 group
+            if (groups.length > 0) selectGroup(groups[0].name);
+
+            // Confirm: 创建 submission 并关闭
+            $confirmBtn.on('click', async function() {
+                if (!importSelectedGroup) return;
+                var detailResp = await fetch('/api/product-groups/' + encodeURIComponent(importSelectedGroup)).then(function(r) { return r.json(); });
+                if (!detailResp.group || !detailResp.group.paths || detailResp.group.paths.length === 0) {
+                    alert('产品组路径为空');
+                    return;
+                }
+                var timeRange = getCurrentTimeRange();
+                var newId = 'pg-' + Date.now();
+                submissions.push({
+                    id: newId,
+                    paths: detailResp.group.paths.slice(),
+                    pathsDescMap: {},
+                    label: importSelectedGroup,
+                    product_group: importSelectedGroup,
+                    count_desc: detailResp.group.paths.length + ' 个产品',
+                    timestamp: new Date().toLocaleTimeString(),
+                    start_date: timeRange.start_date,
+                    end_date: timeRange.end_date,
+                    start_time: timeRange.start_time,
+                    end_time: timeRange.end_time,
+                    factor_tester_name: importSelectedGroup,
+                    factor_tester_serial: '#' + newId
+                });
+                window.submissions = submissions;
+                window.submissionRecords = submissions;
+                renderHistory();
+                refreshSubmissionDependents();
+                closeImportOverlay();
+            });
+        });
+
+        // ── 从产品组导入 END ─────────────────────────────────────────────────
 
         // 暴露给单因子设置快照模块
         window._getCurrentSubmissions = function() {
