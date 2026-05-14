@@ -778,7 +778,13 @@ class OperandExpr(FactorExpr):
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         values = [opnd.evaluate(ctx=ctx) for opnd in self.operands]
-        return self._apply_op(values)
+        result = self._apply_op(values)
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.warning("DEBUG CompositeExpr._evaluate: op=%s index.names=%s shape=%s",
+                     self.op, result.index.names if hasattr(result, 'index') else 'N/A',
+                     result.shape if hasattr(result, 'shape') else 'N/A')
+        return result
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         """子类覆盖：对已求值的 operands DataFrame 执行核心运算。"""
@@ -920,6 +926,12 @@ class ColumnRef(FactorExpr):
 
         result = (result := pd.concat(series_dict, axis=1)).sort_values(by=result.index.names[-1])
         result.columns = list(series_dict.keys())
+
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.warning("DEBUG ColumnRef._evaluate: column=%s freq=%s index.names=%s shape=%s", 
+                     self.column.value, ctx.freq.name if ctx.freq else 'N/A',
+                     result.index.names, result.shape)
 
         return result
 
@@ -1261,6 +1273,12 @@ class ShiftOp(OperandExpr):
             for p, products_group in periods_products_map.items():
                 result_parts.append(operand_val[products_group].shift(int(p)))
             result = pd.concat(result_parts, axis=1)
+
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.warning("DEBUG ShiftOp._evaluate: periods=%s index.names=%s shape=%s",
+                     common_periods if common else 'mixed',
+                     result.index.names, result.shape)
 
         return result
 
