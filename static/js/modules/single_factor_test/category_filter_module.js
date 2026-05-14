@@ -42,6 +42,7 @@
                 var merged = old.data;
                 merged.product_count = s.product_count;
                 merged.factor_tester_serial = s.factor_tester_serial;
+                merged.product_group = s.product_group || merged.product_group || '';
                 merged.selected_paths = s.selected_paths;
                 merged.paths = s.selected_paths || merged.paths;
                 return merged;
@@ -55,6 +56,7 @@
                 factor_tester_name: s.name,
                 factor_tester_serial: s.factor_tester_serial,
                 product_count: s.product_count,
+                product_group: s.product_group || '',
                 count_desc: s.product_count + ' 个产品',
                 timestamp: new Date().toLocaleTimeString(),
                 start_date: '',
@@ -155,7 +157,6 @@
                         });
                     } else if (newName !== name) {
                         // 无路径 → 仅改名
-                        found.product_group = newName;
                         fetch('/rename_submission', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},

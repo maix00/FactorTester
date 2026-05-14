@@ -17,6 +17,7 @@ def tester_to_dict(t):
         'selected_paths':       getattr(t, 'selected_paths', []) or [],
         'factor_tester_name':   t.name,
         'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
+        'product_group':        getattr(t, 'product_group', '') or '',
     }
 
 

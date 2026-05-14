@@ -272,9 +272,12 @@
             }
             // 名称 or 编辑框
             if (isEditing) {
-                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;">';
+                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;margin:0;">';
             } else {
                 html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';">' + _escHtml(name) + '</span>';
+                if (item._fromGroup) {
+                    html += '<span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">产品组</span>';
+                }
             }
             html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + pathCount + '条)</span>';
 
@@ -297,8 +300,13 @@
             if (isExp) {
                 html += '<div class="pg-exp-paths" style="padding-top:6px;">';
                 paths.forEach(function(path, pi) {
-                    html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
-                    html += '<div class="pg-exp-path-hdr" style="padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">' + _escHtml(path) + '</div>';
+                    html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
+                    html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
+                    html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
+                    if (!item._fromGroup && mode !== 'readonly') {
+                        html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
+                    }
+                    html += '</div>';
                     html += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';
                     html += '</div>';
                 });
@@ -350,8 +358,13 @@
                     if (item && item.paths && item.paths.length) {
                         var ph = '<div class="pg-exp-paths" style="padding-top:6px;">';
                         item.paths.forEach(function(path, pi) {
-                            ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
-                            ph += '<div class="pg-exp-path-hdr" style="padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">' + _escHtml(path) + '</div>';
+                            ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
+                            ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
+                            ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
+                            if (!item._fromGroup && mode !== 'readonly') {
+                                ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
+                            }
+                            ph += '</div>';
                             ph += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';
                             ph += '</div>';
                         });
@@ -386,11 +399,22 @@
             if (opts.onDelete) opts.onDelete(name);
         });
 
+        // 删除路径
+        $container.off('click.pgexp', '.pg-exp-path-del').on('click.pgexp', '.pg-exp-path-del', function(e) {
+            e.stopPropagation();
+            var $btn = $(this);
+            var name = $btn.data('name');
+            var path = $btn.data('path');
+            if (opts.onDeletePath) opts.onDeletePath(name, path);
+        });
+
         // 路径展开（异步加载产品）
         $container.off('click.pgexp', '.pg-exp-path-hdr').on('click.pgexp', '.pg-exp-path-hdr', function(e) {
+            // 不触发删除按钮
+            if ($(e.target).closest('.pg-exp-path-del').length) return;
             e.stopPropagation();
             var $hdr = $(this);
-            var path = $hdr.closest('.pg-exp-path-item').find('.pg-exp-path-hdr').text().trim();
+            var path = $hdr.closest('.pg-exp-path-item').data('path');
             var $prods = $hdr.siblings('.pg-exp-path-prods');
             if ($prods.is(':visible')) {
                 $prods.slideUp(150);

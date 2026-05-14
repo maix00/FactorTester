@@ -191,8 +191,9 @@
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         var expItems = submissions.map(function(sub, i) {
+            var isFromGroup = !!sub.product_group;
             var displayName;
-            if (sub.product_group) {
+            if (isFromGroup) {
                 displayName = '📦 ' + sub.product_group;
             } else {
                 displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
@@ -201,7 +202,8 @@
                 name: displayName,
                 paths: sub.paths || [],
                 _index: i,
-                _sub: sub
+                _sub: sub,
+                _fromGroup: isFromGroup
             };
         });
 
@@ -254,6 +256,13 @@
                 var found = expItems.find(function(item) { return item.name === name; });
                 if (found) {
                     delete expandedState[found._index];
+                }
+            },
+            onDeletePath: function(name, path) {
+                var found = expItems.find(function(item) { return item.name === name; });
+                if (found && onDeletePath) {
+                    var pi = (found.paths || []).indexOf(path);
+                    if (pi >= 0) onDeletePath(found._index, pi);
                 }
             },
             onDelete: function(name) {

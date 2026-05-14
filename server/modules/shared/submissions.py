@@ -84,6 +84,7 @@ def submit_selected_products():
     selected_paths = data.get('selected_paths', [])
     id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
     page_uuid = data.get('page_uuid', '').strip() or None
+    group_name = data.get('group_name', '').strip() or None
     assert selected_paths, "未选择任何产品路径"
     selected_paths, selected_products = resolve_products_from_paths(selected_paths)
 
@@ -96,6 +97,8 @@ def submit_selected_products():
     user = runtime_state.current_user_obj()
     factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
     factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
+    if group_name:
+        factor_tester.product_group = group_name
     if page_uuid:
         cast(Any, factor_tester)._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
     if user is not None:
