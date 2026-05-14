@@ -21,8 +21,9 @@ from server.modules.custom_factors.param_config_store import (
     rename_scope,
 )
 from server.services.accounts import can_view_user_scope
+from server.services.factor_registry import get_factor_family_instance
 from server.services.http_auth import login_required
-from server.services.runtime_state import current_user, get_user_file_lock
+from server.services.runtime_state import current_user, get_session_params, get_user_file_lock
 
 
 def _username() -> str | None:
@@ -102,6 +103,62 @@ def api_delete_param_config(ff_alias):
     if not deleted:
         return jsonify({'success': False, 'error': '配置不存在'}), 404
     return jsonify({'success': True})
+
+
+@cf_bp.route('/api/param-configs/<ff_alias>/add-factor', methods=['POST'])
+@login_required
+def api_add_factor_to_param_config(ff_alias):
+    """从当前会话参数中，将一个因子追加到用户因子库配置中。"""
+    username = _username()
+    if username is None:
+        return jsonify({'success': False, 'error': '未登录'}), 401
+    data = request.get_json() or {}
+    factor_alias = (data.get('factor_alias') or '').strip()
+    scope_key = data.get('scope_key', DEFAULT_SCOPE_KEY)
+    if not factor_alias:
+        return jsonify({'success': False, 'error': '缺少 factor_alias'}), 400
+
+    # 获取当前会话中该因子族的参数列表
+    try:
+        factor_family = get_factor_family_instance(ff_alias, username=username)
+    except ImportError:
+        return jsonify({'success': False, 'error': f'因子族 {ff_alias} 不存在'}), 404
+
+    session_params = get_session_params(ff_alias, factor_family)
+    if not session_params:
+        # 没有会话参数，使用默认参数
+        session_params = [{p.alias: p.default_value for p in factor_family.params}]
+
+    # 找到匹配 factor_alias 的参数行
+    matched_param = None
+    for row in session_params:
+        ff_alias_match = factor_family.get_alias(**row)
+        if ff_alias_match == factor_alias:
+            matched_param = dict(row)
+            break
+
+    if matched_param is None:
+        return jsonify({'success': False, 'error': f'未找到因子 {factor_alias} 对应的会话参数'}), 404
+
+    # 读取当前 scope 下的已有配置，追加新参数行（去重）
+    with get_user_file_lock(username):
+        existing_config = load_param_config(username, ff_alias, scope_key=scope_key)
+        existing_params = existing_config.get('params_list', []) if existing_config else []
+
+        # 去重：检查是否已存在相同因子 alias 的参数行
+        existing_aliases = set()
+        for row in existing_params:
+            row_alias = factor_family.get_alias(**row)
+            if row_alias:
+                existing_aliases.add(row_alias)
+
+        if factor_alias in existing_aliases:
+            return jsonify({'success': True, 'message': f'因子 {factor_alias} 已存在，无需重复添加', 'skipped': True})
+
+        existing_params.append(matched_param)
+        config, factors = save_current_user_param_config(username, ff_alias, existing_params, scope_key=scope_key)
+
+    return api_ok({'config': config, 'factors': factors})
 
 
 # ── Scope management ──
