@@ -10,7 +10,8 @@
     window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var newItemPlaceholderName = null;  // 当前 placeholder 名称，null = 无
-    var editingName = null;            // 当前编辑中的记录名
+    var editingName = null;            // 当前选中态记录标识（sub.id）
+    var inlineEditingName = null;      // 当前输入框编辑中的记录标识（sub.id）
     var treeInstance = null;
     var categoryTreeSizer = null;
     var $moduleContainer = null;  // PS.render() 的容器
@@ -103,10 +104,12 @@
         window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
             newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
             editingName: editingName,
+            displayEditingName: inlineEditingName,
             onAdd: function() {
                 // 已有 placeholder 时不重复添加；点击添加时退出其他编辑
                 if (newItemPlaceholderName) return;
                 editingName = null;
+                inlineEditingName = null;
                 var now = new Date();
                 var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
@@ -114,7 +117,7 @@
             },
             onSave: function(name, newName, isPlaceholder) {
                 newName = (newName || '').trim();
-                if (!newName) { editingName = null; renderHistory(); return; }
+                if (!newName) { inlineEditingName = null; editingName = null; renderHistory(); return; }
 
                 if (isPlaceholder) {
                     // placeholder：有路径 → 提交；无路径 → 仅改名保持 placeholder
@@ -124,13 +127,14 @@
                         submitSelectedProducts();
                         newItemPlaceholderName = null;
                         editingName = null;
+                        inlineEditingName = null;
                     }
                     renderHistory();
                 } else {
                     // 已有记录：用 editingName（sub.id）精确查找
                     var subId = editingName;
                     var found = submissions.find(function(s) { return String(s.id) === String(subId); });
-                    if (!found) { editingName = null; renderHistory(); return; }
+                    if (!found) { editingName = null; inlineEditingName = null; renderHistory(); return; }
 
                     var minimalPaths = [];
                     if (treeInstance) {
@@ -166,6 +170,7 @@
                             if (data.success && data.submissions) syncFromServer(data.submissions);
                         });
                     }
+                    inlineEditingName = null;
                     editingName = null;
                     renderHistory();
                 }
@@ -183,10 +188,21 @@
                 var subId = sub ? sub.id : displayName;
                 if (editingName === subId) {
                     editingName = null;
+                    inlineEditingName = null;
                 } else {
                     editingName = subId;
-                    newItemPlaceholderName = null;  // 进入编辑模式时清除 placeholder
+                    inlineEditingName = null;  // 新选中不退输入框
+                    newItemPlaceholderName = null;
                 }
+                renderHistory();
+            },
+            onEditName: function(displayName) {
+                var sub = submissions.find(function(s) {
+                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                    return dn === displayName;
+                });
+                var subId = sub ? sub.id : displayName;
+                inlineEditingName = subId;
                 renderHistory();
             },
             onImportGroup: function() {

@@ -188,7 +188,8 @@
         var onSave = callbacks.onSave || null;                 // 保存按钮回调
 
         var editingName = callbacks.editingName || null;       // 当前编辑中的记录标识（CF传sub.id，PG-manager传组名）
-        var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式，参数：editingName（与editingName同键）
+        var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入选中态，参数：displayName
+        var onEditName = callbacks.onEditName || null;         // 双击名字进入输入框，参数：displayName
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         // displayName 必须唯一，用 sub.id 保证唯一性以支持单选编辑模式
@@ -216,19 +217,28 @@
             }
         });
 
-        var editing = {};
+        // selected：选中态（高亮+图标）
+        var selected = {};
         if (editingName != null) {
-            // editingName 存的是 sub.id（CF）或组名（PG-manager）；映射到 displayName
-            var editItem = expItems.find(function(item) {
-                // CF：通过 _sub.id 匹配；PG-manager：直接用组名匹配
+            var selItem = expItems.find(function(item) {
                 return (item._sub && String(item._sub.id) === String(editingName)) || (item.name === editingName);
+            });
+            if (selItem) selected[selItem.name] = true;
+        }
+
+        // editing：输入框模式（名字变input）
+        var editing = {};
+        var displayEditingName = callbacks.displayEditingName || null;
+        if (displayEditingName != null) {
+            var editItem = expItems.find(function(item) {
+                return (item._sub && String(item._sub.id) === String(displayEditingName)) || (item.name === displayEditingName);
             });
             if (editItem) editing[editItem.name] = true;
         }
 
         PG.renderExpandableGroupList(expItems, $container, {
             mode: 'manage',
-            selected: {},
+            selected: selected,
             expanded: expExpanded,
             editing: editing,
             showAddButton: !!(onAdd || onImportGroup),
@@ -238,19 +248,12 @@
                 if (onAdd) onAdd();
             },
             onToggle: function(name) {
-                // 点击已有记录行 → 进入编辑模式
                 if (name && name !== (newItemPlaceholder && newItemPlaceholder.name) && onToggleEdit) {
                     onToggleEdit(name);
                 }
             },
-            onSave: function(name, newName, isPlaceholder) {
-                if (onSave) {
-                    onSave(name, newName, isPlaceholder);
-                } else if (isPlaceholder && onInsertPlaceholder) {
-                    onInsertPlaceholder(newName);
-                } else if (!isPlaceholder && onRename) {
-                    onRename(name, newName);
-                }
+            onEditName: function(name) {
+                if (onEditName) onEditName(name);
             },
             onSave: function(name, newName, isPlaceholder) {
                 if (onSave) onSave(name, newName, isPlaceholder);

@@ -201,8 +201,9 @@
      *   newItemPlaceholder: {name} | null  -- 底部编辑中的空新方块（最多一个，由 onAdd 设置）
      *   dragHandle: '.cls'      -- SortableJS handle（null = 不可拖拽）
      *   onAdd()                 -- + 号点击回调
-     *   onToggle(name)          -- 单击进入编辑（调用方负责互斥：清其他 editingKey，设新的）
-     *   onSave(name, newName, isPlaceholder)  -- 保存按钮回调（调用方负责保存/提交/更新路径）
+     *   onToggle(name)          -- 单击行进入/退出选中态（调用方负责互斥）
+     *   onEditName(name)        -- 双击名字进入输入框编辑
+     *   onSave(name, newName, isPlaceholder)  -- 保存图标回调（调用方负责保存/提交/更新路径）
      *   onExpand(name)          -- 展开回调
      *   onCollapse(name)        -- 折叠回调
      */
@@ -211,7 +212,7 @@
         var mode = opts.mode || 'readonly';
         var selected = opts.selected || {};
         var expanded = opts.expanded || {};
-        var editing = opts.editing || {};
+        var editing = opts.editing || {};         // 输入框模式（名字变input）
         var showAddButton = !!opts.showAddButton;
         var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;
@@ -247,6 +248,7 @@
             var isSel = !isPlaceholder && !!selected[name];
             var isExp = !isPlaceholder && !!expanded[name];
             var isEditing = isPlaceholder || !!editing[name];
+            var isFromGroup = !!item._fromGroup;
             var pathCount = paths.length;
 
             // 占位方块：虚线框 + 浅背景
@@ -261,13 +263,11 @@
 
             html += '<div class="pg-exp-item" data-name="' + _escHtml(name) + '" data-idx="' + idx + '" data-placeholder="' + (isPlaceholder ? '1' : '0') + '" style="' + itemStyle + '">';
 
-            // ── 主行：展开按钮 + 拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
+            // ── 主行：拖拽手柄 + 名称/输入框 + 路径数 + 操作图标 ──
             html += '<div class="pg-exp-header" style="display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:34px;">';
-            // 展开/折叠按钮
-            if (!isPlaceholder) {
-                html += '<span class="pg-exp-toggle" data-name="' + _escHtml(name) + '" style="cursor:pointer;font-size:12px;flex-shrink:0;color:#666;width:16px;text-align:center;display:inline-block;">' + (isExp ? '&#9650;' : '&#9660;') + '</span>';
-            } else {
-                html += '<span style="width:16px;flex-shrink:0;"></span>';  // 占位对齐
+            // 占位项留空对齐
+            if (isPlaceholder) {
+                html += '<span style="width:16px;flex-shrink:0;"></span>';
             }
             // 占位项没有拖拽手柄
             if (dragHandle && !isPlaceholder) {
@@ -277,20 +277,23 @@
             if (isEditing) {
                 html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;margin:0;">';
             } else {
-                html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';">' + _escHtml(name) + '</span>';
-                if (item._fromGroup) {
+                html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';cursor:text;">' + _escHtml(name) + '</span>';
+                if (isFromGroup) {
                     html += '<span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">产品组</span>';
                 }
             }
             html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + pathCount + '条)</span>';
 
-            // 操作图标组（紧凑排列）
-            html += '<span class="pg-exp-actions" style="display:flex;align-items:center;gap:2px;flex-shrink:0;">';
-            if (isEditing) {
-                html += '<button class="pg-exp-save" data-name="' + _escHtml(name) + '" title="保存" style="background:#4a90d9;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;padding:3px 10px;line-height:1;white-space:nowrap;">保存</button>';
+            // 操作图标组（选中态显示保存/展开/删除；非选中态只显示展开）
+            html += '<span class="pg-exp-actions" style="display:flex;align-items:center;gap:4px;flex-shrink:0;">';
+            if (!isPlaceholder) {
+                html += '<i class="fas fa-' + (isExp ? 'chevron-up' : 'chevron-down') + ' pg-exp-toggle-icon" data-name="' + _escHtml(name) + '" title="' + (isExp ? '折叠' : '展开') + '" style="color:#666;cursor:pointer;font-size:14px;"></i>';
             }
-            if (mode === 'manage' || mode === 'readonly' || isPlaceholder) {
-                html += '<button class="pg-exp-del" data-name="' + _escHtml(name) + '" title="删除" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;"><i class="fas fa-trash"></i></button>';
+            if (isSel && !isFromGroup) {
+                html += '<i class="fas fa-save pg-exp-save-icon" data-name="' + _escHtml(name) + '" title="保存" style="color:#4a90d9;cursor:pointer;font-size:14px;"></i>';
+            }
+            if (isSel && (mode === 'manage' || mode === 'readonly' || isPlaceholder)) {
+                html += '<i class="fas fa-trash pg-exp-del-icon" data-name="' + _escHtml(name) + '" title="删除" style="color:#d00;cursor:pointer;font-size:13px;"></i>';
             }
             html += '</span>';
             html += '</div>';
@@ -332,10 +335,10 @@
 
         // ── 事件绑定 ──
 
-        // 单击行 → 进入编辑模式（互斥由调用方 onToggle 负责）
+        // 单击行 → 进入/退出选中态（toggle）
         // 导入：单击=多选（toggle选中状态）
         $container.off('click.pgexp', '.pg-exp-header').on('click.pgexp', '.pg-exp-header', function(e) {
-            if ($(e.target).closest('button').length) return;
+            if ($(e.target).closest('.pg-exp-actions').length) return;
             if ($(e.target).closest('input').length) return;
             var $item = $(this).closest('.pg-exp-item');
             var name = $item.data('name');
@@ -348,15 +351,22 @@
             if (opts.onToggle) opts.onToggle(name);
         });
 
-        // 展开/折叠
-        $container.off('click.pgexp', '.pg-exp-toggle').on('click.pgexp', '.pg-exp-toggle', function(e) {
+        // 双击名字文字 → 进入输入框编辑
+        $container.off('dblclick.pgexp', '.pg-exp-name').on('dblclick.pgexp', '.pg-exp-name', function(e) {
             e.stopPropagation();
-            var $btn = $(this);
-            var name = $btn.data('name');
-            var $body = $btn.closest('.pg-exp-item').find('.pg-exp-body');
+            var name = $(this).data('name');
+            if (opts.onEditName) opts.onEditName(name);
+        });
+
+        // 展开/折叠（选中态图标）
+        $container.off('click.pgexp', '.pg-exp-toggle-icon').on('click.pgexp', '.pg-exp-toggle-icon', function(e) {
+            e.stopPropagation();
+            var $icon = $(this);
+            var name = $icon.data('name');
+            var $body = $icon.closest('.pg-exp-item').find('.pg-exp-body');
             if (!expanded[name]) {
                 expanded[name] = true;
-                $btn.html('&#9650;');
+                $icon.removeClass('fa-chevron-down').addClass('fa-chevron-up');
                 // 如果 body 还没有路径内容，动态填充
                 if (!$body.find('.pg-exp-paths').length) {
                     var item = null;
@@ -384,14 +394,14 @@
                 if (opts.onExpand) opts.onExpand(name);
             } else {
                 delete expanded[name];
-                $btn.html('&#9660;');
+                $icon.removeClass('fa-chevron-up').addClass('fa-chevron-down');
                 $body.slideUp(150);
                 if (opts.onCollapse) opts.onCollapse(name);
             }
         });
 
-        // 删除
-        $container.off('click.pgexp', '.pg-exp-del').on('click.pgexp', '.pg-exp-del', function(e) {
+        // 删除（选中态图标）
+        $container.off('click.pgexp', '.pg-exp-del-icon').on('click.pgexp', '.pg-exp-del-icon', function(e) {
             e.stopPropagation();
             var name = $(this).data('name');
             if (opts.onDelete) opts.onDelete(name);
@@ -437,8 +447,8 @@
                 });
         });
 
-        // 保存按钮
-        $container.off('click.pgexp', '.pg-exp-save').on('click.pgexp', '.pg-exp-save', function(e) {
+        // 保存图标
+        $container.off('click.pgexp', '.pg-exp-save-icon').on('click.pgexp', '.pg-exp-save-icon', function(e) {
             e.stopPropagation();
             var name = $(this).data('name');
             var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
@@ -448,14 +458,7 @@
             if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
         });
 
-        // 名称输入框：Enter/blur 只更新内部值，不触发保存
-        $container.off('keydown.pgexp', '.pg-exp-name-input')
-            .on('keydown.pgexp', '.pg-exp-name-input', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    // Enter 不做任何事，仅保留输入焦点
-                }
-            });
+        // 名称输入框：Enter/blur → 保存名字，退出输入框（保持选中态）\n        $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')\n            .on('keydown.pgexp', '.pg-exp-name-input', function(e) {\n                if (e.key === 'Enter') {\n                    e.preventDefault();\n                    var $inp = $(this);\n                    var name = $inp.data('name');\n                    var newName = $inp.val().trim();\n                    if (!newName) return;\n                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';\n                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);\n                }\n            })\n            .on('blur.pgexp', '.pg-exp-name-input', function() {\n                var $inp = $(this);\n                var name = $inp.data('name');\n                var newName = $inp.val().trim();\n                if (!newName) return;\n                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';\n                if (opts.onSave) opts.onSave(name, newName, isPlaceholder);\n            });
 
         // SortableJS 拖拽
         if (dragHandle && window.Sortable) {

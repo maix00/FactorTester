@@ -16,6 +16,7 @@
     var $managerRoot = null;
     var categoryTreeSizer = null;
     var selectedName = null;
+    var editingName = null;                  // 输入框编辑中的组名，null = 无
     var expandedNames = {};
     var groups = [];
     var newItemPlaceholderName = null;  // placeholder 名称，null = 无
@@ -37,7 +38,7 @@
             }
 
             var editing = {};
-            if (selectedName) editing[selectedName] = true;
+            if (editingName) editing[editingName] = true;
             var sel = {};
             if (selectedName) sel[selectedName] = true;
 
@@ -52,6 +53,7 @@
                 onAdd: function() {
                     if (newItemPlaceholderName) return;
                     selectedName = null;
+                    editingName = null;
                     var now = new Date();
                     var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
                     newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
@@ -60,8 +62,9 @@
                     renderGroupList();
                 },
                 onToggle: function(name) {
-                    // 互斥：进入编辑先清 placeholder
+                    // 互斥：进入选中清 placeholder 和输入框编辑
                     if (newItemPlaceholderName) { newItemPlaceholderName = null; }
+                    editingName = null;
                     selectedName = (selectedName === name) ? null : name;
                     if (selectedName) {
                         PS.clearChecks(groupTree);
@@ -85,16 +88,20 @@
                     delete expandedNames[name];
                     renderGroupList();
                 },
+                onEditName: function(name) {
+                    editingName = name;
+                    renderGroupList();
+                },
                 onSave: function(name, newName, isPlaceholder) {
                     newName = (newName || '').trim();
-                    if (!newName) { selectedName = null; renderGroupList(); return; }
+                    if (!newName) { editingName = null; renderGroupList(); return; }
 
                     var isPh = isPlaceholder || (newItemPlaceholderName && newItemPlaceholderName === name);
                     if (isPh) {
                         newItemPlaceholderName = newName;
                         if (!allGroupPaths.length) {
                             // 还没有路径 → 仅改名，退出编辑（保持 placeholder 待后续添加路径）
-                            selectedName = null;
+                            editingName = null;
                             renderGroupList();
                             return;
                         }
@@ -103,6 +110,7 @@
                             if (resp.success) {
                                 newItemPlaceholderName = null;
                                 selectedName = newName;
+                                editingName = null;
                                 renderGroupList();
                             } else {
                                 alert('保存失败: ' + (resp.error || '未知错误'));
@@ -119,10 +127,12 @@
                                 if (selectedName === name) selectedName = newName;
                                 if (expandedNames[name]) { delete expandedNames[name]; expandedNames[newName] = true; }
                                 selectedName = null;
+                                editingName = null;
                                 renderGroupList();
                             });
                         } else {
                             selectedName = null;
+                            editingName = null;
                             renderGroupList();
                         }
                         return;
@@ -136,6 +146,7 @@
                         }).then(function(resp) {
                             if (resp && resp.success) {
                                 selectedName = newName;
+                                editingName = null;
                                 renderGroupList();
                             } else {
                                 alert('保存失败: ' + ((resp && resp.error) || '未知错误'));
@@ -143,13 +154,13 @@
                         });
                     } else if (exists) {
                         PG.updateGroup(name, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = name; renderGroupList(); }
+                            if (resp.success) { selectedName = name; editingName = null; renderGroupList(); }
                             else { alert('保存失败: ' + (resp.error || '未知错误')); }
                         });
                     } else {
                         // New
                         PG.createGroup(newName, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = newName; renderGroupList(); }
+                            if (resp.success) { selectedName = newName; editingName = null; renderGroupList(); }
                             else { alert('保存失败: ' + (resp.error || '未知错误')); }
                         });
                     }
@@ -158,12 +169,14 @@
                     // placeholder 删除 → 恢复加号行
                     if (newItemPlaceholderName && newItemPlaceholderName === name) {
                         newItemPlaceholderName = null;
+                        editingName = null;
                         renderGroupList();
                         return;
                     }
                     if (!confirm('删除产品组 "' + name + '"？')) return;
                     PG.deleteGroup(name).then(function() {
                         if (selectedName === name) { selectedName = null; allGroupPaths = []; PS.clearChecks(groupTree); }
+                        editingName = null;
                         delete expandedNames[name];
                         renderGroupList();
                     });
@@ -187,6 +200,7 @@
     function openOverlay() {
         $overlay.css('display', 'flex');
         selectedName = null;
+        editingName = null;
         expandedNames = {};
         allGroupPaths = [];
         groups = [];
