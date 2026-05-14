@@ -461,3 +461,31 @@ th {
     color: #1a7a1a;
     background: #e8f5e9;
 }
+
+/* ── 因子选择器 scope 折叠树 ── */
+.picker-scope-header {
+    user-select: none;
+    transition: background 0.15s;
+}
+.picker-scope-header:hover {
+    background: #f0f4f8;
+}
+.picker-caret {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    flex-shrink: 0;
+}
+.picker-caret.caret-closed {
+    border-left: 6px solid #98a2b3;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+}
+.picker-caret.caret-open {
+    border-top: 6px solid #98a2b3;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+}
+.picker-scope-body {
+    padding-left: 16px;
+}

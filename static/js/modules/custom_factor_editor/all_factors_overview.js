@@ -49,12 +49,20 @@ function renderScopeFactorsOverview() {
     }
 
     const visibleFactors = filterAllFactorsByOwner(data.factors);
-    const groups = {};
+
+    // 第一级：按 scope_key 分组
+    const scopeGroups = {};
     visibleFactors.forEach(f => {
-        const group = getGroup(f.factor_family_alias || f.factor_family_name || f.factor_alias);
-        if (!groups[group]) groups[group] = [];
-        groups[group].push(f);
+        const sk = f.scope_key || '默认';
+        if (!scopeGroups[sk]) scopeGroups[sk] = [];
+        scopeGroups[sk].push(f);
     });
+    const scopeKeys = Object.keys(scopeGroups).sort((a, b) => {
+        if (a === 'default' || a === '默认') return 1;
+        if (b === 'default' || b === '默认') return -1;
+        return a.localeCompare(b);
+    });
+
     let totalPublic = 0, totalCustom = 0, totalUnknown = 0;
     const ownersSeen = new Set();
     const templatesSeen = new Set();
@@ -69,9 +77,9 @@ function renderScopeFactorsOverview() {
     let html = renderAllFactorsControls();
     html += '<div class="all-factors-stats">';
     html += '<div class="all-factors-stat">显示: <strong>' + visibleFactors.length + '</strong> / ' + data.factors.length + ' 个参数配置因子</div>';
+    html += '<div class="all-factors-stat">产品组: <strong>' + scopeKeys.length + '</strong></div>';
     html += '<div class="all-factors-stat">用户: <strong>' + ownersSeen.size + '</strong></div>';
     html += '<div class="all-factors-stat">配置: <strong>' + templatesSeen.size + '</strong></div>';
-    html += '<div class="all-factors-stat">因子家族: <strong>' + Object.keys(groups).length + '</strong></div>';
     html += '<div class="all-factors-stat">公共/自定义/未知: <strong>' + totalPublic + '/' + totalCustom + '/' + totalUnknown + '</strong></div>';
     html += '</div>';
     if (data.errors && data.errors.length) {
@@ -82,39 +90,54 @@ function renderScopeFactorsOverview() {
         return;
     }
 
-    for (const group of Object.keys(groups).sort()) {
-        const items = groups[group].sort(compareAllFactorsForDisplay);
-        const owners = {};
-        items.forEach(f => {
-            const ownerKey = getAllFactorOwnerSortKey(f);
-            if (!owners[ownerKey]) owners[ownerKey] = [];
-            owners[ownerKey].push(f);
+    for (const sk of scopeKeys) {
+        const scopeItems = scopeGroups[sk];
+        // 第二级：按 group（因子家族前缀）分组
+        const groups = {};
+        scopeItems.forEach(f => {
+            const group = getGroup(f.factor_family_alias || f.factor_family_name || f.factor_alias);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(f);
         });
-        html += '<div class="collapsible-factor-node collapsible-factor-group">';
-        html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
-            escHtml(group) + '</span><span class="collapsible-factor-count">' + items.length + '</span></button><div class="collapsible-factor-body">';
-        for (const ownerKey of Object.keys(owners).sort()) {
-            const ownerItems = owners[ownerKey];
-            html += '<div class="collapsible-factor-node collapsible-factor-owner">';
+        html += '<div class="collapsible-factor-node collapsible-factor-scope">';
+        html += '<button class="collapsible-factor-header scope-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
+            escHtml(sk) + '</span><span class="collapsible-factor-count">' + scopeItems.length + '</span></button><div class="collapsible-factor-body">';
+
+        for (const group of Object.keys(groups).sort()) {
+            const items = groups[group].sort(compareAllFactorsForDisplay);
+            const owners = {};
+            items.forEach(f => {
+                const ownerKey = getAllFactorOwnerSortKey(f);
+                if (!owners[ownerKey]) owners[ownerKey] = [];
+                owners[ownerKey].push(f);
+            });
+            html += '<div class="collapsible-factor-node collapsible-factor-group">';
             html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
-                escHtml(getAllFactorOwnerLabel(ownerItems[0])) + '</span><span class="collapsible-factor-count">' + ownerItems.length + '</span></button><div class="collapsible-factor-body">';
-            html += '<table class="all-factors-table"><thead><tr>';
-            html += '<th>因子</th><th>因子家族</th><th>参数配置</th><th>参数</th><th>所有者</th><th>来源</th><th>更新时间</th>';
-            html += '</tr></thead><tbody>';
-            for (const f of ownerItems) {
-                html += '<tr>';
-                html += '<td><strong class="all-factors-alias">' + escHtml(f.factor_alias || '—') + '</strong></td>';
-                html += '<td><div>' + escHtml(f.factor_family_alias || f.factor_family_name || '—') + '</div><div class="all-factors-subtext">' + escHtml(f.chinese_name || f.category || '') + '</div></td>';
-                html += '<td><div>' + escHtml(f.template_name || '—') + '</div><div class="all-factors-subtext">第 ' + (Number(f.template_row_index || 0) + 1) + ' 行</div></td>';
-                html += '<td>' + renderParamsSummary(f.params || []) + '</td>';
-                html += '<td>' + escHtml(getAllFactorOwnerLabel(f)) + '</td>';
-                const sourceLabel = getAllFactorOwnerLabel(f);
-                const sourceClass = f.source === 'public' ? 'tag-public' : (f.source === 'custom' ? 'tag-custom' : 'tag-unknown');
-                html += '<td><span class="tag ' + sourceClass + '">' + escHtml(f.source_label || sourceLabel) + '</span></td>';
-                html += '<td style="color:#888;font-size:12px;">' + escHtml(f.updated_at || '—') + '</td>';
-                html += '</tr>';
+                escHtml(group) + '</span><span class="collapsible-factor-count">' + items.length + '</span></button><div class="collapsible-factor-body">';
+            for (const ownerKey of Object.keys(owners).sort()) {
+                const ownerItems = owners[ownerKey];
+                html += '<div class="collapsible-factor-node collapsible-factor-owner">';
+                html += '<button class="collapsible-factor-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
+                    escHtml(getAllFactorOwnerLabel(ownerItems[0])) + '</span><span class="collapsible-factor-count">' + ownerItems.length + '</span></button><div class="collapsible-factor-body">';
+                html += '<table class="all-factors-table"><thead><tr>';
+                html += '<th>因子</th><th>因子家族</th><th>参数配置</th><th>参数</th><th>所有者</th><th>来源</th><th>更新时间</th>';
+                html += '</tr></thead><tbody>';
+                for (const f of ownerItems) {
+                    html += '<tr>';
+                    html += '<td><strong class="all-factors-alias">' + escHtml(f.factor_alias || '—') + '</strong></td>';
+                    html += '<td><div>' + escHtml(f.factor_family_alias || f.factor_family_name || '—') + '</div><div class="all-factors-subtext">' + escHtml(f.chinese_name || f.category || '') + '</div></td>';
+                    html += '<td><div>' + escHtml(f.template_name || '—') + '</div><div class="all-factors-subtext">第 ' + (Number(f.template_row_index || 0) + 1) + ' 行</div></td>';
+                    html += '<td>' + renderParamsSummary(f.params || []) + '</td>';
+                    html += '<td>' + escHtml(getAllFactorOwnerLabel(f)) + '</td>';
+                    const sourceLabel = getAllFactorOwnerLabel(f);
+                    const sourceClass = f.source === 'public' ? 'tag-public' : (f.source === 'custom' ? 'tag-custom' : 'tag-unknown');
+                    html += '<td><span class="tag ' + sourceClass + '">' + escHtml(f.source_label || sourceLabel) + '</span></td>';
+                    html += '<td style="color:#888;font-size:12px;">' + escHtml(f.updated_at || '—') + '</td>';
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div></div>';
             }
-            html += '</tbody></table></div></div>';
+            html += '</div></div>';
         }
         html += '</div></div>';
     }
