@@ -327,17 +327,17 @@
         });
     }
 
-    // 初始化 Fancytree 和 Sortable。单因子测试页面会动态替换内容，
-    // 外部依赖脚本（jQuery/Fancytree/Sortable）可能比本模块稍晚就绪；
-    // 因此这里不用直接依赖 $(ready)，而是显式等待依赖，避免抽屉停在“加载产品树...”。
+    // 初始化 Fancytree 和 Sortable。动态创建悬浮 overlay 页面（居中弹窗），
+    // 替代旧的侧边 drawer。外部依赖脚本（jQuery/Fancytree/Sortable）可能比本模块稍晚就绪；
+    // 因此显式等待依赖。
     function initCategoryFilterModule(retryCount) {
         retryCount = retryCount || 0;
         if (!window.jQuery) {
             if (retryCount < 80) {
                 setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
             } else {
-                var el = document.getElementById('category_filter_module');
-                if (el) el.innerHTML = '<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：jQuery 未就绪</div>';
+                var el = document.getElementById('category-summary-text');
+                if (el) el.textContent = '产品树加载失败：jQuery 未就绪';
             }
             return;
         }
@@ -349,21 +349,42 @@
             return;
         }
 
-        $moduleContainer = $('#category_filter_module');
-        if (!$moduleContainer.length) return;
-
         var PS = window.ProductSelector;
 
-        // 如果已渲染过，跳过重新渲染（保留树实例）
+        // 创建悬浮 overlay 容器
+        var $overlay = $('#category-filter-overlay');
+        if (!$overlay.length) {
+            $overlay = $('<div id="category-filter-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.35);align-items:center;justify-content:center;"></div>');
+            $('body').append($overlay);
+            // 点击遮罩关闭
+            $overlay.on('click', function(e) {
+                if (e.target === this) closeCategoryFilter();
+            });
+        }
+
+        // 在 overlay 内部创建面板容器
+        if (!$overlay.find('#cf-panel').length) {
+            var panelHtml = '<div id="cf-panel" style="position:relative;width:min(92vw,1100px);height:min(88vh,720px);background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.2);display:flex;flex-direction:column;overflow:hidden;">';
+            panelHtml += '<div id="ps-cf-root" style="flex:1;overflow:hidden;"></div>';
+            panelHtml += '</div>';
+            $overlay.append(panelHtml);
+        }
+
+        $moduleContainer = $('#ps-cf-root');
+        if (!$moduleContainer.length) return;
+
+        // 如果已渲染过，跳过重新渲染
         if ($moduleContainer.find('.ps-body').length) return;
 
-        // 统一布局渲染（无 toolbar，操作按钮在右侧 actionBar 中）
+        // 统一布局渲染
         PS.render($moduleContainer, {
             title: '🌳 产品类别筛选',
             submitLabel: '',
             toolbar: '',
-            onSubmit: submitSelectedProducts
+            onSubmit: submitSelectedProducts,
+            headerBtns: '<button id="cf-overlay-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;line-height:1;">&times;</button>'
         });
+        $('#cf-overlay-close').on('click', closeCategoryFilter);
 
         // 初始化左侧树
         PS.initLeftTree($moduleContainer, {
@@ -392,18 +413,8 @@
                 });
             }
         }
-        // 抽屉打开时同步 resize 尺寸
-        var drawer = document.getElementById('category-drawer');
-        if (drawer && categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
-            drawer.addEventListener('transitionend', function() {
-                if (drawer.classList.contains('open')) {
-                    categoryTreeSizer.sync();
-                }
-            });
-        }
 
-
-        // 初始渲染历史记录（确保 actionBar 始终可见）
+        // 初始渲染历史记录
         renderHistory();
 
         // 暴露给单因子设置快照模块
@@ -420,13 +431,21 @@
         };
     }
 
-    window.ensureCategoryTreeReady = function() {
-        var $ = window.jQuery;
-        if (!$) return;
-        if (!treeInstance) {
+    window.openCategoryFilter = function() {
+        var $overlay = $('#category-filter-overlay');
+        if (!$overlay.length || !$('#ps-cf-root').find('.ps-body').length) {
             initCategoryFilterModule(0);
+        }
+        $('#category-filter-overlay').css('display', 'flex');
+        if (categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
+            setTimeout(function() { categoryTreeSizer.sync(); }, 100);
         }
     };
 
-    initCategoryFilterModule();
+    window.closeCategoryFilter = function() {
+        $('#category-filter-overlay').css('display', 'none');
+        try { if (typeof window.updateCategorySummary === 'function') window.updateCategorySummary(); } catch(e) {}
+    };
+
+    // 不再自动 init，由 openCategoryFilter() 按需懒加载
 })();

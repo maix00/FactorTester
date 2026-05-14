@@ -45,14 +45,7 @@
             : '未选择';
     }
     window.updateCategorySummary = updateCategorySummary;
-    var drawer = document.getElementById('category-drawer');
-    if (drawer) {
-        drawer.addEventListener('transitionend', function () {
-            if (!this.classList.contains('open')) updateCategorySummary();
-        });
-    }
-    // window.submissions 由 category_filter_module.js 约定暴露，
-    // 它在提交或删除后可能更新，简单轮询即可
+    // 由 openCategoryFilter/closeCategoryFilter 管理，不再依赖 drawer
     function initCategorySummary() {
         setInterval(updateCategorySummary, 1000);
         updateCategorySummary();
