@@ -481,6 +481,7 @@
                         </div>
                         <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;cursor:pointer;">▼</span>
                         <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
+                        <button class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
                         <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
                     <div class="tpl-row-detail" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
@@ -513,6 +514,13 @@
                     loadTemplate(this.getAttribute('data-tpl-id'));
                 });
             });
+            // 绑定覆盖按钮（用当前页面设置覆盖已有模板）
+            listEl.querySelectorAll('.global-tpl-overwrite-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    overwriteTemplate(this.getAttribute('data-tpl-id'), this.getAttribute('data-tpl-name'));
+                });
+            });
             // 绑定删除按钮（阻止冒泡）
             listEl.querySelectorAll('.global-tpl-delete-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
@@ -522,6 +530,34 @@
             });
         } catch (e) {
             listEl.innerHTML = '<div style="color:#d40000;text-align:center;padding:10px;">加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    // ── 覆盖已有模板 ──────────────────────────────────────────────────────
+    async function overwriteTemplate(tplId, tplName) {
+        if (!confirm('用当前设置覆盖模板「' + (tplName || tplId) + '」？')) return;
+        const statusEl = document.getElementById('global-tpl-load-status');
+        statusEl.textContent = '覆盖中...';
+        statusEl.style.color = '#7a4b00';
+        try {
+            const snapshot = await collectSnapshot();
+            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshot: snapshot })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                statusEl.textContent = '✓ 已覆盖: ' + (tplName || tplId);
+                statusEl.style.color = '#28a745';
+                await loadTemplateList();
+            } else {
+                statusEl.textContent = '✗ 覆盖失败: ' + (data.error || '未知错误');
+                statusEl.style.color = '#d40000';
+            }
+        } catch (e) {
+            statusEl.textContent = '✗ 网络错误: ' + e.message;
+            statusEl.style.color = '#d40000';
         }
     }
 

@@ -21,8 +21,13 @@
         return sub.label || sub.product_group || ('#' + (index + 1) + ' ' + (sub.factor_tester_serial || ''));
     }
 
+    function submissionVisibleLabel(sub, index) {
+        if (!sub) return '';
+        return sub.product_group || sub.label || ('#' + (index + 1) + ' ' + (sub.factor_tester_serial || ''));
+    }
+
     function submissionDisplayName(sub, index) {
-        var label = submissionEditableLabel(sub, index);
+        var label = submissionVisibleLabel(sub, index);
         var visibleName = sub.product_group ? ('📦 ' + label) : label;
         return visibleName + ' (ID:' + sub.id + ')';
     }
@@ -127,6 +132,7 @@
 
     // 辅助函数：渲染右侧历史记录（委托给统一的 ProductSelector）
     function renderHistory() {
+        if (!$moduleContainer || !$moduleContainer.length || !window.ProductSelector) return;
         var $container = window.ProductSelector.getSubmissionContainer($moduleContainer);
         if (!$container || !$container.length) return;
 
@@ -559,19 +565,21 @@
         // 初始渲染历史记录
         renderHistory();
 
-        // 暴露给单因子设置快照模块
-        window._getCurrentSubmissions = function() {
-            return submissions;
-        };
-        window._applySubmissions = function(newSubmissions) {
-            submissions = newSubmissions;
-            window.submissions = newSubmissions;
-            window.submissionRecords = newSubmissions;
-            expandedState = {};
-            renderHistory();
-            refreshSubmissionDependents();
-        };
     }
+
+    // 暴露给单因子设置快照模块。产品类别筛选弹窗是懒加载的，因此这些接口必须在
+    // openCategoryFilter() 之前就存在，模板恢复才能更新外部摘要和后续测试模块。
+    window._getCurrentSubmissions = function() {
+        return submissions;
+    };
+    window._applySubmissions = function(newSubmissions) {
+        submissions = Array.isArray(newSubmissions) ? newSubmissions : [];
+        window.submissions = submissions;
+        window.submissionRecords = submissions;
+        expandedState = {};
+        renderHistory();
+        refreshSubmissionDependents();
+    };
 
     window.openCategoryFilter = function() {
         var $overlay = $('#category-filter-overlay');

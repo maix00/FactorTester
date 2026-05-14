@@ -315,7 +315,7 @@
                     html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                     html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
                     if (mode !== 'readonly' && mode !== 'import') {
-                        html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
+                        html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                     }
                     html += '</div>';
                     html += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';
@@ -388,7 +388,7 @@
                             ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                             ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
                             if (mode !== 'readonly' && mode !== 'import') {
-                                ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:11px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;">✕</button>';
+                                ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                             }
                             ph += '</div>';
                             ph += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';

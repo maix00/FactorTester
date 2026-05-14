@@ -196,11 +196,12 @@
         var expItems = submissions.map(function(sub, i) {
             var isFromGroup = !!sub.product_group;
             var editableLabel = sub.label || sub.product_group || ('#' + (i + 1) + ' ' + (sub.factor_tester_serial || ''));
+            var displayLabel = sub.product_group || sub.label || ('#' + (i + 1) + ' ' + (sub.factor_tester_serial || ''));
             var visibleName;
             if (isFromGroup) {
-                visibleName = '📦 ' + editableLabel;
+                visibleName = '📦 ' + displayLabel;
             } else {
-                visibleName = editableLabel;
+                visibleName = displayLabel;
             }
             var displayName = visibleName + ' (ID:' + sub.id + ')';
             return {

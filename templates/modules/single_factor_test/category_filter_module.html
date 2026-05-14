@@ -31,7 +31,8 @@
         // 每个 submission 一行，内部每个 path 一行，显示标签名
         var lines = [];
         subs.forEach(function(sub, si) {
-            var label = sub.label || ('提交 #' + (si + 1));
+            var label = sub.product_group || sub.label || ('提交 #' + (si + 1));
+            if (sub.product_group) label = '📦 ' + label;
             var pathLines = (sub.paths || []).map(function(p) {
                 return '  ' + p;
             });
