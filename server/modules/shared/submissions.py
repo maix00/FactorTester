@@ -22,6 +22,7 @@ from .submission_helpers import (
     resolve_products_from_paths,
     submissions_payload,
 )
+from server.modules.products.product_group_store import load_product_groups
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 
@@ -207,8 +208,11 @@ def replace_submissions():
         return api_fail('template_submissions 必须是列表')
 
     from tools.factors.FactorTester import FactorTester
+    from server.modules.products.product_group_store import load_product_groups
     user = runtime_state.current_user_obj()
     replaced = []
+    # 预加载 product_groups（仅当有 submission 引用 group 时查询一次）
+    groups_cache = None
     with factor_testers_lock:
         for tester in runtime_state.factor_testers:
             tester_puuid = getattr(tester, '_page_uuid', None)
@@ -223,7 +227,17 @@ def replace_submissions():
         ]
 
         for i, sub in enumerate(tpl_submissions):
-            selected_paths = sub.get('paths') if isinstance(sub, dict) else []
+            if not isinstance(sub, dict):
+                continue
+            # 解析 paths：优先 product_group，其次 paths
+            selected_paths = sub.get('paths', []) if isinstance(sub.get('paths'), list) else []
+            group_name = sub.get('product_group', '') if isinstance(sub.get('product_group'), str) else ''
+            if group_name:
+                if groups_cache is None:
+                    groups_cache = load_product_groups(user.username)
+                group = next((g for g in groups_cache if g.get('name') == group_name), None)
+                if group and isinstance(group.get('paths'), list):
+                    selected_paths = group['paths']
             if not isinstance(selected_paths, list) or len(selected_paths) == 0:
                 continue
             selected_paths, selected_products = resolve_products_from_paths(selected_paths)
@@ -239,7 +253,8 @@ def replace_submissions():
             replaced.append({
                 'id': alias,
                 'paths': selected_paths,
-                'label': sub.get('label', '') if isinstance(sub, dict) else '',
+                'label': sub.get('label', ''),
+                'product_group': group_name,
                 'factor_tester_name': factor_tester.name,
                 'factor_tester_serial': f"#{alias}",
                 'count_desc': f"{len(selected_products)} 个产品",
