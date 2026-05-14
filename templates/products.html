@@ -17,9 +17,9 @@
         html, body { height: 100%; margin: 0; overflow: hidden; }
         body { background: #f5f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .pv-wrapper { max-width: 100%; margin: 0 auto; padding: 16px 20px; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; }
-        .pv-header { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
+        .pv-header { display: flex; flex-direction: row; align-items: center; gap: 12px; margin-bottom: 14px; flex-shrink: 0; flex-wrap: wrap; }
         .pv-header h1 { font-size: 22px; color: #1a1a1a; margin: 0; }
-        .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; }
+        .pv-header .back-link { font-size: 13px; color: #4a90d9; text-decoration: none; margin-right: 4px; }
         .pv-header .back-link:hover { text-decoration: underline; }
         .pv-layout { display: flex; gap: 16px; flex: 1 1 auto; min-height: 0; }
         .pv-sidebar {
@@ -116,11 +116,10 @@
     <div class="pv-header">
         {% set back_link_class = 'back-link' %}
         {% include 'modules/shared/home_back_link.html' %}
-        <h1>� 产品管理</h1>        <div style="display:flex; gap:10px; align-items:center;">
-            <button id="btn-product-groups" style="padding:6px 16px; font-size:13px; border:1px solid #d0d5dd; border-radius:6px; background:#fff; cursor:pointer;">
-                📦 产品组管理
-            </button>
-        </div>    </div>
+        <h1>📋 产品管理</h1>
+        <button id="btn-product-groups" style="padding:6px 16px; font-size:13px; border:1px solid #d0d5dd; border-radius:6px; background:#fff; color:#333; cursor:pointer; white-space:nowrap;">
+            📦 产品组管理
+        </button>    </div>
 
     <div class="pv-layout">
         <!-- 左侧产品树 -->
@@ -195,18 +194,20 @@
         </div>
         <!-- Body: 2-column -->
         <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
-            <!-- Left: group list -->
-            <div style="width:240px; border-right:1px solid #e2e8f0; display:flex; flex-direction:column; padding:12px;">
-                <div style="display:flex; gap:6px; margin-bottom:10px;">
-                    <input id="pg-new-name" placeholder="新组名..." style="flex:1; padding:6px 8px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px;" maxlength="30">
-                    <button id="pg-btn-save" style="padding:6px 12px; font-size:12px; border:1px solid #4a90d9; border-radius:4px; background:#4a90d9; color:#fff; cursor:pointer; white-space:nowrap;">💾 保存</button>
+            <!-- Left: group list → path list → product list -->
+            <div style="width:260px; min-width:220px; border-right:1px solid #e2e8f0; display:flex; flex-direction:column; padding:12px; overflow:hidden;">
+                <div style="display:flex; gap:6px; margin-bottom:10px; flex-shrink:0;">
+                    <input id="pg-new-name" placeholder="新组名..." style="flex:1; min-width:0; padding:6px 8px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px;" maxlength="30">
+                    <button id="pg-btn-save" style="padding:6px 12px; font-size:12px; border:1px solid #4a90d9; border-radius:4px; background:#4a90d9; color:#fff; cursor:pointer; white-space:nowrap; flex-shrink:0;">💾 保存</button>
                 </div>
-                <div id="pg-group-list" style="flex:1; overflow-y:auto; font-size:12px;"></div>
+                <div id="pg-group-list" style="overflow-y:auto; overflow-x:hidden; font-size:12px; word-break:break-all; flex-shrink:0; max-height:40%;"></div>
+                <!-- Group detail panel: 路径列表 + 点击路径展开产品（由 renderGroupDetail 渲染） -->
+                <div id="pg-group-detail" style="display:none; flex:1; overflow-y:auto; border-top:1px solid #e2e8f0; margin-top:8px; padding-top:8px; min-height:0;"></div>
             </div>
             <!-- Right: tree picker -->
-            <div style="flex:1; display:flex; flex-direction:column; padding:12px; min-width:0;">
-                <div style="font-size:12px; color:#666; margin-bottom:6px;">勾选品种加入当前组（已选：<span id="pg-selected-count">0</span>）</div>
-                <div id="pg-tree-container" style="flex:1; overflow:auto; border:1px solid #e1e4e8; border-radius:6px; padding:6px; background:#fafbfc;"></div>
+            <div style="flex:1; display:flex; flex-direction:column; padding:12px; min-width:0; overflow:hidden;">
+                <div style="font-size:12px; color:#666; margin-bottom:6px; flex-shrink:0;">勾选品种加入当前组（已选：<span id="pg-selected-count">0</span>）</div>
+                <div id="pg-tree-container" style="flex:1; overflow:auto; border:1px solid #e1e4e8; border-radius:6px; padding:6px; background:#fafbfc; min-width:0;"></div>
             </div>
         </div>
     </div>
@@ -784,11 +785,14 @@
 
     init();
 
-    // Expose main tree instance for product_group_manager.js
+    // Expose main tree instance and product map for product_group_manager.js
     window._mainTreeInstance = treeInstance;
+    window._allProductsMap = allProductsMap;
 
 })();
 </script>
+<script src="{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/products/product_group_manager.js') }}"></script>
 </body>
 </html>

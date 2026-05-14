@@ -90,235 +90,112 @@
         }, 0);
     }
 
-    // 辅助函数：渲染右侧历史记录
+    // 辅助函数：渲染右侧历史记录（委托给统一的 ProductSelector）
     function renderHistory() {
-        var html = '';
-        submissions.forEach(function(sub, index) {
-            var isExpanded = expandedState[index] || {};
-            var productGroup = sub.product_group || '';
-            html += '<div class="submission-item" data-index="' + index + '" style="width:100%; box-sizing:border-box; border:1px solid #e1e4e8; border-radius:8px; margin-bottom:12px; background:#fff; overflow:hidden;">';
-            html += '  <div class="submission-header" style="background:#f6f8fa; padding:8px 36px 8px 12px; cursor:move; position:relative; border-bottom:1px solid #e1e4e8; min-height:52px;">';
-            var labelHtml = sub.label
-                ? '<span class="sub-label-text" data-index="' + index + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;">' + sub.label + '</span>'
-                : '<span class="sub-label-add" data-index="' + index + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;">[添加名称]</span>';
-            var labelInput = '<input class="sub-label-input" data-index="' + index + '" type="text" value="' + (sub.label||'').replace(/"/g,'&quot;') + '" placeholder="输入名称后 Enter 确认" style="display:none;font-size:12px;padding:2px 6px;border:1px solid #0078d4;border-radius:4px;width:140px;vertical-align:middle;">';
-            // 信息行：序号 + 序列号 + 时间
-            html += '    <div style="font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:4px;">'
-                + '<i class="fas fa-grip-vertical" style="color:#888; flex-shrink:0;"></i>'
-                + '<strong style="flex-shrink:0;">#' + (index+1) + '</strong>'
-                + '<span style="flex-shrink:0;margin:0 4px;">' + sub.factor_tester_serial + '</span>'
-                + '<span style="color:#888;font-size:12px;flex-shrink:0;">(' + sub.timestamp + ')</span>'
-                + (sub.count_desc ? ' <span style="color:#d00;flex-shrink:0;">' + sub.count_desc + '</span>' : '')
-                + '</div>';
-            // 标签名称行：span 和 input 同行，inline-block 避免抖动
-            html += '    <div style="line-height:24px; min-height:24px;">' + labelHtml + labelInput;
-            // product_group 徽章
-            if (sub.product_group) {
-                html += ' <span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;vertical-align:middle;display:inline-block;line-height:18px;">📦 ' + escHtml(sub.product_group) + '</span>';
-            }
-            html += '</div>';
-            // 删除按钮放在 header 右下角
-            html += '    <button class="delete-submission" data-index="' + index + '" style="position:absolute; right:8px; bottom:8px; background:transparent; border:none; color:#d00; cursor:pointer; font-size:14px;"><i class="fas fa-trash"></i></button>';
-            html += '  </div>';
-            html += '  <div style="width:100%; box-sizing:border-box; padding:8px 12px; overflow-x:auto;">';
-            html += '    <table style="width:100%; min-width:100%; border-collapse:collapse; table-layout:auto;">';
-            sub.paths.forEach(function(path, pathIdx) {
-                var rowId = 'path-' + index + '-' + pathIdx;
-                var expanded = isExpanded[path] || false;
-                var pathDisplay = path;
-                if (sub.pathsDescMap && sub.pathsDescMap[path]) {
-                    pathDisplay = path + ' <span style="color:#888;font-size:12px;">' + sub.pathsDescMap[path] + '</span>';
-                }
-                html += '      <tr class="path-row" data-path="' + path.replace(/"/g, '&quot;') + '" data-sub-index="' + index + '" data-path-index="' + pathIdx + '">';
-                html += '        <td style="padding:4px 0; border-bottom:1px solid #f0f0f0; min-width:0; overflow-wrap:anywhere; word-break:break-word;">';
-                html += '          <div style="display:flex;align-items:flex-start;">';
-                html += '            <span class="path-text" style="cursor:pointer; font-size:13px; margin-left:6px; flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word;">' + pathDisplay + '</span>';
-                html += (productGroup ? '' : '            <button class="delete-path" data-sub-index="' + index + '" data-path-index="' + pathIdx + '" style="flex-shrink:0; background:transparent; border:none; color:#d00; cursor:pointer; padding:0 8px;"><i class="fas fa-times"></i></button>');
-                html += '          </div>';
-                html += '        </td>';
-                html += '      </tr>';
-                if (expanded) {
-                    html += '      <tr class="product-detail-row" id="detail-' + index + '-' + pathIdx + '">';
-                    html += '        <td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">';
-                    html += '          <div class="loading-products" style="font-size:13px;">加载中...</div>';
-                    html += '        </td>';
-                    html += '      </tr>';
-                }
-            });
-            html += '    </table>';
-            html += '  </div>';
-            html += '</div>';
-        });
-        $('#submission-history').html(html || '<div style="color:#888;text-align:center;padding:20px;">暂无提交记录</div>');
+        var $container = $('#submission-history');
+        if (!$container.length) return;
 
-        // 绑定路径点击展开/折叠事件
-        $('.path-text').off('click').on('click', function() {
-            var $row = $(this).closest('tr.path-row');
-            var subIndex = $row.data('sub-index');
-            var path = $row.data('path');
-            var pathIndex = $row.data('path-index');
-            var expanded = expandedState[subIndex] || {};
-            if (expanded[path]) {
-                // 折叠
-                $('#detail-' + subIndex + '-' + pathIndex).remove();
-                delete expanded[path];
-            } else {
-                // 展开：加载产品详情
-                expanded[path] = true;
-                var detailHtml = '<tr class="product-detail-row" id="detail-' + subIndex + '-' + pathIndex + '">' +
-                    '<td style="width:100%; box-sizing:border-box; padding:8px 0 8px 20px; background:#fafbfc;">' +
-                    '<div class="loading-products" style="font-size:13px;">加载中...</div>' +
-                    '</td></tr>';
-                $row.after(detailHtml);
-                loadProductsForPath(path, subIndex, pathIndex);
-            }
-            expandedState[subIndex] = expanded;
-        });
-
-        // 绑定删除路径按钮
-        $('.delete-path').off('click').on('click', function() {
-            var subIndex = $(this).data('sub-index');
-            var pathIndex = $(this).data('path-index');
-            var submission = submissions[subIndex];
-            if (!submission) return;
-            var newPaths = submission.paths.filter(function(_, idx) { return idx !== pathIndex; });
-            fetch('/delete_path_of_submission', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    id_time: submission.id,
-                    new_paths: newPaths
+        window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
+            onReorder: function() {
+                fetch('/reorder_submissions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ new_order: submissions.map(function(s) { return s.id; }) })
                 })
-            })
-            .then(r => r.json())
-            .then(data => {
-                var statusElem = $('#submission_change_status');
-                if (data.success) {
-                    statusElem.html('<div>✓ 路径已删除</div>').css('color', '#28a745');
-                    if (newPaths.length === 0) {
-                        // 如果没有路径了，删除整个提交
-                        fetch('/delete_submission', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ id_time: submission.id })
-                        })
-                        .then(r => r.json())
-                        .then(data2 => {
-                            if (data2.success) {
-                                if (data2.submissions) {
-                                    syncFromServer(data2.submissions);
-                                } else {
-                                    submissions.splice(subIndex, 1);
-                                    renderHistory();
-                                    refreshSubmissionDependents();
-                                }
-                                statusElem.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
-                            } else {
-                                statusElem.html('<div>✗ 删除提交失败: ' + data2.error + '</div>').css('color', '#d40000');
-                            }
-                            setTimeout(function() { statusElem.html(''); }, 3000);
-                        });
-                    } else {
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var $s = $('#submission_change_status');
+                    $s.html(data.success ? '✓ 顺序已更新' : '✗ 排序失败: ' + data.error)
+                      .css('color', data.success ? '#28a745' : '#d40000');
+                    setTimeout(function() { $s.html(''); }, 3000);
+                });
+            },
+            onDeleteSub: function(index) {
+                var sub = submissions[index];
+                if (!sub) return;
+                fetch('/delete_submission', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id_time: sub.id })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var $s = $('#submission_change_status');
+                    if (data.success) {
+                        $s.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
                         if (data.submissions) {
                             syncFromServer(data.submissions);
                         } else {
-                            submissions[subIndex].paths = newPaths;
+                            submissions.splice(index, 1);
                             renderHistory();
                             refreshSubmissionDependents();
                         }
-                        setTimeout(function() { statusElem.html(''); }, 3000);
-                    }
-                } else {
-                    statusElem.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
-                    setTimeout(function() { statusElem.html(''); }, 3000);
-                }
-            });
-        });
-
-        // 绑定删除整个提交按钮
-        $('.delete-submission').off('click').on('click', function() {
-            var index = $(this).data('index');
-            var submission = submissions[index];
-            if (!submission) return;
-            fetch('/delete_submission', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ id_time: submission.id })
-            })
-            .then(r => r.json())
-            .then(data => {
-                var statusElem = $('#submission_change_status');
-                if (data.success) {
-                    statusElem.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
-                    // 用后端返回的列表同步本地
-                    if (data.submissions) {
-                        syncFromServer(data.submissions);
                     } else {
-                        submissions.splice(index, 1);
-                        renderHistory();
-                        refreshSubmissionDependents();
+                        $s.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
                     }
-                    setTimeout(function() { statusElem.html(''); }, 3000);
-                } else {
-                    statusElem.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
-                    setTimeout(function() { statusElem.html(''); }, 3000);
-                }
-            });
-        });
-
-        // ── 提交名称（label）行内编辑 ────────────────────────────────────────
-        function commitLabelEdit($inp) {
-            var idx = parseInt($inp.data('index'), 10);
-            var val = $inp.val().trim();
-            submissions[idx].label = val || '';
-            $inp.hide();
-            // Update display without full re-render
-            var $lbl = $('.sub-label-text[data-index="' + idx + '"], .sub-label-add[data-index="' + idx + '"]');
-            if (val) {
-                $lbl.replaceWith('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;margin-right:4px;">' + val + '</span>');
-            } else {
-                $lbl.replaceWith('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
+                    setTimeout(function() { $s.html(''); }, 3000);
+                });
+            },
+            onDeletePath: function(subIndex, pathIndex) {
+                var sub = submissions[subIndex];
+                if (!sub) return;
+                var newPaths = sub.paths.filter(function(_, i) { return i !== pathIndex; });
+                fetch('/delete_path_of_submission', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id_time: sub.id, new_paths: newPaths })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var $s = $('#submission_change_status');
+                    if (data.success) {
+                        if (newPaths.length === 0) {
+                            fetch('/delete_submission', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ id_time: sub.id })
+                            })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d2) {
+                                if (d2.success) {
+                                    if (d2.submissions) syncFromServer(d2.submissions);
+                                    else { submissions.splice(subIndex, 1); renderHistory(); refreshSubmissionDependents(); }
+                                }
+                                $s.html((d2.success ? '✓' : '✗') + ' 提交已删除').css('color', d2.success ? '#28a745' : '#d40000');
+                                setTimeout(function() { $s.html(''); }, 3000);
+                            });
+                        } else {
+                            if (data.submissions) syncFromServer(data.submissions);
+                            else { sub.paths = newPaths; renderHistory(); refreshSubmissionDependents(); }
+                            $s.html('<div>✓ 路径已删除</div>').css('color', '#28a745');
+                            setTimeout(function() { $s.html(''); }, 3000);
+                        }
+                    } else {
+                        $s.html('<div>✗ 删除失败: ' + data.error + '</div>').css('color', '#d40000');
+                        setTimeout(function() { $s.html(''); }, 3000);
+                    }
+                });
+            },
+            onLabelChange: function(idx, val) {
+                if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
+                if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
+            },
+            onPathClick: function(path, subIndex, pathIndex) {
+                loadProductsForPath(path, subIndex, pathIndex);
             }
-            // Notify IC and Group modules
-            if (typeof window.renderICTabs === 'function') window.renderICTabs(submissions);
-            if (typeof window.renderGroupTabs === 'function') window.renderGroupTabs(submissions);
-        }
-
-        $(document).off('click.sublabel').on('click.sublabel', '.sub-label-text, .sub-label-add', function() {
-            var idx = $(this).data('index');
-            var $inp = $('.sub-label-input[data-index="' + idx + '"]');
-            $(this).hide();
-            $inp.show().focus().select();
         });
-
-        $(document).off('keydown.sublabel').on('keydown.sublabel', '.sub-label-input', function(e) {
-            if (e.key === 'Enter') { commitLabelEdit($(this)); }
-            if (e.key === 'Escape') {
-                var idx = $(this).data('index');
-                $(this).hide();
-                var val = submissions[idx] ? (submissions[idx].label || '') : '';
-                var $lbl = val
-                    ? $('<span class="sub-label-text" data-index="' + idx + '" title="点击重命名" style="color:#0078d4;font-weight:600;cursor:pointer;font-size:12px;margin-right:4px;">' + val + '</span>')
-                    : $('<span class="sub-label-add" data-index="' + idx + '" title="点击添加名称" style="color:#aaa;cursor:pointer;font-size:12px;margin-right:4px;">[添加名称]</span>');
-                $(this).before($lbl);
-            }
-        });
-
-        $(document).off('blur.sublabel').on('blur.sublabel', '.sub-label-input', function() {
-            if ($(this).is(':visible')) commitLabelEdit($(this));
-        });
-        // ── 提交名称编辑 END ─────────────────────────────────────────────────
     }
 
     // 加载指定路径的产品详情
     function loadProductsForPath(path, subIndex, pathIndex) {
         var $detailCell = $('#detail-' + subIndex + '-' + pathIndex + ' td');
+        if (!$detailCell.length) return;
         $.get('/get_products', { path: path })
             .done(function(data) {
                 if (data && data.length) {
                     var html = '<div style="font-size:13px;">';
                     data.forEach(function(prod) {
-                        html += `<div>${prod.title} <span style="color:#888;">${prod.desc || ''}</span></div>`;
+                        html += '<div>' + _escHtml(prod.title) + ' <span style="color:#888;">' + _escHtml(prod.desc || '') + '</span></div>';
                     });
                     html += '</div>';
                     $detailCell.html(html);
@@ -330,6 +207,9 @@
                 $detailCell.html('<span style="color:#d00;font-size:13px;">加载失败</span>');
             });
     }
+
+    // 兼容 PS.renderSubmissionHistory 内部的 _escHtml
+    var _escHtml = escHtml;
 
     function getCurrentTimeRange() {
         if (typeof window.getSharedRuntimeTimeRange === 'function') {
@@ -477,39 +357,11 @@
             treeInstance = null;
         }
 
-        // 清空容器，确保没有残留内容
-        $container.empty();  // 移除任何可能存在的占位文字
-
-        // 可选：显示一个临时的 loading 提示（Fancytree 加载期间会显示自带 loading，但为了体验可以加一个）
-        $container.html('<div style="color:#888;text-align:center;padding:20px;">加载产品树...</div>');
-
-        // 初始化 Fancytree
-        $container.fancytree({
-            source: {
-                url: "/api/tree-data"
-            },
-            checkbox: true,
-            selectMode: 3,
-            init: function(event, data) {
-                treeInstance = data.tree;
-                // 树初始化完成后，移除可能残留的临时占位（Fancytree 已填充内容）
-                $container.find('> div:first-child').remove(); // 移除临时占位
-            },
-            lazyLoad: function(event, data) {
-                var node = data.node;
-                data.result = {
-                    url: "/get_products",
-                    data: { path: node.key }
-                };
-            },
-            renderNode: function(event, data) {
-                var node = data.node;
-                var desc = node.data.desc;
-                if (desc) {
-                    var $title = $(node.span).find('.fancytree-title');
-                    $title.siblings('.node-description').remove();
-                    $title.after('<span class="node-description" style="color:#888; margin-left:8px; font-size:12px;">' + desc + '</span>');
-                }
+        // 使用统一的 ProductSelector 创建树
+        window.ProductSelector.createTree($container, {
+            mode: 'drawer',
+            onInit: function(tree) {
+                treeInstance = tree;
             }
         });
 
@@ -518,41 +370,7 @@
             .off('click.categorySubmit', '#submit-selected')
             .on('click.categorySubmit', '#submit-selected', submitSelectedProducts);
 
-        // 初始化 SortableJS 实现拖动排序
-        var historyContainer = document.getElementById('submission-history');
-        if (historyContainer) {
-            new Sortable(historyContainer, {
-                animation: 150,
-                handle: '.submission-header',
-                onEnd: function(evt) {
-                    fetch('/reorder_submissions', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ new_order: submissions.map(sub => sub.id) })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        var statusElem = $('#submission_change_status');
-                        if (data.success) {
-                            statusElem.html('✓ 顺序已更新').css('color', '#28a745');
-                            // 重新排序 submissions 数组
-                            var oldIndex = evt.oldIndex;
-                            var newIndex = evt.newIndex;
-                            if (oldIndex !== newIndex) {
-                                var movedItem = submissions.splice(oldIndex, 1)[0];
-                                submissions.splice(newIndex, 0, movedItem);
-                                renderHistory();
-                                refreshSubmissionDependents();
-                            }
-                            setTimeout(function() { statusElem.html(''); }, 3000);
-                        } else {
-                            statusElem.html('✗ 排序失败: ' + data.error).css('color', '#d40000');
-                            setTimeout(function() { statusElem.html(''); }, 3000);
-                        }
-                    });
-                }
-            });
-        }
+        // SortableJS 拖拽已由 renderHistory() → PS.renderSubmissionHistory() 内部处理
 
         // ── 路径模板管理 ──────────────────────────────────────────────────────
 
@@ -775,170 +593,11 @@
 
         // ── 路径模板管理 END ──────────────────────────────────────────────────
 
-        // ── 从产品组导入 ─────────────────────────────────────────────────────
-
-        // 产品组导入 picker overlay（独立于 products 页面）
-        var importOverlay = null;
-        var importGroupTree = null;
-        var importSelectedGroup = null;  // 当前选中要导入的 group name
-
-        function closeImportOverlay() {
-            if (importOverlay) { importOverlay.remove(); importOverlay = null; }
-            importGroupTree = null;
-            importSelectedGroup = null;
-        }
-
-        $('#pg-import-btn').on('click', async function() {
-            // 获取用户的所有 product_groups
-            var resp;
-            try {
-                resp = await fetch('/api/product-groups').then(function(r) { return r.json(); });
-            } catch (e) {
-                alert('获取产品组列表失败');
-                return;
-            }
-            var groups = (resp && resp.groups) ? resp.groups : [];
-            if (groups.length === 0) {
-                alert('暂无产品组，请先在产品管理页面创建。');
-                return;
-            }
-
-            // 构建 overlay HTML（左侧 group 列表 + 右侧只读产品树）
-            var groupsHtml = groups.map(function(g) {
-                var cnt = g.path_count || (g.paths ? g.paths.length : 0);
-                return '<div class="pg-import-item" data-name="' + escHtml(g.name) + '" style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; margin-bottom:3px; border-radius:6px; cursor:pointer; font-size:13px; border:1px solid transparent; transition:background 0.15s;">' +
-                    '<span style="font-weight:500;">' + escHtml(g.name) + '</span>' +
-                    '<span style="color:#888; font-size:11px;">' + cnt + ' 品种</span>' +
-                '</div>';
-            }).join('');
-
-            var html = '<div id="pg-import-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:10000;">' +
-                '<div style="background:#fff; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.2); width:800px; max-width:95vw; max-height:80vh; display:flex; flex-direction:column;">' +
-                // Header
-                '<div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #e1e4e8;">' +
-                '<h3 style="margin:0; font-size:16px;">📥 从产品组导入</h3>' +
-                '<button id="pg-import-close" style="background:none; border:none; font-size:20px; cursor:pointer; color:#888; line-height:1;">&times;</button>' +
-                '</div>' +
-                // Body: 2-column layout
-                '<div style="display:flex; flex:1; overflow:hidden;">' +
-                // Left: group list
-                '<div style="width:240px; min-width:180px; border-right:1px solid #e1e4e8; padding:12px; overflow-y:auto;">' +
-                '<div style="font-size:12px; color:#888; margin-bottom:8px;">产品组列表</div>' +
-                '<div id="pg-import-group-list">' + groupsHtml + '</div>' +
-                '</div>' +
-                // Right: tree preview
-                '<div style="flex:1; padding:12px; overflow-y:auto;">' +
-                '<div style="font-size:12px; color:#888; margin-bottom:8px;">' +
-                '<span id="pg-import-tree-title">选择一个产品组查看路径</span>' +
-                '<span id="pg-import-path-count" style="margin-left:8px; color:#6c63ff; font-weight:600;"></span>' +
-                '</div>' +
-                '<div id="pg-import-tree-container" style="border:1px solid #e1e4e8; border-radius:8px; padding:8px; min-height:200px; background:#fafbfc;"></div>' +
-                '</div>' +
-                '</div>' +
-                // Footer
-                '<div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid #e1e4e8;">' +
-                '<button id="pg-import-cancel" style="padding:6px 18px; border:1px solid #ddd; border-radius:6px; background:#fff; cursor:pointer; font-size:13px;">取消</button>' +
-                '<button id="pg-import-confirm" style="padding:6px 18px; border:none; border-radius:6px; background:#6c63ff; color:#fff; cursor:pointer; font-size:13px;" disabled>导入</button>' +
-                '</div>' +
-                '</div></div>';
-
-            importOverlay = $(html);
-            importSelectedGroup = null;
-            $('body').append(importOverlay);
-
-            // Bind close events
-            $('#pg-import-close, #pg-import-cancel').on('click', closeImportOverlay);
-            $('#pg-import-overlay').on('click', function(e) { if (e.target === this) closeImportOverlay(); });
-
-            // Group list: click to select & preview
-            var $importList = $('#pg-import-group-list');
-            var $confirmBtn = $('#pg-import-confirm');
-            var $treeTitle = $('#pg-import-tree-title');
-            var $pathCount = $('#pg-import-path-count');
-            var $treeContainer = $('#pg-import-tree-container');
-
-            function selectGroup(groupName) {
-                importSelectedGroup = groupName;
-                $confirmBtn.prop('disabled', false);
-                // 高亮选中项
-                $importList.find('.pg-import-item').each(function() {
-                    var $item = $(this);
-                    if ($item.data('name') === groupName) {
-                        $item.css({background:'#e8f0fe', borderColor:'#6c63ff', fontWeight:'600'});
-                    } else {
-                        $item.css({background:'transparent', borderColor:'transparent', fontWeight:'500'});
-                    }
-                });
-                // 加载 group 详情并渲染树
-                loadGroupPreview(groupName);
-            }
-
-            async function loadGroupPreview(groupName) {
-                $treeTitle.text('加载中...');
-                $pathCount.text('');
-                var detailResp = await fetch('/api/product-groups/' + encodeURIComponent(groupName)).then(function(r) { return r.json(); });
-                if (!detailResp.group || !detailResp.group.paths) {
-                    $treeTitle.text('加载失败');
-                    return;
-                }
-                var paths = detailResp.group.paths;
-                $treeTitle.text(groupName);
-                $pathCount.text(paths.length + ' 个品种');
-
-                // 销毁旧树，重建
-                if (importGroupTree) {
-                    try { importGroupTree.destroy(); } catch(e) {}
-                    importGroupTree = null;
-                }
-                $treeContainer.empty();
-                $treeContainer.fancytree({
-                    source: {url: '/api/product_tree'},
-                    checkbox: false,
-                    selectMode: 2,
-                    init: function(event, data) {
-                        importGroupTree = data.tree;
-                    },
-                    lazyLoad: function(event, data) {
-                        var node = data.node;
-                        if (node.key && node.key.indexOf('CNFuturesContract') >= 0) {
-                            data.result = { url: '/api/contract_tree', data: {path: node.key} };
-                            return;
-                        }
-                        data.result = { url: '/get_products', data: {path: node.key, checkbox: 'true'} };
-                    },
-                    loadChildren: function(event, data) {
-                        // 高亮 group 包含的 product_name 节点
-                        if (importGroupTree) {
-                            importGroupTree.visit(function(node) {
-                                if (node.data && node.data.product_name && paths.indexOf(node.data.product_name) >= 0) {
-                                    $(node.span).css({background:'#f0e6ff', borderRadius:'3px', padding:'0 2px'});
-                                }
-                            });
-                        }
-                    }
-                });
-            }
-
-            $importList.on('click', '.pg-import-item', function() {
-                selectGroup($(this).data('name'));
-            });
-
-            // 默认选中第一个 group
-            if (groups.length > 0) selectGroup(groups[0].name);
-
-            // Confirm: 调后端创建 FactorTester，然后同步 submissions
-            $confirmBtn.on('click', async function() {
-                if (!importSelectedGroup) return;
-                var detailResp = await fetch('/api/product-groups/' + encodeURIComponent(importSelectedGroup)).then(function(r) { return r.json(); });
-                if (!detailResp.group || !detailResp.group.paths || detailResp.group.paths.length === 0) {
-                    alert('产品组路径为空');
-                    return;
-                }
-                var paths = detailResp.group.paths;
+        // ── 从产品组导入（委托给统一的 ProductSelector）────────────────────────
+        $('#pg-import-btn').on('click', function() {
+            window.ProductSelector.openGroupImport(function(groupName, paths) {
                 var newId = 'pg-' + Date.now();
-
-                // 调后端创建 FactorTester
-                var submitResp = await fetch('/submit_selected_products', {
+                fetch('/submit_selected_products', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -946,27 +605,24 @@
                         id_time: newId,
                         page_uuid: window._pageUuid || ''
                     })
-                }).then(function(r) { return r.json(); });
-
-                if (!submitResp.success) {
-                    alert('提交失败: ' + (submitResp.error || '未知错误'));
-                    return;
-                }
-
-                // 用后端返回的 submissions 同步本地状态
-                syncFromServer(submitResp.submissions || []);
-                // 找到新创建的 submission 并打 product_group 标签
-                var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
-                if (newSub) {
-                    newSub.product_group = importSelectedGroup;
-                    newSub.label = importSelectedGroup;
-                }
-                renderHistory();
-                refreshSubmissionDependents();
-                closeImportOverlay();
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(submitResp) {
+                    if (!submitResp.success) {
+                        alert('提交失败: ' + (submitResp.error || '未知错误'));
+                        return;
+                    }
+                    syncFromServer(submitResp.submissions || []);
+                    var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
+                    if (newSub) {
+                        newSub.product_group = groupName;
+                        newSub.label = groupName;
+                    }
+                    renderHistory();
+                    refreshSubmissionDependents();
+                });
             });
         });
-
         // ── 从产品组导入 END ─────────────────────────────────────────────────
 
         // 暴露给单因子设置快照模块

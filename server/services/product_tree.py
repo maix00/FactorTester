@@ -38,10 +38,19 @@ def convert_to_fancytree(tree_dict, checkbox_default=True):
         key_str = str(key) if not isinstance(key, type) else key.__name__
         current_path = f"{path}/{key_str}" if path else key_str
         child_nodes = []
+        total_product_count = 0
         for child_key, child_val in iter_child_entries(value):
-            child_nodes.extend(build_nodes(child_key, child_val, current_path))
+            child_results = build_nodes(child_key, child_val, current_path)
+            child_nodes.extend(child_results)
+            for cn in child_results:
+                count = cn.get('_product_count', 0)
+                if count:
+                    total_product_count += count
 
         has_objects = isinstance(value, dict) and "$OBJECTS$" in value and bool(value["$OBJECTS$"])
+        direct_product_count = len(value["$OBJECTS$"]) if has_objects else 0
+        total_product_count += direct_product_count
+
         has_subclass = isinstance(value, dict) and "$SUBCLASS$" in value and bool(value["$SUBCLASS$"])
         node = {"title": key_str, "key": current_path, "checkbox": checkbox_default}
         if child_nodes:
@@ -51,7 +60,7 @@ def convert_to_fancytree(tree_dict, checkbox_default=True):
             if not has_objects or has_subclass:
                 node["expanded"] = True
             if has_objects:
-                node["desc"] = f"{len(value['$OBJECTS$'])} 个产品"
+                node["desc"] = f"{direct_product_count} 个产品"
                 product_folder = {
                     "title": "Product Lists",
                     "key": current_path + "/_products",
@@ -60,15 +69,18 @@ def convert_to_fancytree(tree_dict, checkbox_default=True):
                     "checkbox": False,
                 }
                 node["children"].insert(0, product_folder)
+            elif total_product_count > 0:
+                node["desc"] = f"{total_product_count} 个产品"
             else:
                 node['checkbox'] = False
         elif has_objects:
             node["folder"] = True
             node["lazy"] = True
-            node["desc"] = f"{len(value['$OBJECTS$'])} 个产品"
+            node["desc"] = f"{direct_product_count} 个产品"
         else:
             node["folder"] = False
             node["lazy"] = False
+        node["_product_count"] = total_product_count
         return [node]
 
     top_nodes = []
@@ -220,4 +232,3 @@ def build_submission_tree():
 
 
 tree = build_submission_tree()
-fancytree_cache = None
