@@ -19,9 +19,8 @@
     var $managerRoot = null;
     var pathExpandedState = {};   // 组详情中每条路径的展开状态
     var categoryTreeSizer = null;
-    var selectedGroups = {};      // Ctrl/Cmd+点击多选: {name: true}
-    var lastClickedGroup = null;  // 最后点击的组名（用于 Shift+点击范围选择）
-    var wasDragging = false;      // SortableJS 拖拽标志位
+    var selectedGroups = {};      // 直接点击多选: {name: true}
+    var lastClickedGroup = null;
 
     var $overlay = $('#pg-overlay');
 
@@ -37,7 +36,7 @@
             return;
         }
 
-        updateRightTitle('📋 产品组列表（Ctrl/Cmd+点击多选）');
+        updateRightTitle('📋 产品组列表（点击多选）');
 
         PG.fetchGroups().then(function(groups) {
             var searchText = ($('#pg-search-input').val() || '').toLowerCase();
@@ -57,8 +56,8 @@
                         + (isSelected ? 'background:#d0e4ff;font-weight:600;border:2px solid #4a90d9;' : 'background:#f6f8fa;border:1px solid #e1e4e8;')
                         + '">';
                     html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
-                    html += '<i class="fas fa-grip-vertical" style="color:#888;cursor:grab;flex-shrink:0;position:relative;z-index:1;"></i>';
-                    html += '<span class="pg-group-name" title="单击查看路径 / Ctrl+点击多选 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
+                    html += '<i class="fas fa-grip-vertical pg-grip-icon" style="color:#888;cursor:grab;flex-shrink:0;"></i>';
+                    html += '<span class="pg-group-name" title="点击多选 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
                     html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
                     html += '</div>';
                     html += '<button class="pg-group-del" data-name="' + _esc(g.name) + '" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;flex-shrink:0;margin-left:4px;"><i class="fas fa-trash"></i></button>';
@@ -70,63 +69,44 @@
             }
             $container.html(html);
 
-            // 拖拽排序
+            // 拖拽排序（参考 drawer renderSubmissionHistory：SortableJS 自动区分 click/drag）
             var el = document.getElementById('pg-group-list');
             if (el && window.Sortable) {
                 if (el._sortable) el._sortable.destroy();
                 window.Sortable.create(el, {
                     animation: 150,
-                    handle: '.fa-grip-vertical',
-                    onStart: function() {
-                        wasDragging = true;
-                    },
+                    handle: '.pg-grip-icon',
                     onEnd: function() {
                         var names = [];
                         $('#pg-group-list .pg-group-item').each(function() {
                             names.push($(this).data('name'));
                         });
                         PG.reorderGroups(names).then(function() {});
-                        // 延迟清除标志位，确保 click 事件在 mouseup 后才触发时能读到
-                        setTimeout(function() { wasDragging = false; }, 50);
                     }
                 });
             }
 
-            // Ctrl/Cmd+点击多选 + 普通单击查看
+            // 直接点击多选（无需 Ctrl）：点击切换选中状态
             $container.find('.pg-group-item').on('click', function(e) {
-                if (wasDragging) return;
                 if ($(e.target).closest('.pg-group-del').length) return;
-                if ($(e.target).closest('.fa-grip-vertical').length) return;
 
                 var $item = $(this);
                 var name = $item.data('name');
-                var isCtrl = e.ctrlKey || e.metaKey;
 
-                if (isCtrl) {
-                    // Ctrl/Cmd+点击：切换选中
-                    if (selectedGroups[name]) {
-                        delete selectedGroups[name];
-                    } else {
-                        selectedGroups[name] = true;
-                    }
-                    lastClickedGroup = name;
-                    currentGroupName = null;
-                    currentGroupDetail = null;
-                    pathExpandedState = {};
-                    renderGroupList();
+                // 直接点击切换选中
+                if (selectedGroups[name]) {
+                    delete selectedGroups[name];
                 } else {
-                    // 普通单击：清除多选，查看该组路径详情
-                    selectedGroups = {};
-                    lastClickedGroup = name;
-                    loadGroupForEdit(name);
+                    selectedGroups[name] = true;
                 }
+                lastClickedGroup = name;
+                renderGroupList();
             });
 
             // 双击重命名
             $container.find('.pg-group-name').on('dblclick', function(e) {
                 e.stopPropagation();
                 e.preventDefault();
-                wasDragging = false;
                 var $name = $(this);
                 var oldName = $name.text().trim();
                 var $inp = $('<input type="text" style="font-size:13px;padding:2px 6px;border:1px solid #4a90d9;border-radius:4px;width:100%;box-sizing:border-box;">')
@@ -336,7 +316,6 @@
         pathExpandedState = {};
         allGroupPaths = [];
         selectedGroups = {};
-        wasDragging = false;
 
         // 如果还没渲染，用 PS.render 生成统一两栏布局
         if (!$('#ps-manager-root').find('.ps-body').length) {
@@ -345,9 +324,9 @@
                 submitLabel: '💾 保存产品组',
                 onSubmit: doSave,
                 headerBtns: '<button id="pg-overlay-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>',
-                toolbar: '<input id="pg-search-input" type="text" placeholder="🔍 搜索产品组..." style="padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:180px;" maxlength="50">'
-                    + '<input id="pg-new-name" placeholder="新组名..." style="padding:6px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:150px;" maxlength="30">'
-                    + '<span style="font-size:12px;color:#666;">或从右侧列表点击已有组编辑</span>'
+                toolbar: '<input id="pg-new-name" placeholder="新组名..." style="padding:6px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:150px;height:32px;box-sizing:border-box;" maxlength="30">'
+                    + '<button id="pg-save-toolbar-btn" style="padding:6px 14px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;font-size:12px;height:32px;box-sizing:border-box;white-space:nowrap;">💾 保存产品组</button>'
+                    + '<input id="pg-search-input" type="text" placeholder="🔍 搜索产品组..." style="padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:180px;height:32px;box-sizing:border-box;" maxlength="50">'
             });
             $managerRoot = $('#ps-manager-root');
 
@@ -383,6 +362,13 @@
             // 搜索框：输入时过滤组列表
             $('#pg-search-input').on('input', function() {
                 filterGroupList($(this).val().toLowerCase());
+            });
+
+            // toolbar 保存按钮
+            $('#pg-save-toolbar-btn').on('click', function() {
+                var newName = $('#pg-new-name').val().trim();
+                if (newName) currentGroupName = newName;
+                doSave();
             });
 
             // 新组名输入回车即保存

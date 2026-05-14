@@ -335,6 +335,10 @@
                 + '<div id="ps-import-body" style="flex:1;overflow-y:auto;padding:12px 20px;min-height:200px;">'
                 + '<div style="color:#888;text-align:center;padding:40px 0;">加载产品组列表...</div>'
                 + '</div>'
+                // 路径详情面板
+                + '<div id="ps-import-detail" style="max-height:200px;overflow-y:auto;padding:0 20px 12px 20px;border-top:1px solid #e1e4e8;">'
+                + '<div style="color:#888;text-align:center;padding:20px;">点击产品组查看路径</div>'
+                + '</div>'
                 // Footer
                 + '<div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid #e1e4e8;">'
                 + '<button id="ps-import-cancel" style="padding:6px 18px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:13px;">取消</button>'
@@ -373,7 +377,7 @@
                             + '">';
                         html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
                         html += '<i class="fas fa-grip-vertical" style="color:#aaa;flex-shrink:0;"></i>';
-                        html += '<span class="ps-import-name" title="Ctrl/Cmd+点击多选" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escHtml(g.name) + '</span>';
+                        html += '<span class="ps-import-name" title="点击多选 / 选中后查看路径" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _escHtml(g.name) + '</span>';
                         html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
                         html += '</div>';
                         html += '</div>';
@@ -383,24 +387,36 @@
                 }
                 $body.html(html);
 
-                // 绑定点击：Ctrl/Cmd+点击多选
+                // 绑定点击：直接点击切换多选；选中组后展示路径详情
                 $body.find('.ps-import-item').on('click', function(e) {
                     var name = $(this).data('name');
-                    var isCtrl = e.ctrlKey || e.metaKey;
-                    if (isCtrl) {
-                        // 切换选中
-                        if (selectedNames[name]) {
-                            delete selectedNames[name];
-                        } else {
-                            selectedNames[name] = true;
-                        }
+                    // 直接点击切换选中
+                    if (selectedNames[name]) {
+                        delete selectedNames[name];
                     } else {
-                        // 普通单击：清除其他选中，只选当前
-                        selectedNames = {};
                         selectedNames[name] = true;
                     }
                     updateConfirmButton();
                     renderImportList($search.val());
+                    // 展开选中组的路径详情
+                    renderImportDetail(selectedNames);
+                });
+            }
+
+            // 渲染选中组的路径详情（列表下方）
+            function renderImportDetail(selected) {
+                var names = Object.keys(selected);
+                var $detail = $('#ps-import-detail');
+                if (!names.length) {
+                    $detail.html('<div style="color:#888;text-align:center;padding:20px;">点击产品组查看路径</div>');
+                    return;
+                }
+                // 取第一个选中组加载详情
+                var first = names[0];
+                $detail.html('<div style="color:#888;text-align:center;padding:20px;">加载中...</div>');
+                PG.fetchGroupDetail(first).then(function(g) {
+                    if (!g) return;
+                    PG.renderGroupDetail(g, $detail, names.length > 1 ? (first + ' 等' + names.length + '组') : first);
                 });
             }
 
