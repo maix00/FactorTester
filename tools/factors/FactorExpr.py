@@ -289,14 +289,10 @@ class FactorExpr:
               None 表示匿名中间因子（仅创建 FactorData 不做命名映射）。
         """
         factor = factor or self
-        if isinstance(self, OperandExpr) and self.op == 'neg':
-            self._is_intermediate = False
-            return CompositeExpr('neg', self.operands[0].as_intermediate(name, factor))
-        else:
-            self._is_intermediate = True
-            self._intermediate_name = name
-            self._intermediate_factor = factor
-            return self
+        self._is_intermediate = True
+        self._intermediate_name = name
+        self._intermediate_factor = factor
+        return self
 
     # ── 可哈希（用于 set/dict 中的依赖追踪和缓存） ──
 
