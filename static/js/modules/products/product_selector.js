@@ -262,6 +262,7 @@
             onEditName: function(name) {
                 if (onEditName) {
                     var found = expItems.find(function(item) { return item.name === name; });
+                    if (found && found._fromGroup) return;
                     if (found) onEditName(found._sub.id, found._sub, found._index, name);
                     else onEditName(name, null, -1, name);
                 }

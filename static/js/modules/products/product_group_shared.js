@@ -252,7 +252,7 @@
             var isEditing = isPlaceholder || !!editing[name];
             var isFromGroup = !!item._fromGroup;
             var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
-            var showSave = (isSel || isPlaceholderSelected) && mode !== 'import';
+            var showSave = (isSel || isPlaceholderSelected) && mode !== 'import' && !isFromGroup;
             var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
             var pathCount = paths.length;
 
@@ -286,7 +286,7 @@
                 if (isFromGroup) {
                     html += '<span style="background:#6c63ff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">产品组</span>';
                 }
-                if (isSel && mode !== 'import') {
+                if (isSel && mode !== 'import' && !isFromGroup) {
                     html += '<span style="background:#e7f1ff;color:#145da0;border:1px solid #9cc7f2;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;font-weight:600;line-height:1.4;">编辑中</span>';
                 }
             }
@@ -314,7 +314,7 @@
                     html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
                     html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                     html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
-                    if (mode !== 'readonly' && mode !== 'import' && (isSel || isPlaceholderSelected)) {
+                    if (mode !== 'readonly' && mode !== 'import' && (isSel || isPlaceholderSelected) && !isFromGroup) {
                         html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                     }
                     html += '</div>';
@@ -387,7 +387,7 @@
                             ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
                             ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
                             ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
-                            if (mode !== 'readonly' && mode !== 'import' && !!selected[name]) {
+                            if (mode !== 'readonly' && mode !== 'import' && !!selected[name] && !item._fromGroup) {
                                 ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                             }
                             ph += '</div>';
