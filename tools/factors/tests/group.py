@@ -627,8 +627,8 @@ def test_by_group_single_factor(
         if plot_show:
             plt.show()
 
-    if hasattr(tester, '_get_result'):
-        tester._get_result(factor).returns = returns_dict
+    # NOTE: 不再将 returns_dict 写回 r.returns——returns_dict 是 {group_id: {ts: float}}
+    # 的嵌套字典，会污染后续分组测试使用的 r.returns（IC测试的品种x时间矩阵）。
     return products_dict, returns_dict, report_df, cumulative_returns_np, index_list
 
 
