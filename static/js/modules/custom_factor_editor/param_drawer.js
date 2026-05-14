@@ -163,6 +163,10 @@ function buildParamConfigParamsList() {
         _paramAliases.forEach(alias => {
             params[alias] = row[alias] !== undefined ? row[alias] : '';
         });
+        // 保留条目级 category
+        if (row.__category) {
+            params.category = row.__category;
+        }
         return params;
     });
 }
@@ -261,6 +265,8 @@ function loadOwnParamConfigFromUsers(users) {
         _paramAliases.forEach(a => { row[a] = obj[a] !== undefined ? String(obj[a]) : ''; });
         const factor = (own.factors || []).find(f => Number(f.template_row_index || 0) === idx);
         if (factor) row.__factor_alias = factor.factor_alias || '';
+        // 读回条目级 category
+        if (obj.category) row.__category = obj.category;
         return row;
     });
     renderParamTable();
@@ -302,8 +308,9 @@ function renderParamTemplateOptions() {
 function renderParamConfigResult(item, idx) {
     const readonly = item.editable ? '' : '（只读）';
     const selected = _selectedParamConfig && isSameParamConfig(item, _selectedParamConfig) ? ' style="border-color:#0078d4;background:#eef6ff;"' : '';
+    const categoryTag = item.category ? ' <span class="tag tag-category" style="font-size:10px;">' + escHtml(item.category) + '</span>' : '';
     return '<button type="button" class="factor-config-result" data-param-config-idx="' + idx + '"' + selected + '>' +
-        '<span><span class="factor-config-result-title">' + escHtml(item.factor_alias || item.name || '') + '</span>' +
+        '<span><span class="factor-config-result-title">' + escHtml(item.factor_alias || item.name || '') + categoryTag + '</span>' +
         '<span class="factor-config-result-meta">' + escHtml((item.owner_alias || item.owner_username || '') + ' / ' + (item.name || '') + readonly) + '</span></span>' +
         '<span class="factor-config-result-meta">第 ' + (Number(item.template_row_index || 0) + 1) + ' 行</span>' +
         '</button>';
@@ -327,6 +334,7 @@ function flattenParamConfigUsers(users) {
                 owner_alias: user.owner_alias || user.owner_username || '',
                 owner_organization_id: user.owner_organization_id || '',
                 owner_organization_name: user.owner_organization_name || '',
+                category: factor.category || '',
                 editable: !!user.editable,
             });
         });
