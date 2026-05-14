@@ -2,6 +2,12 @@
 
 from flask import jsonify, request
 
+from server.modules.custom_factors.param_config_store import (
+    DEFAULT_SCOPE_KEY,
+    delete_scope,
+    ensure_scope_exists,
+    rename_scope,
+)
 from server.modules.templates import templates_bp
 from server.modules.templates.common import load_template_list, new_template_id, save_template_list
 from server.services.http_auth import login_required
@@ -14,7 +20,7 @@ def list_path_templates():
     username = require_user()
     with get_user_file_lock(username):
         templates = load_template_list(username, 'path')
-    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name']} for t in templates]})
+    return jsonify({'success': True, 'templates': [{'id': t['id'], 'name': t['name'], 'scope_key': t['name']} for t in templates]})
 
 
 @templates_bp.route('/api/path_templates', methods=['POST'])
@@ -30,10 +36,15 @@ def save_path_template():
     username = require_user()
     with get_user_file_lock(username):
         templates = load_template_list(username, 'path')
+        # name 唯一性校验
+        if any(t.get('name') == name for t in templates):
+            return jsonify({'success': False, 'error': '模板名称已存在'})
         template_id = new_template_id()
         templates.append({'id': template_id, 'name': name, 'submissions': submissions})
         save_template_list(username, 'path', templates)
-    return jsonify({'success': True, 'id': template_id})
+        # 同步创建因子库 scope（以模板 name 为 scope_key）
+        ensure_scope_exists(username, name)
+    return jsonify({'success': True, 'id': template_id, 'scope_key': name})
 
 
 @templates_bp.route('/api/path_templates/<tpl_id>', methods=['GET'])
@@ -45,7 +56,9 @@ def get_path_template(tpl_id):
     template = next((t for t in templates if t['id'] == tpl_id), None)
     if not template:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
-    return jsonify({'success': True, 'template': template})
+    result = dict(template)
+    result['scope_key'] = template.get('name', '')
+    return jsonify({'success': True, 'template': result})
 
 
 @templates_bp.route('/api/path_templates/<tpl_id>', methods=['PUT'])
@@ -58,16 +71,23 @@ def update_path_template(tpl_id):
         template = next((t for t in templates if t['id'] == tpl_id), None)
         if not template:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
+        old_name = template.get('name', '')
         if 'name' in data:
             name = data['name'].strip()
             if not name:
                 return jsonify({'success': False, 'error': '模板名称不能为空'})
+            # name 唯一性校验（排除自身）
+            if any(t.get('id') != tpl_id and t.get('name') == name for t in templates):
+                return jsonify({'success': False, 'error': '模板名称已存在'})
             template['name'] = name
         if 'submissions' in data:
             if not isinstance(data['submissions'], list) or len(data['submissions']) == 0:
                 return jsonify({'success': False, 'error': '提交列表不能为空'})
             template['submissions'] = data['submissions']
         save_template_list(username, 'path', templates)
+        # 如果模板名称变更，同步重命名因子库 scope
+        if 'name' in data and old_name and old_name != name:
+            rename_scope(username, old_name, name)
     return jsonify({'success': True})
 
 
@@ -78,10 +98,16 @@ def delete_path_template(tpl_id):
     with get_user_file_lock(username):
         templates = load_template_list(username, 'path')
         before = len(templates)
+        deleted = [t for t in templates if t['id'] == tpl_id]
         templates = [t for t in templates if t['id'] != tpl_id]
         if len(templates) == before:
             return jsonify({'success': False, 'error': '模板不存在'}), 404
         save_template_list(username, 'path', templates)
+        # 同步删除因子库 scope（以模板 name 为 scope_key）
+        if deleted:
+            scope_name = deleted[0].get('name', '')
+            if scope_name:
+                delete_scope(username, scope_name)
     return jsonify({'success': True})
 
 
