@@ -252,6 +252,7 @@
             var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
             var showSave = (isSel || isPlaceholderSelected) && !isFromGroup;
             var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
+            var pathCount = paths.length;
 
             // 占位方块：虚线框 + 浅背景
             var itemStyle = 'border-radius:6px;margin-bottom:6px;overflow:hidden;';
