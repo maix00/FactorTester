@@ -20,8 +20,20 @@
         <button id="pg-import-btn" title="从产品组导入路径" style="font-size:12px;padding:4px 12px;background:#6c63ff;color:#fff;border:none;border-radius:5px;cursor:pointer;">📥 从产品组导入</button>
     </div>
 
-    <script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/modules/single_factor_test/category_filter_module.js') }}"></script>
+    </div>
+
+</div><!-- /.module -->
+
+<!-- 依赖资源 -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/skin-win8/ui.fancytree.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.fancytree/2.38.2/jquery.fancytree-all-deps.min.js"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/resizable_tree_container.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/products/product_group_shared.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/products/product_selector.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/category_filter_module.js') }}"></script>
 
     </div><!-- /.settings-drawer-panel -->
 </div><!-- /.settings-drawer-overlay #category-drawer -->
