@@ -250,7 +250,7 @@
             var isEditing = isPlaceholder || !!editing[name];
             var isFromGroup = !!item._fromGroup;
             var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
-            var showSave = (isSel || isPlaceholderSelected) && !isFromGroup;
+            var showSave = (isSel || isPlaceholderSelected) && !isFromGroup && mode !== 'import';
             var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
             var pathCount = paths.length;
 
