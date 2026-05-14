@@ -213,6 +213,24 @@
                         renderGroupList();
                     });
                 },
+                onDeletePath: function(name, path) {
+                    var group = groups.find(function(g) { return g.name === name; });
+                    if (!group) return;
+                    var newPaths = (group.paths || []).filter(function(p) { return p !== path; });
+                    PG.updateGroup(name, newPaths).then(function(resp) {
+                        if (resp && resp.success) {
+                            if (selectedName === name) {
+                                allGroupPaths = newPaths.slice();
+                                PS.clearChecks(groupTree);
+                                PS.restoreChecks(groupTree, allGroupPaths);
+                            }
+                            flashStatus('✓ 路径已删除');
+                            renderGroupList();
+                        } else {
+                            flashStatus('✗ 删除路径失败: ' + ((resp && resp.error) || '未知错误'), false);
+                        }
+                    });
+                },
                 onRename: function(oldName, newName) {
                     newName = (newName || '').trim();
                     if (!newName || newName === oldName) { renderGroupList(); return; }
@@ -226,9 +244,14 @@
                 onReorder: function(names) {
                     var visible = {};
                     names.forEach(function(n) { visible[n] = true; });
-                    var fullOrder = names.slice();
+                    var visibleStorageOrder = names.slice().reverse();
+                    var fullOrder = [];
                     groups.forEach(function(g) {
-                        if (!visible[g.name]) fullOrder.push(g.name);
+                        if (visible[g.name]) {
+                            fullOrder.push(visibleStorageOrder.shift());
+                        } else {
+                            fullOrder.push(g.name);
+                        }
                     });
                     PG.reorderGroups(fullOrder).then(function(resp) {
                         flashStatus(resp && resp.success ? '✓ 顺序已更新' : '✗ 排序失败', !!(resp && resp.success));

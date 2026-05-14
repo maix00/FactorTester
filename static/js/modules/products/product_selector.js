@@ -300,7 +300,7 @@
                     }
                 });
                 var reordered = [];
-                newOrder.forEach(function(oldIdx) {
+                newOrder.reverse().forEach(function(oldIdx) {
                     reordered.push(submissions[oldIdx]);
                 });
                 submissions.length = 0;
