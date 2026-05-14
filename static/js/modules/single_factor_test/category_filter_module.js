@@ -349,6 +349,33 @@
             }
         });
 
+        // 左栏右下角拖动缩放
+        if (typeof window.setupResizableTreeContainer === 'function' && !categoryTreeSizer) {
+            var $leftPanel = $moduleContainer.find('.ps-left-panel');
+            var $treeContainer = $moduleContainer.find('.ps-tree-container');
+            if ($leftPanel.length && $treeContainer.length) {
+                categoryTreeSizer = window.setupResizableTreeContainer({
+                    outerElement: $leftPanel[0],
+                    innerElement: $treeContainer[0],
+                    minWidth: 260,
+                    initialWidth: 340,
+                    maxWidth: 'min(54vw, 620px)',
+                    maxWidthFallback: 620,
+                    desktopMediaQuery: '(max-width: 1200px)',
+                    mobileInnerMaxHeight: '400px'
+                });
+            }
+        }
+        // 抽屉打开时同步 resize 尺寸
+        var drawer = document.getElementById('category-drawer');
+        if (drawer && categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
+            drawer.addEventListener('transitionend', function() {
+                if (drawer.classList.contains('open')) {
+                    categoryTreeSizer.sync();
+                }
+            });
+        }
+
         // 提交按钮委托（已在 render 中绑定，此处保留兼容）
         $(document)
             .off('click.categorySubmit', '.ps-submit-btn')
