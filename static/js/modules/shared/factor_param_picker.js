@@ -41,7 +41,7 @@
         const q = (document.getElementById('shared-factor-param-picker-search')?.value || '').trim().toLowerCase();
         const visible = items.filter(item => {
             if (!q) return true;
-            return [item.factor_alias, item.factor_family_alias, item.factor_family_name, item.chinese_name, item.owner_alias, item.owner_username, item.scope_key]
+            return [item.factor_alias, item.factor_family_alias, item.factor_family_name, item.chinese_name, item.owner_alias, item.owner_username, item.scope_key, item.category]
                 .join(' ').toLowerCase().includes(q);
         });
 
