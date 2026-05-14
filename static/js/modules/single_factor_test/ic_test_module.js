@@ -1391,7 +1391,7 @@
         const summaryRow = document.getElementById('ic-freq-summary-row');
         if (!tbody || !summaryText) return;
         if (!factors || factors.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="2" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="3" style="color:#888;text-align:center;">暂无因子数据，请先选择因子家族。</td></tr>';
             summaryText.textContent = '暂无因子数据';
             return;
         }
@@ -1402,8 +1402,10 @@
         factors.forEach(f => {
             const defaultReturnFreq = f.default_return_freq || '';
             const defaultHint = defaultReturnFreq ? `默认: 因子$F (${defaultReturnFreq})` : '默认: 因子$F';
+            const cat = (f.category || '').trim();
             rows += `<tr>
                 <td><label><input type="checkbox" class="factor-checkbox" data-factor-alias="${f.alias}" checked> ${f.name}</label></td>
+                <td style="color:#667085;font-size:12px;">${cat}</td>
                 <td>
                     <input
                         type="text"
