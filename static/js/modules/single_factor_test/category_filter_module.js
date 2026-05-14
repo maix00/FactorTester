@@ -234,12 +234,14 @@
                 newItemPlaceholderName = null;
                 renderHistory();
             },
-            onToggleEdit: function(displayName) {
-                // displayName → sub.id（CF 用 id 做键）
-                var sub = submissions.find(function(s) {
-                    return submissionDisplayName(s, submissions.indexOf(s)) === displayName;
-                });
-                var subId = sub ? sub.id : displayName;
+            onToggleEdit: function(subId, sub) {
+                // ProductSelector 直接传 sub.id；兼容旧调用时再退回显示名匹配。
+                if (!sub) {
+                    sub = submissions.find(function(s) {
+                        return String(s.id) === String(subId) || submissionDisplayName(s, submissions.indexOf(s)) === subId;
+                    });
+                    subId = sub ? sub.id : subId;
+                }
                 if (editingName === subId) {
                     editingName = null;
                     inlineEditingName = null;
@@ -261,11 +263,13 @@
                 }
                 renderHistory();
             },
-            onEditName: function(displayName) {
-                var sub = submissions.find(function(s) {
-                    return submissionDisplayName(s, submissions.indexOf(s)) === displayName;
-                });
-                var subId = sub ? sub.id : displayName;
+            onEditName: function(subId, sub) {
+                if (!sub) {
+                    sub = submissions.find(function(s) {
+                        return String(s.id) === String(subId) || submissionDisplayName(s, submissions.indexOf(s)) === subId;
+                    });
+                    subId = sub ? sub.id : subId;
+                }
                 editingName = subId;
                 inlineEditingName = subId;
                 setEditingHint(sub || null);

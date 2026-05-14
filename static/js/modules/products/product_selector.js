@@ -254,11 +254,17 @@
             },
             onToggle: function(name) {
                 if (name && name !== (newItemPlaceholder && newItemPlaceholder.name) && onToggleEdit) {
-                    onToggleEdit(name);
+                    var found = expItems.find(function(item) { return item.name === name; });
+                    if (found) onToggleEdit(found._sub.id, found._sub, found._index, name);
+                    else onToggleEdit(name, null, -1, name);
                 }
             },
             onEditName: function(name) {
-                if (onEditName) onEditName(name);
+                if (onEditName) {
+                    var found = expItems.find(function(item) { return item.name === name; });
+                    if (found) onEditName(found._sub.id, found._sub, found._index, name);
+                    else onEditName(name, null, -1, name);
+                }
             },
             onSave: function(name, newName, isPlaceholder) {
                 if (onSave) onSave(name, newName, isPlaceholder);
