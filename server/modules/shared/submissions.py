@@ -16,10 +16,8 @@ from server.services.product_tree import (
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
-from .submission_helpers import (
-    resolve_products_from_paths,
-    submissions_payload,
-)
+from .submission_helpers import resolve_products_from_paths, submissions_payload
+from .submission_ids import make_submission_id
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 
@@ -82,7 +80,7 @@ def get_products():
 def submit_selected_products():
     data = request.get_json()
     selected_paths = data.get('selected_paths', [])
-    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    id_time = make_submission_id(data.get('id_time'))
     page_uuid = data.get('page_uuid', '').strip() or None
     group_name = data.get('group_name', '').strip() or None
     assert selected_paths, "未选择任何产品路径"

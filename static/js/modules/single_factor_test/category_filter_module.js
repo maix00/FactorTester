@@ -219,11 +219,13 @@
             },
             onImportGroup: function() {
                 window.ProductSelector.openGroupImport(function(groupName, paths) {
+                    var importId = Date.now() + '-' + Math.random().toString(36).slice(2, 10);
                     fetch('/submit_selected_products', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             selected_paths: paths,
+                            id_time: importId,
                             group_name: groupName,
                             page_uuid: window._pageUuid || ''
                         })
