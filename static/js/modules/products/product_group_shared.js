@@ -286,12 +286,6 @@
 
             // 操作图标组（紧凑排列）
             html += '<span class="pg-exp-actions" style="display:flex;align-items:center;gap:2px;flex-shrink:0;">';
-            if (mode === 'manage' || isPlaceholder) {
-                html += '<button class="pg-exp-save" data-name="' + _escHtml(name) + '" title="保存" style="background:none;border:none;color:#0078d4;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;"><i class="fas fa-save"></i></button>';
-            }
-            if (!isPlaceholder) {
-                html += '<button class="pg-exp-toggle" data-name="' + _escHtml(name) + '" title="展开/收起" style="background:none;border:none;color:#888;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;">' + (isExp ? '&#9650;' : '&#9660;') + '</button>';
-            }
             if (mode === 'manage' || mode === 'readonly' || isPlaceholder) {
                 html += '<button class="pg-exp-del" data-name="' + _escHtml(name) + '" title="删除" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;"><i class="fas fa-trash"></i></button>';
             }
@@ -335,12 +329,36 @@
 
         // ── 事件绑定 ──
 
-        // 点击主行 → toggle 选中
+        // 单击行 → 切换编辑模式
+        // 非导入：非编辑→进入编辑 / 编辑→退出并保存（单击输入框外部区域）
+        // 导入：单击=多选（toggle选中状态）
         $container.off('click.pgexp', '.pg-exp-header').on('click.pgexp', '.pg-exp-header', function(e) {
             if ($(e.target).closest('button').length) return; // 按钮不触发
-            if ($(e.target).closest('input').length) return;   // 输入框不触发
-            var name = $(this).closest('.pg-exp-item').data('name');
-            if (opts.onToggle) opts.onToggle(name);
+            if ($(e.target).closest('input').length) return;   // 输入框内点击不触发
+            var $item = $(this).closest('.pg-exp-item');
+            var name = $item.data('name');
+            var isPlaceholder = String($item.data('placeholder')) === '1';
+
+            if (mode === 'import') {
+                // 导入模式：单击=多选
+                if (opts.onToggle) opts.onToggle(name);
+                return;
+            }
+
+            var isEditing = isPlaceholder || !!editing[name];
+            if (isEditing) {
+                // 已在编辑 → 退出并保存
+                var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
+                var newName = $inp.length ? $inp.val().trim() : name;
+                if (!newName) return;
+                // 标记正在保存，防 blur 重复
+                var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
+                $container.data(saveKey, true);
+                if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
+            } else if (opts.onToggle) {
+                // 不在编辑 → 进入编辑
+                opts.onToggle(name);
+            }
         });
 
         // 展开/折叠
@@ -383,16 +401,6 @@
                 $body.slideUp(150);
                 if (opts.onCollapse) opts.onCollapse(name);
             }
-        });
-
-        // 保存（管理模式）
-        $container.off('click.pgexp', '.pg-exp-save').on('click.pgexp', '.pg-exp-save', function(e) {
-            e.stopPropagation();
-            var name = $(this).data('name');
-            var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
-            var newName = $inp.length ? $inp.val().trim() : name;
-            var isPlaceholder = String($(this).closest('.pg-exp-item').data('placeholder')) === '1';
-            if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
         });
 
         // 删除
@@ -442,7 +450,7 @@
                 });
         });
 
-        // 名称输入框：Enter 触发保存，blur 也触发保存
+        // 名称输入框：Enter 触发保存，blur 也触发保存（互斥：Enter 后 blur 不重复）
         $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')
             .on('keydown.pgexp', '.pg-exp-name-input', function(e) {
                 if (e.key === 'Enter') {
@@ -452,23 +460,27 @@
                     var newName = $inp.val().trim();
                     if (!newName) return;
                     var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
-                    if (opts.onSave) {
-                        opts.onSave(name, newName, isPlaceholder);
-                    }
+                    // 标记防 blur 重复
+                    var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
+                    $container.data(saveKey, true);
+                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
                 }
             })
             .on('blur.pgexp', '.pg-exp-name-input', function() {
-                // 延迟以允许保存按钮点击优先处理
                 var $inp = $(this);
+                var name = $inp.data('name');
+                var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
                 setTimeout(function() {
-                    if (!$inp.is(':visible')) return; // 已被重新渲染
-                    var name = $inp.data('name');
+                    // 已通过 Enter/单击触发过保存 → 跳过
+                    if ($container.data(saveKey)) {
+                        $container.removeData(saveKey);
+                        return;
+                    }
+                    if (!$inp.is(':visible')) return;
                     var newName = $inp.val().trim();
                     if (!newName) return;
                     var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
-                    if (opts.onSave) {
-                        opts.onSave(name, newName, isPlaceholder);
-                    }
+                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
                 }, 150);
             });
 
