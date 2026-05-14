@@ -16,6 +16,9 @@
     <!-- 布局由 ProductSelector.render() 生成 -->
     <!-- Toolbar 模板元素（隐藏），JS 读取后拼入渲染 -->
     <div id="category-toolbar-tpl" style="display:none;">
+        <button id="ps-submit-inline-btn" title="将树中选中的产品提交到列表" style="font-size:12px;padding:4px 12px;background:#0078d4;color:#fff;border:none;border-radius:5px;cursor:pointer;">✅ 提交选中产品</button>
+        <button id="pg-import-btn" title="从产品组导入路径" style="font-size:12px;padding:4px 12px;background:#6c63ff;color:#fff;border:none;border-radius:5px;cursor:pointer;">📥 从产品组导入</button>
+        <span style="color:#ccc;">|</span>
         <select id="tpl-select" style="min-width:140px;font-size:13px;padding:3px 6px;border:1px solid #ddd;border-radius:5px;height:30px;">
             <option value="">— 选择模板 —</option>
         </select>
@@ -26,8 +29,6 @@
         <button id="tpl-save-btn" title="将当前所有提交路径保存为新模板" style="font-size:12px;padding:4px 12px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;">另存为…</button>
         <button id="tpl-update-btn" title="用当前所有提交路径覆盖选中模板" style="font-size:12px;padding:4px 12px;background:#fd7e14;color:#fff;border:none;border-radius:5px;cursor:pointer;">更新</button>
         <button id="tpl-delete-btn" title="删除选中模板" style="font-size:12px;padding:4px 12px;background:transparent;color:#d00;border:1px solid #faa;border-radius:5px;cursor:pointer;">删除</button>
-        <span style="color:#ccc;">|</span>
-        <button id="pg-import-btn" title="从产品组导入路径" style="font-size:12px;padding:4px 12px;background:#6c63ff;color:#fff;border:none;border-radius:5px;cursor:pointer;">📥 从产品组导入</button>
         <span id="tpl-status" style="font-size:12px;white-space:nowrap;"></span>
     </div>
 </div>

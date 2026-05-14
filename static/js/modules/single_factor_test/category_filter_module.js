@@ -334,13 +334,16 @@
             $toolbarTpl.remove();
         }
 
-        // 统一布局渲染
+        // 统一布局渲染（提交按钮在 toolbar 中，不占 header）
         PS.render($moduleContainer, {
             title: '🌳 产品类别筛选',
-            submitLabel: '✅ 提交选中产品',
+            submitLabel: '',
             toolbar: toolbarHTML,
             onSubmit: submitSelectedProducts
         });
+
+        // 绑定 toolbar 中的内联提交按钮
+        $moduleContainer.find('#ps-submit-inline-btn').on('click', submitSelectedProducts);
 
         // 初始化左侧树
         PS.initLeftTree($moduleContainer, {
@@ -379,12 +382,6 @@
             });
         }
 
-        // 提交按钮委托（已在 render 中绑定，此处保留兼容）
-        $(document)
-            .off('click.categorySubmit', '.ps-submit-btn')
-            .on('click.categorySubmit', '.ps-submit-btn', submitSelectedProducts);
-
-        // SortableJS 拖拽已由 renderHistory() → PS.renderSubmissionHistory() 内部处理
 
         // ── 路径模板管理 ──────────────────────────────────────────────────────
 
