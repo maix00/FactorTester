@@ -116,8 +116,11 @@
     <div class="pv-header">
         {% set back_link_class = 'back-link' %}
         {% include 'modules/shared/home_back_link.html' %}
-        <h1>� 产品管理</h1>
-    </div>
+        <h1>� 产品管理</h1>        <div style="display:flex; gap:10px; align-items:center;">
+            <button id="btn-product-groups" style="padding:6px 16px; font-size:13px; border:1px solid #d0d5dd; border-radius:6px; background:#fff; cursor:pointer;">
+                📦 产品组管理
+            </button>
+        </div>    </div>
 
     <div class="pv-layout">
         <!-- 左侧产品树 -->
@@ -177,6 +180,33 @@
                         <tbody></tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Product Group Overlay ── -->
+<div id="pg-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:999; justify-content:center; align-items:center;">
+    <div style="background:#fff; border-radius:12px; width:min(90vw, 800px); max-height:85vh; display:flex; flex-direction:column; box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+        <!-- Header -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #e2e8f0;">
+            <h3 style="margin:0; font-size:16px;">📦 产品组管理</h3>
+            <button id="pg-overlay-close" style="background:none; border:none; font-size:20px; cursor:pointer; color:#888;">&times;</button>
+        </div>
+        <!-- Body: 2-column -->
+        <div style="display:flex; flex:1; min-height:0; overflow:hidden;">
+            <!-- Left: group list -->
+            <div style="width:240px; border-right:1px solid #e2e8f0; display:flex; flex-direction:column; padding:12px;">
+                <div style="display:flex; gap:6px; margin-bottom:10px;">
+                    <input id="pg-new-name" placeholder="新组名..." style="flex:1; padding:6px 8px; border:1px solid #d0d5dd; border-radius:4px; font-size:12px;" maxlength="30">
+                    <button id="pg-btn-save" style="padding:6px 12px; font-size:12px; border:1px solid #4a90d9; border-radius:4px; background:#4a90d9; color:#fff; cursor:pointer; white-space:nowrap;">💾 保存</button>
+                </div>
+                <div id="pg-group-list" style="flex:1; overflow-y:auto; font-size:12px;"></div>
+            </div>
+            <!-- Right: tree picker -->
+            <div style="flex:1; display:flex; flex-direction:column; padding:12px; min-width:0;">
+                <div style="font-size:12px; color:#666; margin-bottom:6px;">勾选品种加入当前组（已选：<span id="pg-selected-count">0</span>）</div>
+                <div id="pg-tree-container" style="flex:1; overflow:auto; border:1px solid #e1e4e8; border-radius:6px; padding:6px; background:#fafbfc;"></div>
             </div>
         </div>
     </div>
@@ -753,6 +783,234 @@
     });
 
     init();
+
+    // ── Product Group Manager ──────────────────────────────
+    (function() {
+        var currentGroupName = null;
+        var allGroupPaths = [];  // paths of the currently editing group
+        var groupTreeInstance = null;
+        var allProductPaths = [];
+
+        var $overlay = $('#pg-overlay');
+        var $groupList = $('#pg-group-list');
+        var $selectedCount = $('#pg-selected-count');
+        var $newName = $('#pg-new-name');
+        var $treeContainer = $('#pg-tree-container');
+
+        // ── API helpers ──
+        async function api(method, url, body) {
+            var opts = { method: method, headers: {'Content-Type': 'application/json'} };
+            if (body) opts.body = JSON.stringify(body);
+            var resp = await fetch(url, opts);
+            return resp.json();
+        }
+
+        async function listGroups() {
+            return (await api('GET', '/api/product-groups')).groups || [];
+        }
+
+        async function saveGroup(name, paths) {
+            return api('POST', '/api/product-groups', {name: name, paths: paths});
+        }
+
+        async function updateGroup(name, paths) {
+            return api('PUT', '/api/product-groups/' + encodeURIComponent(name), {paths: paths});
+        }
+
+        async function deleteGroup(name) {
+            return api('DELETE', '/api/product-groups/' + encodeURIComponent(name));
+        }
+
+        // ── Build all product paths from the main Fancytree ──
+        function collectProductPaths() {
+            var paths = [];
+            if (!treeInstance) return paths;
+            treeInstance.visit(function(node) {
+                if (node.data && node.data.product_name && node.data.has_data !== false) {
+                    paths.push({key: node.key, name: node.data.product_name, desc: node.data.desc || ''});
+                }
+            });
+            return paths;
+        }
+
+        // ── Render group list ──
+        async function renderGroupList() {
+            var groups = await listGroups();
+            var html = '';
+            for (var i = 0; i < groups.length; i++) {
+                var g = groups[i];
+                var active = g.name === currentGroupName ? ' style="background:#e8f0fe; font-weight:600;"' : '';
+                html += '<div class="pg-group-item" data-name="' + escHtml(g.name) + '"' + active + '>' +
+                    '<span style="flex:1; cursor:pointer;" class="pg-group-name">' + escHtml(g.name) + ' (' + (g.path_count || g.paths ? g.paths.length : 0) + ')</span>' +
+                    '<button class="pg-group-del" data-name="' + escHtml(g.name) + '" title="删除" style="background:none; border:none; color:#d32f2f; cursor:pointer; font-size:14px;">&times;</button>' +
+                '</div>';
+            }
+            $groupList.html(html || '<div style="color:#888; font-size:12px;">暂无产品组</div>');
+
+            // Style items
+            $groupList.find('.pg-group-item').css({
+                display:'flex', alignItems:'center', padding:'6px 8px', marginBottom:'2px',
+                borderRadius:'4px', cursor:'pointer', fontSize:'12px', border:'1px solid transparent'
+            }).hover(
+                function() { if ($(this).find('.pg-group-name').text().split(' (')[0] !== (currentGroupName||'')) $(this).css('background','#f0f4f8'); },
+                function() { if ($(this).find('.pg-group-name').text().split(' (')[0] !== (currentGroupName||'')) $(this).css('background','transparent'); }
+            );
+
+            // Click on group name -> load
+            $groupList.find('.pg-group-name').off('click').on('click', function() {
+                var name = $(this).text().split(' (')[0];
+                loadGroupForEdit(name);
+            });
+
+            // Delete button
+            $groupList.find('.pg-group-del').off('click').on('click', async function(e) {
+                e.stopPropagation();
+                var name = $(this).data('name');
+                if (!confirm('删除产品组 "' + name + '"？')) return;
+                await deleteGroup(name);
+                if (currentGroupName === name) { currentGroupName = null; allGroupPaths = []; }
+                renderGroupList();
+                refreshTreeChecks();
+            });
+        }
+
+        // ── Tree: init group picker Fancytree ──
+        async function initGroupTree() {
+            // Build product paths from main tree (wait a bit for it to load)
+            await new Promise(function(r) { setTimeout(r, 200); });
+            allProductPaths = collectProductPaths();
+
+            $treeContainer.empty();
+            $treeContainer.fancytree({
+                source: {url: '/api/product_tree'},
+                checkbox: true,
+                selectMode: 2,
+                extensions: ['glyph'],
+                glyph: {
+                    map: {
+                        doc: "glyphicon glyphicon-file",
+                        docOpen: "glyphicon glyphicon-file",
+                        checkbox: "glyphicon glyphicon-unchecked",
+                        checkboxSelected: "glyphicon glyphicon-check",
+                        checkboxUnknown: "glyphicon glyphicon-share",
+                        dragHelper: "glyphicon glyphicon-play",
+                        dropMarker: "glyphicon glyphicon-arrow-right",
+                        error: "glyphicon glyphicon-warning-sign",
+                        expanderClosed: "glyphicon glyphicon-menu-right",
+                        expanderLazy: "glyphicon glyphicon-menu-right",
+                        expanderOpen: "glyphicon glyphicon-menu-down",
+                        folder: "glyphicon glyphicon-folder-close",
+                        folderOpen: "glyphicon glyphicon-folder-open",
+                        loading: "glyphicon glyphicon-refresh"
+                    }
+                },
+                init: function(event, data) {
+                    groupTreeInstance = data.tree;
+                },
+                lazyLoad: function(event, data) {
+                    var node = data.node;
+                    if (node.key && node.key.indexOf('CNFuturesContract') >= 0) {
+                        data.result = { url: '/api/contract_tree', data: {path: node.key} };
+                        return;
+                    }
+                    data.result = { url: '/get_products', data: {path: node.key, checkbox: 'true'} };
+                },
+                loadChildren: function(event, data) {
+                    // After children loaded, restore checks
+                    restoreTreeChecks();
+                },
+                select: function(event, data) {
+                    if (data.node.data && data.node.data.product_name) {
+                        var pname = data.node.data.product_name;
+                        var idx = allGroupPaths.indexOf(pname);
+                        if (data.node.selected && idx < 0) {
+                            allGroupPaths.push(pname);
+                        } else if (!data.node.selected && idx >= 0) {
+                            allGroupPaths.splice(idx, 1);
+                        }
+                        $selectedCount.text(allGroupPaths.length);
+                    }
+                }
+            });
+        }
+
+        function restoreTreeChecks() {
+            if (!groupTreeInstance) return;
+            groupTreeInstance.visit(function(node) {
+                if (node.data && node.data.product_name) {
+                    var pname = node.data.product_name;
+                    node.setSelected(allGroupPaths.indexOf(pname) >= 0);
+                }
+            });
+        }
+
+        function refreshTreeChecks() {
+            restoreTreeChecks();
+            $selectedCount.text(allGroupPaths.length);
+        }
+
+        async function loadGroupForEdit(name) {
+            var resp = await api('GET', '/api/product-groups/' + encodeURIComponent(name));
+            if (!resp.group) return;
+            currentGroupName = name;
+            allGroupPaths = resp.group.paths || [];
+            $newName.val(name);
+            refreshTreeChecks();
+            renderGroupList();
+        }
+
+        // ── Save/New group ──
+        async function doSave() {
+            var name = $newName.val().trim();
+            if (!name) { alert('请输入组名'); return; }
+            if (!allGroupPaths.length) { alert('请至少选择一个品种'); return; }
+
+            var resp;
+            if (currentGroupName && currentGroupName !== name) {
+                // Rename: delete old + create new
+                await deleteGroup(currentGroupName);
+                resp = await saveGroup(name, allGroupPaths);
+            } else if (currentGroupName === name) {
+                resp = await updateGroup(name, allGroupPaths);
+            } else {
+                resp = await saveGroup(name, allGroupPaths);
+            }
+
+            if (resp.success) {
+                currentGroupName = name;
+                renderGroupList();
+            } else {
+                alert('保存失败: ' + (resp.error || '未知错误'));
+            }
+        }
+
+        // ── Open/Close overlay ──
+        function openOverlay() {
+            $overlay.css('display', 'flex');
+            currentGroupName = null;
+            allGroupPaths = [];
+            $newName.val('');
+            $selectedCount.text('0');
+            renderGroupList();
+            if (!groupTreeInstance) {
+                initGroupTree();
+            } else {
+                refreshTreeChecks();
+            }
+        }
+
+        function closeOverlay() {
+            $overlay.css('display', 'none');
+        }
+
+        // ── Bind events ──
+        $('#btn-product-groups').on('click', openOverlay);
+        $('#pg-overlay-close').on('click', closeOverlay);
+        $('#pg-overlay').on('click', function(e) { if (e.target === this) closeOverlay(); });
+        $('#pg-btn-save').on('click', doSave);
+        $('#pg-new-name').on('keydown', function(e) { if (e.key === 'Enter') doSave(); });
+    })();
+
 })();
 </script>
 </body>
