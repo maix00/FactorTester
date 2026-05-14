@@ -109,7 +109,7 @@
                         PG.createGroup(newName, allGroupPaths).then(function(resp) {
                             if (resp.success) {
                                 newItemPlaceholderName = null;
-                                selectedName = newName;
+                                selectedName = null;
                                 editingName = null;
                                 renderGroupList();
                             } else {
@@ -145,7 +145,7 @@
                             return PG.updateGroup(newName, allGroupPaths);
                         }).then(function(resp) {
                             if (resp && resp.success) {
-                                selectedName = newName;
+                                selectedName = null;
                                 editingName = null;
                                 renderGroupList();
                             } else {
@@ -154,13 +154,13 @@
                         });
                     } else if (exists) {
                         PG.updateGroup(name, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = name; editingName = null; renderGroupList(); }
+                            if (resp.success) { selectedName = null; editingName = null; renderGroupList(); }
                             else { alert('保存失败: ' + (resp.error || '未知错误')); }
                         });
                     } else {
                         // New
                         PG.createGroup(newName, allGroupPaths).then(function(resp) {
-                            if (resp.success) { selectedName = newName; editingName = null; renderGroupList(); }
+                            if (resp.success) { selectedName = null; editingName = null; renderGroupList(); }
                             else { alert('保存失败: ' + (resp.error || '未知错误')); }
                         });
                     }

@@ -126,9 +126,9 @@
                     if (selNodes.length > 0) {
                         submitSelectedProducts();
                         newItemPlaceholderName = null;
-                        editingName = null;
-                        inlineEditingName = null;
                     }
+                    editingName = null;
+                    inlineEditingName = null;
                     renderHistory();
                 } else {
                     // 已有记录：用 editingName（sub.id）精确查找
@@ -156,7 +156,12 @@
                         })
                         .then(function(r) { return r.json(); })
                         .then(function(data) {
-                            if (data.success && data.submissions) syncFromServer(data.submissions);
+                            if (data.success) {
+                                inlineEditingName = null;
+                                editingName = null;
+                                if (data.submissions) syncFromServer(data.submissions);
+                                else renderHistory();
+                            }
                         });
                     } else if (newName !== name) {
                         // 无路径 → 仅改名
@@ -167,12 +172,19 @@
                         })
                         .then(function(r) { return r.json(); })
                         .then(function(data) {
-                            if (data.success && data.submissions) syncFromServer(data.submissions);
+                            if (data.success) {
+                                inlineEditingName = null;
+                                editingName = null;
+                                if (data.submissions) syncFromServer(data.submissions);
+                                else renderHistory();
+                            }
                         });
+                    } else {
+                        // 名字没变、没路径 → 直接退出
+                        inlineEditingName = null;
+                        editingName = null;
+                        renderHistory();
                     }
-                    inlineEditingName = null;
-                    editingName = null;
-                    renderHistory();
                 }
             },
             onDeletePlaceholder: function() {

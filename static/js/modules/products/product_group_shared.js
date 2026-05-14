@@ -245,11 +245,13 @@
             var name = item.name || '';
             var paths = item.paths || [];
             var isPlaceholder = !!item._placeholder;
-            var isSel = !isPlaceholder && !!selected[name];
+            var isSel = (!isPlaceholder && !!selected[name]);
             var isExp = !isPlaceholder && !!expanded[name];
             var isEditing = isPlaceholder || !!editing[name];
             var isFromGroup = !!item._fromGroup;
-            var pathCount = paths.length;
+            var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
+            var showSave = (isSel || isPlaceholderSelected) && !isFromGroup;
+            var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
 
             // 占位方块：虚线框 + 浅背景
             var itemStyle = 'border-radius:6px;margin-bottom:6px;overflow:hidden;';
@@ -289,10 +291,10 @@
             if (!isPlaceholder) {
                 html += '<i class="fas fa-' + (isExp ? 'chevron-up' : 'chevron-down') + ' pg-exp-toggle-icon" data-name="' + _escHtml(name) + '" title="' + (isExp ? '折叠' : '展开') + '" style="color:#666;cursor:pointer;font-size:14px;"></i>';
             }
-            if (isSel && !isFromGroup) {
+            if (showSave) {
                 html += '<i class="fas fa-save pg-exp-save-icon" data-name="' + _escHtml(name) + '" title="保存" style="color:#4a90d9;cursor:pointer;font-size:14px;"></i>';
             }
-            if (isSel && (mode === 'manage' || mode === 'readonly' || isPlaceholder)) {
+            if (showDelete) {
                 html += '<i class="fas fa-trash pg-exp-del-icon" data-name="' + _escHtml(name) + '" title="删除" style="color:#d00;cursor:pointer;font-size:13px;"></i>';
             }
             html += '</span>';
@@ -458,7 +460,27 @@
             if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
         });
 
-        // 名称输入框：Enter/blur → 保存名字，退出输入框（保持选中态）\n        $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')\n            .on('keydown.pgexp', '.pg-exp-name-input', function(e) {\n                if (e.key === 'Enter') {\n                    e.preventDefault();\n                    var $inp = $(this);\n                    var name = $inp.data('name');\n                    var newName = $inp.val().trim();\n                    if (!newName) return;\n                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';\n                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);\n                }\n            })\n            .on('blur.pgexp', '.pg-exp-name-input', function() {\n                var $inp = $(this);\n                var name = $inp.data('name');\n                var newName = $inp.val().trim();\n                if (!newName) return;\n                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';\n                if (opts.onSave) opts.onSave(name, newName, isPlaceholder);\n            });
+        // 名称输入框：Enter/blur → 保存名字，退出输入框（保持选中态）
+        $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')
+            .on('keydown.pgexp', '.pg-exp-name-input', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    var $inp = $(this);
+                    var name = $inp.data('name');
+                    var newName = $inp.val().trim();
+                    if (!newName) return;
+                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
+                }
+            })
+            .on('blur.pgexp', '.pg-exp-name-input', function() {
+                var $inp = $(this);
+                var name = $inp.data('name');
+                var newName = $inp.val().trim();
+                if (!newName) return;
+                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
+            });
 
         // SortableJS 拖拽
         if (dragHandle && window.Sortable) {
