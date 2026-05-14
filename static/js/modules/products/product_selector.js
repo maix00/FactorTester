@@ -186,6 +186,8 @@
         var onDeletePlaceholder = callbacks.onDeletePlaceholder || null;
         var onRename = callbacks.onRename || null;
         var onSave = callbacks.onSave || null;                 // 统一保存回调（替代 onInsertPlaceholder/onRename）
+        var onExitEdit = callbacks.onExitEdit || null;         // 退出编辑回调（Enter/blur/单击已编辑行）
+
         var editingName = callbacks.editingName || null;       // 当前编辑中的记录标识（CF传sub.id，PG-manager传组名）
         var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式，参数：editingName（与editingName同键）
 
@@ -250,6 +252,9 @@
                 } else if (!isPlaceholder && onRename) {
                     onRename(name, newName);
                 }
+            },
+            onExitEdit: function(name, newName, isPlaceholder) {
+                if (onExitEdit) onExitEdit(name, newName, isPlaceholder);
             },
             onRename: onRename,
             onExpand: function(name) {

@@ -60,7 +60,7 @@
                     renderGroupList();
                 },
                 onToggle: function(name) {
-                    // 点击进入编辑模式（改名），同时加载路径到左侧树
+                    // 互斥：进入编辑先清 placeholder
                     if (newItemPlaceholderName) { newItemPlaceholderName = null; }
                     selectedName = (selectedName === name) ? null : name;
                     if (selectedName) {
@@ -85,7 +85,7 @@
                     delete expandedNames[name];
                     renderGroupList();
                 },
-                onSave: function(name, newName, isPlaceholder) {
+                onExitEdit: function(name, newName, isPlaceholder) {
                     newName = (newName || '').trim();
                     if (!newName) { alert('组名不能为空'); return; }
 

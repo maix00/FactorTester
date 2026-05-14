@@ -196,19 +196,16 @@
      *   mode: 'manage' | 'import' | 'readonly'
      *   selected: {name: true}  -- 选中状态
      *   expanded: {name: true}  -- 展开状态
-     *   editing: {name: true}   -- 正在编辑（名称变 input）。与 newItemPlaceholder 互斥：
-     *                             若同时存在，editing 被忽略（placeholder 优先）。
+     *   editing: {name: true}   -- 正在编辑（名称变 input）
      *   showAddButton: true     -- 顶部显示 + 号方块
      *   newItemPlaceholder: {name} | null  -- 底部编辑中的空新方块（最多一个，由 onAdd 设置）
      *   dragHandle: '.cls'      -- SortableJS handle（null = 不可拖拽）
      *   onAdd()                 -- + 号点击回调
-     *   onToggle(name)          -- 点击选中/取消
+     *   onToggle(name)          -- 单击进入编辑（调用方负责互斥：清其他 editingKey，设新的）
+     *   onExitEdit(name, newName, isPlaceholder)  -- 退出编辑（Enter/blur/单击已编辑行）
      *   onExpand(name)          -- 展开回调
      *   onCollapse(name)        -- 折叠回调
-     *   onSave(name)            -- 管理模式：保存按钮
-     *   onDelete(name)          -- 删除按钮
-     *   onRename(old, new)      -- 重命名完成
-     *   onReorder(names)        -- 拖拽排序完成
+     *   onSave(name, newName, isPlaceholder)  -- [已废弃] 统一保存回调
      */
     function renderExpandableGroupList(items, $container, opts) {
         opts = opts || {};
@@ -216,8 +213,6 @@
         var selected = opts.selected || {};
         var expanded = opts.expanded || {};
         var editing = opts.editing || {};
-        // 强制互斥：placeholder 优先，有 placeholder 时忽略 editing
-        if (newItemPlaceholder) { editing = {}; }
         var showAddButton = !!opts.showAddButton;
         var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;
@@ -330,33 +325,26 @@
         // ── 事件绑定 ──
 
         // 单击行 → 切换编辑模式
-        // 非导入：非编辑→进入编辑 / 编辑→退出并保存（单击输入框外部区域）
+        // 非导入：非编辑→进入编辑 / 编辑→退出编辑
         // 导入：单击=多选（toggle选中状态）
         $container.off('click.pgexp', '.pg-exp-header').on('click.pgexp', '.pg-exp-header', function(e) {
-            if ($(e.target).closest('button').length) return; // 按钮不触发
-            if ($(e.target).closest('input').length) return;   // 输入框内点击不触发
+            if ($(e.target).closest('button').length) return;
+            if ($(e.target).closest('input').length) return;
             var $item = $(this).closest('.pg-exp-item');
             var name = $item.data('name');
-            var isPlaceholder = String($item.data('placeholder')) === '1';
 
             if (mode === 'import') {
-                // 导入模式：单击=多选
                 if (opts.onToggle) opts.onToggle(name);
                 return;
             }
 
+            var isPlaceholder = String($item.data('placeholder')) === '1';
             var isEditing = isPlaceholder || !!editing[name];
             if (isEditing) {
-                // 已在编辑 → 退出并保存
                 var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
                 var newName = $inp.length ? $inp.val().trim() : name;
-                if (!newName) return;
-                // 标记正在保存，防 blur 重复
-                var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
-                $container.data(saveKey, true);
-                if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
+                if (opts.onExitEdit) opts.onExitEdit(name, newName, isPlaceholder);
             } else if (opts.onToggle) {
-                // 不在编辑 → 进入编辑
                 opts.onToggle(name);
             }
         });
@@ -450,7 +438,7 @@
                 });
         });
 
-        // 名称输入框：Enter 触发保存，blur 也触发保存（互斥：Enter 后 blur 不重复）
+        // 名称输入框：Enter 退出编辑，blur 退出编辑
         $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')
             .on('keydown.pgexp', '.pg-exp-name-input', function(e) {
                 if (e.key === 'Enter') {
@@ -460,28 +448,16 @@
                     var newName = $inp.val().trim();
                     if (!newName) return;
                     var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
-                    // 标记防 blur 重复
-                    var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
-                    $container.data(saveKey, true);
-                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
+                    if (opts.onExitEdit) opts.onExitEdit(name, newName, isPlaceholder);
                 }
             })
             .on('blur.pgexp', '.pg-exp-name-input', function() {
                 var $inp = $(this);
                 var name = $inp.data('name');
-                var saveKey = 'pgexp_save_' + name.replace(/[^a-zA-Z0-9]/g, '_');
-                setTimeout(function() {
-                    // 已通过 Enter/单击触发过保存 → 跳过
-                    if ($container.data(saveKey)) {
-                        $container.removeData(saveKey);
-                        return;
-                    }
-                    if (!$inp.is(':visible')) return;
-                    var newName = $inp.val().trim();
-                    if (!newName) return;
-                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
-                    if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
-                }, 150);
+                var newName = $inp.val().trim();
+                if (!newName) return;
+                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                if (opts.onExitEdit) opts.onExitEdit(name, newName, isPlaceholder);
             });
 
         // SortableJS 拖拽
