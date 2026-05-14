@@ -80,46 +80,16 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     }
 
-    // ---------- 获取当前上下文（从 group test 自己的两级选项卡） ----------
     function getCurrentContext() {
-        // 优先从 group test 自己的选项卡获取
-        var activeGroupSubTab = document.querySelector('#groupTab .nav-link.active');
-        if (activeGroupSubTab) {
-            var panelId = activeGroupSubTab.getAttribute('data-bs-target');
-            if (panelId) {
-                var match = panelId.match(/group-panel-(\d+)/);
-                if (match) {
-                    var subId = match[1];
-                    var panel = document.querySelector(panelId);
-                    if (panel) {
-                        var activeFactorTab = panel.querySelector('.factor-tabs-container .nav-link.active');
-                        if (activeFactorTab) {
-                            var factorName = activeFactorTab.textContent.trim();
-                            var factorInfo = window.factorList ? window.factorList.find(function(f) { return f.name === factorName || f.alias === factorName; }) : null;
-                            if (factorInfo) {
-                                return { submission_id: subId, factor_alias: factorInfo.alias };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // 回退到 IC 测试的当前选项卡
-        var activeIcTab = document.querySelector('#icTab .nav-link.active');
-        if (!activeIcTab) return null;
-        var icPanelId = activeIcTab.getAttribute('data-bs-target');
-        if (!icPanelId) return null;
-        var icMatch = icPanelId.match(/ic-panel-(\d+)/);
-        if (!icMatch) return null;
-        var icSubId = icMatch[1];
-        var icPanel = document.querySelector(icPanelId);
-        if (!icPanel) return null;
-        var activeICFactorTab = icPanel.querySelector('.factor-tabs-container .nav-link.active');
-        if (!activeICFactorTab) return null;
-        var icFactorName = activeICFactorTab.textContent.trim();
-        var icFactorInfo = window.factorList ? window.factorList.find(function(f) { return f.name === icFactorName || f.alias === icFactorName; }) : null;
-        if (!icFactorInfo) return null;
-        return { submission_id: icSubId, factor_alias: icFactorInfo.alias };
+        var ctx = window.SingleFactorSubmissionContext;
+        if (!ctx) return null;
+        return ctx.getActiveFactorContext({
+            tabSelector: '#groupTab .nav-link.active',
+            panelPrefix: 'group-panel',
+        }) || ctx.getActiveFactorContext({
+            tabSelector: '#icTab .nav-link.active',
+            panelPrefix: 'ic-panel',
+        });
     }
 
     // ---------- 多周期收益率频率复选框 ----------
@@ -1548,7 +1518,7 @@
             var tabId = 'group-tab-' + sub.id;
             var panelId = 'group-panel-' + sub.id;
             var tabLabel = sub.product_group || sub.label || ('测试器' + (idx+1));
-            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.product_group ? '📦 ' : '') + tabLabel + '</button></li>';
+            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-submission-id="' + sub.id + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.product_group ? '📦 ' : '') + tabLabel + '</button></li>';
 
             // 第二级：因子选项卡
             var factorTabsHtml = '';

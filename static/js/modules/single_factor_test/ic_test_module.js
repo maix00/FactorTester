@@ -1475,7 +1475,7 @@
             const panelId = `ic-panel-${sub.id}`;
             const tabLabel = sub.product_group || sub.label || sub.factor_tester_serial || ('测试器' + (idx+1));
             const pgPrefix = sub.product_group ? '📦 ' : '';
-            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
+            tabsHtml += `<li class="nav-item"><button class="nav-link ${activeClass}" id="${tabId}" data-submission-id="${sub.id}" data-bs-toggle="tab" data-bs-target="#${panelId}" type="button" role="tab">${pgPrefix}${tabLabel}</button></li>`;
             panelsHtml += `
                 <div class="tab-pane fade ${showClass}" id="${panelId}" role="tabpanel">
                     <div class="ic-card">
