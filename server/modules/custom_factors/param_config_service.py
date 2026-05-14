@@ -109,7 +109,7 @@ def build_factor_library_config_factors(current_username: str, owner_account: di
     return factors
 
 
-def build_param_factor_overview(current_username: str, include_subordinates: bool, scope_key: str | None = None) -> dict:
+def build_param_factor_overview(current_username: str, include_subordinates: bool, scope_key: str | None = None, factor_family_alias: str | None = None) -> dict:
     accounts = (
         visible_accounts_for(current_username, include_self=True)
         if include_subordinates
@@ -134,6 +134,8 @@ def build_param_factor_overview(current_username: str, include_subordinates: boo
 
         for sk in scope_keys:
             for ff_alias in list_param_config_aliases(owner_username, sk):
+                if factor_family_alias and ff_alias != factor_family_alias:
+                    continue
                 config = load_param_config(owner_username, ff_alias, sk)
                 if not config:
                     continue

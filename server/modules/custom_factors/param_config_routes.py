@@ -41,7 +41,8 @@ def api_param_factor_overview():
         return jsonify({'success': False, 'error': '未登录'}), 401
     include_subordinates = request.args.get('include_subordinates') == '1'
     scope_key = request.args.get('scope_key') or None
-    payload = build_param_factor_overview(username, include_subordinates, scope_key=scope_key)
+    factor_family_alias = request.args.get('factor_family_alias') or None
+    payload = build_param_factor_overview(username, include_subordinates, scope_key=scope_key, factor_family_alias=factor_family_alias)
     return jsonify({'success': True, **payload})
 
 
