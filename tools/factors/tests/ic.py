@@ -80,6 +80,10 @@ def run_ic_for_factor(
 
     re_table = ic_factor.get_intermediate("RE")
     fe_table = ic_factor.get_intermediate("FE")
+    import logging
+    _log = logging.getLogger(__name__)
+    _log.warning("DEBUG re_table index names=%s, shape=%s", re_table.index.names if re_table is not None else 'None', re_table.shape if re_table is not None else 'None')
+    _log.warning("DEBUG fe_table index names=%s, shape=%s", fe_table.index.names if fe_table is not None else 'None', fe_table.shape if fe_table is not None else 'None')
     stats = ic_stats(ic_series)
 
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()

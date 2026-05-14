@@ -2031,10 +2031,6 @@ def signal_align(
     # 找到 freq 是其整数倍的索引层级（第一个匹配的）
     index_names = [str(n) for n in data.index.names]
     index_freqs = [DataFreq(n) for n in index_names]
-    if any(f.value == pd.Timedelta(0) for f in index_freqs):
-        raise ValueError(
-            f"数据索引包含无法解析的频率名称: {index_names}。"
-            f"请检查 DataFrame 索引是否包含有效的频率层级（如 'MIN5', 'DAY1'）。")
     try:
         first_true_idx = next(
             (i for i, f in enumerate(index_freqs)
