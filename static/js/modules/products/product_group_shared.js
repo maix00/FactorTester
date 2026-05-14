@@ -196,7 +196,8 @@
      *   mode: 'manage' | 'import' | 'readonly'
      *   selected: {name: true}  -- 选中状态
      *   expanded: {name: true}  -- 展开状态
-     *   editing: {name: true}   -- 正在编辑（名称变 input）
+     *   editing: {name: true}   -- 正在编辑（名称变 input）。与 newItemPlaceholder 互斥：
+     *                             若同时存在，editing 被忽略（placeholder 优先）。
      *   showAddButton: true     -- 顶部显示 + 号方块
      *   newItemPlaceholder: {name} | null  -- 底部编辑中的空新方块（最多一个，由 onAdd 设置）
      *   dragHandle: '.cls'      -- SortableJS handle（null = 不可拖拽）
@@ -215,6 +216,8 @@
         var selected = opts.selected || {};
         var expanded = opts.expanded || {};
         var editing = opts.editing || {};
+        // 强制互斥：placeholder 优先，有 placeholder 时忽略 editing
+        if (newItemPlaceholder) { editing = {}; }
         var showAddButton = !!opts.showAddButton;
         var newItemPlaceholder = opts.newItemPlaceholder || null;  // {name: 'xxx'} | null
         var dragHandle = opts.dragHandle || null;

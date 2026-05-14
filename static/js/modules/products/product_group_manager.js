@@ -85,11 +85,11 @@
                     delete expandedNames[name];
                     renderGroupList();
                 },
-                onSave: function(name, newName) {
+                onSave: function(name, newName, isPlaceholder) {
                     newName = (newName || '').trim();
                     if (!newName) { alert('组名不能为空'); return; }
 
-                    var isPh = newItemPlaceholderName && newItemPlaceholderName === name;
+                    var isPh = isPlaceholder || (newItemPlaceholderName && newItemPlaceholderName === name);
                     if (isPh) {
                         newItemPlaceholderName = newName;
                         if (!allGroupPaths.length) {

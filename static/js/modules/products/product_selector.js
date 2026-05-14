@@ -186,8 +186,8 @@
         var onDeletePlaceholder = callbacks.onDeletePlaceholder || null;
         var onRename = callbacks.onRename || null;
         var onSave = callbacks.onSave || null;                 // 统一保存回调（替代 onInsertPlaceholder/onRename）
-        var editingName = callbacks.editingName || null;       // 当前编辑中的记录名
-        var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式
+        var editingName = callbacks.editingName || null;       // 当前编辑中的记录标识（CF传sub.id，PG-manager传组名）
+        var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式，参数：editingName（与editingName同键）
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         // displayName 必须唯一，用 sub.id 保证唯一性以支持单选编辑模式
@@ -216,9 +216,12 @@
         });
 
         var editing = {};
-        if (editingName) {
-            // editingName 存的是 sub.id，需要映射到 displayName
-            var editItem = expItems.find(function(item) { return String(item._sub.id) === String(editingName); });
+        if (editingName != null) {
+            // editingName 存的是 sub.id（CF）或组名（PG-manager）；映射到 displayName
+            var editItem = expItems.find(function(item) {
+                // CF：通过 _sub.id 匹配；PG-manager：直接用组名匹配
+                return (item._sub && String(item._sub.id) === String(editingName)) || (item.name === editingName);
+            });
             if (editItem) editing[editItem.name] = true;
         }
 
@@ -234,18 +237,14 @@
                 if (onAdd) onAdd();
             },
             onToggle: function(name) {
-                // 点击已有记录行 → 进入编辑模式（改名），传 id 而非 displayName
+                // 点击已有记录行 → 进入编辑模式
                 if (name && name !== (newItemPlaceholder && newItemPlaceholder.name) && onToggleEdit) {
-                    var found = expItems.find(function(item) { return item.name === name; });
-                    if (found) onToggleEdit(found._sub.id);
+                    onToggleEdit(name);
                 }
             },
             onSave: function(name, newName, isPlaceholder) {
-                // name 是 displayName，按 expItems 反查 _sub.id
-                var found = expItems.find(function(item) { return item.name === name; });
-                var subId = found ? found._sub.id : null;
                 if (onSave) {
-                    onSave(name, newName, isPlaceholder, subId);
+                    onSave(name, newName, isPlaceholder);
                 } else if (isPlaceholder && onInsertPlaceholder) {
                     onInsertPlaceholder(newName);
                 } else if (!isPlaceholder && onRename) {

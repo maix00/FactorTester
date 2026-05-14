@@ -112,7 +112,7 @@
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                 renderHistory();
             },
-            onSave: function(name, newName, isPlaceholder, subId) {
+            onSave: function(name, newName, isPlaceholder) {
                 newName = (newName || '').trim();
                 if (!newName) { editingName = null; renderHistory(); return; }
 
@@ -127,7 +127,8 @@
                     }
                     renderHistory();
                 } else {
-                    // 已有记录：用 subId 精确查找
+                    // 已有记录：用 editingName（sub.id）精确查找
+                    var subId = editingName;
                     var found = submissions.find(function(s) { return String(s.id) === String(subId); });
                     if (!found) { editingName = null; renderHistory(); return; }
 
@@ -173,11 +174,17 @@
                 newItemPlaceholderName = null;
                 renderHistory();
             },
-            onToggleEdit: function(name) {
-                if (editingName === name) {
+            onToggleEdit: function(displayName) {
+                // displayName → sub.id（CF 用 id 做键）
+                var sub = submissions.find(function(s) {
+                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                    return dn === displayName;
+                });
+                var subId = sub ? sub.id : displayName;
+                if (editingName === subId) {
                     editingName = null;
                 } else {
-                    editingName = name;
+                    editingName = subId;
                     newItemPlaceholderName = null;  // 进入编辑模式时清除 placeholder
                 }
                 renderHistory();
