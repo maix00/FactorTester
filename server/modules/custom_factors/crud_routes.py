@@ -32,6 +32,7 @@ from server.services.factor_registry import (
 )
 from server.services.http_auth import login_required
 from server.services.runtime_state import current_user
+from server.services.user_storage import migrate_templates_on_rename
 
 
 def _current_user_is_super_admin() -> bool:
@@ -139,6 +140,8 @@ def api_update_factor(factor_id):
     invalidate_custom_factor_cache(username, factor_id)
     if old_name and old_name != new_name:
         invalidate_factor_family_cache(old_name)
+        # 迁移所有用户的模板文件（setting snapshots + params templates）
+        migrate_templates_on_rename(old_name, new_name)
         # 同步文件名：类名改了但 URL 里的 factor_id 还是旧名，
         # 先按新类名保存（上面已做），再删旧文件，保持文件名与类名一致。
         if rename_factor_source(username, factor_id, new_name):
