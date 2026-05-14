@@ -112,7 +112,7 @@
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
                 renderHistory();
             },
-            onExitEdit: function(name, newName, isPlaceholder) {
+            onSave: function(name, newName, isPlaceholder) {
                 newName = (newName || '').trim();
                 if (!newName) { editingName = null; renderHistory(); return; }
 

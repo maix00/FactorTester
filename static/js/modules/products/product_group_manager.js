@@ -85,7 +85,7 @@
                     delete expandedNames[name];
                     renderGroupList();
                 },
-                onExitEdit: function(name, newName, isPlaceholder) {
+                onSave: function(name, newName, isPlaceholder) {
                     newName = (newName || '').trim();
                     if (!newName) { selectedName = null; renderGroupList(); return; }
 
