@@ -183,6 +183,202 @@
         }
         window.openSharedFactorParamPicker = openFactorParamPicker;
 
+        // ── 从因子库批量导入（多选版） ──────────────────────────────────────
+        var multiImportItems = [];
+        var multiImportChecked = {};
+
+        function ensureMultiImportOverlay() {
+            var ov = document.getElementById('factor-library-import-overlay');
+            if (ov) return ov;
+            ov = document.createElement('div');
+            ov.id = 'factor-library-import-overlay';
+            ov.style.cssText = 'display:none;position:fixed;inset:0;z-index:3100;background:rgba(15,23,42,.35);align-items:center;justify-content:center;padding:24px;';
+            ov.innerHTML =
+                '<div style="width:min(980px,96vw);max-height:86vh;background:#fff;border-radius:8px;box-shadow:0 18px 48px rgba(15,23,42,.25);display:flex;flex-direction:column;overflow:hidden;">' +
+                '<div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #e5e7eb;">' +
+                '<strong style="font-size:16px;">从因子库导入参数</strong>' +
+                '<input id="multi-import-search" type="search" placeholder="搜索因子/家族/参数/用户" style="flex:1;min-width:180px;">' +
+                '<button type="button" class="param-btn" id="multi-import-toggle-all">全选</button>' +
+                '<button type="button" id="multi-import-confirm" class="param-btn" style="background:#6c63ff;color:#fff;border:none;">确认导入</button>' +
+                '<button type="button" class="param-btn" id="multi-import-close">关闭</button>' +
+                '</div>' +
+                '<div id="multi-import-body" style="overflow:auto;padding:14px 18px;"></div>' +
+                '<div style="padding:8px 18px;border-top:1px solid #e5e7eb;font-size:11px;color:#888;text-align:right;">' +
+                '已选择 <span id="multi-import-count">0</span> 个因子' +
+                '</div></div>';
+            document.body.appendChild(ov);
+
+            ov.querySelector('#multi-import-close').addEventListener('click', function() {
+                ov.style.display = 'none';
+            });
+            ov.addEventListener('click', function(e) {
+                if (e.target === ov) ov.style.display = 'none';
+            });
+
+            ov.querySelector('#multi-import-search').addEventListener('input', renderMultiImportTable);
+
+            var toggleAll = ov.querySelector('#multi-import-toggle-all');
+            toggleAll.addEventListener('click', function() {
+                var visible = getVisibleMultiImportItems();
+                var allChecked = visible.every(function(item) { return !!(item._id && multiImportChecked[item._id]); });
+                visible.forEach(function(item) {
+                    if (item._id) multiImportChecked[item._id] = !allChecked;
+                });
+                renderMultiImportTable();
+            });
+
+            ov.querySelector('#multi-import-confirm').addEventListener('click', function() {
+                var selected = multiImportItems.filter(function(item) {
+                    return item._id && multiImportChecked[item._id];
+                });
+                if (!selected.length) { alert('请至少选择一个因子'); return; }
+                ov.style.display = 'none';
+                batchAddParams(selected);
+            });
+
+            return ov;
+        }
+
+        function getVisibleMultiImportItems() {
+            var search = (document.getElementById('multi-import-search')?.value || '').trim().toLowerCase();
+            return multiImportItems.filter(function(item) {
+                if (!search) return true;
+                var haystack = [
+                    item.factor_alias,
+                    item.factor_family_alias,
+                    item.chinese_name,
+                    item.owner_alias,
+                    item.owner_username,
+                    (item.params || []).map(function(p) { return p.alias + ':' + p.value; }).join(' '),
+                ].join(' ').toLowerCase();
+                return haystack.indexOf(search) !== -1;
+            });
+        }
+
+        function renderMultiImportTable() {
+            var body = document.getElementById('multi-import-body');
+            if (!body) return;
+            var visible = getVisibleMultiImportItems();
+            var countEl = document.getElementById('multi-import-count');
+            var totalChecked = visible.reduce(function(sum, item) {
+                return sum + (item._id && multiImportChecked[item._id] ? 1 : 0);
+            }, 0);
+            if (countEl) countEl.textContent = String(totalChecked);
+
+            if (!visible.length) {
+                body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">该因子家族暂无已保存的参数配置。</div>';
+                return;
+            }
+
+            var html = '<table class="param-table" style="width:100%;"><thead><tr>' +
+                '<th style="width:36px;"><input type="checkbox" id="multi-import-check-all-visible"></th>' +
+                '<th>因子</th><th>参数</th><th>所有者</th><th>范围键</th>' +
+                '</tr></thead><tbody>';
+            visible.forEach(function(item) {
+                var checked = item._id && multiImportChecked[item._id] ? ' checked' : '';
+                var params = (item.params || []).map(function(p) {
+                    return '<span style="display:inline-block;margin:1px 4px 1px 0;color:#667085;">' +
+                        _escapeHtml(p.alias) + ':' + _escapeHtml(p.value) + '</span>';
+                }).join('');
+                html += '<tr>' +
+                    '<td><input type="checkbox" class="multi-import-check"' +
+                    ' data-id="' + _escapeHtml(item._id || '') + '"' + checked + '></td>' +
+                    '<td><strong>' + _escapeHtml(item.factor_alias || '') + '</strong>' +
+                    '<div style="color:#888;font-size:12px;">' + _escapeHtml(item.chinese_name || '') + '</div></td>' +
+                    '<td>' + (params || '<span style="color:#aaa;">无</span>') + '</td>' +
+                    '<td style="font-size:12px;">' + _escapeHtml(item.owner_alias || item.owner_username || '') + '</td>' +
+                    '<td style="font-size:11px;color:#888;">' + _escapeHtml(item.scope_key || '') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table>';
+            body.innerHTML = html;
+
+            // 绑定全选 checkbox
+            var allCheck = document.getElementById('multi-import-check-all-visible');
+            if (allCheck) {
+                allCheck.checked = (totalChecked === visible.length && visible.length > 0);
+                allCheck.addEventListener('change', function() {
+                    var checked = this.checked;
+                    visible.forEach(function(item) {
+                        if (item._id) multiImportChecked[item._id] = checked;
+                    });
+                    renderMultiImportTable();
+                });
+            }
+
+            // 绑定单个 checkbox
+            body.querySelectorAll('.multi-import-check').forEach(function(cb) {
+                cb.addEventListener('change', function() {
+                    var id = this.dataset.id;
+                    if (id) multiImportChecked[id] = this.checked;
+                    renderMultiImportTable();
+                });
+            });
+        }
+
+        // 顺序添加因子（category 仅用于前端筛选，不传给后端）
+        async function batchAddParams(selectedItems) {
+            var statusEl = document.getElementById('import-factors-from-library-status');
+            if (statusEl) statusEl.textContent = '导入中...';
+            var added = 0;
+            for (var i = 0; i < selectedItems.length; i++) {
+                var item = selectedItems[i];
+                var body = { factor_family_alias: factorAlias };
+                if (item.params) {
+                    body.params = {};
+                    item.params.forEach(function(p) {
+                        if (p.alias) body.params[p.alias] = p.value;
+                    });
+                }
+                try {
+                    var resp = await fetch('/add_params', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    var data = await resp.json();
+                    if (data.success) {
+                        renderFactorRows(data.factor_rows || []);
+                        added++;
+                    }
+                } catch(e) {}
+            }
+            if (statusEl) statusEl.textContent = added > 0 ? '已导入 ' + added + ' 个因子' : '';
+            if (typeof window.refreshICModule === 'function') window.refreshICModule();
+            setTimeout(function() { if (statusEl && statusEl.textContent.indexOf('导入') >= 0) statusEl.textContent = ''; }, 3000);
+        }
+
+        async function openMultiFactorImport() {
+            multiImportChecked = {};
+            var ov = ensureMultiImportOverlay();
+            var body = document.getElementById('multi-import-body');
+            ov.style.display = 'flex';
+            if (body) body.innerHTML = '<div style="color:#888;text-align:center;padding:28px;">加载因子库...</div>';
+            try {
+                // 按当前 factor_family_alias 过滤
+                var url = '/custom-factors/api/param-factor-overview?include_subordinates=1';
+                if (factorAlias) url += '&factor_family_alias=' + encodeURIComponent(factorAlias);
+                var resp = await fetch(url);
+                var data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                multiImportItems = (data.factors || []).map(function(item, idx) {
+                    item._id = item.factor_alias + '__' + String(item.row_index || idx) + '__' + (item.owner_username || item.owner_alias || '');
+                    return item;
+                });
+                renderMultiImportTable();
+            } catch (e) {
+                if (body) body.innerHTML = '<div style="color:#d40000;text-align:center;padding:28px;">加载失败: ' + _escapeHtml(e.message) + '</div>';
+            }
+        }
+
+        // 绑定导入按钮：找到 HTML 中的按钮，否则在 bindEvents 后动态创建
+        var importBtn = document.getElementById('import-factors-from-library-btn');
+        if (importBtn) {
+            importBtn.addEventListener('click', function() {
+                openMultiFactorImport();
+            });
+        }
+
         function renderFactorRows(rows) {
             const tableBody = document.getElementById('factor_table_body');
             if (!tableBody) return;
