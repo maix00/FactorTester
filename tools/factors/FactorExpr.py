@@ -778,7 +778,8 @@ class OperandExpr(FactorExpr):
 
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
         values = [opnd.evaluate(ctx=ctx) for opnd in self.operands]
-        return self._apply_op(values)
+        result = self._apply_op(values)
+        return result
 
     def _apply_op(self, values: List[Any]) -> pd.DataFrame:
         """子类覆盖：对已求值的 operands DataFrame 执行核心运算。"""
@@ -920,7 +921,6 @@ class ColumnRef(FactorExpr):
 
         result = (result := pd.concat(series_dict, axis=1)).sort_values(by=result.index.names[-1])
         result.columns = list(series_dict.keys())
-
         return result
 
     @property
