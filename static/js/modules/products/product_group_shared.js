@@ -56,6 +56,16 @@
         return _api('DELETE', '/api/product-groups/' + encodeURIComponent(name));
     }
 
+    /** PUT /api/product-groups/reorder → {success} */
+    function reorderGroups(names) {
+        return _api('PUT', '/api/product-groups/reorder', {names: names});
+    }
+
+    /** PUT /api/product-groups/<oldName>/rename → {success} */
+    function renameGroup(oldName, newName) {
+        return _api('PUT', '/api/product-groups/' + encodeURIComponent(oldName) + '/rename', {name: newName});
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     /**
@@ -211,6 +221,8 @@
         createGroup: createGroup,
         updateGroup: updateGroup,
         deleteGroup: deleteGroup,
+        reorderGroups: reorderGroups,
+        renameGroup: renameGroup,
         renderGroupListHTML: renderGroupListHTML,
         renderProductDetailHTML: renderProductDetailHTML,
         renderPathListHTML: renderPathListHTML,

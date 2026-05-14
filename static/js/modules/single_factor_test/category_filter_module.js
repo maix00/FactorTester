@@ -11,6 +11,7 @@
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var treeInstance = null;
     var categoryTreeSizer = null;
+    var $moduleContainer = null;  // PS.render() 的容器
 
     function escHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -92,8 +93,8 @@
 
     // 辅助函数：渲染右侧历史记录（委托给统一的 ProductSelector）
     function renderHistory() {
-        var $container = $('#submission-history');
-        if (!$container.length) return;
+        var $container = window.ProductSelector.getSubmissionContainer($moduleContainer);
+        if (!$container || !$container.length) return;
 
         window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
             onReorder: function() {
@@ -104,7 +105,7 @@
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    var $s = $('#submission_change_status');
+                    var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
                     $s.html(data.success ? '✓ 顺序已更新' : '✗ 排序失败: ' + data.error)
                       .css('color', data.success ? '#28a745' : '#d40000');
                     setTimeout(function() { $s.html(''); }, 3000);
@@ -120,7 +121,7 @@
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    var $s = $('#submission_change_status');
+                    var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
                     if (data.success) {
                         $s.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
                         if (data.submissions) {
@@ -147,7 +148,7 @@
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    var $s = $('#submission_change_status');
+                    var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
                     if (data.success) {
                         if (newPaths.length === 0) {
                             fetch('/delete_submission', {
@@ -273,7 +274,7 @@
         })
         .then(r => r.json())
         .then(data => {
-            var statusSpan = $('#submit_status');
+            var statusSpan = window.ProductSelector.getStatusEl($moduleContainer);
             if (data.success) {
                 var msg = '✓ 已提交，产品数量: ' + data.count + ', 路径数量: ' + data.count_paths;
                 statusSpan.html(msg).css('color', '#28a745');
@@ -304,71 +305,54 @@
             if (retryCount < 80) {
                 setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
             } else {
-                var el = document.getElementById('tree-container');
+                var el = document.getElementById('category_filter_module');
                 if (el) el.innerHTML = '<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：jQuery 未就绪</div>';
             }
             return;
         }
         var $ = window.jQuery;
         if (!$.fn || typeof $.fn.fancytree !== 'function') {
-            var $waitingContainer = $("#tree-container");
-            if ($waitingContainer.length) {
-                $waitingContainer.html('<div style="color:#888;text-align:center;padding:20px;">产品树插件加载中...</div>');
-            }
             if (retryCount < 80) {
                 setTimeout(function() { initCategoryFilterModule(retryCount + 1); }, 50);
-            } else if ($waitingContainer.length) {
-                $waitingContainer.html('<div style="color:#d40000;text-align:center;padding:20px;">产品树加载失败：Fancytree 未就绪</div>');
             }
             return;
         }
 
-        var $container = $("#tree-container");
-        if (!_hasMountedTree($container)) {
-            treeInstance = null;
+        $moduleContainer = $('#category_filter_module');
+        if (!$moduleContainer.length) return;
+
+        var PS = window.ProductSelector;
+
+        // 如果已渲染过，跳过重新渲染（保留树实例）
+        if ($moduleContainer.find('.ps-body').length) return;
+
+        // 读取隐藏的 toolbar 模板 HTML 并删除模板 DOM
+        var toolbarHTML = '';
+        var $toolbarTpl = $moduleContainer.find('#category-toolbar-tpl');
+        if ($toolbarTpl.length) {
+            toolbarHTML = $toolbarTpl.html();
+            $toolbarTpl.remove();
         }
 
-        if (typeof window.setupResizableTreeContainer === 'function') {
-            categoryTreeSizer = window.setupResizableTreeContainer({
-                outerSelector: '#category-tree-panel',
-                innerSelector: '#tree-container',
-                minWidth: 260,
-                initialWidth: 340,
-                maxWidth: 'min(54vw, 620px)',
-                outerMaxWidth: 'min(58vw, 700px)',
-                desktopMediaQuery: '(max-width: 1200px)',
-                mobileInnerMaxHeight: '400px'
-            });
-        }
-        var drawer = document.getElementById('category-drawer');
-        if (drawer && categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
-            drawer.addEventListener('transitionend', function() {
-                if (drawer.classList.contains('open')) {
-                    categoryTreeSizer.sync();
-                }
-            });
-        }
+        // 统一布局渲染
+        PS.render($moduleContainer, {
+            title: '🌳 产品类别筛选',
+            submitLabel: '✅ 提交选中产品',
+            toolbar: toolbarHTML,
+            onSubmit: submitSelectedProducts
+        });
 
-        // 若之前已初始化，先销毁后重建（处理内容热替换后树丢失/失效）。
-        if (_hasMountedTree($container)) {
-            try {
-                $container.fancytree('destroy');
-            } catch (e) {}
-            treeInstance = null;
-        }
-
-        // 使用统一的 ProductSelector 创建树
-        window.ProductSelector.createTree($container, {
-            mode: 'drawer',
+        // 初始化左侧树
+        PS.initLeftTree($moduleContainer, {
             onInit: function(tree) {
                 treeInstance = tree;
             }
         });
 
-        // 提交按钮可能随单因子内容局部刷新而重建，使用委托绑定保持事件稳定。
+        // 提交按钮委托（已在 render 中绑定，此处保留兼容）
         $(document)
-            .off('click.categorySubmit', '#submit-selected')
-            .on('click.categorySubmit', '#submit-selected', submitSelectedProducts);
+            .off('click.categorySubmit', '.ps-submit-btn')
+            .on('click.categorySubmit', '.ps-submit-btn', submitSelectedProducts);
 
         // SortableJS 拖拽已由 renderHistory() → PS.renderSubmissionHistory() 内部处理
 
@@ -642,10 +626,9 @@
     window.ensureCategoryTreeReady = function() {
         var $ = window.jQuery;
         if (!$) return;
-        var $container = $("#tree-container");
-        if (!$container.length) return;
-        if (_hasMountedTree($container)) return;
-        initCategoryFilterModule(0);
+        if (!treeInstance) {
+            initCategoryFilterModule(0);
+        }
     };
 
     initCategoryFilterModule();
