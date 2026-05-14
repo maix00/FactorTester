@@ -178,11 +178,32 @@
         var onDeletePath = callbacks.onDeletePath || function() {};
         var onLabelChange = callbacks.onLabelChange || function() {};
         var onPathClick = callbacks.onPathClick || function() {};
+        var onAdd = callbacks.onAdd || null;
+        var onImportGroup = callbacks.onImportGroup || null;
 
-        // 映射成 expandable 格式：name = #N + factor_tester_serial
+        // ── 顶部操作栏：+ 添加 + 从产品组导入，并列 ──
+        var actionBar = '';
+        if (onAdd || onImportGroup) {
+            actionBar += '<div class="ps-sub-action-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+            if (onAdd) {
+                actionBar += '<div class="pg-exp-add-btn" style="display:flex;align-items:center;justify-content:center;height:36px;padding:0 16px;border:2px dashed #d0d5dd;border-radius:6px;cursor:pointer;background:#fafbfc;color:#888;font-size:14px;transition:background 0.15s,border-color 0.15s;flex-shrink:0;" title="提交选中产品到列表">+ 添加</div>';
+            }
+            if (onImportGroup) {
+                actionBar += '<button class="ps-import-group-btn" style="height:36px;padding:0 14px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;flex-shrink:0;">📥 从产品组导入</button>';
+            }
+            actionBar += '</div>';
+        }
+
+        // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         var expItems = submissions.map(function(sub, i) {
+            var displayName;
+            if (sub.product_group) {
+                displayName = '📦 ' + sub.product_group;
+            } else {
+                displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
+            }
             return {
-                name: '#' + (i + 1) + ' ' + (sub.factor_tester_serial || ''),
+                name: displayName,
                 paths: sub.paths || [],
                 _index: i,
                 _sub: sub
@@ -190,11 +211,10 @@
         });
 
         var expExpanded = {};
-        Object.keys(expandedState).forEach(function(k) {
-            var sub = submissions[k];
-            if (!sub) return;
-            var name = '#' + (parseInt(k)+1) + ' ' + (sub.factor_tester_serial || '');
-            expExpanded[name] = true;
+        expItems.forEach(function(item) {
+            if (expandedState[item._index]) {
+                expExpanded[item.name] = true;
+            }
         });
 
         PG.renderExpandableGroupList(expItems, $container, {
@@ -205,30 +225,20 @@
             showAddButton: false,
             dragHandle: '.pg-exp-grip',
             onExpand: function(name) {
-                var idx = -1;
-                for (var i = 0; i < expItems.length; i++) {
-                    if (expItems[i].name === name) { idx = i; break; }
-                }
-                if (idx >= 0 && expandedState[idx]) {
-                    // mark all paths expanded
-                    (expandedState[idx] || {})._all = true;
+                var found = expItems.find(function(item) { return item.name === name; });
+                if (found) {
+                    expandedState[found._index] = expandedState[found._index] || {};
                 }
             },
             onCollapse: function(name) {
-                var idx = -1;
-                for (var i = 0; i < expItems.length; i++) {
-                    if (expItems[i].name === name) { idx = i; break; }
-                }
-                if (idx >= 0) {
-                    expandedState[idx] = {};
+                var found = expItems.find(function(item) { return item.name === name; });
+                if (found) {
+                    delete expandedState[found._index];
                 }
             },
             onDelete: function(name) {
-                var idx = -1;
-                for (var i = 0; i < expItems.length; i++) {
-                    if (expItems[i].name === name) { idx = i; break; }
-                }
-                if (idx >= 0) onDeleteSub(idx);
+                var found = expItems.find(function(item) { return item.name === name; });
+                if (found) onDeleteSub(found._index);
             },
             onReorder: function(names) {
                 // 用 names 反推出新的 submissions 顺序
@@ -262,6 +272,19 @@
             $prods.html('加载中...').slideDown(150);
             onPathClick(path, -1, -1);
         });
+
+        // ── 顶部操作栏事件 ──
+        if (actionBar) {
+            $container.prepend(actionBar);
+            $container.find('.pg-exp-add-btn').off('click.psadd').on('click.psadd', function(e) {
+                e.stopPropagation();
+                if (onAdd) onAdd();
+            });
+            $container.find('.ps-import-group-btn').off('click.psimport').on('click.psimport', function(e) {
+                e.stopPropagation();
+                if (onImportGroup) onImportGroup();
+            });
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -285,14 +308,16 @@
                 + '</div>'
                 + '<div style="display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid #e1e4e8;background:#f6f8fa;">'
                 + '<input id="ps-import-search" type="text" placeholder="🔍 搜索产品组..." style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;" maxlength="50">'
-                + '<button id="ps-import-confirm" style="padding:6px 18px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;" disabled>导入选中 (0)</button>'
                 + '</div>'
                 + '<div id="ps-import-body" style="flex:1;overflow-y:auto;padding:12px 20px;min-height:200px;">'
                 + '<div style="color:#888;text-align:center;padding:40px 0;">加载产品组列表...</div>'
                 + '</div>'
-                + '<div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid #e1e4e8;">'
+                + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 20px;border-top:1px solid #e1e4e8;">'
+                + '<span id="ps-import-count" style="font-size:12px;color:#888;"></span>'
+                + '<div style="display:flex;gap:8px;">'
                 + '<button id="ps-import-cancel" style="padding:6px 18px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:13px;">取消</button>'
-                + '</div></div></div>';
+                + '<button id="ps-import-confirm" style="padding:6px 18px;border:none;border-radius:6px;background:#6c63ff;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;" disabled>导入选中 (0)</button>'
+                + '</div>'
 
             var $ov = $(html).appendTo('body');
 
@@ -307,6 +332,7 @@
             function updateConfirmButton() {
                 var count = Object.keys(selectedNames).length;
                 $confirm.text('导入选中 (' + count + ')').prop('disabled', count === 0);
+                $('#ps-import-count').text(count > 0 ? '已选 ' + count + ' 组' : '');
             }
 
             function renderImportList(filterText) {
@@ -351,19 +377,19 @@
             $confirm.on('click', function() {
                 var names = Object.keys(selectedNames);
                 if (!names.length) return;
-                var pathSet = {};
-                var importGroupName = names.length === 1 ? names[0] : (names[0] + ' 等' + names.length + '组');
                 var promises = names.map(function(n) {
                     return PG.fetchGroupDetail(n).then(function(g) {
-                        if (g && g.paths) {
-                            g.paths.forEach(function(p) { pathSet[p] = true; });
-                        }
+                        return { name: n, paths: g && g.paths ? g.paths : [] };
                     });
                 });
-                Promise.all(promises).then(function() {
-                    var allPaths = Object.keys(pathSet);
-                    if (!allPaths.length) { alert('选中的产品组没有路径'); return; }
-                    onImport(importGroupName, allPaths);
+                Promise.all(promises).then(function(results) {
+                    var allEmpty = results.every(function(r) { return !r.paths.length; });
+                    if (allEmpty) { alert('选中的产品组没有路径'); return; }
+                    results.forEach(function(r) {
+                        if (r.paths.length) {
+                            onImport(r.name, r.paths);
+                        }
+                    });
                     close();
                 });
             });

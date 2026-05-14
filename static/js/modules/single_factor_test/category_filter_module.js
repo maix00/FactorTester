@@ -97,6 +97,37 @@
         if (!$container || !$container.length) return;
 
         window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
+            onAdd: function() {
+                submitSelectedProducts();
+            },
+            onImportGroup: function() {
+                window.ProductSelector.openGroupImport(function(groupName, paths) {
+                    var newId = 'pg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+                    fetch('/submit_selected_products', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            selected_paths: paths,
+                            id_time: newId,
+                            page_uuid: window._pageUuid || ''
+                        })
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(submitResp) {
+                        if (!submitResp.success) {
+                            alert('提交失败: ' + (submitResp.error || '未知错误'));
+                            return;
+                        }
+                        if (submitResp.submissions) syncFromServer(submitResp.submissions);
+                        var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
+                        if (newSub) {
+                            newSub.product_group = groupName;
+                        }
+                        renderHistory();
+                        refreshSubmissionDependents();
+                    });
+                });
+            },
             onReorder: function() {
                 fetch('/reorder_submissions', {
                     method: 'POST',
@@ -364,7 +395,7 @@
         // ── 从产品组导入（委托给统一的 ProductSelector）────────────────────────
         $('#pg-import-btn').on('click', function() {
             window.ProductSelector.openGroupImport(function(groupName, paths) {
-                var newId = 'pg-' + Date.now();
+                var newId = 'pg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
                 fetch('/submit_selected_products', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -380,11 +411,11 @@
                         alert('提交失败: ' + (submitResp.error || '未知错误'));
                         return;
                     }
-                    syncFromServer(submitResp.submissions || []);
+                    if (submitResp.submissions) syncFromServer(submitResp.submissions);
+                    // 给最新的提交打上产品组标记
                     var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
                     if (newSub) {
                         newSub.product_group = groupName;
-                        newSub.label = groupName;
                     }
                     renderHistory();
                     refreshSubmissionDependents();

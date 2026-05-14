@@ -247,7 +247,7 @@
             }
             // 名称 or 编辑框
             if (isEditing) {
-                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;padding:3px 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;">';
+                html += '<input class="pg-exp-name-input" data-name="' + _escHtml(name) + '" type="text" value="' + _escHtml(name) + '" style="flex:1;min-width:0;font-size:13px;height:28px;padding:0 6px;border:1px solid #4a90d9;border-radius:4px;box-sizing:border-box;line-height:28px;">';
             } else {
                 html += '<span class="pg-exp-name" data-name="' + _escHtml(name) + '" title="' + _escHtml(name) + '" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:' + (isSel ? '600' : '400') + ';">' + _escHtml(name) + '</span>';
             }
@@ -305,9 +305,38 @@
         // 展开/折叠
         $container.off('click.pgexp', '.pg-exp-toggle').on('click.pgexp', '.pg-exp-toggle', function(e) {
             e.stopPropagation();
-            var name = $(this).data('name');
-            if (opts.onExpand && !expanded[name]) opts.onExpand(name);
-            else if (opts.onCollapse && expanded[name]) opts.onCollapse(name);
+            var $btn = $(this);
+            var name = $btn.data('name');
+            var $body = $btn.closest('.pg-exp-item').find('.pg-exp-body');
+            if (!expanded[name]) {
+                expanded[name] = true;
+                $btn.html('&#9650;');
+                // 如果 body 还没有路径内容，动态填充
+                if (!$body.find('.pg-exp-paths').length) {
+                    var item = null;
+                    for (var i = 0; i < items.length; i++) {
+                        if (items[i].name === name) { item = items[i]; break; }
+                    }
+                    if (item && item.paths && item.paths.length) {
+                        var ph = '<div class="pg-exp-paths" style="padding-top:6px;">';
+                        item.paths.forEach(function(path, pi) {
+                            ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
+                            ph += '<div class="pg-exp-path-hdr" style="padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">' + _escHtml(path) + '</div>';
+                            ph += '<div class="pg-exp-path-prods" data-path="' + _escHtml(path) + '" style="display:none;padding:4px 8px 4px 16px;font-size:12px;color:#888;"></div>';
+                            ph += '</div>';
+                        });
+                        ph += '</div>';
+                        $body.prepend(ph);
+                    }
+                }
+                $body.slideDown(150);
+                if (opts.onExpand) opts.onExpand(name);
+            } else {
+                delete expanded[name];
+                $btn.html('&#9660;');
+                $body.slideUp(150);
+                if (opts.onCollapse) opts.onCollapse(name);
+            }
         });
 
         // 保存（管理模式）
