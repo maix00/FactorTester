@@ -233,8 +233,8 @@
 
         // ── + 号方块（仅在无 placeholder 时显示） ──
         if (showAddButton && !newItemPlaceholder) {
-            html += '<div class="pg-exp-add-block" style="margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;background:#fafbfc;padding:4px 10px;display:flex;align-items:center;justify-content:center;">';
-            html += '<button class="pg-exp-add-act" style="width:28px;height:28px;border-radius:50%;border:1.5px solid #aaa;background:transparent;color:#888;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;box-sizing:border-box;" title="新增">+</button>';
+            html += '<div class="pg-exp-add-block" style="margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;background:#fafbfc;padding:6px 10px;display:flex;align-items:center;justify-content:center;min-height:34px;box-sizing:border-box;">';
+            html += '<button class="pg-exp-add-act" style="width:22px;height:22px;border-radius:50%;border:1.5px solid #aaa;background:transparent;color:#888;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;box-sizing:border-box;" title="新增">+</button>';
             html += '</div>';
         }
 
@@ -242,7 +242,7 @@
             html += '<div style="color:#888;text-align:center;padding:12px;">暂无数据</div>';
             $container.html(html);
         } else {
-            html += '<div id="pg-expandable-list" style="font-size:13px;">';
+            html += '<div class="pg-expandable-list" style="font-size:13px;">';
             renderItems.forEach(function(item, idx) {
             var name = item.name || '';
             var paths = item.paths || [];
@@ -386,10 +386,10 @@
         $container.off('click.pgexp', '.pg-exp-save').on('click.pgexp', '.pg-exp-save', function(e) {
             e.stopPropagation();
             var name = $(this).data('name');
-            // 先提交编辑框内的新名称
             var $inp = $container.find('.pg-exp-name-input[data-name="' + _escHtml(name) + '"]');
             var newName = $inp.length ? $inp.val().trim() : name;
-            if (opts.onSave) opts.onSave(name, newName);
+            var isPlaceholder = String($(this).closest('.pg-exp-item').data('placeholder')) === '1';
+            if (opts.onSave) opts.onSave(name, newName, isPlaceholder);
         });
 
         // 删除
@@ -439,24 +439,39 @@
                 });
         });
 
-        // 名称输入框：Enter 触发保存（占位项）或重命名（已有项）
-        $container.off('keydown.pgexp', '.pg-exp-name-input').on('keydown.pgexp', '.pg-exp-name-input', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                var $inp = $(this);
-                var name = $inp.data('name');
-                var newName = $inp.val().trim();
-                if (!newName) return;
-                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
-                if (opts.onSave) {
-                    opts.onSave(name, newName);
+        // 名称输入框：Enter 触发保存，blur 也触发保存
+        $container.off('keydown.pgexp blur.pgexp', '.pg-exp-name-input')
+            .on('keydown.pgexp', '.pg-exp-name-input', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    var $inp = $(this);
+                    var name = $inp.data('name');
+                    var newName = $inp.val().trim();
+                    if (!newName) return;
+                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                    if (opts.onSave) {
+                        opts.onSave(name, newName, isPlaceholder);
+                    }
                 }
-            }
-        });
+            })
+            .on('blur.pgexp', '.pg-exp-name-input', function() {
+                // 延迟以允许保存按钮点击优先处理
+                var $inp = $(this);
+                setTimeout(function() {
+                    if (!$inp.is(':visible')) return; // 已被重新渲染
+                    var name = $inp.data('name');
+                    var newName = $inp.val().trim();
+                    if (!newName) return;
+                    var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                    if (opts.onSave) {
+                        opts.onSave(name, newName, isPlaceholder);
+                    }
+                }, 150);
+            });
 
         // SortableJS 拖拽
         if (dragHandle && window.Sortable) {
-            var el = document.getElementById('pg-expandable-list');
+            var el = $container.find('.pg-expandable-list')[0];
             if (el) {
                 if (el._sortable) el._sortable.destroy();
                 window.Sortable.create(el, {
@@ -464,7 +479,7 @@
                     handle: dragHandle,
                     onEnd: function() {
                         var names = [];
-                        $('#pg-expandable-list .pg-exp-item').each(function() {
+                        $(el).find('.pg-exp-item').each(function() {
                             names.push($(this).data('name'));
                         });
                         if (opts.onReorder) opts.onReorder(names);

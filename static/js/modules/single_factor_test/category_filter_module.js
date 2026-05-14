@@ -104,8 +104,9 @@
             newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
             editingName: editingName,
             onAdd: function() {
-                // 已有 placeholder 时不重复添加
+                // 已有 placeholder 时不重复添加；点击添加时退出其他编辑
                 if (newItemPlaceholderName) return;
+                editingName = null;
                 var now = new Date();
                 var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
                 newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
@@ -128,7 +129,7 @@
                 } else {
                     // 已有记录：有路径 → 更新路径 + 改名；无路径 → 仅改名
                     var found = submissions.find(function(s) {
-                        var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                        var dn = s.product_group ? ('📦 ' + s.product_group + ' (' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
                         return dn === name;
                     });
                     if (!found) { editingName = null; renderHistory(); return; }
@@ -176,7 +177,12 @@
                 renderHistory();
             },
             onToggleEdit: function(name) {
-                editingName = (editingName === name) ? null : name;
+                if (editingName === name) {
+                    editingName = null;
+                } else {
+                    editingName = name;
+                    newItemPlaceholderName = null;  // 进入编辑模式时清除 placeholder
+                }
                 renderHistory();
             },
             onImportGroup: function() {

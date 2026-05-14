@@ -190,11 +190,12 @@
         var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
+        // displayName 必须唯一，用 sub.id 保证唯一性以支持单选编辑模式
         var expItems = submissions.map(function(sub, i) {
             var isFromGroup = !!sub.product_group;
             var displayName;
             if (isFromGroup) {
-                displayName = '📦 ' + sub.product_group;
+                displayName = '📦 ' + sub.product_group + ' (' + sub.id + ')';
             } else {
                 displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
             }
