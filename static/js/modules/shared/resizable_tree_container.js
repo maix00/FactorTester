@@ -25,9 +25,12 @@
 
         var minWidth = Number.isFinite(opts.minWidth) ? opts.minWidth : 260;
         var initialWidth = Number.isFinite(opts.initialWidth) ? opts.initialWidth : 340;
+        var minHeight = Number.isFinite(opts.minHeight) ? opts.minHeight : 120;
+        var initialHeight = Number.isFinite(opts.initialHeight) ? opts.initialHeight : null;
         var maxWidthFallback = Number.isFinite(opts.maxWidthFallback) ? opts.maxWidthFallback : Math.floor(window.innerWidth * 0.62);
         var desktopMediaQuery = opts.desktopMediaQuery || '(max-width: 1024px)';
         var mobileInnerHeight = opts.mobileInnerMaxHeight || '38vh';
+        var resizeDirection = opts.resizeDirection || 'both'; // 'horizontal', 'vertical', 'both'
 
         outer.style.width = 'fit-content';
         outer.style.minWidth = '0';
@@ -36,11 +39,15 @@
 
         inner.style.boxSizing = 'border-box';
         inner.style.minWidth = String(minWidth) + 'px';
+        inner.style.minHeight = String(minHeight) + 'px';
         if (opts.maxWidth) inner.style.maxWidth = opts.maxWidth;
         if (!inner.style.width || inner.style.width === '100%') {
             inner.style.width = String(initialWidth) + 'px';
         }
-        inner.style.resize = 'horizontal';
+        if (initialHeight && (!inner.style.height || inner.style.height === 'auto')) {
+            inner.style.height = String(initialHeight) + 'px';
+        }
+        inner.style.resize = resizeDirection;
         inner.style.overflowX = 'auto';
         inner.style.overflowY = 'auto';
 
@@ -53,6 +60,7 @@
                 outer.style.flexBasis = 'auto';
                 inner.style.width = '100%';
                 inner.style.minWidth = '0';
+                inner.style.minHeight = '0';
                 inner.style.resize = 'none';
                 if (mobileInnerHeight) {
                     inner.style.maxHeight = mobileInnerHeight;
@@ -61,7 +69,8 @@
             }
 
             inner.style.minWidth = String(minWidth) + 'px';
-            inner.style.resize = 'horizontal';
+            inner.style.minHeight = String(minHeight) + 'px';
+            inner.style.resize = resizeDirection;
             inner.style.maxHeight = '';
 
             var innerStyle = window.getComputedStyle(inner);

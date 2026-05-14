@@ -46,8 +46,8 @@
                         + (isActive ? 'background:#e8f0fe;font-weight:600;' : 'background:#f6f8fa;')
                         + 'border:1px solid ' + (isActive ? '#4a90d9' : '#e1e4e8') + ';">';
                     html += '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">';
-                    html += '<i class="fas fa-grip-vertical" style="color:#888;cursor:grab;flex-shrink:0;"></i>';
-                    html += '<span class="pg-group-name" title="点击查看路径列表 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
+                    html += '<i class="fas fa-grip-vertical" style="color:#888;cursor:grab;flex-shrink:0;position:relative;z-index:1;"></i>';
+                    html += '<span class="pg-group-name" title="单击查看路径 / 双击重命名" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(g.name) + '</span>';
                     html += '<span style="color:#888;font-size:11px;flex-shrink:0;">(' + (g.path_count || g.paths ? g.paths.length : 0) + '条)</span>';
                     html += '</div>';
                     html += '<button class="pg-group-del" data-name="' + _esc(g.name) + '" style="background:none;border:none;color:#d00;cursor:pointer;font-size:13px;flex-shrink:0;margin-left:4px;"><i class="fas fa-trash"></i></button>';
@@ -78,17 +78,25 @@
                 });
             }
 
-            // 事件绑定
+            // 事件绑定：单击有 300ms 延时以区分双击重命名
+            var clickTimer = null;
             $container.find('.pg-group-item').on('click', function(e) {
                 if ($(e.target).closest('.pg-group-del').length) return;
                 if ($(e.target).closest('.fa-grip-vertical').length) return;
-                loadGroupForEdit($(this).data('name'));
+                var $item = $(this);
+                var name = $item.data('name');
+                if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; } // 双击：取消单击
+                clickTimer = setTimeout(function() {
+                    clickTimer = null;
+                    loadGroupForEdit(name);
+                }, 300);
             });
 
             // 双击重命名（内联替换，避免 DOM 插入触发 blur）
             $container.find('.pg-group-name').on('dblclick', function(e) {
                 e.stopPropagation();
                 e.preventDefault();
+                if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
                 var $name = $(this);
                 var oldName = $name.text().trim();
                 var $inp = $('<input type="text" style="font-size:13px;padding:2px 6px;border:1px solid #4a90d9;border-radius:4px;width:100%;box-sizing:border-box;">')
@@ -303,8 +311,11 @@
                         innerElement: $treeContainer[0],
                         minWidth: 260,
                         initialWidth: 340,
+                        minHeight: 150,
+                        initialHeight: 420,
                         maxWidth: 'min(54vw, 620px)',
                         maxWidthFallback: 620,
+                        resizeDirection: 'both',
                         desktopMediaQuery: '(max-width: 1200px)',
                         mobileInnerMaxHeight: '400px'
                     });

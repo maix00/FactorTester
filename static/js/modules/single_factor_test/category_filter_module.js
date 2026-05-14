@@ -359,8 +359,11 @@
                     innerElement: $treeContainer[0],
                     minWidth: 260,
                     initialWidth: 340,
+                    minHeight: 150,
+                    initialHeight: 400,
                     maxWidth: 'min(54vw, 620px)',
                     maxWidthFallback: 620,
+                    resizeDirection: 'both',
                     desktopMediaQuery: '(max-width: 1200px)',
                     mobileInnerMaxHeight: '400px'
                 });
