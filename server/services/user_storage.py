@@ -52,6 +52,11 @@ def user_template_path(
     if scope_key:
         directory = os.path.join(directory, f'{kind}_templates')
         os.makedirs(directory, exist_ok=True)
+        if ff_alias:
+            # 两级：{kind}_templates/{scope_key}/{ff_alias}.json
+            directory = os.path.join(directory, scope_key)
+            os.makedirs(directory, exist_ok=True)
+            return os.path.join(directory, f'{ff_alias}.json')
         return os.path.join(directory, f'{scope_key}.json')
     if kind == 'params' and ff_alias:
         directory = os.path.join(directory, 'params_templates')
