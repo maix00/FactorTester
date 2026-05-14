@@ -184,6 +184,9 @@
 
         var onInsertPlaceholder = callbacks.onInsertPlaceholder || null;
         var onDeletePlaceholder = callbacks.onDeletePlaceholder || null;
+        var onRename = callbacks.onRename || null;
+        var editingName = callbacks.editingName || null;       // 当前编辑中的记录名
+        var onToggleEdit = callbacks.onToggleEdit || null;     // 点击进入编辑模式
 
         // 映射成 expandable 格式：优先显示产品组名（带标示），否则 #N + serial
         var expItems = submissions.map(function(sub, i) {
@@ -208,26 +211,36 @@
             }
         });
 
+        var editing = {};
+        if (editingName) editing[editingName] = true;
+
         PG.renderExpandableGroupList(expItems, $container, {
-            mode: 'readonly',
+            mode: 'manage',
             selected: {},
             expanded: expExpanded,
-            editing: {},
+            editing: editing,
             showAddButton: !!(onAdd || onImportGroup),
             newItemPlaceholder: newItemPlaceholder,
             dragHandle: '.pg-exp-grip',
             onAdd: function() {
                 if (onAdd) onAdd();
             },
+            onToggle: function(name) {
+                // 点击已有记录行 → 进入编辑模式（改名）
+                if (name && name !== (newItemPlaceholder && newItemPlaceholder.name) && onToggleEdit) {
+                    onToggleEdit(name);
+                }
+            },
             onSave: function(name, newName) {
-                // 判断是 placeholder 还是已有项
+                // placeholder → 二阶段（先改名，有路径才真正提交）
                 var isPh = newItemPlaceholder && newItemPlaceholder.name === name;
                 if (isPh && onInsertPlaceholder) {
                     onInsertPlaceholder(newName);
-                } else if (!isPh && onAdd) {
-                    onAdd();
+                } else if (!isPh && onRename) {
+                    onRename(name, newName);
                 }
             },
+            onRename: onRename,
             onExpand: function(name) {
                 var found = expItems.find(function(item) { return item.name === name; });
                 if (found) {
@@ -300,8 +313,8 @@
                 + '<h3 style="margin:0;font-size:16px;">📥 从产品组导入</h3>'
                 + '<button id="ps-import-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>'
                 + '</div>'
-                + '<div style="display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid #e1e4e8;background:#f6f8fa;">'
-                + '<input id="ps-import-search" type="text" placeholder="🔍 搜索产品组..." style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;" maxlength="50">'
+                + '<div style="display:flex;align-items:center;padding:10px 20px;border-bottom:1px solid #e1e4e8;background:#f6f8fa;">'
+                + '<input id="ps-import-search" type="text" placeholder="🔍 搜索产品组..." style="flex:1;padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;margin:0;" maxlength="50">'
                 + '</div>'
                 + '<div id="ps-import-body" style="flex:1;overflow-y:auto;padding:12px 20px;min-height:200px;">'
                 + '<div style="color:#888;text-align:center;padding:40px 0;">加载产品组列表...</div>'

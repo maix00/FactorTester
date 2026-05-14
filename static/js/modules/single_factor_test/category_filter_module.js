@@ -10,6 +10,7 @@
     window.getSubmissionRecords = function() { return submissions; };
     var expandedState = {};        // 记录每个提交中路径的展开状态
     var newItemPlaceholderName = null;  // 当前 placeholder 名称，null = 无
+    var editingName = null;            // 当前编辑中的记录名
     var treeInstance = null;
     var categoryTreeSizer = null;
     var $moduleContainer = null;  // PS.render() 的容器
@@ -99,6 +100,7 @@
 
         window.ProductSelector.renderSubmissionHistory(submissions, expandedState, $container, {
             newItemPlaceholder: newItemPlaceholderName ? { name: newItemPlaceholderName } : null,
+            editingName: editingName,
             onAdd: function() {
                 // 已有 placeholder 时不重复添加
                 if (newItemPlaceholderName) return;
@@ -122,15 +124,41 @@
                 newItemPlaceholderName = null;
                 renderHistory();
             },
+            onToggleEdit: function(name) {
+                editingName = (editingName === name) ? null : name;
+                renderHistory();
+            },
+            onRename: function(oldName, newName) {
+                newName = (newName || '').trim();
+                if (!newName || newName === oldName) { editingName = null; renderHistory(); return; }
+                // 找到对应记录，调后端改名
+                var found = submissions.find(function(s) {
+                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                    return dn === oldName;
+                });
+                if (found) {
+                    found.product_group = newName;
+                    fetch('/rename_submission', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ id_time: found.id, new_name: newName })
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success && data.submissions) syncFromServer(data.submissions);
+                    });
+                }
+                editingName = null;
+                renderHistory();
+            },
             onImportGroup: function() {
                 window.ProductSelector.openGroupImport(function(groupName, paths) {
-                    var newId = 'pg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
                     fetch('/submit_selected_products', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             selected_paths: paths,
-                            id_time: newId,
+                            group_name: groupName,
                             page_uuid: window._pageUuid || ''
                         })
                     })
@@ -141,10 +169,6 @@
                             return;
                         }
                         if (submitResp.submissions) syncFromServer(submitResp.submissions);
-                        var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
-                        if (newSub) {
-                            newSub.product_group = groupName;
-                        }
                         renderHistory();
                         refreshSubmissionDependents();
                     });

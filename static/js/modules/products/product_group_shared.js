@@ -233,8 +233,8 @@
 
         // ── + 号方块（仅在无 placeholder 时显示） ──
         if (showAddButton && !newItemPlaceholder) {
-            html += '<div class="pg-exp-add-block" style="margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;background:#fafbfc;padding:8px 12px;display:flex;align-items:center;">';
-            html += '<button class="pg-exp-add-act" style="width:28px;height:28px;border-radius:50%;border:1.5px solid #aaa;background:transparent;color:#888;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;" title="新增">+</button>';
+            html += '<div class="pg-exp-add-block" style="margin-bottom:8px;border:2px dashed #d0d5dd;border-radius:6px;background:#fafbfc;padding:4px 10px;display:flex;align-items:center;justify-content:center;">';
+            html += '<button class="pg-exp-add-act" style="width:28px;height:28px;border-radius:50%;border:1.5px solid #aaa;background:transparent;color:#888;font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;box-sizing:border-box;" title="新增">+</button>';
             html += '</div>';
         }
 
@@ -422,11 +422,10 @@
                 var $inp = $(this);
                 var name = $inp.data('name');
                 var newName = $inp.val().trim();
-                var isPlaceholder = $inp.closest('.pg-exp-item').data('placeholder') === 1;
-                if (isPlaceholder && newName && opts.onSave) {
+                if (!newName) return;
+                var isPlaceholder = String($inp.closest('.pg-exp-item').data('placeholder')) === '1';
+                if (opts.onSave) {
                     opts.onSave(name, newName);
-                } else if (newName && newName !== name && opts.onRename) {
-                    opts.onRename(name, newName);
                 }
             }
         });
