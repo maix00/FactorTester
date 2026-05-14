@@ -132,7 +132,7 @@
         html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-shrink:0;">';
         html += '<div style="font-size:15px;font-weight:600;">📋 已选路径列表</div>';
         html += '</div>';
-        html += '<div style="font-size:12px;color:#586069;margin-bottom:8px;flex-shrink:0;">💡 拖拽提交记录可调整顺序，点击路径可查看产品详情</div>';
+        html += '<div style="font-size:12px;color:#586069;margin-bottom:8px;flex-shrink:0;">💡 拖拽提交路径组可调整顺序，点击路径组以编辑</div>';
         html += '<div class="ps-submission-history" style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:4px;"></div>';
         html += '</div>';
         html += '</div>';
@@ -147,7 +147,7 @@
     function initLeftTree($container, treeOpts) {
         var $left = $container.find('.ps-left-content');
         $left.html('<div style="margin-bottom:8px;color:#586069;font-size:13px;">树状结构，勾选叶子节点或分类后提交</div>'
-            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;max-height:500px;overflow:auto;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
+            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;height:100%;min-height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
         createTree($left.find('.ps-tree-container'), treeOpts);
     }
 

@@ -51,6 +51,7 @@
                 dragHandle: '.pg-exp-grip',
                 onAdd: function() {
                     if (newItemPlaceholderName) return;
+                    selectedName = null;
                     var now = new Date();
                     var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
                     newItemPlaceholderName = now.getFullYear() + pad(now.getMonth()+1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
@@ -59,12 +60,10 @@
                     renderGroupList();
                 },
                 onToggle: function(name) {
-                    if (selectedName === name) {
-                        selectedName = null;
-                        allGroupPaths = [];
-                        PS.clearChecks(groupTree);
-                    } else {
-                        selectedName = name;
+                    // 点击进入编辑模式（改名），同时加载路径到左侧树
+                    if (newItemPlaceholderName) { newItemPlaceholderName = null; }
+                    selectedName = (selectedName === name) ? null : name;
+                    if (selectedName) {
                         PS.clearChecks(groupTree);
                         PG.fetchGroupDetail(name).then(function(g) {
                             if (g && g.paths) {
@@ -72,6 +71,9 @@
                                 PS.restoreChecks(groupTree, allGroupPaths);
                             }
                         });
+                    } else {
+                        allGroupPaths = [];
+                        PS.clearChecks(groupTree);
                     }
                     renderGroupList();
                 },
@@ -196,7 +198,7 @@
                 onSubmit: function() {},
                 showSubmit: false,
                 headerBtns: '<button id="pg-overlay-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>',
-                toolbar: '<input id="pg-search-input" type="text" placeholder="🔍 搜索产品组..." style="padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:180px;height:32px;box-sizing:border-box;" maxlength="50">'
+                toolbar: '<input id="pg-search-input" type="text" placeholder="🔍 搜索产品组..." style="padding:6px 10px;border:1px solid #d0d5dd;border-radius:4px;font-size:12px;width:180px;height:32px;box-sizing:border-box;margin:0;" maxlength="50">'
             });
             $managerRoot = $('#ps-manager-root');
 
@@ -227,7 +229,7 @@
 
             $('#pg-overlay-close').on('click', closeOverlay);
             $('#pg-search-input').on('input', function() { renderGroupList(); });
-            PS.updateLeftHint($managerRoot, '点击选中产品组 → 勾选品种 → 保存');
+            PS.updateLeftHint($managerRoot, '点击路径组以编辑 → 勾选品种 → 保存');
         } else {
             $managerRoot = $('#ps-manager-root');
             PS.clearChecks(groupTree);
