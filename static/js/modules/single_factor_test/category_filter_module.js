@@ -194,7 +194,7 @@
             onToggleEdit: function(displayName) {
                 // displayName → sub.id（CF 用 id 做键）
                 var sub = submissions.find(function(s) {
-                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                    var dn = s.product_group ? ('📦 ' + s.product_group + ' (ID:' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
                     return dn === displayName;
                 });
                 var subId = sub ? sub.id : displayName;
@@ -210,7 +210,7 @@
             },
             onEditName: function(displayName) {
                 var sub = submissions.find(function(s) {
-                    var dn = s.product_group ? ('📦 ' + s.product_group) : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
+                    var dn = s.product_group ? ('📦 ' + s.product_group + ' (ID:' + s.id + ')') : ('#' + (submissions.indexOf(s)+1) + ' ' + (s.factor_tester_serial || ''));
                     return dn === displayName;
                 });
                 var subId = sub ? sub.id : displayName;

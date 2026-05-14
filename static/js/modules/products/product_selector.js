@@ -197,7 +197,7 @@
             var isFromGroup = !!sub.product_group;
             var displayName;
             if (isFromGroup) {
-                displayName = '📦 ' + sub.product_group;
+                displayName = '📦 ' + sub.product_group + ' (ID:' + sub.id + ')';
             } else {
                 displayName = '#' + (i + 1) + ' ' + (sub.factor_tester_serial || '');
             }
