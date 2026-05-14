@@ -400,6 +400,11 @@
             PS.clearChecks(groupTree);
         }
 
+        // overlay 显示后同步 tree container 高度
+        if (categoryTreeSizer && typeof categoryTreeSizer.sync === 'function') {
+            categoryTreeSizer.sync();
+        }
+
         renderGroupList();
     }
 
