@@ -335,24 +335,13 @@
         // 如果已渲染过，跳过重新渲染（保留树实例）
         if ($moduleContainer.find('.ps-body').length) return;
 
-        // 读取隐藏的 toolbar 模板 HTML 并删除模板 DOM
-        var toolbarHTML = '';
-        var $toolbarTpl = $moduleContainer.find('#category-toolbar-tpl');
-        if ($toolbarTpl.length) {
-            toolbarHTML = $toolbarTpl.html();
-            $toolbarTpl.remove();
-        }
-
-        // 统一布局渲染（提交按钮在 toolbar 中，不占 header）
+        // 统一布局渲染（无 toolbar，操作按钮在右侧 actionBar 中）
         PS.render($moduleContainer, {
             title: '🌳 产品类别筛选',
             submitLabel: '',
-            toolbar: toolbarHTML,
+            toolbar: '',
             onSubmit: submitSelectedProducts
         });
-
-        // 绑定 toolbar 中的内联提交按钮
-        $moduleContainer.find('#ps-submit-inline-btn').on('click', submitSelectedProducts);
 
         // 初始化左侧树
         PS.initLeftTree($moduleContainer, {
@@ -392,37 +381,7 @@
         }
 
 
-        // ── 从产品组导入（委托给统一的 ProductSelector）────────────────────────
-        $('#pg-import-btn').on('click', function() {
-            window.ProductSelector.openGroupImport(function(groupName, paths) {
-                var newId = 'pg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-                fetch('/submit_selected_products', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        selected_paths: paths,
-                        id_time: newId,
-                        page_uuid: window._pageUuid || ''
-                    })
-                })
-                .then(function(r) { return r.json(); })
-                .then(function(submitResp) {
-                    if (!submitResp.success) {
-                        alert('提交失败: ' + (submitResp.error || '未知错误'));
-                        return;
-                    }
-                    if (submitResp.submissions) syncFromServer(submitResp.submissions);
-                    // 给最新的提交打上产品组标记
-                    var newSub = submissions.find(function(s) { return String(s.id) === String(newId); });
-                    if (newSub) {
-                        newSub.product_group = groupName;
-                    }
-                    renderHistory();
-                    refreshSubmissionDependents();
-                });
-            });
-        });
-        // ── 从产品组导入 END ─────────────────────────────────────────────────
+        // 从产品组导入已由 renderSubmissionHistory 的 actionBar 处理，无需额外绑定。
 
         // 暴露给单因子设置快照模块
         window._getCurrentSubmissions = function() {
