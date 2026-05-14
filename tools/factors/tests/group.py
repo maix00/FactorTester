@@ -36,18 +36,8 @@ def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFra
     if signal_node is None:
         return raw_table
 
-    # If raw_table has a single-level unnamed index (name=None), signal_align
-    # will try DataFreq('None') → Timedelta(0) → division by zero.
-    # Promote the index name to the signal frequency name so DataFreq parses it.
-    _raw = raw_table
-    _idx_names = _raw.index.names
-    if len(_idx_names) == 1 and _idx_names[0] is None:
-        _freq_name = DataFreq(signal_node.signal_freq).name
-        _raw = _raw.copy()
-        _raw.index.name = _freq_name
-
     return signal_align(
-        _raw,
+        raw_table,
         signal_node.signal_freq,
         basepoint=signal_node.basepoint,
         daily_basepoint=signal_node.daily_basepoint,
