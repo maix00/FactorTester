@@ -43,7 +43,8 @@
         var factorTab = panel.querySelector(options.factorTabSelector || '.factor-tabs-container .nav-link.active');
         if (!factorTab) return null;
 
-        var factor = findFactorByLabel(factorTab.textContent.trim());
+        var factorLabel = factorTab.getAttribute('data-factor-alias') || factorTab.textContent.trim();
+        var factor = findFactorByLabel(factorLabel);
         if (!factor) return null;
 
         return {

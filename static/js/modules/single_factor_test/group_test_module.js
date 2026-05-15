@@ -86,10 +86,18 @@
         return ctx.getActiveFactorContext({
             tabSelector: '#groupTab .nav-link.active',
             panelPrefix: 'group-panel',
+            factorTabSelector: '.group-factor-nav-btn.active',
         }) || ctx.getActiveFactorContext({
             tabSelector: '#icTab .nav-link.active',
             panelPrefix: 'ic-panel',
         });
+    }
+
+    function getActiveGroupSubmissionId() {
+        var ctx = window.SingleFactorSubmissionContext;
+        var activeTab = document.querySelector('#groupTab .nav-link.active');
+        if (!ctx || !activeTab) return null;
+        return ctx.getSubmissionIdFromTab(activeTab, 'group-panel');
     }
 
     // ---------- 多周期收益率频率复选框 ----------
@@ -758,19 +766,14 @@
         });
     }
 
-    // ---------- 运行分组测试 ----------
-    function runGroupTest() {
-        var context = getCurrentContext();
-        if (!context) {
-            alert('请先在 IC 测试模块中运行 IC 测试，并点击某个因子的选项卡');
-            return;
+    function collectGroupRunPayload(context, factorAlias) {
+        var statusSpan = document.getElementById('group_test_status');
+        var currentSubmissionId = context && context.submission_id;
+        if (!currentSubmissionId || !factorAlias) {
+            return { error: '请先选择测试器和因子' };
         }
-        var currentSubmissionId = context.submission_id;
-        var currentFactorAlias = context.factor_alias;
-        
-        var n_groups = parseInt(document.getElementById('group_count').value, 10);
 
-        // 读取费率模式
+        var n_groups = parseInt(document.getElementById('group_count').value, 10);
         var feeMode = 'none';
         var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
         if (feeModeEl) feeMode = feeModeEl.value;
@@ -778,29 +781,25 @@
         var fee = 0.0;
         var fee_map = {};
         var use_closetoday = _useCloseToday;
-
         if (feeMode === 'uniform') {
             fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
         } else if (feeMode === 'per_product') {
             fee_map = buildFeeMap();
             if (!Object.keys(fee_map).length) {
-                alert('按品种费率模式下请先点击"获取费率"加载品种费率数据。');
-                return;
+                return { error: '按品种费率模式下请先点击"获取费率"加载品种费率数据。' };
             }
         }
-        
-        // 优先用本模块的分离输入框（年/月/日）
+
         var sy = document.getElementById('group_start_year').value;
         var sm = document.getElementById('group_start_month').value;
         var sd = document.getElementById('group_start_day').value;
         var ey = document.getElementById('group_end_year').value;
         var em = document.getElementById('group_end_month').value;
         var ed = document.getElementById('group_end_day').value;
-        
+
         var start_date = (sy && sm && sd) ? buildValidDate(sy, sm, sd) : null;
         var end_date = (ey && em && ed) ? buildValidDate(ey, em, ed) : null;
-        
-        // fallback：从时间范围模块读取
+
         if (!start_date) {
             var timeSy = document.getElementById('start_year') ? document.getElementById('start_year').value : null;
             var timeSm = document.getElementById('start_month') ? document.getElementById('start_month').value : null;
@@ -813,46 +812,23 @@
             var timeEd = document.getElementById('end_day') ? document.getElementById('end_day').value : null;
             if (timeEy && timeEm && timeEd) end_date = buildValidDate(timeEy, timeEm, timeEd);
         }
-        
-        // 最终 fallback：从 submission 中获取
+
         if (!start_date || !end_date) {
-            var submission = window.submissions ? window.submissions.find(function(s) { return s.id == currentSubmissionId; }) : null;
+            var submission = window.submissions ? window.submissions.find(function(s) { return String(s.id) === String(currentSubmissionId); }) : null;
             if (submission) {
                 if (!start_date) start_date = submission.start_date;
                 if (!end_date) end_date = submission.end_date;
             }
         }
-        
-        var statusSpan = document.getElementById('group_test_status');
-        
-        if (!start_date || !end_date) {
-            statusSpan.innerHTML = '✗ 请设置时间范围';
-            statusSpan.style.color = '#d40000';
-            return;
-        }
-        
-        if (start_date > end_date) {
-            statusSpan.innerHTML = '✗ 起始日期不能晚于终止日期';
-            statusSpan.style.color = '#d40000';
-            return;
-        }
-        
-        // 收集多周期收益率频率
+
+        if (!start_date || !end_date) return { error: '请设置时间范围' };
+        if (start_date > end_date) return { error: '起始日期不能晚于终止日期' };
+
         var return_freqs = getSelectedReturnFreqs();
-
-        statusSpan.innerHTML = '分组测试运行中...';
-        statusSpan.style.color = '#0078d4';
-
-        // 隐藏旧结果
-        var multiHorizonContainer = document.getElementById('multi_horizon_container');
-        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
-
-        fetch('/run_group_test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        return {
+            payload: {
                 submission_id: currentSubmissionId,
-                factor_alias: currentFactorAlias,
+                factor_alias: factorAlias,
                 n_groups: n_groups,
                 fee: fee,
                 fee_map: fee_map,
@@ -861,9 +837,65 @@
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
                 rebalance_mode: document.getElementById('rebalance_mode')?.value || 'each_period'
-            })
-        })
-        .then(function(res) { return res.json(); })
+            },
+            statusEl: statusSpan,
+        };
+    }
+
+    function applyGroupTestResult(data, statusText) {
+        if (data.multi_horizon) {
+            updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
+            var chartContainer = document.getElementById('group_chart_container');
+            var metricsContainer = document.getElementById('group_metrics_container');
+            if (chartContainer) chartContainer.style.display = 'none';
+            if (metricsContainer) metricsContainer.style.display = 'none';
+            closeSnapshotDrawer();
+            _lastGrossData = null;
+            _lastMetrics = null;
+            renderMultiHorizonTable(data.results, data.n_groups);
+            return;
+        }
+
+        updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
+        _lastGrossData = data.groups;
+        _lastMetrics = data.metrics;
+        _lastNgroups = data.n_groups;
+        _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
+        drawGroupChart(data.groups);
+        renderMetricsTable(data.metrics);
+        var slider = document.getElementById('fee_sensitivity_slider');
+        if (slider) { slider.value = 0; updateSensitivityLabel(0); }
+    }
+
+    function postGroupTest(payload) {
+        return fetch('/run_group_test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function(res) { return res.json(); });
+    }
+
+    // ---------- 运行分组测试 ----------
+    function runGroupTest() {
+        var context = getCurrentContext();
+        if (!context) {
+            alert('请先在 IC 测试模块中运行 IC 测试，并点击某个因子的选项卡');
+            return;
+        }
+        var built = collectGroupRunPayload(context, context.factor_alias);
+        var statusSpan = built.statusEl || document.getElementById('group_test_status');
+        if (built.error) {
+            statusSpan.innerHTML = '✗ ' + built.error;
+            statusSpan.style.color = '#d40000';
+            return;
+        }
+
+        statusSpan.innerHTML = '分组测试运行中...';
+        statusSpan.style.color = '#0078d4';
+        var multiHorizonContainer = document.getElementById('multi_horizon_container');
+        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
+
+        postGroupTest(built.payload)
         .then(function(data) {
             if (!data.success) {
                 statusSpan.innerHTML = '✗ 分组测试失败: ' + data.error;
@@ -878,43 +910,11 @@
                 return;
             }
 
-            // 多周期对比模式
-            if (data.multi_horizon) {
-                statusSpan.innerHTML = '✓ 多周期对比完成（' + data.results.length + ' 个频率）';
-                statusSpan.style.color = '#28a745';
-                // 多时段品种策略提示
-                updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
-                // 隐藏单频率图表和指标表
-                var chartContainer = document.getElementById('group_chart_container');
-                var metricsContainer = document.getElementById('group_metrics_container');
-                if (chartContainer) chartContainer.style.display = 'none';
-                if (metricsContainer) metricsContainer.style.display = 'none';
-                closeSnapshotDrawer();
-                // 清空缓存
-                _lastGrossData = null;
-                _lastMetrics = null;
-                // 渲染多周期对比表格
-                renderMultiHorizonTable(data.results, data.n_groups);
-                return;
-            }
-
-            statusSpan.innerHTML = '✓ 分组测试完成';
+            statusSpan.innerHTML = data.multi_horizon ? ('✓ 多周期对比完成（' + data.results.length + ' 个频率）') : '✓ 分组测试完成';
             statusSpan.style.color = '#28a745';
-
-            // ── 多时段品种策略提示 ──
-            updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
-
-            // 缓存原始数据，供成本敏感性滑条使用
-            _lastGrossData = data.groups;  // 每组含 gross_returns / fee_costs
-            _lastMetrics = data.metrics;
-            _lastNgroups = data.n_groups;
-            _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
-            // 初次渲染使用原始数据
-            drawGroupChart(data.groups);
-            renderMetricsTable(data.metrics);
-            // 重置滑条到0
-            var slider = document.getElementById('fee_sensitivity_slider');
-            if (slider) { slider.value = 0; updateSensitivityLabel(0); }
+            cacheGroupResult(context.submission_id, context.factor_alias, data);
+            markGroupFactorStatus(context.submission_id, context.factor_alias, data.success ? 'done' : 'error');
+            applyGroupTestResult(data);
         })
         .catch(function(err) {
             statusSpan.innerHTML = '请求失败: ' + err.message;
@@ -923,11 +923,111 @@
         });
     }
 
+    async function runAllGroupTestsForCurrentSubmission() {
+        var submissionId = getActiveGroupSubmissionId();
+        if (!submissionId) {
+            alert('请先选择一个 FactorTester 选项卡');
+            return;
+        }
+        var factors = Array.isArray(window.factorList) ? window.factorList : [];
+        if (!factors.length) {
+            alert('暂无可运行因子');
+            return;
+        }
+        var firstContext = {
+            submission_id: submissionId,
+        };
+        var statusSpan = document.getElementById('group_test_status');
+        var runBtn = document.getElementById('run_group_test_btn');
+        var runAllBtn = document.getElementById('run_all_group_tests_btn');
+        if (runBtn) runBtn.disabled = true;
+        if (runAllBtn) runAllBtn.disabled = true;
+        clearResults();
+        try {
+            for (var i = 0; i < factors.length; i++) {
+                var factor = factors[i];
+                var factorAlias = factor.alias || factor.name;
+                var built = collectGroupRunPayload(firstContext, factorAlias);
+                if (built.error) {
+                    if (statusSpan) {
+                        statusSpan.innerHTML = '✗ ' + built.error;
+                        statusSpan.style.color = '#d40000';
+                    }
+                    return;
+                }
+                if (statusSpan) {
+                    statusSpan.innerHTML = '分组测试运行中... ' + (i + 1) + '/' + factors.length + ' · ' + factorAlias;
+                    statusSpan.style.color = '#0078d4';
+                }
+                markGroupFactorStatus(submissionId, factorAlias, '');
+                try {
+                    var data = await postGroupTest(built.payload);
+                    if (!data.success) {
+                        markGroupFactorStatus(submissionId, factorAlias, 'error');
+                        cacheGroupResult(submissionId, factorAlias, data);
+                        if (statusSpan) {
+                            statusSpan.innerHTML = '✗ ' + factorAlias + ' 分组测试失败: ' + (data.error || '未知错误');
+                            statusSpan.style.color = '#d40000';
+                        }
+                        return;
+                    }
+                    cacheGroupResult(submissionId, factorAlias, data);
+                    markGroupFactorStatus(submissionId, factorAlias, 'done');
+                } catch (err) {
+                    markGroupFactorStatus(submissionId, factorAlias, 'error');
+                    if (statusSpan) {
+                        statusSpan.innerHTML = '✗ ' + factorAlias + ' 请求失败: ' + err.message;
+                        statusSpan.style.color = '#d40000';
+                    }
+                    return;
+                }
+            }
+            var activeBtn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"].active');
+            var activeAlias = activeBtn ? activeBtn.getAttribute('data-factor-alias') : (factors[0].alias || factors[0].name);
+            var result = getCachedGroupResult(submissionId, activeAlias);
+            if (result && result.success) applyGroupTestResult(result);
+            if (statusSpan) {
+                statusSpan.innerHTML = '✓ 已完成当前测试器全部 ' + factors.length + ' 个因子的分组测试';
+                statusSpan.style.color = '#28a745';
+            }
+        } finally {
+            if (runBtn) runBtn.disabled = false;
+            if (runAllBtn) runAllBtn.disabled = false;
+        }
+    }
+
     // ---------- 成本敏感性：缓存数据 ----------
     var _lastGrossData = null;   // 上次返回的 groups（含 gross_returns / fee_costs）
     var _lastMetrics = null;
     var _lastTimestamps = [];
     var _lastNgroups = 0;
+    var _groupResultsBySubmission = {};
+
+    function cacheGroupResult(submissionId, factorAlias, data) {
+        if (!submissionId || !factorAlias || !data) return;
+        if (!_groupResultsBySubmission[submissionId]) _groupResultsBySubmission[submissionId] = {};
+        _groupResultsBySubmission[submissionId][factorAlias] = data;
+    }
+
+    function getCachedGroupResult(submissionId, factorAlias) {
+        return _groupResultsBySubmission[submissionId] && _groupResultsBySubmission[submissionId][factorAlias];
+    }
+
+    function markGroupFactorStatus(submissionId, factorAlias, status) {
+        var btn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"][data-factor-alias="' + cssEscape(String(factorAlias)) + '"]');
+        if (!btn) return;
+        btn.setAttribute('data-run-status', status || '');
+        var badge = btn.querySelector('.group-factor-run-status');
+        if (badge) {
+            badge.textContent = status === 'done' ? '✓' : (status === 'error' ? '!' : '');
+            badge.style.color = status === 'error' ? '#d40000' : '#28a745';
+        }
+    }
+
+    function cssEscape(value) {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+        return value.replace(/["\\]/g, '\\$&');
+    }
 
     /** 更新敏感性滑条标签 */
     function updateSensitivityLabel(val) {
@@ -1490,6 +1590,8 @@
         setTimeout(syncFromTimeModule, 0);
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
+        var runAllBtn = document.getElementById('run_all_group_tests_btn');
+        if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
 
         // 如果已有 submissions，渲染两级选项卡
         if (window.submissions && window.submissions.length > 0) {
@@ -1501,13 +1603,16 @@
     window.renderGroupTabs = function(submissions) {
         var container = document.getElementById('group-tab-container');
         var runBtn = document.getElementById('run_group_test_btn');
+        var runAllBtn = document.getElementById('run_all_group_tests_btn');
         if (!container) return;
         if (!submissions || submissions.length === 0) {
             container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
             if (runBtn) runBtn.style.display = 'none';
+            if (runAllBtn) runAllBtn.style.display = 'none';
             return;
         }
         if (runBtn) runBtn.style.display = '';
+        if (runAllBtn) runAllBtn.style.display = '';
 
         var factorList = window.factorList || [];
         var tabsHtml = '<ul class="nav nav-tabs" id="groupTab" role="tablist">';
@@ -1520,28 +1625,30 @@
             var tabLabel = sub.product_group || sub.label || ('测试器' + (idx+1));
             tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-submission-id="' + sub.id + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.product_group ? '📦 ' : '') + tabLabel + '</button></li>';
 
-            // 第二级：因子选项卡
-            var factorTabsHtml = '';
-            var factorPanesHtml = '';
+            var factorNavHtml = '';
+            var factorContentHtml = '';
             if (factorList.length > 0) {
-                factorTabsHtml = '<ul class="nav nav-tabs factor-tabs-container" style="margin-top:12px;">';
-                factorPanesHtml = '<div class="tab-content">';
+                factorNavHtml = '<div class="group-factor-workspace" style="display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:12px;margin-top:12px;">';
+                factorNavHtml += '<div class="group-factor-sidebar" style="border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;max-height:360px;overflow:auto;padding:6px;">';
                 factorList.forEach(function(f, fi) {
-                    var fActive = fi === 0 ? 'active' : '';
-                    var fShow = fi === 0 ? 'show active' : '';
-                    var fTabId = 'group-factor-tab-' + sub.id + '-' + fi;
-                    var fPaneId = 'group-factor-pane-' + sub.id + '-' + fi;
-                    factorTabsHtml += '<li class="nav-item"><button class="nav-link ' + fActive + '" id="' + fTabId + '" data-bs-toggle="tab" data-bs-target="#' + fPaneId + '" type="button" role="tab">' + (f.alias || f.name) + '</button></li>';
-                    factorPanesHtml += '<div class="tab-pane fade ' + fShow + '" id="' + fPaneId + '" role="tabpanel">' +
-                        '<div style="color:#888;padding:16px;text-align:center;">已选择因子 <b>' + (f.alias || f.name) + '</b>，配置好参数后点击下方"运行分组测试"</div>' +
-                        '</div>';
+                    var alias = f.alias || f.name || '';
+                    var isActive = fi === 0 ? ' active' : '';
+                    var cached = getCachedGroupResult(sub.id, alias);
+                    var status = cached ? (cached.success ? 'done' : 'error') : '';
+                    factorNavHtml += '<button type="button" class="group-factor-nav-btn' + isActive + '" data-submission-id="' + escGrp(sub.id) + '" data-factor-alias="' + escGrp(alias) + '" data-run-status="' + status + '" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid ' + (fi === 0 ? '#9cc7f2' : 'transparent') + ';background:' + (fi === 0 ? '#e7f1ff' : 'transparent') + ';border-radius:6px;padding:7px 8px;margin-bottom:4px;text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
+                        + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escGrp(alias) + '</span>'
+                        + '<span class="group-factor-run-status" style="font-size:12px;color:' + (status === 'error' ? '#d40000' : '#28a745') + ';font-weight:700;">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
+                        + '</button>';
                 });
-                factorTabsHtml += '</ul>';
-                factorPanesHtml += '</div>';
+                factorNavHtml += '</div>';
+                factorContentHtml = '<div class="group-factor-content" data-submission-id="' + escGrp(sub.id) + '" style="border:1px dashed #d0d5dd;border-radius:8px;padding:18px;color:#667085;min-height:120px;">'
+                    + '已选择因子 <b class="group-active-factor-label">' + escGrp(factorList[0].alias || factorList[0].name || '') + '</b>。可运行当前因子，或一次运行左侧全部因子。'
+                    + '</div>';
+                factorNavHtml += factorContentHtml + '</div>';
             }
 
             panelsHtml += '<div class="tab-pane fade ' + showClass + '" id="' + panelId + '" role="tabpanel">' +
-                factorTabsHtml + factorPanesHtml +
+                factorNavHtml +
                 '</div>';
         });
         tabsHtml += '</ul>';
@@ -1559,11 +1666,34 @@
 
         // ── 长按因子选项卡 → 添加到因子库 ──
         bindGroupFactorTabLongPress();
+        bindGroupFactorNavigation();
     };
+
+    function bindGroupFactorNavigation() {
+        document.querySelectorAll('.group-factor-nav-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var panel = btn.closest('.tab-pane');
+                if (!panel) return;
+                panel.querySelectorAll('.group-factor-nav-btn').forEach(function(other) {
+                    other.classList.remove('active');
+                    other.style.background = 'transparent';
+                    other.style.borderColor = 'transparent';
+                });
+                btn.classList.add('active');
+                btn.style.background = '#e7f1ff';
+                btn.style.borderColor = '#9cc7f2';
+                var label = panel.querySelector('.group-active-factor-label');
+                if (label) label.textContent = btn.getAttribute('data-factor-alias') || '';
+                clearResults();
+                var result = getCachedGroupResult(btn.getAttribute('data-submission-id'), btn.getAttribute('data-factor-alias'));
+                if (result && result.success) applyGroupTestResult(result);
+            });
+        });
+    }
 
     // ── 长按因子选项卡辅助函数 ──
     function bindGroupFactorTabLongPress() {
-        var allFactorTabs = document.querySelectorAll('.factor-tabs-container .nav-link');
+        var allFactorTabs = document.querySelectorAll('.group-factor-nav-btn');
         allFactorTabs.forEach(function(btn) {
             addGroupFactorLongPress(btn);
         });
@@ -1585,7 +1715,7 @@
             longPressFired = false;
             longPressTimer = setTimeout(function() {
                 longPressFired = true;
-                var factorAlias = btn.textContent.trim();
+                var factorAlias = btn.getAttribute('data-factor-alias') || btn.textContent.trim();
                 if (!factorAlias) return;
                 showGroupAddToLibraryPopover(btn, factorAlias);
             }, 600);
