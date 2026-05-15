@@ -74,15 +74,6 @@
         </div>
     </div>
 
-    <!-- 多周期收益率频率选择（折叠） -->
-    <details class="group-setting-row" style="margin-bottom:12px;">
-        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#1f2937;outline:none;">多周期对比</summary>
-        <div class="group-inline-wrap" style="padding-left:16px;margin-top:8px;">
-            <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
-            <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
-        </div>
-    </details>
-
     <!-- 时间范围 -->
     <div class="group-setting-row" style="margin-bottom:16px;">
         <label style="margin-bottom:0;white-space:nowrap;">起始时间：</label>
@@ -101,6 +92,19 @@
         <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
         <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="margin-left:8px;white-space:nowrap;">同步时间模块</button>
     </div>
+
+    <!-- 扩展分析（折叠） -->
+    <details class="group-settings-grid" style="margin-bottom:12px;">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#1f2937;outline:none;padding:4px 0;">🔬 扩展分析</summary>
+        <div id="extended_analysis_content" style="padding-left:16px;border-left:3px solid #e5e7eb;margin-top:8px;">
+            <!-- 多周期对比内嵌到此处 -->
+            <div class="group-setting-row" style="margin-bottom:8px;">
+                <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
+                <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
+                <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
+            </div>
+        </div>
+    </details>
 
     <!-- 分组测试按钮 -->
     <div class="group-run-actions" style="margin-top:12px;">
