@@ -117,6 +117,17 @@
         return ctx.getSubmissionIdFromTab(activeTab, 'group-panel');
     }
 
+    function pageHasICModule() {
+        return !!document.getElementById('ic_test_module');
+    }
+
+    function getMissingGroupContextMessage() {
+        if (pageHasICModule()) {
+            return '请先选择产品组/测试器和因子；如果因子列表尚未出现，请先在 IC 测试模块运行 IC 测试。';
+        }
+        return '请先选择测试器和因子';
+    }
+
     // ---------- 多周期收益率频率复选框 ----------
     var RETURN_FREQ_OPTIONS = ['1d', '2d', '3d', '5d', '10d', '20d'];
     function renderReturnFreqCheckboxes() {
@@ -257,7 +268,8 @@
     }
 
     // ---------- 清空测试结果 ----------
-    function clearResults() {
+    function clearResults(options) {
+        options = options || {};
         var chartContainer = document.getElementById('group_chart_container');
         var metricsContainer = document.getElementById('group_metrics_container');
         var multiHorizonContainer = document.getElementById('multi_horizon_container');
@@ -265,8 +277,10 @@
         if (metricsContainer) metricsContainer.style.display = 'none';
         if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
         closeSnapshotDrawer();
-        var status = document.getElementById('group_test_status');
-        if (status) status.innerHTML = '';
+        if (options.clearStatus) {
+            var status = document.getElementById('group_test_status');
+            if (status) status.innerHTML = '';
+        }
     }
 
     // ---------- 绘制分组累计收益曲线 ----------
@@ -783,7 +797,7 @@
         });
     }
 
-    function collectGroupRunPayload(context, factorAlias) {
+    async function collectGroupRunPayload(context, factorAlias) {
         var statusSpan = document.getElementById('group_test_status');
         var currentSubmissionId = context && context.submission_id;
         if (!currentSubmissionId || !factorAlias) {
@@ -801,9 +815,20 @@
         if (feeMode === 'uniform') {
             fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
         } else if (feeMode === 'per_product') {
+            if (!_feeTableData.length) {
+                if (statusSpan) {
+                    statusSpan.innerHTML = '正在获取品种费率...';
+                    statusSpan.style.color = '#0078d4';
+                }
+                try {
+                    await fetchFeeTable(false);
+                } catch (err) {
+                    return { error: '获取品种费率失败: ' + err.message };
+                }
+            }
             fee_map = buildFeeMap();
             if (!Object.keys(fee_map).length) {
-                return { error: '按品种费率模式下请先点击"获取费率"加载品种费率数据。' };
+                return { error: '未获取到品种费率，请检查费率数据源。' };
             }
         }
 
@@ -893,13 +918,13 @@
     }
 
     // ---------- 运行分组测试 ----------
-    function runGroupTest() {
+    async function runGroupTest() {
         var context = getCurrentContext();
         if (!context) {
-            alert('请先在 IC 测试模块中运行 IC 测试，并点击某个因子的选项卡');
+            alert(getMissingGroupContextMessage());
             return;
         }
-        var built = collectGroupRunPayload(context, context.factor_alias);
+        var built = await collectGroupRunPayload(context, context.factor_alias);
         var statusSpan = built.statusEl || document.getElementById('group_test_status');
         if (built.error) {
             statusSpan.innerHTML = '✗ ' + built.error;
@@ -915,7 +940,10 @@
         postGroupTest(built.payload)
         .then(function(data) {
             if (!data.success) {
-                statusSpan.innerHTML = '✗ 分组测试失败: ' + data.error;
+                var errorText = data.needs_ic_test && pageHasICModule()
+                    ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试，再运行分组测试。'
+                    : data.error;
+                statusSpan.innerHTML = '✗ 分组测试失败: ' + errorText;
                 statusSpan.style.color = '#d40000';
                 if (data.traceback) {
                     var chartContainer = document.getElementById('group_chart_container');
@@ -961,12 +989,12 @@
         if (runAllBtn) runAllBtn.disabled = true;
         clearCachedGroupResultsForSubmission(submissionId);
         clearGroupFactorStatuses(submissionId);
-        clearResults();
+        clearResults({ clearStatus: true });
         try {
             for (var i = 0; i < factors.length; i++) {
                 var factor = factors[i];
                 var factorAlias = factor.alias || factor.name;
-                var built = collectGroupRunPayload(firstContext, factorAlias);
+                var built = await collectGroupRunPayload(firstContext, factorAlias);
                 if (built.error) {
                     if (statusSpan) {
                         statusSpan.innerHTML = '✗ ' + built.error;
@@ -985,7 +1013,10 @@
                         markGroupFactorStatus(submissionId, factorAlias, 'error');
                         cacheGroupResult(submissionId, factorAlias, data);
                         if (statusSpan) {
-                            statusSpan.innerHTML = '✗ ' + factorAlias + ' 分组测试失败: ' + (data.error || '未知错误');
+                            var errorText = data.needs_ic_test && pageHasICModule()
+                                ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
+                                : (data.error || '未知错误');
+                            statusSpan.innerHTML = '✗ ' + factorAlias + ' 分组测试失败: ' + errorText;
                             statusSpan.style.color = '#d40000';
                         }
                         return;
@@ -1326,7 +1357,7 @@
     function fetchFeeTable(forceRefresh) {
         var statusEl = document.getElementById('drawer_fee_fetch_status');
         if (statusEl) { statusEl.textContent = '加载中...'; statusEl.style.color = '#0078d4'; }
-        fetch('/get_fee_table', {
+        return fetch('/get_fee_table', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ force_refresh: !!forceRefresh })
@@ -1335,16 +1366,17 @@
         .then(function(data) {
             if (!data.success) {
                 if (statusEl) { statusEl.textContent = '获取失败: ' + data.error; statusEl.style.color = '#d40000'; }
-                return;
+                throw new Error(data.error || '获取失败');
             }
             _feeTableData = data.rows || [];
-            _feeModifications = {};  // 新数据覆盖后清空修改
             renderFeeTable();
             updateFeeSummary();
             if (statusEl) { statusEl.textContent = '✓ 已加载 ' + _feeTableData.length + ' 个品种'; statusEl.style.color = '#28a745'; }
+            return data;
         })
         .catch(function(err) {
             if (statusEl) { statusEl.textContent = '请求失败: ' + err.message; statusEl.style.color = '#d40000'; }
+            throw err;
         });
     }
 
@@ -1562,7 +1594,7 @@
 
         // 抽屉内获取费率按钮
         var fetchBtn = document.getElementById('drawer_fetch_fee_btn');
-        if (fetchBtn) fetchBtn.addEventListener('click', function() { fetchFeeTable(false); });
+        if (fetchBtn) fetchBtn.addEventListener('click', function() { fetchFeeTable(false).catch(function() {}); });
 
         // 抽屉内恢复原始值按钮
         var resetBtn = document.getElementById('drawer_reset_fee_btn');
@@ -1685,7 +1717,7 @@
         bindGroupFactorTabLongPress();
         bindGroupSubmissionNavigation(submissions);
         bindGroupFactorNavigation();
-        restoreActiveGroupResult();
+        restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
     };
 
     function getActiveFactorAliasForSubmission(submissionId) {
@@ -1722,14 +1754,17 @@
         });
     }
 
-    function restoreActiveGroupResult() {
+    function restoreActiveGroupResult(options) {
+        options = options || {};
         var activeBtn = document.querySelector('.group-factor-nav-btn.active');
         if (!activeBtn) {
-            clearResults();
+            if (!options.preserveWhenMissingActive) {
+                clearResults({ clearStatus: false });
+            }
             return;
         }
         var result = getCachedGroupResult(activeBtn.getAttribute('data-submission-id'), activeBtn.getAttribute('data-factor-alias'));
-        clearResults();
+        clearResults({ clearStatus: !result });
         if (result && result.success) {
             applyGroupTestResult(result);
             var statusSpan = document.getElementById('group_test_status');

@@ -9,13 +9,13 @@
         <div id="group-settings-panel" class="group-test-settings-panel">
     
     <!-- 第一行：分组数量 + 手续费设置 -->
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:6px;">
+    <div class="group-settings-grid">
+        <div class="group-setting-row compact">
             <label style="margin-bottom:0;white-space:nowrap;">分组数量：</label>
             <input type="number" id="group_count" value="5" min="2" max="10" step="1" style="width:70px;">
         </div>
 
-        <div style="display:flex;align-items:center;gap:6px;">
+        <div class="group-setting-row">
             <label style="margin-bottom:0;white-space:nowrap;">再平衡模式：</label>
             <select id="rebalance_mode" style="width:180px;">
                 <option value="each_period" selected>每期等权再平衡</option>
@@ -35,7 +35,7 @@
             </div>
         </div>
 
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div class="group-setting-row full">
             <label style="margin-bottom:0;white-space:nowrap;">手续费：</label>
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
                 <input type="radio" name="fee_mode" id="fee_mode_none" value="none" checked> 不扣除
@@ -48,7 +48,7 @@
             </label>
 
             <!-- 统一费率输入 -->
-            <span id="fee_uniform_wrap" style="display:none;align-items:center;gap:4px;">
+            <span id="fee_uniform_wrap" style="display:none;align-items:center;gap:4px;flex-wrap:nowrap;">
                 <input type="number" id="fee_rate" value="0.03" step="0.001" min="0" style="width:80px;" title="双边手续费率（%），例如 0.03 表示万分之三">
                 <span style="font-size:12px;color:#666;">%（双边）</span>
                 <span style="margin-left:8px;font-size:12px;color:#555;">敏感性:</span>
@@ -57,7 +57,7 @@
             </span>
 
             <!-- 按品种费率控件 -->
-            <span id="fee_per_product_wrap" style="display:none;align-items:center;gap:6px;">
+            <span id="fee_per_product_wrap" style="display:none;align-items:center;gap:6px;flex-wrap:nowrap;">
                 <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
                     当前：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
                 </span>
@@ -74,8 +74,8 @@
     </div>
 
     <!-- 第二行：多周期收益率频率选择 -->
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+    <div class="group-setting-row full" style="margin-bottom:12px;">
+        <div class="group-inline-wrap">
             <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
             <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
             <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
@@ -83,8 +83,8 @@
     </div>
 
     <!-- 第三行：时间范围 + 时间同步按钮 -->
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+    <div class="group-setting-row full" style="margin-bottom:16px;">
+        <div class="group-date-row">
             <label style="margin-bottom:0;white-space:nowrap;">时间范围：</label>
             <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
             <span style="color:#999;">-</span>
@@ -221,6 +221,37 @@
     #group_test_module .group-test-settings-panel {
         padding: 12px;
     }
+    #group_test_module .group-settings-grid {
+        display: grid;
+        grid-template-columns: minmax(110px, max-content) minmax(240px, 1fr);
+        gap: 10px 16px;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    #group_test_module .group-setting-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: nowrap;
+    }
+    #group_test_module .group-setting-row.full {
+        grid-column: 1 / -1;
+    }
+    #group_test_module .group-setting-row.compact {
+        width: max-content;
+    }
+    #group_test_module .group-inline-wrap,
+    #group_test_module .group-date-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+    #group_test_module .group-date-row input {
+        flex: 0 0 auto;
+    }
     #group_test_module .group-nav-title {
         font-size: 12px;
         font-weight: 700;
@@ -269,6 +300,14 @@
         }
         #group_test_module .group-test-settings-panel {
             grid-column: 1 / -1;
+        }
+    }
+    @media (max-width: 720px) {
+        #group_test_module .group-settings-grid {
+            grid-template-columns: 1fr;
+        }
+        #group_test_module .group-setting-row {
+            flex-wrap: wrap;
         }
     }
 </style>

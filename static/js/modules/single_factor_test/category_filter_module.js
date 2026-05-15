@@ -107,22 +107,6 @@
         refreshSubmissionDependents();
     }
 
-    function fetchCurrentPageSubmissions() {
-        if (!window._pageUuid) return Promise.resolve();
-        var url = '/api/list_submissions';
-        url += '?page_uuid=' + encodeURIComponent(window._pageUuid);
-        return fetch(url)
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data && data.success && Array.isArray(data.submissions)) {
-                    syncFromServer(data.submissions);
-                }
-            })
-            .catch(function(e) {
-                console.error('恢复产品类别提交失败:', e);
-            });
-    }
-
     function refreshSubmissionDependents() {
         setTimeout(function() {
             try {
@@ -576,7 +560,6 @@
                     maxWidth: 'min(54vw, 620px)',
                     maxWidthFallback: 620,
                     resizeDirection: 'both',
-                    followOuterHeight: true,
                     desktopMediaQuery: '(max-width: 1200px)',
                     mobileInnerMaxHeight: '400px'
                 });
@@ -601,12 +584,6 @@
         renderHistory();
         refreshSubmissionDependents();
     };
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', fetchCurrentPageSubmissions);
-    } else {
-        fetchCurrentPageSubmissions();
-    }
 
     window.openCategoryFilter = function() {
         var $overlay = $('#category-filter-overlay');

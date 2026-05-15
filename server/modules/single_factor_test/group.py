@@ -76,6 +76,12 @@ def run_group_test():
 
         factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
         if not factor:
+            if not getattr(tester, 'factors', None):
+                return jsonify({
+                    'success': False,
+                    'error': '当前测试器尚未生成因子实例。请先在 IC 测试模块运行一次 IC 测试，再运行分组测试。',
+                    'needs_ic_test': True,
+                }), 400
             return jsonify({'success': False, 'error': f'未找到因子 {factor_alias}，可用因子: {[(f.alias, f.name) for f in tester.factors]}'}), 404
 
         time_range = None
