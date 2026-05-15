@@ -82,6 +82,21 @@
 
     function getCurrentContext() {
         var ctx = window.SingleFactorSubmissionContext;
+        var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
+        if (activeFactorBtn) {
+            var submissionId = activeFactorBtn.getAttribute('data-submission-id');
+            var factorAlias = activeFactorBtn.getAttribute('data-factor-alias');
+            var factorList = Array.isArray(window.factorList) ? window.factorList : [];
+            var matchedFactor = factorList.find(function(f) {
+                return f.alias === factorAlias || f.name === factorAlias;
+            }) || null;
+            return {
+                submission_id: submissionId,
+                submission: ctx ? ctx.findSubmissionById(submissionId) : null,
+                factor_alias: factorAlias,
+                factor: matchedFactor,
+            };
+        }
         if (!ctx) return null;
         return ctx.getActiveFactorContext({
             tabSelector: '#groupTab .nav-link.active',
@@ -94,6 +109,8 @@
     }
 
     function getActiveGroupSubmissionId() {
+        var activeBtn = document.querySelector('.group-submission-nav-btn.active');
+        if (activeBtn) return activeBtn.getAttribute('data-submission-id');
         var ctx = window.SingleFactorSubmissionContext;
         var activeTab = document.querySelector('#groupTab .nav-link.active');
         if (!ctx || !activeTab) return null;
@@ -942,6 +959,8 @@
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
         if (runBtn) runBtn.disabled = true;
         if (runAllBtn) runAllBtn.disabled = true;
+        clearCachedGroupResultsForSubmission(submissionId);
+        clearGroupFactorStatuses(submissionId);
         clearResults();
         try {
             for (var i = 0; i < factors.length; i++) {
@@ -1002,6 +1021,8 @@
     var _lastTimestamps = [];
     var _lastNgroups = 0;
     var _groupResultsBySubmission = {};
+    var _activeGroupSubmissionId = null;
+    var _activeGroupFactorBySubmission = {};
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
@@ -1013,6 +1034,11 @@
         return _groupResultsBySubmission[submissionId] && _groupResultsBySubmission[submissionId][factorAlias];
     }
 
+    function clearCachedGroupResultsForSubmission(submissionId) {
+        if (!submissionId) return;
+        _groupResultsBySubmission[submissionId] = {};
+    }
+
     function markGroupFactorStatus(submissionId, factorAlias, status) {
         var btn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"][data-factor-alias="' + cssEscape(String(factorAlias)) + '"]');
         if (!btn) return;
@@ -1022,6 +1048,14 @@
             badge.textContent = status === 'done' ? '✓' : (status === 'error' ? '!' : '');
             badge.style.color = status === 'error' ? '#d40000' : '#28a745';
         }
+    }
+
+    function clearGroupFactorStatuses(submissionId) {
+        document.querySelectorAll('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"]').forEach(function(btn) {
+            btn.setAttribute('data-run-status', '');
+            var badge = btn.querySelector('.group-factor-run-status');
+            if (badge) badge.textContent = '';
+        });
     }
 
     function cssEscape(value) {
@@ -1262,14 +1296,9 @@
         });
     }
 
-    // ---------- 监听 IC 模块及自身选项卡切换，自动清空结果 ----------
+    // ---------- 监听 IC 模块及自身选项卡切换 ----------
     function bindICModuleEvents() {
-        document.addEventListener('shown.bs.tab', function(event) {
-            var target = event.target;
-            if (target.closest('#icTab') || target.closest('#groupTab') || target.closest('.factor-tabs-container')) {
-                clearResults();
-            }
-        });
+        // 分组测试结果按 submission + factor 缓存，切换选项卡时不主动清空。
     }
 
     // ---------- 手续费表相关状态与函数 ----------
@@ -1599,7 +1628,7 @@
         }
     }
 
-    // 暴露给外部调用：渲染分组测试的两级选项卡（submission → factor）
+    // 暴露给外部调用：渲染分组测试的三级工作区（submission → factor → settings）
     window.renderGroupTabs = function(submissions) {
         var container = document.getElementById('group-tab-container');
         var runBtn = document.getElementById('run_group_test_btn');
@@ -1615,213 +1644,124 @@
         if (runAllBtn) runAllBtn.style.display = '';
 
         var factorList = window.factorList || [];
-        var tabsHtml = '<ul class="nav nav-tabs" id="groupTab" role="tablist">';
-        var panelsHtml = '<div class="tab-content" id="groupTabContent">';
+        var activeSubmission = submissions.find(function(sub) {
+            return String(sub.id) === String(_activeGroupSubmissionId);
+        }) || submissions[0];
+        _activeGroupSubmissionId = activeSubmission ? String(activeSubmission.id) : null;
+
+        var submissionsHtml = '<div class="group-nav-column"><div class="group-nav-title">产品组 / 测试器</div>';
         submissions.forEach(function(sub, idx) {
-            var activeClass = idx === 0 ? 'active' : '';
-            var showClass = idx === 0 ? 'show active' : '';
-            var tabId = 'group-tab-' + sub.id;
-            var panelId = 'group-panel-' + sub.id;
+            var isActive = String(sub.id) === String(_activeGroupSubmissionId);
             var tabLabel = sub.product_group || sub.label || ('测试器' + (idx+1));
-            tabsHtml += '<li class="nav-item"><button class="nav-link ' + activeClass + '" id="' + tabId + '" data-submission-id="' + sub.id + '" data-bs-toggle="tab" data-bs-target="#' + panelId + '" type="button" role="tab">' + (sub.product_group ? '📦 ' : '') + tabLabel + '</button></li>';
-
-            var factorNavHtml = '';
-            var factorContentHtml = '';
-            if (factorList.length > 0) {
-                factorNavHtml = '<div class="group-factor-workspace" style="display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:12px;margin-top:12px;">';
-                factorNavHtml += '<div class="group-factor-sidebar" style="border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;max-height:360px;overflow:auto;padding:6px;">';
-                factorList.forEach(function(f, fi) {
-                    var alias = f.alias || f.name || '';
-                    var isActive = fi === 0 ? ' active' : '';
-                    var cached = getCachedGroupResult(sub.id, alias);
-                    var status = cached ? (cached.success ? 'done' : 'error') : '';
-                    factorNavHtml += '<button type="button" class="group-factor-nav-btn' + isActive + '" data-submission-id="' + escGrp(sub.id) + '" data-factor-alias="' + escGrp(alias) + '" data-run-status="' + status + '" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid ' + (fi === 0 ? '#9cc7f2' : 'transparent') + ';background:' + (fi === 0 ? '#e7f1ff' : 'transparent') + ';border-radius:6px;padding:7px 8px;margin-bottom:4px;text-align:left;cursor:pointer;font-size:12px;color:#1f2937;">'
-                        + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escGrp(alias) + '</span>'
-                        + '<span class="group-factor-run-status" style="font-size:12px;color:' + (status === 'error' ? '#d40000' : '#28a745') + ';font-weight:700;">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
-                        + '</button>';
-                });
-                factorNavHtml += '</div>';
-                factorContentHtml = '<div class="group-factor-content" data-submission-id="' + escGrp(sub.id) + '" style="border:1px dashed #d0d5dd;border-radius:8px;padding:18px;color:#667085;min-height:120px;">'
-                    + '已选择因子 <b class="group-active-factor-label">' + escGrp(factorList[0].alias || factorList[0].name || '') + '</b>。可运行当前因子，或一次运行左侧全部因子。'
-                    + '</div>';
-                factorNavHtml += factorContentHtml + '</div>';
-            }
-
-            panelsHtml += '<div class="tab-pane fade ' + showClass + '" id="' + panelId + '" role="tabpanel">' +
-                factorNavHtml +
-                '</div>';
+            var subMeta = sub.product_group ? '产品组' : (sub.factor_tester_serial || 'FactorTester');
+            submissionsHtml += '<button type="button" class="group-submission-nav-btn' + (isActive ? ' active' : '') + '" data-submission-id="' + escGrp(sub.id) + '">'
+                + '<span>' + (sub.product_group ? '📦 ' : '') + escGrp(tabLabel) + '</span>'
+                + '<small style="color:#667085;font-size:11px;">' + escGrp(subMeta) + '</small>'
+                + '</button>';
         });
-        tabsHtml += '</ul>';
-        panelsHtml += '</div>';
-        container.innerHTML = tabsHtml + panelsHtml;
+        submissionsHtml += '</div>';
 
-        // 初始化 Bootstrap 选项卡
-        if (typeof bootstrap !== 'undefined') {
-            var tabTriggers = document.querySelectorAll('#groupTab button[data-bs-toggle="tab"]');
-            tabTriggers.forEach(function(trigger) {
-                var tab = new bootstrap.Tab(trigger);
-                trigger.addEventListener('click', function(e) { e.preventDefault(); tab.show(); });
+        var factorsHtml = '<div class="group-factor-sidebar"><div class="group-nav-title">因子列表</div>';
+        if (factorList.length > 0 && _activeGroupSubmissionId) {
+            var activeFactorAlias = getActiveFactorAliasForSubmission(_activeGroupSubmissionId) || (factorList[0].alias || factorList[0].name || '');
+            _activeGroupFactorBySubmission[_activeGroupSubmissionId] = activeFactorAlias;
+            factorList.forEach(function(f) {
+                var alias = f.alias || f.name || '';
+                var isFactorActive = alias === activeFactorAlias;
+                var cached = getCachedGroupResult(_activeGroupSubmissionId, alias);
+                var status = cached ? (cached.success ? 'done' : 'error') : '';
+                factorsHtml += '<button type="button" class="group-factor-nav-btn' + (isFactorActive ? ' active' : '') + '" data-submission-id="' + escGrp(_activeGroupSubmissionId) + '" data-factor-alias="' + escGrp(alias) + '" data-run-status="' + status + '">'
+                    + '<span>' + escGrp(alias) + '</span>'
+                    + '<span class="group-factor-run-status" style="font-size:12px;color:' + (status === 'error' ? '#d40000' : '#28a745') + ';font-weight:700;">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
+                    + '</button>';
             });
+        } else {
+            factorsHtml += '<div style="color:#888;font-size:12px;padding:8px;">暂无因子列表</div>';
         }
+        factorsHtml += '</div>';
 
-        // ── 长按因子选项卡 → 添加到因子库 ──
+        container.innerHTML = submissionsHtml + factorsHtml;
+
         bindGroupFactorTabLongPress();
+        bindGroupSubmissionNavigation(submissions);
         bindGroupFactorNavigation();
+        restoreActiveGroupResult();
     };
+
+    function getActiveFactorAliasForSubmission(submissionId) {
+        if (_activeGroupFactorBySubmission[submissionId]) return _activeGroupFactorBySubmission[submissionId];
+        var activeBtn = document.querySelector('.group-factor-nav-btn.active[data-submission-id="' + cssEscape(String(submissionId)) + '"]');
+        if (activeBtn) return activeBtn.getAttribute('data-factor-alias');
+        var cached = _groupResultsBySubmission[submissionId];
+        if (cached) {
+            var first = Object.keys(cached)[0];
+            if (first) return first;
+        }
+        return null;
+    }
+
+    function bindGroupSubmissionNavigation(submissions) {
+        document.querySelectorAll('.group-submission-nav-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                _activeGroupSubmissionId = btn.getAttribute('data-submission-id');
+                window.renderGroupTabs(submissions);
+            });
+        });
+    }
 
     function bindGroupFactorNavigation() {
         document.querySelectorAll('.group-factor-nav-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                var panel = btn.closest('.tab-pane');
-                if (!panel) return;
-                panel.querySelectorAll('.group-factor-nav-btn').forEach(function(other) {
+                document.querySelectorAll('.group-factor-nav-btn').forEach(function(other) {
                     other.classList.remove('active');
-                    other.style.background = 'transparent';
-                    other.style.borderColor = 'transparent';
                 });
                 btn.classList.add('active');
-                btn.style.background = '#e7f1ff';
-                btn.style.borderColor = '#9cc7f2';
-                var label = panel.querySelector('.group-active-factor-label');
-                if (label) label.textContent = btn.getAttribute('data-factor-alias') || '';
-                clearResults();
-                var result = getCachedGroupResult(btn.getAttribute('data-submission-id'), btn.getAttribute('data-factor-alias'));
-                if (result && result.success) applyGroupTestResult(result);
+                _activeGroupFactorBySubmission[btn.getAttribute('data-submission-id')] = btn.getAttribute('data-factor-alias');
+                restoreActiveGroupResult();
             });
         });
+    }
+
+    function restoreActiveGroupResult() {
+        var activeBtn = document.querySelector('.group-factor-nav-btn.active');
+        if (!activeBtn) {
+            clearResults();
+            return;
+        }
+        var result = getCachedGroupResult(activeBtn.getAttribute('data-submission-id'), activeBtn.getAttribute('data-factor-alias'));
+        clearResults();
+        if (result && result.success) {
+            applyGroupTestResult(result);
+            var statusSpan = document.getElementById('group_test_status');
+            if (statusSpan) {
+                statusSpan.innerHTML = result.multi_horizon ? ('✓ 多周期对比完成（' + result.results.length + ' 个频率）') : '✓ 分组测试完成';
+                statusSpan.style.color = '#28a745';
+            }
+        } else if (result && !result.success) {
+            var statusEl = document.getElementById('group_test_status');
+            if (statusEl) {
+                statusEl.innerHTML = '✗ 分组测试失败: ' + (result.error || '未知错误');
+                statusEl.style.color = '#d40000';
+            }
+        }
     }
 
     // ── 长按因子选项卡辅助函数 ──
     function bindGroupFactorTabLongPress() {
+        var helper = window.SingleFactorLibraryHelper;
+        if (!helper) return;
         var allFactorTabs = document.querySelectorAll('.group-factor-nav-btn');
         allFactorTabs.forEach(function(btn) {
-            addGroupFactorLongPress(btn);
-        });
-    }
-
-    function addGroupFactorLongPress(btn) {
-        var longPressTimer = null;
-        var longPressFired = false;
-
-        function cancelLongPress() {
-            if (longPressTimer) {
-                clearTimeout(longPressTimer);
-                longPressTimer = null;
-            }
-            longPressFired = false;
-        }
-
-        btn.addEventListener('pointerdown', function(e) {
-            longPressFired = false;
-            longPressTimer = setTimeout(function() {
-                longPressFired = true;
-                var factorAlias = btn.getAttribute('data-factor-alias') || btn.textContent.trim();
-                if (!factorAlias) return;
-                showGroupAddToLibraryPopover(btn, factorAlias);
-            }, 600);
-        });
-
-        btn.addEventListener('pointermove', function(e) {
-            if (longPressTimer && Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) > 5) {
-                cancelLongPress();
-            }
-        });
-
-        btn.addEventListener('pointerup', function() { cancelLongPress(); });
-        btn.addEventListener('pointercancel', function() { cancelLongPress(); });
-        btn.addEventListener('pointerleave', function() { cancelLongPress(); });
-    }
-
-    async function showGroupAddToLibraryPopover(anchor, factorAlias) {
-        var existing = document.querySelector('.group-add-to-library-popover');
-        if (existing) existing.remove();
-
-        var popover = document.createElement('div');
-        popover.className = 'group-add-to-library-popover';
-        popover.innerHTML = '<div style="padding:12px;text-align:center;color:#aaa;">加载中...</div>';
-        document.body.appendChild(popover);
-
-        var rect = anchor.getBoundingClientRect();
-        popover.style.cssText = 'position:fixed;z-index:4000;background:#fff;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.18);min-width:280px;max-width:360px;overflow:hidden;left:' + Math.min(rect.left, window.innerWidth - 310) + 'px;top:' + (rect.bottom + 6) + 'px;';
-
-        var factorFamilyAlias = window.factorFamilyAlias || '';
-
-        try {
-            var resp = await fetch('/custom-factors/api/param-config-scopes');
-            var data = await resp.json();
-            var scopes = data.success ? (data.product_groups || data.scopes || []) : [];
-            if (scopes.indexOf('default') === -1) scopes.unshift('default');
-
-            var scopeOptions = scopes.map(function(s) {
-                var label = (!s || s === 'default') ? '默认产品组' : s;
-                return '<option value="' + escGrp(s) + '">' + escGrp(label) + '</option>';
-            }).join('');
-
-            popover.innerHTML = ''
-                + '<div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;">'
-                + '<strong style="font-size:14px;">📌 添加到因子库</strong>'
-                + '<div style="font-size:12px;color:#666;margin-top:4px;">' + escGrp(factorAlias) + '</div>'
-                + '</div>'
-                + '<div style="padding:12px 16px;">'
-                + '<label style="font-size:12px;color:#333;display:block;margin-bottom:4px;">目标产品组</label>'
-                + '<select class="form-select" id="group-add-to-lib-scope-select" style="width:100%;">' + scopeOptions + '</select>'
-                + '</div>'
-                + '<div style="padding:0 16px 14px;display:flex;gap:8px;justify-content:flex-end;">'
-                + '<button type="button" class="param-btn" id="group-add-to-lib-cancel">取消</button>'
-                + '<button type="button" class="param-btn btn-primary" id="group-add-to-lib-confirm">确认添加</button>'
-                + '</div>'
-                + '<div id="group-add-to-lib-msg" style="padding:0 16px 12px;font-size:12px;display:none;"></div>';
-        } catch (e) {
-            popover.innerHTML = '<div style="padding:16px;color:#d40000;">加载失败</div>';
-        }
-
-        popover.querySelector('#group-add-to-lib-cancel').addEventListener('click', function() {
-            popover.remove();
-        });
-        popover.querySelector('#group-add-to-lib-confirm').addEventListener('click', async function() {
-            var scopeSelect = popover.querySelector('#group-add-to-lib-scope-select');
-            var scopeKey = scopeSelect ? scopeSelect.value : 'default';
-            var msgEl = popover.querySelector('#group-add-to-lib-msg');
-            try {
-                var addResp = await fetch('/custom-factors/api/param-configs/' + encodeURIComponent(factorFamilyAlias) + '/add-factor', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ factor_alias: factorAlias, product_group: scopeKey })
-                });
-                var addData = await addResp.json();
-                if (msgEl) {
-                    msgEl.style.display = 'block';
-                    if (addData.success) {
-                        if (addData.skipped) {
-                            msgEl.style.color = '#b08800';
-                            msgEl.textContent = addData.message || '已存在，跳过';
-                        } else {
-                            msgEl.style.color = '#28a745';
-                            msgEl.textContent = '✅ 已添加到因子库';
-                        }
-                    } else {
-                        msgEl.style.color = '#d40000';
-                        msgEl.textContent = '✗ ' + (addData.error || '添加失败');
-                    }
-                }
-                setTimeout(function() { popover.remove(); }, 1500);
-            } catch (e) {
-                if (msgEl) {
-                    msgEl.style.display = 'block';
-                    msgEl.style.color = '#d40000';
-                    msgEl.textContent = '✗ 网络错误';
-                }
-            }
-        });
-
-        setTimeout(function() {
-            document.addEventListener('pointerdown', function closeGrp(e) {
-                if (!popover.contains(e.target) && e.target !== anchor) {
-                    popover.remove();
-                    document.removeEventListener('pointerdown', closeGrp);
+            helper.bindLongPress(btn, {
+                popoverClass: 'group-add-to-library-popover',
+                getFactorAlias: function(anchor) {
+                    return anchor.getAttribute('data-factor-alias') || anchor.textContent.trim();
+                },
+                getProductGroup: function(anchor) {
+                    return helper.inferScopeFromSubmissionId(anchor.getAttribute('data-submission-id'));
                 }
             });
-        }, 100);
+        });
     }
 
     function escGrp(s) {
