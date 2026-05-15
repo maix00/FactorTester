@@ -125,8 +125,8 @@
 
         // Body: 左右两栏
         html += '<div class="ps-body" style="display:flex;background:#fff;border:1px solid #e1e4e8;border-top:none;border-radius:0 0 12px 12px;min-height:420px;">';
-        html += '<div class="ps-left-panel" style="flex:1;min-width:260px;padding:16px;border-right:1px solid #e1e4e8;">';
-        html += '<div class="ps-left-content"></div>';
+        html += '<div class="ps-left-panel" style="flex:1;min-width:260px;padding:16px;border-right:1px solid #e1e4e8;display:flex;flex-direction:column;min-height:0;">';
+        html += '<div class="ps-left-content" style="flex:1;min-height:0;display:flex;flex-direction:column;"></div>';
         html += '</div>';
         html += '<div class="ps-right-panel" style="flex:1.5;min-width:280px;padding:16px;display:flex;flex-direction:column;">';
         html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-shrink:0;">';
@@ -147,7 +147,7 @@
     function initLeftTree($container, treeOpts) {
         var $left = $container.find('.ps-left-content');
         $left.html('<div style="margin-bottom:8px;color:#586069;font-size:13px;">树状结构，勾选叶子节点或分类后提交</div>'
-            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;height:100%;min-height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
+            + '<div class="ps-tree-container" style="width:100%;box-sizing:border-box;flex:1;min-height:300px;overflow:auto;border:1px solid #e1e4e8;border-radius:8px;padding:8px;background:#fff;"></div>');
         createTree($left.find('.ps-tree-container'), treeOpts);
     }
 

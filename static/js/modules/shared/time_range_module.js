@@ -6,6 +6,36 @@
  */
 
 (function() {
+    var PAGE_UUID_STORAGE_KEY = 'single_factor_test_page_uuid';
+    var TIME_RANGE_STORAGE_KEY = 'single_factor_test_time_range';
+    try {
+        if (!window._pageUuid) {
+            window._pageUuid = sessionStorage.getItem(PAGE_UUID_STORAGE_KEY) || '';
+        }
+    } catch (e) {}
+
+    function rememberPageUuid(pageUuid) {
+        if (!pageUuid) return;
+        window._pageUuid = pageUuid;
+        try { sessionStorage.setItem(PAGE_UUID_STORAGE_KEY, pageUuid); } catch (e) {}
+    }
+    window.rememberSingleFactorPageUuid = rememberPageUuid;
+
+    function rememberTimeRange(timeData) {
+        if (!timeData) return;
+        try { sessionStorage.setItem(TIME_RANGE_STORAGE_KEY, JSON.stringify(timeData)); } catch (e) {}
+    }
+    window.rememberSingleFactorTimeRange = rememberTimeRange;
+
+    function loadRememberedTimeRange() {
+        try {
+            var raw = sessionStorage.getItem(TIME_RANGE_STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     // 等待 DateUtils 加载完成
     function waitForDateUtils(callback) {
         if (window.DateUtils) {
@@ -185,8 +215,9 @@
             if (res.success) {
                 // 存储后端返回的 page_uuid，后续请求传回
                 if (res.page_uuid) {
-                    window._pageUuid = res.page_uuid;
+                    rememberPageUuid(res.page_uuid);
                 }
+                rememberTimeRange(getSharedRuntimeTimeRange());
                 let msg = '✓ 已保存';
                 if (res.start_calc_param_val) {
                     msg += '，因子起始计算时间更新为: ' + res.start_calc_param_val;
@@ -299,11 +330,40 @@
                 const sectionElem = document.querySelector('.section[data-factor-alias]');
                 if (sectionElem) factorFamilyAlias = sectionElem.getAttribute('data-factor-alias');
                 
-                // 初始化复选框状态（默认都未勾选）
+                // 初始化复选框状态（默认都未勾选），刷新同一标签页时优先恢复上次保存的时间设置。
                 isTradingDayCheck.checked = false;
                 isCnFuturesDayCheck.checked = false;
                 isCnFuturesNightCheck.checked = false;
-                setTimeInputsDisabled(false);
+                var remembered = loadRememberedTimeRange();
+                if (remembered && window._pageUuid) {
+                    var rememberedStartDate = (remembered.start_date || '').split('-');
+                    var rememberedEndDate = (remembered.end_date || '').split('-');
+                    var rememberedStartTime = (remembered.start_time || '').split(':');
+                    var rememberedEndTime = (remembered.end_time || '').split(':');
+                    if (rememberedStartDate.length === 3) {
+                        startYear.value = rememberedStartDate[0];
+                        startMonth.value = pad(rememberedStartDate[1]);
+                        startDay.value = pad(rememberedStartDate[2]);
+                    }
+                    if (rememberedEndDate.length === 3) {
+                        endYear.value = rememberedEndDate[0];
+                        endMonth.value = pad(rememberedEndDate[1]);
+                        endDay.value = pad(rememberedEndDate[2]);
+                    }
+                    if (rememberedStartTime.length === 2) {
+                        startHour.value = pad(rememberedStartTime[0]);
+                        startMinute.value = pad(rememberedStartTime[1]);
+                    }
+                    if (rememberedEndTime.length === 2) {
+                        endHour.value = pad(rememberedEndTime[0]);
+                        endMinute.value = pad(rememberedEndTime[1]);
+                    }
+                    timezoneInput.value = remembered.timezone || timezoneInput.value;
+                    isTradingDayCheck.checked = !!remembered.is_trading_day;
+                    isCnFuturesDayCheck.checked = !!remembered.is_cn_futures_day;
+                    isCnFuturesNightCheck.checked = !!remembered.is_cn_futures_night;
+                }
+                setTimeInputsDisabled(!!(isTradingDayCheck.checked || isCnFuturesDayCheck.checked || isCnFuturesNightCheck.checked));
                 
                 // 更新显示
                 updateCurrentSettings();
@@ -325,7 +385,8 @@
             isCnFuturesDayCheck.addEventListener('change', toggleCnFutures);
             isCnFuturesNightCheck.addEventListener('change', toggleCnFutures);
             confirmBtn.addEventListener('click', confirmTimeRange);
-            toggleTradingDay(); // 确保交易日状态正确
+            setTimeInputsDisabled(!!(isTradingDayCheck.checked || isCnFuturesDayCheck.checked || isCnFuturesNightCheck.checked));
+            updateCurrentSettings();
         });
     }
 

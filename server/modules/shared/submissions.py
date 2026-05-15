@@ -28,7 +28,8 @@ from tools.products.Futures import FuturesContract
 @route_guard
 def list_submissions():
     """返回当前全部有效的 FactorTester 列表（前端同步用）。"""
-    return api_ok({'submissions': submissions_payload()})
+    page_uuid = request.args.get('page_uuid', '').strip() or None
+    return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
 @shared_bp.route('/get_products')
@@ -113,7 +114,7 @@ def submit_selected_products():
         'factor_tester_name':   factor_tester.name,
         'factor_tester_serial': f"#{id_time}",
         'count_desc':          f"{len(selected_products)} 个产品",
-        'submissions':         submissions_payload(),
+        'submissions':         submissions_payload(page_uuid),
     })
 
 
@@ -215,7 +216,7 @@ def clear_all_submissions():
             t for t in runtime_state.factor_testers
             if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
         ]
-    return api_ok({'submissions': submissions_payload()})
+    return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
 @shared_bp.route('/delete_path_of_submission', methods=['POST'])

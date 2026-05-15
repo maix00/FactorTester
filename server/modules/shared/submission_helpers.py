@@ -36,12 +36,15 @@ def resolve_products_from_paths(raw_paths: list[str]):
     return selected_paths, selected_products
 
 
-def valid_testers():
+def valid_testers(page_uuid=None):
     """Return active testers that still hold products."""
     with factor_testers_lock:
-        return [t for t in runtime_state.factor_testers if t.products and len(t.products) > 0]
+        testers = [t for t in runtime_state.factor_testers if t.products and len(t.products) > 0]
+        if page_uuid:
+            testers = [t for t in testers if getattr(t, '_page_uuid', None) == page_uuid]
+        return testers
 
 
-def submissions_payload():
+def submissions_payload(page_uuid=None):
     """Standard submissions list payload for frontend sync."""
-    return [tester_to_dict(t) for t in valid_testers()]
+    return [tester_to_dict(t) for t in valid_testers(page_uuid)]

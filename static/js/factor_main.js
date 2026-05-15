@@ -54,6 +54,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (result.success) {
                         if (result.page_uuid) {
                             window._pageUuid = result.page_uuid;
+                            if (typeof window.rememberSingleFactorPageUuid === 'function') {
+                                window.rememberSingleFactorPageUuid(result.page_uuid);
+                            }
                         }
                         window._confirmedTimeData = data;  // 记录已确认的时间，供新增因子自动应用
                         statusSpan.innerText = '✓ 已保存，时间范围已更新';

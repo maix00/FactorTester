@@ -31,6 +31,7 @@
         var desktopMediaQuery = opts.desktopMediaQuery || '(max-width: 1024px)';
         var mobileInnerHeight = opts.mobileInnerMaxHeight || '38vh';
         var resizeDirection = opts.resizeDirection || 'both'; // 'horizontal', 'vertical', 'both'
+        var followOuterHeight = !!opts.followOuterHeight;
 
         outer.style.width = 'fit-content';
         outer.style.minWidth = '0';
@@ -52,6 +53,32 @@
         inner.style.overflowY = 'auto';
 
         var resizeObserver = null;
+        var outerResizeObserver = null;
+
+        function syncHeightFromOuter() {
+            if (!followOuterHeight) return;
+            var outerRect = outer.getBoundingClientRect();
+            if (!outerRect.height || outerRect.height <= 1) return;
+            var outerStyle = window.getComputedStyle(outer);
+            var available =
+                outerRect.height -
+                (parseFloat(outerStyle.paddingTop) || 0) -
+                (parseFloat(outerStyle.paddingBottom) || 0) -
+                (parseFloat(outerStyle.borderTopWidth) || 0) -
+                (parseFloat(outerStyle.borderBottomWidth) || 0);
+            var parent = inner.parentElement;
+            if (parent) {
+                Array.prototype.forEach.call(parent.children, function(child) {
+                    if (child === inner) return;
+                    var childStyle = window.getComputedStyle(child);
+                    available -= child.getBoundingClientRect().height;
+                    available -= (parseFloat(childStyle.marginTop) || 0) + (parseFloat(childStyle.marginBottom) || 0);
+                });
+            }
+            if (available > minHeight) {
+                inner.style.height = Math.round(available) + 'px';
+            }
+        }
 
         function sync() {
             var isMobile = window.matchMedia(desktopMediaQuery).matches;
@@ -91,6 +118,7 @@
             var targetOuterWidth = Math.ceil(targetInnerWidth + chromeWidth);
             outer.style.width = String(targetOuterWidth) + 'px';
             outer.style.flexBasis = String(targetOuterWidth) + 'px';
+            syncHeightFromOuter();
         }
 
         function onWindowResize() {
@@ -105,6 +133,12 @@
                 sync();
             });
             resizeObserver.observe(inner);
+            if (followOuterHeight) {
+                outerResizeObserver = new global.ResizeObserver(function() {
+                    syncHeightFromOuter();
+                });
+                outerResizeObserver.observe(outer);
+            }
         }
 
         global.addEventListener('resize', onWindowResize);
@@ -116,6 +150,10 @@
                 if (resizeObserver) {
                     resizeObserver.disconnect();
                     resizeObserver = null;
+                }
+                if (outerResizeObserver) {
+                    outerResizeObserver.disconnect();
+                    outerResizeObserver = null;
                 }
             }
         };

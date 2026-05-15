@@ -213,7 +213,26 @@
                         timezone: td.timezone || 'Asia/Shanghai'
                     })
                 }).then(res => res.json()).then(res => {
-                    if (res.page_uuid) { window._pageUuid = res.page_uuid; }
+                    if (res.page_uuid) {
+                        if (typeof window.rememberSingleFactorPageUuid === 'function') {
+                            window.rememberSingleFactorPageUuid(res.page_uuid);
+                        } else {
+                            window._pageUuid = res.page_uuid;
+                        }
+                    }
+                    if (typeof window.rememberSingleFactorTimeRange === 'function') {
+                        window.rememberSingleFactorTimeRange({
+                            page_uuid: window._pageUuid || '',
+                            start_date: td.start_date || '',
+                            start_time: td.start_time || '09:00',
+                            end_date: td.end_date || '',
+                            end_time: td.end_time || '15:00',
+                            is_trading_day: td.is_trading_day || false,
+                            is_cn_futures_day: td.is_cn_futures_day || false,
+                            is_cn_futures_night: td.is_cn_futures_night || false,
+                            timezone: td.timezone || 'Asia/Shanghai'
+                        });
+                    }
                 });
             } catch (e) {
                 console.error('恢复时间范围失败:', e);
@@ -251,15 +270,18 @@
         }
 
         // 3. 清除旧 tester，为每个 submission 重新提交以重建后端 tester
-        if (snapshot.submissions && snapshot.submissions.length > 0) {
+        if (Array.isArray(snapshot.submissions)) {
             // 先清空后端旧 tester（仅清除当前页面的）
             try {
                 await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
+                if (typeof window._applySubmissions === 'function') {
+                    window._applySubmissions([]);
+                }
             } catch (e) {
                 console.error('清空旧测试器失败:', e);
             }
             // 按 submisssion_id 顺序重新提交
-            var latestServerSubmissions = null;
+            var latestServerSubmissions = [];
             for (var i = 0; i < snapshot.submissions.length; i++) {
                 var sub = snapshot.submissions[i];
                 var paths = sub.selected_paths || sub.paths || [];
@@ -297,7 +319,9 @@
                 }
             }
             try {
-                var listResp = await fetch('/api/list_submissions');
+                var listUrl = '/api/list_submissions';
+                if (window._pageUuid) listUrl += '?page_uuid=' + encodeURIComponent(window._pageUuid);
+                var listResp = await fetch(listUrl);
                 var listData = await listResp.json();
                 if (listData.success && listData.submissions) {
                     latestServerSubmissions = listData.submissions;
