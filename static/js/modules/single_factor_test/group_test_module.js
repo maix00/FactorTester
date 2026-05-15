@@ -1571,8 +1571,8 @@
         document.querySelectorAll('input[name="fee_mode"]').forEach(function(radio) {
             radio.addEventListener('change', function() {
                 var mode = this.value;
-                var uniformWrap     = document.getElementById('fee_uniform_wrap');
-                var perProductWrap  = document.getElementById('fee_per_product_wrap');
+                var uniformWrap     = document.getElementById('fee_uniform_row');
+                var perProductWrap  = document.getElementById('fee_per_product_row');
                 if (uniformWrap)    uniformWrap.style.display    = (mode === 'uniform')     ? 'flex' : 'none';
                 if (perProductWrap) perProductWrap.style.display  = (mode === 'per_product') ? 'flex' : 'none';
             });
