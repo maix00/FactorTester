@@ -57,6 +57,27 @@ class TestGroupDetail(unittest.TestCase):
         self.assertEqual(analysis["top_times"][0]["sum"], 0.03)
         self.assertEqual({row["time"] for row in analysis["top_times"][:2]}, {"09:00", "22:55"})
 
+    def test_builds_daily_and_period_robustness(self):
+        index = list(pd.to_datetime([
+            "2026-01-01 09:00",
+            "2026-01-01 09:05",
+            "2026-01-02 09:00",
+            "2026-01-03 09:00",
+        ]))
+        detail = build_group_detail(
+            0,
+            {0: {}},
+            np.array([[0.10], [0.10], [-0.05], [-0.05]]),
+            index,
+        )
+        daily = detail["daily_analysis"]
+        robust = detail["period_robustness"]
+
+        self.assertEqual(daily["top_days"][0]["date"], "2026-01-01")
+        self.assertLess(daily["return_without_top1_day"], 0)
+        self.assertLess(robust["without_top5pct"]["remaining_return"], 0.2)
+        self.assertTrue(detail["robustness_summary"]["is_fragile"])
+
 
 if __name__ == "__main__":
     unittest.main()

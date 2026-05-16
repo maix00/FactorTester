@@ -59,6 +59,13 @@ def build_group_detail(
     periods_desc = sorted(periods, key=lambda item: item['return'], reverse=True)
     positive_run_analysis = _build_positive_run_analysis(return_series)
     intraday_analysis = _build_intraday_analysis(return_series)
+    daily_analysis = _build_daily_analysis(return_series)
+    period_robustness = _build_period_robustness(return_series)
+    robustness_summary = _build_robustness_summary(
+        positive_run_analysis,
+        daily_analysis,
+        period_robustness,
+    )
 
     if clean_returns.size:
         hist_counts, hist_edges = np.histogram(clean_returns, bins=min(20, max(5, int(np.sqrt(clean_returns.size)))))
@@ -95,6 +102,9 @@ def build_group_detail(
         'return_series': return_series,
         'positive_run_analysis': positive_run_analysis,
         'intraday_analysis': intraday_analysis,
+        'daily_analysis': daily_analysis,
+        'period_robustness': period_robustness,
+        'robustness_summary': robustness_summary,
     }
 
 
@@ -196,4 +206,80 @@ def _build_intraday_analysis(return_series: list[dict[str, Any]]) -> dict[str, A
         'rows': rows,
         'top_times': top_times,
         'bottom_times': bottom_times,
+    }
+
+
+def _build_daily_analysis(return_series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not return_series:
+        return {'rows': [], 'top_days': [], 'bottom_days': [], 'return_without_top1_day': None, 'return_without_top5_days': None}
+    df = pd.DataFrame(return_series)
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['date'] = df['timestamp'].dt.strftime('%Y-%m-%d')
+    grouped = df.groupby('date')['return'].agg(count='count', sum='sum', mean='mean').reset_index()
+    rows = [
+        {
+            'date': str(row['date']),
+            'count': int(row['count']),
+            'sum': float(row['sum']),
+            'mean': float(row['mean']),
+        }
+        for _, row in grouped.iterrows()
+    ]
+    top_days = sorted(rows, key=lambda item: item['sum'], reverse=True)
+    bottom_days = sorted(rows, key=lambda item: item['sum'])
+
+    def _without(days: list[dict[str, Any]]) -> float | None:
+        excluded = {day['date'] for day in days}
+        subset = df.loc[~df['date'].isin(excluded), 'return']
+        if subset.empty:
+            return None
+        return float(np.prod(1.0 + subset.to_numpy(dtype=float)) - 1.0)
+
+    return {
+        'rows': rows,
+        'top_days': top_days[:10],
+        'bottom_days': bottom_days[:10],
+        'return_without_top1_day': _without(top_days[:1]),
+        'return_without_top5_days': _without(top_days[:5]),
+    }
+
+
+def _build_period_robustness(return_series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not return_series:
+        return {}
+    returns = np.asarray([row['return'] for row in return_series], dtype=float)
+    order = np.argsort(-returns)
+
+    def _without_top_ratio(ratio: float) -> dict[str, Any]:
+        n_remove = max(1, int(np.ceil(len(returns) * ratio)))
+        keep_mask = np.ones(len(returns), dtype=bool)
+        keep_mask[order[:n_remove]] = False
+        kept = returns[keep_mask]
+        return {
+            'removed_count': int(n_remove),
+            'remaining_return': float(np.prod(1.0 + kept) - 1.0) if kept.size else None,
+        }
+
+    return {
+        'without_top1pct': _without_top_ratio(0.01),
+        'without_top5pct': _without_top_ratio(0.05),
+    }
+
+
+def _build_robustness_summary(
+    positive_runs: dict[str, Any],
+    daily_analysis: dict[str, Any],
+    period_robustness: dict[str, Any],
+) -> dict[str, Any]:
+    issues = []
+    if positive_runs.get('is_concentrated'):
+        issues.append('positive_runs')
+    if daily_analysis.get('return_without_top1_day') is not None and daily_analysis['return_without_top1_day'] <= 0:
+        issues.append('top_day')
+    top5 = period_robustness.get('without_top5pct', {})
+    if top5.get('remaining_return') is not None and top5['remaining_return'] <= 0:
+        issues.append('top_periods')
+    return {
+        'issues': issues,
+        'is_fragile': bool(issues),
     }

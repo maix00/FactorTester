@@ -801,6 +801,16 @@
         return html + '</tbody></table>';
     }
 
+    function renderDailyRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>日期</th><th>样本</th><th>累计</th><th>均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.date + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum)
+                + '</td><td>' + fmtPct(row.mean) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
     function renderIntradayWindows(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">尚未添加时间窗口</div>';
         var html = '<table class="group-detail-table"><thead><tr><th>窗口</th><th>样本</th><th>累计贡献</th><th>占总收益</th></tr></thead><tbody>';
@@ -993,6 +1003,8 @@
             '收益直方图与分位数 · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
         renderPositiveRunAnalysis(detail.positive_run_analysis || {});
         renderIntradayAnalysis(detail.intraday_analysis || {});
+        renderDailyAnalysis(detail.daily_analysis || {});
+        renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
     }
@@ -1030,6 +1042,36 @@
         renderSelectedIntradayWindows();
         document.getElementById('group-detail-intraday-top').innerHTML = renderIntradayRows(top);
         document.getElementById('group-detail-intraday-bottom').innerHTML = renderIntradayRows(bottom);
+    }
+
+    function renderDailyAnalysis(analysis) {
+        var top = analysis.top_days || [];
+        var bottom = analysis.bottom_days || [];
+        var best = top[0];
+        document.getElementById('group-detail-daily-summary').textContent =
+            best ? '哪些交易日主导了结果 · 最高 ' + best.date + ' ' + fmtPct(best.sum) : '哪些交易日主导了结果';
+        document.getElementById('group-detail-daily-overview').textContent =
+            '去掉贡献最高 1 日后累计收益 ' + fmtPct(analysis.return_without_top1_day)
+            + '；去掉贡献最高 5 日后累计收益 ' + fmtPct(analysis.return_without_top5_days) + '。';
+        document.getElementById('group-detail-daily-top').innerHTML = renderDailyRows(top);
+        document.getElementById('group-detail-daily-bottom').innerHTML = renderDailyRows(bottom);
+    }
+
+    function renderRobustnessSummary(summary, periodRobustness) {
+        var top1 = periodRobustness.without_top1pct || {};
+        var top5 = periodRobustness.without_top5pct || {};
+        var issueLabels = {
+            positive_runs: '少数连续正收益段',
+            top_day: '单一交易日',
+            top_periods: '头部时段',
+        };
+        var issues = (summary.issues || []).map(function(key) { return issueLabels[key] || key; });
+        document.getElementById('group-detail-robustness-summary').textContent =
+            summary.is_fragile ? '存在集中性风险' : '未见明显集中性风险';
+        document.getElementById('group-detail-robustness-overview').textContent =
+            '去掉最好 1% 时段后累计收益 ' + fmtPct(top1.remaining_return)
+            + '；去掉最好 5% 时段后累计收益 ' + fmtPct(top5.remaining_return)
+            + (issues.length ? '。当前主要风险来自：' + issues.join('、') + '。' : '。');
     }
 
     var _groupIntradayRows = [];
