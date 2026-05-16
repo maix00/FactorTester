@@ -36,7 +36,7 @@
         </div>
 
         <div class="group-setting-row">
-            <label style="margin-bottom:0;white-space:nowrap;">手续费：</label>
+            <label style="margin-bottom:0;white-space:nowrap;">扣费方式：</label>
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
                 <input type="radio" name="fee_mode" id="fee_mode_none" value="none" checked> 不扣除
             </label>
@@ -59,10 +59,11 @@
             <span id="fee_sensitivity_label" style="font-size:12px;color:#0078d4;white-space:nowrap;">0.000%</span>
         </div>
 
-        <!-- 按品种费率控件（始终可见；费率模式只决定运行时是否采用） -->
-        <div id="fee_per_product_row" style="display:flex;padding-left:28px;margin-top:-4px;margin-bottom:4px;align-items:center;gap:6px;">
+        <!-- 品种费率控件（始终可见；费率模式只决定运行时是否采用） -->
+        <div id="fee_per_product_row" class="group-setting-row" style="margin-top:-4px;margin-bottom:4px;">
+            <label style="margin-bottom:0;white-space:nowrap;">品种费率：</label>
             <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
-                当前：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
+                平仓口径：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
             </span>
             <button id="use_closetoday_btn" class="btn btn-outline-secondary btn-sm"
                     title="点击切换平今/平昨模式，将影响费率计算"
