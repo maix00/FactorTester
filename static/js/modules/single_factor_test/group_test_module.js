@@ -256,7 +256,8 @@
                 + '在部分产品无信号（含 NaN）的混合期数中，自动切换为 <b>多时段品种策略</b>：<br>'
                 + '• 保护无信号品种的持仓不动<br>'
                 + '• 仅对有信号的品种进行交易和再平衡<br>'
-                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）';
+                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）<br>'
+                + '• 若某组只有新增、没有可回收资金，则该组当期冻结，不强行开新仓';
         } else {
             panel.style.display = 'block';
             panel.style.background = '#eef7ee';
@@ -265,6 +266,18 @@
             title.textContent = '所有产品具有统一的交易时段';
             body.textContent = '所有产品在所有期数中均有信号，您选择的再平衡模式将在每期中正常生效。';
         }
+    }
+
+    function updateRebalanceModeDescription() {
+        var select = document.getElementById('rebalance_mode');
+        var target = document.getElementById('rebalance_mode_description');
+        if (!select || !target) return;
+        var descriptions = {
+            each_period: '每一期都把当前组内成员重新调成等权。适合比较“每期按最新排序重新建仓”的理论表现，换手通常最高。',
+            buy_and_hold: '组内成员不变时保持原有持仓比例；只有成员进出组时才交易。更接近低换手的持有逻辑，也是默认模式。',
+            recycle: '留存成员的持仓不动；有成员退出时，把释放出的资金优先分给新进成员。适合观察“旧仓尽量不动、只用退出资金补新仓”的过渡方式。',
+        };
+        target.textContent = descriptions[select.value] || '';
     }
 
     // ---------- 清空测试结果 ----------
@@ -1861,6 +1874,7 @@
         bindSnapshotDrawerEvents();
         bindGroupDetailOverlay();
         bindGroupSectionToggles();
+        updateRebalanceModeDescription();
         syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
         setTimeout(syncFromTimeModule, 0);
@@ -1868,6 +1882,8 @@
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
         if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
+        var rebalanceSelect = document.getElementById('rebalance_mode');
+        if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
 
         // 如果已有 submissions，渲染两级选项卡
         if (window.submissions && window.submissions.length > 0) {

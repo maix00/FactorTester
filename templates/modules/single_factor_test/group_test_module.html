@@ -23,6 +23,10 @@
                 <option value="recycle">退出资金优先补新仓</option>
             </select>
         </div>
+        <div id="rebalance_mode_description" class="group-setting-hint"></div>
+        <div class="group-setting-hint group-setting-hint-muted">
+            若所选产品交易时段不统一，出现“部分产品有信号、部分产品无信号”的混合期时，会自动启用多时段保护逻辑，并临时覆盖所选再平衡模式。
+        </div>
 
         <!-- 策略说明面板（运行后动态填充） -->
         <div id="strategy_info_panel" style="display:none;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
@@ -381,6 +385,19 @@
         flex-wrap: wrap;
         padding-top: 10px;
         border-top: 1px solid #eef2f7;
+    }
+    #group_test_module .group-setting-hint {
+        padding: 8px 10px;
+        border-left: 3px solid #98a2b3;
+        background: #f8fafc;
+        color: #475467;
+        font-size: 12px;
+        line-height: 1.55;
+    }
+    #group_test_module .group-setting-hint-muted {
+        border-left-color: #d0d5dd;
+        background: #fcfcfd;
+        color: #667085;
     }
     #group_test_module .group-detail-trigger,
     #group_test_module .group-ranking-trigger {
