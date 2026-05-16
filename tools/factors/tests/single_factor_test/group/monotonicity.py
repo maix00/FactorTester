@@ -47,18 +47,27 @@ def build_group_ranking_detail(group_returns_np: np.ndarray, index_list: list | 
         adjacent = np.empty((0, returns.shape[1] - 1), dtype=float)
 
     spread_series = []
+    monotonic_series = []
     if index_list is not None and len(index_list) == len(returns):
         running_nav = 1.0
         for row_idx, idx_entry in enumerate(index_list):
             row = returns[row_idx]
             if not np.isfinite(row).all():
                 continue
+            row_diffs = np.diff(row)
+            is_descending = bool(np.all(row_diffs <= 0))
+            is_ascending = bool(np.all(row_diffs >= 0))
             spread = float(row[0] - row[-1])
             running_nav *= 1.0 + spread
             spread_series.append({
                 'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
                 'spread': spread,
                 'cumulative_return': running_nav,
+            })
+            monotonic_series.append({
+                'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
+                'is_monotonic': is_descending or is_ascending,
+                'is_descending': is_descending,
             })
 
     adjacent_summary = []
@@ -84,5 +93,6 @@ def build_group_ranking_detail(group_returns_np: np.ndarray, index_list: list | 
             'positive_ratio': _safe_float(np.mean(top_bottom > 0)) if top_bottom.size else None,
             'series': spread_series,
         },
+        'monotonic_series': monotonic_series,
         'adjacent_spreads': adjacent_summary,
     }

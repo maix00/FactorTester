@@ -1037,6 +1037,7 @@
         document.getElementById('group-ranking-spread-summary').textContent =
             '最高组减最低组的逐期表现 · 均值 ' + fmtPct(topBottom.mean_spread) + ' · 为正 ' + fmtPct(topBottom.positive_ratio);
         renderGroupRankingSpreadChart(topBottom.series || []);
+        renderGroupRankingMonotonicChart(detail.monotonic_series || []);
     }
 
     function renderGroupRankingSpreadChart(series) {
@@ -1066,6 +1067,47 @@
                 yAxis: 1,
                 data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
                 color: '#0f4c81',
+            }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderGroupRankingMonotonicChart(series) {
+        var el = document.getElementById('group-ranking-monotonic-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        Highcharts.chart(el, {
+            chart: { type: 'column', backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: {
+                categories: categories,
+                labels: { step: Math.max(1, Math.ceil(categories.length / 8)) },
+            },
+            yAxis: {
+                min: 0,
+                max: 1,
+                tickPositions: [0, 1],
+                title: { text: null },
+                labels: {
+                    formatter: function() { return this.value === 1 ? '单调' : '非单调'; },
+                },
+            },
+            legend: { enabled: false },
+            tooltip: {
+                formatter: function() {
+                    var row = series[this.point.index];
+                    var state = row.is_descending ? '严格降序' : (row.is_monotonic ? '严格升序' : '非单调');
+                    return '<b>' + categories[this.point.index] + '</b><br/>' + state;
+                },
+            },
+            series: [{
+                name: '单调性',
+                data: (series || []).map(function(row) {
+                    return {
+                        y: row.is_monotonic ? 1 : 0,
+                        color: row.is_descending ? '#2f855a' : (row.is_monotonic ? '#7c9fe6' : '#d0d5dd'),
+                    };
+                }),
             }],
             credits: { enabled: false },
         });

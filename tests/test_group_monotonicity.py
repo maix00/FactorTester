@@ -48,6 +48,8 @@ class TestGroupRankingDetail(unittest.TestCase):
         self.assertAlmostEqual(series[0]["spread"], 0.02)
         self.assertAlmostEqual(series[1]["spread"], 0.05)
         self.assertAlmostEqual(series[1]["cumulative_return"], 1.071)
+        self.assertEqual(detail["monotonic_series"][0]["is_descending"], True)
+        self.assertEqual(detail["monotonic_series"][1]["is_monotonic"], True)
 
 
 if __name__ == "__main__":
