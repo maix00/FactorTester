@@ -241,6 +241,16 @@
                             </div>
                         </div>
                     </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>正收益段贡献</span>
+                            <span class="group-detail-section-summary" id="group-detail-positive-run-summary">是否依赖少数连续正收益段</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div id="group-detail-positive-run-overview" class="group-detail-note"></div>
+                            <div id="group-detail-positive-runs"></div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </div>
@@ -495,6 +505,15 @@
         font-size: 18px;
         font-weight: 700;
         color: #101828;
+    }
+    #group_test_module .group-detail-note {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #475467;
+        font-size: 13px;
+        line-height: 1.6;
     }
     #group_test_module .group-detail-grid {
         display: grid;

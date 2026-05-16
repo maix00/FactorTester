@@ -781,6 +781,16 @@
         return html + '</tbody></table>';
     }
 
+    function renderPositiveRuns(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无连续正收益段</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>开始</th><th>结束</th><th>期数</th><th>区段收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + formatCompactTime(row.start) + '</td><td>' + formatCompactTime(row.end) + '</td><td>'
+                + row.period_count + '</td><td>' + fmtPct(row.return) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
     function formatGroupProduct(product) {
         if (!product) return '—';
         if (typeof product === 'string') return product;
@@ -961,8 +971,31 @@
                 : '哪些产品最常进入该组';
         document.getElementById('group-detail-distribution-summary').textContent =
             '收益直方图与分位数 · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        renderPositiveRunAnalysis(detail.positive_run_analysis || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
+    }
+
+    function renderPositiveRunAnalysis(analysis) {
+        var top1 = analysis.top1_positive_contribution_ratio;
+        var top3 = analysis.top3_positive_contribution_ratio;
+        var concentrated = !!analysis.is_concentrated;
+        document.getElementById('group-detail-positive-run-summary').textContent =
+            concentrated
+                ? '疑似依赖少数正收益段'
+                : '检查收益是否集中在少数连续正收益段';
+        var overview = document.getElementById('group-detail-positive-run-overview');
+        if (!analysis.run_count) {
+            overview.textContent = '没有检测到连续正收益段。';
+        } else {
+            overview.textContent =
+                '共 ' + analysis.run_count + ' 段连续正收益；最强 1 段贡献 ' + fmtPct(top1)
+                + ' 的正收益，最强 3 段贡献 ' + fmtPct(top3)
+                + '。去掉最强 1 段后累计收益 ' + fmtPct(analysis.return_without_top1_run)
+                + '，去掉最强 3 段后累计收益 ' + fmtPct(analysis.return_without_top3_runs)
+                + (concentrated ? '。当前表现明显依赖少数正收益段。' : '。');
+        }
+        document.getElementById('group-detail-positive-runs').innerHTML = renderPositiveRuns(analysis.top_runs);
     }
 
     function fmtPct(value) {
