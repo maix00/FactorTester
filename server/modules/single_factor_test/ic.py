@@ -374,7 +374,7 @@ def _build_ic_response(
                 for i in range(win - 1, len(s_vals)):
                     win_slice = np.asarray(s_vals[i - win + 1:i + 1], dtype=float)
                     m = float(np.mean(win_slice))
-                    std_win = float(np.std(win_slice))
+                    std_win = float(np.std(win_slice, ddof=1))
                     rr = (m / std_win) if std_win != 0 else None
                     r_mean.append(_safe_round(m))
                     r_ir.append(_safe_round(rr))
