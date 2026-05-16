@@ -89,6 +89,69 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     return factor.evaluate(tester.products)
 
 
+def build_target_amounts(
+    curr_mask_all: np.ndarray,
+    prev_end_amounts: np.ndarray,
+    wealth_before_trade: np.ndarray,
+    rebalance_mode: str,
+) -> np.ndarray:
+    """Build next-period target holdings for all groups with vectorized operations."""
+    curr_mask = np.asarray(curr_mask_all, dtype=bool)
+    prev_amounts = np.asarray(prev_end_amounts, dtype=float)
+    wealth = np.asarray(wealth_before_trade, dtype=float)
+    counts = curr_mask.sum(axis=1).astype(float)
+    targets = np.zeros_like(prev_amounts, dtype=float)
+    non_empty = counts > 0
+    if not non_empty.any():
+        return targets
+
+    if rebalance_mode == "each_period":
+        targets[non_empty] = (
+            curr_mask[non_empty].astype(float)
+            * (wealth[non_empty] / counts[non_empty])[:, np.newaxis]
+        )
+        return targets
+
+    prev_mask = prev_amounts > 0
+    staying = curr_mask & prev_mask
+    exiting = prev_mask & (~curr_mask)
+    entering = curr_mask & (~prev_mask)
+    n_entering = entering.sum(axis=1).astype(float)
+    released = (prev_amounts * exiting.astype(float)).sum(axis=1)
+
+    targets = prev_amounts * staying.astype(float)
+    rows_with_released = (n_entering > 0) & (released > 0)
+    if rows_with_released.any():
+        targets[rows_with_released] += (
+            entering[rows_with_released].astype(float)
+            * (released[rows_with_released] / n_entering[rows_with_released])[:, np.newaxis]
+        )
+
+    fallback_rows = non_empty & (n_entering > 0) & (~rows_with_released)
+    if rebalance_mode == "buy_and_hold":
+        # If membership expands without any released capital, equal-weight once to fund entrants.
+        if fallback_rows.any():
+            targets[fallback_rows] = (
+                curr_mask[fallback_rows].astype(float)
+                * (wealth[fallback_rows] / counts[fallback_rows])[:, np.newaxis]
+            )
+    elif rebalance_mode == "recycle":
+        # Keep staying holdings; fund entrants with an equal-weight top-up when no capital was released.
+        if fallback_rows.any():
+            targets[fallback_rows] += (
+                entering[fallback_rows].astype(float)
+                * (wealth[fallback_rows] / counts[fallback_rows])[:, np.newaxis]
+            )
+    else:
+        raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
+
+    totals = targets.sum(axis=1)
+    rescale = non_empty & (totals > 0) & (np.abs(totals - wealth) > 1e-12)
+    if rescale.any():
+        targets[rescale] *= (wealth[rescale] / totals[rescale])[:, np.newaxis]
+    return targets
+
+
 def test_by_group_single_factor(
     tester: Any,
     factor: Factor,
@@ -104,14 +167,14 @@ def test_by_group_single_factor(
     sift_volume_ratio: Optional[float] = None,
     fee: float = 0.0,
     fee_map: dict = {},
-    rebalance_mode: str = "each_period",
+    rebalance_mode: str = "buy_and_hold",
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
     rebalance_mode:
-      - "each_period":   每期等权再平衡 — 所有组成员每期重新平分资金（默认）
-      - "buy_and_hold":  组内持仓不动 — 只在产品进出组时才买卖
-      - "recycle":       资金回收再分配 — 新产品用退出产品的资金，不够再等权补足
+      - "each_period":   每期等权再平衡 — 所有组成员每期重新平分资金
+      - "buy_and_hold":  组内持仓不动 — 只在产品进出组时才买卖（默认）
+      - "recycle":       退出资金优先补新仓 — 留存仓位不动，退出资金先给新成员
 
     多时段品种自动检测：
       当 table_np 中出现某些时刻部分品种有信号、部分品种无信号（isnan_fac 混合）时，
@@ -419,82 +482,13 @@ def test_by_group_single_factor(
 
                 target_amounts[g] = tg
 
-        elif rebalance_mode == "each_period":
-            # 每期等权：所有组成员重新平分资金
-            for g in ne_idx:
-                cm = curr_mask_all[g]
-                cc = curr_count_all[g]
-                if cc > 0:
-                    target_amounts[g] = cm.astype(float) * (wealth_before_trade[g] / cc)
-
-        elif rebalance_mode == "buy_and_hold":
-            # 持仓不动：只在进出时调仓
-            prev_mask_all = prev_end_amounts > 0
-            for g in ne_idx:
-                cm = curr_mask_all[g]
-                pm = prev_mask_all[g]
-                pa = prev_end_amounts[g]
-                wb = wealth_before_trade[g]
-                cc = curr_count_all[g]
-
-                staying = cm & pm
-                exiting = pm & (~cm)
-                entering = cm & (~pm)
-                n_ent = int(entering.sum())
-
-                sell_exit = pa * exiting.astype(float)
-                released = float(sell_exit.sum())
-
-                tg = np.zeros(P, dtype=float)
-                if staying.any():
-                    tg += pa * staying.astype(float)
-                if n_ent > 0 and released > 0:
-                    tg += entering.astype(float) * (released / n_ent)
-                elif n_ent > 0 and wb > 0:
-                    tg = cm.astype(float) * (wb / cc)
-
-                total_tg = float(tg.sum())
-                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
-                    tg *= (wb / total_tg)
-
-                target_amounts[g] = tg
-
-        elif rebalance_mode == "recycle":
-            # 资金回收再分配
-            prev_mask_all = prev_end_amounts > 0
-            for g in ne_idx:
-                cm = curr_mask_all[g]
-                pm = prev_mask_all[g]
-                pa = prev_end_amounts[g]
-                wb = wealth_before_trade[g]
-                cc = curr_count_all[g]
-
-                staying = cm & pm
-                exiting = pm & (~cm)
-                entering = cm & (~pm)
-                n_ent = int(entering.sum())
-                n_stay = int(staying.sum())
-
-                sell_exit = pa * exiting.astype(float)
-                recycled = float(sell_exit.sum())
-
-                tg = np.zeros(P, dtype=float)
-                if n_ent > 0:
-                    if recycled > 0:
-                        tg += entering.astype(float) * (recycled / n_ent)
-                    else:
-                        tg += entering.astype(float) * (wb / cc)
-                if n_stay > 0:
-                    tg += pa * staying.astype(float)
-
-                total_tg = float(tg.sum())
-                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
-                    tg *= (wb / total_tg)
-
-                target_amounts[g] = tg
-
-        else:
-            raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
+        elif rebalance_mode in {"each_period", "buy_and_hold", "recycle"}:
+            target_amounts = build_target_amounts(
+                curr_mask_all,
+                prev_end_amounts,
+                wealth_before_trade,
+                rebalance_mode,
+            )
 
         # ── 统一计算买卖/手续费/收益（矩阵运算，所有非空组）──
         ne_target = target_amounts[ne_idx]           # (n_ne, P)
@@ -663,15 +657,15 @@ def test_by_group(
     sift_volume_ratio: Optional[float] = None,
     fee: float = 0.0,
     fee_map: dict = {},
-    rebalance_mode: str = "each_period",
+    rebalance_mode: str = "buy_and_hold",
     **kwargs,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Run group test for one or more factors.
 
     rebalance_mode:
-      - \"each_period\":   每期等权再平衡（默认）
-      - \"buy_and_hold\":  组内持仓不动
-      - \"recycle\":       资金回收再分配
+      - \"each_period\":   每期等权再平衡
+      - \"buy_and_hold\":  组内持仓不动（默认）
+      - \"recycle\":       退出资金优先补新仓
     """
     factors = [factors] if isinstance(factors, Factor) else (factors if factors is not None else tester.factors)
     assert isinstance(factors, list), f"factors must be a list, got {type(factors)}"

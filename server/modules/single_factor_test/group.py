@@ -63,7 +63,7 @@ def run_group_test():
     fee_uniform    = float(data.get('fee', 0.0) or 0.0) / 100.0
     fee_map_raw: dict = data.get('fee_map', {})
     use_closetoday: bool = bool(data.get('use_closetoday', False))
-    rebalance_mode: str = str(data.get('rebalance_mode', 'each_period') or 'each_period')
+    rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
     # 多周期对比：传入 return_freqs 数组，如 ["1d","3d","5d","10d"]

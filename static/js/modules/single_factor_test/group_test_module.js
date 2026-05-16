@@ -250,7 +250,7 @@
             var modeLabel = {
                 'each_period': '每期等权再平衡',
                 'buy_and_hold': '组内持仓不动',
-                'recycle': '资金回收再分配'
+                'recycle': '退出资金优先补新仓'
             }[usedMode] || usedMode;
             body.innerHTML = '所选再平衡模式 <b>' + modeLabel + '</b> 仅在 <u>所有产品均有信号</u> 的期数中生效。<br>'
                 + '在部分产品无信号（含 NaN）的混合期数中，自动切换为 <b>多时段品种策略</b>：<br>'
@@ -1067,7 +1067,7 @@
                 start_date: start_date,
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
-                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'each_period'
+                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold'
             },
             statusEl: statusSpan,
         };
