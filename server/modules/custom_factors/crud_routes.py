@@ -27,6 +27,7 @@ from server.services.accounts import (
     is_super_admin_account,
 )
 from server.services.factor_registry import (
+    get_custom_factor_instance,
     invalidate_custom_factor_cache,
     invalidate_factor_family_cache,
 )
@@ -244,6 +245,8 @@ def api_get_factor(factor_id):
         return jsonify({'success': False, 'error': '因子不存在'}), 404
 
     meta = parse_class_meta(source)
+    factor_family = get_custom_factor_instance(owner_username, factor_id)
+    from server.modules.shared.param_meta import serialize_param_meta
     return jsonify({
         'success': True,
         'factor': {
@@ -256,5 +259,7 @@ def api_get_factor(factor_id):
             'is_public': False,
             'owner_username': owner_username,
             'can_edit': owner_username == username,
+            'math_expr': getattr(factor_family, 'math_expr', '') if factor_family is not None else '',
+            'params': [serialize_param_meta(param) for param in factor_family.params] if factor_family is not None else [],
         }
     })

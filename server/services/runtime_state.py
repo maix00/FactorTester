@@ -160,7 +160,24 @@ def cleanup_session_resource(sid: str) -> None:
 def get_session_params(ff_alias: str, ff) -> list:
     store_key = (get_session_id(), ff_alias)
     with params_store_lock:
-        return list(params_store.get(store_key, []))
+        stored = list(params_store.get(store_key, []))
+    if not stored:
+        return stored
+    valid_aliases = {param.alias for param in getattr(ff, 'params', [])}
+    pruned = [
+        {key: value for key, value in row.items() if key in valid_aliases}
+        for row in stored
+        if isinstance(row, dict)
+    ]
+    try:
+        from server.modules.shared.param_config import normalize_param_rows
+        normalized = normalize_param_rows(ff, pruned)
+    except Exception:
+        normalized = []
+    if normalized != stored:
+        with params_store_lock:
+            params_store[store_key] = list(normalized)
+    return normalized
 
 
 def save_session_params(ff_alias: str, params_list: list):

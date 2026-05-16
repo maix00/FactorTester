@@ -253,7 +253,9 @@
             var isFromGroup = !!item._fromGroup;
             var isPlaceholderSelected = isPlaceholder;  // placeholder 自动进入选中+编辑态
             var showSave = (isSel || isPlaceholderSelected) && mode !== 'import' && !isFromGroup;
-            var showDelete = (isSel || isPlaceholderSelected) && (mode === 'manage' || mode === 'readonly' || isPlaceholderSelected);
+            var showDelete = isPlaceholder
+                ? isPlaceholderSelected
+                : (mode === 'manage' || mode === 'readonly');
             var pathCount = paths.length;
 
             // 占位方块：虚线框 + 浅背景

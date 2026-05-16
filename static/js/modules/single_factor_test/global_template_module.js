@@ -250,14 +250,14 @@
             }
         }
 
-        // 3. 清除旧 tester，为每个 submission 重新提交以重建后端 tester
+        // 3. 清除当前页旧 tester，再按模板重建；即使模板没有 submission 也要清空旧内容。
+        try {
+            await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
+            if (typeof window._applySubmissions === 'function') window._applySubmissions([]);
+        } catch (e) {
+            console.error('清空旧测试器失败:', e);
+        }
         if (snapshot.submissions && snapshot.submissions.length > 0) {
-            // 先清空后端旧 tester（仅清除当前页面的）
-            try {
-                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
-            } catch (e) {
-                console.error('清空旧测试器失败:', e);
-            }
             // 按 submisssion_id 顺序重新提交
             var latestServerSubmissions = null;
             for (var i = 0; i < snapshot.submissions.length; i++) {
@@ -297,7 +297,7 @@
                 }
             }
             try {
-                var listResp = await fetch('/api/list_submissions');
+                var listResp = await fetch('/api/list_submissions?page_uuid=' + encodeURIComponent(window._pageUuid || ''));
                 var listData = await listResp.json();
                 if (listData.success && listData.submissions) {
                     latestServerSubmissions = listData.submissions;

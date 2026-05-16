@@ -418,9 +418,13 @@
                 renderImportList($(this).val());
             });
 
+            var importPending = false;
             $confirm.on('click', function() {
+                if (importPending) return;
                 var names = Object.keys(selectedNames);
                 if (!names.length) return;
+                importPending = true;
+                $confirm.prop('disabled', true).text('导入中...');
                 var promises = names.map(function(n) {
                     return PG.fetchGroupDetail(n).then(function(g) {
                         return { name: n, paths: g && g.paths ? g.paths : [] };
@@ -428,13 +432,21 @@
                 });
                 Promise.all(promises).then(function(results) {
                     var allEmpty = results.every(function(r) { return !r.paths.length; });
-                    if (allEmpty) { alert('选中的产品组没有路径'); return; }
+                    if (allEmpty) {
+                        alert('选中的产品组没有路径');
+                        importPending = false;
+                        updateConfirmButton();
+                        return;
+                    }
                     results.forEach(function(r) {
                         if (r.paths.length) {
                             onImport(r.name, r.paths);
                         }
                     });
                     close();
+                }).catch(function() {
+                    importPending = false;
+                    updateConfirmButton();
                 });
             });
 
