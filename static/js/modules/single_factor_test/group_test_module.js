@@ -662,7 +662,11 @@
         var theadHtml = '<tr><th>指标</th>';
         groupLabels.forEach(function(g) {
             var isLS = (g === 'LS');
-            theadHtml += '<th' + (isLS ? ' style="background:#f0f0f0;"' : '') + '>' + (isLS ? 'Long-Short' : ('第' + (parseInt(g)+1) + '组')) + '</th>';
+            if (isLS) {
+                theadHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
+            } else {
+                theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">第' + (parseInt(g)+1) + '组</th>';
+            }
         });
         theadHtml += '</tr>';
         document.getElementById('metrics_head').innerHTML = theadHtml;
@@ -729,6 +733,114 @@
 
         // 绑定指标名 hover 弹出描述和数学公式
         bindMetricHoverPopup(metricNamesCN, metricDescs, metricMathExprs);
+        bindGroupDetailHeaders();
+    }
+
+    function bindGroupDetailHeaders() {
+        document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
+            });
+        });
+    }
+
+    function renderGroupDetailTable(rows, type) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>时间</th><th>收益</th><th>产品</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            var d = new Date(row.timestamp);
+            var time = isNaN(d.getTime()) ? row.timestamp : d.toLocaleString();
+            html += '<tr><td>' + time + '</td><td>' + (row.return * 100).toFixed(3) + '%</td><td>' + (row.products || []).join('、') + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderGroupFrequency(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        rows.slice(0, 12).forEach(function(row) {
+            html += '<tr><td>' + row.product + '</td><td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderGroupDetailHistogram(histogram) {
+        var el = document.getElementById('group-detail-histogram');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { type: 'column', backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: {
+                categories: (histogram || []).map(function(bin) {
+                    return (bin.left * 100).toFixed(2) + '% ~ ' + (bin.right * 100).toFixed(2) + '%';
+                }),
+                labels: { rotation: -35, style: { fontSize: '10px' } },
+            },
+            yAxis: { title: { text: '期数' } },
+            legend: { enabled: false },
+            series: [{ name: '期数', data: (histogram || []).map(function(bin) { return bin.count; }), color: '#4a90d9' }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderGroupDetail(detail) {
+        var summary = detail.summary || {};
+        var labels = {
+            'Total Return': '总收益',
+            'Annual Return': '年化',
+            'Sharpe Ratio': '夏普',
+            'Max Drawdown': '最大回撤',
+            'Win Rate': '胜率',
+            'Avg Turnover': '换手率',
+        };
+        document.getElementById('group-detail-summary').innerHTML = Object.keys(labels).map(function(key) {
+            var value = summary[key];
+            var display = value == null ? '—' : (
+                key.indexOf('Return') >= 0 || key.indexOf('Drawdown') >= 0 || key === 'Win Rate'
+                    ? Number(value).toFixed(2) + '%'
+                    : key === 'Avg Turnover'
+                        ? (Number(value) * 100).toFixed(1) + '%'
+                        : Number(value).toFixed(4)
+            );
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">' + labels[key] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
+        document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
+        document.getElementById('group-detail-bottom-periods').innerHTML = renderGroupDetailTable(detail.bottom_periods);
+        var q = (detail.distribution || {}).quantiles || {};
+        document.getElementById('group-detail-quantiles').textContent =
+            'P05 ' + fmtPct(q.p05) + ' · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
+    }
+
+    function fmtPct(value) {
+        return value == null ? '—' : (value * 100).toFixed(3) + '%';
+    }
+
+    async function openGroupDetail(groupIndex) {
+        var context = getCurrentContext();
+        if (!context || !context.submission_id) return;
+        var overlay = document.getElementById('group-detail-overlay');
+        var loading = document.getElementById('group-detail-loading');
+        var content = document.getElementById('group-detail-content');
+        document.getElementById('group-detail-title').textContent = '第' + (groupIndex + 1) + '组详情';
+        overlay.classList.add('open');
+        loading.style.display = '';
+        content.style.display = 'none';
+        try {
+            var resp = await fetch('/get_group_detail', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: context.submission_id, group_index: groupIndex }),
+            });
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || '加载失败');
+            renderGroupDetail(data.detail || {});
+            loading.style.display = 'none';
+            content.style.display = '';
+        } catch (err) {
+            loading.textContent = '加载失败: ' + (err.message || err);
+        }
     }
 
     /** 为指标名列绑定 hover 浮窗 */
@@ -1672,6 +1784,7 @@
         bindTimeSyncListeners();
         bindFeeControls();
         bindSnapshotDrawerEvents();
+        bindGroupDetailOverlay();
         syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
         setTimeout(syncFromTimeModule, 0);
@@ -1684,6 +1797,17 @@
         if (window.submissions && window.submissions.length > 0) {
             window.renderGroupTabs(window.submissions);
         }
+    }
+
+    function bindGroupDetailOverlay() {
+        var overlay = document.getElementById('group-detail-overlay');
+        var closeBtn = document.getElementById('group-detail-close');
+        if (closeBtn) closeBtn.addEventListener('click', function() {
+            if (overlay) overlay.classList.remove('open');
+        });
+        if (overlay) overlay.addEventListener('click', function(event) {
+            if (event.target === overlay) overlay.classList.remove('open');
+        });
     }
 
     // 暴露给外部调用：渲染分组测试的三级工作区（submission → factor → settings）

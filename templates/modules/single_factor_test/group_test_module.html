@@ -174,6 +174,40 @@
         </div>
     </div>
 
+    <div class="settings-drawer-overlay" id="group-detail-overlay">
+        <div class="settings-drawer-panel group-detail-panel">
+            <button class="drawer-close-btn" id="group-detail-close">✕ 关闭</button>
+            <div class="drawer-inner-container">
+                <div class="section-title" id="group-detail-title">分组详情</div>
+                <div id="group-detail-loading" style="color:#667085;padding:18px 0;">加载中...</div>
+                <div id="group-detail-content" style="display:none;">
+                    <div class="group-detail-summary" id="group-detail-summary"></div>
+                    <div class="group-detail-grid">
+                        <section>
+                            <h6>最常入组产品</h6>
+                            <div id="group-detail-frequency"></div>
+                        </section>
+                        <section>
+                            <h6>收益分布</h6>
+                            <div id="group-detail-histogram" style="height:220px;"></div>
+                            <div id="group-detail-quantiles" class="group-detail-muted"></div>
+                        </section>
+                    </div>
+                    <div class="group-detail-grid">
+                        <section>
+                            <h6>最高收益时段</h6>
+                            <div id="group-detail-top-periods"></div>
+                        </section>
+                        <section>
+                            <h6>最低收益时段</h6>
+                            <div id="group-detail-bottom-periods"></div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 分组快照抽屉：从下方滑出 -->
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
@@ -293,6 +327,62 @@
         padding-top: 10px;
         border-top: 1px solid #eef2f7;
     }
+    #group_test_module .group-detail-trigger {
+        cursor: pointer;
+        color: #0f4c81;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+    #group_test_module .group-detail-panel {
+        width: min(1040px, calc(100vw - 32px));
+    }
+    #group_test_module .group-detail-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+    #group_test_module .group-detail-summary-item {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+        background: #fafbfc;
+    }
+    #group_test_module .group-detail-summary-label,
+    #group_test_module .group-detail-muted {
+        font-size: 12px;
+        color: #667085;
+    }
+    #group_test_module .group-detail-summary-value {
+        margin-top: 4px;
+        font-size: 18px;
+        font-weight: 700;
+        color: #101828;
+    }
+    #group_test_module .group-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+    }
+    #group_test_module .group-detail-grid section {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 12px;
+        min-width: 0;
+    }
+    #group_test_module .group-detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    #group_test_module .group-detail-table th,
+    #group_test_module .group-detail-table td {
+        padding: 6px 4px;
+        border-bottom: 1px solid #eef2f7;
+        text-align: left;
+        vertical-align: top;
+    }
     @media (max-width: 1100px) {
         #group_test_module .group-test-workspace {
             grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr);
@@ -307,6 +397,9 @@
         }
         #group_test_module .group-setting-row {
             flex-wrap: wrap;
+        }
+        #group_test_module .group-detail-grid {
+            grid-template-columns: 1fr;
         }
     }
 </style>

@@ -10,6 +10,7 @@ from tools.factors.FactorTester import _active_tester, _signal_time
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.data.DataFreq import DataFreq
 from tools.factors.tests.group import infer_periods_per_year
+from tools.factors.tests.group_detail import build_group_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
@@ -376,5 +377,36 @@ def get_group_snapshot():
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/get_group_detail', methods=['POST'])
+def get_group_detail():
+    """Return first-phase detail analytics for one group from the latest run."""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    group_index = data.get('group_index')
+    if submission_id is None or group_index is None:
+        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
+    try:
+        group_index = int(group_index)
+        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_detail')
+        products = getattr(tester, '_last_group_products', None)
+        returns_np = getattr(tester, '_last_group_returns_np', None)
+        index_list = getattr(tester, '_last_group_index_list', None)
+        if not products or returns_np is None or not index_list:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        if group_index < 0 or group_index >= returns_np.shape[1]:
+            return jsonify({'success': False, 'error': '分组索引无效'}), 400
+        metrics = getattr(tester, '_last_group_report_df', None)
+        summary = {}
+        if isinstance(metrics, pd.DataFrame) and group_index in metrics.index:
+            summary = {
+                str(key): _safe_float(value)
+                for key, value in metrics.loc[group_index].to_dict().items()
+            }
+        detail = build_group_detail(group_index, products, returns_np, index_list, summary)
+        return jsonify({'success': True, 'detail': detail})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
