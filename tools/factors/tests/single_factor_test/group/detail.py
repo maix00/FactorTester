@@ -58,6 +58,7 @@ def build_group_detail(
         })
     periods_desc = sorted(periods, key=lambda item: item['return'], reverse=True)
     positive_run_analysis = _build_positive_run_analysis(return_series)
+    intraday_analysis = _build_intraday_analysis(return_series)
 
     if clean_returns.size:
         hist_counts, hist_edges = np.histogram(clean_returns, bins=min(20, max(5, int(np.sqrt(clean_returns.size)))))
@@ -93,6 +94,7 @@ def build_group_detail(
         },
         'return_series': return_series,
         'positive_run_analysis': positive_run_analysis,
+        'intraday_analysis': intraday_analysis,
     }
 
 
@@ -160,4 +162,38 @@ def _build_positive_run_analysis(return_series: list[dict[str, Any]]) -> dict[st
         'return_without_top1_run': without_top1,
         'return_without_top3_runs': without_top3,
         'is_concentrated': concentrated,
+    }
+
+
+def _build_intraday_analysis(return_series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not return_series:
+        return {'rows': [], 'top_times': [], 'bottom_times': []}
+
+    df = pd.DataFrame(return_series)
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['time'] = df['timestamp'].dt.strftime('%H:%M')
+    grouped = df.groupby('time')['return'].agg(count='count', mean='mean', sum='sum', std='std').reset_index()
+    grouped['t_like'] = grouped.apply(
+        lambda row: float(row['mean'] / row['std'] * np.sqrt(row['count']))
+        if row['std'] and np.isfinite(row['std']) else None,
+        axis=1,
+    )
+
+    rows = [
+        {
+            'time': str(row['time']),
+            'count': int(row['count']),
+            'mean': float(row['mean']),
+            'sum': float(row['sum']),
+            'std': float(row['std']) if np.isfinite(row['std']) else None,
+            't_like': float(row['t_like']) if row['t_like'] is not None and np.isfinite(row['t_like']) else None,
+        }
+        for _, row in grouped.iterrows()
+    ]
+    top_times = sorted(rows, key=lambda item: item['sum'], reverse=True)[:10]
+    bottom_times = sorted(rows, key=lambda item: item['sum'])[:10]
+    return {
+        'rows': rows,
+        'top_times': top_times,
+        'bottom_times': bottom_times,
     }

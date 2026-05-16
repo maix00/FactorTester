@@ -251,6 +251,34 @@
                             <div id="group-detail-positive-runs"></div>
                         </div>
                     </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>日内时段贡献</span>
+                            <span class="group-detail-section-summary" id="group-detail-intraday-summary">哪些分钟真正贡献了收益</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-intraday-window-controls">
+                                <label>开始
+                                    <input type="time" id="group-intraday-window-start">
+                                </label>
+                                <label>结束
+                                    <input type="time" id="group-intraday-window-end">
+                                </label>
+                                <button type="button" id="group-intraday-window-add" class="btn btn-outline-secondary btn-sm">添加窗口</button>
+                            </div>
+                            <div id="group-detail-intraday-windows"></div>
+                            <div class="group-detail-grid">
+                                <section>
+                                    <h6>贡献最高的分钟</h6>
+                                    <div id="group-detail-intraday-top"></div>
+                                </section>
+                                <section>
+                                    <h6>拖累最大的分钟</h6>
+                                    <div id="group-detail-intraday-bottom"></div>
+                                </section>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </div>
@@ -514,6 +542,20 @@
         color: #475467;
         font-size: 13px;
         line-height: 1.6;
+    }
+    #group_test_module .group-intraday-window-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+        font-size: 13px;
+    }
+    #group_test_module .group-intraday-window-controls label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 0;
     }
     #group_test_module .group-detail-grid {
         display: grid;

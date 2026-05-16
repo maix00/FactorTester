@@ -791,6 +791,26 @@
         return html + '</tbody></table>';
     }
 
+    function renderIntradayRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>时间</th><th>样本</th><th>均值</th><th>累计</th><th>t-like</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.time + '</td><td>' + row.count + '</td><td>' + fmtPct(row.mean) + '</td><td>'
+                + fmtPct(row.sum) + '</td><td>' + (row.t_like == null ? '—' : Number(row.t_like).toFixed(3)) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderIntradayWindows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">尚未添加时间窗口</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>窗口</th><th>样本</th><th>累计贡献</th><th>占总收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.label + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum) + '</td><td>'
+                + fmtPct(row.share_of_total_sum) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
     function formatGroupProduct(product) {
         if (!product) return '—';
         if (typeof product === 'string') return product;
@@ -972,6 +992,7 @@
         document.getElementById('group-detail-distribution-summary').textContent =
             '收益直方图与分位数 · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
         renderPositiveRunAnalysis(detail.positive_run_analysis || {});
+        renderIntradayAnalysis(detail.intraday_analysis || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
     }
@@ -996,6 +1017,50 @@
                 + (concentrated ? '。当前表现明显依赖少数正收益段。' : '。');
         }
         document.getElementById('group-detail-positive-runs').innerHTML = renderPositiveRuns(analysis.top_runs);
+    }
+
+    function renderIntradayAnalysis(analysis) {
+        var top = analysis.top_times || [];
+        var bottom = analysis.bottom_times || [];
+        var best = top[0];
+        _groupIntradayRows = analysis.rows || [];
+        _groupIntradayWindows = [];
+        document.getElementById('group-detail-intraday-summary').textContent =
+            best ? '哪些分钟真正贡献了收益 · 最高 ' + best.time + ' ' + fmtPct(best.sum) : '哪些分钟真正贡献了收益';
+        renderSelectedIntradayWindows();
+        document.getElementById('group-detail-intraday-top').innerHTML = renderIntradayRows(top);
+        document.getElementById('group-detail-intraday-bottom').innerHTML = renderIntradayRows(bottom);
+    }
+
+    var _groupIntradayRows = [];
+    var _groupIntradayWindows = [];
+
+    function summarizeIntradayWindow(start, end) {
+        var rows = (_groupIntradayRows || []).filter(function(row) {
+            return row.time >= start && row.time <= end;
+        });
+        var total = (_groupIntradayRows || []).reduce(function(sum, row) { return sum + (row.sum || 0); }, 0);
+        var contribution = rows.reduce(function(sum, row) { return sum + (row.sum || 0); }, 0);
+        var count = rows.reduce(function(sum, row) { return sum + (row.count || 0); }, 0);
+        return {
+            label: start + '-' + end,
+            count: count,
+            sum: contribution,
+            share_of_total_sum: total !== 0 ? contribution / total : null,
+        };
+    }
+
+    function renderSelectedIntradayWindows() {
+        var target = document.getElementById('group-detail-intraday-windows');
+        if (target) target.innerHTML = renderIntradayWindows(_groupIntradayWindows);
+    }
+
+    function addSelectedIntradayWindow() {
+        var startEl = document.getElementById('group-intraday-window-start');
+        var endEl = document.getElementById('group-intraday-window-end');
+        if (!startEl || !endEl || !startEl.value || !endEl.value || startEl.value > endEl.value) return;
+        _groupIntradayWindows.push(summarizeIntradayWindow(startEl.value, endEl.value));
+        renderSelectedIntradayWindows();
     }
 
     function fmtPct(value) {
@@ -2123,6 +2188,8 @@
         if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
+        var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
+        if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
 
         // 如果已有 submissions，渲染两级选项卡
         if (window.submissions && window.submissions.length > 0) {

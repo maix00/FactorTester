@@ -39,6 +39,24 @@ class TestGroupDetail(unittest.TestCase):
         self.assertLess(analysis["return_without_top1_run"], 0)
         self.assertTrue(analysis["is_concentrated"])
 
+    def test_builds_intraday_contribution_summary(self):
+        index = [
+            pd.Timestamp("2026-01-01 09:00"),
+            pd.Timestamp("2026-01-02 09:00"),
+            pd.Timestamp("2026-01-01 14:55"),
+            pd.Timestamp("2026-01-01 22:55"),
+        ]
+        detail = build_group_detail(
+            0,
+            {0: {}},
+            np.array([[0.01], [0.02], [-0.01], [0.03]]),
+            index,
+        )
+        analysis = detail["intraday_analysis"]
+
+        self.assertEqual(analysis["top_times"][0]["sum"], 0.03)
+        self.assertEqual({row["time"] for row in analysis["top_times"][:2]}, {"09:00", "22:55"})
+
 
 if __name__ == "__main__":
     unittest.main()
