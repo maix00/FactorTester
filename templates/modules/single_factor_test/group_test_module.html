@@ -189,7 +189,7 @@
                     <section class="group-detail-section open">
                         <button class="group-detail-section-toggle" type="button">
                             <span>概览</span>
-                            <span class="group-detail-section-summary">核心指标</span>
+                            <span class="group-detail-section-summary">该组收益、风险、胜率和换手</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div class="group-detail-summary" id="group-detail-summary"></div>
@@ -197,8 +197,17 @@
                     </section>
                     <section class="group-detail-section open">
                         <button class="group-detail-section-toggle" type="button">
+                            <span>收益时序</span>
+                            <span class="group-detail-section-summary">单期收益与累计净值</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div id="group-detail-return-chart" style="height:260px;"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section open">
+                        <button class="group-detail-section-toggle" type="button">
                             <span>入组产品</span>
-                            <span class="group-detail-section-summary" id="group-detail-frequency-summary"></span>
+                            <span class="group-detail-section-summary" id="group-detail-frequency-summary">哪些产品最常进入该组</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div id="group-detail-frequency"></div>
@@ -207,7 +216,7 @@
                     <section class="group-detail-section">
                         <button class="group-detail-section-toggle" type="button">
                             <span>收益分布</span>
-                            <span class="group-detail-section-summary" id="group-detail-distribution-summary"></span>
+                            <span class="group-detail-section-summary" id="group-detail-distribution-summary">收益直方图与分位数</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div id="group-detail-histogram" style="height:220px;"></div>
@@ -217,7 +226,7 @@
                     <section class="group-detail-section">
                         <button class="group-detail-section-toggle" type="button">
                             <span>极端时段</span>
-                            <span class="group-detail-section-summary">最高 / 最低收益</span>
+                            <span class="group-detail-section-summary">收益最高和最低的具体时段</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div class="group-detail-grid">
@@ -247,7 +256,7 @@
                     <section class="group-detail-section open">
                         <button class="group-detail-section-toggle" type="button">
                             <span>概览</span>
-                            <span class="group-detail-section-summary" id="group-ranking-overview-summary"></span>
+                            <span class="group-detail-section-summary" id="group-ranking-overview-summary">整体排序质量</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div class="group-detail-summary" id="group-ranking-summary"></div>
@@ -256,7 +265,7 @@
                     <section class="group-detail-section open">
                         <button class="group-detail-section-toggle" type="button">
                             <span>相邻组梯度</span>
-                            <span class="group-detail-section-summary">从高组到低组</span>
+                            <span class="group-detail-section-summary">相邻两组之间是否逐级拉开</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div id="group-ranking-adjacent"></div>
@@ -265,7 +274,7 @@
                     <section class="group-detail-section open">
                         <button class="group-detail-section-toggle" type="button">
                             <span>首尾组差</span>
-                            <span class="group-detail-section-summary" id="group-ranking-spread-summary"></span>
+                            <span class="group-detail-section-summary" id="group-ranking-spread-summary">最高组减最低组的逐期表现</span>
                         </button>
                         <div class="group-detail-section-body">
                             <div id="group-ranking-spread-chart" style="height:260px;"></div>

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from tools.factors.FactorTester import _signal_time
+from tools.products.product_utils import product_display_name
 
 
 def build_group_detail(
@@ -22,11 +23,15 @@ def build_group_detail(
     total_periods = max(len(index_list), 1)
 
     entry_counts = Counter()
+    product_display_map = {}
     for products in group_products.values():
-        entry_counts.update(str(product) for product in products)
+        for product in products:
+            display = product_display_name(product)
+            entry_counts.update([display['name']])
+            product_display_map[display['name']] = display
     entry_frequency = [
         {
-            'product': product,
+            'product': product_display_map.get(product, {'name': product, 'desc': product}),
             'count': count,
             'frequency': count / total_periods,
         }
@@ -34,14 +39,22 @@ def build_group_detail(
     ]
 
     periods = []
+    cumulative_return = 1.0
+    return_series = []
     for row_idx, idx_entry in enumerate(index_list):
         value = returns[row_idx]
         if not np.isfinite(value):
             continue
+        cumulative_return *= 1.0 + float(value)
+        return_series.append({
+            'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
+            'return': float(value),
+            'cumulative_return': cumulative_return,
+        })
         periods.append({
             'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
             'return': float(value),
-            'products': [str(product) for product in group_products.get(idx_entry, [])],
+            'products': [product_display_name(product) for product in group_products.get(idx_entry, [])],
         })
     periods_desc = sorted(periods, key=lambda item: item['return'], reverse=True)
 
@@ -77,4 +90,5 @@ def build_group_detail(
             'quantiles': quantiles,
             'period_count': int(clean_returns.size),
         },
+        'return_series': return_series,
     }

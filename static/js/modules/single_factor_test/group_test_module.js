@@ -767,7 +767,7 @@
         rows.forEach(function(row) {
             var d = new Date(row.timestamp);
             var time = isNaN(d.getTime()) ? row.timestamp : d.toLocaleString();
-            html += '<tr><td>' + time + '</td><td>' + (row.return * 100).toFixed(3) + '%</td><td>' + (row.products || []).join('、') + '</td></tr>';
+            html += '<tr><td>' + time + '</td><td>' + (row.return * 100).toFixed(3) + '%</td><td>' + formatGroupProducts(row.products || []) + '</td></tr>';
         });
         return html + '</tbody></table>';
     }
@@ -776,9 +776,21 @@
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.slice(0, 12).forEach(function(row) {
-            html += '<tr><td>' + row.product + '</td><td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
         });
         return html + '</tbody></table>';
+    }
+
+    function formatGroupProduct(product) {
+        if (!product) return '—';
+        if (typeof product === 'string') return product;
+        var name = product.name || '';
+        var desc = product.desc && product.desc !== name ? ' · ' + product.desc : '';
+        return name + desc;
+    }
+
+    function formatGroupProducts(products) {
+        return (products || []).map(formatGroupProduct).join('、');
     }
 
     function renderGroupDetailHistogram(histogram) {
@@ -796,6 +808,37 @@
             yAxis: { title: { text: '期数' } },
             legend: { enabled: false },
             series: [{ name: '期数', data: (histogram || []).map(function(bin) { return bin.count; }), color: '#4a90d9' }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderGroupDetailReturnChart(series) {
+        var el = document.getElementById('group-detail-return-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: [{
+                title: { text: '单期收益' },
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            }, {
+                title: { text: '累计净值' },
+                opposite: true,
+            }],
+            tooltip: { shared: true },
+            series: [{
+                name: '单期收益',
+                type: 'column',
+                data: (series || []).map(function(row) { return [new Date(row.timestamp).getTime(), row.return]; }),
+                color: '#7c9fe6',
+            }, {
+                name: '累计净值',
+                type: 'line',
+                yAxis: 1,
+                data: (series || []).map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
+                color: '#0f4c81',
+            }],
             credits: { enabled: false },
         });
     }
@@ -829,10 +872,11 @@
             'P05 ' + fmtPct(q.p05) + ' · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
         document.getElementById('group-detail-frequency-summary').textContent =
             (detail.entry_frequency && detail.entry_frequency.length)
-                ? '最常见 ' + detail.entry_frequency[0].product + ' ' + (detail.entry_frequency[0].frequency * 100).toFixed(1) + '%'
-                : '暂无数据';
+                ? '哪些产品最常进入该组 · ' + formatGroupProduct(detail.entry_frequency[0].product) + ' ' + (detail.entry_frequency[0].frequency * 100).toFixed(1) + '%'
+                : '哪些产品最常进入该组';
         document.getElementById('group-detail-distribution-summary').textContent =
-            'P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+            '收益直方图与分位数 · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
     }
 
@@ -904,9 +948,9 @@
         }).join('');
         document.getElementById('group-ranking-adjacent').innerHTML = renderGroupRankingAdjacent(detail.adjacent_spreads);
         document.getElementById('group-ranking-overview-summary').textContent =
-            '单调 ' + fmtPct(detail.monotonic_period_ratio) + ' · 首尾为正 ' + fmtPct(topBottom.positive_ratio);
+            '整体排序质量 · 单调 ' + fmtPct(detail.monotonic_period_ratio) + ' · 首尾为正 ' + fmtPct(topBottom.positive_ratio);
         document.getElementById('group-ranking-spread-summary').textContent =
-            '均值 ' + fmtPct(topBottom.mean_spread) + ' · 为正 ' + fmtPct(topBottom.positive_ratio);
+            '最高组减最低组的逐期表现 · 均值 ' + fmtPct(topBottom.mean_spread) + ' · 为正 ' + fmtPct(topBottom.positive_ratio);
         renderGroupRankingSpreadChart(topBottom.series || []);
     }
 
