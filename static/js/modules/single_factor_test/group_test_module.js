@@ -905,6 +905,41 @@
         document.getElementById('group-ranking-adjacent').innerHTML = renderGroupRankingAdjacent(detail.adjacent_spreads);
         document.getElementById('group-ranking-overview-summary').textContent =
             '单调 ' + fmtPct(detail.monotonic_period_ratio) + ' · 首尾为正 ' + fmtPct(topBottom.positive_ratio);
+        document.getElementById('group-ranking-spread-summary').textContent =
+            '均值 ' + fmtPct(topBottom.mean_spread) + ' · 为正 ' + fmtPct(topBottom.positive_ratio);
+        renderGroupRankingSpreadChart(topBottom.series || []);
+    }
+
+    function renderGroupRankingSpreadChart(series) {
+        var el = document.getElementById('group-ranking-spread-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: [{
+                title: { text: '单期组差' },
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            }, {
+                title: { text: '累计净值' },
+                opposite: true,
+            }],
+            tooltip: { shared: true },
+            series: [{
+                name: '单期 Top-Bottom',
+                type: 'column',
+                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.spread]; }),
+                color: '#7c9fe6',
+                tooltip: { valueSuffix: '' },
+            }, {
+                name: '累计净值',
+                type: 'line',
+                yAxis: 1,
+                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
+                color: '#0f4c81',
+            }],
+            credits: { enabled: false },
+        });
     }
 
     async function openGroupRankingDetail() {

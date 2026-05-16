@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from tools.factors.FactorTester import _signal_time
 
 
 def _safe_float(value: Any) -> float | None:
@@ -15,7 +16,7 @@ def _safe_float(value: Any) -> float | None:
     return result if np.isfinite(result) else None
 
 
-def build_group_ranking_detail(group_returns_np: np.ndarray) -> dict[str, Any]:
+def build_group_ranking_detail(group_returns_np: np.ndarray, index_list: list | None = None) -> dict[str, Any]:
     """Summarize whether group returns preserve the factor ranking."""
     returns = np.asarray(group_returns_np, dtype=float)
     if returns.ndim != 2 or returns.shape[1] < 2:
@@ -45,6 +46,21 @@ def build_group_ranking_detail(group_returns_np: np.ndarray) -> dict[str, Any]:
         top_bottom = np.array([], dtype=float)
         adjacent = np.empty((0, returns.shape[1] - 1), dtype=float)
 
+    spread_series = []
+    if index_list is not None and len(index_list) == len(returns):
+        running_nav = 1.0
+        for row_idx, idx_entry in enumerate(index_list):
+            row = returns[row_idx]
+            if not np.isfinite(row).all():
+                continue
+            spread = float(row[0] - row[-1])
+            running_nav *= 1.0 + spread
+            spread_series.append({
+                'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
+                'spread': spread,
+                'cumulative_return': running_nav,
+            })
+
     adjacent_summary = []
     for idx in range(max(returns.shape[1] - 1, 0)):
         series = adjacent[:, idx] if adjacent.size else np.array([], dtype=float)
@@ -66,6 +82,7 @@ def build_group_ranking_detail(group_returns_np: np.ndarray) -> dict[str, Any]:
         'top_bottom': {
             'mean_spread': _safe_float(np.nanmean(top_bottom)) if top_bottom.size else None,
             'positive_ratio': _safe_float(np.mean(top_bottom > 0)) if top_bottom.size else None,
+            'series': spread_series,
         },
         'adjacent_spreads': adjacent_summary,
     }

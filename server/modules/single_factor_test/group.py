@@ -423,8 +423,9 @@ def get_group_ranking_detail():
     try:
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_ranking_detail')
         returns_np = getattr(tester, '_last_group_returns_np', None)
+        index_list = getattr(tester, '_last_group_index_list', None)
         if returns_np is None:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np)})
+        return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np, index_list)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

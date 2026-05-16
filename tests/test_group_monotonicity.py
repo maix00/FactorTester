@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+import pandas as pd
 
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 
@@ -31,6 +32,22 @@ class TestGroupRankingDetail(unittest.TestCase):
         self.assertAlmostEqual(detail["mean_non_empty_group_count"], 2.5)
         self.assertAlmostEqual(detail["full_group_period_ratio"], 0.5)
         self.assertAlmostEqual(detail["top_bottom"]["mean_spread"], 0.02)
+
+    def test_builds_top_bottom_time_series_for_comparable_rows(self):
+        detail = build_group_ranking_detail(
+            np.array([
+                [0.03, 0.02, 0.01],
+                [0.01, np.nan, 0.00],
+                [0.04, 0.01, -0.01],
+            ]),
+            list(pd.date_range("2026-01-01", periods=3, freq="D")),
+        )
+
+        series = detail["top_bottom"]["series"]
+        self.assertEqual(len(series), 2)
+        self.assertAlmostEqual(series[0]["spread"], 0.02)
+        self.assertAlmostEqual(series[1]["spread"], 0.05)
+        self.assertAlmostEqual(series[1]["cumulative_return"], 1.071)
 
 
 if __name__ == "__main__":
