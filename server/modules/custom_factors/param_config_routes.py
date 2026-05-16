@@ -8,6 +8,7 @@ from server.modules.custom_factors import cf_bp
 from server.services.api_response import api_ok, route_guard
 from server.modules.custom_factors.param_config_service import (
     build_param_factor_overview,
+    list_factor_library_product_groups,
     list_param_config_users,
     save_current_user_param_config,
 )
@@ -16,8 +17,8 @@ from server.modules.custom_factors.param_config_store import (
     delete_param_config,
     delete_scope,
     ensure_scope_exists,
-    list_param_config_scopes,
     load_param_config,
+    normalize_product_group,
     rename_scope,
 )
 from server.services.accounts import can_view_user_scope
@@ -40,9 +41,9 @@ def api_param_factor_overview():
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     include_subordinates = request.args.get('include_subordinates') == '1'
-    scope_key = request.args.get('scope_key') or None
+    product_group = request.args.get('product_group') or request.args.get('scope_key') or None
     factor_family_alias = request.args.get('factor_family_alias') or None
-    payload = build_param_factor_overview(username, include_subordinates, scope_key=scope_key, factor_family_alias=factor_family_alias)
+    payload = build_param_factor_overview(username, include_subordinates, product_group=product_group, factor_family_alias=factor_family_alias)
     return jsonify({'success': True, **payload})
 
 
@@ -52,8 +53,8 @@ def api_param_configs(ff_alias):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    scope_key = request.args.get('scope_key', DEFAULT_SCOPE_KEY)
-    payload = list_param_config_users(username, ff_alias, scope_key=scope_key)
+    product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
+    payload = list_param_config_users(username, ff_alias, product_group=product_group)
     return jsonify({'success': True, **payload})
 
 
@@ -65,8 +66,8 @@ def api_get_param_config(ff_alias, owner_username):
         return jsonify({'success': False, 'error': '未登录'}), 401
     if not can_view_user_scope(username, owner_username):
         return jsonify({'success': False, 'error': '无权查看该用户配置'}), 403
-    scope_key = request.args.get('scope_key', DEFAULT_SCOPE_KEY)
-    config = load_param_config(owner_username, ff_alias, scope_key=scope_key)
+    product_group = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
+    config = load_param_config(owner_username, ff_alias, scope_key=product_group)
     if not config:
         return jsonify({'success': False, 'error': '该用户尚未保存因子库参数配置'}), 404
     config = dict(config)
@@ -84,11 +85,11 @@ def api_save_param_config(ff_alias):
         return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json() or {}
     params_list = data.get('params_list', [])
-    scope_key = data.get('scope_key', DEFAULT_SCOPE_KEY)
+    product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
     if not isinstance(params_list, list):
         return jsonify({'success': False, 'error': '参数列表格式无效'})
     with get_user_file_lock(username):
-        config, factors = save_current_user_param_config(username, ff_alias, params_list, scope_key=scope_key)
+        config, factors = save_current_user_param_config(username, ff_alias, params_list, product_group=product_group)
     return api_ok({'config': config, 'factors': factors})
 
 
@@ -98,7 +99,7 @@ def api_delete_param_config(ff_alias):
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    scope_key = request.args.get('scope_key', DEFAULT_SCOPE_KEY)
+    scope_key = request.args.get('product_group') or request.args.get('scope_key') or DEFAULT_SCOPE_KEY
     with get_user_file_lock(username):
         deleted = delete_param_config(username, ff_alias, scope_key=scope_key)
     if not deleted:
@@ -115,7 +116,8 @@ def api_add_factor_to_param_config(ff_alias):
         return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json() or {}
     factor_alias = (data.get('factor_alias') or '').strip()
-    scope_key = data.get('scope_key', DEFAULT_SCOPE_KEY)
+    product_group = data.get('product_group') or data.get('scope_key') or DEFAULT_SCOPE_KEY
+    scope_key = normalize_product_group(product_group)
     if not factor_alias:
         return jsonify({'success': False, 'error': '缺少 factor_alias'}), 400
 
@@ -157,7 +159,7 @@ def api_add_factor_to_param_config(ff_alias):
             return jsonify({'success': True, 'message': f'因子 {factor_alias} 已存在，无需重复添加', 'skipped': True})
 
         existing_params.append(matched_param)
-        config, factors = save_current_user_param_config(username, ff_alias, existing_params, scope_key=scope_key)
+        config, factors = save_current_user_param_config(username, ff_alias, existing_params, product_group=scope_key)
 
     return api_ok({'config': config, 'factors': factors})
 
@@ -170,8 +172,8 @@ def api_list_scopes():
     username = _username()
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
-    scopes = list_param_config_scopes(username)
-    return jsonify({'success': True, 'scopes': scopes})
+    product_groups = list_factor_library_product_groups(username)
+    return jsonify({'success': True, 'scopes': product_groups, 'product_groups': product_groups})
 
 
 @cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['PUT'])
@@ -182,7 +184,7 @@ def api_ensure_scope(scope_key):
         return jsonify({'success': False, 'error': '未登录'}), 401
     with get_user_file_lock(username):
         actual = ensure_scope_exists(username, scope_key)
-    return jsonify({'success': True, 'scope_key': actual})
+    return jsonify({'success': True, 'scope_key': actual, 'product_group': actual})
 
 
 @cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['PATCH'])
@@ -192,16 +194,16 @@ def api_rename_scope(scope_key):
     if username is None:
         return jsonify({'success': False, 'error': '未登录'}), 401
     data = request.get_json() or {}
-    new_key = (data.get('new_scope_key') or '').strip()
+    new_key = (data.get('new_product_group') or data.get('new_scope_key') or '').strip()
     if not new_key:
         return jsonify({'success': False, 'error': '新 scope key 不能为空'})
     if new_key == scope_key:
-        return jsonify({'success': True, 'scope_key': scope_key})
+        return jsonify({'success': True, 'scope_key': scope_key, 'product_group': scope_key})
     with get_user_file_lock(username):
         ok = rename_scope(username, scope_key, new_key)
     if not ok:
         return jsonify({'success': False, 'error': '重命名失败，源 scope 不存在或目标已存在'}), 400
-    return jsonify({'success': True, 'scope_key': new_key})
+    return jsonify({'success': True, 'scope_key': new_key, 'product_group': new_key})
 
 
 @cf_bp.route('/api/param-config-scopes/<scope_key>', methods=['DELETE'])

@@ -61,6 +61,14 @@
             return (paramMetas || []).find(function(p) { return p.alias === alias; }) || {};
         }
 
+        function getFactorProductGroup(item) {
+            return item.product_group || item.scope_key || 'default';
+        }
+
+        function formatProductGroupLabel(productGroup) {
+            return (!productGroup || productGroup === 'default' || productGroup === '默认') ? '默认产品组' : productGroup;
+        }
+
         function readParamControl(alias) {
             const control = document.getElementById('param_' + alias);
             if (!control) return '';
@@ -141,6 +149,8 @@
                     item.chinese_name,
                     item.owner_alias,
                     item.owner_username,
+                    item.product_group,
+                    item.scope_key,
                     (item.params || []).map(function(p) { return p.alias + ':' + p.value; }).join(' '),
                 ].join(' ').toLowerCase();
                 return haystack.indexOf(search) !== -1;
@@ -249,6 +259,8 @@
                     item.chinese_name,
                     item.owner_alias,
                     item.owner_username,
+                    item.product_group,
+                    item.scope_key,
                     (item.params || []).map(function(p) { return p.alias + ':' + p.value; }).join(' '),
                 ].join(' ').toLowerCase();
                 return haystack.indexOf(search) !== -1;
@@ -272,7 +284,7 @@
 
             var html = '<table class="param-table" style="width:100%;"><thead><tr>' +
                 '<th style="width:36px;"><input type="checkbox" id="multi-import-check-all-visible"></th>' +
-                '<th>因子</th><th>参数</th><th>所有者</th><th>范围键</th>' +
+                '<th>因子</th><th>参数</th><th>所有者</th><th>产品组</th>' +
                 '</tr></thead><tbody>';
             visible.forEach(function(item) {
                 var checked = item._id && multiImportChecked[item._id] ? ' checked' : '';
@@ -287,7 +299,7 @@
                     '<div style="color:#888;font-size:12px;">' + _escapeHtml(item.chinese_name || '') + '</div></td>' +
                     '<td>' + (params || '<span style="color:#aaa;">无</span>') + '</td>' +
                     '<td style="font-size:12px;">' + _escapeHtml(item.owner_alias || item.owner_username || '') + '</td>' +
-                    '<td style="font-size:11px;color:#888;">' + _escapeHtml(item.scope_key || '') + '</td>' +
+                    '<td style="font-size:11px;color:#888;">' + _escapeHtml(formatProductGroupLabel(getFactorProductGroup(item))) + '</td>' +
                     '</tr>';
             });
             html += '</tbody></table>';
@@ -362,7 +374,7 @@
                 var data = await resp.json();
                 if (!data.success) throw new Error(data.error || '加载失败');
                 multiImportItems = (data.factors || []).map(function(item, idx) {
-                    item._id = item.factor_alias + '__' + String(item.row_index || idx) + '__' + (item.owner_username || item.owner_alias || '');
+                    item._id = item.factor_alias + '__' + String(item.row_index || idx) + '__' + (item.owner_username || item.owner_alias || '') + '__' + getFactorProductGroup(item);
                     return item;
                 });
                 renderMultiImportTable();

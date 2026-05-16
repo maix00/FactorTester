@@ -1,14 +1,16 @@
-"""Storage for factor-library two-level-scoped parameter configs.
+"""Storage for factor-library product-group-scoped parameter configs.
 
 Scope model:
-  1st level: user_id (path_template ID → scope_key)
-  2nd level: (user_id, scope_key)
+  1st level: user_id
+  2nd level: (user_id, product_group)
 
 Storage layout:
-  {user_data}/factor_library_param_configs/{scope_key}/{ff_alias}.json
+  {user_data}/factor_library_param_configs/{product_group}/{ff_alias}.json
 
-Migration: old flat files at {user_data}/factor_library_param_configs/{ff_alias}.json
-are auto-migrated to scope_key="default" on first access.
+Compatibility: product_group is stored in the old scope_key directory position so
+existing factor-library configs continue to load. Old flat files at
+{user_data}/factor_library_param_configs/{ff_alias}.json are auto-migrated to
+product_group="default" on first access.
 """
 
 import json
@@ -21,6 +23,14 @@ from server.services.user_storage import user_data_dir
 DEFAULT_SCOPE_KEY = 'default'
 
 
+def normalize_product_group(product_group: str | None) -> str:
+    """Normalize blank UI product-group values to the default storage key."""
+    if product_group is None:
+        return DEFAULT_SCOPE_KEY
+    product_group = str(product_group).strip()
+    return product_group or DEFAULT_SCOPE_KEY
+
+
 def _base_config_dir(username: str) -> str:
     d = os.path.join(user_data_dir(username), 'factor_library_param_configs')
     os.makedirs(d, exist_ok=True)
@@ -28,12 +38,14 @@ def _base_config_dir(username: str) -> str:
 
 
 def param_config_dir(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> str:
+    scope_key = normalize_product_group(scope_key)
     d = os.path.join(_base_config_dir(username), scope_key)
     os.makedirs(d, exist_ok=True)
     return d
 
 
 def param_config_path(username: str, scope_key: str, ff_alias: str) -> str:
+    scope_key = normalize_product_group(scope_key)
     return os.path.join(param_config_dir(username, scope_key), f'{ff_alias}.json')
 
 
@@ -76,6 +88,7 @@ def _cleanup_empty_scope_dirs(username: str) -> None:
 
 
 def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> dict | None:
+    scope_key = normalize_product_group(scope_key)
     _migrate_if_needed(username, scope_key, ff_alias)
     path = param_config_path(username, scope_key, ff_alias)
     try:
@@ -83,6 +96,8 @@ def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCO
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, dict) and isinstance(data.get('params_list'), list):
+                data['scope_key'] = data.get('scope_key') or scope_key
+                data['product_group'] = data.get('product_group') or data.get('scope_key') or scope_key
                 return data
     except Exception:
         pass
@@ -90,10 +105,12 @@ def load_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCO
 
 
 def save_param_config(username: str, ff_alias: str, params_list: list, scope_key: str = DEFAULT_SCOPE_KEY) -> dict:
+    scope_key = normalize_product_group(scope_key)
     config = {
         'id': username,
-        'scope': 'user_submission',
+        'scope': 'user_product_group',
         'scope_key': scope_key,
+        'product_group': scope_key,
         'scope_user_id': username,
         'name': username,
         'params_list': params_list,
@@ -107,6 +124,7 @@ def save_param_config(username: str, ff_alias: str, params_list: list, scope_key
 
 
 def delete_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_SCOPE_KEY) -> bool:
+    scope_key = normalize_product_group(scope_key)
     _migrate_if_needed(username, scope_key, ff_alias)
     path = param_config_path(username, scope_key, ff_alias)
     if os.path.exists(path):
@@ -117,6 +135,7 @@ def delete_param_config(username: str, ff_alias: str, scope_key: str = DEFAULT_S
 
 
 def list_param_config_aliases(username: str, scope_key: str = DEFAULT_SCOPE_KEY) -> list[str]:
+    scope_key = normalize_product_group(scope_key)
     _migrate_scope_dir(username, scope_key)
     d = param_config_dir(username, scope_key)
     if not os.path.isdir(d):
@@ -160,9 +179,8 @@ def list_param_config_scopes(username: str) -> list[str]:
 
 
 def ensure_scope_exists(username: str, scope_key: str) -> str:
-    """Ensure a scope directory exists. Returns the scope_key."""
-    if not scope_key or scope_key.strip() == '':
-        scope_key = DEFAULT_SCOPE_KEY
+    """Ensure a product-group directory exists. Returns the storage key."""
+    scope_key = normalize_product_group(scope_key)
     param_config_dir(username, scope_key)
     return scope_key
 
@@ -180,7 +198,9 @@ def list_all_aliases_across_scopes(username: str) -> dict[str, list[str]]:
 
 
 def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
-    """Rename a scope directory."""
+    """Rename a product-group directory."""
+    old_scope_key = normalize_product_group(old_scope_key)
+    new_scope_key = normalize_product_group(new_scope_key)
     base = _base_config_dir(username)
     old_path = os.path.join(base, old_scope_key)
     new_path = os.path.join(base, new_scope_key)
@@ -192,6 +212,7 @@ def rename_scope(username: str, old_scope_key: str, new_scope_key: str) -> bool:
 
 def delete_scope(username: str, scope_key: str) -> bool:
     """Delete an entire scope directory and its contents."""
+    scope_key = normalize_product_group(scope_key)
     if scope_key == DEFAULT_SCOPE_KEY:
         return False
     path = os.path.join(_base_config_dir(username), scope_key)

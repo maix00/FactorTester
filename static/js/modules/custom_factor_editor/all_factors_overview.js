@@ -50,10 +50,10 @@ function renderScopeFactorsOverview() {
 
     const visibleFactors = filterAllFactorsByOwner(data.factors);
 
-    // 第一级：按 scope_key 分组
+    // 第一级：按产品组分组
     const scopeGroups = {};
     visibleFactors.forEach(f => {
-        const sk = f.scope_key || '默认';
+        const sk = getFactorProductGroup(f);
         if (!scopeGroups[sk]) scopeGroups[sk] = [];
         scopeGroups[sk].push(f);
     });
@@ -101,7 +101,7 @@ function renderScopeFactorsOverview() {
         });
         html += '<div class="collapsible-factor-node collapsible-factor-scope">';
         html += '<button class="collapsible-factor-header scope-header" type="button"><span class="caret">▶</span><span class="collapsible-factor-title">' +
-            escHtml(sk) + '</span><span class="collapsible-factor-count">' + scopeItems.length + '</span></button><div class="collapsible-factor-body">';
+            escHtml(formatProductGroupLabel(sk)) + '</span><span class="collapsible-factor-count">' + scopeItems.length + '</span></button><div class="collapsible-factor-body">';
 
         for (const group of Object.keys(groups).sort()) {
             const items = groups[group].sort(compareAllFactorsForDisplay);
@@ -247,11 +247,20 @@ function renderParamsSummary(params) {
 
 function compareAllFactorsForDisplay(a, b) {
     return (
+        getFactorProductGroup(a).localeCompare(getFactorProductGroup(b)) ||
         getGroup(a.factor_family_alias || a.factor_family_name || a.factor_alias).localeCompare(getGroup(b.factor_family_alias || b.factor_family_name || b.factor_alias)) ||
         getAllFactorOwnerSortKey(a).localeCompare(getAllFactorOwnerSortKey(b)) ||
         (a.factor_family_alias || '').localeCompare(b.factor_family_alias || '') ||
         (a.factor_alias || '').localeCompare(b.factor_alias || '')
     );
+}
+
+function getFactorProductGroup(item) {
+    return item.product_group || item.scope_key || 'default';
+}
+
+function formatProductGroupLabel(productGroup) {
+    return (!productGroup || productGroup === 'default' || productGroup === '默认') ? '默认产品组' : productGroup;
 }
 
 // ── 通用因子选择表格（scope 分组 + 搜索过滤 + 选择按钮）──
@@ -279,7 +288,7 @@ function renderFactorPickerTable(items, containerEl, opts) {
     const visible = items.filter(function(item) {
         if (!searchQuery) return true;
         return [item.factor_alias, item.factor_family_alias, item.factor_family_name,
-            item.chinese_name, item.owner_alias, item.owner_username, item.scope_key, item.category]
+            item.chinese_name, item.owner_alias, item.owner_username, item.product_group, item.scope_key, item.category]
             .join(' ').toLowerCase().indexOf(searchQuery) !== -1;
     });
 
@@ -289,10 +298,10 @@ function renderFactorPickerTable(items, containerEl, opts) {
         return;
     }
 
-    // 按 scope_key 分组
+    // 按产品组分组
     var scopes = {};
     visible.forEach(function(item) {
-        var sk = item.scope_key || '默认';
+        var sk = getFactorProductGroup(item);
         if (!scopes[sk]) scopes[sk] = [];
         scopes[sk].push(item);
     });
@@ -312,7 +321,7 @@ function renderFactorPickerTable(items, containerEl, opts) {
         html += '<div class="picker-scope-node">';
         html += '<div class="picker-scope-header" data-scope-toggle="' + escHtml(sk) + '" style="display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer;border-bottom:1px solid #f0f0f0;">';
         html += '<span class="picker-caret ' + caretClass + '" data-scope="' + escHtml(sk) + '"></span>';
-        html += '<strong style="font-size:14px;color:#1e293b;">' + escHtml(sk) + '</strong>';
+        html += '<strong style="font-size:14px;color:#1e293b;">' + escHtml(formatProductGroupLabel(sk)) + '</strong>';
         html += '<span style="color:#888;font-size:12px;">(' + groupItems.length + ')</span>';
         html += '</div>';
         html += '<div class="picker-scope-body" data-scope-body="' + escHtml(sk) + '" style="' + bodyStyle + '">';

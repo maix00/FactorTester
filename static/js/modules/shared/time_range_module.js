@@ -6,6 +6,20 @@
  */
 
 (function() {
+    var PAGE_UUID_STORAGE_KEY = 'single_factor_test_page_uuid';
+    try {
+        if (!window._pageUuid) {
+            window._pageUuid = sessionStorage.getItem(PAGE_UUID_STORAGE_KEY) || '';
+        }
+    } catch (e) {}
+
+    function rememberPageUuid(pageUuid) {
+        if (!pageUuid) return;
+        window._pageUuid = pageUuid;
+        try { sessionStorage.setItem(PAGE_UUID_STORAGE_KEY, pageUuid); } catch (e) {}
+    }
+    window.rememberSingleFactorPageUuid = rememberPageUuid;
+
     // 等待 DateUtils 加载完成
     function waitForDateUtils(callback) {
         if (window.DateUtils) {
@@ -185,7 +199,7 @@
             if (res.success) {
                 // 存储后端返回的 page_uuid，后续请求传回
                 if (res.page_uuid) {
-                    window._pageUuid = res.page_uuid;
+                    rememberPageUuid(res.page_uuid);
                 }
                 let msg = '✓ 已保存';
                 if (res.start_calc_param_val) {

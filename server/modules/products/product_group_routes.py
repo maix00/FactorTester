@@ -10,8 +10,11 @@ from server.modules.products.product_group_store import (
     create_product_group,
     delete_product_group,
     load_product_groups,
+    rename_product_group,
+    reorder_product_groups,
     update_product_group,
 )
+from server.modules.custom_factors.param_config_store import rename_scope
 from server.services.http_auth import login_required
 from server.services.runtime_state import require_user
 
@@ -75,4 +78,37 @@ def delete_product_group_view(name):
     ok = delete_product_group(username, name)
     if not ok:
         return jsonify({'success': False, 'error': '产品组不存在'}), 404
+    return jsonify({'success': True})
+
+
+# ── Rename ──
+
+@templates_bp.route('/api/product-groups/<name>/rename', methods=['PUT'])
+@login_required
+def rename_product_group_view(name):
+    data = request.get_json()
+    new_name = (data.get('name') or '').strip()
+    if not new_name:
+        return jsonify({'success': False, 'error': '新名称不能为空'}), 400
+    username = require_user()
+    group = rename_product_group(username, name, new_name)
+    if group is None:
+        return jsonify({'success': False, 'error': '重命名失败：名称已存在或产品组不存在'}), 400
+    rename_scope(username, name, new_name)
+    return jsonify({'success': True, 'group': group})
+
+
+# ── Reorder ──
+
+@templates_bp.route('/api/product-groups/reorder', methods=['PUT'])
+@login_required
+def reorder_product_groups_view():
+    data = request.get_json()
+    names = data.get('names', [])
+    if not isinstance(names, list) or len(names) == 0:
+        return jsonify({'success': False, 'error': 'names 不能为空'}), 400
+    username = require_user()
+    ok = reorder_product_groups(username, names)
+    if not ok:
+        return jsonify({'success': False, 'error': '排序失败：部分产品组不存在'}), 400
     return jsonify({'success': True})

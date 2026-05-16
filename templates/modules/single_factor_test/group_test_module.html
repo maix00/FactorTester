@@ -1,14 +1,21 @@
 <div class="module" id="group_test_module" style="margin-top:24px;">
     <div class="section-title">分组测试</div>
+
+    <div class="group-test-workspace">
+        <div id="group-tab-container" class="group-test-nav-shell">
+            <div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>
+        </div>
+
+        <div id="group-settings-panel" class="group-test-settings-panel">
     
     <!-- 第一行：分组数量 + 手续费设置 -->
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:6px;">
+    <div class="group-settings-grid">
+        <div class="group-setting-row">
             <label style="margin-bottom:0;white-space:nowrap;">分组数量：</label>
             <input type="number" id="group_count" value="5" min="2" max="10" step="1" style="width:70px;">
         </div>
 
-        <div style="display:flex;align-items:center;gap:6px;">
+        <div class="group-setting-row">
             <label style="margin-bottom:0;white-space:nowrap;">再平衡模式：</label>
             <select id="rebalance_mode" style="width:180px;">
                 <option value="each_period" selected>每期等权再平衡</option>
@@ -18,7 +25,7 @@
         </div>
 
         <!-- 策略说明面板（运行后动态填充） -->
-        <div id="strategy_info_panel" style="display:none;flex:1 1 100%;margin-top:10px;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
+        <div id="strategy_info_panel" style="display:none;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
             <div style="display:flex;align-items:flex-start;gap:8px;">
                 <span id="strategy_icon" style="font-size:18px;"></span>
                 <div>
@@ -28,7 +35,7 @@
             </div>
         </div>
 
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div class="group-setting-row">
             <label style="margin-bottom:0;white-space:nowrap;">手续费：</label>
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
                 <input type="radio" name="fee_mode" id="fee_mode_none" value="none" checked> 不扣除
@@ -39,59 +46,71 @@
             <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="按品种分别设置费率">
                 <input type="radio" name="fee_mode" id="fee_mode_per_product" value="per_product"> 按品种费率
             </label>
+        </div>
 
-            <!-- 统一费率输入 -->
-            <span id="fee_uniform_wrap" style="display:none;align-items:center;gap:4px;">
+        <!-- 统一费率输入（独立缩进行） -->
+        <div id="fee_uniform_row" style="display:none;padding-left:28px;margin-top:-4px;margin-bottom:4px;">
+            <label style="display:inline-flex;align-items:center;gap:4px;margin-bottom:0;font-weight:normal;">
                 <input type="number" id="fee_rate" value="0.03" step="0.001" min="0" style="width:80px;" title="双边手续费率（%），例如 0.03 表示万分之三">
                 <span style="font-size:12px;color:#666;">%（双边）</span>
-                <span style="margin-left:8px;font-size:12px;color:#555;">敏感性:</span>
-                <input type="range" id="fee_sensitivity_slider" min="0" max="0.05" step="0.001" value="0" style="width:120px;" title="滑动查看不同费率下净值变化（不影响实际费率输入）">
-                <span id="fee_sensitivity_label" style="font-size:12px;color:#0078d4;white-space:nowrap;">0.000%</span>
-            </span>
+            </label>
+            <span style="margin-left:12px;font-size:12px;color:#555;">敏感性:</span>
+            <input type="range" id="fee_sensitivity_slider" min="0" max="0.05" step="0.001" value="0" style="width:140px;">
+            <span id="fee_sensitivity_label" style="font-size:12px;color:#0078d4;white-space:nowrap;">0.000%</span>
+        </div>
 
-            <!-- 按品种费率控件 -->
-            <span id="fee_per_product_wrap" style="display:none;align-items:center;gap:6px;">
-                <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
-                    当前：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
-                </span>
-                <button id="use_closetoday_btn" class="btn btn-outline-secondary btn-sm"
-                        title="点击切换平今/平昨模式，将影响费率计算"
-                        style="white-space:nowrap;">切换为平今仓</button>
-                <!-- 打开费率抽屉按钮 -->
-                <span id="group-fee-drawer-trigger" title="查看/编辑品种费率"
-                      style="display:inline-flex;cursor:pointer;align-items:center;gap:4px;padding:4px 10px;border:1px solid #d0d5dd;border-radius:4px;background:#f6f8fa;font-size:12px;white-space:nowrap;margin-left:4px;">
-                    📋 品种费率 <span id="group-fee-summary" style="font-size:12px;color:#888;"></span>
-                </span>
+        <!-- 按品种费率控件（独立缩进行） -->
+        <div id="fee_per_product_row" style="display:none;padding-left:28px;margin-top:-4px;margin-bottom:4px;align-items:center;gap:6px;">
+            <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
+                当前：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
+            </span>
+            <button id="use_closetoday_btn" class="btn btn-outline-secondary btn-sm"
+                    title="点击切换平今/平昨模式，将影响费率计算"
+                    style="white-space:nowrap;">切换为平今仓</button>
+            <span id="group-fee-drawer-trigger" title="查看/编辑品种费率"
+                  style="display:inline-flex;cursor:pointer;align-items:center;gap:4px;padding:4px 10px;border:1px solid #d0d5dd;border-radius:4px;background:#f6f8fa;font-size:12px;white-space:nowrap;margin-left:4px;">
+                📋 品种费率 <span id="group-fee-summary" style="font-size:12px;color:#888;"></span>
             </span>
         </div>
     </div>
 
-    <!-- 第二行：多周期收益率频率选择 -->
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
-            <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
-            <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
-        </div>
+    <!-- 时间范围 -->
+    <div class="group-setting-row" style="margin-bottom:16px;">
+        <label style="margin-bottom:0;white-space:nowrap;">起始时间：</label>
+        <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <span style="color:#999;">-</span>
+        <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <span style="color:#999;">-</span>
+        <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+    </div>
+    <div class="group-setting-row" style="margin-bottom:16px;">
+        <label style="margin-bottom:0;white-space:nowrap;">终止时间：</label>
+        <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <span style="color:#999;">-</span>
+        <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <span style="color:#999;">-</span>
+        <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="margin-left:8px;white-space:nowrap;">同步时间模块</button>
     </div>
 
-    <!-- 第三行：时间范围 + 时间同步按钮 -->
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-            <label style="margin-bottom:0;white-space:nowrap;">时间范围：</label>
-            <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="margin:0 4px;color:#999;">至</span>
-            <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="margin-left:4px;white-space:nowrap;">同步时间模块</button>
+    <!-- 扩展分析（折叠） -->
+    <details class="group-settings-grid" style="margin-bottom:12px;">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#1f2937;outline:none;padding:4px 0;">🔬 扩展分析</summary>
+        <div id="extended_analysis_content" style="padding-left:16px;border-left:3px solid #e5e7eb;margin-top:8px;">
+            <!-- 多周期对比内嵌到此处 -->
+            <div class="group-setting-row" style="margin-bottom:8px;">
+                <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
+                <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
+                <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
+            </div>
         </div>
+    </details>
+
+    <!-- 分组测试按钮 -->
+    <div class="group-run-actions" style="margin-top:12px;">
+        <button id="run_group_test_btn" class="btn btn-primary" style="display:none;">运行分组测试</button>
+        <button id="run_all_group_tests_btn" class="btn btn-outline-primary" style="display:none;margin-left:8px;">运行当前测试器全部因子</button>
+        <span id="group_test_status" style="margin-left:12px;font-size:13px;"></span>
     </div>
 
     <!-- 费率抽屉 -->
@@ -129,16 +148,8 @@
             </div>
         </div>
     </div>
-    
-    <!-- 两级选项卡 -->
-    <div id="group-tab-container" style="margin-top:16px;">
-        <div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>
-    </div>
 
-    <!-- 分组测试按钮 -->
-    <div style="margin-top:12px;">
-        <button id="run_group_test_btn" class="btn btn-primary" style="display:none;">运行分组测试</button>
-        <span id="group_test_status" style="margin-left:12px;font-size:13px;"></span>
+        </div>
     </div>
 
     <!-- 图表容器 -->
@@ -186,6 +197,119 @@
         </div>
     </div>
 </div>
+
+<style>
+    #group_test_module .group-test-workspace {
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) minmax(220px, 280px) minmax(360px, 1fr);\n        padding-right: 0;
+        gap: 12px;
+        align-items: start;
+        margin-top: 12px;
+    }
+    #group_test_module .group-test-nav-shell {
+        display: contents;
+    }
+    #group_test_module .group-nav-column,
+    #group_test_module .group-factor-sidebar,
+    #group_test_module .group-test-settings-panel {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        min-height: 220px;
+    }
+    #group_test_module .group-nav-column,
+    #group_test_module .group-factor-sidebar {
+        padding: 6px;
+        max-height: 440px;
+        overflow: auto;
+    }
+    #group_test_module .group-test-settings-panel {
+        padding: 12px;
+    }
+    #group_test_module .group-settings-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    #group_test_module .group-setting-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    #group_test_module .group-inline-wrap,
+    #group_test_module .group-date-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+    #group_test_module .group-date-row input {
+        flex: 0 0 auto;
+    }
+    #group_test_module .group-nav-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #475467;
+        padding: 4px 6px 8px;
+    }
+    #group_test_module .group-submission-nav-btn,
+    #group_test_module .group-factor-nav-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        border-radius: 6px;
+        padding: 7px 8px;
+        margin-bottom: 4px;
+        text-align: left;
+        cursor: pointer;
+        font-size: 12px;
+        color: #1f2937;
+    }
+    #group_test_module .group-submission-nav-btn.active,
+    #group_test_module .group-factor-nav-btn.active {
+        background: #e7f1ff;
+        border-color: #9cc7f2;
+    }
+    #group_test_module .group-submission-nav-btn span:first-child,
+    #group_test_module .group-factor-nav-btn span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    #group_test_module .group-run-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding-top: 10px;
+        border-top: 1px solid #eef2f7;
+    }
+    @media (max-width: 1100px) {
+        #group_test_module .group-test-workspace {
+            grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr);
+        }
+        #group_test_module .group-test-settings-panel {
+            grid-column: 1 / -1;
+        }
+    }
+    @media (max-width: 720px) {
+        #group_test_module .group-settings-grid {
+            grid-template-columns: 1fr;
+        }
+        #group_test_module .group-setting-row {
+            flex-wrap: wrap;
+        }
+    }
+</style>
 
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test_module.js') }}"></script>

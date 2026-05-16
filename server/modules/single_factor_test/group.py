@@ -68,9 +68,7 @@ def run_group_test():
     _saved_products = None
     tester = None
     try:
-        tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
-        if not tester:
-            return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
+        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test')
 
         # 快照 products 以防并发请求（如 IC 测试或 delete_path）修改共享的 tester.products
         _saved_products = tester.products.copy()
@@ -78,6 +76,12 @@ def run_group_test():
 
         factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
         if not factor:
+            if not getattr(tester, 'factors', None):
+                return jsonify({
+                    'success': False,
+                    'error': '当前测试器尚未生成因子实例。请先在 IC 测试模块运行一次 IC 测试，再运行分组测试。',
+                    'needs_ic_test': True,
+                }), 400
             return jsonify({'success': False, 'error': f'未找到因子 {factor_alias}，可用因子: {[(f.alias, f.name) for f in tester.factors]}'}), 404
 
         time_range = None
@@ -266,9 +270,7 @@ def get_group_snapshot():
         return jsonify({'success': False, 'error': '缺少 submission_id 或 timestamp_ms'}), 400
 
     try:
-        tester = runtime_state.find_factor_tester(submission_id, allow_suffix=True)
-        if not tester:
-            return jsonify({'success': False, 'error': '未找到测试器实例'}), 404
+        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
 
         products_dict = getattr(tester, '_last_group_products', None)
         valid_cols = getattr(tester, '_last_group_valid_cols', None)

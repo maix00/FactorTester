@@ -6,64 +6,6 @@
     const FF_ALIAS = window.factorFamilyAlias || '';
     const TEMPLATE_API_BASE = '/api/single_factor_setting_templates/';
 
-    // ── 参数模板辅助函数 ──────────────────────────────────────────────────
-    // 每个因子家族设置模板对应一个独立的内部参数模板，名字沿用 __global_tpl_ 以兼容既有数据。
-    function _paramTplName(settingTplId) {
-        return '__global_tpl_' + settingTplId + '__';
-    }
-
-    // 查找指定设置模板对应的参数模板，返回 { id, name } 或 null
-    async function _findParamTpl(settingTplId) {
-        try {
-            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS));
-            var data = await resp.json();
-            if (data.success && data.templates) {
-                var targetName = _paramTplName(settingTplId);
-                return data.templates.find(function(t) { return t.name === targetName; }) || null;
-            }
-        } catch(e) {}
-        return null;
-    }
-
-    // 删除指定设置模板对应的参数模板（若存在）
-    async function _deleteParamTpl(settingTplId) {
-        var existing = await _findParamTpl(settingTplId);
-        if (existing) {
-            try {
-                await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
-                    method: 'DELETE'
-                });
-            } catch(e) {
-                console.error('删除参数模板 ' + _paramTplName(settingTplId) + ' 失败:', e);
-            }
-        }
-    }
-
-    // 保存/更新指定设置模板对应的参数模板
-    async function _saveOrUpdateParamTpl(settingTplId, params_list) {
-        var existing = await _findParamTpl(settingTplId);
-        var tplName = _paramTplName(settingTplId);
-        if (existing) {
-            // 更新已有的
-            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS) + '/' + existing.id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ params_list: params_list })
-            });
-            var data = await resp.json();
-            return { success: data.success, id: existing.id, error: data.error };
-        } else {
-            // 新建
-            var resp = await fetch('/api/params_templates/' + encodeURIComponent(FF_ALIAS), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: tplName, params_list: params_list })
-            });
-            var data = await resp.json();
-            return { success: data.success, id: data.id, error: data.error };
-        }
-    }
-
     // ── 收集当前所有设置快照 ──────────────────────────────────────────────
     async function collectSnapshot() {
         const snapshot = {};
@@ -290,12 +232,6 @@
                 if (!replaceData.success) {
                     alert('恢复参数失败: ' + (replaceData.error || ''));
                 } else {
-                    // 同步保存/更新该设置模板对应的参数模板（供参数模块下拉框显示）
-                    if (tplId) {
-                        _saveOrUpdateParamTpl(tplId, snapshot.params_list).catch(function(e) {
-                            console.error('同步参数模板失败:', e);
-                        });
-                    }
                     // 局部刷新参数表与外部摘要（统一走 replace_params 返回的最新因子行）
                     if (typeof window._renderParamFactorRows === 'function' && Array.isArray(replaceData.factor_rows)) {
                         window._renderParamFactorRows(replaceData.factor_rows);
@@ -314,54 +250,81 @@
             }
         }
 
-        // 3. 清除旧 tester，为每个 submission 重新提交以重建后端 tester
+        // 3. 清除当前页旧 tester，再按模板重建；即使模板没有 submission 也要清空旧内容。
+        try {
+            await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
+            if (typeof window._applySubmissions === 'function') window._applySubmissions([]);
+        } catch (e) {
+            console.error('清空旧测试器失败:', e);
+        }
         if (snapshot.submissions && snapshot.submissions.length > 0) {
-            // 先清空后端旧 tester（仅清除当前页面的）
-            try {
-                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
-            } catch (e) {
-                console.error('清空旧测试器失败:', e);
-            }
             // 按 submisssion_id 顺序重新提交
-            var restoredSubmissions = [];
+            var latestServerSubmissions = null;
             for (var i = 0; i < snapshot.submissions.length; i++) {
                 var sub = snapshot.submissions[i];
-                if (!sub.paths || sub.paths.length === 0) continue;
+                var paths = sub.selected_paths || sub.paths || [];
+                if (!paths.length) continue;
                 // 注意：不使用模板中的旧 id，而是生成新的，避免不同窗口的 tester 碰撞
-                var id_time = Date.now() + i;
+                var id_time = Date.now() + '-' + i;
                 try {
                     var resp = await fetch('/submit_selected_products', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            selected_paths: sub.paths,
+                            selected_paths: paths,
                             id_time: id_time,
+                            group_name: sub.product_group || '',
                             page_uuid: window._pageUuid || ''
                         })
                     });
                     var result = await resp.json();
                     if (result.success) {
-                        restoredSubmissions.push({
-                            id: id_time,
-                            label: sub.label || result.factor_tester_serial || '',
-                            paths: result.selected_paths || sub.paths,
-                            pathsDescMap: sub.pathsDescMap || {},
-                            factor_tester_name: result.factor_tester_name || sub.factor_tester_name,
-                            factor_tester_serial: result.factor_tester_serial || sub.factor_tester_serial,
-                            count_desc: result.count_desc || sub.count_desc,
-                            timestamp: sub.timestamp || '',
-                            start_date: sub.start_date || '',
-                            end_date: sub.end_date || '',
-                            start_time: sub.start_time || '',
-                            end_time: sub.end_time || ''
-                        });
+                        if (sub.label) {
+                            try {
+                                await fetch('/rename_submission', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id_time: id_time, new_name: sub.label })
+                                });
+                            } catch (renameErr) {
+                                console.error('恢复提交名称失败:', sub.id, renameErr);
+                            }
+                        }
+                        latestServerSubmissions = result.submissions || latestServerSubmissions;
                     }
                 } catch (e) {
                     console.error('重新提交测试器失败:', sub.id, e);
                 }
             }
-            // 用新的 submissions 更新全局状态
-            if (restoredSubmissions.length > 0 && typeof window._applySubmissions === 'function') {
+            try {
+                var listResp = await fetch('/api/list_submissions?page_uuid=' + encodeURIComponent(window._pageUuid || ''));
+                var listData = await listResp.json();
+                if (listData.success && listData.submissions) {
+                    latestServerSubmissions = listData.submissions;
+                }
+            } catch (listErr) {
+                console.error('刷新恢复后的提交列表失败:', listErr);
+            }
+            if (latestServerSubmissions && typeof window._applySubmissions === 'function') {
+                var restoredSubmissions = latestServerSubmissions.map(function(s) {
+                    return {
+                        id: s.id,
+                        label: s.label || '',
+                        product_group: s.product_group || '',
+                        paths: s.selected_paths || [],
+                        selected_paths: s.selected_paths || [],
+                        pathsDescMap: {},
+                        factor_tester_name: s.name || s.factor_tester_name,
+                        factor_tester_serial: s.factor_tester_serial,
+                        product_count: s.product_count,
+                        count_desc: (s.product_count || 0) + ' 个产品',
+                        timestamp: '',
+                        start_date: '',
+                        end_date: '',
+                        start_time: '',
+                        end_time: ''
+                    };
+                });
                 window._applySubmissions(restoredSubmissions);
             }
         }
@@ -449,17 +412,6 @@
             });
             const data = await resp.json();
             if (data.success) {
-                // 拿到设置模板 ID 后，同步保存对应的参数模板
-                if (snapshot.params_list && snapshot.params_list.length > 0) {
-                    try {
-                        var result = await _saveOrUpdateParamTpl(data.id, snapshot.params_list);
-                        if (!result.success) {
-                            console.error('保存参数模板失败:', result.error);
-                        }
-                    } catch(e) {
-                        console.error('保存参数模板异常:', e);
-                    }
-                }
                 statusEl.textContent = '✓ 已保存: ' + name;
                 statusEl.style.color = '#28a745';
                 if (nameInput) nameInput.value = '';
@@ -529,6 +481,7 @@
                         </div>
                         <span class="tpl-expand-icon" style="font-size:11px;color:#888;transition:transform 0.2s;cursor:pointer;">▼</span>
                         <button class="btn btn-sm btn-outline-primary global-tpl-load-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;">加载</button>
+                        <button class="btn btn-sm global-tpl-overwrite-btn" data-tpl-id="${tplId}" data-tpl-name="${escapeHtml(tpl.name)}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#7a4b00;border:1px solid #f5c26b;background:#fff8e6;border-radius:4px;cursor:pointer;">覆盖</button>
                         <button class="btn btn-sm global-tpl-delete-btn" data-tpl-id="${tplId}" style="flex-shrink:0;font-size:12px;padding:3px 10px;color:#d40000;border:1px solid #faa;background:transparent;border-radius:4px;cursor:pointer;">删除</button>
                     </div>
                     <div class="tpl-row-detail" style="display:none;padding:6px 10px 10px 10px;background:#f8fafc;">
@@ -561,6 +514,13 @@
                     loadTemplate(this.getAttribute('data-tpl-id'));
                 });
             });
+            // 绑定覆盖按钮（用当前页面设置覆盖已有模板）
+            listEl.querySelectorAll('.global-tpl-overwrite-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    overwriteTemplate(this.getAttribute('data-tpl-id'), this.getAttribute('data-tpl-name'));
+                });
+            });
             // 绑定删除按钮（阻止冒泡）
             listEl.querySelectorAll('.global-tpl-delete-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
@@ -570,6 +530,34 @@
             });
         } catch (e) {
             listEl.innerHTML = '<div style="color:#d40000;text-align:center;padding:10px;">加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    // ── 覆盖已有模板 ──────────────────────────────────────────────────────
+    async function overwriteTemplate(tplId, tplName) {
+        if (!confirm('用当前设置覆盖模板「' + (tplName || tplId) + '」？')) return;
+        const statusEl = document.getElementById('global-tpl-load-status');
+        statusEl.textContent = '覆盖中...';
+        statusEl.style.color = '#7a4b00';
+        try {
+            const snapshot = await collectSnapshot();
+            const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshot: snapshot })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                statusEl.textContent = '✓ 已覆盖: ' + (tplName || tplId);
+                statusEl.style.color = '#28a745';
+                await loadTemplateList();
+            } else {
+                statusEl.textContent = '✗ 覆盖失败: ' + (data.error || '未知错误');
+                statusEl.style.color = '#d40000';
+            }
+        } catch (e) {
+            statusEl.textContent = '✗ 网络错误: ' + e.message;
+            statusEl.style.color = '#d40000';
         }
     }
 
@@ -608,8 +596,6 @@
             const resp = await fetch(TEMPLATE_API_BASE + encodeURIComponent(FF_ALIAS) + '/' + tplId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
-                // 同时删除该设置模板关联的参数模板
-                await _deleteParamTpl(tplId);
                 statusEl.textContent = '✓ 已删除';
                 statusEl.style.color = '#28a745';
                 await loadTemplateList();

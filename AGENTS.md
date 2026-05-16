@@ -129,7 +129,7 @@ git worktree add ../Codes-master-server master
 
 **权限分层（Agent 启动时自我判定）**：
 - **VS Code Agent（低权限）**：可以正常执行命令和提交代码。merge feat → master + push 前输出提示语句，不暂停等待。
-- **Codex Agent（高权限）**：不得直接运行任何写操作（commit / merge / push / 创建文件 / rm）。每个写操作前输出提示语句，等人类回复"继续"后执行。
+- **Codex Agent（高权限）**：可以执行任务所需的常规写操作（创建/修改文件、commit、merge 本地分支等）。写操作前输出提示语句说明意图；高风险或破坏性操作（如 `rm -rf`、`git reset --hard`、force push、删除远程分支、直接推送远程）仍需人类明确确认。
 
 **人类调度（唯一并发控制）**：
 - 人类负责分配 Issue 给 agent，不给同一个 Issue 分配给多个 agent。

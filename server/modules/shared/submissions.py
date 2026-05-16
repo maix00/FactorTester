@@ -6,6 +6,8 @@ Shared submission routes:
   POST /delete_submission
   POST /clear_all_submissions
   POST /delete_path_of_submission
+  POST /update_submission_paths
+  POST /rename_submission
 """
 from flask import request, jsonify
 import time
@@ -16,11 +18,8 @@ from server.services.product_tree import (
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
 from . import shared_bp
-from .submission_helpers import (
-    resolve_products_from_paths,
-    submissions_payload,
-)
-from server.modules.products.product_group_store import load_product_groups
+from .submission_helpers import resolve_products_from_paths, submissions_payload
+from .submission_ids import make_submission_id
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 
@@ -29,7 +28,8 @@ from tools.products.Futures import FuturesContract
 @route_guard
 def list_submissions():
     """返回当前全部有效的 FactorTester 列表（前端同步用）。"""
-    return api_ok({'submissions': submissions_payload()})
+    page_uuid = request.args.get('page_uuid', '').strip() or None
+    return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
 @shared_bp.route('/get_products')
@@ -83,17 +83,23 @@ def get_products():
 def submit_selected_products():
     data = request.get_json()
     selected_paths = data.get('selected_paths', [])
-    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    id_time = make_submission_id(data.get('id_time'))
     page_uuid = data.get('page_uuid', '').strip() or None
+    group_name = data.get('group_name', '').strip() or None
     assert selected_paths, "未选择任何产品路径"
     selected_paths, selected_products = resolve_products_from_paths(selected_paths)
 
     from tools.factors.FactorTester import FactorTester
-    # 按 page_uuid 查找时间：优先 set_time_range 值，fallback Settings 默认值
-    _start, _end, _start_calc = runtime_state.get_current_time(page_uuid)
+    # 按 page_uuid 查找运行时时间：无记录则拒绝创建
+    time_entry = runtime_state.get_current_time(page_uuid)
+    if time_entry is None:
+        return api_fail('请先在时间范围设置模块中设置起止时间')
+    _start, _end, _start_calc = time_entry
     user = runtime_state.current_user_obj()
     factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
     factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
+    if group_name:
+        factor_tester.product_group = group_name
     if page_uuid:
         cast(Any, factor_tester)._page_uuid = page_uuid  # 绑定页面标识，set_time_range 时可匹配更新
     if user is not None:
@@ -108,7 +114,7 @@ def submit_selected_products():
         'factor_tester_name':   factor_tester.name,
         'factor_tester_serial': f"#{id_time}",
         'count_desc':          f"{len(selected_products)} 个产品",
-        'submissions':         submissions_payload(),
+        'submissions':         submissions_payload(page_uuid),
     })
 
 
@@ -119,10 +125,48 @@ def reorder_submissions():
     new_order = data.get('new_order', [])
     with factor_testers_lock:
         n = len(runtime_state.factor_testers)
-        alias_to_tester = {t.alias: t for t in runtime_state.factor_testers}
+        # 构建 core_id → tester 映射（前端使用去掉用户前缀的 core_id）
+        alias_to_tester = {}
+        for t in runtime_state.factor_testers:
+            core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+            alias_to_tester[core_id] = t
         runtime_state.factor_testers[:] = [alias_to_tester[a] for a in new_order if a in alias_to_tester]
-        assert len(runtime_state.factor_testers) == n, "Reordered list length mismatch"
+        if len(runtime_state.factor_testers) != n:
+            return api_fail(f'排序失败: 期望{n}条，实际匹配{len(runtime_state.factor_testers)}条')
     return api_ok()
+
+
+@shared_bp.route('/update_submission_paths', methods=['POST'])
+@route_guard
+def update_submission_paths():
+    data = request.get_json()
+    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
+    selected_paths = data.get('selected_paths', [])
+    new_name = (data.get('new_name') or '').strip()
+    tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
+    assert tester is not None, "Submission not found"
+    selected_paths, selected_products = resolve_products_from_paths(selected_paths)
+    assert selected_paths, "未选择任何产品路径"
+    tester.products = sorted(list(set(selected_products)))
+    tester.selected_paths = selected_paths
+    if new_name:
+        tester.label = new_name
+    return api_ok({'submissions': submissions_payload()})
+
+
+@shared_bp.route('/rename_submission', methods=['POST'])
+@route_guard
+def rename_submission():
+    data = request.get_json()
+    id_time = str(data.get('id_time')) if data.get('id_time') is not None else None
+    assert id_time is not None, "Missing id_time"
+    new_name = (data.get('new_name') or '').strip()
+    assert new_name, "新名称不能为空"
+    tester = runtime_state.find_factor_tester(id_time, allow_suffix=True)
+    assert tester is not None, "Submission not found"
+    tester.label = new_name
+    return api_ok({'submissions': submissions_payload()})
 
 
 @shared_bp.route('/delete_submission', methods=['POST'])
@@ -172,7 +216,7 @@ def clear_all_submissions():
             t for t in runtime_state.factor_testers
             if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
         ]
-    return api_ok({'submissions': submissions_payload()})
+    return api_ok({'submissions': submissions_payload(page_uuid)})
 
 
 @shared_bp.route('/delete_path_of_submission', methods=['POST'])
@@ -188,71 +232,3 @@ def delete_path_of_submission():
     tester.products = sorted(list(set(selected_products)))
     tester.selected_paths = selected_paths
     return api_ok({'submissions': submissions_payload()})
-
-
-@shared_bp.route('/replace_submissions', methods=['POST'])
-@route_guard
-def replace_submissions():
-    """按给定列表一次性替换当前页面的 submissions。"""
-    data = request.get_json() or {}
-    tpl_submissions = data.get('template_submissions', [])
-    page_uuid = (data.get('page_uuid') or '').strip() or None
-    if not isinstance(tpl_submissions, list):
-        return api_fail('template_submissions 必须是列表')
-
-    from tools.factors.FactorTester import FactorTester
-    from server.modules.products.product_group_store import load_product_groups
-    user = runtime_state.current_user_obj()
-    replaced = []
-    # 预加载 product_groups（仅当有 submission 引用 group 时查询一次）
-    groups_cache = None
-    with factor_testers_lock:
-        for tester in runtime_state.factor_testers:
-            tester_puuid = getattr(tester, '_page_uuid', None)
-            if tester_puuid is None or tester_puuid == page_uuid:
-                try:
-                    tester.delete()
-                except Exception:
-                    pass
-        runtime_state.factor_testers[:] = [
-            t for t in runtime_state.factor_testers
-            if getattr(t, '_page_uuid', None) is not None and getattr(t, '_page_uuid', None) != page_uuid
-        ]
-
-        for i, sub in enumerate(tpl_submissions):
-            if not isinstance(sub, dict):
-                continue
-            # 解析 paths：优先 product_group，其次 paths
-            selected_paths = sub.get('paths', []) if isinstance(sub.get('paths'), list) else []
-            group_name = sub.get('product_group', '') if isinstance(sub.get('product_group'), str) else ''
-            if group_name:
-                if groups_cache is None:
-                    groups_cache = load_product_groups(user.username)
-                group = next((g for g in groups_cache if g.get('name') == group_name), None)
-                if group and isinstance(group.get('paths'), list):
-                    selected_paths = group['paths']
-            if not isinstance(selected_paths, list) or len(selected_paths) == 0:
-                continue
-            selected_paths, selected_products = resolve_products_from_paths(selected_paths)
-            alias = str(int(time.time() * 1000) + i)
-            _start, _end, _start_calc = runtime_state.get_current_time(page_uuid)
-            factor_tester = FactorTester(products=selected_products, alias=alias, time_range=(_start, _end), user=user)
-            factor_tester.selected_paths = selected_paths
-            if page_uuid:
-                cast(Any, factor_tester)._page_uuid = page_uuid
-            if user is not None:
-                user.add_tester(factor_tester)
-            runtime_state.factor_testers.append(factor_tester)
-            replaced.append({
-                'id': alias,
-                'paths': selected_paths,
-                'label': sub.get('label', ''),
-                'product_group': group_name,
-                'factor_tester_name': factor_tester.name,
-                'factor_tester_serial': f"#{alias}",
-                'count_desc': f"{len(selected_products)} 个产品",
-            })
-    return api_ok({
-        'replaced_submissions': replaced,
-        'submissions': submissions_payload(),
-    })

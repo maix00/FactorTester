@@ -1,4 +1,3 @@
-{% from 'modules/shared/param_config_bar.html' import render_param_config_bar %}
 <!-- 参数设置摘要行 -->
 <div class="setting-summary-row" onclick="document.getElementById('param-drawer').classList.add('open');document.getElementById('user-badge').style.display='none';if(window.MathJax)MathJax.typesetPromise([document.getElementById('pm-math-block')].filter(Boolean)).then(function(){if(window.fitMathJaxToContainer)window.fitMathJaxToContainer(document.getElementById('pm-math-block'));})">
     <span class="setting-summary-label">⚙️ 参数设置</span>
@@ -56,24 +55,14 @@
      data-param-metas='{{ (param_metas | default([])) | tojson }}'>
     <div class="section-title">参数设置</div>
 
-    <!-- 参数模板区 -->
-    {{ render_param_config_bar(
-        bar_id='params-template-bar',
-        select_id='params-tpl-select',
-        select_placeholder='— 选择模板 —',
-        label_id='params-tpl-name-label',
-        input_id='params-tpl-name-input',
-        status_id='params-tpl-status',
-        label_title='双击重命名',
-        label_hover=true,
-        label_max_width='200px',
-        buttons=[
-            {'id': 'params-tpl-load-btn', 'text': '加载', 'title': '加载选中模板的参数组合', 'variant': 'param-template-btn-primary'},
-            {'id': 'params-tpl-save-btn', 'text': '另存为…', 'title': '将当前参数列表保存为新模板', 'variant': 'param-template-btn-success'},
-            {'id': 'params-tpl-update-btn', 'text': '更新', 'title': '用当前参数列表覆盖选中模板', 'variant': 'param-template-btn-warning'},
-            {'id': 'params-tpl-delete-btn', 'text': '删除', 'title': '删除选中模板', 'variant': 'param-template-btn-danger'}
-        ]
-    ) }}
+    <!-- 从因子库批量导入按钮 -->
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0 0;">
+        <button type="button" id="import-factors-from-library-btn" class="param-template-btn" style="background:#6c63ff;color:#fff;border:none;font-size:12px;padding:4px 12px;border-radius:5px;cursor:pointer;"
+                title="从因子库（自己或下级保存的参数配置）批量导入到当前参数列表">
+            📥 从因子库导入
+        </button>
+        <span id="import-factors-from-library-status" style="font-size:11px;color:#888;"></span>
+    </div>
 
     <!-- 从因子库批量导入按钮 -->
     <div style="display:flex;align-items:center;gap:8px;padding:4px 0 0;">
