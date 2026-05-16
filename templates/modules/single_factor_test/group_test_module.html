@@ -181,28 +181,82 @@
                 <div class="section-title" id="group-detail-title">分组详情</div>
                 <div id="group-detail-loading" style="color:#667085;padding:18px 0;">加载中...</div>
                 <div id="group-detail-content" style="display:none;">
-                    <div class="group-detail-summary" id="group-detail-summary"></div>
-                    <div class="group-detail-grid">
-                        <section>
-                            <h6>最常入组产品</h6>
+                    <section class="group-detail-section open">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>概览</span>
+                            <span class="group-detail-section-summary">核心指标</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-summary" id="group-detail-summary"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section open">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>入组产品</span>
+                            <span class="group-detail-section-summary" id="group-detail-frequency-summary"></span>
+                        </button>
+                        <div class="group-detail-section-body">
                             <div id="group-detail-frequency"></div>
-                        </section>
-                        <section>
-                            <h6>收益分布</h6>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>收益分布</span>
+                            <span class="group-detail-section-summary" id="group-detail-distribution-summary"></span>
+                        </button>
+                        <div class="group-detail-section-body">
                             <div id="group-detail-histogram" style="height:220px;"></div>
                             <div id="group-detail-quantiles" class="group-detail-muted"></div>
-                        </section>
-                    </div>
-                    <div class="group-detail-grid">
-                        <section>
-                            <h6>最高收益时段</h6>
-                            <div id="group-detail-top-periods"></div>
-                        </section>
-                        <section>
-                            <h6>最低收益时段</h6>
-                            <div id="group-detail-bottom-periods"></div>
-                        </section>
-                    </div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>极端时段</span>
+                            <span class="group-detail-section-summary">最高 / 最低收益</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-grid">
+                                <section>
+                                    <h6>最高收益时段</h6>
+                                    <div id="group-detail-top-periods"></div>
+                                </section>
+                                <section>
+                                    <h6>最低收益时段</h6>
+                                    <div id="group-detail-bottom-periods"></div>
+                                </section>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-drawer-overlay" id="group-ranking-overlay">
+        <div class="settings-drawer-panel group-detail-panel">
+            <button class="drawer-close-btn" id="group-ranking-close">✕ 关闭</button>
+            <div class="drawer-inner-container">
+                <div class="section-title">排序能力</div>
+                <div id="group-ranking-loading" style="color:#667085;padding:18px 0;">加载中...</div>
+                <div id="group-ranking-content" style="display:none;">
+                    <section class="group-detail-section open">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>概览</span>
+                            <span class="group-detail-section-summary" id="group-ranking-overview-summary"></span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-summary" id="group-ranking-summary"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section open">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>相邻组梯度</span>
+                            <span class="group-detail-section-summary">从高组到低组</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div id="group-ranking-adjacent"></div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </div>
@@ -327,7 +381,8 @@
         padding-top: 10px;
         border-top: 1px solid #eef2f7;
     }
-    #group_test_module .group-detail-trigger {
+    #group_test_module .group-detail-trigger,
+    #group_test_module .group-ranking-trigger {
         cursor: pointer;
         color: #0f4c81;
         text-decoration: underline;
@@ -341,6 +396,43 @@
         grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 8px;
         margin-bottom: 14px;
+    }
+    #group_test_module .group-detail-section {
+        border: 1px solid #d9e2ec;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+    }
+    #group_test_module .group-detail-section-toggle {
+        width: 100%;
+        border: 0;
+        background: #f7fafc;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        font-weight: 600;
+        text-align: left;
+    }
+    #group_test_module .group-detail-section-toggle::after {
+        content: '▾';
+        color: #667085;
+    }
+    #group_test_module .group-detail-section:not(.open) .group-detail-section-toggle::after {
+        content: '▸';
+    }
+    #group_test_module .group-detail-section-summary {
+        margin-left: auto;
+        color: #667085;
+        font-weight: 400;
+        font-size: 12px;
+    }
+    #group_test_module .group-detail-section-body {
+        padding: 14px;
+    }
+    #group_test_module .group-detail-section:not(.open) .group-detail-section-body {
+        display: none;
     }
     #group_test_module .group-detail-summary-item {
         border: 1px solid #e5e7eb;

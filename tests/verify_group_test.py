@@ -742,7 +742,7 @@ def verify_integrated_with_rev():
     from tools.factors.FactorTester import FactorTester
     from tools.factors.Factors import Factor
     from tools.factors.FactorFamily import FactorFamily
-    from tools.factors.tests.group import get_factor_table_for_group
+    from tools.factors.tests.single_factor_test.group.core import get_factor_table_for_group
     from tools.data.DataColumn import DataColumn
     from tools.data.DataFreq import DataFreq
 

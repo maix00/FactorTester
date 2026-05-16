@@ -9,8 +9,9 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester, _signal_time
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.data.DataFreq import DataFreq
-from tools.factors.tests.group import infer_periods_per_year
-from tools.factors.tests.group_detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
+from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
@@ -408,5 +409,22 @@ def get_group_detail():
             }
         detail = build_group_detail(group_index, products, returns_np, index_list, summary)
         return jsonify({'success': True, 'detail': detail})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/get_group_ranking_detail', methods=['POST'])
+def get_group_ranking_detail():
+    """Return second-phase whole-test ranking analytics from the latest run."""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    if submission_id is None:
+        return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
+    try:
+        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_ranking_detail')
+        returns_np = getattr(tester, '_last_group_returns_np', None)
+        if returns_np is None:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

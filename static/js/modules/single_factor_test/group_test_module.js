@@ -659,7 +659,7 @@
         
         // 转置：行 = 指标名，列 = 分组
         // 表头：第一列「指标」，后面每个分组一列
-        var theadHtml = '<tr><th>指标</th>';
+        var theadHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         groupLabels.forEach(function(g) {
             var isLS = (g === 'LS');
             if (isLS) {
@@ -742,6 +742,10 @@
                 openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
             });
         });
+        var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
+        if (rankingHead) {
+            rankingHead.addEventListener('click', openGroupRankingDetail);
+        }
     }
 
     function renderGroupDetailTable(rows, type) {
@@ -810,6 +814,12 @@
         var q = (detail.distribution || {}).quantiles || {};
         document.getElementById('group-detail-quantiles').textContent =
             'P05 ' + fmtPct(q.p05) + ' · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        document.getElementById('group-detail-frequency-summary').textContent =
+            (detail.entry_frequency && detail.entry_frequency.length)
+                ? '最常见 ' + detail.entry_frequency[0].product + ' ' + (detail.entry_frequency[0].frequency * 100).toFixed(1) + '%'
+                : '暂无数据';
+        document.getElementById('group-detail-distribution-summary').textContent =
+            'P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
     }
 
@@ -836,6 +846,73 @@
             var data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');
             renderGroupDetail(data.detail || {});
+            loading.style.display = 'none';
+            content.style.display = '';
+        } catch (err) {
+            loading.textContent = '加载失败: ' + (err.message || err);
+        }
+    }
+
+    function renderGroupRankingAdjacent(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>组间</th><th>平均差</th><th>为正占比</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>第' + (row.from_group + 1) + '组 - 第' + (row.to_group + 1) + '组</td><td>'
+                + fmtPct(row.mean_spread) + '</td><td>' + fmtPct(row.positive_ratio) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderGroupRankingDetail(detail) {
+        var topBottom = detail.top_bottom || {};
+        var labels = [
+            ['monotonic_period_ratio', '单调期占比', true],
+            ['descending_period_ratio', '严格降序占比', true],
+            ['mean_rank_correlation', '平均秩相关', false],
+            ['mean_non_empty_group_count', '平均有效组数', false],
+            ['full_group_period_ratio', '全组可比期占比', true],
+            ['top_bottom_mean', '首尾组平均差', true],
+            ['top_bottom_positive', '首尾差为正占比', true],
+        ];
+        var values = {
+            monotonic_period_ratio: detail.monotonic_period_ratio,
+            descending_period_ratio: detail.descending_period_ratio,
+            mean_rank_correlation: detail.mean_rank_correlation,
+            mean_non_empty_group_count: detail.mean_non_empty_group_count,
+            full_group_period_ratio: detail.full_group_period_ratio,
+            top_bottom_mean: topBottom.mean_spread,
+            top_bottom_positive: topBottom.positive_ratio,
+        };
+        document.getElementById('group-ranking-summary').innerHTML = labels.map(function(item) {
+            var value = values[item[0]];
+            var display = value == null ? '—' : (item[2] ? fmtPct(value) : Number(value).toFixed(4));
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        document.getElementById('group-ranking-adjacent').innerHTML = renderGroupRankingAdjacent(detail.adjacent_spreads);
+        document.getElementById('group-ranking-overview-summary').textContent =
+            '单调 ' + fmtPct(detail.monotonic_period_ratio) + ' · 首尾为正 ' + fmtPct(topBottom.positive_ratio);
+    }
+
+    async function openGroupRankingDetail() {
+        var context = getCurrentContext();
+        if (!context || !context.submission_id) return;
+        var overlay = document.getElementById('group-ranking-overlay');
+        var loading = document.getElementById('group-ranking-loading');
+        var content = document.getElementById('group-ranking-content');
+        overlay.classList.add('open');
+        loading.style.display = '';
+        loading.textContent = '加载中...';
+        content.style.display = 'none';
+        try {
+            var resp = await fetch('/get_group_ranking_detail', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: context.submission_id }),
+            });
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || '加载失败');
+            renderGroupRankingDetail(data.detail || {});
             loading.style.display = 'none';
             content.style.display = '';
         } catch (err) {
@@ -1785,6 +1862,7 @@
         bindFeeControls();
         bindSnapshotDrawerEvents();
         bindGroupDetailOverlay();
+        bindGroupSectionToggles();
         syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
         setTimeout(syncFromTimeModule, 0);
@@ -1807,6 +1885,23 @@
         });
         if (overlay) overlay.addEventListener('click', function(event) {
             if (event.target === overlay) overlay.classList.remove('open');
+        });
+        var rankingOverlay = document.getElementById('group-ranking-overlay');
+        var rankingCloseBtn = document.getElementById('group-ranking-close');
+        if (rankingCloseBtn) rankingCloseBtn.addEventListener('click', function() {
+            if (rankingOverlay) rankingOverlay.classList.remove('open');
+        });
+        if (rankingOverlay) rankingOverlay.addEventListener('click', function(event) {
+            if (event.target === rankingOverlay) rankingOverlay.classList.remove('open');
+        });
+    }
+
+    function bindGroupSectionToggles() {
+        document.querySelectorAll('.group-detail-section-toggle').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var section = btn.closest('.group-detail-section');
+                if (section) section.classList.toggle('open');
+            });
         });
     }
 
