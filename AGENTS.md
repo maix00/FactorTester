@@ -216,6 +216,10 @@ git status
 
 如果 `gh auth status` 未登录，提示先运行 `gh auth login`。
 
+> 当前机器的交互式 Terminal（例如 `base` 环境）通过 macOS keyring 使用 `gh` 凭据。
+> Codex/自动化 shell 可能无法读取 keyring，因而把同一账号误报为 `token invalid`。
+> 如果用户终端中的 `gh auth status` 显示已登录、而 agent shell 显示失败，优先按“keyring 隔离”处理，不要据此判断用户未登录。
+
 ### 1. 读取 Issue
 
 ```bash
