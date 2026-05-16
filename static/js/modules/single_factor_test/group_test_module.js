@@ -818,12 +818,17 @@
         var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
         var returns = (series || []).map(function(row) { return Number(row.return); });
         var bounds = getRobustAxisBounds(returns);
-        Highcharts.chart(el, {
-            chart: { backgroundColor: 'transparent' },
+        Highcharts.stockChart(el, {
+            chart: { backgroundColor: 'transparent', zoomType: 'x' },
             title: { text: null },
             xAxis: {
-                categories: categories,
-                labels: { step: Math.max(1, Math.ceil(categories.length / 8)) },
+                ordinal: false,
+                labels: {
+                    formatter: function() {
+                        var idx = Math.round(this.value);
+                        return categories[idx] || '';
+                    },
+                },
             },
             yAxis: [{
                 title: { text: '单期收益' },
@@ -837,7 +842,7 @@
             tooltip: {
                 shared: true,
                 formatter: function() {
-                    var idx = this.points && this.points.length ? this.points[0].point.index : this.point.index;
+                    var idx = this.points && this.points.length ? this.points[0].point.x : this.point.x;
                     var row = series[idx];
                     return '<b>' + categories[idx] + '</b><br/>'
                         + '单期收益: ' + fmtPct(row.return) + '<br/>'
@@ -847,18 +852,31 @@
             series: [{
                 name: '单期收益',
                 type: 'column',
-                data: (series || []).map(function(row) {
+                data: (series || []).map(function(row, idx) {
                     var clipped = Math.min(bounds.max, Math.max(bounds.min, row.return));
                     var isOutlier = row.return < bounds.min || row.return > bounds.max;
-                    return { y: clipped, color: isOutlier ? '#d97706' : '#7c9fe6' };
+                    return { x: idx, y: clipped, color: isOutlier ? '#d97706' : '#7c9fe6' };
                 }),
             }, {
                 name: '累计净值',
                 type: 'line',
                 yAxis: 1,
-                data: (series || []).map(function(row) { return row.cumulative_return; }),
+                data: (series || []).map(function(row, idx) { return [idx, row.cumulative_return]; }),
                 color: '#0f4c81',
             }],
+            navigator: {
+                enabled: true,
+                xAxis: {
+                    labels: {
+                        formatter: function() {
+                            var idx = Math.round(this.value);
+                            return categories[idx] || '';
+                        },
+                    },
+                },
+            },
+            scrollbar: { enabled: true },
+            rangeSelector: { enabled: false },
             credits: { enabled: false },
         });
     }
