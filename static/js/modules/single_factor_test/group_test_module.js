@@ -815,32 +815,80 @@
     function renderGroupDetailReturnChart(series) {
         var el = document.getElementById('group-detail-return-chart');
         if (!el || typeof Highcharts === 'undefined') return;
+        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        var returns = (series || []).map(function(row) { return Number(row.return); });
+        var bounds = getRobustAxisBounds(returns);
         Highcharts.chart(el, {
             chart: { backgroundColor: 'transparent' },
             title: { text: null },
-            xAxis: { type: 'datetime' },
+            xAxis: {
+                categories: categories,
+                labels: { step: Math.max(1, Math.ceil(categories.length / 8)) },
+            },
             yAxis: [{
                 title: { text: '单期收益' },
+                min: bounds.min,
+                max: bounds.max,
                 labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
             }, {
                 title: { text: '累计净值' },
                 opposite: true,
             }],
-            tooltip: { shared: true },
+            tooltip: {
+                shared: true,
+                formatter: function() {
+                    var idx = this.points && this.points.length ? this.points[0].point.index : this.point.index;
+                    var row = series[idx];
+                    return '<b>' + categories[idx] + '</b><br/>'
+                        + '单期收益: ' + fmtPct(row.return) + '<br/>'
+                        + '累计净值: ' + Number(row.cumulative_return).toFixed(4);
+                },
+            },
             series: [{
                 name: '单期收益',
                 type: 'column',
-                data: (series || []).map(function(row) { return [new Date(row.timestamp).getTime(), row.return]; }),
-                color: '#7c9fe6',
+                data: (series || []).map(function(row) {
+                    var clipped = Math.min(bounds.max, Math.max(bounds.min, row.return));
+                    var isOutlier = row.return < bounds.min || row.return > bounds.max;
+                    return { y: clipped, color: isOutlier ? '#d97706' : '#7c9fe6' };
+                }),
             }, {
                 name: '累计净值',
                 type: 'line',
                 yAxis: 1,
-                data: (series || []).map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
+                data: (series || []).map(function(row) { return row.cumulative_return; }),
                 color: '#0f4c81',
             }],
             credits: { enabled: false },
         });
+    }
+
+    function getRobustAxisBounds(values) {
+        var clean = (values || []).filter(function(v) { return Number.isFinite(v); }).sort(function(a, b) { return a - b; });
+        if (!clean.length) return { min: -0.01, max: 0.01 };
+        function quantile(q) {
+            var pos = (clean.length - 1) * q;
+            var base = Math.floor(pos);
+            var rest = pos - base;
+            return clean[base + 1] !== undefined ? clean[base] + rest * (clean[base + 1] - clean[base]) : clean[base];
+        }
+        var low = quantile(0.01);
+        var high = quantile(0.99);
+        if (low === high) {
+            var pad = Math.max(Math.abs(low) * 0.2, 0.001);
+            return { min: low - pad, max: high + pad };
+        }
+        var pad = (high - low) * 0.15;
+        return {
+            min: Math.min(0, low - pad),
+            max: Math.max(0, high + pad),
+        };
+    }
+
+    function formatCompactTime(timestamp) {
+        var d = new Date(timestamp);
+        if (isNaN(d.getTime())) return timestamp;
+        return d.toLocaleString();
     }
 
     function renderGroupDetail(detail) {
