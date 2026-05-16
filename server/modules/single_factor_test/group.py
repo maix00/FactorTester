@@ -9,6 +9,7 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester, _signal_time
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.data.DataFreq import DataFreq
+from tools.factors.tests.group import infer_periods_per_year
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
@@ -23,21 +24,22 @@ def _safe_float(v):
     return None if (math.isnan(fv) or math.isinf(fv)) else fv
 
 
-def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame) -> dict:
+def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_like=None) -> dict:
     """从 Long-Short 收益率序列计算绩效指标。"""
     s = pd.Series(r_ls_array).replace([np.inf, -np.inf], np.nan).dropna()
     n = len(s)
     if n == 0:
         return {}
+    annual_periods = infer_periods_per_year(index_like) if index_like is not None else 252.0
     cum_s = (1 + s).cumprod()
     dd = (cum_s.cummax() - cum_s) / cum_s.cummax()
-    ls_annual = _safe_float((cum_s.iloc[-1] ** (252 / n) - 1) * 100) if n > 1 else None
+    ls_annual = _safe_float((cum_s.iloc[-1] ** (annual_periods / n) - 1) * 100) if n > 1 else None
     ls_dd = _safe_float(dd.max() * 100) if n > 0 else None
     return {
         'Total Return':  _safe_float((cum_s.iloc[-1] - 1) * 100) if n > 0 else None,
         'Annual Return': ls_annual,
-        'Volatility':    _safe_float(s.std() * (252 ** 0.5) * 100),
-        'Sharpe Ratio':  _safe_float((s.mean() * 252) / (s.std() * 252**0.5)) if s.std() != 0 else None,
+        'Volatility':    _safe_float(s.std() * (annual_periods ** 0.5) * 100),
+        'Sharpe Ratio':  _safe_float((s.mean() * annual_periods) / (s.std() * annual_periods**0.5)) if s.std() != 0 else None,
         'Max Drawdown':  ls_dd,
         'Calmar Ratio':  _safe_float(float(ls_annual) / float(ls_dd)) if (ls_annual and ls_dd) else None,
         'Win Rate':      _safe_float((s > 0).sum() / n * 100) if n > 0 else None,
@@ -155,7 +157,7 @@ def run_group_test():
                     total_cap = new_total
 
                 r_ls_np = np.array(r_ls_arr, dtype=float)
-                ls_metric = _compute_ls_metrics(r_ls_np, report_df)
+                ls_metric = _compute_ls_metrics(r_ls_np, report_df, idx_list)
                 freq_label = str(rf_str) if rf_str else factor.freq.name if factor.freq else 'base'
                 multi_horizon_results.append({
                     'return_freq': freq_label,
@@ -222,7 +224,7 @@ def run_group_test():
         ls_vals    = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
         groups_data.append({'name': 'Long-Short', 'timestamps': timestamps, 'cumulative_returns': ls_vals, 'is_ls': True})
 
-        ls_metric = _compute_ls_metrics(r_ls, report_df)
+        ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
 
         metrics: dict = {}
         if not report_df.empty:

@@ -16,6 +16,28 @@ from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
 
 
+def infer_periods_per_year(index_like) -> float:
+    """Infer strategy periods/year from realised signal timestamps."""
+    idx = pd.DatetimeIndex(_extract_signal_index(pd.Index(index_like)))
+    idx = idx.dropna()
+    if len(idx) < 2:
+        return 252.0
+    per_day = pd.Series(1, index=idx.normalize()).groupby(level=0).sum()
+    median_per_day = float(per_day.median()) if not per_day.empty else 1.0
+    if median_per_day > 1:
+        return median_per_day * 252.0
+    unique_days = pd.DatetimeIndex(per_day.index).sort_values()
+    if len(unique_days) < 2:
+        return 252.0
+    business_days = np.busday_count(
+        unique_days[0].date().isoformat(),
+        (unique_days[-1] + pd.Timedelta(days=1)).date().isoformat(),
+    )
+    if business_days <= 0:
+        return 252.0
+    return max(1.0, len(unique_days) / business_days * 252.0)
+
+
 def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFrame:
     """Temporarily project a raw FE/RE table onto factor signal timestamps."""
     from tools.factors.FactorExpr import SignalAlign, signal_align
@@ -541,6 +563,7 @@ def test_by_group_single_factor(
         mask_report &= (signal_times <= _align_ts_to_index(end_date, signal_times))
 
     report_groups = {}
+    annual_periods = infer_periods_per_year(index_list)
     for idx in range(n_groups):
         r = group_returns_np[mask_report, idx]
 
@@ -549,9 +572,9 @@ def test_by_group_single_factor(
             cum = (1 + s).cumprod()
             n = len(s)
             total_ret = (cum.iloc[-1] - 1) * 100 if n > 0 else 0
-            annual_ret = (cum.iloc[-1] ** (252 / n) - 1) * 100 if n > 1 else 0
-            vol = s.std() * np.sqrt(252) * 100
-            sharpe = (s.mean() * 252) / (s.std() * np.sqrt(252)) if s.std() != 0 else 0
+            annual_ret = (cum.iloc[-1] ** (annual_periods / n) - 1) * 100 if n > 1 else 0
+            vol = s.std() * np.sqrt(annual_periods) * 100
+            sharpe = (s.mean() * annual_periods) / (s.std() * np.sqrt(annual_periods)) if s.std() != 0 else 0
             dd = ((cum.cummax() - cum) / cum.cummax()).max() * 100 if n > 0 else 0
             calmar = annual_ret / dd if dd != 0 else 0
             win_rate = (s > 0).sum() / n * 100 if n > 0 else 0
@@ -693,4 +716,3 @@ def test_by_group(
 
     assert cum_np_out is not None and idx_list_out is not None
     return products_out, returns_out, report_df, cum_np_out, idx_list_out
-

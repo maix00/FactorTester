@@ -635,9 +635,9 @@
         };
         var metricMathExprs = {
             'Total Return': '$$R_{\\text{total}} = \\prod_t (1+r_t) - 1$$',
-            'Annual Return': '$$R_{\\text{ann}} = (1+R_{\\text{total}})^{252/n} - 1$$',
-            'Volatility': '$$\\sigma_{\\text{ann}} = \\sigma_{\\text{daily}} \\cdot \\sqrt{252}$$',
-            'Sharpe Ratio': '$$\\text{Sharpe} = \\frac{R_{\\text{ann}}}{\\sigma_{\\text{ann}}}$$',
+            'Annual Return': '$$R_{\\text{ann}} = (1+R_{\\text{total}})^{N_{\\text{year}}/n} - 1$$',
+            'Volatility': '$$\\sigma_{\\text{ann}} = \\sigma_{\\text{period}} \\cdot \\sqrt{N_{\\text{year}}}$$',
+            'Sharpe Ratio': '$$\\text{Sharpe} = \\frac{\\bar r_{\\text{period}} \\cdot N_{\\text{year}}}{\\sigma_{\\text{period}} \\cdot \\sqrt{N_{\\text{year}}}}$$',
             'Max Drawdown': '$$\\text{MDD} = \\max_t \\left( \\frac{\\text{Peak}_t - \\text{NAV}_t}{\\text{Peak}_t} \\right)$$',
             'Calmar Ratio': '$$\\text{Calmar} = \\frac{R_{\\text{ann}}}{|\\text{MDD}|}$$',
             'Win Rate': '$$\\text{WinRate} = \\frac{N_{\\text{positive}}}{N_{\\text{total}}}$$',
@@ -1191,7 +1191,7 @@
             for (var i = 1; i < cumVals.length; i++) {
                 returns.push(cumVals[i] / cumVals[i-1] - 1.0);
             }
-            newMetrics[String(g)] = calcMetricsFromReturns(returns);
+            newMetrics[String(g)] = calcMetricsFromReturns(returns, t.slice(1));
         }
 
         // LS
@@ -1201,7 +1201,7 @@
             for (var i = 1; i < lsCum.length; i++) {
                 lsReturns.push(lsCum[i] / lsCum[i-1] - 1.0);
             }
-            newMetrics['LS'] = calcMetricsFromReturns(lsReturns);
+            newMetrics['LS'] = calcMetricsFromReturns(lsReturns, t.slice(1));
         }
 
         // 保留 Avg Turnover（不受费率影响）
@@ -1216,8 +1216,33 @@
         renderMetricsTable(newMetrics);
     }
 
+    function inferPeriodsPerYearFromTimestamps(timestamps) {
+        if (!timestamps || timestamps.length < 2) return 252;
+        var dayCounts = {};
+        timestamps.forEach(function(ts) {
+            var d = new Date(ts);
+            if (isNaN(d.getTime())) return;
+            var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            dayCounts[key] = (dayCounts[key] || 0) + 1;
+        });
+        var counts = Object.keys(dayCounts).map(function(key) { return dayCounts[key]; }).sort(function(a, b) { return a - b; });
+        if (!counts.length) return 252;
+        var median = counts[Math.floor(counts.length / 2)];
+        if (median > 1) return median * 252;
+        var days = Object.keys(dayCounts).sort();
+        if (days.length < 2) return 252;
+        var start = new Date(days[0] + 'T00:00:00');
+        var end = new Date(days[days.length - 1] + 'T00:00:00');
+        var businessDays = 0;
+        for (var cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
+            var dow = cur.getDay();
+            if (dow !== 0 && dow !== 6) businessDays++;
+        }
+        return businessDays > 0 ? Math.max(1, days.length / businessDays * 252) : 252;
+    }
+
     /** 从收益率序列计算指标 */
-    function calcMetricsFromReturns(returns) {
+    function calcMetricsFromReturns(returns, timestamps) {
         if (!returns || returns.length === 0) return {};
         var n = returns.length;
         var cum = 1.0;
@@ -1243,9 +1268,10 @@
         var variance = (sumSq / n) - (mean * mean);
         var std = Math.sqrt(Math.max(variance, 0));
         var totalRet = (cum - 1.0) * 100;
-        var annualRet = (Math.pow(cum, 252 / n) - 1) * 100;
-        var vol = std * Math.sqrt(252) * 100;
-        var sharpe = std > 0 ? (mean * 252) / (std * Math.sqrt(252)) : 0;
+        var annualPeriods = inferPeriodsPerYearFromTimestamps(timestamps);
+        var annualRet = (Math.pow(cum, annualPeriods / n) - 1) * 100;
+        var vol = std * Math.sqrt(annualPeriods) * 100;
+        var sharpe = std > 0 ? (mean * annualPeriods) / (std * Math.sqrt(annualPeriods)) : 0;
         var calmar = maxDD > 0 ? annualRet / (maxDD * 100) : 0;
         var winRate = (winCount / n) * 100;
 
