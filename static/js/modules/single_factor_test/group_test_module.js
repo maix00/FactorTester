@@ -818,9 +818,20 @@
         var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
         var returns = (series || []).map(function(row) { return Number(row.return); });
         var bounds = getRobustAxisBounds(returns);
+        var outlierPoints = [];
+        (series || []).forEach(function(row, idx) {
+            if (row.return < bounds.min || row.return > bounds.max) {
+                outlierPoints.push({
+                    x: idx,
+                    y: row.return < bounds.min ? bounds.min : bounds.max,
+                    actualReturn: row.return,
+                });
+            }
+        });
         Highcharts.stockChart(el, {
             chart: { backgroundColor: 'transparent', zoomType: 'x' },
             title: { text: null },
+            legend: { enabled: true },
             xAxis: {
                 ordinal: false,
                 labels: {
@@ -854,15 +865,23 @@
                 type: 'column',
                 data: (series || []).map(function(row, idx) {
                     var clipped = Math.min(bounds.max, Math.max(bounds.min, row.return));
-                    var isOutlier = row.return < bounds.min || row.return > bounds.max;
-                    return { x: idx, y: clipped, color: isOutlier ? '#d97706' : '#7c9fe6' };
+                    return { x: idx, y: clipped };
                 }),
+                color: '#7c9fe6',
             }, {
                 name: '累计净值',
                 type: 'line',
                 yAxis: 1,
                 data: (series || []).map(function(row, idx) { return [idx, row.cumulative_return]; }),
                 color: '#0f4c81',
+            }, {
+                name: '离群值',
+                type: 'scatter',
+                data: outlierPoints,
+                color: '#d14343',
+                marker: { symbol: 'triangle', radius: 5 },
+                enableMouseTracking: false,
+                showInNavigator: false,
             }],
             navigator: {
                 enabled: true,
