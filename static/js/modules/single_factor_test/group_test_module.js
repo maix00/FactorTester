@@ -811,6 +811,16 @@
         return html + '</tbody></table>';
     }
 
+    function renderProductContributionRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.active_period_count + '</td><td>'
+                + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(row.mean_active_contribution) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
     function renderIntradayWindows(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">尚未添加时间窗口</div>';
         var html = '<table class="group-detail-table"><thead><tr><th>窗口</th><th>样本</th><th>累计贡献</th><th>占总收益</th></tr></thead><tbody>';
@@ -1004,6 +1014,7 @@
         renderPositiveRunAnalysis(detail.positive_run_analysis || {});
         renderIntradayAnalysis(detail.intraday_analysis || {});
         renderDailyAnalysis(detail.daily_analysis || {});
+        renderProductAnalysis(detail.product_analysis || {});
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
@@ -1057,6 +1068,21 @@
         document.getElementById('group-detail-daily-bottom').innerHTML = renderDailyRows(bottom);
     }
 
+    function renderProductAnalysis(analysis) {
+        var top = analysis.top_products || [];
+        var bottom = analysis.bottom_products || [];
+        var best = top[0];
+        document.getElementById('group-detail-product-summary').textContent =
+            best ? '哪些产品真正贡献了毛收益 · 最高 ' + formatGroupProduct(best.product) : '哪些产品真正贡献了毛收益';
+        document.getElementById('group-detail-product-overview').textContent =
+            '以下为已实现持仓下的毛收益贡献，不含手续费分摊。'
+            + '最强 1 个产品贡献正毛收益的 ' + fmtPct(analysis.top1_positive_contribution_ratio)
+            + '，最强 3 个产品贡献 ' + fmtPct(analysis.top3_positive_contribution_ratio)
+            + (analysis.is_concentrated ? '。当前毛收益对少数产品较集中。' : '。');
+        document.getElementById('group-detail-product-top').innerHTML = renderProductContributionRows(top);
+        document.getElementById('group-detail-product-bottom').innerHTML = renderProductContributionRows(bottom);
+    }
+
     function renderRobustnessSummary(summary, periodRobustness) {
         var top1 = periodRobustness.without_top1pct || {};
         var top5 = periodRobustness.without_top5pct || {};
@@ -1064,6 +1090,7 @@
             positive_runs: '少数连续正收益段',
             top_day: '单一交易日',
             top_periods: '头部时段',
+            products: '少数产品',
         };
         var issues = (summary.issues || []).map(function(key) { return issueLabels[key] || key; });
         document.getElementById('group-detail-robustness-summary').textContent =

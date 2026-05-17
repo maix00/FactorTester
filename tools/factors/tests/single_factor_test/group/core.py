@@ -378,6 +378,7 @@ def test_by_group_single_factor(
     ], dtype=float)
 
     group_gross_returns_np = np.zeros((T, n_groups), dtype=float)
+    group_product_gross_contrib_np = np.zeros((T, n_groups, P), dtype=float)
     fee_costs_np = np.zeros((T, n_groups), dtype=float)
     group_returns_np = np.zeros((T, n_groups), dtype=float)
 
@@ -503,11 +504,13 @@ def test_by_group_single_factor(
         fee_ratio = fee / ne_wb
 
         # 总收益
-        gross = (ne_target / ne_wb[:, np.newaxis] * ne_ret[np.newaxis, :]).sum(axis=1)  # (n_ne,)
+        product_gross_contrib = ne_target / ne_wb[:, np.newaxis] * ne_ret[np.newaxis, :]
+        gross = product_gross_contrib.sum(axis=1)  # (n_ne,)
         net_ret = (1.0 - fee_ratio) * (1.0 + gross) - 1.0
 
         wealth[ne_idx] = ne_wb * (1.0 + net_ret)
         group_gross_returns_np[t, ne_idx] = gross
+        group_product_gross_contrib_np[t, ne_idx] = product_gross_contrib
         fee_costs_np[t, ne_idx] = fee_ratio
         group_returns_np[t, ne_idx] = net_ret
 
@@ -522,6 +525,7 @@ def test_by_group_single_factor(
 
     tester._last_fee_costs_np = fee_costs_np
     tester._last_group_gross_returns_np = group_gross_returns_np
+    tester._last_group_product_gross_contrib_np = group_product_gross_contrib_np
     tester._last_group_returns_np = group_returns_np
     tester._last_group_products = products_dict  # {g: {t_index: [product_names]}}
     tester._last_group_valid_cols = valid_cols    # 品种名称列表（按列顺序）

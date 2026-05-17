@@ -16,6 +16,8 @@ def build_group_detail(
     group_returns_np: np.ndarray,
     index_list: list,
     metrics: dict | None = None,
+    product_gross_contrib_np: np.ndarray | None = None,
+    valid_cols: list | None = None,
 ) -> dict[str, Any]:
     returns = np.asarray(group_returns_np[:, group_index], dtype=float)
     clean_returns = returns[np.isfinite(returns)]
@@ -61,10 +63,12 @@ def build_group_detail(
     intraday_analysis = _build_intraday_analysis(return_series)
     daily_analysis = _build_daily_analysis(return_series)
     period_robustness = _build_period_robustness(return_series)
+    product_analysis = _build_product_analysis(group_index, product_gross_contrib_np, valid_cols)
     robustness_summary = _build_robustness_summary(
         positive_run_analysis,
         daily_analysis,
         period_robustness,
+        product_analysis,
     )
 
     if clean_returns.size:
@@ -105,6 +109,7 @@ def build_group_detail(
         'daily_analysis': daily_analysis,
         'period_robustness': period_robustness,
         'robustness_summary': robustness_summary,
+        'product_analysis': product_analysis,
     }
 
 
@@ -270,6 +275,7 @@ def _build_robustness_summary(
     positive_runs: dict[str, Any],
     daily_analysis: dict[str, Any],
     period_robustness: dict[str, Any],
+    product_analysis: dict[str, Any],
 ) -> dict[str, Any]:
     issues = []
     if positive_runs.get('is_concentrated'):
@@ -279,7 +285,49 @@ def _build_robustness_summary(
     top5 = period_robustness.get('without_top5pct', {})
     if top5.get('remaining_return') is not None and top5['remaining_return'] <= 0:
         issues.append('top_periods')
+    if product_analysis.get('is_concentrated'):
+        issues.append('products')
     return {
         'issues': issues,
         'is_fragile': bool(issues),
+    }
+
+
+def _build_product_analysis(
+    group_index: int,
+    product_gross_contrib_np: np.ndarray | None,
+    valid_cols: list | None,
+) -> dict[str, Any]:
+    if product_gross_contrib_np is None or not valid_cols:
+        return {'rows': [], 'top_products': [], 'bottom_products': [], 'is_concentrated': False}
+    contrib = np.asarray(product_gross_contrib_np[:, group_index, :], dtype=float)
+    sums = np.nansum(contrib, axis=0)
+    counts = np.sum(np.abs(contrib) > 0, axis=0)
+    rows = []
+    for idx, product in enumerate(valid_cols):
+        display = product_display_name(product)
+        rows.append({
+            'product': display,
+            'active_period_count': int(counts[idx]),
+            'gross_contribution': float(sums[idx]),
+            'mean_active_contribution': float(sums[idx] / counts[idx]) if counts[idx] else None,
+        })
+    top_products = sorted(rows, key=lambda item: item['gross_contribution'], reverse=True)
+    bottom_products = sorted(rows, key=lambda item: item['gross_contribution'])
+    positive_total = sum(max(row['gross_contribution'], 0.0) for row in rows)
+    top1_ratio = (top_products[0]['gross_contribution'] / positive_total) if top_products and positive_total > 0 else None
+    top3_ratio = (
+        sum(max(row['gross_contribution'], 0.0) for row in top_products[:3]) / positive_total
+        if positive_total > 0 else None
+    )
+    return {
+        'rows': rows,
+        'top_products': top_products[:10],
+        'bottom_products': bottom_products[:10],
+        'top1_positive_contribution_ratio': top1_ratio,
+        'top3_positive_contribution_ratio': top3_ratio,
+        'is_concentrated': bool(
+            (top1_ratio is not None and top1_ratio >= 0.5)
+            or (top3_ratio is not None and top3_ratio >= 0.8)
+        ),
     }

@@ -78,6 +78,25 @@ class TestGroupDetail(unittest.TestCase):
         self.assertLess(robust["without_top5pct"]["remaining_return"], 0.2)
         self.assertTrue(detail["robustness_summary"]["is_fragile"])
 
+    def test_builds_product_gross_contribution_from_cached_matrix(self):
+        products = [
+            SimpleNamespace(name="CF.CZC", desc="一号棉花"),
+            SimpleNamespace(name="CY.CZC", desc="棉纱"),
+        ]
+        detail = build_group_detail(
+            0,
+            {0: {}},
+            np.array([[0.01], [0.02]]),
+            list(pd.date_range("2026-01-01", periods=2, freq="D")),
+            product_gross_contrib_np=np.array([[[0.03, -0.02]], [[0.02, 0.00]]]),
+            valid_cols=products,
+        )
+        analysis = detail["product_analysis"]
+
+        self.assertEqual(analysis["top_products"][0]["product"]["name"], "CF.CZC")
+        self.assertAlmostEqual(analysis["top_products"][0]["gross_contribution"], 0.05)
+        self.assertTrue(analysis["is_concentrated"])
+
 
 if __name__ == "__main__":
     unittest.main()

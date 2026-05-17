@@ -395,6 +395,8 @@ def get_group_detail():
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_detail')
         products = getattr(tester, '_last_group_products', None)
         returns_np = getattr(tester, '_last_group_returns_np', None)
+        product_contrib_np = getattr(tester, '_last_group_product_gross_contrib_np', None)
+        valid_cols = getattr(tester, '_last_group_valid_cols', None)
         index_list = getattr(tester, '_last_group_index_list', None)
         if not products or returns_np is None or not index_list:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
@@ -407,7 +409,7 @@ def get_group_detail():
                 str(key): _safe_float(value)
                 for key, value in metrics.loc[group_index].to_dict().items()
             }
-        detail = build_group_detail(group_index, products, returns_np, index_list, summary)
+        detail = build_group_detail(group_index, products, returns_np, index_list, summary, product_contrib_np, valid_cols)
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
