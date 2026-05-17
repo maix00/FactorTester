@@ -23,6 +23,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from tools.data.DataFreq import DataFreq
     from tools.factors.Factors import Factor
+    from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
 class FactorRunResult:
@@ -38,7 +39,7 @@ class FactorRunResult:
       ic_series, ic_stats
 
       ── Group 测试 ──
-      returns, _return_freq
+      returns, _return_freq, group_result
     """
 
     __slots__ = (
@@ -50,6 +51,7 @@ class FactorRunResult:
         "_return_freq",
         "ic_series",
         "ic_stats",
+        "group_result",
     )
 
     def __init__(self, factor: Optional[Factor] = None) -> None:
@@ -61,6 +63,7 @@ class FactorRunResult:
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
         self.ic_stats: pd.Series = pd.Series(dtype=float)
+        self.group_result: Optional[GroupRunResult] = None
 
     # ── 内部工具：判断 _func_expr 是否含外层 neg ──
 
@@ -153,3 +156,4 @@ class FactorRunResult:
         self._return_freq = None
         self.ic_series = pd.Series(dtype=float)
         self.ic_stats = pd.Series(dtype=float)
+        self.group_result = None

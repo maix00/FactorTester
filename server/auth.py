@@ -39,7 +39,7 @@ def _check_login():
         'auth.login', 'auth.register', 'auth.api_me', 'auth.api_keep_login',
         'auth.api_public_organizations', 'auth.logout',
         'core.home',
-        'core.docs', 'core.docs_single_factor', 'core.docs_multi_factor',
+        'core.docs', 'core.docs_single_factor',
         'core.docs_price_viewer', 'core.docs_factor_editor',
         'core.docs_data_dictionary',
         'core.docs_dev', 'core.docs_dev_backend', 'core.docs_dev_frontend',

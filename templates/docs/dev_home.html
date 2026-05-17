@@ -43,7 +43,7 @@
 │  Bootstrap 5 + Fancytree + Plotly + Monaco Editor           │
 ├──────────────────────────────────────────────────────────────┤
 │                  Flask Blueprint 路由层 (server/)            │
-│  auth · core · shared · single_factor · multi_factor · cf   │
+│  auth · core · shared · single_factor · cf                  │
 ├───────────┬───────────┬──────────────┬──────────────────────┤
 │  因子层   │  产品层   │   参数层      │      数据层          │
 │ Factors/  │ Product/  │ Parameters/  │ DataMeta / DataColumn│
@@ -89,7 +89,7 @@
         <tr><td><code>start_server.py</code></td><td>应用入口：创建 Flask app、启动服务器（开发/生产模式切换）</td></tr>
         <tr><td><code>Settings.py</code></td><td>全局配置：默认时间范围、数据路径、交易时段等</td></tr>
         <tr><td><code>server/</code></td><td>Flask Blueprint 模块、服务层（auth、accounts、factor_registry 等）</td></tr>
-        <tr><td><code>server/modules/</code></td><td>功能模块 Blueprint（single_factor_test、multi_factor_analysis、products、custom_factors）</td></tr>
+        <tr><td><code>server/modules/</code></td><td>功能模块 Blueprint（single_factor_test、products、custom_factors）</td></tr>
         <tr><td><code>server/services/</code></td><td>通用服务（API 响应格式、用户存储、运行时状态、热重载配置等）</td></tr>
         <tr><td><code>tools/</code></td><td>核心业务逻辑库：因子引擎、产品定义、参数系统、数据层</td></tr>
         <tr><td><code>tools/factors/</code></td><td>因子表达式引擎 (FactorExpr)、因子族 (FactorFamily)、因子测试器 (FactorTester)</td></tr>

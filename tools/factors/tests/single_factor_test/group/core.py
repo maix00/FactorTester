@@ -14,6 +14,7 @@ from tools.data.DataFreq import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
 def infer_periods_per_year(index_like) -> float:
@@ -526,16 +527,6 @@ def test_by_group_single_factor(
     if multi_session_active:
         print(f"[INFO] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
-    tester._last_fee_costs_np = fee_costs_np
-    tester._last_group_trade_notional_ratio_np = trade_notional_ratio_np
-    tester._last_group_gross_returns_np = group_gross_returns_np
-    tester._last_group_product_gross_contrib_np = group_product_gross_contrib_np
-    tester._last_group_returns_np = group_returns_np
-    tester._last_group_products = products_dict  # {g: {t_index: [product_names]}}
-    tester._last_group_valid_cols = valid_cols    # 品种名称列表（按列顺序）
-    tester._last_group_index_list = index_list
-    tester._last_multi_session_active = multi_session_active  # 是否启用了多时段策略
-
     returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 
     bad = np.isnan(group_returns_np) | np.isinf(group_returns_np) | (group_returns_np <= -1.0)
@@ -602,7 +593,22 @@ def test_by_group_single_factor(
         })
 
     report_df = pd.DataFrame(report_groups).T.sort_index()
-    tester._last_group_report_df = report_df.copy()
+    r = tester._get_result(factor) if hasattr(tester, "_get_result") else None
+    group_result = GroupRunResult(
+        fee_costs_np=fee_costs_np,
+        trade_notional_ratio_np=trade_notional_ratio_np,
+        gross_returns_np=group_gross_returns_np,
+        product_gross_contrib_np=group_product_gross_contrib_np,
+        returns_np=group_returns_np,
+        products_by_group=products_dict,
+        valid_cols=valid_cols,
+        index_list=index_list,
+        multi_session_active=multi_session_active,
+        report_df=report_df.copy(),
+    )
+    if r is not None:
+        r.group_result = group_result
+    tester.last_group_factor = factor
     if not plot_flag or (plot_flag and plot_show):
         with pd.option_context("display.max_rows", None, "display.max_columns", None):
             print("Group Performance Summary:\n", report_df)
