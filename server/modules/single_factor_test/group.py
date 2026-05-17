@@ -396,6 +396,8 @@ def get_group_detail():
         products = getattr(tester, '_last_group_products', None)
         returns_np = getattr(tester, '_last_group_returns_np', None)
         product_contrib_np = getattr(tester, '_last_group_product_gross_contrib_np', None)
+        gross_returns_np = getattr(tester, '_last_group_gross_returns_np', None)
+        trade_notional_np = getattr(tester, '_last_group_trade_notional_ratio_np', None)
         valid_cols = getattr(tester, '_last_group_valid_cols', None)
         index_list = getattr(tester, '_last_group_index_list', None)
         if not products or returns_np is None or not index_list:
@@ -409,7 +411,10 @@ def get_group_detail():
                 str(key): _safe_float(value)
                 for key, value in metrics.loc[group_index].to_dict().items()
             }
-        detail = build_group_detail(group_index, products, returns_np, index_list, summary, product_contrib_np, valid_cols)
+        detail = build_group_detail(
+            group_index, products, returns_np, index_list, summary,
+            product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
+        )
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

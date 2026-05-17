@@ -1027,6 +1027,7 @@
         renderProductAnalysis(detail.product_analysis || {});
         renderCalendarAnalysis(detail.calendar_analysis || {});
         renderHoldingAnalysis(detail.holding_analysis || {});
+        renderTradabilityAnalysis(detail.tradability_analysis || {});
         renderExplanations(detail.explanations || []);
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
@@ -1149,6 +1150,34 @@
             lines && lines.length
                 ? '<ul class="group-detail-explanation-list">' + lines.map(function(line) { return '<li>' + line + '</li>'; }).join('') + '</ul>'
                 : '<div class="group-detail-muted">当前未识别到明显集中性风险。</div>';
+    }
+
+    function renderTradabilityAnalysis(analysis) {
+        document.getElementById('group-detail-tradability-summary').textContent =
+            analysis.break_even_fee == null
+                ? '资金换手与成本承受力'
+                : '资金换手与成本承受力 · break-even ' + fmtBp(analysis.break_even_fee);
+        var items = [
+            ['avg_trade_notional_ratio', '平均资金换手'],
+            ['median_trade_notional_ratio', '中位资金换手'],
+            ['break_even_fee', 'Break-even 成本'],
+        ];
+        document.getElementById('group-detail-tradability-summary-grid').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : (item[0] === 'break_even_fee' ? fmtBp(value) : fmtPct(value));
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        var rows = analysis.sensitivity || [];
+        var html = '<table class="group-detail-table"><thead><tr><th>单边等比例成本</th><th>累计收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + fmtBp(row.fee) + '</td><td>' + fmtPct(row.total_return) + '</td></tr>';
+        });
+        document.getElementById('group-detail-fee-sensitivity').innerHTML = rows.length ? html + '</tbody></table>' : '<div class="group-detail-muted">暂无数据</div>';
+    }
+
+    function fmtBp(value) {
+        return value == null ? '—' : (value * 10000).toFixed(2) + ' bp';
     }
 
     var _groupIntradayRows = [];

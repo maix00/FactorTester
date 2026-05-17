@@ -380,6 +380,7 @@ def test_by_group_single_factor(
     group_gross_returns_np = np.zeros((T, n_groups), dtype=float)
     group_product_gross_contrib_np = np.zeros((T, n_groups, P), dtype=float)
     fee_costs_np = np.zeros((T, n_groups), dtype=float)
+    trade_notional_ratio_np = np.zeros((T, n_groups), dtype=float)
     group_returns_np = np.zeros((T, n_groups), dtype=float)
 
     _VALID_MODES = frozenset({"each_period", "buy_and_hold", "recycle"})
@@ -502,6 +503,7 @@ def test_by_group_single_factor(
         sell = np.clip(ne_prev - ne_target, 0.0, None)  # (n_ne, P)
         fee = (buy * open_fee_vec[np.newaxis, :] + sell * close_fee_vec[np.newaxis, :]).sum(axis=1)  # (n_ne,)
         fee_ratio = fee / ne_wb
+        trade_notional_ratio = (buy + sell).sum(axis=1) / ne_wb
 
         # 总收益
         product_gross_contrib = ne_target / ne_wb[:, np.newaxis] * ne_ret[np.newaxis, :]
@@ -512,6 +514,7 @@ def test_by_group_single_factor(
         group_gross_returns_np[t, ne_idx] = gross
         group_product_gross_contrib_np[t, ne_idx] = product_gross_contrib
         fee_costs_np[t, ne_idx] = fee_ratio
+        trade_notional_ratio_np[t, ne_idx] = trade_notional_ratio
         group_returns_np[t, ne_idx] = net_ret
 
         # 更新 prev_end_amounts
@@ -524,6 +527,7 @@ def test_by_group_single_factor(
         print(f"[INFO] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
     tester._last_fee_costs_np = fee_costs_np
+    tester._last_group_trade_notional_ratio_np = trade_notional_ratio_np
     tester._last_group_gross_returns_np = group_gross_returns_np
     tester._last_group_product_gross_contrib_np = group_product_gross_contrib_np
     tester._last_group_returns_np = group_returns_np

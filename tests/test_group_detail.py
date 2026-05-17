@@ -116,6 +116,21 @@ class TestGroupDetail(unittest.TestCase):
         self.assertEqual(detail["holding_analysis"]["median_periods"], 1.5)
         self.assertTrue(detail["explanations"])
 
+    def test_builds_tradability_analysis_from_trade_notional(self):
+        detail = build_group_detail(
+            0,
+            {0: {}},
+            np.array([[0.01], [0.01], [0.01]]),
+            list(pd.date_range("2026-01-01", periods=3, freq="D")),
+            group_gross_returns_np=np.array([[0.01], [0.01], [0.01]]),
+            trade_notional_ratio_np=np.array([[1.0], [1.0], [1.0]]),
+        )
+        analysis = detail["tradability_analysis"]
+
+        self.assertAlmostEqual(analysis["avg_trade_notional_ratio"], 1.0)
+        self.assertGreater(analysis["break_even_fee"], 0)
+        self.assertEqual(len(analysis["sensitivity"]), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,8 @@ def build_group_detail(
     metrics: dict | None = None,
     product_gross_contrib_np: np.ndarray | None = None,
     valid_cols: list | None = None,
+    group_gross_returns_np: np.ndarray | None = None,
+    trade_notional_ratio_np: np.ndarray | None = None,
 ) -> dict[str, Any]:
     returns = np.asarray(group_returns_np[:, group_index], dtype=float)
     clean_returns = returns[np.isfinite(returns)]
@@ -64,6 +66,11 @@ def build_group_detail(
     daily_analysis = _build_daily_analysis(return_series)
     calendar_analysis = _build_calendar_analysis(return_series)
     holding_analysis = _build_holding_analysis(group_products, index_list)
+    tradability_analysis = _build_tradability_analysis(
+        group_index,
+        group_gross_returns_np,
+        trade_notional_ratio_np,
+    )
     period_robustness = _build_period_robustness(return_series)
     product_analysis = _build_product_analysis(group_index, product_gross_contrib_np, valid_cols)
     robustness_summary = _build_robustness_summary(
@@ -73,6 +80,7 @@ def build_group_detail(
         product_analysis,
         calendar_analysis,
         holding_analysis,
+        tradability_analysis,
     )
 
     if clean_returns.size:
@@ -113,6 +121,7 @@ def build_group_detail(
         'daily_analysis': daily_analysis,
         'calendar_analysis': calendar_analysis,
         'holding_analysis': holding_analysis,
+        'tradability_analysis': tradability_analysis,
         'period_robustness': period_robustness,
         'robustness_summary': robustness_summary,
         'product_analysis': product_analysis,
@@ -123,6 +132,7 @@ def build_group_detail(
             product_analysis,
             calendar_analysis,
             holding_analysis,
+            tradability_analysis,
         ),
     }
 
@@ -292,6 +302,7 @@ def _build_robustness_summary(
     product_analysis: dict[str, Any],
     calendar_analysis: dict[str, Any],
     holding_analysis: dict[str, Any],
+    tradability_analysis: dict[str, Any],
 ) -> dict[str, Any]:
     issues = []
     if positive_runs.get('is_concentrated'):
@@ -307,6 +318,8 @@ def _build_robustness_summary(
         issues.append('months')
     if holding_analysis.get('median_periods') is not None and holding_analysis['median_periods'] <= 1:
         issues.append('short_holding')
+    if tradability_analysis.get('break_even_fee') is not None and tradability_analysis['break_even_fee'] <= 0.0002:
+        issues.append('low_break_even_fee')
     return {
         'issues': issues,
         'is_fragile': bool(issues),
@@ -415,6 +428,7 @@ def _build_explanations(
     product_analysis: dict[str, Any],
     calendar_analysis: dict[str, Any],
     holding_analysis: dict[str, Any],
+    tradability_analysis: dict[str, Any],
 ) -> list[str]:
     lines = []
     if positive_runs.get('is_concentrated'):
@@ -430,4 +444,51 @@ def _build_explanations(
         lines.append('正收益在月份上存在集中。')
     if holding_analysis.get('median_periods') is not None and holding_analysis['median_periods'] <= 1:
         lines.append('持仓中位数仅 1 期，属于高周转信号。')
+    if tradability_analysis.get('break_even_fee') is not None and tradability_analysis['break_even_fee'] <= 0.0002:
+        lines.append('可承受的单边等比例成本较低，成本敏感。')
     return lines
+
+
+def _build_tradability_analysis(
+    group_index: int,
+    group_gross_returns_np: np.ndarray | None,
+    trade_notional_ratio_np: np.ndarray | None,
+) -> dict[str, Any]:
+    if group_gross_returns_np is None or trade_notional_ratio_np is None:
+        return {}
+    gross = np.asarray(group_gross_returns_np[:, group_index], dtype=float)
+    notional = np.asarray(trade_notional_ratio_np[:, group_index], dtype=float)
+    valid = np.isfinite(gross) & np.isfinite(notional)
+    gross = gross[valid]
+    notional = notional[valid]
+    if gross.size == 0:
+        return {}
+
+    def _total_return(fee: float) -> float:
+        net = (1.0 - fee * notional) * (1.0 + gross) - 1.0
+        return float(np.prod(1.0 + net) - 1.0)
+
+    low, high = 0.0, 0.05
+    if _total_return(low) <= 0:
+        break_even = 0.0
+    elif _total_return(high) > 0:
+        break_even = None
+    else:
+        for _ in range(60):
+            mid = (low + high) / 2.0
+            if _total_return(mid) > 0:
+                low = mid
+            else:
+                high = mid
+        break_even = high
+
+    sensitivity = [
+        {'fee': fee, 'total_return': _total_return(fee)}
+        for fee in (0.0, 0.0001, 0.0002, 0.0003, 0.0005)
+    ]
+    return {
+        'avg_trade_notional_ratio': float(np.mean(notional)),
+        'median_trade_notional_ratio': float(np.median(notional)),
+        'break_even_fee': break_even,
+        'sensitivity': sensitivity,
+    }
