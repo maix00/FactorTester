@@ -225,6 +225,46 @@
                     </section>
                     <section class="group-detail-section">
                         <button class="group-detail-section-toggle" type="button">
+                            <span>日历结构</span>
+                            <span class="group-detail-section-summary" id="group-detail-calendar-summary">按月、按月内日期、按年查看收益</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-grid">
+                                <section>
+                                    <h6>月份贡献</h6>
+                                    <div id="group-detail-calendar-month"></div>
+                                </section>
+                                <section>
+                                    <h6>月内日期贡献</h6>
+                                    <div id="group-detail-calendar-day"></div>
+                                </section>
+                            </div>
+                            <div style="margin-top:12px;">
+                                <h6>年份贡献</h6>
+                                <div id="group-detail-calendar-year"></div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>持有期画像</span>
+                            <span class="group-detail-section-summary" id="group-detail-holding-summary">组内成员通常停留多久</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-summary" id="group-detail-holding"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>自动结论</span>
+                            <span class="group-detail-section-summary" id="group-detail-explanation-summary">系统归纳的主要风险</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div id="group-detail-explanations"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
                             <span>产品毛收益贡献</span>
                             <span class="group-detail-section-summary" id="group-detail-product-summary">哪些产品真正贡献了毛收益</span>
                         </button>
@@ -589,6 +629,12 @@
         color: #475467;
         font-size: 13px;
         line-height: 1.6;
+    }
+    #group_test_module .group-detail-explanation-list {
+        margin: 0;
+        padding-left: 20px;
+        color: #475467;
+        line-height: 1.7;
     }
     #group_test_module .group-intraday-window-controls {
         display: flex;

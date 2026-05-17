@@ -97,6 +97,25 @@ class TestGroupDetail(unittest.TestCase):
         self.assertAlmostEqual(analysis["top_products"][0]["gross_contribution"], 0.05)
         self.assertTrue(analysis["is_concentrated"])
 
+    def test_builds_calendar_holding_and_explanations(self):
+        products = {0: {
+            pd.Timestamp("2026-01-01"): [SimpleNamespace(name="A", desc="A")],
+            pd.Timestamp("2026-01-02"): [SimpleNamespace(name="A", desc="A")],
+            pd.Timestamp("2026-02-01"): [SimpleNamespace(name="B", desc="B")],
+        }}
+        detail = build_group_detail(
+            0,
+            products,
+            np.array([[0.10], [0.10], [-0.05]]),
+            list(products[0].keys()),
+            product_gross_contrib_np=np.array([[[0.10, 0.0]], [[0.10, 0.0]], [[0.0, -0.05]]]),
+            valid_cols=[SimpleNamespace(name="A", desc="A"), SimpleNamespace(name="B", desc="B")],
+        )
+
+        self.assertEqual(detail["calendar_analysis"]["month_rows"][0]["month"], "01")
+        self.assertEqual(detail["holding_analysis"]["median_periods"], 1.5)
+        self.assertTrue(detail["explanations"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -821,6 +821,16 @@
         return html + '</tbody></table>';
     }
 
+    function renderCalendarRows(rows, key) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>' + key + '</th><th>样本</th><th>累计</th><th>均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row[key] + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum)
+                + '</td><td>' + fmtPct(row.mean) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
     function renderIntradayWindows(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">尚未添加时间窗口</div>';
         var html = '<table class="group-detail-table"><thead><tr><th>窗口</th><th>样本</th><th>累计贡献</th><th>占总收益</th></tr></thead><tbody>';
@@ -1015,6 +1025,9 @@
         renderIntradayAnalysis(detail.intraday_analysis || {});
         renderDailyAnalysis(detail.daily_analysis || {});
         renderProductAnalysis(detail.product_analysis || {});
+        renderCalendarAnalysis(detail.calendar_analysis || {});
+        renderHoldingAnalysis(detail.holding_analysis || {});
+        renderExplanations(detail.explanations || []);
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
@@ -1091,6 +1104,8 @@
             top_day: '单一交易日',
             top_periods: '头部时段',
             products: '少数产品',
+            months: '少数月份',
+            short_holding: '极短持有期',
         };
         var issues = (summary.issues || []).map(function(key) { return issueLabels[key] || key; });
         document.getElementById('group-detail-robustness-summary').textContent =
@@ -1099,6 +1114,41 @@
             '去掉最好 1% 时段后累计收益 ' + fmtPct(top1.remaining_return)
             + '；去掉最好 5% 时段后累计收益 ' + fmtPct(top5.remaining_return)
             + (issues.length ? '。当前主要风险来自：' + issues.join('、') + '。' : '。');
+    }
+
+    function renderCalendarAnalysis(analysis) {
+        var topMonth = (analysis.month_rows || [])[0];
+        document.getElementById('group-detail-calendar-summary').textContent =
+            topMonth ? '按月、按月内日期、按年查看收益 · 最强月份 ' + topMonth.month : '按月、按月内日期、按年查看收益';
+        document.getElementById('group-detail-calendar-month').innerHTML = renderCalendarRows(analysis.month_rows, 'month');
+        document.getElementById('group-detail-calendar-day').innerHTML = renderCalendarRows(analysis.day_rows, 'day');
+        document.getElementById('group-detail-calendar-year').innerHTML = renderCalendarRows(analysis.year_rows, 'year');
+    }
+
+    function renderHoldingAnalysis(analysis) {
+        document.getElementById('group-detail-holding-summary').textContent =
+            analysis.median_periods == null ? '组内成员通常停留多久' : '组内成员通常停留多久 · 中位数 ' + Number(analysis.median_periods).toFixed(1) + ' 期';
+        var items = [
+            ['run_count', '持有段数'],
+            ['mean_periods', '平均持有期'],
+            ['median_periods', '中位持有期'],
+            ['p95_periods', 'P95 持有期'],
+        ];
+        document.getElementById('group-detail-holding').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : Number(value).toFixed(item[0] === 'run_count' ? 0 : 2);
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+    }
+
+    function renderExplanations(lines) {
+        document.getElementById('group-detail-explanation-summary').textContent =
+            lines && lines.length ? '系统归纳的主要风险 · ' + lines.length + ' 条' : '系统归纳的主要风险';
+        document.getElementById('group-detail-explanations').innerHTML =
+            lines && lines.length
+                ? '<ul class="group-detail-explanation-list">' + lines.map(function(line) { return '<li>' + line + '</li>'; }).join('') + '</ul>'
+                : '<div class="group-detail-muted">当前未识别到明显集中性风险。</div>';
     }
 
     var _groupIntradayRows = [];

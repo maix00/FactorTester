@@ -62,6 +62,8 @@ def build_group_detail(
     positive_run_analysis = _build_positive_run_analysis(return_series)
     intraday_analysis = _build_intraday_analysis(return_series)
     daily_analysis = _build_daily_analysis(return_series)
+    calendar_analysis = _build_calendar_analysis(return_series)
+    holding_analysis = _build_holding_analysis(group_products, index_list)
     period_robustness = _build_period_robustness(return_series)
     product_analysis = _build_product_analysis(group_index, product_gross_contrib_np, valid_cols)
     robustness_summary = _build_robustness_summary(
@@ -69,6 +71,8 @@ def build_group_detail(
         daily_analysis,
         period_robustness,
         product_analysis,
+        calendar_analysis,
+        holding_analysis,
     )
 
     if clean_returns.size:
@@ -107,9 +111,19 @@ def build_group_detail(
         'positive_run_analysis': positive_run_analysis,
         'intraday_analysis': intraday_analysis,
         'daily_analysis': daily_analysis,
+        'calendar_analysis': calendar_analysis,
+        'holding_analysis': holding_analysis,
         'period_robustness': period_robustness,
         'robustness_summary': robustness_summary,
         'product_analysis': product_analysis,
+        'explanations': _build_explanations(
+            positive_run_analysis,
+            daily_analysis,
+            period_robustness,
+            product_analysis,
+            calendar_analysis,
+            holding_analysis,
+        ),
     }
 
 
@@ -276,6 +290,8 @@ def _build_robustness_summary(
     daily_analysis: dict[str, Any],
     period_robustness: dict[str, Any],
     product_analysis: dict[str, Any],
+    calendar_analysis: dict[str, Any],
+    holding_analysis: dict[str, Any],
 ) -> dict[str, Any]:
     issues = []
     if positive_runs.get('is_concentrated'):
@@ -287,6 +303,10 @@ def _build_robustness_summary(
         issues.append('top_periods')
     if product_analysis.get('is_concentrated'):
         issues.append('products')
+    if calendar_analysis.get('month_concentration_ratio') is not None and calendar_analysis['month_concentration_ratio'] >= 0.5:
+        issues.append('months')
+    if holding_analysis.get('median_periods') is not None and holding_analysis['median_periods'] <= 1:
+        issues.append('short_holding')
     return {
         'issues': issues,
         'is_fragile': bool(issues),
@@ -331,3 +351,83 @@ def _build_product_analysis(
             or (top3_ratio is not None and top3_ratio >= 0.8)
         ),
     }
+
+
+def _build_calendar_analysis(return_series: list[dict[str, Any]]) -> dict[str, Any]:
+    if not return_series:
+        return {'month_rows': [], 'day_rows': [], 'year_rows': [], 'month_concentration_ratio': None}
+    df = pd.DataFrame(return_series)
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['month'] = df['timestamp'].dt.strftime('%m')
+    df['day'] = df['timestamp'].dt.strftime('%d')
+    df['year'] = df['timestamp'].dt.strftime('%Y')
+
+    def _rows(key: str) -> list[dict[str, Any]]:
+        grouped = df.groupby(key)['return'].agg(count='count', sum='sum', mean='mean').reset_index()
+        return [
+            {
+                key: str(row[key]),
+                'count': int(row['count']),
+                'sum': float(row['sum']),
+                'mean': float(row['mean']),
+            }
+            for _, row in grouped.iterrows()
+        ]
+
+    month_rows = _rows('month')
+    positive_month_total = sum(max(row['sum'], 0.0) for row in month_rows)
+    top_month = max(month_rows, key=lambda row: row['sum'], default=None)
+    month_ratio = (top_month['sum'] / positive_month_total) if top_month and positive_month_total > 0 else None
+    return {
+        'month_rows': sorted(month_rows, key=lambda row: row['sum'], reverse=True),
+        'day_rows': sorted(_rows('day'), key=lambda row: row['sum'], reverse=True),
+        'year_rows': sorted(_rows('year'), key=lambda row: row['sum'], reverse=True),
+        'month_concentration_ratio': month_ratio,
+    }
+
+
+def _build_holding_analysis(group_products: dict, index_list: list) -> dict[str, Any]:
+    runs = []
+    active: dict[str, int] = {}
+    for idx_entry in index_list:
+        current = {product_display_name(product)['name'] for product in group_products.get(idx_entry, [])}
+        for product in list(active):
+            if product not in current:
+                runs.append(active.pop(product))
+        for product in current:
+            active[product] = active.get(product, 0) + 1
+    runs.extend(active.values())
+    if not runs:
+        return {'run_count': 0, 'mean_periods': None, 'median_periods': None, 'p95_periods': None}
+    arr = np.asarray(runs, dtype=float)
+    return {
+        'run_count': int(arr.size),
+        'mean_periods': float(np.mean(arr)),
+        'median_periods': float(np.median(arr)),
+        'p95_periods': float(np.quantile(arr, 0.95)),
+    }
+
+
+def _build_explanations(
+    positive_runs: dict[str, Any],
+    daily_analysis: dict[str, Any],
+    period_robustness: dict[str, Any],
+    product_analysis: dict[str, Any],
+    calendar_analysis: dict[str, Any],
+    holding_analysis: dict[str, Any],
+) -> list[str]:
+    lines = []
+    if positive_runs.get('is_concentrated'):
+        lines.append('收益明显依赖少数连续正收益段。')
+    if daily_analysis.get('return_without_top1_day') is not None and daily_analysis['return_without_top1_day'] <= 0:
+        lines.append('去掉贡献最高的单一交易日后，累计收益转为非正。')
+    top5 = period_robustness.get('without_top5pct', {})
+    if top5.get('remaining_return') is not None and top5['remaining_return'] <= 0:
+        lines.append('去掉最好 5% 时段后，累计收益转为非正。')
+    if product_analysis.get('is_concentrated'):
+        lines.append('毛收益对少数产品较集中。')
+    if calendar_analysis.get('month_concentration_ratio') is not None and calendar_analysis['month_concentration_ratio'] >= 0.5:
+        lines.append('正收益在月份上存在集中。')
+    if holding_analysis.get('median_periods') is not None and holding_analysis['median_periods'] <= 1:
+        lines.append('持仓中位数仅 1 期，属于高周转信号。')
+    return lines
