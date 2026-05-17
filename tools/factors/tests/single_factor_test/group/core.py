@@ -153,6 +153,24 @@ def build_target_amounts(
     return targets
 
 
+def compute_group_gross_returns(
+    target_amounts: np.ndarray,
+    wealth_before_trade: np.ndarray,
+    product_returns: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-product gross contributions and per-group gross returns."""
+    product_contrib = (
+        target_amounts / wealth_before_trade[:, np.newaxis]
+        * product_returns[np.newaxis, :]
+    )
+    return product_contrib, product_contrib.sum(axis=1)
+
+
+def compute_group_net_returns(gross_returns: np.ndarray, fee_ratio: np.ndarray) -> np.ndarray:
+    """Apply proportional fees to gross returns."""
+    return (1.0 - fee_ratio) * (1.0 + gross_returns) - 1.0
+
+
 def test_by_group_single_factor(
     tester: Any,
     factor: Factor,
@@ -507,9 +525,8 @@ def test_by_group_single_factor(
         trade_notional_ratio = (buy + sell).sum(axis=1) / ne_wb
 
         # 总收益
-        product_gross_contrib = ne_target / ne_wb[:, np.newaxis] * ne_ret[np.newaxis, :]
-        gross = product_gross_contrib.sum(axis=1)  # (n_ne,)
-        net_ret = (1.0 - fee_ratio) * (1.0 + gross) - 1.0
+        product_gross_contrib, gross = compute_group_gross_returns(ne_target, ne_wb, ne_ret)
+        net_ret = compute_group_net_returns(gross, fee_ratio)
 
         wealth[ne_idx] = ne_wb * (1.0 + net_ret)
         group_gross_returns_np[t, ne_idx] = gross
