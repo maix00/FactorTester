@@ -95,12 +95,11 @@ DSL 核心。三层结构：
 start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 │
 ├─ server/               ← HTTP 层（Flask Blueprints）
-│  ├─ core.py            ← 页面路由（/ , /multi_factor_test, /price_viewer, /docs/*）
+│  ├─ core.py            ← 页面路由（/ , /price_viewer, /docs/*）
 │  ├─ auth.py            ← 登录/登出/会话
 │  ├─ admin.py           ← 用户与机构管理
 │  ├─ modules/
 │  │  ├─ single_factor_test/  ← IC + 分组回测 API 与页面
-│  │  ├─ multi_factor_analysis/ ← 相关性、因子合成、热力图、分层回测
 │  │  ├─ custom_factors/      ← 编辑器、CRUD、目录、参数配置
 │  │  ├─ products/cn_futures/ ← 品种树 + 价格数据 API
 │  │  ├─ shared/              ← 共享工具
