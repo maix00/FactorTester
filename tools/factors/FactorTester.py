@@ -169,6 +169,7 @@ class FactorTester(UniqueObject):
             self._sync_lock = threading.Lock()
             # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
             self.results: Dict['Factor', FactorRunResult] = {}
+            self.last_group_factor: Optional['Factor'] = None
             if time_range is not None:
                 self.update_time_range(time_range)
             else:
