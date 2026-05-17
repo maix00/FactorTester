@@ -359,12 +359,10 @@ class FactorExpr:
         result = self._evaluate(ctx)
         if self._is_intermediate and cache is not None:
             cache[sk] = result
-        # 全局求值进度：每次完成一个节点的实际计算后递增
-        try:
-            from server.services.eval_progress import bump as _bump
-            _bump()
-        except ImportError:
-            pass
+        # 全局求值进度：每次完成一个节点的实际计算后递增。
+        # hook seam 归 engine 所有；server 只负责注册/消费，不反向渗入核心层。
+        from tools.factors.eval_progress import bump as _bump
+        _bump()
         return result
     
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
@@ -986,7 +984,7 @@ class ParamRef(FactorExpr):
             else:
                 if isinstance(value, (str, dict)):
                     try:
-                        from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+                        from tools.factors.factor_param_resolution import resolve_factor_param_value
                         value = resolve_factor_param_value(value)
                     except Exception as exc:
                         raise TypeError(f"参数 {self.param.alias} 无法解析为因子: {value}") from exc

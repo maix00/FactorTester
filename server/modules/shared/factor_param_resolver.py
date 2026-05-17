@@ -7,6 +7,7 @@ from server.modules.custom_factors.param_config_service import build_param_facto
 from server.modules.shared.param_config import normalize_param_row
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import current_user
+from tools.factors.factor_param_resolution import register_factor_param_resolver
 
 
 def resolve_factor_param_value(value):
@@ -61,3 +62,8 @@ def _params_list_to_dict(params: list) -> dict:
         if isinstance(item, dict) and item.get('alias'):
             row[item['alias']] = item.get('value', '')
     return row
+
+
+# Register the server adapter at import time. Core factor code now depends only on
+# the engine seam, while the Flask layer decides how serialized UI values resolve.
+register_factor_param_resolver(resolve_factor_param_value)
