@@ -225,6 +225,24 @@
                     </section>
                     <section class="group-detail-section">
                         <button class="group-detail-section-toggle" type="button">
+                            <span>滚动稳定性</span>
+                            <span class="group-detail-section-summary" id="group-detail-rolling-summary">不同时间窗口里是否持续有效</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div id="group-detail-rolling-chart" style="height:220px;"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
+                            <span>组容量风险</span>
+                            <span class="group-detail-section-summary" id="group-detail-capacity-summary">组内样本是否经常过小</span>
+                        </button>
+                        <div class="group-detail-section-body">
+                            <div class="group-detail-summary" id="group-detail-capacity"></div>
+                        </div>
+                    </section>
+                    <section class="group-detail-section">
+                        <button class="group-detail-section-toggle" type="button">
                             <span>可交易性</span>
                             <span class="group-detail-section-summary" id="group-detail-tradability-summary">资金换手与成本承受力</span>
                         </button>

@@ -1028,6 +1028,8 @@
         renderCalendarAnalysis(detail.calendar_analysis || {});
         renderHoldingAnalysis(detail.holding_analysis || {});
         renderTradabilityAnalysis(detail.tradability_analysis || {});
+        renderRollingAnalysis(detail.rolling_analysis || {});
+        renderCapacityAnalysis(detail.capacity_analysis || {});
         renderExplanations(detail.explanations || []);
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
@@ -1107,6 +1109,8 @@
             products: '少数产品',
             months: '少数月份',
             short_holding: '极短持有期',
+            tiny_groups: '小样本组',
+            unstable_windows: '滚动表现不稳',
         };
         var issues = (summary.issues || []).map(function(key) { return issueLabels[key] || key; });
         document.getElementById('group-detail-robustness-summary').textContent =
@@ -1174,6 +1178,52 @@
             html += '<tr><td>' + fmtBp(row.fee) + '</td><td>' + fmtPct(row.total_return) + '</td></tr>';
         });
         document.getElementById('group-detail-fee-sensitivity').innerHTML = rows.length ? html + '</tbody></table>' : '<div class="group-detail-muted">暂无数据</div>';
+    }
+
+    function renderRollingAnalysis(analysis) {
+        var rows = analysis.rows || [];
+        document.getElementById('group-detail-rolling-summary').textContent =
+            analysis.window_size == null
+                ? '不同时间窗口里是否持续有效'
+                : '不同时间窗口里是否持续有效 · ' + analysis.window_size + ' 期窗口';
+        var el = document.getElementById('group-detail-rolling-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { backgroundColor: 'transparent', zoomType: 'x' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: {
+                title: { text: '窗口累计收益' },
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            },
+            tooltip: { valueDecimals: 4 },
+            series: [{
+                name: '滚动窗口收益',
+                data: rows.map(function(row) { return [new Date(row.timestamp).getTime(), row.return]; }),
+                color: '#0f4c81',
+            }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderCapacityAnalysis(analysis) {
+        document.getElementById('group-detail-capacity-summary').textContent =
+            analysis.tiny_group_ratio == null ? '组内样本是否经常过小' : '组内样本是否经常过小 · 小样本期 ' + fmtPct(analysis.tiny_group_ratio);
+        var items = [
+            ['mean_count', '平均成员数'],
+            ['median_count', '中位成员数'],
+            ['min_count', '最少成员数'],
+            ['empty_ratio', '空组占比'],
+            ['tiny_group_ratio', '成员数 <= 2 占比'],
+        ];
+        document.getElementById('group-detail-capacity').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : (
+                item[0].indexOf('ratio') >= 0 ? fmtPct(value) : Number(value).toFixed(item[0] === 'min_count' ? 0 : 2)
+            );
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
     }
 
     function fmtBp(value) {

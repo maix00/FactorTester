@@ -66,6 +66,8 @@ def build_group_detail(
     daily_analysis = _build_daily_analysis(return_series)
     calendar_analysis = _build_calendar_analysis(return_series)
     holding_analysis = _build_holding_analysis(group_products, index_list)
+    capacity_analysis = _build_capacity_analysis(group_products, index_list)
+    rolling_analysis = _build_rolling_analysis(return_series)
     tradability_analysis = _build_tradability_analysis(
         group_index,
         group_gross_returns_np,
@@ -81,6 +83,8 @@ def build_group_detail(
         calendar_analysis,
         holding_analysis,
         tradability_analysis,
+        capacity_analysis,
+        rolling_analysis,
     )
 
     if clean_returns.size:
@@ -121,6 +125,8 @@ def build_group_detail(
         'daily_analysis': daily_analysis,
         'calendar_analysis': calendar_analysis,
         'holding_analysis': holding_analysis,
+        'capacity_analysis': capacity_analysis,
+        'rolling_analysis': rolling_analysis,
         'tradability_analysis': tradability_analysis,
         'period_robustness': period_robustness,
         'robustness_summary': robustness_summary,
@@ -133,6 +139,8 @@ def build_group_detail(
             calendar_analysis,
             holding_analysis,
             tradability_analysis,
+            capacity_analysis,
+            rolling_analysis,
         ),
     }
 
@@ -303,6 +311,8 @@ def _build_robustness_summary(
     calendar_analysis: dict[str, Any],
     holding_analysis: dict[str, Any],
     tradability_analysis: dict[str, Any],
+    capacity_analysis: dict[str, Any],
+    rolling_analysis: dict[str, Any],
 ) -> dict[str, Any]:
     issues = []
     if positive_runs.get('is_concentrated'):
@@ -320,6 +330,10 @@ def _build_robustness_summary(
         issues.append('short_holding')
     if tradability_analysis.get('break_even_fee') is not None and tradability_analysis['break_even_fee'] <= 0.0002:
         issues.append('low_break_even_fee')
+    if capacity_analysis.get('tiny_group_ratio') is not None and capacity_analysis['tiny_group_ratio'] >= 0.2:
+        issues.append('tiny_groups')
+    if rolling_analysis.get('negative_window_ratio') is not None and rolling_analysis['negative_window_ratio'] >= 0.5:
+        issues.append('unstable_windows')
     return {
         'issues': issues,
         'is_fragile': bool(issues),
@@ -429,6 +443,8 @@ def _build_explanations(
     calendar_analysis: dict[str, Any],
     holding_analysis: dict[str, Any],
     tradability_analysis: dict[str, Any],
+    capacity_analysis: dict[str, Any],
+    rolling_analysis: dict[str, Any],
 ) -> list[str]:
     lines = []
     if positive_runs.get('is_concentrated'):
@@ -446,6 +462,10 @@ def _build_explanations(
         lines.append('持仓中位数仅 1 期，属于高周转信号。')
     if tradability_analysis.get('break_even_fee') is not None and tradability_analysis['break_even_fee'] <= 0.0002:
         lines.append('可承受的单边等比例成本较低，成本敏感。')
+    if capacity_analysis.get('tiny_group_ratio') is not None and capacity_analysis['tiny_group_ratio'] >= 0.2:
+        lines.append('较多期数组内样本偏少，结果可能受小样本影响。')
+    if rolling_analysis.get('negative_window_ratio') is not None and rolling_analysis['negative_window_ratio'] >= 0.5:
+        lines.append('滚动窗口中负收益占比较高，时间稳定性不足。')
     return lines
 
 
@@ -491,4 +511,36 @@ def _build_tradability_analysis(
         'median_trade_notional_ratio': float(np.median(notional)),
         'break_even_fee': break_even,
         'sensitivity': sensitivity,
+    }
+
+
+def _build_capacity_analysis(group_products: dict, index_list: list) -> dict[str, Any]:
+    counts = np.asarray([len(group_products.get(idx_entry, [])) for idx_entry in index_list], dtype=float)
+    if counts.size == 0:
+        return {}
+    return {
+        'mean_count': float(np.mean(counts)),
+        'median_count': float(np.median(counts)),
+        'min_count': int(np.min(counts)),
+        'empty_ratio': float(np.mean(counts == 0)),
+        'tiny_group_ratio': float(np.mean(counts <= 2)),
+    }
+
+
+def _build_rolling_analysis(return_series: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(return_series) < 5:
+        return {'rows': [], 'window_size': None, 'negative_window_ratio': None}
+    returns = np.asarray([row['return'] for row in return_series], dtype=float)
+    window = min(max(5, int(np.ceil(len(returns) * 0.1))), 60)
+    rows = []
+    for end in range(window, len(returns) + 1):
+        chunk = returns[end - window:end]
+        rows.append({
+            'timestamp': return_series[end - 1]['timestamp'],
+            'return': float(np.prod(1.0 + chunk) - 1.0),
+        })
+    return {
+        'rows': rows,
+        'window_size': int(window),
+        'negative_window_ratio': float(np.mean([row['return'] < 0 for row in rows])) if rows else None,
     }

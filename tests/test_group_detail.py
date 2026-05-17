@@ -131,6 +131,20 @@ class TestGroupDetail(unittest.TestCase):
         self.assertGreater(analysis["break_even_fee"], 0)
         self.assertEqual(len(analysis["sensitivity"]), 5)
 
+    def test_builds_rolling_and_capacity_analysis(self):
+        index = list(pd.date_range("2026-01-01", periods=10, freq="D"))
+        products = {0: {idx: ([SimpleNamespace(name="A", desc="A")] if i % 2 else []) for i, idx in enumerate(index)}}
+        detail = build_group_detail(
+            0,
+            products,
+            np.array([[0.01], [-0.02], [0.01], [-0.02], [0.01], [-0.02], [0.01], [-0.02], [0.01], [-0.02]]),
+            index,
+        )
+
+        self.assertEqual(detail["rolling_analysis"]["window_size"], 5)
+        self.assertGreater(detail["rolling_analysis"]["negative_window_ratio"], 0)
+        self.assertEqual(detail["capacity_analysis"]["empty_ratio"], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()
