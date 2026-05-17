@@ -2074,11 +2074,12 @@ def signal_align(
         last_col: pd.Series = cast(pd.Series, data.index.get_level_values(last_col_name).to_series().reset_index(drop=True))
         _last_col_filtered: pd.Series = cast(pd.Series, last_col[last_col.shift(-1) - last_col >= end_gap])
         end_session_pos: pd.Index = cast(pd.Index, _last_col_filtered.index)
+        session_ends = end_session_pos.tolist() + [len(last_col) - 1]
         signal_map_mask = cast(pd.Series, basepoint_pos.isin({
             i
             for start, end in zip(
-                [0] + (cast(np.ndarray, end_session_pos[:-1].values) + 1).tolist(),
-                end_session_pos
+                [0] + [int(pos) + 1 for pos in end_session_pos],
+                session_ends,
             )
             for i in range(start + multiple - 1, end + 1, multiple)
             if start + multiple - 1 <= end
