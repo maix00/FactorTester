@@ -34,6 +34,26 @@ conda run -n GTHT python -m pytest -q
 
 不要默认使用 shell 当前激活的 `base` 环境；`base` 环境缺少本项目所需的量化计算依赖。
 
+也可以使用仓库提供的统一入口脚本：
+
+```bash
+./scripts/test.sh
+```
+
+### 可选：离线 git hooks
+
+由于数据/环境限制，无法依赖 GitHub Actions 时，可以启用本仓库内置的离线 hooks，在 commit/push 前自动跑测试：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+关闭：
+
+```bash
+git config --unset core.hooksPath
+```
+
 ## 说明
 
 - `conda env export --from-history` 目前只能导出 `python`，因为其余包是后续安装的；因此仓库使用 `environment.yml` 显式记录当前真实运行基线。
