@@ -169,6 +169,7 @@ class FactorTester(UniqueObject):
             self._sync_lock = threading.Lock()
             # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
             self.results: Dict['Factor', FactorRunResult] = {}
+            self.last_group_factor: Optional['Factor'] = None
             if time_range is not None:
                 self.update_time_range(time_range)
             else:
@@ -318,7 +319,7 @@ class FactorTester(UniqueObject):
 
     def ic_stats(self, ic_series: pd.Series) -> pd.Series:
         """计算 IC 序列的汇总统计量。"""
-        from tools.factors.tests.ic import ic_stats
+        from tools.factors.tests.single_factor_test.ic import ic_stats
         return ic_stats(ic_series)
 
     def test_by_group(self, factors: 'Optional[Factor|List[Factor]]' = None,
@@ -330,8 +331,8 @@ class FactorTester(UniqueObject):
                       plot_n_group_list: Optional[List[int]] = None,
                       sift_volume_ratio: Optional[float] = None,
                       fee: float = 0.0, fee_map: dict = {}, **kwargs) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-        """按因子值分组测试；核心实现位于 tools.factors.tests.group。"""
-        from tools.factors.tests.group import test_by_group
+        """按因子值分组测试；核心实现位于 tools.factors.tests.single_factor_test.group。"""
+        from tools.factors.tests.single_factor_test.group.core import test_by_group
         return test_by_group(
             self,
             factors=factors,

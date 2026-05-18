@@ -36,13 +36,12 @@ def create_app() -> Flask:
     app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
 
-    # ── 注册 9 个 Blueprint ──
+    # ── 注册 Blueprint ──
     from server.auth import auth_bp
     from server.core import core_bp
     from server.modules.templates import templates_bp
     from server.modules.shared import shared_bp
     from server.modules.single_factor_test import sft_bp
-    from server.modules.multi_factor_analysis import mfa_bp
     from server.modules.products.cn_futures import cn_futures_bp
     from server.modules.custom_factors import cf_bp
     from server.admin import admin_bp
@@ -52,7 +51,6 @@ def create_app() -> Flask:
     app.register_blueprint(templates_bp)
     app.register_blueprint(shared_bp)
     app.register_blueprint(sft_bp)
-    app.register_blueprint(mfa_bp)
     app.register_blueprint(cn_futures_bp)
     app.register_blueprint(cf_bp)
     app.register_blueprint(admin_bp)

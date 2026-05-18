@@ -9,7 +9,9 @@ from flask import request, jsonify
 from tools.factors.FactorTester import _active_tester, _signal_time
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.data.DataFreq import DataFreq
-from tools.factors.tests.group import infer_periods_per_year
+from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
+from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
@@ -52,6 +54,14 @@ def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_l
     }
 
 
+def _latest_group_result(tester):
+    factor = getattr(tester, 'last_group_factor', None)
+    if factor is None:
+        return None
+    result = tester.results.get(factor) if hasattr(tester, 'results') else None
+    return result.group_result if result is not None else None
+
+
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
     data = request.get_json()
@@ -61,7 +71,7 @@ def run_group_test():
     fee_uniform    = float(data.get('fee', 0.0) or 0.0) / 100.0
     fee_map_raw: dict = data.get('fee_map', {})
     use_closetoday: bool = bool(data.get('use_closetoday', False))
-    rebalance_mode: str = str(data.get('rebalance_mode', 'each_period') or 'each_period')
+    rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
     # 多周期对比：传入 return_freqs 数组，如 ["1d","3d","5d","10d"]
@@ -136,9 +146,10 @@ def run_group_test():
                 )
                 # ... (computation logic unchanged) ...
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
-                _gross = getattr(tester, '_last_group_gross_returns_np', None)
+                group_result = tester._get_result(factor).group_result
+                _gross = group_result.gross_returns_np if group_result is not None else None
                 gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
-                _fee_np = getattr(tester, '_last_fee_costs_np', None)
+                _fee_np = group_result.fee_costs_np if group_result is not None else None
                 fee_np_arr = _fee_np if _fee_np is not None else np.zeros((len(timestamps), n_groups))
 
                 long_net  = (1.0 - fee_np_arr[:, 0]) * (1.0 + gross_np[:, 0]) - 1.0
@@ -171,7 +182,7 @@ def run_group_test():
                 tester.results[factor].returns = _saved_returns
             
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups,
-                            'multi_session_active': getattr(tester, '_last_multi_session_active', False),
+                            'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
                             'rebalance_mode': rebalance_mode})
 
         # ─── 原有单频率逻辑 ───
@@ -184,9 +195,10 @@ def run_group_test():
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
-        _gross = getattr(tester, '_last_group_gross_returns_np', None)
+        group_result = tester._get_result(factor).group_result
+        _gross = group_result.gross_returns_np if group_result is not None else None
         gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
-        _fee = getattr(tester, '_last_fee_costs_np', None)
+        _fee = group_result.fee_costs_np if group_result is not None else None
         fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_groups))
 
         groups_data = []
@@ -236,7 +248,7 @@ def run_group_test():
         metrics['LS'] = ls_metric
 
         return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups,
-                        'multi_session_active': getattr(tester, '_last_multi_session_active', False),
+                        'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
                         'rebalance_mode': rebalance_mode})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
@@ -274,8 +286,9 @@ def get_group_snapshot():
     try:
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
 
-        products_dict = getattr(tester, '_last_group_products', None)
-        valid_cols = getattr(tester, '_last_group_valid_cols', None)
+        group_result = _latest_group_result(tester)
+        products_dict = group_result.products_by_group if group_result is not None else None
+        valid_cols = group_result.valid_cols if group_result is not None else None
         if not products_dict or not valid_cols:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
 
@@ -376,5 +389,63 @@ def get_group_snapshot():
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/get_group_detail', methods=['POST'])
+def get_group_detail():
+    """Return first-phase detail analytics for one group from the latest run."""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    group_index = data.get('group_index')
+    if submission_id is None or group_index is None:
+        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
+    try:
+        group_index = int(group_index)
+        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_detail')
+        group_result = _latest_group_result(tester)
+        products = group_result.products_by_group if group_result is not None else None
+        returns_np = group_result.returns_np if group_result is not None else None
+        product_contrib_np = group_result.product_gross_contrib_np if group_result is not None else None
+        gross_returns_np = group_result.gross_returns_np if group_result is not None else None
+        trade_notional_np = group_result.trade_notional_ratio_np if group_result is not None else None
+        valid_cols = group_result.valid_cols if group_result is not None else None
+        index_list = group_result.index_list if group_result is not None else None
+        if not products or returns_np is None or not index_list:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        if group_index < 0 or group_index >= returns_np.shape[1]:
+            return jsonify({'success': False, 'error': '分组索引无效'}), 400
+        metrics = group_result.report_df if group_result is not None else None
+        summary = {}
+        if isinstance(metrics, pd.DataFrame) and group_index in metrics.index:
+            summary = {
+                str(key): _safe_float(value)
+                for key, value in metrics.loc[group_index].to_dict().items()
+            }
+        detail = build_group_detail(
+            group_index, products, returns_np, index_list, summary,
+            product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
+        )
+        return jsonify({'success': True, 'detail': detail})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/get_group_ranking_detail', methods=['POST'])
+def get_group_ranking_detail():
+    """Return second-phase whole-test ranking analytics from the latest run."""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    if submission_id is None:
+        return jsonify({'success': False, 'error': '缺少 submission_id'}), 400
+    try:
+        tester = runtime_state.get_factor_tester(submission_id, caller='get_group_ranking_detail')
+        group_result = _latest_group_result(tester)
+        returns_np = group_result.returns_np if group_result is not None else None
+        index_list = group_result.index_list if group_result is not None else None
+        if returns_np is None:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np, index_list)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

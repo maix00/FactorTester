@@ -15,7 +15,7 @@ from flask import Response, jsonify, request
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.ic import run_ic_for_factor
+from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 
 from . import sft_bp
 from server.services.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress

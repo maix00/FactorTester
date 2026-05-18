@@ -140,11 +140,10 @@
         <table>
             <tr><th>Blueprint</th><th>文件</th><th>职责</th></tr>
             <tr><td><code>auth_bp</code></td><td>server/auth.py</td><td>登录/注册/登出，首个注册用户自动为 Admin</td></tr>
-            <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页(/)、单因子测试、多因子测试、技术文档</td></tr>
+            <tr><td><code>core_bp</code></td><td>server/core.py</td><td>首页(/)、单因子测试、技术文档</td></tr>
             <tr><td><code>templates_bp</code></td><td>server/modules/templates/</td><td>参数/时间/单因子设置快照模板的 CRUD</td></tr>
             <tr><td><code>shared_bp</code></td><td>server/modules/shared/</td><td>因子数据、参数管理、产品提交、时间范围</td></tr>
             <tr><td><code>sft_bp</code></td><td>server/modules/single_factor_test/</td><td>IC 测试、分组回测</td></tr>
-            <tr><td><code>mfa_bp</code></td><td>server/modules/multi_factor_analysis/</td><td>多因子合成与分析</td></tr>
             <tr><td><code>cn_futures_bp</code></td><td>server/modules/products/cn_futures/</td><td>费率获取与管理</td></tr>
         </table>
 
@@ -153,7 +152,6 @@
             <tr><th>路由</th><th>方法</th><th>说明</th></tr>
             <tr><td><code>/</code></td><td>GET</td><td>首页，显示模块导航卡片</td></tr>
             <tr><td><code>/single_factor_test?factor=X</code></td><td>GET</td><td>单因子测试页，加载因子 X 的参数、IC、分组模块</td></tr>
-            <tr><td><code>/multi_factor_test</code></td><td>GET</td><td>多因子分析页面</td></tr>
             <tr><td><code>/docs</code></td><td>GET</td><td>本技术文档</td></tr>
         </table>
         <p>因子列表通过扫描 <code>Factors/</code> 目录中的 <code>.py</code> 文件中定义的类自动发现，按类别（Mm/Oi/Vl/Vp）分组显示。中文名通过类 docstring 的首行提取。</p>
@@ -278,16 +276,7 @@
             <tr><td><code>/get_fee_table</code></td><td>POST</td><td>获取品种费率表（用于回测扣费）</td></tr>
         </table>
 
-        <h3>4.6 多因子分析</h3>
-        <table>
-            <tr><th>路由</th><th>方法</th><th>说明</th></tr>
-            <tr><td><code>/run_mfa_heatmap</code></td><td>POST</td><td>因子相关性热力图</td></tr>
-            <tr><td><code>/run_mfa_correlation</code></td><td>POST</td><td>因子两两相关性矩阵</td></tr>
-            <tr><td><code>/run_mfa_hierarchy</code></td><td>POST</td><td>因子层次聚类分析</td></tr>
-            <tr><td><code>/run_mfa_combination</code></td><td>POST</td><td>多因子合成回测</td></tr>
-        </table>
-
-        <h3>4.7 其他</h3>
+        <h3>4.6 其他</h3>
         <table>
             <tr><th>路由</th><th>方法</th><th>说明</th></tr>
             <tr><td><code>/shutdown</code></td><td>POST</td><td>关闭服务器（仅 Admin）</td></tr>
@@ -322,7 +311,6 @@
         </div>
         <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;">
             <a href="javascript:void(0)" onclick="goFactor('/single_factor_test')" style="display:inline-block;padding:8px 24px;background:#4a90d9;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">📊 进入单因子测试 →</a>
-            <a href="javascript:void(0)" onclick="goFactor('/multi_factor_test')" style="display:inline-block;padding:8px 24px;background:#6c5ce7;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">🔗 进入多因子测试 →</a>
         </div>
 
     <!-- 6. 工具类 -->

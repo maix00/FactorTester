@@ -359,12 +359,10 @@ class FactorExpr:
         result = self._evaluate(ctx)
         if self._is_intermediate and cache is not None:
             cache[sk] = result
-        # 全局求值进度：每次完成一个节点的实际计算后递增
-        try:
-            from server.services.eval_progress import bump as _bump
-            _bump()
-        except ImportError:
-            pass
+        # 全局求值进度：每次完成一个节点的实际计算后递增。
+        # hook seam 归 engine 所有；server 只负责注册/消费，不反向渗入核心层。
+        from tools.factors.eval_progress import bump as _bump
+        _bump()
         return result
     
     def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
@@ -986,7 +984,7 @@ class ParamRef(FactorExpr):
             else:
                 if isinstance(value, (str, dict)):
                     try:
-                        from server.modules.shared.factor_param_resolver import resolve_factor_param_value
+                        from tools.factors.factor_param_resolution import resolve_factor_param_value
                         value = resolve_factor_param_value(value)
                     except Exception as exc:
                         raise TypeError(f"参数 {self.param.alias} 无法解析为因子: {value}") from exc
@@ -2048,8 +2046,12 @@ def signal_align(
             raise ValueError(
                 f"Invalid time basepoint '{daily_basepoint}'. "
                 f"Must be a time string like '09:01:00' or '15:00:00'")
-        series = data.groupby(idx_name).transform(
-            lambda x: getattr(pd.DatetimeIndex(x.index.get_level_values(-1)), 'time') == base_time)
+        # Mark rows whose innermost timestamp matches the requested basepoint time.
+        # NOTE: we deliberately produce a boolean Series (not a DataFrame) so the
+        # downstream basepoint selection logic stays consistent.
+        last_level = data.index.get_level_values(-1)
+        times = pd.DatetimeIndex(last_level)
+        series = pd.Series(times.time == base_time)
     elif isinstance(bp, str):
         bp_lower = bp.lower()
         if bp_lower == 'last':
@@ -2076,11 +2078,12 @@ def signal_align(
         last_col: pd.Series = cast(pd.Series, data.index.get_level_values(last_col_name).to_series().reset_index(drop=True))
         _last_col_filtered: pd.Series = cast(pd.Series, last_col[last_col.shift(-1) - last_col >= end_gap])
         end_session_pos: pd.Index = cast(pd.Index, _last_col_filtered.index)
+        session_ends = end_session_pos.tolist() + [len(last_col) - 1]
         signal_map_mask = cast(pd.Series, basepoint_pos.isin({
             i
             for start, end in zip(
-                [0] + (cast(np.ndarray, end_session_pos[:-1].values) + 1).tolist(),
-                end_session_pos
+                [0] + [int(pos) + 1 for pos in end_session_pos],
+                session_ends,
             )
             for i in range(start + multiple - 1, end + 1, multiple)
             if start + multiple - 1 <= end

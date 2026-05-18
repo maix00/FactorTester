@@ -2,7 +2,7 @@
 Core Blueprint — 应用入口和页面路由。
 
 负责：
-  - 首页 (/) 及功能页面（多因子分析、价格查看）渲染
+  - 首页 (/) 及功能页面（价格查看）渲染
   - /docs/* 文档体系全体路由（用户手册、开发者指南、数据字典、工具类源码）
   - 数据字典页动态调用 data_dictionary 扫描器
   - 工具类源码页 AST 解析 + 折叠渲染
@@ -16,12 +16,6 @@ core_bp = Blueprint('core', __name__)
 @core_bp.route('/', methods=['GET'])
 def home():
     return render_template('home.html')
-
-
-@core_bp.route('/multi_factor_test', methods=['GET'])
-def multi_factor():
-    """多因子分析页面。"""
-    return render_template('multi_factor.html')
 
 
 @core_bp.route('/products', methods=['GET'])
@@ -40,12 +34,6 @@ def docs():
 def docs_single_factor():
     """用户手册 - 单因子测试。"""
     return render_template('docs/user_manual_single_factor.html')
-
-
-@core_bp.route('/docs/multi-factor', methods=['GET'])
-def docs_multi_factor():
-    """用户手册 - 多因子分析。"""
-    return render_template('docs/user_manual_multi_factor.html')
 
 
 @core_bp.route('/docs/price-viewer', methods=['GET'])

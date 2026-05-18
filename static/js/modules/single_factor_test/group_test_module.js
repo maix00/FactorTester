@@ -250,13 +250,14 @@
             var modeLabel = {
                 'each_period': '每期等权再平衡',
                 'buy_and_hold': '组内持仓不动',
-                'recycle': '资金回收再分配'
+                'recycle': '退出资金优先补新仓'
             }[usedMode] || usedMode;
             body.innerHTML = '所选再平衡模式 <b>' + modeLabel + '</b> 仅在 <u>所有产品均有信号</u> 的期数中生效。<br>'
                 + '在部分产品无信号（含 NaN）的混合期数中，自动切换为 <b>多时段品种策略</b>：<br>'
                 + '• 保护无信号品种的持仓不动<br>'
                 + '• 仅对有信号的品种进行交易和再平衡<br>'
-                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）';
+                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）<br>'
+                + '• 若某组只有新增、没有可回收资金，则该组当期冻结，不强行开新仓';
         } else {
             panel.style.display = 'block';
             panel.style.background = '#eef7ee';
@@ -265,6 +266,18 @@
             title.textContent = '所有产品具有统一的交易时段';
             body.textContent = '所有产品在所有期数中均有信号，您选择的再平衡模式将在每期中正常生效。';
         }
+    }
+
+    function updateRebalanceModeDescription() {
+        var select = document.getElementById('rebalance_mode');
+        var target = document.getElementById('rebalance_mode_description');
+        if (!select || !target) return;
+        var descriptions = {
+            each_period: '每一期都把当前组内成员重新调成等权。适合比较“每期按最新排序重新建仓”的理论表现，换手通常最高。',
+            buy_and_hold: '组内成员不变时保持原有持仓比例；只有成员进出组时才交易。更接近低换手的持有逻辑，也是默认模式。',
+            recycle: '留存成员的持仓不动；有成员退出时，把释放出的资金优先分给新进成员。适合观察“旧仓尽量不动、只用退出资金补新仓”的过渡方式。',
+        };
+        target.textContent = descriptions[select.value] || '';
     }
 
     // ---------- 清空测试结果 ----------
@@ -659,10 +672,14 @@
         
         // 转置：行 = 指标名，列 = 分组
         // 表头：第一列「指标」，后面每个分组一列
-        var theadHtml = '<tr><th>指标</th>';
+        var theadHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         groupLabels.forEach(function(g) {
             var isLS = (g === 'LS');
-            theadHtml += '<th' + (isLS ? ' style="background:#f0f0f0;"' : '') + '>' + (isLS ? 'Long-Short' : ('第' + (parseInt(g)+1) + '组')) + '</th>';
+            if (isLS) {
+                theadHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
+            } else {
+                theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">第' + (parseInt(g)+1) + '组</th>';
+            }
         });
         theadHtml += '</tr>';
         document.getElementById('metrics_head').innerHTML = theadHtml;
@@ -729,6 +746,693 @@
 
         // 绑定指标名 hover 弹出描述和数学公式
         bindMetricHoverPopup(metricNamesCN, metricDescs, metricMathExprs);
+        bindGroupDetailHeaders();
+    }
+
+    function bindGroupDetailHeaders() {
+        document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
+            });
+        });
+        var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
+        if (rankingHead) {
+            rankingHead.addEventListener('click', openGroupRankingDetail);
+        }
+    }
+
+    function renderGroupDetailTable(rows, type) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>时间</th><th>收益</th><th>产品</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            var d = new Date(row.timestamp);
+            var time = isNaN(d.getTime()) ? row.timestamp : d.toLocaleString();
+            html += '<tr><td>' + time + '</td><td>' + (row.return * 100).toFixed(3) + '%</td><td>' + formatGroupProducts(row.products || []) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderGroupFrequency(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        rows.slice(0, 12).forEach(function(row) {
+            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderPositiveRuns(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无连续正收益段</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>开始</th><th>结束</th><th>期数</th><th>区段收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + formatCompactTime(row.start) + '</td><td>' + formatCompactTime(row.end) + '</td><td>'
+                + row.period_count + '</td><td>' + fmtPct(row.return) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderIntradayRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>时间</th><th>样本</th><th>均值</th><th>累计</th><th>t-like</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.time + '</td><td>' + row.count + '</td><td>' + fmtPct(row.mean) + '</td><td>'
+                + fmtPct(row.sum) + '</td><td>' + (row.t_like == null ? '—' : Number(row.t_like).toFixed(3)) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderDailyRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>日期</th><th>样本</th><th>累计</th><th>均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.date + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum)
+                + '</td><td>' + fmtPct(row.mean) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderProductContributionRows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.active_period_count + '</td><td>'
+                + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(row.mean_active_contribution) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderCalendarRows(rows, key) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>' + key + '</th><th>样本</th><th>累计</th><th>均值</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row[key] + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum)
+                + '</td><td>' + fmtPct(row.mean) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderIntradayWindows(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">尚未添加时间窗口</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>窗口</th><th>样本</th><th>累计贡献</th><th>占总收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + row.label + '</td><td>' + row.count + '</td><td>' + fmtPct(row.sum) + '</td><td>'
+                + fmtPct(row.share_of_total_sum) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function formatGroupProduct(product) {
+        if (!product) return '—';
+        if (typeof product === 'string') return product;
+        var name = product.name || '';
+        var desc = product.desc && product.desc !== name ? ' · ' + product.desc : '';
+        return name + desc;
+    }
+
+    function formatGroupProducts(products) {
+        return (products || []).map(formatGroupProduct).join('、');
+    }
+
+    function renderGroupDetailHistogram(histogram) {
+        var el = document.getElementById('group-detail-histogram');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { type: 'column', backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: {
+                categories: (histogram || []).map(function(bin) {
+                    return (bin.left * 100).toFixed(2) + '% ~ ' + (bin.right * 100).toFixed(2) + '%';
+                }),
+                labels: { rotation: -35, style: { fontSize: '10px' } },
+            },
+            yAxis: { title: { text: '期数' } },
+            legend: { enabled: false },
+            series: [{ name: '期数', data: (histogram || []).map(function(bin) { return bin.count; }), color: '#4a90d9' }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderGroupDetailReturnChart(series) {
+        var el = document.getElementById('group-detail-return-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        var returns = (series || []).map(function(row) { return Number(row.return); });
+        var bounds = getRobustAxisBounds(returns);
+        var outlierPoints = [];
+        (series || []).forEach(function(row, idx) {
+            if (row.return < bounds.min || row.return > bounds.max) {
+                outlierPoints.push({
+                    x: idx,
+                    y: row.return < bounds.min ? bounds.min : bounds.max,
+                    actualReturn: row.return,
+                });
+            }
+        });
+        Highcharts.stockChart(el, {
+            chart: { backgroundColor: 'transparent', zoomType: 'x' },
+            title: { text: null },
+            legend: { enabled: true },
+            xAxis: {
+                ordinal: false,
+                labels: {
+                    formatter: function() {
+                        var idx = Math.round(this.value);
+                        return categories[idx] || '';
+                    },
+                },
+            },
+            yAxis: [{
+                title: { text: '单期收益' },
+                min: bounds.min,
+                max: bounds.max,
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            }, {
+                title: { text: '累计净值' },
+                opposite: true,
+            }],
+            tooltip: {
+                shared: true,
+                formatter: function() {
+                    var idx = this.points && this.points.length ? this.points[0].point.x : this.point.x;
+                    var row = series[idx];
+                    return '<b>' + categories[idx] + '</b><br/>'
+                        + '单期收益: ' + fmtPct(row.return) + '<br/>'
+                        + '累计净值: ' + Number(row.cumulative_return).toFixed(4);
+                },
+            },
+            series: [{
+                name: '单期收益',
+                type: 'column',
+                data: (series || []).map(function(row, idx) {
+                    var clipped = Math.min(bounds.max, Math.max(bounds.min, row.return));
+                    return { x: idx, y: clipped };
+                }),
+                color: '#7c9fe6',
+            }, {
+                name: '累计净值',
+                type: 'line',
+                yAxis: 1,
+                data: (series || []).map(function(row, idx) { return [idx, row.cumulative_return]; }),
+                color: '#0f4c81',
+            }, {
+                name: '离群值',
+                type: 'scatter',
+                data: outlierPoints,
+                color: '#d14343',
+                marker: { symbol: 'triangle', radius: 5 },
+                enableMouseTracking: false,
+                showInNavigator: false,
+            }],
+            navigator: {
+                enabled: true,
+                xAxis: {
+                    labels: {
+                        formatter: function() {
+                            var idx = Math.round(this.value);
+                            return categories[idx] || '';
+                        },
+                    },
+                },
+            },
+            scrollbar: { enabled: true },
+            rangeSelector: { enabled: false },
+            credits: { enabled: false },
+        });
+    }
+
+    function getRobustAxisBounds(values) {
+        var clean = (values || []).filter(function(v) { return Number.isFinite(v); }).sort(function(a, b) { return a - b; });
+        if (!clean.length) return { min: -0.01, max: 0.01 };
+        function quantile(q) {
+            var pos = (clean.length - 1) * q;
+            var base = Math.floor(pos);
+            var rest = pos - base;
+            return clean[base + 1] !== undefined ? clean[base] + rest * (clean[base + 1] - clean[base]) : clean[base];
+        }
+        var low = quantile(0.01);
+        var high = quantile(0.99);
+        if (low === high) {
+            var pad = Math.max(Math.abs(low) * 0.2, 0.001);
+            return { min: low - pad, max: high + pad };
+        }
+        var pad = (high - low) * 0.15;
+        return {
+            min: Math.min(0, low - pad),
+            max: Math.max(0, high + pad),
+        };
+    }
+
+    function formatCompactTime(timestamp) {
+        var d = new Date(timestamp);
+        if (isNaN(d.getTime())) return timestamp;
+        return d.toLocaleString();
+    }
+
+    function renderGroupDetail(detail) {
+        var summary = detail.summary || {};
+        var labels = {
+            'Total Return': '总收益',
+            'Annual Return': '年化',
+            'Sharpe Ratio': '夏普',
+            'Max Drawdown': '最大回撤',
+            'Win Rate': '胜率',
+            'Avg Turnover': '换手率',
+        };
+        document.getElementById('group-detail-summary').innerHTML = Object.keys(labels).map(function(key) {
+            var value = summary[key];
+            var display = value == null ? '—' : (
+                key.indexOf('Return') >= 0 || key.indexOf('Drawdown') >= 0 || key === 'Win Rate'
+                    ? Number(value).toFixed(2) + '%'
+                    : key === 'Avg Turnover'
+                        ? (Number(value) * 100).toFixed(1) + '%'
+                        : Number(value).toFixed(4)
+            );
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">' + labels[key] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
+        document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
+        document.getElementById('group-detail-bottom-periods').innerHTML = renderGroupDetailTable(detail.bottom_periods);
+        var q = (detail.distribution || {}).quantiles || {};
+        document.getElementById('group-detail-quantiles').textContent =
+            'P05 ' + fmtPct(q.p05) + ' · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        document.getElementById('group-detail-frequency-summary').textContent =
+            (detail.entry_frequency && detail.entry_frequency.length)
+                ? '哪些产品最常进入该组 · ' + formatGroupProduct(detail.entry_frequency[0].product) + ' ' + (detail.entry_frequency[0].frequency * 100).toFixed(1) + '%'
+                : '哪些产品最常进入该组';
+        document.getElementById('group-detail-distribution-summary').textContent =
+            '收益直方图与分位数 · P50 ' + fmtPct(q.p50) + ' · P95 ' + fmtPct(q.p95);
+        renderPositiveRunAnalysis(detail.positive_run_analysis || {});
+        renderIntradayAnalysis(detail.intraday_analysis || {});
+        renderDailyAnalysis(detail.daily_analysis || {});
+        renderProductAnalysis(detail.product_analysis || {});
+        renderCalendarAnalysis(detail.calendar_analysis || {});
+        renderHoldingAnalysis(detail.holding_analysis || {});
+        renderTradabilityAnalysis(detail.tradability_analysis || {});
+        renderRollingAnalysis(detail.rolling_analysis || {});
+        renderCapacityAnalysis(detail.capacity_analysis || {});
+        renderExplanations(detail.explanations || []);
+        renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
+        renderGroupDetailReturnChart(detail.return_series || []);
+        renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
+    }
+
+    function renderPositiveRunAnalysis(analysis) {
+        var top1 = analysis.top1_positive_contribution_ratio;
+        var top3 = analysis.top3_positive_contribution_ratio;
+        var concentrated = !!analysis.is_concentrated;
+        document.getElementById('group-detail-positive-run-summary').textContent =
+            concentrated
+                ? '疑似依赖少数正收益段'
+                : '检查收益是否集中在少数连续正收益段';
+        var overview = document.getElementById('group-detail-positive-run-overview');
+        if (!analysis.run_count) {
+            overview.textContent = '没有检测到连续正收益段。';
+        } else {
+            overview.textContent =
+                '共 ' + analysis.run_count + ' 段连续正收益；最强 1 段贡献 ' + fmtPct(top1)
+                + ' 的正收益，最强 3 段贡献 ' + fmtPct(top3)
+                + '。去掉最强 1 段后累计收益 ' + fmtPct(analysis.return_without_top1_run)
+                + '，去掉最强 3 段后累计收益 ' + fmtPct(analysis.return_without_top3_runs)
+                + (concentrated ? '。当前表现明显依赖少数正收益段。' : '。');
+        }
+        document.getElementById('group-detail-positive-runs').innerHTML = renderPositiveRuns(analysis.top_runs);
+    }
+
+    function renderIntradayAnalysis(analysis) {
+        var top = analysis.top_times || [];
+        var bottom = analysis.bottom_times || [];
+        var best = top[0];
+        _groupIntradayRows = analysis.rows || [];
+        _groupIntradayWindows = [];
+        document.getElementById('group-detail-intraday-summary').textContent =
+            best ? '哪些分钟真正贡献了收益 · 最高 ' + best.time + ' ' + fmtPct(best.sum) : '哪些分钟真正贡献了收益';
+        renderSelectedIntradayWindows();
+        document.getElementById('group-detail-intraday-top').innerHTML = renderIntradayRows(top);
+        document.getElementById('group-detail-intraday-bottom').innerHTML = renderIntradayRows(bottom);
+    }
+
+    function renderDailyAnalysis(analysis) {
+        var top = analysis.top_days || [];
+        var bottom = analysis.bottom_days || [];
+        var best = top[0];
+        document.getElementById('group-detail-daily-summary').textContent =
+            best ? '哪些交易日主导了结果 · 最高 ' + best.date + ' ' + fmtPct(best.sum) : '哪些交易日主导了结果';
+        document.getElementById('group-detail-daily-overview').textContent =
+            '去掉贡献最高 1 日后累计收益 ' + fmtPct(analysis.return_without_top1_day)
+            + '；去掉贡献最高 5 日后累计收益 ' + fmtPct(analysis.return_without_top5_days) + '。';
+        document.getElementById('group-detail-daily-top').innerHTML = renderDailyRows(top);
+        document.getElementById('group-detail-daily-bottom').innerHTML = renderDailyRows(bottom);
+    }
+
+    function renderProductAnalysis(analysis) {
+        var top = analysis.top_products || [];
+        var bottom = analysis.bottom_products || [];
+        var best = top[0];
+        document.getElementById('group-detail-product-summary').textContent =
+            best ? '哪些产品真正贡献了毛收益 · 最高 ' + formatGroupProduct(best.product) : '哪些产品真正贡献了毛收益';
+        document.getElementById('group-detail-product-overview').textContent =
+            '以下为已实现持仓下的毛收益贡献，不含手续费分摊。'
+            + '最强 1 个产品贡献正毛收益的 ' + fmtPct(analysis.top1_positive_contribution_ratio)
+            + '，最强 3 个产品贡献 ' + fmtPct(analysis.top3_positive_contribution_ratio)
+            + (analysis.is_concentrated ? '。当前毛收益对少数产品较集中。' : '。');
+        document.getElementById('group-detail-product-top').innerHTML = renderProductContributionRows(top);
+        document.getElementById('group-detail-product-bottom').innerHTML = renderProductContributionRows(bottom);
+    }
+
+    function renderRobustnessSummary(summary, periodRobustness) {
+        var top1 = periodRobustness.without_top1pct || {};
+        var top5 = periodRobustness.without_top5pct || {};
+        var issueLabels = {
+            positive_runs: '少数连续正收益段',
+            top_day: '单一交易日',
+            top_periods: '头部时段',
+            products: '少数产品',
+            months: '少数月份',
+            short_holding: '极短持有期',
+            tiny_groups: '小样本组',
+            unstable_windows: '滚动表现不稳',
+        };
+        var issues = (summary.issues || []).map(function(key) { return issueLabels[key] || key; });
+        document.getElementById('group-detail-robustness-summary').textContent =
+            summary.is_fragile ? '存在集中性风险' : '未见明显集中性风险';
+        document.getElementById('group-detail-robustness-overview').textContent =
+            '去掉最好 1% 时段后累计收益 ' + fmtPct(top1.remaining_return)
+            + '；去掉最好 5% 时段后累计收益 ' + fmtPct(top5.remaining_return)
+            + (issues.length ? '。当前主要风险来自：' + issues.join('、') + '。' : '。');
+    }
+
+    function renderCalendarAnalysis(analysis) {
+        var topMonth = (analysis.month_rows || [])[0];
+        document.getElementById('group-detail-calendar-summary').textContent =
+            topMonth ? '按月、按月内日期、按年查看收益 · 最强月份 ' + topMonth.month : '按月、按月内日期、按年查看收益';
+        document.getElementById('group-detail-calendar-month').innerHTML = renderCalendarRows(analysis.month_rows, 'month');
+        document.getElementById('group-detail-calendar-day').innerHTML = renderCalendarRows(analysis.day_rows, 'day');
+        document.getElementById('group-detail-calendar-year').innerHTML = renderCalendarRows(analysis.year_rows, 'year');
+    }
+
+    function renderHoldingAnalysis(analysis) {
+        document.getElementById('group-detail-holding-summary').textContent =
+            analysis.median_periods == null ? '组内成员通常停留多久' : '组内成员通常停留多久 · 中位数 ' + Number(analysis.median_periods).toFixed(1) + ' 期';
+        var items = [
+            ['run_count', '持有段数'],
+            ['mean_periods', '平均持有期'],
+            ['median_periods', '中位持有期'],
+            ['p95_periods', 'P95 持有期'],
+        ];
+        document.getElementById('group-detail-holding').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : Number(value).toFixed(item[0] === 'run_count' ? 0 : 2);
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+    }
+
+    function renderExplanations(lines) {
+        document.getElementById('group-detail-explanation-summary').textContent =
+            lines && lines.length ? '系统归纳的主要风险 · ' + lines.length + ' 条' : '系统归纳的主要风险';
+        document.getElementById('group-detail-explanations').innerHTML =
+            lines && lines.length
+                ? '<ul class="group-detail-explanation-list">' + lines.map(function(line) { return '<li>' + line + '</li>'; }).join('') + '</ul>'
+                : '<div class="group-detail-muted">当前未识别到明显集中性风险。</div>';
+    }
+
+    function renderTradabilityAnalysis(analysis) {
+        document.getElementById('group-detail-tradability-summary').textContent =
+            analysis.break_even_fee == null
+                ? '资金换手与成本承受力'
+                : '资金换手与成本承受力 · break-even ' + fmtBp(analysis.break_even_fee);
+        var items = [
+            ['avg_trade_notional_ratio', '平均资金换手'],
+            ['median_trade_notional_ratio', '中位资金换手'],
+            ['break_even_fee', 'Break-even 成本'],
+        ];
+        document.getElementById('group-detail-tradability-summary-grid').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : (item[0] === 'break_even_fee' ? fmtBp(value) : fmtPct(value));
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        var rows = analysis.sensitivity || [];
+        var html = '<table class="group-detail-table"><thead><tr><th>单边等比例成本</th><th>累计收益</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>' + fmtBp(row.fee) + '</td><td>' + fmtPct(row.total_return) + '</td></tr>';
+        });
+        document.getElementById('group-detail-fee-sensitivity').innerHTML = rows.length ? html + '</tbody></table>' : '<div class="group-detail-muted">暂无数据</div>';
+    }
+
+    function renderRollingAnalysis(analysis) {
+        var rows = analysis.rows || [];
+        document.getElementById('group-detail-rolling-summary').textContent =
+            analysis.window_size == null
+                ? '不同时间窗口里是否持续有效'
+                : '不同时间窗口里是否持续有效 · ' + analysis.window_size + ' 期窗口';
+        var el = document.getElementById('group-detail-rolling-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { backgroundColor: 'transparent', zoomType: 'x' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: {
+                title: { text: '窗口累计收益' },
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            },
+            tooltip: { valueDecimals: 4 },
+            series: [{
+                name: '滚动窗口收益',
+                data: rows.map(function(row) { return [new Date(row.timestamp).getTime(), row.return]; }),
+                color: '#0f4c81',
+            }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderCapacityAnalysis(analysis) {
+        document.getElementById('group-detail-capacity-summary').textContent =
+            analysis.tiny_group_ratio == null ? '组内样本是否经常过小' : '组内样本是否经常过小 · 小样本期 ' + fmtPct(analysis.tiny_group_ratio);
+        var items = [
+            ['mean_count', '平均成员数'],
+            ['median_count', '中位成员数'],
+            ['min_count', '最少成员数'],
+            ['empty_ratio', '空组占比'],
+            ['tiny_group_ratio', '成员数 <= 2 占比'],
+        ];
+        document.getElementById('group-detail-capacity').innerHTML = items.map(function(item) {
+            var value = analysis[item[0]];
+            var display = value == null ? '—' : (
+                item[0].indexOf('ratio') >= 0 ? fmtPct(value) : Number(value).toFixed(item[0] === 'min_count' ? 0 : 2)
+            );
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+    }
+
+    function fmtBp(value) {
+        return value == null ? '—' : (value * 10000).toFixed(2) + ' bp';
+    }
+
+    var _groupIntradayRows = [];
+    var _groupIntradayWindows = [];
+
+    function summarizeIntradayWindow(start, end) {
+        var rows = (_groupIntradayRows || []).filter(function(row) {
+            return row.time >= start && row.time <= end;
+        });
+        var total = (_groupIntradayRows || []).reduce(function(sum, row) { return sum + (row.sum || 0); }, 0);
+        var contribution = rows.reduce(function(sum, row) { return sum + (row.sum || 0); }, 0);
+        var count = rows.reduce(function(sum, row) { return sum + (row.count || 0); }, 0);
+        return {
+            label: start + '-' + end,
+            count: count,
+            sum: contribution,
+            share_of_total_sum: total !== 0 ? contribution / total : null,
+        };
+    }
+
+    function renderSelectedIntradayWindows() {
+        var target = document.getElementById('group-detail-intraday-windows');
+        if (target) target.innerHTML = renderIntradayWindows(_groupIntradayWindows);
+    }
+
+    function addSelectedIntradayWindow() {
+        var startEl = document.getElementById('group-intraday-window-start');
+        var endEl = document.getElementById('group-intraday-window-end');
+        if (!startEl || !endEl || !startEl.value || !endEl.value || startEl.value > endEl.value) return;
+        _groupIntradayWindows.push(summarizeIntradayWindow(startEl.value, endEl.value));
+        renderSelectedIntradayWindows();
+    }
+
+    function fmtPct(value) {
+        return value == null ? '—' : (value * 100).toFixed(3) + '%';
+    }
+
+    async function openGroupDetail(groupIndex) {
+        var context = getCurrentContext();
+        if (!context || !context.submission_id) return;
+        var overlay = document.getElementById('group-detail-overlay');
+        var loading = document.getElementById('group-detail-loading');
+        var content = document.getElementById('group-detail-content');
+        document.getElementById('group-detail-title').textContent = '第' + (groupIndex + 1) + '组详情';
+        overlay.classList.add('open');
+        loading.style.display = '';
+        content.style.display = 'none';
+        try {
+            var resp = await fetch('/get_group_detail', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: context.submission_id, group_index: groupIndex }),
+            });
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || '加载失败');
+            renderGroupDetail(data.detail || {});
+            loading.style.display = 'none';
+            content.style.display = '';
+        } catch (err) {
+            loading.textContent = '加载失败: ' + (err.message || err);
+        }
+    }
+
+    function renderGroupRankingAdjacent(rows) {
+        if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        var html = '<table class="group-detail-table"><thead><tr><th>组间</th><th>平均差</th><th>为正占比</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
+            html += '<tr><td>第' + (row.from_group + 1) + '组 - 第' + (row.to_group + 1) + '组</td><td>'
+                + fmtPct(row.mean_spread) + '</td><td>' + fmtPct(row.positive_ratio) + '</td></tr>';
+        });
+        return html + '</tbody></table>';
+    }
+
+    function renderGroupRankingDetail(detail) {
+        var topBottom = detail.top_bottom || {};
+        var labels = [
+            ['monotonic_period_ratio', '单调期占比', true],
+            ['descending_period_ratio', '严格降序占比', true],
+            ['mean_rank_correlation', '平均秩相关', false],
+            ['mean_non_empty_group_count', '平均有效组数', false],
+            ['full_group_period_ratio', '全组可比期占比', true],
+            ['top_bottom_mean', '首尾组平均差', true],
+            ['top_bottom_positive', '首尾差为正占比', true],
+        ];
+        var values = {
+            monotonic_period_ratio: detail.monotonic_period_ratio,
+            descending_period_ratio: detail.descending_period_ratio,
+            mean_rank_correlation: detail.mean_rank_correlation,
+            mean_non_empty_group_count: detail.mean_non_empty_group_count,
+            full_group_period_ratio: detail.full_group_period_ratio,
+            top_bottom_mean: topBottom.mean_spread,
+            top_bottom_positive: topBottom.positive_ratio,
+        };
+        document.getElementById('group-ranking-summary').innerHTML = labels.map(function(item) {
+            var value = values[item[0]];
+            var display = value == null ? '—' : (item[2] ? fmtPct(value) : Number(value).toFixed(4));
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
+        document.getElementById('group-ranking-adjacent').innerHTML = renderGroupRankingAdjacent(detail.adjacent_spreads);
+        document.getElementById('group-ranking-overview-summary').textContent =
+            '整体排序质量 · 单调 ' + fmtPct(detail.monotonic_period_ratio) + ' · 首尾为正 ' + fmtPct(topBottom.positive_ratio);
+        document.getElementById('group-ranking-spread-summary').textContent =
+            '最高组减最低组的逐期表现 · 均值 ' + fmtPct(topBottom.mean_spread) + ' · 为正 ' + fmtPct(topBottom.positive_ratio);
+        renderGroupRankingSpreadChart(topBottom.series || []);
+        renderGroupRankingMonotonicChart(detail.monotonic_series || []);
+    }
+
+    function renderGroupRankingSpreadChart(series) {
+        var el = document.getElementById('group-ranking-spread-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(el, {
+            chart: { backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: { type: 'datetime' },
+            yAxis: [{
+                title: { text: '单期组差' },
+                labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
+            }, {
+                title: { text: '累计净值' },
+                opposite: true,
+            }],
+            tooltip: { shared: true },
+            series: [{
+                name: '单期 Top-Bottom',
+                type: 'column',
+                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.spread]; }),
+                color: '#7c9fe6',
+                tooltip: { valueSuffix: '' },
+            }, {
+                name: '累计净值',
+                type: 'line',
+                yAxis: 1,
+                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
+                color: '#0f4c81',
+            }],
+            credits: { enabled: false },
+        });
+    }
+
+    function renderGroupRankingMonotonicChart(series) {
+        var el = document.getElementById('group-ranking-monotonic-chart');
+        if (!el || typeof Highcharts === 'undefined') return;
+        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        Highcharts.chart(el, {
+            chart: { type: 'column', backgroundColor: 'transparent' },
+            title: { text: null },
+            xAxis: {
+                categories: categories,
+                labels: { step: Math.max(1, Math.ceil(categories.length / 8)) },
+            },
+            yAxis: {
+                min: 0,
+                max: 1,
+                tickPositions: [0, 1],
+                title: { text: null },
+                labels: {
+                    formatter: function() { return this.value === 1 ? '单调' : '非单调'; },
+                },
+            },
+            legend: { enabled: false },
+            tooltip: {
+                formatter: function() {
+                    var row = series[this.point.index];
+                    var state = row.is_descending ? '严格降序' : (row.is_monotonic ? '严格升序' : '非单调');
+                    return '<b>' + categories[this.point.index] + '</b><br/>' + state;
+                },
+            },
+            series: [{
+                name: '单调性',
+                data: (series || []).map(function(row) {
+                    return {
+                        y: row.is_monotonic ? 1 : 0,
+                        color: row.is_descending ? '#2f855a' : (row.is_monotonic ? '#7c9fe6' : '#d0d5dd'),
+                    };
+                }),
+            }],
+            credits: { enabled: false },
+        });
+    }
+
+    async function openGroupRankingDetail() {
+        var context = getCurrentContext();
+        if (!context || !context.submission_id) return;
+        var overlay = document.getElementById('group-ranking-overlay');
+        var loading = document.getElementById('group-ranking-loading');
+        var content = document.getElementById('group-ranking-content');
+        overlay.classList.add('open');
+        loading.style.display = '';
+        loading.textContent = '加载中...';
+        content.style.display = 'none';
+        try {
+            var resp = await fetch('/get_group_ranking_detail', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ submission_id: context.submission_id }),
+            });
+            var data = await resp.json();
+            if (!data.success) throw new Error(data.error || '加载失败');
+            renderGroupRankingDetail(data.detail || {});
+            loading.style.display = 'none';
+            content.style.display = '';
+        } catch (err) {
+            loading.textContent = '加载失败: ' + (err.message || err);
+        }
     }
 
     /** 为指标名列绑定 hover 浮窗 */
@@ -878,7 +1582,7 @@
                 start_date: start_date,
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
-                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'each_period'
+                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold'
             },
             statusEl: statusSpan,
         };
@@ -1598,9 +2302,7 @@
             radio.addEventListener('change', function() {
                 var mode = this.value;
                 var uniformWrap     = document.getElementById('fee_uniform_row');
-                var perProductWrap  = document.getElementById('fee_per_product_row');
                 if (uniformWrap)    uniformWrap.style.display    = (mode === 'uniform')     ? 'flex' : 'none';
-                if (perProductWrap) perProductWrap.style.display  = (mode === 'per_product') ? 'flex' : 'none';
             });
         });
 
@@ -1672,6 +2374,9 @@
         bindTimeSyncListeners();
         bindFeeControls();
         bindSnapshotDrawerEvents();
+        bindGroupDetailOverlay();
+        bindGroupSectionToggles();
+        updateRebalanceModeDescription();
         syncFromTimeModule();
         document.addEventListener('timeRangeDefaultLoaded', syncFromTimeModule, { once: true });
         setTimeout(syncFromTimeModule, 0);
@@ -1679,11 +2384,43 @@
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
         if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
+        var rebalanceSelect = document.getElementById('rebalance_mode');
+        if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
+        var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
+        if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
 
         // 如果已有 submissions，渲染两级选项卡
         if (window.submissions && window.submissions.length > 0) {
             window.renderGroupTabs(window.submissions);
         }
+    }
+
+    function bindGroupDetailOverlay() {
+        var overlay = document.getElementById('group-detail-overlay');
+        var closeBtn = document.getElementById('group-detail-close');
+        if (closeBtn) closeBtn.addEventListener('click', function() {
+            if (overlay) overlay.classList.remove('open');
+        });
+        if (overlay) overlay.addEventListener('click', function(event) {
+            if (event.target === overlay) overlay.classList.remove('open');
+        });
+        var rankingOverlay = document.getElementById('group-ranking-overlay');
+        var rankingCloseBtn = document.getElementById('group-ranking-close');
+        if (rankingCloseBtn) rankingCloseBtn.addEventListener('click', function() {
+            if (rankingOverlay) rankingOverlay.classList.remove('open');
+        });
+        if (rankingOverlay) rankingOverlay.addEventListener('click', function(event) {
+            if (event.target === rankingOverlay) rankingOverlay.classList.remove('open');
+        });
+    }
+
+    function bindGroupSectionToggles() {
+        document.querySelectorAll('.group-detail-section-toggle').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var section = btn.closest('.group-detail-section');
+                if (section) section.classList.toggle('open');
+            });
+        });
     }
 
     // 暴露给外部调用：渲染分组测试的三级工作区（submission → factor → settings）
