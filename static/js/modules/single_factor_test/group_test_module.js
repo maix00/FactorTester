@@ -203,6 +203,32 @@
             return best;
         }
         var bodyHtml = '';
+
+        function isFiniteNumber(v) {
+            return typeof v === 'number' && isFinite(v) && !isNaN(v);
+        }
+
+        // pct is already in percent units (e.g. 0.12 means 0.12%).
+        function formatPercentAdaptive(pct, metricName) {
+            if (!isFiniteNumber(pct)) return '—';
+            var abs = Math.abs(pct);
+
+            // Mean Return is often tiny; show basis points when small to avoid all zeros.
+            if (metricName === 'Mean Return' && abs < 0.1) {
+                var bp = pct * 100; // 1% = 100 bp
+                var decBp = Math.abs(bp) >= 1 ? 2 : 3;
+                return bp.toFixed(decBp) + ' bp';
+            }
+
+            var dec;
+            if (abs >= 10) dec = 2;
+            else if (abs >= 1) dec = 3;
+            else if (abs >= 0.1) dec = 4;
+            else if (abs >= 0.01) dec = 5;
+            else dec = 6;
+            return pct.toFixed(dec) + '%';
+        }
+
         allMetricNames.forEach(function(name) {
             var cnName = metricNamesCN[name] || name;
             // 收集原始数值找最佳
@@ -219,7 +245,7 @@
                 } else if (name === 'Avg Position Changes') {
                     display = val.toFixed(1);
                 } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
-                    display = val.toFixed(2) + '%';
+                    display = formatPercentAdaptive(val, name);
                 } else if (name.includes('Ratio') || name === 'Skewness' || name === 'Kurtosis') {
                     display = val.toFixed(4);
                 } else {
@@ -707,6 +733,32 @@
 
         // 表体：每行一个指标
         var tbodyHtml = '';
+
+        function isFiniteNumber(v) {
+            return typeof v === 'number' && isFinite(v) && !isNaN(v);
+        }
+
+        // pct is already in percent units (e.g. 0.12 means 0.12%).
+        function formatPercentAdaptive(pct, metricName) {
+            if (!isFiniteNumber(pct)) return '—';
+            var abs = Math.abs(pct);
+
+            // Mean Return is often tiny; show basis points when small to avoid all zeros.
+            if (metricName === 'Mean Return' && abs < 0.1) {
+                var bp = pct * 100; // 1% = 100 bp
+                var decBp = Math.abs(bp) >= 1 ? 2 : 3;
+                return bp.toFixed(decBp) + ' bp';
+            }
+
+            var dec;
+            if (abs >= 10) dec = 2;
+            else if (abs >= 1) dec = 3;
+            else if (abs >= 0.1) dec = 4;
+            else if (abs >= 0.01) dec = 5;
+            else dec = 6;
+            return pct.toFixed(dec) + '%';
+        }
+
         metricNames.forEach(function(name) {
             var cnName = metricNamesCN[name] || name;
             // 收集原始数值找最佳
@@ -729,7 +781,7 @@
                     } else if (name === 'Avg Position Changes') {
                         val = val.toFixed(1);
                     } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
-                        val = val.toFixed(2) + '%';
+                        val = formatPercentAdaptive(val, name);
                     } else if (name.includes('Ratio')) {
                         val = val.toFixed(4);
                     } else {
