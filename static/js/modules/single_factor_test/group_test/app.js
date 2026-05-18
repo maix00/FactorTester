@@ -1,7 +1,7 @@
-/**
- * 分组测试模块独立脚本
- */
-(function() {
+(function(){
+    var GT = window.GroupTest;
+    if (!GT) { console.warn('[GroupTest] bootstrap missing'); return; }
+
     // 时区：后端返回 UTC epoch，useUTC=false 按浏览器本地时区显示
     if (typeof Highcharts !== 'undefined') {
         Highcharts.setOptions({ global: { useUTC: false } });
@@ -648,6 +648,22 @@
 
     // ---------- 渲染统计指标表格 ----------
     function renderMetricsTable(metrics) {
+        // Prefer modular sectioned table if available (Issue #50).
+        if (GT && typeof GT.renderSectionedMetricsTable === 'function') {
+            var containerMod = document.getElementById('group_metrics_container');
+            if (!containerMod || !metrics || Object.keys(metrics).length === 0) {
+                if (containerMod) containerMod.style.display = 'none';
+                return;
+            }
+            containerMod.style.display = 'block';
+            GT.renderSectionedMetricsTable(metrics);
+            // Preserve existing bindings that rely on #metrics_head click targets.
+            bindGroupDetailHeaders();
+            // Hover popup still works because metric-name-cell class is preserved.
+            // (Math/desc dictionaries are currently local to legacy renderer; will be migrated later.)
+            return;
+        }
+
         var container = document.getElementById('group_metrics_container');
         if (!container || !metrics || Object.keys(metrics).length === 0) {
             if (container) container.style.display = 'none';
@@ -1051,26 +1067,12 @@
     }
 
     function renderGroupDetail(detail) {
-        var summary = detail.summary || {};
-        var labels = {
-            'Total Return': '总收益',
-            'Annual Return': '年化',
-            'Sharpe Ratio': '夏普',
-            'Max Drawdown': '最大回撤',
-            'Win Rate': '胜率',
-            'Avg Turnover': '换手率',
-        };
-        document.getElementById('group-detail-summary').innerHTML = Object.keys(labels).map(function(key) {
-            var value = summary[key];
-            var display = value == null ? '—' : (
-                key.indexOf('Return') >= 0 || key.indexOf('Drawdown') >= 0 || key === 'Win Rate'
-                    ? Number(value).toFixed(2) + '%'
-                    : key === 'Avg Turnover'
-                        ? (Number(value) * 100).toFixed(1) + '%'
-                        : Number(value).toFixed(4)
-            );
-            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">' + labels[key] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
-        }).join('');
+        // Common metrics moved to the outer summary table (Issue #50).
+        // Keep overlay "概览" focused on deep-dive content.
+        var summaryEl = document.getElementById('group-detail-summary');
+        if (summaryEl) {
+            summaryEl.innerHTML = '<div class="group-detail-muted">本组的通用收益/风险指标已移至外部总表（按分区展示）。此处保留结构化分析与明细。</div>';
+        }
         document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
         document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
         document.getElementById('group-detail-bottom-periods').innerHTML = renderGroupDetailTable(detail.bottom_periods);
@@ -2155,11 +2157,20 @@
 
     /** 获取当前费率修改（供单因子设置快照 collectSnapshot 调用） */
     window._getFeeModifications = function() {
+        // Prefer modular fee state if available.
+        if (GT && GT.fee && typeof GT.fee.getModifications === 'function') {
+            return GT.fee.getModifications();
+        }
         return JSON.parse(JSON.stringify(_feeModifications));
     };
 
     /** 应用费率修改（供单因子设置快照 applySnapshot 调用） */
     window._applyFeeModifications = function(mods) {
+        // Prefer modular fee state if available.
+        if (GT && GT.fee && typeof GT.fee.applyModifications === 'function') {
+            GT.fee.applyModifications(mods);
+            return;
+        }
         _feeModifications = {};
         if (mods && typeof mods === 'object') {
             Object.keys(mods).forEach(function(code) {
@@ -2659,4 +2670,8 @@
     } else {
         init();
     }
+    // Expose primary entrypoints under GroupTest (namespaced)
+    GT.ui = GT.ui || {};
+    GT.ui.init = init;
+    GT.ui.renderTabs = window.renderGroupTabs;
 })();
