@@ -1,33 +1,28 @@
 /**
  * GroupTest entrypoint.
  *
- * For now we still rely on legacy implementation in group_test_module.js.
- * This file provides a stable namespaced API (window.GroupTest.*) and
- * small additive helpers as we migrate piece-by-piece.
+ * This file provides a stable namespaced API (window.GroupTest.*).
+ * The actual UI implementation currently lives in group_test/app.js and
+ * is attached to GT.ui.
  */
 (function() {
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
 
-    // ---- Tabs / navigation hook (legacy bridge) ----
-    function hasLegacyRenderTabs() {
-        return typeof window.renderGroupTabs === 'function';
-    }
-
+    // ---- Tabs / navigation hook ----
     function renderTabs(submissions) {
-        if (!hasLegacyRenderTabs()) {
-            GT.log('legacy renderGroupTabs not available yet');
-            return;
-        }
-        return window.renderGroupTabs(submissions);
+        if (GT.ui && typeof GT.ui.renderTabs === 'function') return GT.ui.renderTabs(submissions);
+        GT.log('GroupTest.ui.renderTabs not ready yet');
     }
 
     // Do not override if another module already defined it.
     if (!GT.renderTabs) GT.renderTabs = renderTabs;
 
-    // Compatibility: keep the old global for existing callers.
-    // (Will be removed once all callers migrate to GroupTest and legacy is removed in #52.)
-    if (!window.renderGroupTabs) window.renderGroupTabs = renderTabs;
+    // Compatibility: other modules still call window.renderGroupTabs(...)
+    // Keep it as a stable facade pointing at GroupTest.renderTabs.
+    if (!window.renderGroupTabs) {
+        window.renderGroupTabs = function(submissions) { return GT.renderTabs(submissions); };
+    }
 
     // ---- Metrics helpers (sectioned summary table) ----
     function renderSectionedMetricsTable(metricsByGroup) {
