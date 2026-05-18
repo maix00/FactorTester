@@ -6,6 +6,133 @@
 - **Triage labels**: Default — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 - **Domain docs**: Single-context — one `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.
 
+## “被分配 Issue 号即可开工”的总流程（并行友好 / 多 Agent）
+
+> 目标：人类只需要对 agent 说一句“你负责 Issue #N”，agent 就能自行判断能否开工、如何隔离并行、做完如何回到 `feat`，以及什么时候由人类合入 `master`。
+
+### 0. 现成解决方案（为什么这样设计）
+
+并行协作里最稳定的一套组合是：
+
+1. **一任务一分支 + 一任务一工作区**：用 `git worktree` 为每个任务创建独立目录，减少互相污染（每个 worktree 有自己的 `HEAD`/`index` 等元数据）。citeturn1search1turn1search4  
+2. **显式 Claim（认领）机制**：用 Issue comment / assignee 表示“谁在做”，避免重复劳动；GitHub 本身也支持把 Issue assign 给某个用户。citeturn1search2turn1search7  
+3. **Ownership（写入范围）**：每个 Issue 明确允许修改的目录/文件；更强约束可用 `CODEOWNERS` 来表达代码归属/审阅责任。citeturn1search0turn1search5  
+4. **顺序集成（单点 merge）**：并行开发，顺序合入，降低冲突放大。
+
+本仓默认采用：**worktree 隔离 + Issue claim + Ownership + 人类顺序 merge**。
+
+### 1. Agent 接到任务时的自检（必须做）
+
+当人类分配你一个 Issue 号 `#N` 后，你必须按以下顺序自检：
+
+1. **读取 Issue**（没有 Issue body / 验收标准就不要动手）
+   ```bash
+   gh issue view N --comments
+   ```
+2. **判断是否可由 agent 直接实现**
+   - Issue 必须带 `ready-for-agent`
+   - 如果是 `ready-for-human` / 或需要产品决策 / 或牵涉大范围架构调整但未写清，停止并向人类报告缺的信息。
+3. **Ownership / Write scope（强制）**
+   - Issue body 必须包含小节：`## Ownership / Write scope`
+   - 必须列出“允许修改”的目录/文件（可以额外列出“禁止修改”的共享文件）
+   - 若缺失该小节：停止并要求人类补充（否则并行一定踩踏）。
+4. **Claim（认领）机制（强制）**
+   - 你必须在 Issue 下留 comment 表示你已认领，格式固定：
+     - `Claimed-by: <agent_name> @ <YYYY-MM-DD HH:MM>`
+   - 如果 Issue 已存在其他人的 `Claimed-by:` 且未明确释放：停止并告知人类。
+5. **并发互斥检查（强制）**
+   - 每个 Issue 必须用自己的 worktree，路径固定：
+     - 分支：`fix/issue-N-<slug>`
+     - worktree：`~/Codes/.workspace/fix/issue-N-<slug>/`
+   - **若该 worktree 目录已存在**，说明已经有另一个 agent 在做这个 Issue：你必须停止并告知人类重新分配。
+6. **确认当前 `~/Codes` 在 `feat`**
+   ```bash
+   cd ~/Codes
+   git status -sb
+   # 期望看到：## feat
+   ```
+
+### 2. Agent 创建分支 + worktree（并行模式；禁止 checkout -b）
+
+> 并行时绝对不要在 `~/Codes/` 里 `git checkout -b`，那会把共享的 `feat` worktree 切走，导致冲突。
+
+```bash
+cd ~/Codes
+mkdir -p .workspace
+
+# slug 生成规则（强制一致，避免互斥失效/目录重复）：
+# - 全小写；用 - 分隔；只保留字母数字和 -
+# - 最长 40 字符（超出截断）
+# - 示例：Issue 标题 “GroupTest: Split Modules Skeleton”
+#   slug = group-test-split-modules-skeleton
+
+git branch fix/issue-N-<slug> feat
+git worktree add .workspace/fix/issue-N-<slug> fix/issue-N-<slug>
+
+cd .workspace/fix/issue-N-<slug>
+git status -sb
+# 期望看到：## fix/issue-N-<slug>
+```
+
+### 3. Agent 实现与提交（只做本 Issue，避免踩踏）
+
+1. 修改前后都要看：
+   ```bash
+   git status && git diff
+   ```
+2. 每个 Issue 尽量 **1 个 commit**（必要时可多个，但要有清晰分层）
+3. 提交前必须输出摘要：
+   ```bash
+   git diff --stat
+   ```
+4. Commit message 必须带 refs：
+   ```bash
+   git add .
+   git commit -m "<type>: <描述> (refs #N)"
+   ```
+
+### 4. Agent 完成后如何合并（并行默认：不自动合回 feat）
+
+> 为避免多个 agent 同时 merge 造成冲突放大：  
+> **并行模式下，agent 完成后默认只提交到自己的 `fix/issue-N-*` 分支，不要合回 `feat`。**
+>
+> 合并顺序由人类（或人类明确指定的“集成 agent”）统一执行：`fix/* → feat → master`。
+
+完成 Issue 后，你需要额外做两件事：
+1. 确保工作区 clean：`git status`
+2. 在 Issue 下留 comment：
+   - `Done-by: <agent_name> @ <YYYY-MM-DD HH:MM>`
+   - 附上：`git diff --stat` 摘要 + 手工回归步骤 + 可能的冲突点
+
+#### （可选）你被明确指定为“集成 agent”时，才允许你合回 `feat`
+
+#### A) 合回 `feat`（可由 agent 执行）
+
+```bash
+# 1) 回到共享的 feat worktree
+cd ~/Codes
+git checkout feat
+
+# 2) 合并分支到 feat
+git merge fix/issue-N-<slug>
+
+# 3) 删除分支 + worktree（避免占坑影响并行）
+git branch -d fix/issue-N-<slug>
+git worktree remove .workspace/fix/issue-N-<slug>
+rm -rf .workspace/fix/issue-N-<slug>
+```
+
+#### B) 合入 `master` + push（由人类执行；避免网络/凭据/破坏性操作）
+
+> 由于 `master` 被 `~/Codes-master-server/` worktree 占用，并且 Codex 环境可能遇到网络/DNS 限制，
+> **合入 master + push origin master 一律由人类在本机终端执行**。
+
+```bash
+cd ~/Codes-master-server
+git merge feat --no-ff -m "merge: feat to master (<YYYY-MM-DD>)"
+git push origin master
+```
+
 ## Issue 驱动的开发工作流
 
 ```
@@ -202,6 +329,12 @@ rm -rf .workspace/fix/issue-<N>-<描述>
 
 > 只依赖 `git` + `gh`，不需要 GitKraken。
 
+> ✅ 本仓统一使用 **worktree 分支流程**（单人/并行都一样）。这样可以一劳永逸地避免：
+> - 把共享的 `~/Codes`（feat worktree）切走导致 worktree 冲突
+> - 并行时不同 agent 互相污染工作区状态
+>
+> 因此：**本仓不再提供 `git checkout -b ...` 的流程**（即使单人也不要用）。
+
 ### 0. 前提检查
 
 开始前检查环境：
@@ -226,11 +359,18 @@ git status
 gh issue view <号码> --comments
 ```
 
-### 2. 创建工作分支
+### 2. 创建工作分支（统一 worktree 流程）
 
 ```bash
-git checkout feat && git pull origin master  # 确保 feat 基于最新 master
-git checkout -b fix/issue-<号码>-<简短描述>
+cd ~/Codes
+git checkout feat
+git pull origin master  # 确保 feat 基于最新 master（仅更新远端 master 的基线）
+
+mkdir -p .workspace
+git branch fix/issue-<号码>-<简短描述> feat
+git worktree add .workspace/fix/issue-<号码>-<简短描述> fix/issue-<号码>-<简短描述>
+
+cd .workspace/fix/issue-<号码>-<简短描述>
 ```
 
 ### 3. 修改代码
@@ -251,8 +391,14 @@ git commit -m "<type>: <描述> (refs #<号码>)"
 ### 5. 合并回 feat
 
 ```bash
-git checkout feat && git merge fix/issue-<号码>-<简短描述>
+cd ~/Codes
+git checkout feat
+git merge fix/issue-<号码>-<简短描述>
 git branch -d fix/issue-<号码>-<简短描述>
+
+# 删除 worktree（避免占坑）
+git worktree remove .workspace/fix/issue-<号码>-<简短描述>
+rm -rf .workspace/fix/issue-<号码>-<简短描述>
 ```
 
 全部 Issue 完成后，`feat → master`：
