@@ -724,4 +724,9 @@
 </style>
 
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
+<!-- GroupTest modular scripts (load order matters) -->
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/index.js') }}"></script>
+
+<!-- Legacy implementation (to be removed in Issue #52) -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test_module.js') }}"></script>
