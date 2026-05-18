@@ -81,8 +81,9 @@
             labels.push(k);
         }
         labels.sort(function(a, b) {
-            if (a === 'LS') return 1;
-            if (b === 'LS') return -1;
+            // Long-Short column should be the first group column
+            if (a === 'LS') return -1;
+            if (b === 'LS') return 1;
             return parseInt(a, 10) - parseInt(b, 10);
         });
         return labels;
@@ -152,4 +153,3 @@
         metricDisplay: metricDisplay,
     };
 })();
-
