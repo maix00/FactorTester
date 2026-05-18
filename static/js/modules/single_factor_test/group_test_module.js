@@ -325,6 +325,18 @@
     // ---------- 绘制分组累计收益曲线 ----------
     var _groupChart = null;  // 当前图表引用
 
+    function buildContinuousTimeAxis(rows, timestampGetter) {
+        var labels = (rows || []).map(function(row) {
+            return formatCompactTime(timestampGetter(row));
+        });
+        return {
+            labels: labels,
+            labelAt: function(value) {
+                return labels[Math.round(value)] || '';
+            },
+        };
+    }
+
     function drawGroupChart(groups) {
         var container = document.getElementById('group_chart_container');
         if (!container || !groups || groups.length === 0) {
@@ -332,13 +344,15 @@
             return;
         }
         container.style.display = 'block';
+        var timestamps = (groups[0] && groups[0].timestamps) || [];
+        var axis = buildContinuousTimeAxis(timestamps, function(timestamp) { return timestamp; });
         
         var series = groups.map(function(group) {
             var opts = {
                 name: group.name,
                 type: 'line',
                 data: group.cumulative_returns
-                    .map(function(val, idx) { return val !== null ? [group.timestamps[idx], val] : null; })
+                    .map(function(val, idx) { return val !== null ? [idx, val] : null; })
                     .filter(function(pt) { return pt !== null; }),
                 tooltip: { valueDecimals: 4 }
             };
@@ -363,13 +377,18 @@
                 events: {
                     click: function(e) {
                         // 点击图表获取最近数据点的分组快照
-                        var xVal = e.xAxis[0].value;
-                        fetchGroupSnapshot(xVal);
+                        var sampleIndex = Math.round(e.xAxis[0].value);
+                        if (timestamps[sampleIndex] != null) fetchGroupSnapshot(timestamps[sampleIndex]);
                     }
                 }
             },
             title: { text: '分组累计收益（初始净值 = 1）' },
-            xAxis: { type: 'datetime' },
+            xAxis: {
+                ordinal: false,
+                labels: {
+                    formatter: function() { return axis.labelAt(this.value); },
+                },
+            },
             yAxis: { title: { text: '净值' }, crosshair: true },
             plotOptions: {
                 series: {
@@ -377,7 +396,7 @@
                     point: {
                         events: {
                             click: function() {
-                                fetchGroupSnapshot(this.x);
+                                if (timestamps[this.x] != null) fetchGroupSnapshot(timestamps[this.x]);
                             }
                         }
                     }
@@ -388,7 +407,8 @@
                 valueDecimals: 4,
                 useHTML: true,
                 formatter: function () {
-                    var d = new Date(this.x);
+                    var timestamp = timestamps[Math.round(this.x)];
+                    var d = new Date(timestamp);
                     var dateStr = isIntraday
                         ? d.getFullYear() + '-' +
                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
@@ -411,17 +431,7 @@
             series: series,
             navigator: { enabled: true },
             scrollbar: { enabled: true },
-            rangeSelector: {
-                enabled: true,
-                selected: undefined,
-                buttons: [
-                    { type: 'month', count: 1, text: '1M' },
-                    { type: 'month', count: 3, text: '3M' },
-                    { type: 'month', count: 6, text: '6M' },
-                    { type: 'year', count: 1, text: '1Y' },
-                    { type: 'all', text: 'All' }
-                ]
-            }
+            rangeSelector: { enabled: false }
         });
     }
 
@@ -1240,18 +1250,28 @@
                 : '不同时间窗口里是否持续有效 · ' + analysis.window_size + ' 期窗口';
         var el = document.getElementById('group-detail-rolling-chart');
         if (!el || typeof Highcharts === 'undefined') return;
+        var axis = buildContinuousTimeAxis(rows, function(row) { return row.timestamp; });
         Highcharts.chart(el, {
             chart: { backgroundColor: 'transparent', zoomType: 'x' },
             title: { text: null },
-            xAxis: { type: 'datetime' },
+            xAxis: {
+                labels: {
+                    formatter: function() { return axis.labelAt(this.value); },
+                },
+            },
             yAxis: {
                 title: { text: '窗口累计收益' },
                 labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
             },
-            tooltip: { valueDecimals: 4 },
+            tooltip: {
+                formatter: function() {
+                    return '<b>' + axis.labelAt(this.x) + '</b><br/>'
+                        + this.series.name + ': ' + fmtPct(this.y);
+                },
+            },
             series: [{
                 name: '滚动窗口收益',
-                data: rows.map(function(row) { return [new Date(row.timestamp).getTime(), row.return]; }),
+                data: rows.map(function(row, idx) { return [idx, row.return]; }),
                 color: '#0f4c81',
             }],
             credits: { enabled: false },
@@ -1391,10 +1411,15 @@
     function renderGroupRankingSpreadChart(series) {
         var el = document.getElementById('group-ranking-spread-chart');
         if (!el || typeof Highcharts === 'undefined') return;
+        var axis = buildContinuousTimeAxis(series, function(row) { return row.timestamp; });
         Highcharts.chart(el, {
             chart: { backgroundColor: 'transparent' },
             title: { text: null },
-            xAxis: { type: 'datetime' },
+            xAxis: {
+                labels: {
+                    formatter: function() { return axis.labelAt(this.value); },
+                },
+            },
             yAxis: [{
                 title: { text: '单期组差' },
                 labels: { formatter: function() { return (this.value * 100).toFixed(2) + '%'; } },
@@ -1402,18 +1427,27 @@
                 title: { text: '累计净值' },
                 opposite: true,
             }],
-            tooltip: { shared: true },
+            tooltip: {
+                shared: true,
+                formatter: function() {
+                    var idx = this.points && this.points.length ? this.points[0].point.x : this.point.x;
+                    var row = series[idx];
+                    return '<b>' + axis.labelAt(idx) + '</b><br/>'
+                        + '单期 Top-Bottom: ' + fmtPct(row.spread) + '<br/>'
+                        + '累计净值: ' + Number(row.cumulative_return).toFixed(4);
+                },
+            },
             series: [{
                 name: '单期 Top-Bottom',
                 type: 'column',
-                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.spread]; }),
+                data: series.map(function(row, idx) { return [idx, row.spread]; }),
                 color: '#7c9fe6',
                 tooltip: { valueSuffix: '' },
             }, {
                 name: '累计净值',
                 type: 'line',
                 yAxis: 1,
-                data: series.map(function(row) { return [new Date(row.timestamp).getTime(), row.cumulative_return]; }),
+                data: series.map(function(row, idx) { return [idx, row.cumulative_return]; }),
                 color: '#0f4c81',
             }],
             credits: { enabled: false },
