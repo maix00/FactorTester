@@ -2046,8 +2046,12 @@ def signal_align(
             raise ValueError(
                 f"Invalid time basepoint '{daily_basepoint}'. "
                 f"Must be a time string like '09:01:00' or '15:00:00'")
-        series = data.groupby(idx_name).transform(
-            lambda x: getattr(pd.DatetimeIndex(x.index.get_level_values(-1)), 'time') == base_time)
+        # Mark rows whose innermost timestamp matches the requested basepoint time.
+        # NOTE: we deliberately produce a boolean Series (not a DataFrame) so the
+        # downstream basepoint selection logic stays consistent.
+        last_level = data.index.get_level_values(-1)
+        times = pd.DatetimeIndex(last_level)
+        series = pd.Series(times.time == base_time)
     elif isinstance(bp, str):
         bp_lower = bp.lower()
         if bp_lower == 'last':
