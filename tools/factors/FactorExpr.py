@@ -1296,8 +1296,19 @@ def _is_zero_shift_period(periods: 'FactorExpr') -> bool:
 
 
 def _strip_latex_time_subscript(latex: str) -> str:
-    suffix = '_{t}'
-    return latex[:-len(suffix)] if latex.endswith(suffix) else latex
+    """
+    Remove a trailing time subscript from a LaTeX fragment.
+
+    Historically some leaf nodes emitted `_t` while others emitted `_{t}`.
+    For operators like SHIFT that need to *replace* the time index, we must
+    normalize both forms to avoid MathJax "Double subscripts" errors
+    (e.g. `\\tilde{O}_t_{t-N}`).
+    """
+    if latex.endswith('_{t}'):
+        return latex[:-len('_{t}')]
+    if latex.endswith('_t'):
+        return latex[:-len('_t')]
+    return latex
 
 
 def _rolling_argmaxmin(
