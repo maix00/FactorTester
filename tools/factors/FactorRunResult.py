@@ -47,6 +47,12 @@ class FactorRunResult:
         "_source_table",
         "_func_table",
         "table",
+        # Raw-bar presence mask aligned to `table` (T x P, bool).
+        # True means this product truly has a bar at that timestamp in the underlying data,
+        # not merely an inserted row from union alignment.
+        "data_present_mask",
+        # Fast-path: whether data_present_mask is all True (dense panel, no inserted rows).
+        "data_present_all",
         "_returns",
         "_return_freq",
         "ic_series",
@@ -59,6 +65,8 @@ class FactorRunResult:
         self._source_table: pd.DataFrame = pd.DataFrame()
         self._func_table: pd.DataFrame = pd.DataFrame()
         self.table: pd.DataFrame = pd.DataFrame()
+        self.data_present_mask: pd.DataFrame = pd.DataFrame()
+        self.data_present_all: Optional[bool] = None
         self._returns: pd.DataFrame = pd.DataFrame()
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
@@ -152,6 +160,8 @@ class FactorRunResult:
         self._source_table = pd.DataFrame()
         self._func_table = pd.DataFrame()
         self.table = pd.DataFrame()
+        self.data_present_mask = pd.DataFrame()
+        self.data_present_all = None
         self.returns = pd.DataFrame()
         self._return_freq = None
         self.ic_series = pd.Series(dtype=float)
