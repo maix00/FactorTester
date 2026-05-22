@@ -109,6 +109,42 @@
         return unknown;
     }
 
+    // Best-value direction: 1 = higher is better, -1 = lower is better, 0/undefined = no highlight.
+    var METRIC_DIR = {
+        'Total Return': 1,
+        'Annual Return': 1,
+        'Sharpe Ratio': 1,
+        'Calmar Ratio': 1,
+        'Win Rate': 1,
+        'Mean Return': 1,
+        'Skewness': 1,
+        'Volatility': -1,
+        'Max Drawdown': -1,
+        'Kurtosis': -1,
+        'Avg Turnover': -1,
+        'Avg Turnover Accel': -1,
+        'Avg Position Changes': -1,
+        'Up Ratio': 1,
+    };
+
+    function getBestIdx(values, metricName) {
+        var dir = METRIC_DIR[metricName] || 0;
+        if (!dir) return null;
+        var bestIdx = null;
+        var bestVal = null;
+        for (var i = 0; i < values.length; i++) {
+            var v = values[i];
+            if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) continue;
+            var num = typeof v === 'number' ? v : parseFloat(v);
+            if (!isFinite(num)) continue;
+            if (bestIdx === null || (dir > 0 ? num > bestVal : num < bestVal)) {
+                bestIdx = i;
+                bestVal = num;
+            }
+        }
+        return bestIdx;
+    }
+
     function render(metricsByGroup) {
         var sections = (GT.metrics.sections && GT.metrics.sections.buildSections) ? GT.metrics.sections.buildSections() : [];
         var labels = getGroupLabels(metricsByGroup);
@@ -133,12 +169,15 @@
         sections.forEach(function(sec) {
             bodyHtml += sectionRow(sec.title);
             (sec.metrics || []).forEach(function(metricName) {
+                var rawVals = labels.map(function(g) { return (metricsByGroup[g] || {})[metricName]; });
+                var bestIdx = getBestIdx(rawVals, metricName);
                 bodyHtml += '<tr>';
                 bodyHtml += '<td class="metric-name-cell" data-metric="' + metricName.replace(/"/g, '&quot;') + '" style="font-weight:600;">'
                     + (metricNamesCN[metricName] || metricName) + '</td>';
-                labels.forEach(function(g) {
+                labels.forEach(function(g, gi) {
                     var v = (metricsByGroup[g] || {})[metricName];
-                    bodyHtml += '<td>' + metricDisplay(metricName, v) + '</td>';
+                    var cls = (bestIdx !== null && gi === bestIdx) ? ' class="group-best-cell"' : '';
+                    bodyHtml += '<td' + cls + '>' + metricDisplay(metricName, v) + '</td>';
                 });
                 bodyHtml += '</tr>';
             });
