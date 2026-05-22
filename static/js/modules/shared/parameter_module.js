@@ -384,12 +384,11 @@
         }
 
         // 绑定导入按钮：找到 HTML 中的按钮，否则在 bindEvents 后动态创建
-        var importBtn = document.getElementById('import-factors-from-library-btn');
-        if (importBtn) {
-            importBtn.addEventListener('click', function() {
+        document.querySelectorAll('#import-factors-from-library-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
                 openMultiFactorImport();
             });
-        }
+        });
 
         function renderFactorRows(rows) {
             const tableBody = document.getElementById('factor_table_body');
