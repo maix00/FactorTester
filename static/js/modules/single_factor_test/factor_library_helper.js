@@ -145,12 +145,13 @@
         });
 
         setTimeout(function() {
+            // Use capture so it still works even if other overlays stop propagation.
             document.addEventListener('pointerdown', function closeOnOutside(e) {
                 if (!popover.contains(e.target) && e.target !== anchor) {
                     popover.remove();
-                    document.removeEventListener('pointerdown', closeOnOutside);
+                    document.removeEventListener('pointerdown', closeOnOutside, true);
                 }
-            });
+            }, true);
         }, 100);
     }
 
