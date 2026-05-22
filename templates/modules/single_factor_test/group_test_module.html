@@ -162,10 +162,12 @@
 
     <!-- 指标表格 -->
     <div id="group_metrics_container" style="margin-top:16px;display:none;">
-        <table class="ic-table" style="width:100%;">
-            <thead id="metrics_head"></thead>
-            <tbody id="metrics_body"></tbody>
-        </table>
+        <div class="group-metrics-table-scroll">
+            <table class="ic-table group-metrics-table">
+                <thead id="metrics_head"></thead>
+                <tbody id="metrics_body"></tbody>
+            </table>
+        </div>
     </div>
 
     <!-- 多周期对比结果表格 -->
@@ -707,6 +709,19 @@
         font-weight: 700;
         color: #1a7a1a;
         background: #e8f5e9;
+    }
+
+    /* 指标总表：限制在容器内，允许横向滚动浏览 */
+    #group_test_module .group-metrics-table-scroll {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    #group_test_module .group-metrics-table {
+        /* 让表格优先铺满容器，列多时再触发横向滚动 */
+        width: max-content;
+        min-width: 100%;
     }
     @media (max-width: 1100px) {
         #group_test_module .group-test-workspace {
