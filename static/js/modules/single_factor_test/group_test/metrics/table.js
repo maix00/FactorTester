@@ -150,10 +150,17 @@
         var labels = getGroupLabels(metricsByGroup);
         if (!labels.length) return { headHtml: '', bodyHtml: '' };
 
-        var headHtml = '<tr><th>指标</th>';
+        // Header triggers are used by group_test/app.js bindGroupDetailHeaders():
+        // - click "指标" to open ranking detail
+        // - click "第k组" to open group detail
+        var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
-            if (g === 'LS') headHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
-            else headHtml += '<th>第' + (parseInt(g, 10) + 1) + '组</th>';
+            if (g === 'LS') {
+                headHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
+            } else {
+                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(g) + '" title="查看该组详情">第'
+                    + (parseInt(g, 10) + 1) + '组</th>';
+            }
         });
         headHtml += '</tr>';
 
