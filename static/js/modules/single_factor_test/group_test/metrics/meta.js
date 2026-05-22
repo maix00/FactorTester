@@ -46,20 +46,22 @@
     };
 
     var math = {
-        'Total Return': '$$R_{\\\\text{total}} = \\\\prod_t (1+r_t) - 1$$',
-        'Annual Return': '$$R_{\\\\text{ann}} = (1+R_{\\\\text{total}})^{N_{\\\\text{year}}/n} - 1$$',
-        'Volatility': '$$\\\\sigma_{\\\\text{ann}} = \\\\sigma_{\\\\text{period}} \\\\cdot \\\\sqrt{N_{\\\\text{year}}}$$',
-        'Sharpe Ratio': '$$\\\\text{Sharpe} = \\\\frac{\\\\bar r_{\\\\text{period}} \\\\cdot N_{\\\\text{year}}}{\\\\sigma_{\\\\text{period}} \\\\cdot \\\\sqrt{N_{\\\\text{year}}}}$$',
-        'Max Drawdown': '$$\\\\text{MDD} = \\\\max_t \\\\left( \\\\frac{\\\\text{Peak}_t - \\\\text{NAV}_t}{\\\\text{Peak}_t} \\\\right)$$',
-        'Calmar Ratio': '$$\\\\text{Calmar} = \\\\frac{R_{\\\\text{ann}}}{|\\\\text{MDD}|}$$',
-        'Win Rate': '$$\\\\text{WinRate} = \\\\frac{N_{\\\\text{positive}}}{N_{\\\\text{total}}}$$',
-        'Mean Return': '$$\\\\bar{r} = \\\\frac{1}{n}\\\\sum_{t=1}^n r_t$$',
-        'Skewness': '$$S = \\\\frac{1}{n}\\\\sum_{t=1}^n \\\\left(\\\\frac{r_t - \\\\bar{r}}{\\\\sigma}\\\\right)^3$$',
-        'Kurtosis': '$$K = \\\\frac{1}{n}\\\\sum_{t=1}^n \\\\left(\\\\frac{r_t - \\\\bar{r}}{\\\\sigma}\\\\right)^4 - 3$$',
-        'Avg Turnover': '$$\\\\text{Turnover} = \\\\frac{|\\\\text{持仓变动}|}{\\\\text{平均持仓数}}$$',
-        'Avg Turnover Accel': '$$\\\\text{Accel} = \\\\frac{\\\\text{MA}(\\\\text{TO}, N_s)}{\\\\text{MA}(\\\\text{TO}, N_l)} - 1$$',
-        'Up Ratio': '$$\\\\text{UpRatio} = \\\\frac{\\\\sum \\\\max(r_i, 0)}{\\\\sum |r_i|}$$',
-        'Avg Position Changes': '$$\\\\bar{C} = \\\\frac{1}{n}\\\\sum_{t=1}^n (|\\\\text{new}_t| + |\\\\text{exit}_t|)$$',
+        // NOTE: JS 字符串里 `\\` 才会在运行时变成 LaTeX 的单个反斜杠 `\`。
+        // 之前这里写成了 `\\\\text` 等，导致运行时变成 `\\text`，MathJax 会把它当普通文本打印出来。
+        'Total Return': '$$R_{\\text{total}} = \\prod_t (1+r_t) - 1$$',
+        'Annual Return': '$$R_{\\text{ann}} = (1+R_{\\text{total}})^{N_{\\text{year}}/n} - 1$$',
+        'Volatility': '$$\\sigma_{\\text{ann}} = \\sigma_{\\text{period}} \\cdot \\sqrt{N_{\\text{year}}}$$',
+        'Sharpe Ratio': '$$\\text{Sharpe} = \\frac{\\bar r_{\\text{period}} \\cdot N_{\\text{year}}}{\\sigma_{\\text{period}} \\cdot \\sqrt{N_{\\text{year}}}}$$',
+        'Max Drawdown': '$$\\text{MDD} = \\max_t \\left( \\frac{\\text{Peak}_t - \\text{NAV}_t}{\\text{Peak}_t} \\right)$$',
+        'Calmar Ratio': '$$\\text{Calmar} = \\frac{R_{\\text{ann}}}{|\\text{MDD}|}$$',
+        'Win Rate': '$$\\text{WinRate} = \\frac{N_{\\text{positive}}}{N_{\\text{total}}}$$',
+        'Mean Return': '$$\\bar{r} = \\frac{1}{n}\\sum_{t=1}^n r_t$$',
+        'Skewness': '$$S = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^3$$',
+        'Kurtosis': '$$K = \\frac{1}{n}\\sum_{t=1}^n \\left(\\frac{r_t - \\bar{r}}{\\sigma}\\right)^4 - 3$$',
+        'Avg Turnover': '$$\\text{Turnover} = \\frac{|\\text{持仓变动}|}{\\text{平均持仓数}}$$',
+        'Avg Turnover Accel': '$$\\text{Accel} = \\frac{\\text{MA}(\\text{TO}, N_s)}{\\text{MA}(\\text{TO}, N_l)} - 1$$',
+        'Up Ratio': '$$\\text{UpRatio} = \\frac{\\sum \\max(r_i, 0)}{\\sum |r_i|}$$',
+        'Avg Position Changes': '$$\\bar{C} = \\frac{1}{n}\\sum_{t=1}^n (|\\text{new}_t| + |\\text{exit}_t|)$$',
     };
 
     GT.metrics.meta = {
@@ -68,4 +70,3 @@
         math: math,
     };
 })();
-
