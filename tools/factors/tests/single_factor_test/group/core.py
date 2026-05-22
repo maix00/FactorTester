@@ -261,6 +261,22 @@ def test_by_group_single_factor(
     table_np = table_src[valid_cols].to_numpy(dtype=float)
     returns_np = returns_src[valid_cols].to_numpy(dtype=float)
 
+    # ── data_present_mask（原始 bar 是否存在）──
+    # 重要：不要用因子信号 NaN 来判断“是否有数据/是否可交易”：
+    # - signal NaN 可能是用户刻意过滤 universe
+    # - union 对齐也会引入插入行 NaN
+    #
+    # 优先使用 FactorRunResult.data_present_mask（由 Factor.evaluate 在预加载/对齐时生成）；
+    # 若不可用，则回退到 returns 的可用性推断（有限但比 signal NaN 更合理）。
+    present_src: Optional[pd.DataFrame] = None
+    if r is not None and hasattr(r, "data_present_mask"):
+        try:
+            _pm = getattr(r, "data_present_mask")
+            if isinstance(_pm, pd.DataFrame) and not _pm.empty:
+                present_src = _pm.copy(deep=False)
+        except Exception:
+            present_src = None
+
     # ── 首尾全 NaN 行截断 ──
     # 数据首尾可能存在所有品种均为 NaN 的行（数据尚未开始或已结束），截断之
     _all_nan = np.all(np.isnan(table_np), axis=1)  # (T,) — 整行全 NaN
@@ -299,28 +315,44 @@ def test_by_group_single_factor(
     membership_np = np.zeros((T, n_groups, P), dtype=bool)
     current_members = np.zeros((n_groups, P), dtype=bool)
 
-    # ── 按列的首部 NaN 填充（仅用于多时段品种检测，不覆盖 table_np）──
-    # 某些品种在中途才上市，首部全为 NaN，不应被误判为"多时段品种"
-    # 策略：对每列找到第一个有效值的行号，将其之前的 NaN 填 0.0
-    not_nan = ~np.isnan(table_np)                   # (T, P)
-    first_valid = np.argmax(not_nan, axis=0)          # (P,)  每列第一个非NaN行号；全NaN列=0
-    col_has_any = np.asarray(not_nan.any(axis=0), dtype=bool)  # (P,)  哪些列有至少一个有效值，强制为array避免P=1时标量化
-    row_idx = np.arange(T, dtype=int)[:, np.newaxis]  # (T, 1)
-    head_mask = (row_idx < first_valid[np.newaxis, :]) & col_has_any[np.newaxis, :]  # (T, P)
-    table_filled_np = np.where(head_mask, 0.0, table_np)
+    # ── 多时段品种检测（基于 data_present_mask，而不是 signal NaN） ──
+    if present_src is not None:
+        # 对齐索引层级（与 table_src/returns_src 同样抽取 signal index）
+        present_src.index = _extract_signal_index(present_src.index)
+        # 与 table/returns 同样的起止截断
+        if start_date is not None:
+            _sd = _align_ts_to_index(start_date, present_src.index)
+            present_src = cast(pd.DataFrame, present_src[present_src.index >= _sd])
+        if end_date is not None:
+            _ed = _align_ts_to_index(end_date, present_src.index)
+            present_src = cast(pd.DataFrame, present_src[present_src.index <= _ed])
+        # 与 table/returns 取共同索引与列
+        present_src = present_src.loc[common_index, valid_cols]
+        # 跟随首尾截断（与 table_np/returns_np 一致）
+        if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
+            present_src = present_src.iloc[trim_start:trim_end]
+        present_np = present_src.to_numpy(dtype=bool)
+    else:
+        # 回退：用 returns 可用性近似表示“是否有原始 bar”
+        present_np = np.isfinite(returns_np) & (returns_np > -1.0)
 
-    # ── 多时段品种检测 ──
-    # 使用填充后的 table_filled_np，排除首部未上市品种的干扰
-    _mixed_mask = np.any(np.isnan(table_filled_np), axis=1) & (~np.all(np.isnan(table_filled_np), axis=1))
+    # 排除“首部未上市/未有数据”的影响：对每列，把第一个 True 之前的 False 视为 True
+    # （这些 False 不应触发多时段策略）
+    col_has_any_present = np.asarray(present_np.any(axis=0), dtype=bool)
+    first_present = np.argmax(present_np, axis=0)  # 全 False 列会得到 0，但会被 col_has_any_present 屏蔽
+    row_idx = np.arange(T, dtype=int)[:, np.newaxis]
+    head_missing = (row_idx < first_present[np.newaxis, :]) & col_has_any_present[np.newaxis, :]
+    present_filled = np.where(head_missing, True, present_np)
+
+    _mixed_mask = np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
     multi_session_active = bool(_mixed_mask.any())
     if multi_session_active:
-        # 统计真正缺失的品种（排除首部未上市部分）
-        _after_head_nan = np.isnan(table_filled_np) & ~head_mask          # (T, P) 只保留首部之后的NaN
-        _missing_cols = np.where(np.any(_after_head_nan, axis=0))[0]       # 哪些列在首部之后有NaN
+        _after_head_missing = (~present_np) & (~head_missing)
+        _missing_cols = np.where(np.any(_after_head_missing, axis=0))[0]
         _missing_names = [str(valid_cols[i]) for i in _missing_cols]
         print(
-            f"[INFO] {factor.alias}: 检测到 {int(_mixed_mask.sum())}/{T} 期存在部分品种缺失信号 "
-            f"（{len(_missing_names)} 个品种有缺失：{', '.join(_missing_names[:5])}"
+            f"[INFO] {factor.alias}: 检测到 {int(_mixed_mask.sum())}/{T} 期存在部分品种无原始数据 "
+            f"（{len(_missing_names)} 个品种存在缺失：{', '.join(_missing_names[:5])}"
             f"{'...' if len(_missing_names) > 5 else ''}），"
             f"自动启用多时段品种策略，忽略 rebalance_mode='{rebalance_mode}'。"
         )
@@ -343,9 +375,11 @@ def test_by_group_single_factor(
         if t == 0:
             carry_members = np.zeros((n_groups, P), dtype=bool)
         elif multi_session_active:
-            # 多时段策略：信号缺失品种保留在当前组中，不被踢出
-            # isnan_fac=True 表示该品种本期无信号 → 保留
-            carry_members = current_members & (~isbad_ret[np.newaxis, :])
+            # 多时段策略：基于“无原始数据”的品种保护逻辑
+            # - present=False：该品种本期无 bar → 保留在原组，不参与当期再分配
+            # - present=True：该品种本期有数据 → 允许正常进出组（由 available_mask 决定是否加入）
+            has_data_t = present_np[t]  # (P,)
+            carry_members = current_members & (~has_data_t[np.newaxis, :]) & (~isbad_ret[np.newaxis, :])
         else:
             carry_members = current_members & isnan_ret[np.newaxis, :] & (~isbad_ret[np.newaxis, :])
 
@@ -411,8 +445,8 @@ def test_by_group_single_factor(
     wealth = np.ones(n_groups, dtype=float)
     prev_end_amounts = np.zeros((n_groups, P), dtype=float)
 
-    # 多时段：预计算每期哪些品种有因子信号
-    fac_has_signal = ~np.isnan(table_np)  # (T, P)
+    # 多时段：预计算每期哪些品种有原始数据（注意：不是因子信号是否 NaN）
+    data_has_bar = present_np  # (T, P)
 
     # 记录每期多时段策略触发的组（用于报告）
     multi_session_triggered_count = 0
@@ -423,9 +457,9 @@ def test_by_group_single_factor(
         wealth_before_trade = wealth.copy()        # (n_groups,)
 
         # ── 本期是否触发多时段逻辑 ──
-        # 判断标准：当期存在部分品种有信号、部分品种无信号（混合行）
-        has_signal_t = fac_has_signal[t]           # (P,) bool
-        is_mixed_t = multi_session_active and has_signal_t.any() and (~has_signal_t).any()
+        # 判断标准：当期存在部分品种有原始数据、部分品种无原始数据（混合行）
+        has_bar_t = data_has_bar[t]               # (P,) bool
+        is_mixed_t = multi_session_active and has_bar_t.any() and (~has_bar_t).any()
 
         # ── 计算 target_amounts: (n_groups, P) ──
         target_amounts = np.zeros((n_groups, P), dtype=float)
@@ -470,12 +504,12 @@ def test_by_group_single_factor(
                 exiting = pm & (~cm)
                 entering = cm & (~pm)
 
-                # 退出产品中：有信号的卖出，无信号的保留金额
-                exiting_sig = exiting & has_signal_t
-                exiting_nosig = exiting & (~has_signal_t)
+                # 退出产品中：有 bar 的卖出，无 bar 的保留金额
+                exiting_sig = exiting & has_bar_t
+                exiting_nosig = exiting & (~has_bar_t)
 
-                # 进入产品中：只有有信号的才真正进入
-                entering_sig = entering & has_signal_t
+                # 进入产品中：只有有 bar 的才真正进入
+                entering_sig = entering & has_bar_t
                 n_entering = int(entering_sig.sum())
 
                 # 卖出有信号的退出产品（扣除手续费）
