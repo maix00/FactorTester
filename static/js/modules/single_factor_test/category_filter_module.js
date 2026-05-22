@@ -525,8 +525,12 @@
         $moduleContainer = $('#ps-cf-root');
         if (!$moduleContainer.length) return;
 
-        // 如果已渲染过，跳过重新渲染
-        if ($moduleContainer.find('.ps-body').length) return;
+        // 如果已渲染过，不再重复构建结构，但仍需刷新历史
+        // （切换因子家族时 overlay 可能复用旧 DOM，若不刷新会残留旧提交路径）
+        if ($moduleContainer.find('.ps-body').length) {
+            try { renderHistory(); } catch (e) {}
+            return;
+        }
 
         // 统一布局渲染
         PS.render($moduleContainer, {
