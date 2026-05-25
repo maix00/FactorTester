@@ -20,6 +20,11 @@ if TYPE_CHECKING:
     from tools.data.DataSource import DataSource
     from tools.data.DataMeta import DataMeta
     from tools.parameters.Parameter import Parameter
+    from .leaf import ConstExpr, ColumnRef, ParamRef
+    from .composite import CompositeExpr
+    from .rolling import RollingExpr, RollingOp
+    from .shift import ShiftOp
+    from .cross_sectional import CrossSectionalOp
 
 
 # ── 求值上下文（统一 evaluate/_evaluate 签名） ──
@@ -457,11 +462,11 @@ class FactorExpr:
 
     # ── 便利方法：时序算子 ──
 
-    def rolling_mean(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_mean(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动平均（简单平均）。"""
         return _lazy()['RollingOp']('rolling_mean', _lazy()['_to_expr'](window), self)
 
-    def rolling(self, window: Union[int, str, pd.Timedelta]) -> 'RollingExpr':
+    def rolling(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingExpr':
         """创建滚动窗口，支持 .truncate() + .mean()/.argmax_raw() 等逐步构建。
 
         示例：
@@ -469,47 +474,47 @@ class FactorExpr:
         """
         return _lazy()['RollingExpr'](self, _lazy()['_to_expr'](window))
 
-    def rolling_std(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_std(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动标准差。"""
         return _lazy()['RollingOp']('rolling_std', _lazy()['_to_expr'](window), self)
 
-    def rolling_var(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_var(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期移动方差。"""
         return _lazy()['RollingOp']('rolling_var', _lazy()['_to_expr'](window), self)
 
-    def rolling_min(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_min(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动最小值。"""
         return _lazy()['RollingOp']('rolling_min', _lazy()['_to_expr'](window), self)
 
-    def rolling_max(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_max(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动最大值。"""
         return _lazy()['RollingOp']('rolling_max', _lazy()['_to_expr'](window), self)
 
-    def rolling_sum(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_sum(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动求和。"""
         return _lazy()['RollingOp']('rolling_sum', _lazy()['_to_expr'](window), self)
 
-    def rolling_ema(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_ema(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期指数移动平均（EMA, span=window）。"""
         return _lazy()['RollingOp']('rolling_ema', _lazy()['_to_expr'](window), self)
 
-    def rolling_corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_corr(self, other: 'FactorExpr', window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动相关系数：self 与 other 的 rolling correlation。"""
         return _lazy()['RollingOp']('rolling_corr', _lazy()['_to_expr'](window), self, other)
 
-    def rolling_skew(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_skew(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期滚动偏度。"""
         return _lazy()['RollingOp']('rolling_skew', _lazy()['_to_expr'](window), self)
 
-    def rolling_argmax(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_argmax(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最大值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmax', _lazy()['_to_expr'](window), self)
 
-    def rolling_argmin(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
+    def rolling_argmin(self, window: Union[int, str, pd.Timedelta, 'FactorExpr', 'Parameter']) -> 'RollingOp':
         """N 期内最小值出现位置（0=最早, 1=最新），归一化到 [0,1]。"""
         return _lazy()['RollingOp']('rolling_argmin', _lazy()['_to_expr'](window), self)
 
-    def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter'] = 1) -> 'ShiftOp':
+    def shift(self, periods: Union[int, str, pd.Timedelta, 'Parameter', 'FactorExpr'] = 1) -> 'ShiftOp':
         """前 N 期值：x.shift(1) 即昨天值。"""
         return _lazy()['ShiftOp']('shift', periods, self)
 
