@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from tools.parameters.Parameter import Parameter
 
 
-from .core import FactorExpr, EvaluateContext
+from .core import FactorExpr, EvaluateContext, _lazy
 from .operands import OperandExpr
 
 class WhereOp(OperandExpr):
@@ -44,13 +44,13 @@ class WhereOp(OperandExpr):
             if isinstance(cond, pd.DataFrame):
                 cond_df = cond.reindex(index=a.index, columns=a.columns)
             elif isinstance(cond, pd.Series):
-                mask = CompositeExpr._df_series_broadcast(a, cond).astype(bool)
+                mask = _lazy()['CompositeExpr']._df_series_broadcast(a, cond).astype(bool)
                 cond_df = pd.DataFrame(mask, index=a.index, columns=a.columns)
             else:
                 cond_df = pd.DataFrame(bool(cond), index=a.index, columns=a.columns)
 
             if isinstance(b, pd.Series):
-                b_arr = CompositeExpr._df_series_broadcast(a, b)
+                b_arr = _lazy()['CompositeExpr']._df_series_broadcast(a, b)
                 b = pd.DataFrame(b_arr, index=a.index, columns=a.columns)
 
             return a.where(cond_df, other=b)
