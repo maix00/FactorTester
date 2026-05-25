@@ -380,22 +380,33 @@ class RollingOp(OperandExpr):
             if isinstance(periods_val, ConstExpr):
                 periods_val = periods_val.value
 
-        # 求值 trunc_start / trunc_end（如果有）
+        common, common_periods, product_periods = _resolve_windows(
+            window=periods_val, freq=ctx.freq,
+            products=[p for p in ctx.products if p in data_vals[0].columns])
+
+        # 确定每个 product 对应的窗口大小（用于截断数组的 shape 对齐）
+        if common:
+            window_per_product = {p: common_periods for p in data_vals[0].columns}
+        else:
+            window_per_product = product_periods
+
+        # 求值 trunc_start / trunc_end（如果有——动态截断）
         trunc_start_arr = None
         trunc_end_arr = None
         if self._trunc_start is not None and self._trunc_end is not None:
             ts_df = self._trunc_start.evaluate(ctx=ctx)
             te_df = self._trunc_end.evaluate(ctx=ctx)
-            # 需要跟 data_vals[0] 对齐
+            # 对齐 data_vals[0] 的 columns 和 index
             common_cols = data_vals[0].columns.intersection(ts_df.columns)
             ts_arr = ts_df[common_cols].reindex(data_vals[0].index).to_numpy(dtype=float)
             te_arr = te_df[common_cols].reindex(data_vals[0].index).to_numpy(dtype=float)
             # trunc 是对窗口内的偏移截断，需要 shape=(T-W+1, P)
-            # 传 None 由 _rolling_argmaxmin / _mask_outside_trunc 处理
-
-        common, common_periods, product_periods = _resolve_windows(
-            window=periods_val, freq=ctx.freq,
-            products=[p for p in ctx.products if p in data_vals[0].columns])
+            # 取公共窗口最小值做 shape 截取；不同 product 按 product_periods 分流时再调整
+            if common and common_periods < len(ts_arr):
+                ts_arr = ts_arr[common_periods - 1:]
+                te_arr = te_arr[common_periods - 1:]
+            trunc_start_arr = ts_arr
+            trunc_end_arr = te_arr
 
         if common:
             result = self._apply_rolling(common_periods, *data_vals, freq=ctx.freq,

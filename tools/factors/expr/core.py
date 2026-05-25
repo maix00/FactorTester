@@ -49,7 +49,7 @@ def _lazy():
     if _LAZY is None:
         from .leaf import _to_expr, ConstExpr, ColumnRef, ParamRef
         from .composite import CompositeExpr
-        from .rolling import RollingOp
+        from .rolling import RollingExpr, RollingOp
         from .shift import ShiftOp
         from .cross_sectional import CrossSectionalOp
         _LAZY = {
@@ -58,6 +58,7 @@ def _lazy():
             'ColumnRef': ColumnRef,
             'ParamRef': ParamRef,
             'CompositeExpr': CompositeExpr,
+            'RollingExpr': RollingExpr,
             'RollingOp': RollingOp,
             'ShiftOp': ShiftOp,
             'CrossSectionalOp': CrossSectionalOp,
@@ -459,6 +460,14 @@ class FactorExpr:
     def rolling_mean(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动平均（简单平均）。"""
         return _lazy()['RollingOp']('rolling_mean', _lazy()['_to_expr'](window), self)
+
+    def rolling(self, window: Union[int, str, pd.Timedelta]) -> 'RollingExpr':
+        """创建滚动窗口，支持 .truncate() + .mean()/.argmax_raw() 等逐步构建。
+
+        示例：
+            CLOSE.rolling(240).truncate(0, 8).argmin_raw()
+        """
+        return _lazy()['RollingExpr'](self, _lazy()['_to_expr'](window))
 
     def rolling_std(self, window: Union[int, str, pd.Timedelta]) -> 'RollingOp':
         """N 期移动标准差。"""

@@ -543,7 +543,7 @@ def run_ic_test():
         (_, _, _, _, _, _, ic_lags, primary_ic_lag) = _parse_ic_params(data)
 
         tester = get_factor_tester(data.get('submission_id', ''), caller='run_ic_test')
-        factor_family = get_factor_family_instance(data.get('factor_family_alias', ''))
+        factor_family = get_factor_family_instance(data.get('factor_family_alias', ''), username=data.get('owner_username'))
         assert isinstance(factor_family, FactorFamily)
         all_factors = factor_family.get_factors(
             params_list=get_session_params(data.get('factor_family_alias', ''), factor_family)
@@ -589,7 +589,7 @@ def run_ic_test_stream():
     # ── 在主线程中完成所有需要 context 的操作 ──
     try:
         tester = get_factor_tester(str(data.get('submission_id', '')), caller='run_ic_test_stream')
-        factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')))
+        factor_family = get_factor_family_instance(str(data.get('factor_family_alias', '')), username=data.get('owner_username'))
         assert isinstance(factor_family, FactorFamily)
         all_factors = factor_family.get_factors(
             params_list=get_session_params(str(data.get('factor_family_alias', '')), factor_family)
