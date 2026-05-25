@@ -22,6 +22,26 @@
     var newItemPlaceholderName = null;  // placeholder 名称，null = 无
 
     var $overlay = $('#pg-overlay');
+    var $liquidityOverlay = null;
+    var liquidityGroupName = null;
+    var liquidityPath = null;
+    var liquidityProducts = [];
+
+    function escHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function negativeProductPath(parentPath, productName) {
+        var basePath = parentPath.slice(-10) === '/_products' ? parentPath : parentPath + '/_products';
+        return '-' + basePath + '/' + productName;
+    }
+
+    function formatVolume(value) {
+        if (value == null || isNaN(Number(value))) return '—';
+        return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+    }
 
     function positivePaths(paths) {
         return (paths || []).filter(function(path) { return path.charAt(0) !== '-'; });
@@ -51,6 +71,88 @@
         var $s = PS.getChangeStatusEl($managerRoot);
         $s.html(message).css('color', ok === false ? '#d40000' : '#28a745');
         setTimeout(function() { $s.html(''); }, 3000);
+    }
+
+    function ensureLiquidityOverlay() {
+        if ($liquidityOverlay && $liquidityOverlay.length) return;
+        var html = ''
+            + '<div id="pg-liquidity-overlay" style="display:none;position:fixed;inset:0;z-index:1100;background:rgba(15,23,42,0.42);align-items:center;justify-content:center;padding:28px;">'
+            + '<div style="width:min(1080px,calc(100vw - 56px));max-height:calc(100vh - 56px);display:flex;flex-direction:column;background:#fff;border-radius:12px;box-shadow:0 20px 55px rgba(15,23,42,0.24);overflow:hidden;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:16px 20px;border-bottom:1px solid #e5e7eb;">'
+            + '<div><div style="font-size:16px;font-weight:600;color:#101828;">产品流动性与排除设置</div><div class="pg-liquidity-subtitle" style="margin-top:5px;font-size:12px;color:#667085;font-family:monospace;word-break:break-all;"></div></div>'
+            + '<button type="button" class="pg-liquidity-close" style="border:none;background:none;color:#667085;font-size:24px;line-height:1;cursor:pointer;">&times;</button>'
+            + '</div>'
+            + '<div class="pg-liquidity-note" style="padding:10px 20px;background:#f8fafc;border-bottom:1px solid #e5e7eb;color:#475467;font-size:12px;">统计窗口：以每个产品最近可得交易日为终点，滚动 1 年。排除项将保存为独立的负路径规则。</div>'
+            + '<div class="pg-liquidity-content" style="overflow:auto;padding:14px 20px 20px;"></div>'
+            + '</div></div>';
+        $('body').append(html);
+        $liquidityOverlay = $('#pg-liquidity-overlay');
+        $liquidityOverlay.on('click', function(event) {
+            if (event.target === this) closeLiquidityOverlay();
+        });
+        $liquidityOverlay.on('click', '.pg-liquidity-close', closeLiquidityOverlay);
+        $liquidityOverlay.on('click', '.pg-liquidity-toggle', function() {
+            var $button = $(this);
+            var exclusionPath = $button.data('exclusion');
+            var excluded = String($button.data('excluded')) === '1';
+            if (selectedName !== liquidityGroupName) return;
+            allGroupPaths = allGroupPaths.filter(function(path) { return path !== exclusionPath; });
+            if (!excluded) allGroupPaths.push(exclusionPath);
+            var editingGroup = groups.find(function(group) { return group.name === liquidityGroupName; });
+            if (editingGroup) editingGroup.paths = allGroupPaths.slice();
+            renderLiquidityProducts(liquidityProducts);
+            flashStatus(excluded ? '↩ 已恢复该产品，点击产品组保存按钮生效' : '− 已排除该产品，点击产品组保存按钮生效');
+        });
+    }
+
+    function closeLiquidityOverlay() {
+        if ($liquidityOverlay) $liquidityOverlay.css('display', 'none');
+        liquidityGroupName = null;
+        liquidityPath = null;
+        liquidityProducts = [];
+    }
+
+    function renderLiquidityProducts(products) {
+        var canEdit = selectedName === liquidityGroupName;
+        var displayedGroup = groups.find(function(group) { return group.name === liquidityGroupName; });
+        var displayedPaths = canEdit ? allGroupPaths : ((displayedGroup && displayedGroup.paths) || []);
+        liquidityProducts = products || [];
+        var html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;">'
+            + '<thead><tr style="color:#475467;text-align:left;border-bottom:1px solid #d0d5dd;">'
+            + '<th style="width:14%;padding:9px 10px;">产品代码</th><th style="width:22%;padding:9px 10px;">产品说明</th>'
+            + '<th style="width:17%;padding:9px 10px;">最近日成交量</th><th style="width:19%;padding:9px 10px;">近 1 年日均成交量</th>'
+            + '<th style="width:15%;padding:9px 10px;">近 1 年零量日</th><th style="width:13%;padding:9px 10px;">操作</th></tr></thead><tbody>';
+        liquidityProducts.forEach(function(product) {
+            var productName = product.product_name || product.title || product.name || '';
+            var exclusionPath = negativeProductPath(liquidityPath, productName);
+            var excluded = displayedPaths.indexOf(exclusionPath) !== -1;
+            html += '<tr style="border-bottom:1px solid #f0f2f5;' + (excluded ? 'color:#98a2b3;background:#f9fafb;' : '') + '">'
+                + '<td style="padding:10px;">' + escHtml(productName) + (excluded ? ' <span style="color:#b42318;font-size:11px;">已排除</span>' : '') + '</td>'
+                + '<td style="padding:10px;">' + escHtml(product.desc || '—') + '</td>'
+                + '<td style="padding:10px;">' + formatVolume(product.latest_volume) + '</td>'
+                + '<td style="padding:10px;">' + formatVolume(product.average_daily_volume_1y) + '</td>'
+                + '<td style="padding:10px;">' + (product.zero_volume_days_1y == null ? '—' : escHtml(product.zero_volume_days_1y)) + '</td>'
+                + '<td style="padding:10px;">'
+                + (canEdit ? '<button type="button" class="pg-liquidity-toggle" data-exclusion="' + escHtml(exclusionPath) + '" data-excluded="' + (excluded ? '1' : '0') + '" style="padding:4px 10px;border:1px solid ' + (excluded ? '#1570ef' : '#d92d20') + ';border-radius:5px;background:#fff;color:' + (excluded ? '#1570ef' : '#d92d20') + ';cursor:pointer;">' + (excluded ? '恢复' : '排除') + '</button>' : '<span style="font-size:11px;color:#98a2b3;">选择该组后可编辑</span>')
+                + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        if (!liquidityProducts.length) html = '<div style="padding:20px;color:#667085;text-align:center;">该路径下没有产品</div>';
+        $liquidityOverlay.find('.pg-liquidity-content').html(html);
+    }
+
+    function openLiquidityOverlay(groupName, path) {
+        ensureLiquidityOverlay();
+        liquidityGroupName = groupName;
+        liquidityPath = path;
+        $liquidityOverlay.find('.pg-liquidity-subtitle').text(groupName + ' / ' + path);
+        $liquidityOverlay.find('.pg-liquidity-content').html('<div style="padding:28px;color:#667085;text-align:center;">正在读取一年成交量统计...</div>');
+        $liquidityOverlay.css('display', 'flex');
+        $.get('/get_products', { path: path, include_volume_stats: 'true' })
+            .done(renderLiquidityProducts)
+            .fail(function() {
+                $liquidityOverlay.find('.pg-liquidity-content').html('<div style="padding:28px;color:#d92d20;text-align:center;">成交量统计加载失败</div>');
+            });
     }
 
     function renderGroupList() {
@@ -278,13 +380,8 @@
                         flashStatus(resp && resp.success ? '✓ 顺序已更新' : '✗ 排序失败', !!(resp && resp.success));
                     });
                 },
-                onToggleProductExclusion: function(name, exclusionPath, excluded) {
-                    if (selectedName !== name) return;
-                    allGroupPaths = allGroupPaths.filter(function(path) { return path !== exclusionPath; });
-                    if (!excluded) allGroupPaths.push(exclusionPath);
-                    var editingGroup = groups.find(function(group) { return group.name === name; });
-                    if (editingGroup) editingGroup.paths = allGroupPaths.slice();
-                    flashStatus(excluded ? '↩ 已恢复该产品，点击保存生效' : '− 已排除该产品，点击保存生效');
+                onOpenProductDetails: function(name, path) {
+                    openLiquidityOverlay(name, path);
                 }
             });
         });
@@ -353,6 +450,7 @@
     }
 
     function closeOverlay() {
+        closeLiquidityOverlay();
         $overlay.css('display', 'none');
     }
 
@@ -360,5 +458,8 @@
 
     $('#btn-product-groups').on('click', openOverlay);
     $('#pg-overlay').on('click', function(e) { if (e.target === this) closeOverlay(); });
+    $(document).on('keydown.pgLiquidity', function(e) {
+        if (e.key === 'Escape' && $liquidityOverlay && $liquidityOverlay.is(':visible')) closeLiquidityOverlay();
+    });
 
 })(jQuery, window);
