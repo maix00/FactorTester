@@ -23,6 +23,24 @@
 
     var $overlay = $('#pg-overlay');
 
+    function positivePaths(paths) {
+        return (paths || []).filter(function(path) { return path.charAt(0) !== '-'; });
+    }
+
+    function exclusionsCoveredBy(paths, positive) {
+        return (paths || []).filter(function(path) {
+            if (path.charAt(0) !== '-') return false;
+            var leafPath = path.substring(1);
+            return positive.some(function(includedPath) {
+                return leafPath === includedPath || leafPath.indexOf(includedPath + '/') === 0;
+            });
+        });
+    }
+
+    function restoreGroupChecks() {
+        PS.restoreChecks(groupTree, positivePaths(allGroupPaths));
+    }
+
     function setManagerHint(name) {
         if (!$managerRoot || !$managerRoot.length) return;
         PS.updateLeftHint($managerRoot, name ? ('正在编辑：' + name + '；调整左侧勾选后点击保存') : '点击路径组以编辑 → 勾选品种 → 保存');
@@ -85,7 +103,7 @@
                         PG.fetchGroupDetail(name).then(function(g) {
                             if (g && g.paths) {
                                 allGroupPaths = g.paths.slice();
-                                PS.restoreChecks(groupTree, allGroupPaths);
+                                restoreGroupChecks();
                             }
                         });
                     } else {
@@ -110,7 +128,7 @@
                     PG.fetchGroupDetail(name).then(function(g) {
                         if (g && g.paths) {
                             allGroupPaths = g.paths.slice();
-                            PS.restoreChecks(groupTree, allGroupPaths);
+                            restoreGroupChecks();
                         }
                     });
                     setManagerHint(name);
@@ -216,13 +234,16 @@
                 onDeletePath: function(name, path) {
                     var group = groups.find(function(g) { return g.name === name; });
                     if (!group) return;
-                    var newPaths = (group.paths || []).filter(function(p) { return p !== path; });
+                    var newPaths = (group.paths || []).filter(function(p) {
+                        if (p === path) return false;
+                        return path.charAt(0) === '-' || p.charAt(0) !== '-' || p.substring(1).indexOf(path + '/') !== 0;
+                    });
                     PG.updateGroup(name, newPaths).then(function(resp) {
                         if (resp && resp.success) {
                             if (selectedName === name) {
                                 allGroupPaths = newPaths.slice();
                                 PS.clearChecks(groupTree);
-                                PS.restoreChecks(groupTree, allGroupPaths);
+                                restoreGroupChecks();
                             }
                             flashStatus('✓ 路径已删除');
                             renderGroupList();
@@ -256,6 +277,14 @@
                     PG.reorderGroups(fullOrder).then(function(resp) {
                         flashStatus(resp && resp.success ? '✓ 顺序已更新' : '✗ 排序失败', !!(resp && resp.success));
                     });
+                },
+                onToggleProductExclusion: function(name, exclusionPath, excluded) {
+                    if (selectedName !== name) return;
+                    allGroupPaths = allGroupPaths.filter(function(path) { return path !== exclusionPath; });
+                    if (!excluded) allGroupPaths.push(exclusionPath);
+                    var editingGroup = groups.find(function(group) { return group.name === name; });
+                    if (editingGroup) editingGroup.paths = allGroupPaths.slice();
+                    flashStatus(excluded ? '↩ 已恢复该产品，点击保存生效' : '− 已排除该产品，点击保存生效');
                 }
             });
         });
@@ -283,7 +312,9 @@
 
             PS.initLeftTree($managerRoot, {
                 onInit: function(tree) { groupTree = tree; },
-                onSelect: function(paths) { allGroupPaths = paths; }
+                onSelect: function(paths) {
+                    allGroupPaths = paths.concat(exclusionsCoveredBy(allGroupPaths, paths));
+                }
             });
 
             if (typeof window.setupResizableTreeContainer === 'function' && !categoryTreeSizer) {

@@ -66,6 +66,20 @@
         return _api('PUT', '/api/product-groups/' + encodeURIComponent(oldName) + '/rename', {name: newName});
     }
 
+    function isExclusionPath(path) {
+        return typeof path === 'string' && path.charAt(0) === '-';
+    }
+
+    function negativeProductPath(parentPath, productName) {
+        var basePath = parentPath.slice(-10) === '/_products' ? parentPath : parentPath + '/_products';
+        return '-' + basePath + '/' + productName;
+    }
+
+    function formatVolume(value) {
+        if (value == null || isNaN(Number(value))) return '—';
+        return Number(value).toLocaleString('zh-CN', {maximumFractionDigits: 0});
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     /**
@@ -313,9 +327,10 @@
             if (isExp) {
                 html += '<div class="pg-exp-paths" style="padding-top:6px;">';
                 paths.forEach(function(path, pi) {
+                    var excludedPath = isExclusionPath(path);
                     html += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
-                    html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
-                    html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
+                    html += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:' + (excludedPath ? '#fff3f3' : '#f0f2f5') + ';cursor:' + (excludedPath ? 'default' : 'pointer') + ';font-size:12px;font-family:monospace;word-break:break-word;">';
+                    html += '<span style="flex:1;min-width:0;">' + _escHtml(path) + (excludedPath ? ' <span style="font-family:sans-serif;color:#b42318;font-size:10px;">已排除</span>' : '') + '</span>';
                     if (mode !== 'readonly' && mode !== 'import' && (isSel || isPlaceholderSelected) && !isFromGroup) {
                         html += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                     }
@@ -386,9 +401,10 @@
                     if (item && item.paths && item.paths.length) {
                         var ph = '<div class="pg-exp-paths" style="padding-top:6px;">';
                         item.paths.forEach(function(path, pi) {
+                            var excludedPath = isExclusionPath(path);
                             ph += '<div class="pg-exp-path-item" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" data-fromgroup="' + (item._fromGroup ? '1' : '0') + '" style="border:1px solid #e1e4e8;border-radius:4px;margin-bottom:4px;overflow:hidden;">';
-                            ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:#f0f2f5;cursor:pointer;font-size:12px;font-family:monospace;word-break:break-word;">';
-                            ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + '</span>';
+                            ph += '<div class="pg-exp-path-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:' + (excludedPath ? '#fff3f3' : '#f0f2f5') + ';cursor:' + (excludedPath ? 'default' : 'pointer') + ';font-size:12px;font-family:monospace;word-break:break-word;">';
+                            ph += '<span style="flex:1;min-width:0;">' + _escHtml(path) + (excludedPath ? ' <span style="font-family:sans-serif;color:#b42318;font-size:10px;">已排除</span>' : '') + '</span>';
                             if (mode !== 'readonly' && mode !== 'import' && !!selected[name] && !item._fromGroup) {
                                 ph += '<button class="pg-exp-path-del" data-name="' + _escHtml(name) + '" data-path="' + _escHtml(path) + '" data-pi="' + pi + '" title="删除路径" style="background:none;border:none;color:#d00;cursor:pointer;font-size:12px;padding:1px 4px;margin-left:6px;flex-shrink:0;line-height:1;"><i class="fas fa-times"></i></button>';
                             }
@@ -433,18 +449,43 @@
             e.stopPropagation();
             var $hdr = $(this);
             var path = $hdr.closest('.pg-exp-path-item').data('path');
+            if (isExclusionPath(path)) return;
+            var groupName = $hdr.closest('.pg-exp-item').data('name');
+            var item = null;
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].name === groupName) { item = items[i]; break; }
+            }
+            var currentPaths = item && item.paths ? item.paths : [];
+            var canExclude = mode === 'manage' && !!selected[groupName] && !(item && item._fromGroup);
             var $prods = $hdr.siblings('.pg-exp-path-prods');
             if ($prods.is(':visible')) {
                 $prods.slideUp(150);
                 return;
             }
             $prods.html('加载中...').slideDown(150);
-            $.get('/get_products', { path: path })
+            $.get('/get_products', { path: path, include_volume_stats: mode === 'manage' ? 'true' : 'false' })
                 .done(function(data) {
                     if (data && data.length) {
                         var h = '<div style="font-size:12px;">';
+                        if (mode === 'manage') {
+                            h += '<div style="display:grid;grid-template-columns:minmax(110px,1fr) 100px 110px 96px 60px;gap:8px;padding:3px 0;color:#667085;font-size:10px;border-bottom:1px solid #e5e7eb;">'
+                                + '<span>产品</span><span>最近日成交量</span><span>近1年日均</span><span>近1年零量日</span><span>操作</span></div>';
+                        }
                         data.forEach(function(prod) {
-                            h += '<div style="padding:2px 0;">' + _escHtml(prod.title || prod.name || '') + (prod.desc ? ' <span style="color:#888;font-size:10px;">' + _escHtml(prod.desc) + '</span>' : '') + '</div>';
+                            var productName = prod.product_name || prod.title || prod.name || '';
+                            var exclusionPath = negativeProductPath(path, productName);
+                            var excluded = currentPaths.indexOf(exclusionPath) !== -1;
+                            if (mode === 'manage') {
+                                h += '<div class="pg-product-liquidity-row" data-exclusion="' + _escHtml(exclusionPath) + '" data-excluded="' + (excluded ? '1' : '0') + '" style="display:grid;grid-template-columns:minmax(110px,1fr) 100px 110px 96px 60px;gap:8px;align-items:center;padding:4px 0;' + (excluded ? 'color:#98a2b3;text-decoration:line-through;' : '') + '">'
+                                    + '<span title="' + _escHtml(prod.desc || '') + '">' + _escHtml(productName) + '</span>'
+                                    + '<span>' + formatVolume(prod.latest_volume) + '</span>'
+                                    + '<span>' + formatVolume(prod.average_daily_volume_1y) + '</span>'
+                                    + '<span>' + (prod.zero_volume_days_1y == null ? '—' : _escHtml(prod.zero_volume_days_1y)) + '</span>'
+                                    + (canExclude ? '<button type="button" class="pg-product-exclusion-btn" style="padding:2px 5px;border:1px solid ' + (excluded ? '#1570ef' : '#d92d20') + ';border-radius:4px;background:#fff;color:' + (excluded ? '#1570ef' : '#d92d20') + ';cursor:pointer;font-size:10px;text-decoration:none;">' + (excluded ? '恢复' : '排除') + '</button>' : '<span></span>')
+                                    + '</div>';
+                            } else {
+                                h += '<div style="padding:2px 0;">' + _escHtml(productName) + (prod.desc ? ' <span style="color:#888;font-size:10px;">' + _escHtml(prod.desc) + '</span>' : '') + '</div>';
+                            }
                         });
                         h += '</div>';
                         $prods.html(h);
@@ -455,6 +496,20 @@
                 .fail(function() {
                     $prods.html('<span style="color:#d00;">加载失败</span>');
                 });
+        });
+
+        $container.off('click.pgexp', '.pg-product-exclusion-btn').on('click.pgexp', '.pg-product-exclusion-btn', function(e) {
+            e.stopPropagation();
+            var $button = $(this);
+            var $row = $button.closest('.pg-product-liquidity-row');
+            var exclusionPath = $row.data('exclusion');
+            var excluded = String($row.data('excluded')) === '1';
+            var groupName = $button.closest('.pg-exp-item').data('name');
+            $row.data('excluded', excluded ? '0' : '1')
+                .css({color: excluded ? '' : '#98a2b3', textDecoration: excluded ? '' : 'line-through'});
+            $button.text(excluded ? '排除' : '恢复')
+                .css({borderColor: excluded ? '#d92d20' : '#1570ef', color: excluded ? '#d92d20' : '#1570ef'});
+            if (opts.onToggleProductExclusion) opts.onToggleProductExclusion(groupName, exclusionPath, excluded);
         });
 
         // 保存图标

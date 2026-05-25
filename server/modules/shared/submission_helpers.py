@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import server.services.runtime_state as runtime_state
+from server.modules.products.product_path_selection import resolve_selection_products
 from server.services.runtime_state import factor_testers_lock
-from server.services.product_tree import find_node_by_path, get_minimal_paths, tree
+from server.services.product_tree import tree
 
 
 def tester_to_dict(t):
@@ -23,17 +24,8 @@ def tester_to_dict(t):
 
 
 def resolve_products_from_paths(raw_paths: list[str]):
-    """Return (minimal_paths, deduped_sorted_products) from selected tree paths."""
-    selected_paths = get_minimal_paths(raw_paths or [])
-    selected_products = []
-    for path in selected_paths:
-        node = find_node_by_path(tree, path.split('/'))
-        if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
-            selected_products.extend(node['$OBJECTS$'])
-        else:
-            selected_products.append(node)
-    selected_products = sorted(list(set(selected_products)))
-    return selected_paths, selected_products
+    """Return canonical paths and included products after explicit exclusions."""
+    return resolve_selection_products(raw_paths, tree)
 
 
 def valid_testers(page_uuid=None):

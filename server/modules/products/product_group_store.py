@@ -1,7 +1,8 @@
 """Product group (产品组) storage helpers.
 
 A product_group is a named collection of tree paths: { name, paths: [...], updated_at }.
-Paths are tree node keys (e.g. "单因子测试/农产品/豆类"), resolved to products on read.
+Paths are tree node keys (e.g. "单因子测试/农产品/豆类"). Negative leaf
+paths (e.g. "-单因子测试/农产品/豆类/_products/RB.SHF") exclude products.
 Storage: {user_data}/product_groups.json  (single JSON array per user)
 """
 from __future__ import annotations
@@ -10,32 +11,16 @@ import json
 import os
 import time
 
-from server.services.product_tree import get_minimal_paths
+from server.modules.products.product_path_selection import resolve_selection_products
 from server.services.user_storage import user_data_dir
 
 
 def _resolve_group_products(paths: list) -> list:
     """Resolve tree paths to deduped product objects. Returns product name strings."""
     from server.modules.shared.price_services import cached_product_tree
-    from server.services.product_tree import find_node_by_path
-    minimal = get_minimal_paths([p for p in paths if isinstance(p, str) and p.strip()])
     tree = cached_product_tree().tree
-    products = []
-    for path in minimal:
-        node = find_node_by_path(tree, path.split('/'))
-        if isinstance(node, dict) and '$OBJECTS$' in node and isinstance(node['$OBJECTS$'], list):
-            products.extend(node['$OBJECTS$'])
-        elif node is not None:
-            products.append(node)
-    # 去重并返回产品名
-    seen = set()
-    result = []
-    for p in products:
-        name = getattr(p, 'name', str(p))
-        if name not in seen:
-            seen.add(name)
-            result.append(name)
-    return sorted(result)
+    _, products = resolve_selection_products(paths, tree)
+    return [getattr(product, 'name', str(product)) for product in products]
 
 
 def _groups_path(username: str) -> str:
