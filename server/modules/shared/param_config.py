@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from tools.parameters import TypeParam
+
 
 def _clean_factor_alias(value: str) -> str:
     """Remove |$F:xxx suffix from a nested factor alias string.
@@ -19,12 +21,35 @@ def _clean_factor_alias(value: str) -> str:
     return re.sub(r'\|?\$F:[^|]+', '', value)
 
 
+def _coerce_transport_value(param, value):
+    """Convert text controls for numeric TypeParam values before validation."""
+    if not isinstance(param, TypeParam) or not isinstance(value, str):
+        return value
+
+    types = param._typ if isinstance(param._typ, tuple) else (param._typ,)
+    default_type = type(getattr(param, 'default_value', None))
+    try:
+        if default_type is int and int in types:
+            return int(value.strip())
+        if float in types:
+            return float(value.strip())
+        if int in types:
+            return int(value.strip())
+    except ValueError:
+        return value
+    return value
+
+
 def normalize_param_rows(factor_family, params_list: list) -> list:
     normalized_rows = []
     for params in params_list:
         if not isinstance(params, dict):
             raise ValueError('参数行必须是对象')
         normalized = factor_family._normalize_param_kwargs(**params)
+        normalized = {
+            alias: _coerce_transport_value(factor_family.params_dict[alias], value)
+            for alias, value in normalized.items()
+        }
         factor_family._check_in_space(**normalized)
         row = {}
         for p in factor_family.params:

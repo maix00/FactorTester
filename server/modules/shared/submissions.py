@@ -24,6 +24,49 @@ from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
 
 
+def _trailing_year_volume_stats(product):
+    """Return daily-volume liquidity summaries relative to the latest data date."""
+    import pandas as pd
+    from tools.data.DataColumn import DataColumn
+
+    empty_result = {
+        'latest_volume': None,
+        'average_daily_volume_1y': None,
+        'zero_volume_days_1y': None,
+        'volume_stats_as_of': None,
+    }
+    try:
+        data = product.get_slices(
+            target_cols=DataColumn.VOLUME,
+            time_col='DAY1',
+            data_freq='DAY1',
+            copy=False,
+        )
+    except Exception:
+        return empty_result
+    volume_column = DataColumn.VOLUME.name
+    if data.empty or volume_column not in data.columns:
+        return empty_result
+
+    if isinstance(data.index, pd.MultiIndex):
+        date_index = pd.to_datetime(data.index.get_level_values('DAY1' if 'DAY1' in data.index.names else 0))
+    else:
+        date_index = pd.to_datetime(data.index)
+    daily = pd.Series(pd.to_numeric(data[volume_column], errors='coerce').values, index=date_index)
+    daily = daily.groupby(daily.index.normalize()).sum(min_count=1).dropna().sort_index()
+    if daily.empty:
+        return empty_result
+
+    latest_date = daily.index[-1]
+    trailing = daily[daily.index >= latest_date - pd.DateOffset(years=1)]
+    return {
+        'latest_volume': float(daily.iloc[-1]),
+        'average_daily_volume_1y': float(trailing.mean()),
+        'zero_volume_days_1y': int((trailing <= 0).sum()),
+        'volume_stats_as_of': latest_date.strftime('%Y-%m-%d'),
+    }
+
+
 @shared_bp.route('/api/list_submissions')
 @route_guard
 def list_submissions():
@@ -39,6 +82,7 @@ def get_products():
         return jsonify([])
     # 叶节点 checkbox 默认 True，可通过 ?checkbox=false 关闭
     leaf_checkbox = request.args.get('checkbox', 'true').lower() != 'false'
+    include_volume_stats = request.args.get('include_volume_stats', 'false').lower() == 'true'
     from server.modules.shared.price_services import cached_product_tree
     search_tree = cached_product_tree().tree
     node_path = original_path[:-10] if original_path.endswith('/_products') else original_path
@@ -74,6 +118,8 @@ def get_products():
                 from tools.products.product_utils import get_contract_desc
                 prod_desc = get_contract_desc(prod_name)
                 node_data['desc'] = prod_desc
+        if include_volume_stats:
+            node_data.update(_trailing_year_volume_stats(prod))
         child_nodes.append(node_data)
     return jsonify(child_nodes)
 

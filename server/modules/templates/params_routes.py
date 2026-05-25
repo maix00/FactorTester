@@ -153,22 +153,11 @@ def replace_params():
     ff_alias = data.get('factor_family_alias')
     params_list = data.get('params_list', [])
     factor_family = get_factor_family_instance(ff_alias)
+    from server.modules.shared.param_config import normalize_param_rows
+
     seen = set()
     new_params_list = []
-    for params in params_list:
-        factor_family._check_in_space(**params)
-        new_params = {
-            param.alias: param._value_space.rectify(params[param.alias])
-            if param.alias in params
-            else param.default_value
-            for param in factor_family.params
-        }
-        # Clean $F suffix from FactorParam string values
-        from server.modules.shared.param_config import _clean_factor_alias
-        for param in factor_family.params:
-            v = new_params.get(param.alias)
-            if isinstance(v, str) and '|$F:' in v:
-                new_params[param.alias] = _clean_factor_alias(v)
+    for new_params in normalize_param_rows(factor_family, params_list):
         key = factor_family.get_alias(**new_params)
         if key not in seen:
             seen.add(key)
