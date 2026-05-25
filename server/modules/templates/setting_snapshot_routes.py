@@ -4,7 +4,9 @@ from flask import jsonify, request
 
 from server.modules.templates import templates_bp
 from server.modules.templates.common import SINGLE_FACTOR_SETTING_TEMPLATE_KIND, load_template_list, new_template_id, save_template_list
+from server.modules.templates.snapshot_product_groups import refresh_template_product_group_paths
 from server.modules.templates.summary import build_snapshot_summary
+from server.modules.products.product_group_store import load_product_groups
 from server.services.http_auth import login_required
 from server.services.runtime_state import get_user_file_lock, require_user
 
@@ -62,6 +64,7 @@ def get_single_factor_setting_template(factor_family_alias, tpl_id):
     template = next((t for t in templates if t['id'] == tpl_id), None)
     if not template:
         return jsonify({'success': False, 'error': '模板不存在'}), 404
+    template = refresh_template_product_group_paths(template, load_product_groups(username))
     return jsonify({'success': True, 'template': template})
 
 
