@@ -303,20 +303,24 @@ class FactorExpr:
 
     def tree_repr(self, indent: int = 2, _level: int = 0) -> str:
         """以树状格式打印表达式。"""
-        pad = ' ' * (indent * _level)
-        line = f"{pad}{self._repr_head()}"
-        operands = list(getattr(self, '_operands', ()))
-        if not operands:
-            return line
+        branch_indent = max(indent, 2)
+        horizontal = '─' * (branch_indent - 1)
+        lines = [(' ' * (indent * _level)) + self._repr_head()]
 
-        child_lines: List[str] = []
-        for op in operands:
-            if isinstance(op, FactorExpr):
-                child_lines.append(op.tree_repr(indent=indent, _level=_level + 1))
-            else:
-                child_pad = ' ' * (indent * (_level + 1))
-                child_lines.append(f"{child_pad}{op!r}")
-        return '\n'.join([line, *child_lines])
+        def append_children(node: 'FactorExpr', prefix: str) -> None:
+            operands = list(getattr(node, '_operands', ()))
+            for index, operand in enumerate(operands):
+                is_last = index == len(operands) - 1
+                connector = ('└' if is_last else '├') + horizontal + ' '
+                if isinstance(operand, FactorExpr):
+                    lines.append(f"{prefix}{connector}{operand._repr_head()}")
+                    extension = (' ' if is_last else '│') + (' ' * branch_indent)
+                    append_children(operand, prefix + extension)
+                else:
+                    lines.append(f"{prefix}{connector}{operand!r}")
+
+        append_children(self, '')
+        return '\n'.join(lines)
 
     @property
     def is_leaf_ref(self) -> bool:

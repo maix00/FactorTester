@@ -21,6 +21,26 @@ def test_structural_key_changes_when_formula_changes():
     assert _expr()._structural_key() != _expr(seed=2)._structural_key()
 
 
+def test_tree_repr_shows_nested_branch_connectors():
+    expr = CompositeExpr(
+        "mul",
+        CompositeExpr(
+            "sub",
+            ColumnRef(DataColumn.CLOSE),
+            ColumnRef(DataColumn.OPEN),
+        ),
+        ColumnRef(DataColumn.VOLUME),
+    )
+
+    assert expr.tree_repr() == (
+        "mul\n"
+        "├─ sub\n"
+        "│  ├─ ColumnRef[CLOSE]\n"
+        "│  └─ ColumnRef[OPEN]\n"
+        "└─ ColumnRef[VOLUME]"
+    )
+
+
 def test_intermediate_name_collision_is_detectable():
     class MockFactor:
         _intermediate_factor_data = {}
