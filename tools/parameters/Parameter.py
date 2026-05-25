@@ -298,6 +298,10 @@ class FactorParam(TypeParam):
             rectify=rectify,
             alias=alias_value,
         )
+        # FactorParam inherits from TypeParam but constructs its own ValueSpace;
+        # set _typ so TypeParam-aware helpers (e.g. _coerce_transport_value) can
+        # inspect the accepted types.
+        self._typ = (FactorExpr, DataColumnParam, str, dict, type(None))
         Parameter.__init__(self, alias=alias, value_space=space, default_value=default_value, *args, **kwargs)
 
 
