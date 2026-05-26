@@ -546,10 +546,20 @@ def _rolling_argmaxmin(
     trunc_end : (n_rows-window+1, n_cols) ndarray or None
         每行每列的截断终点偏移（0 = 窗口最左），None = window-1。
     """
-    if window < 2:
-        raise ValueError(f"window must be >= 2, got {window}")
+    if window < 1:
+        raise ValueError(f"window must be >= 1, got {window}")
 
     n_rows = len(df)
+
+    # window=1 快速路径：位置始终为 0
+    if window == 1:
+        result = np.zeros((n_rows, df.shape[1]))
+        if normalize:
+            result[:] = np.nan  # window=1 归一化无意义
+        else:
+            result[0, :] = np.nan  # 第一行不足窗口
+        return pd.DataFrame(result, index=df.index, columns=df.columns)
+
     if n_rows < window:
         return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
                             index=df.index, columns=df.columns)
