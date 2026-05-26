@@ -430,10 +430,15 @@ class RollingOp(OperandExpr):
             products=[p for p in ctx.products if p in data_vals[0].columns])
 
         # ── session-aware rolling path ──
+        # Only use positional (per-row) aggregation when we genuinely need
+        # session skipping — i.e. products have different trading sessions.
+        # For same_session panels (even with missing bars), pandas rolling is
+        # correct and dramatically faster (C-optimised).
         timeline = getattr(ctx, 'panel_timeline', None)
         use_positional = (
             timeline is not None
-            and not timeline.dense_same_session
+            and timeline.schedule_complete
+            and bool(timeline.same_session) is False
             and common
             and isinstance(common_periods, int)
             and common_periods >= 1
