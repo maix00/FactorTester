@@ -356,15 +356,15 @@ class FactorExpr:
     def get_ref_types(self, typ: type, leaf_only: bool = False) -> Set[Any]:
         """收集表达式树中的所有指定类型的引用节点。"""
         result: Set[Any] = set()
-        seen: set[int] = set()  # 用 id 去重（DAG 中同节点实例不重复遍历）
+        seen: set[tuple] = set()  # 用 structural_key 去重
         stack: list[FactorExpr] = [self]
 
         while stack:
             node = stack.pop()
-            nid = id(node)
-            if nid in seen:
+            sk = node._structural_key()
+            if sk in seen:
                 continue
-            seen.add(nid)
+            seen.add(sk)
             ops = getattr(node, '_operands', [])
             ops_list = list(ops)
             is_leaf = node.is_leaf_ref
