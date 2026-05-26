@@ -322,12 +322,19 @@ class Factor(UniqueObject, FactorExpr):
 
                 cols = list(result.columns)
                 if cols and preloaded:
+                    # 建立 列名 → df_index 的查找表（preloaded 键为 (Product, freq)，需映射到列名）
+                    _colname_to_dfindex: dict[str, pd.Index] = {}
+                    for (prod, _freq), df_data in preloaded.items():
+                        if _freq == freq.name and hasattr(prod, 'name') and hasattr(df_data, 'index'):
+                            _colname_to_dfindex[prod.name] = df_data.index
+
                     mask_np = np.zeros((len(panel_ts), len(cols)), dtype=bool)
                     for j, p in enumerate(cols):
-                        df = preloaded.get((p, freq.name))
-                        if df is None or not hasattr(df, "index"):
-                            continue
-                        mask_np[:, j] = np.asarray(panel_ts.isin(df.index), dtype=bool)
+                        df_idx = _colname_to_dfindex.get(p)
+                        if df_idx is not None:
+                            mask_np[:, j] = np.asarray(panel_ts.isin(df_idx), dtype=bool)
+                        # else: 某些列可能是用户过滤出的（如通过 CrossSectionIC），不在 preloaded 中，
+                        # 保持 False，下游会回退到 returns 推断
                     r.data_present_mask = pd.DataFrame(mask_np, index=result.index, columns=result.columns)
                     r.data_present_all = bool(mask_np.all())
                 else:
