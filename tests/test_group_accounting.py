@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from tools.factors.tests.single_factor_test.group.core import build_target_amounts
+from tools.factors.tests.single_factor_test.group.core import (
+    build_multi_session_target_amounts,
+    build_target_amounts,
+)
 
 
 def test_each_period_reweights_members_equally():
@@ -33,3 +36,28 @@ def test_target_amounts_preserve_group_wealth():
         "recycle",
     )
     np.testing.assert_allclose(targets.sum(axis=1), [1.0, 1.0])
+
+
+def test_multi_session_targets_vectorize_preserved_and_recycled_holdings():
+    targets = build_multi_session_target_amounts(
+        np.array([[False, True, True, False], [True, False, False, True]]),
+        np.array([[0.4, 0.6, 0.0, 0.0], [0.0, 0.5, 0.5, 0.0]]),
+        np.array([1.0, 1.0]),
+        np.array([False, True, True, True]),
+        np.array([0.0, 0.1, 0.0, 0.0]),
+    )
+
+    np.testing.assert_allclose(targets[0], [0.4, 0.6, 0.0, 0.0])
+    np.testing.assert_allclose(targets[1], [0.0, 0.0, 0.0, 1.0])
+
+
+def test_multi_session_initial_period_funds_tradable_members():
+    targets = build_multi_session_target_amounts(
+        np.array([[True, False, True]]),
+        np.zeros((1, 3)),
+        np.array([1.0]),
+        np.array([True, False, True]),
+        np.zeros(3),
+    )
+
+    np.testing.assert_allclose(targets, [[0.5, 0.0, 0.5]])
