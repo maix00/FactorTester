@@ -220,6 +220,7 @@ class Factor(UniqueObject, FactorExpr):
                             except Exception:
                                 return
                         desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
+                    desired_freq.add(self.freq)
                     valid_products: List[Product] = []
                     available_freqs_set: Optional[Set[DataFreq]] = None
                     for p in products:
