@@ -546,10 +546,20 @@ def _rolling_argmaxmin(
     trunc_end : (n_rows-window+1, n_cols) ndarray or None
         每行每列的截断终点偏移（0 = 窗口最左），None = window-1。
     """
-    if window < 2:
-        raise ValueError(f"window must be >= 2, got {window}")
+    if window < 1:
+        raise ValueError(f"window must be >= 1, got {window}")
 
     n_rows = len(df)
+
+    # window=1 快速路径：位置始终为 0
+    if window == 1:
+        result = np.zeros((n_rows, df.shape[1]))
+        if normalize:
+            result[:] = np.nan  # window=1 归一化无意义
+        else:
+            result[0, :] = np.nan  # 第一行不足窗口
+        return pd.DataFrame(result, index=df.index, columns=df.columns)
+
     if n_rows < window:
         return pd.DataFrame(np.full((n_rows, df.shape[1]), np.nan),
                             index=df.index, columns=df.columns)
@@ -574,10 +584,15 @@ def _rolling_argmaxmin(
     reversed_view = windows[..., ::-1]
 
     if op in ('rolling_argmax', 'rolling_argmax_raw'):
-        # nanargmax: NaN 被忽略，全 NaN → 0（会被 nan_rows 覆盖）
-        pos_matrix = np.nanargmax(reversed_view, axis=-1)
+        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)  # (n, n_cols)
+        safe_view = np.where(np.isnan(reversed_view), -np.inf, reversed_view)
+        pos_matrix = np.nanargmax(safe_view, axis=-1)
+        pos_matrix[all_nan_cols] = 0  # 全 NaN 列填充 0，后续被 nan_rows 覆盖
     elif op in ('rolling_argmin', 'rolling_argmin_raw'):
-        pos_matrix = np.nanargmin(reversed_view, axis=-1)
+        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)
+        safe_view = np.where(np.isnan(reversed_view), np.inf, reversed_view)
+        pos_matrix = np.nanargmin(safe_view, axis=-1)
+        pos_matrix[all_nan_cols] = 0
     else:
         raise ValueError(f"Invalid op: {op}")
 
