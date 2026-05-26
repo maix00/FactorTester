@@ -82,7 +82,7 @@ class MmRet(FactorFamily):
 
 - **签名脆弱性**：修改基类节点的 `evaluate()` 签名时需同步更新所有调用方（`RollingOp`、`ShiftOp` 等）— 不匹配导致运行时 `TypeError`
 - **命名冲突**：`as_intermediate(name)` 要求名称唯一；冲突直接报错而非自动加后缀，避免数据查找歧义
-- **多品种解析**：`Timedelta` / `DataFreq` 窗口必须按品种解析（不同品种 `day_periods` 不同）；用第一个品种的 `DataMeta` 统一转换会产生错误结果
+- **多品种解析**：对于密集/同会话面板，`Timedelta` / `DataFreq` 窗口可按产品可用的 bars 解析；对于不同交易时段品种的统一面板，本条原有的按各产品 `day_periods` 解析规则已由 [ADR-007](007-session-aware-window-semantics.md) 取代
 - **缓存过期**：纯表达式的全局中间缓存可能在不同品种集合间保留旧 `source_table`；重用时必须刷新
 - **类标记继承**：基类的 `hide` 标记若通过 `getattr` 继承，会意外隐藏具体子类；仅基类标记须用 `cls.__dict__` 检查
 
