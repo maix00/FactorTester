@@ -97,7 +97,7 @@ def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     volume_window = volume.rolling(window)
     peak = volume_window.argmax_raw()
     rise = volume_window.truncate(0, peak - 1).argmin_raw()
-    fall = volume_window.truncate(peak + 1, volume_window.size - 1).argmin_raw()
+    fall = volume_window.truncate(peak + 1, volume_window.bars - 1).argmin_raw()
     rise_close = close.rolling(window).truncate(rise, rise).min()
     fall_close = close.rolling(window).truncate(fall, fall).min()
     expr = (rise_close - fall_close) / (fall - rise + 1e-10)
@@ -110,11 +110,11 @@ def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     assert not result.empty
 
 
-def test_window_size_preserves_timedelta_dependency_for_frequency_inference():
+def test_window_bars_preserves_timedelta_dependency_for_frequency_inference():
     window = WindowParam("FrequencyWindow", default_value="9m")
     volume = _FrameExpr(pd.DataFrame({"P": [1.0]}))
     volume_window = volume.rolling(window)
-    expr = volume_window.truncate(0, volume_window.size - 1).argmin_raw()
+    expr = volume_window.truncate(0, volume_window.bars - 1).argmin_raw()
 
     resolved = expr.resolve(param_values={"FrequencyWindow": pd.Timedelta("9m")})
 

@@ -68,9 +68,9 @@ class RollingExpr(FactorExpr):
         return 'rolling'
 
     @property
-    def size(self) -> 'WindowExpr':
+    def bars(self) -> 'WindowBarsExpr':
         """将窗口长度解析为可参与截断边界运算的 bar 数表达式。"""
-        return WindowExpr(self._window)
+        return WindowBarsExpr(self._window)
 
     # ── 截断 ──
 
@@ -193,7 +193,7 @@ class RollingExpr(FactorExpr):
         return 'rolling'
 
 
-class WindowExpr(FactorExpr):
+class WindowBarsExpr(FactorExpr):
     """滚动窗口在当前数据频率下对应的 bar 数。"""
 
     def __init__(self, window: FactorExpr):
@@ -205,10 +205,10 @@ class WindowExpr(FactorExpr):
 
     @property
     def op_name(self) -> str:
-        return 'window_size'
+        return 'window_bars'
 
-    def resolve(self, *args, **kwargs) -> 'WindowExpr':
-        return WindowExpr(self.window.resolve(*args, **kwargs))
+    def resolve(self, *args, **kwargs) -> 'WindowBarsExpr':
+        return WindowBarsExpr(self.window.resolve(*args, **kwargs))
 
     def _evaluate(self, ctx: EvaluateContext) -> int:
         value = self.window.value if isinstance(self.window, ConstExpr) else self.window.evaluate(ctx=ctx)
@@ -222,10 +222,10 @@ class WindowExpr(FactorExpr):
         return f'\\mathrm{{Bars}}\\left({window_latex}\\right)'
 
     def _get_alias(self) -> str:
-        return f'WIN_{self.window._get_alias()}'
+        return f'BARS_{self.window._get_alias()}'
 
     def _structural_key(self) -> tuple:
-        return ('WindowExpr', self.window._structural_key())
+        return ('WindowBarsExpr', self.window._structural_key())
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -614,4 +614,3 @@ def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tup
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 5: 横截面算子
 # ═════════════════════════════════════════════════════════════════════════════
-
