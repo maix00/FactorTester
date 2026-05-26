@@ -201,24 +201,20 @@ class FactorExpr:
             node: 每个唯一的 intermediate 节点（按 structural_key 去重）。
         """
         seen: set[tuple] = set()
-        stack: list[FactorExpr] = [self]
-        post: list[FactorExpr] = []
 
-        while stack:
-            node = stack.pop()
+        def visit(node: 'FactorExpr') -> 'Iterator[FactorExpr]':
             sk = node._structural_key()
             if sk in seen:
-                continue
+                return
             seen.add(sk)
 
-            post.append(node)
-            for opnd in reversed(list(getattr(node, '_operands', ()))):
-                stack.append(opnd)
+            for operand in getattr(node, '_operands', ()):
+                yield from visit(operand)
 
-        # 后序遍历：子节点先产出
-        for node in reversed(post):
             if node._is_intermediate:
                 yield node
+
+        yield from visit(self)
 
     def to_latex(self, final_name: str = 'X') -> str:
         """生成含 intermediate 分行定义的 LaTeX。
