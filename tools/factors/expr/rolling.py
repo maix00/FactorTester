@@ -574,10 +574,15 @@ def _rolling_argmaxmin(
     reversed_view = windows[..., ::-1]
 
     if op in ('rolling_argmax', 'rolling_argmax_raw'):
-        # nanargmax: NaN 被忽略，全 NaN → 0（会被 nan_rows 覆盖）
-        pos_matrix = np.nanargmax(reversed_view, axis=-1)
+        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)  # (n, n_cols)
+        safe_view = np.where(np.isnan(reversed_view), -np.inf, reversed_view)
+        pos_matrix = np.nanargmax(safe_view, axis=-1)
+        pos_matrix[all_nan_cols] = 0  # 全 NaN 列填充 0，后续被 nan_rows 覆盖
     elif op in ('rolling_argmin', 'rolling_argmin_raw'):
-        pos_matrix = np.nanargmin(reversed_view, axis=-1)
+        all_nan_cols = np.all(np.isnan(reversed_view), axis=-1)
+        safe_view = np.where(np.isnan(reversed_view), np.inf, reversed_view)
+        pos_matrix = np.nanargmin(safe_view, axis=-1)
+        pos_matrix[all_nan_cols] = 0
     else:
         raise ValueError(f"Invalid op: {op}")
 
