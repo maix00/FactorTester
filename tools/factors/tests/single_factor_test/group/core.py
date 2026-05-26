@@ -266,8 +266,8 @@ def test_by_group_single_factor(
     # - signal NaN 可能是用户刻意过滤 universe
     # - union 对齐也会引入插入行 NaN
     #
-    # 优先使用 FactorRunResult.data_present_mask（由 Factor.evaluate 在预加载/对齐时生成）；
-    # 若不可用，则回退到 returns 的可用性推断（有限但比 signal NaN 更合理）。
+    # 使用 FactorRunResult.data_present_mask（由 Factor.evaluate 在预加载/对齐时生成）。
+    # 必须可用，不可用时抛异常。
     present_src: Optional[pd.DataFrame] = None
     if r is not None and hasattr(r, "data_present_mask"):
         try:
@@ -333,16 +333,19 @@ def test_by_group_single_factor(
             present_src = present_src.iloc[trim_start:trim_end]
         present_np = present_src.to_numpy(dtype=bool)
     else:
-        # 回退：用 returns 可用性近似表示“是否有原始 bar”
-        present_np = np.isfinite(returns_np) & (returns_np > -1.0)
+        raise ValueError(f"{factor.alias}: data_present_mask 不可用，无法进行分组测试。")
 
     # 排除“首部未上市/未有数据”的影响：对每列，把第一个 True 之前的 False 视为 True
     # （这些 False 不应触发多时段策略）
     col_has_any_present = np.asarray(present_np.any(axis=0), dtype=bool)
+    # 对于从头到尾都没有数据的列（col_has_any_present=False），视为"始终不存在"，
+    # 强制设 True 以避免触发多时段策略（这些品种直接跳过，不在 valid_cols 中参与交易）
     first_present = np.argmax(present_np, axis=0)  # 全 False 列会得到 0，但会被 col_has_any_present 屏蔽
     row_idx = np.arange(T, dtype=int)[:, np.newaxis]
     head_missing = (row_idx < first_present[np.newaxis, :]) & col_has_any_present[np.newaxis, :]
     present_filled = np.where(head_missing, True, present_np)
+    # 全 False 列：视为始终不存在，强制填 True（这些品种不会在 valid_cols 中参与交易）
+    present_filled[:, ~col_has_any_present] = True
 
     _mixed_mask = np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
     multi_session_active = bool(_mixed_mask.any())
@@ -576,7 +579,7 @@ def test_by_group_single_factor(
         prev_end_amounts[ne_idx] = new_prev
 
     if multi_session_active:
-        print(f"[INFO] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
+        print(f"[WARN] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
     returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 

@@ -56,8 +56,8 @@ def run_ic_for_factor(
     tester: Any,
     params: Dict[str, Any],
     factor_list: List[Factor],
-) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame]:
-    """Run CrossSectionIC and return IC series/stats plus raw RE/FE intermediates."""
+) -> Tuple[List[Factor], pd.Series, pd.Series, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Run CrossSectionIC and return IC stats, FE/RE intermediates, and their source mask."""
     ic_family = CrossSectionIC()
     ic_factor = ic_family.get_factor(**params)
     ic_factor.clear()
@@ -84,6 +84,11 @@ def run_ic_for_factor(
 
     re_table = re_table.copy() if re_table is not None else pd.DataFrame()
     fe_table = fe_table.copy() if fe_table is not None else pd.DataFrame()
+    ic_run_result = tester._get_result(ic_factor)
+    data_present_mask = ic_run_result.data_present_mask.copy(deep=False)
 
-    return factor_list, ic_series, cast(pd.Series, stats), cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table)
-
+    return (
+        factor_list, ic_series, cast(pd.Series, stats),
+        cast(pd.DataFrame, re_table), cast(pd.DataFrame, fe_table),
+        cast(pd.DataFrame, data_present_mask),
+    )

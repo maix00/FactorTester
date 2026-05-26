@@ -40,6 +40,7 @@ class EvaluateContext(NamedTuple):
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
     start_calc_point: Optional[Any] = None  # pd.Timestamp or None
+    run_result: Optional[Any] = None
 
 
 
@@ -164,12 +165,18 @@ class FactorExpr:
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
                 start_calc_point=kwargs.get('start_calc_point', None),
+                run_result=kwargs.get('run_result', None),
             )
         cache = ctx.cache
         sk = self._structural_key()
         if self._is_intermediate and cache is not None and sk in cache:
             return cache[sk]
         result = self._evaluate(ctx)
+        if isinstance(result, pd.DataFrame) and result.size > 0 and result.isna().all(axis=None):
+            # 全 NaN — 生成诊断信息向上抛，帮助前端定位问题节点
+            raise ValueError(
+                f"表达式节点计算结果全为 NaN：{type(self).__name__}({self._repr_head()})"
+            )
         if self._is_intermediate and cache is not None:
             cache[sk] = result
         # 全局求值进度：每次完成一个节点的实际计算后递增。
@@ -560,4 +567,3 @@ class FactorExpr:
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1.5: 多元算子基类
 # ═════════════════════════════════════════════════════════════════════════════
-
