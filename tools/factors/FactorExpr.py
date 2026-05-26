@@ -20,6 +20,7 @@ from tools.factors.expr import (
     EvaluateContext,
     PanelTimeline,
     build_panel_timeline,
+    shift_positions,
     # operands
     OperandExpr,
     # leaf

@@ -105,3 +105,51 @@ def _trading_days(index: pd.Index) -> pd.Index:
     if isinstance(index, pd.MultiIndex) and "DAY1" in index.names:
         return pd.Index(index.get_level_values("DAY1"), name="DAY1")
     return pd.Index(_timestamps(index).normalize(), name="DAY1")
+
+
+# ── session-aware shift lookup ──
+
+def shift_positions(
+    timeline: PanelTimeline,
+    periods: int,
+    data: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a DataFrame of lookup positions for session-aware shift(periods).
+
+    Each cell contains the integer row position of the value ``periods``
+    scheduled bars earlier for that product, or -1 when no such bar exists
+    (including when the source bar is scheduled but unobserved).
+
+    Pure intraday periods: count only ``scheduled_mask == True`` slots.
+    Day mixed periods: locate the trading-day boundary first, then apply
+    intraday remainder on ``scheduled_mask``.
+
+    On dense same-session panels this is *not* called — the caller uses the
+    standard pandas ``.shift(periods)`` fast path.
+    """
+    result = pd.DataFrame(-1, index=data.index, columns=data.columns, dtype=int)
+    scheduled = timeline.scheduled_mask.reindex(index=data.index, columns=data.columns, fill_value=False)
+    observed = timeline.observed_mask.reindex(index=data.index, columns=data.columns, fill_value=False)
+
+    for col in data.columns:
+        mask = scheduled[col].to_numpy(dtype=bool)
+        pos = np.arange(len(mask))
+        # -- find scheduled positions for each row --
+        scheduled_pos = np.where(mask)[0]
+        if len(scheduled_pos) == 0:
+            continue
+        # for each scheduled position, its ordinal index
+        ordinal_map = np.full(len(mask), -1, dtype=int)
+        ordinal_map[scheduled_pos] = np.arange(len(scheduled_pos))
+        for i in range(len(mask)):
+            if not mask[i]:
+                continue
+            target_ord = ordinal_map[i] - periods
+            if target_ord < 0:
+                continue
+            src_pos = scheduled_pos[target_ord]
+            # scheduled but unobserved → leave as -1 (=NaN in shift result)
+            if not observed[col].iloc[src_pos]:
+                continue
+            result.iloc[i, result.columns.get_loc(col)] = src_pos
+    return result
