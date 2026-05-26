@@ -172,9 +172,8 @@ class FactorExpr:
         result = self._evaluate(ctx)
         if isinstance(result, pd.DataFrame) and result.size > 0 and result.isna().all(axis=None):
             # 全 NaN — 生成诊断信息向上抛，帮助前端定位问题节点
-            latex = self._to_latex()
             raise ValueError(
-                f"表达式节点计算结果全为 NaN：{type(self).__name__} → {latex}"
+                f"表达式节点计算结果全为 NaN：{type(self).__name__}({self._repr_head()})"
             )
         if self._is_intermediate and cache is not None:
             cache[sk] = result
