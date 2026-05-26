@@ -40,6 +40,7 @@ class EvaluateContext(NamedTuple):
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
     start_calc_point: Optional[Any] = None  # pd.Timestamp or None
+    run_result: Optional[Any] = None
 
 
 
@@ -164,6 +165,7 @@ class FactorExpr:
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
                 start_calc_point=kwargs.get('start_calc_point', None),
+                run_result=kwargs.get('run_result', None),
             )
         cache = ctx.cache
         sk = self._structural_key()
@@ -565,4 +567,3 @@ class FactorExpr:
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1.5: 多元算子基类
 # ═════════════════════════════════════════════════════════════════════════════
-

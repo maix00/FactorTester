@@ -278,7 +278,8 @@ class Factor(UniqueObject, FactorExpr):
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
-                                     cache=_intermediate_cache, start_calc_point=start_calc_point)
+                                     cache=_intermediate_cache, start_calc_point=start_calc_point,
+                                     run_result=r if _tester is not None else None)
 
         # ── 2. 提取未对齐的原始数据 ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
@@ -307,38 +308,7 @@ class Factor(UniqueObject, FactorExpr):
             r = _tester._get_result(self)
             r.source_table = raw_data
             r.table = result
-
-            # ── 4.1 data_present_mask：只在首次（result 列是 Product 时）设置一次，不再更新 ──
-            # ColumnRef.evaluate 返回的 result.columns 是 Product 类型。
-            # IC 测试的 result 列是 ['IC'] 字符串，不满足条件，不会覆盖。
-            try:
-                _existing = getattr(r, 'data_present_mask', None)
-                _has_mask = isinstance(_existing, pd.DataFrame) and not _existing.empty
-                _is_product = len(result.columns) > 0 and isinstance(result.columns[0], Product)
-                if not _has_mask and _is_product:
-                    panel_index = result.index
-                    if isinstance(panel_index, pd.MultiIndex):
-                        panel_ts = pd.DatetimeIndex(panel_index.get_level_values(-1))
-                    else:
-                        panel_ts = pd.DatetimeIndex(panel_index)
-
-                    cols = list(result.columns)
-                    if cols and preloaded:
-                        _colname_to_dfindex: dict[str, pd.Index] = {}
-                        for (prod, _freq), df_data in preloaded.items():
-                            if _freq == freq.name and hasattr(prod, 'name') and hasattr(df_data, 'index'):
-                                _colname_to_dfindex[prod.name] = df_data.index
-
-                        mask_np = np.zeros((len(panel_ts), len(cols)), dtype=bool)
-                        for j, p in enumerate(cols):
-                            df_idx = _colname_to_dfindex.get(p)
-                            if df_idx is not None:
-                                mask_np[:, j] = np.asarray(panel_ts.isin(df_idx), dtype=bool)
-
-                        r.data_present_mask = pd.DataFrame(mask_np, index=result.index, columns=result.columns)
-                        r.data_present_all = bool(mask_np.all())
-            except Exception:
-                pass        else:
+        else:
             # 无 tester（如 CrossSectionIC 独立 evaluate）：写入 Factor 本地缓存
             self._source_data = raw_data
             self._data = result
