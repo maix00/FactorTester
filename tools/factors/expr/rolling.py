@@ -67,6 +67,11 @@ class RollingExpr(FactorExpr):
     def op_name(self) -> str:
         return 'rolling'
 
+    @property
+    def size(self) -> 'WindowExpr':
+        """将窗口长度解析为可参与截断边界运算的 bar 数表达式。"""
+        return WindowExpr(self._window)
+
     # ── 截断 ──
 
     def truncate(self, start: Any, end: Any) -> 'RollingExpr':
@@ -186,6 +191,41 @@ class RollingExpr(FactorExpr):
 
     def _get_alias(self) -> str:
         return 'rolling'
+
+
+class WindowExpr(FactorExpr):
+    """滚动窗口在当前数据频率下对应的 bar 数。"""
+
+    def __init__(self, window: FactorExpr):
+        self.window = window
+
+    @property
+    def _operands(self) -> Sequence[FactorExpr]:
+        return (self.window,)
+
+    @property
+    def op_name(self) -> str:
+        return 'window_size'
+
+    def resolve(self, *args, **kwargs) -> 'WindowExpr':
+        return WindowExpr(self.window.resolve(*args, **kwargs))
+
+    def _evaluate(self, ctx: EvaluateContext) -> int:
+        value = self.window.value if isinstance(self.window, ConstExpr) else self.window.evaluate(ctx=ctx)
+        common, periods, _ = _resolve_windows(value, ctx.freq, ctx.products)
+        if not common:
+            raise ValueError("按品种变化的窗口长度暂不能作为动态截断边界")
+        return periods
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        window_latex = self.window._to_latex(subst)
+        return f'\\mathrm{{Bars}}\\left({window_latex}\\right)'
+
+    def _get_alias(self) -> str:
+        return f'WIN_{self.window._get_alias()}'
+
+    def _structural_key(self) -> tuple:
+        return ('WindowExpr', self.window._structural_key())
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -394,12 +434,16 @@ class RollingOp(OperandExpr):
         trunc_start_arr = None
         trunc_end_arr = None
         if self._trunc_start is not None and self._trunc_end is not None:
-            ts_df = self._trunc_start.evaluate(ctx=ctx)
-            te_df = self._trunc_end.evaluate(ctx=ctx)
-            # 对齐 data_vals[0] 的 columns 和 index
-            common_cols = data_vals[0].columns.intersection(ts_df.columns)
-            ts_arr = ts_df[common_cols].reindex(data_vals[0].index).to_numpy(dtype=float)
-            te_arr = te_df[common_cols].reindex(data_vals[0].index).to_numpy(dtype=float)
+            def as_trunc_array(value: Any) -> np.ndarray:
+                if isinstance(value, pd.DataFrame):
+                    return value.reindex(
+                        index=data_vals[0].index,
+                        columns=data_vals[0].columns,
+                    ).to_numpy(dtype=float)
+                return np.full(data_vals[0].shape, value, dtype=float)
+
+            ts_arr = as_trunc_array(self._trunc_start.evaluate(ctx=ctx))
+            te_arr = as_trunc_array(self._trunc_end.evaluate(ctx=ctx))
             # trunc 是对窗口内的偏移截断，需要 shape=(T-W+1, P)
             # 取公共窗口最小值做 shape 截取；不同 product 按 product_periods 分流时再调整
             if common and common_periods < len(ts_arr):
@@ -529,10 +573,10 @@ def _rolling_argmaxmin(
     # reversed: 最近 bar 在 index=0
     reversed_view = windows[..., ::-1]
 
-    if op == 'rolling_argmax':
+    if op in ('rolling_argmax', 'rolling_argmax_raw'):
         # nanargmax: NaN 被忽略，全 NaN → 0（会被 nan_rows 覆盖）
         pos_matrix = np.nanargmax(reversed_view, axis=-1)
-    elif op == 'rolling_argmin':
+    elif op in ('rolling_argmin', 'rolling_argmin_raw'):
         pos_matrix = np.nanargmin(reversed_view, axis=-1)
     else:
         raise ValueError(f"Invalid op: {op}")
