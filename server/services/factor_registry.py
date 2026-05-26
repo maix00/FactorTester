@@ -68,8 +68,10 @@ def get_factor_family_instance(module_name, username: str | None = None):
                 custom_factor = get_custom_factor_instance(username, factor_id)
                 if custom_factor is not None and custom_factor.__class__.__name__ == module_name:
                     return custom_factor
+        custom_path = os.path.join(custom_dir, f'{module_name}.py')
+        raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' or '{custom_path}' (user '{username}')")
 
-    raise ImportError(f"Cannot load factor '{module_name}' from '{module_path}'")
+    raise ImportError(f"Cannot load factor '{module_name}': not found in '{module_path}' and no active user session")
 
 
 def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily | None:
@@ -90,7 +92,10 @@ def _build_custom_factor_family(username: str, factor_id: str) -> FactorFamily |
             if isinstance(obj, type) and issubclass(obj, FactorFamily) and obj is not FactorFamily:
                 return obj()
         return None
-    except Exception:
+    except Exception as e:
+        import logging
+        logger = logging.getLogger('factor_registry')
+        logger.warning("Cannot load custom factor '%s/%s': %s", username, factor_id, e)
         return None
 
 

@@ -26,7 +26,10 @@ def _coerce_transport_value(param, value):
     if not isinstance(param, TypeParam) or not isinstance(value, str):
         return value
 
-    types = param._typ if isinstance(param._typ, tuple) else (param._typ,)
+    typ = getattr(param, '_typ', None)
+    if typ is None:
+        return value
+    types = typ if isinstance(typ, tuple) else (typ,)
     default_type = type(getattr(param, 'default_value', None))
     try:
         if default_type is int and int in types:

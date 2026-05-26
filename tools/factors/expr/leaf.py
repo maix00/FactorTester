@@ -1,0 +1,288 @@
+# =============================================================================
+# tools/factors/expr/leaf.py
+# 因子表达式系统 — 从 FactorExpr.py 拆分
+# =============================================================================
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import threading
+from typing import (
+    TYPE_CHECKING, Any, Callable, Dict, Iterator, List, NamedTuple,
+    Optional, Sequence, Set, Tuple, Union, cast
+)
+
+from tools.data.DataColumn import DataColumn
+from tools.data.DataFreq import DataFreq
+
+if TYPE_CHECKING:
+    from tools.products.Product import Product
+    from tools.data.DataSource import DataSource
+    from tools.data.DataMeta import DataMeta
+    from tools.parameters.Parameter import Parameter
+
+
+from .core import FactorExpr, EvaluateContext
+
+class ColumnRef(FactorExpr):
+    """
+    数据列引用 — 表达式树的叶子节点。
+
+    示例：
+        close = ColumnRef(DataColumn.CLOSE_ADJUSTED)
+        high  = ColumnRef(DataColumn.HIGH_ADJUSTED)
+        vol   = ColumnRef(DataColumn.VOLUME)
+
+    运行时通过 product.{freq} 获取数据，source 参数选择数据源。
+    """
+
+    def __init__(self, column: DataColumn):
+        self.column = column
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    @property
+    def required_columns(self) -> Set[str]:
+        """此列引用所需的数据列名（用于校验数据源是否兼容）。"""
+        return {self.column.name, self.column.value}
+
+    def _select_source(self, product: 'Product', freq: DataFreq,
+                       source: Optional['DataSource'] = None) -> Optional['DataSource']:
+        """
+        为给定品种选择数据源。返回 None 表示无需指定（DataMeta 使用自己的加载逻辑）。
+
+        - 若 source 已指定：校验该品种在此 source+freq 下是否有数据
+        - 若未指定：遍历 DataSource 找到第一个可用且包含所需列的源
+        - 若无注册的数据源：返回 None，由 DataMeta 自行加载
+        """
+        from tools.data.DataSource import DataSource as DS
+
+        if source is not None and source.freq == freq and product in source:
+            return source
+        
+        available_sources = getattr(product, freq.name).list_available_sources()
+        if available_sources:
+            return available_sources[0]
+        else:
+            return None
+
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+
+        from tools.data.DataMeta import DataMeta
+
+        products = ctx.products
+        freq = ctx.freq
+        source = ctx.source
+        preloaded = ctx.preloaded
+
+        series_dict = {}
+        for p in products:
+            # 优先使用预加载数据
+            if preloaded is not None:
+                preload_key = (p, freq.name)
+                preloaded_df = preloaded.get(preload_key)
+                if preloaded_df is not None and self.column.name in preloaded_df.columns:
+                    series_dict[p] = preloaded_df[self.column.name]
+                    continue
+                if preloaded_df is not None:
+                    from tools.data.DataMeta import DataMeta
+                    raw_col = DataMeta._get_nonadjusted_col_name(self.column.name)
+                    if DataMeta._check_is_adjusted(self.column.name) and raw_col in preloaded_df.columns:
+                        series_dict[p] = preloaded_df[raw_col]
+                        continue
+
+            dm: DataMeta = getattr(p, freq.name)
+            if source is not None:
+                try:
+                    ds = dm.set_current_source(source)
+                except ValueError as e:
+                    raise Warning(f"ColumnRef: source {source.alias} is not compatible with product {p.name} at freq {freq.name}") from e
+            if dm.next_available_source() is None:
+                continue  # 无可用数据源，跳过此品种
+            col_name = self.column.name   # 如 'CLOSE_ADJUSTED' for CA
+
+            # 使用 get_and_adjust_cols 确保复权列（如 CLOSE_ADJUSTED）被自动计算
+            data = dm.get_and_adjust_cols([col_name], copy=False, start_calc_point=ctx.start_calc_point)
+            if data.empty:
+                continue
+            series_dict[p] = data[col_name]
+
+        result = (result := pd.concat(series_dict, axis=1)).sort_values(by=result.index.names[-1])
+        result.columns = list(series_dict.keys())
+        return result
+
+    @property
+    def op_name(self) -> str:
+        return self.column.value
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        col_to_latex = {
+            'O': 'O_t', 'H': 'H_t', 'L': 'L_t', 'C': 'C_t',
+            'OA': '\\tilde{O}_t', 'HA': '\\tilde{H}_t',
+            'LA': '\\tilde{L}_t', 'CA': '\\tilde{C}_t',
+            'V': 'V_t', 'OI': 'OI_t',
+        }
+        return col_to_latex.get(self.column.value) or self.column.value
+
+    def _get_alias(self) -> str:
+        return self.column.value
+
+    def _structural_key(self) -> tuple:
+        return ('ColumnRef', self.column)
+
+class ParamRef(FactorExpr):
+    """
+    参数引用 — 表达式树的叶子节点，运行时从 FactorFamily 注册表取参数值。
+
+    示例：
+        window_param = WindowParam('W', 5)            # 2. WindowParam 来自 tools/parameters
+        close_ma = ColumnRef(DataColumn.CLOSE_ADJUSTED).rolling_mean(window_param)
+
+        # 等价于：close_ma = CLOSE.rolling_mean(5)，但窗口长度由外部参数化
+
+    支持的类型：
+      - DataColumnParam: 值会被 rectify 为 DataColumn 后用于列查找
+      - WindowParam: 值作为窗口参数传入 RollingOp
+      - 任意 Parameter: 值直接作为标量参与表达式计算
+    """
+
+    def __init__(self, param: 'Parameter'):
+        self.param = param
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    def _evaluate(self, ctx: EvaluateContext) -> pd.DataFrame:
+        raise RuntimeError("ParamRef._evaluate() 不得调用; 请先调用 resolve(param_values) 将 ParamRef 转为 ConstExpr/ColumnRef 后再求值")
+
+    def resolve(self, param_values: dict | None = None, *args, **kwargs) -> FactorExpr:
+        """从宿主对象的注册表中取出当前参数值。若提供 param_values 则优先从中查找。"""
+        from tools.parameters import DataColumnParam, FactorParam
+        from tools.factors import Factor
+        factor: Optional['Factor'] = None
+
+        if param_values is not None and self.param.alias in param_values:
+            value = param_values[self.param.alias]
+        else:
+            value = self.param.default_value
+        if isinstance(self.param, DataColumnParam):
+            resolved: FactorExpr = ColumnRef(DataColumn(value))
+        elif isinstance(self.param, FactorParam):
+            value = self.param._value_space.rectify(value)
+            if value is None:
+                resolved = ConstExpr(None)
+            else:
+                if isinstance(value, (str, dict)):
+                    try:
+                        from tools.factors.factor_param_resolution import resolve_factor_param_value
+                        value = resolve_factor_param_value(value)
+                    except Exception as exc:
+                        raise TypeError(f"参数 {self.param.alias} 无法解析为因子: {value}") from exc
+                if isinstance(value, Factor):
+                    resolved = value._func_expr
+                    factor = value
+                else:
+                    resolved = value
+                if not isinstance(resolved, FactorExpr):
+                    raise TypeError(f"参数 {self.param.alias} 需要 FactorExpr，收到 {type(value).__name__}")
+                resolved = resolved.resolve(param_values=param_values, *args, **kwargs)
+        else:
+            resolved = ConstExpr(value)
+
+        if self._is_intermediate:
+            resolved = resolved.as_intermediate(self._intermediate_name, factor=factor)
+        return resolved
+
+    @property
+    def op_name(self) -> str:
+        return f"${{{self.param.alias}}}"
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        """LaTeX 变量名。ParamRef 的参数名作为基础变量，如 'P' → P_t。"""
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        param_latex = f"\\textcolor{{red}}{{{self.param.alias}}}"
+        from tools.parameters import DataColumnParam, FactorParam
+        if isinstance(self.param, (DataColumnParam, FactorParam)):
+            return f"{param_latex}_{{t}}"
+        return param_latex
+
+    def _get_alias(self) -> str:
+        return f"P{self.param.alias}"
+
+    def _structural_key(self) -> tuple:
+        return ('ParamRef', self.param.alias)
+
+class ConstExpr(FactorExpr):
+    """
+    常量表达式 — 标量、固定值或窗口/位移参数的叶子节点。
+
+    当 value 是 int/float/ndarray 时 → 参与表达式运算，evaluate() 返回 self
+    （由 CompositeExpr._apply_op 提取 .value 后内联处理）。
+
+    当 value 是 pd.Timedelta/DataFreq 时 → 窗口/位移参数，
+    evaluate() 直接返回 bar 数（int）。
+    """
+
+    def __init__(self, value: Any):
+        self.value = value
+
+    @property
+    def is_leaf_ref(self) -> bool:
+        return True
+
+    def _evaluate(self, ctx: EvaluateContext) -> Any:
+        return self.value
+
+    @property
+    def op_name(self) -> str:
+        return f"const({self.value})"
+
+    def _to_latex(self, subst: dict | None = None) -> str:
+        sk = self._structural_key()
+        if subst is not None and sk in subst:
+            return f"{subst[sk]}_t"
+        return str(self.value)
+
+    def _get_alias(self) -> str:
+        v = self.value
+        if isinstance(v, (int, float)):
+            return str(v).replace('.', 'd').replace('-', 'N')
+        return 'const'
+
+    def _structural_key(self) -> tuple:
+        v = self.value
+        if isinstance(v, np.ndarray):
+            return ('ConstExpr', v.tobytes())
+        return ('ConstExpr', v)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 辅助：将标量/ndarray 转为 ConstExpr
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _to_expr(value: Any) -> FactorExpr:
+    """将非 FactorExpr 值包装为 ConstExpr，将 Parameter 转为 ParamRef。"""
+    if isinstance(value, FactorExpr):
+        return value
+    from tools.parameters.Parameter import Parameter
+    if isinstance(value, Parameter):
+        return ParamRef(value)
+    return ConstExpr(value)  # type: ignore[arg-type]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Layer 4: 滚动窗口算子
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RollingExpr (方案 B) — 惰性滚动窗口表达式节点
+# ═════════════════════════════════════════════════════════════════════════════
+
