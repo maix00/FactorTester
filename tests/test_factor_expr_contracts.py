@@ -92,6 +92,17 @@ def test_timedelta_window_can_drive_dynamic_truncation_offsets():
     assert not result.empty
 
 
+def test_window_size_preserves_timedelta_dependency_for_frequency_inference():
+    window = WindowParam("FrequencyWindow", default_value="9m")
+    volume = _FrameExpr(pd.DataFrame({"P": [1.0]}))
+    volume_window = volume.rolling(window)
+    expr = volume_window.truncate(0, volume_window.size - 1).argmin_raw()
+
+    resolved = expr.resolve(param_values={"FrequencyWindow": pd.Timedelta("9m")})
+
+    assert any(ref.value == pd.Timedelta("9m") for ref in resolved.const_refs)
+
+
 def test_intermediate_name_collision_is_detectable():
     class MockFactor:
         _intermediate_factor_data = {}
