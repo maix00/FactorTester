@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from tools.data.DataFreq import DataFreq
     from tools.factors.Factors import Factor
     from tools.factors.tests.single_factor_test.group.result import GroupRunResult
+    from tools.factors.expr.timeline import PanelTimeline
 
 
 class FactorRunResult:
@@ -53,6 +54,7 @@ class FactorRunResult:
         "data_present_mask",
         # Fast-path: whether data_present_mask is all True (dense panel, no inserted rows).
         "data_present_all",
+        "panel_timeline",
         "_returns",
         "_return_freq",
         "ic_series",
@@ -67,6 +69,7 @@ class FactorRunResult:
         self.table: pd.DataFrame = pd.DataFrame()
         self.data_present_mask: pd.DataFrame = pd.DataFrame()
         self.data_present_all: Optional[bool] = None
+        self.panel_timeline: Optional[PanelTimeline] = None
         self._returns: pd.DataFrame = pd.DataFrame()
         self._return_freq: Optional[DataFreq] = None
         self.ic_series: pd.Series = pd.Series(dtype=float)
@@ -162,6 +165,7 @@ class FactorRunResult:
         self.table = pd.DataFrame()
         self.data_present_mask = pd.DataFrame()
         self.data_present_all = None
+        self.panel_timeline = None
         self.returns = pd.DataFrame()
         self._return_freq = None
         self.ic_series = pd.Series(dtype=float)

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .rolling import RollingExpr, RollingOp
     from .shift import ShiftOp
     from .cross_sectional import CrossSectionalOp
+    from .timeline import PanelTimeline
 
 
 # ── 求值上下文（统一 evaluate/_evaluate 签名） ──
@@ -40,6 +41,7 @@ class EvaluateContext(NamedTuple):
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
     start_calc_point: Optional[Any] = None  # pd.Timestamp or None
+    panel_timeline: Optional['PanelTimeline'] = None
 
 
 
@@ -164,6 +166,7 @@ class FactorExpr:
                 cache=kwargs.get('cache', None),
                 preloaded=kwargs.get('preloaded', None),
                 start_calc_point=kwargs.get('start_calc_point', None),
+                panel_timeline=kwargs.get('panel_timeline', None),
             )
         cache = ctx.cache
         sk = self._structural_key()
@@ -560,4 +563,3 @@ class FactorExpr:
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 1.5: 多元算子基类
 # ═════════════════════════════════════════════════════════════════════════════
-

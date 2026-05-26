@@ -18,6 +18,8 @@ from tools.factors.expr import (
     # core
     FactorExpr,
     EvaluateContext,
+    PanelTimeline,
+    build_panel_timeline,
     # operands
     OperandExpr,
     # leaf

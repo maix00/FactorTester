@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union, Any, 
 
 from tools import UniqueObject, DataFreq
 from tools.products.Product import Product
-from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr
+from tools.factors.FactorExpr import FactorExpr, SignalAlign, CompositeExpr, ConstExpr, build_panel_timeline
 from tools.factors.FactorRunResult import FactorRunResult
 
 if TYPE_CHECKING:
@@ -262,6 +262,7 @@ class Factor(UniqueObject, FactorExpr):
                 data = dm.get_and_adjust_cols(columns, copy=False, start_calc_point=start_calc_point)
                 if not data.empty:
                     preloaded[(p, freq.name)] = data
+        panel_timeline = build_panel_timeline(products, freq, preloaded)
 
         # ── 获取/创建 FactorRunResult；选择缓存目标 ──
         # 有 tester → 局部 dict（每次 evaluate() 调用独立，不跨 tester 污染）
@@ -278,7 +279,8 @@ class Factor(UniqueObject, FactorExpr):
         # evaluate 先递归求值 SignalAlign（对齐），再取反（如有 neg 包裹）
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
-                                     cache=_intermediate_cache, start_calc_point=start_calc_point)
+                                     cache=_intermediate_cache, start_calc_point=start_calc_point,
+                                     panel_timeline=panel_timeline)
 
         # ── 2. 提取未对齐的原始数据 ──
         # 穿透 neg 层找到 SignalAlign，获取其 _raw_data
@@ -307,6 +309,7 @@ class Factor(UniqueObject, FactorExpr):
             r = _tester._get_result(self)
             r.source_table = raw_data
             r.table = result
+            r.panel_timeline = panel_timeline
 
             # ── 4.1 data_present_mask：记录 union 对齐过程中“该品种该时刻是否真的有原始 bar” ──
             # 用于区分：

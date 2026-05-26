@@ -17,6 +17,9 @@ from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 from tools.data.DataSource import DataSource
 
+if TYPE_CHECKING:
+    from tools.products.TradingSchedule import TradingSchedule
+
 class Product(UniqueObject):
     """
     金融产品基类。
@@ -84,6 +87,10 @@ class Product(UniqueObject):
     def is_term_contract(self) -> bool:
         """Whether this product is an individual contract in a term structure."""
         return False
+
+    def get_trading_schedule(self) -> Optional['TradingSchedule']:
+        """Return an explicit normalized trading schedule, if the product provides one."""
+        return None
     
     def get_some_data(self, data_freq: Optional[Any] = None, copy: bool = False) -> pd.DataFrame:
         """
