@@ -4,7 +4,7 @@
 # =============================================================================
 
 from .core import FactorExpr, EvaluateContext
-from .timeline import PanelTimeline, build_panel_timeline, shift_positions
+from .timeline import PanelTimeline, build_panel_timeline, shift_positions, rolling_positions
 from .operands import OperandExpr
 from .leaf import ColumnRef, ParamRef, ConstExpr, _to_expr
 from .rolling import RollingExpr, RollingOp, _rolling_argmaxmin, _mask_outside_trunc, _resolve_windows
@@ -53,6 +53,7 @@ __all__ = [
     "PanelTimeline",
     "build_panel_timeline",
     "shift_positions",
+    "rolling_positions",
     # operands
     "OperandExpr",
     # leaf

@@ -153,3 +153,47 @@ def shift_positions(
                 continue
             result.iloc[i, result.columns.get_loc(col)] = src_pos
     return result
+
+
+# ── session-aware rolling window start positions ──
+
+def rolling_positions(
+    timeline: PanelTimeline,
+    periods: int,
+    data: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return the start row position for a session-aware rolling window.
+
+    Each cell contains the integer row position of the bar that is ``periods - 1``
+    scheduled slots earlier than the current row, clamped to the earliest
+    scheduled position when fewer than ``periods`` scheduled bars precede the row.
+    Returns -1 only when *no* scheduled bar exists at or before the current row.
+
+    The caller is responsible for enforcing ``min_periods`` — this function
+    always returns a valid start position for any row that has at least one
+    preceding scheduled bar.
+    """
+    result = pd.DataFrame(-1, index=data.index, columns=data.columns, dtype=int)
+    scheduled = timeline.scheduled_mask.reindex(
+        index=data.index, columns=data.columns, fill_value=False,
+    )
+
+    for col in data.columns:
+        mask = scheduled[col].to_numpy(dtype=bool)
+        scheduled_pos = np.where(mask)[0]
+        if len(scheduled_pos) == 0:
+            continue
+        earliest = scheduled_pos[0]
+        ordinal_map = np.full(len(mask), -1, dtype=int)
+        ordinal_map[scheduled_pos] = np.arange(len(scheduled_pos))
+        for i in range(len(mask)):
+            if not mask[i]:
+                continue
+            target_ord = ordinal_map[i] - (periods - 1)
+            if target_ord < 0:
+                # partial window: use earliest available scheduled bar
+                start_pos = earliest
+            else:
+                start_pos = scheduled_pos[target_ord]
+            result.iloc[i, result.columns.get_loc(col)] = start_pos
+    return result

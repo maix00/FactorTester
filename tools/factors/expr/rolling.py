@@ -212,9 +212,14 @@ class WindowBarsExpr(FactorExpr):
 
     def _evaluate(self, ctx: EvaluateContext) -> int:
         value = self.window.value if isinstance(self.window, ConstExpr) else self.window.evaluate(ctx=ctx)
-        common, periods, _ = _resolve_windows(value, ctx.freq, ctx.products)
+        common, periods, product_periods = _resolve_windows(value, ctx.freq, ctx.products)
         if not common:
-            raise ValueError("按品种变化的窗口长度暂不能作为动态截断边界")
+            raise ValueError(
+                f".bars cannot be evaluated to a single scalar bar count: "
+                f"different products have different bar counts for window {value}. "
+                f"Use a window that resolves uniformly across all products, "
+                f"or avoid .bars with asynchronous product panels."
+            )
         return periods
 
     def _to_latex(self, subst: dict | None = None) -> str:
@@ -424,6 +429,32 @@ class RollingOp(OperandExpr):
             window=periods_val, freq=ctx.freq,
             products=[p for p in ctx.products if p in data_vals[0].columns])
 
+        # ── session-aware rolling path ──
+        timeline = getattr(ctx, 'panel_timeline', None)
+        use_positional = (
+            timeline is not None
+            and not timeline.dense_same_session
+            and common
+            and isinstance(common_periods, int)
+            and common_periods >= 1
+            and self._trunc_start is None
+            and self._trunc_end is None
+        )
+        if use_positional:
+            from .timeline import rolling_positions
+            start_pos = rolling_positions(timeline, common_periods, data_vals[0])
+            scheduled = timeline.scheduled_mask.reindex(
+                index=data_vals[0].index, columns=data_vals[0].columns, fill_value=False,
+            )
+            if self.op in _POSITIONAL_AGG_OPS:
+                return _positional_rolling_agg(
+                    data_vals[0], common_periods, start_pos,
+                    scheduled_mask=scheduled,
+                    op=self.op,
+                    extra=data_vals[1] if self._n_data >= 2 else None,
+                )
+            # fall through to standard path for ops not yet ported
+
         # 确定每个 product 对应的窗口大小（用于截断数组的 shape 对齐）
         if common:
             window_per_product = {p: common_periods for p in data_vals[0].columns}
@@ -609,6 +640,126 @@ def _resolve_windows(window: Any, freq: Any, products: Sequence[Product]) -> Tup
         if product_periods.values() and len(set(product_periods.values())) == 1:
             return True, next(iter(product_periods.values())), {}
         return False, 0, product_periods
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Session-aware positional rolling aggregation
+# ═════════════════════════════════════════════════════════════════════════════
+
+_POSITIONAL_AGG_OPS = frozenset({
+    'rolling_mean', 'rolling_std', 'rolling_var', 'rolling_min',
+    'rolling_max', 'rolling_sum',
+    'rolling_argmax', 'rolling_argmin',
+    'rolling_argmax_raw', 'rolling_argmin_raw',
+    'rolling_corr', 'rolling_cov',
+})
+
+
+def _positional_rolling_agg(
+    df: pd.DataFrame,
+    window: int,
+    start_positions: pd.DataFrame,
+    scheduled_mask: pd.DataFrame,
+    op: str,
+    extra: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Compute rolling aggregation using session-aware positional windows.
+
+    ``start_positions`` is a DataFrame where each cell contains the row position
+    of the window's start bar (inclusive), or -1 to indicate fewer than *window*
+    scheduled bars precede the row.
+
+    The aggregation reads values from ``df`` between the start row and the
+    current row (inclusive), keeps only scheduled slots (per ``scheduled_mask``),
+    takes the last *window* values, and applies the aggregation.
+    """
+    n_rows, n_cols = df.shape
+    arr = df.to_numpy(dtype=float)
+    start_arr = start_positions.to_numpy(dtype=int)
+    scheduled_arr = scheduled_mask.to_numpy(dtype=bool)
+    extra_arr = extra.to_numpy(dtype=float) if extra is not None else None
+    result = np.full((n_rows, n_cols), np.nan, dtype=float)
+
+    # argmax/min needs special handling for normalize
+    is_arg_op = op in ('rolling_argmax', 'rolling_argmin',
+                       'rolling_argmax_raw', 'rolling_argmin_raw')
+    normalize = op in ('rolling_argmax', 'rolling_argmin')
+
+    for col_idx in range(n_cols):
+        col_start = start_arr[:, col_idx]
+        col_vals = arr[:, col_idx]
+        col_sched = scheduled_arr[:, col_idx]
+        for i in range(n_rows):
+            s = col_start[i]
+            if s < 0:
+                continue
+            # keep only scheduled positions in [s, i]
+            span_mask = col_sched[s:i + 1]
+            vals = col_vals[s:i + 1][span_mask]
+            min_periods = max(1, window // 2)
+            if len(vals) < min_periods:
+                continue
+
+            if is_arg_op:
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                if op in ('rolling_argmax', 'rolling_argmax_raw'):
+                    pos = np.nanargmax(w[::-1])
+                else:
+                    pos = np.nanargmin(w[::-1])
+                raw_pos = window - 1 - pos
+                if normalize and window > 1:
+                    result[i, col_idx] = raw_pos / (window - 1)
+                else:
+                    result[i, col_idx] = float(raw_pos)
+            elif op == 'rolling_mean':
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                result[i, col_idx] = np.nanmean(w)
+            elif op == 'rolling_std':
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                result[i, col_idx] = np.nanstd(w)
+            elif op == 'rolling_var':
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                result[i, col_idx] = np.nanvar(w)
+            elif op == 'rolling_min':
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                result[i, col_idx] = np.nanmin(w)
+            elif op == 'rolling_max':
+                w = vals[-window:]
+                if np.all(np.isnan(w)):
+                    continue
+                result[i, col_idx] = np.nanmax(w)
+            elif op == 'rolling_sum':
+                w = vals[-window:]
+                result[i, col_idx] = np.nansum(w) if not np.all(np.isnan(w)) else np.nan
+            elif op in ('rolling_corr', 'rolling_cov'):
+                if extra_arr is None:
+                    continue
+                vx = vals[-window:]
+                vy_full = extra_arr[s:i + 1, col_idx]
+                vy = vy_full[span_mask][-window:]
+                mask = ~np.isnan(vx) & ~np.isnan(vy)
+                if mask.sum() < 2:
+                    continue
+                vxm = vx[mask]
+                vym = vy[mask]
+                if op == 'rolling_corr':
+                    corr = np.corrcoef(vxm, vym)[0, 1]
+                    result[i, col_idx] = corr
+                else:
+                    cov = np.cov(vxm, vym, ddof=1)[0, 1]
+                    result[i, col_idx] = cov
+
+    return pd.DataFrame(result, index=df.index, columns=df.columns)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

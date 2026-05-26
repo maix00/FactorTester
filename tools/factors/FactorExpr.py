@@ -21,6 +21,7 @@ from tools.factors.expr import (
     PanelTimeline,
     build_panel_timeline,
     shift_positions,
+    rolling_positions,
     # operands
     OperandExpr,
     # leaf
