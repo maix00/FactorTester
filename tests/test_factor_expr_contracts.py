@@ -41,6 +41,24 @@ def test_tree_repr_shows_nested_branch_connectors():
     )
 
 
+def test_to_latex_defines_shared_intermediate_before_dependents():
+    shared = (ColumnRef(DataColumn.CLOSE) + ConstExpr(1)).as_intermediate("BASE")
+    left = (shared + ConstExpr(2)).as_intermediate("LEFT")
+    right = (shared + ConstExpr(3)).as_intermediate("RIGHT")
+
+    latex = (left / right).to_latex()
+    lines = latex.splitlines()
+
+    base_line = next(index for index, line in enumerate(lines) if r"\mathrm{BASE}_t &:=" in line)
+    left_line = next(index for index, line in enumerate(lines) if r"\mathrm{LEFT}_t &:=" in line)
+    right_line = next(index for index, line in enumerate(lines) if r"\mathrm{RIGHT}_t &:=" in line)
+
+    assert base_line < left_line
+    assert base_line < right_line
+    assert r"\mathrm{BASE}_t + 2" in lines[left_line]
+    assert r"\mathrm{BASE}_t + 3" in lines[right_line]
+
+
 def test_intermediate_name_collision_is_detectable():
     class MockFactor:
         _intermediate_factor_data = {}
