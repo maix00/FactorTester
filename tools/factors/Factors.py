@@ -206,7 +206,10 @@ class Factor(UniqueObject, FactorExpr):
         if freq is not None:
             freq = freq
         else:
-            freq_name = getattr(self.family, '_freq_name', None)
+            freq_name = (
+                getattr(self.family, '_source_freq', None)
+                or getattr(self.family, '_freq_name', None)
+            )
             if freq_name is not None:
                 freq = DataFreq(freq_name)
             else:
@@ -245,6 +248,9 @@ class Factor(UniqueObject, FactorExpr):
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 
+        products = [product for product in products if freq in set(product.list_available_freqs())]
+        if not products:
+            raise ValueError(f"{self}: 没有产品提供数据频率 {freq}，无法计算因子值")
         self._source_freq = freq
 
         # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──

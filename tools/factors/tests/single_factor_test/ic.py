@@ -8,6 +8,7 @@ import pandas as pd
 
 from tools.factors import CrossSectionIC, Factor
 from tools.factors.FactorTester import _align_ts
+from tools.data.DataFreq import DataFreq
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:
@@ -63,7 +64,11 @@ def run_ic_for_factor(
     ic_factor.clear()
 
     sample_factor = factor_list[0]
-    ic_factor.evaluate(tester.products, source_freq=sample_factor._source_freq)
+    source_freq = sample_factor._source_freq
+    if source_freq is None:
+        configured_source_freq = getattr(getattr(sample_factor, "family", None), "_source_freq", None)
+        source_freq = DataFreq(configured_source_freq) if configured_source_freq else None
+    ic_factor.evaluate(tester.products, freq=source_freq)
 
     ic_series = cast(pd.Series, ic_factor.table["IC"])
     if not isinstance(ic_series, pd.Series):
