@@ -1083,7 +1083,8 @@
     // 运行 IC 测试（核心修改）
     async function resolveSubmissionIdForIC(subId, submission) {
         try {
-            const resp = await fetch('/api/list_submissions');
+            const pageUuid = encodeURIComponent(window._pageUuid || '');
+            const resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
             const data = await resp.json();
             if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
                 return String(subId);

@@ -284,7 +284,7 @@
                                 await fetch('/rename_submission', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ id_time: id_time, new_name: sub.label })
+                                    body: JSON.stringify({ id_time: id_time, new_name: sub.label, page_uuid: window._pageUuid || '' })
                                 });
                             } catch (renameErr) {
                                 console.error('恢复提交名称失败:', sub.id, renameErr);
