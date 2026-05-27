@@ -2,7 +2,6 @@ from typing import Any, List, Optional, Tuple, cast
 import pandas as pd
 import os
 from tools.products.Futures import Futures, FuturesContract
-from tools.products.TradingSchedule import TradingSchedule
 from tools import DataColumn
 
 _data = pd.read_csv('../data/sectors.csv')
@@ -119,13 +118,6 @@ class CNFutures(Futures):
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
-        self._trading_schedule = TradingSchedule.from_strings(
-            get_by_code_and_version(self.code, self.version, day_time_col_name),
-            get_by_code_and_version(self.code, self.version, night_time_col_name),
-        )
-
-    def get_trading_schedule(self) -> Optional[TradingSchedule]:
-        return self._trading_schedule
 
     def get_roller_info_path(self) -> str:
         if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):

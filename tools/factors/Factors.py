@@ -206,7 +206,10 @@ class Factor(UniqueObject, FactorExpr):
         if freq is not None:
             freq = freq
         else:
-            freq_name = getattr(self.family, '_freq_name', None)
+            freq_name = (
+                getattr(self.family, '_source_freq', None)
+                or getattr(self.family, '_freq_name', None)
+            )
             if freq_name is not None:
                 freq = DataFreq(freq_name)
             else:
@@ -220,6 +223,7 @@ class Factor(UniqueObject, FactorExpr):
                             except Exception:
                                 return
                         desired_freq = set(filter(None, (get_freq(cr.value) for cr in const_refs)))
+                    desired_freq.add(self.freq)
                     valid_products: List[Product] = []
                     available_freqs_set: Optional[Set[DataFreq]] = None
                     for p in products:
@@ -244,6 +248,9 @@ class Factor(UniqueObject, FactorExpr):
                 else:
                     raise ValueError(f"{self}: 无法推断数据频率，因为没有提供产品")
 
+        products = [product for product in products if freq in set(product.list_available_freqs())]
+        if not products:
+            raise ValueError(f"{self}: 没有产品提供数据频率 {freq}，无法计算因子值")
         self._source_freq = freq
 
         # ── start_calc_point：从活跃 tester 获取，显式传入数据加载和 EvaluateContext ──
@@ -280,6 +287,7 @@ class Factor(UniqueObject, FactorExpr):
         # SignalAlign._raw_data 同时保存了未对齐的原始数据
         result = self._expr.evaluate(products=products, freq=freq, preloaded=preloaded,
                                      cache=_intermediate_cache, start_calc_point=start_calc_point,
+                                     run_result=r if _tester is not None else None,
                                      panel_timeline=panel_timeline)
 
         # ── 2. 提取未对齐的原始数据 ──
@@ -310,36 +318,6 @@ class Factor(UniqueObject, FactorExpr):
             r.source_table = raw_data
             r.table = result
             r.panel_timeline = panel_timeline
-
-            # ── 4.1 data_present_mask：记录 union 对齐过程中“该品种该时刻是否真的有原始 bar” ──
-            # 用于区分：
-            #   - union 对齐插入的空行（present=False）
-            #   - 用户/策略刻意置 NaN 的信号（present 仍可能为 True）
-            try:
-                panel_index = result.index
-                if isinstance(panel_index, pd.MultiIndex):
-                    # 以最后一层时间戳为准（SignalAlign 的 _SIGNAL@ 层通常在最后）
-                    panel_ts = pd.DatetimeIndex(panel_index.get_level_values(-1))
-                else:
-                    panel_ts = pd.DatetimeIndex(panel_index)
-
-                cols = list(result.columns)
-                if cols and preloaded:
-                    mask_np = np.zeros((len(panel_ts), len(cols)), dtype=bool)
-                    for j, p in enumerate(cols):
-                        df = preloaded.get((p, freq.name))
-                        if df is None or not hasattr(df, "index"):
-                            continue
-                        mask_np[:, j] = np.asarray(panel_ts.isin(df.index), dtype=bool)
-                    r.data_present_mask = pd.DataFrame(mask_np, index=result.index, columns=result.columns)
-                    r.data_present_all = bool(mask_np.all())
-                else:
-                    r.data_present_mask = pd.DataFrame()
-                    r.data_present_all = None
-            except Exception:
-                # 不让 mask 计算失败影响主流程；下游可回退到 returns/OHLC 推断
-                r.data_present_mask = pd.DataFrame()
-                r.data_present_all = None
         else:
             # 无 tester（如 CrossSectionIC 独立 evaluate）：写入 Factor 本地缓存
             self._source_data = raw_data

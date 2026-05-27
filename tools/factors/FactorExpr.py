@@ -20,8 +20,8 @@ from tools.factors.expr import (
     EvaluateContext,
     PanelTimeline,
     build_panel_timeline,
-    shift_positions,
-    rolling_positions,
+    compact_observed,
+    scatter_observed,
     # operands
     OperandExpr,
     # leaf

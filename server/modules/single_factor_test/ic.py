@@ -151,7 +151,7 @@ def _merge_ic_result(
 ):
     """将一组 IC 结果合并到 compute 中。"""
     lag_i = int(key[-1])
-    factor_list, ic_series, stats, re_table, fe_table = result
+    factor_list, ic_series, stats, re_table, fe_table, data_present_mask = result
     for factor in factor_list:
         compute.series_by_factor_lag.setdefault(factor, {})[lag_i] = ic_series.copy()
         compute.stats_by_factor_lag.setdefault(factor, {})[lag_i] = stats.copy()
@@ -163,6 +163,9 @@ def _merge_ic_result(
                 r.returns = re_table
             if not fe_table.empty:
                 r.func_table = fe_table
+            if not data_present_mask.empty:
+                r.data_present_mask = data_present_mask.copy(deep=False)
+                r.data_present_all = bool(data_present_mask.to_numpy(dtype=bool).all())
             p_names = _extract_product_names(fe_table, re_table)
             if p_names:
                 for p_name in p_names:

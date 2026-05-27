@@ -12,6 +12,7 @@ from tools.factors.FactorExpr import (
     FactorExpr,
     RollingOp,
     ShiftOp,
+    CrossSectionalOp,
 )
 from tools.parameters import WindowParam
 
@@ -137,3 +138,17 @@ def test_intermediate_name_collision_is_detectable():
     factor._intermediate_alias_index["X"] = e1._structural_key()
     existing = factor._intermediate_alias_index["X"]
     assert existing != e2._structural_key()
+
+
+def test_cs_zscore_maps_constant_cross_section_to_neutral_values():
+    values = pd.DataFrame(
+        {"A": [1.0, 1.0, float("nan")], "B": [1.0, 2.0, float("nan")], "C": [float("nan"), 3.0, 4.0]},
+    )
+
+    result = CrossSectionalOp("cs_zscore", _FrameExpr(values))._apply_op([values])
+
+    assert result.loc[0, "A"] == 0.0
+    assert result.loc[0, "B"] == 0.0
+    assert pd.isna(result.loc[0, "C"])
+    assert result.loc[1].notna().all()
+    assert result.loc[2].isna().all()

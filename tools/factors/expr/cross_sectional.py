@@ -67,8 +67,12 @@ class CrossSectionalOp(OperandExpr):
         if self.op == 'cs_zscore':
             mean = x.mean(axis=1)
             std = x.std(axis=1)
-            std = std.replace(0, np.nan)
-            return x.sub(mean, axis=0).div(std, axis=0)
+            result = x.sub(mean, axis=0).div(std.replace(0, np.nan), axis=0)
+            constant_rows = std.eq(0)
+            if constant_rows.any():
+                constant_values = x.loc[constant_rows]
+                result.loc[constant_rows] = constant_values.where(constant_values.isna(), 0.0)
+            return result
         if self.op == 'cs_rank':
             return x.rank(axis=1, pct=True) - 0.5
         raise ValueError(f"Unknown cross-sectional op: {self.op}")
@@ -151,4 +155,3 @@ class CrossSectionalOp(OperandExpr):
 # ═════════════════════════════════════════════════════════════════════════════
 # Layer 6: 复合表达式（二元运算树节点）
 # ═════════════════════════════════════════════════════════════════════════════
-

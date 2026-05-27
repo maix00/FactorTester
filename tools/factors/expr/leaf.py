@@ -109,8 +109,24 @@ class ColumnRef(FactorExpr):
                 continue
             series_dict[p] = data[col_name]
 
-        result = (result := pd.concat(series_dict, axis=1)).sort_values(by=result.index.names[-1])
+        result = pd.concat(series_dict, axis=1).sort_index(level=-1, sort_remaining=False)
         result.columns = list(series_dict.keys())
+        run_result = ctx.run_result
+        if (
+            run_result is not None
+            and isinstance(run_result.data_present_mask, pd.DataFrame)
+            and run_result.data_present_mask.empty
+        ):
+            data_present_mask = pd.DataFrame(
+                {
+                    product: np.asarray(result.index.isin(series.index), dtype=bool)
+                    for product, series in series_dict.items()
+                },
+                index=result.index,
+                dtype=bool,
+            )
+            run_result.data_present_mask = data_present_mask
+            run_result.data_present_all = bool(data_present_mask.to_numpy(dtype=bool).all())
         return result
 
     @property
@@ -285,4 +301,3 @@ def _to_expr(value: Any) -> FactorExpr:
 # ═════════════════════════════════════════════════════════════════════════════
 # RollingExpr (方案 B) — 惰性滚动窗口表达式节点
 # ═════════════════════════════════════════════════════════════════════════════
-
