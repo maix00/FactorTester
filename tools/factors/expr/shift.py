@@ -63,14 +63,9 @@ class ShiftOp(OperandExpr):
             window=periods_val, freq=ctx.freq,
             products=[p for p in ctx.products if p in operand_val.columns])
 
-        # ── 同会话密集面板或没有 timeline → 标准 pandas shift ──
+        # 同交易位置的面板沿用 master 的固定行数语义。
         timeline = ctx.panel_timeline
-        use_fast_path = (
-            timeline is None
-            or timeline.dense_same_session
-            or (timeline.schedule_complete and timeline.same_session)
-        )
-        if use_fast_path:
+        if timeline is None or timeline.same_session:
             if common:
                 result = operand_val.shift(int(common_periods))
             else:
@@ -85,33 +80,22 @@ class ShiftOp(OperandExpr):
                 result = pd.concat(result_parts, axis=1)
             return result
 
-        # ── 异步会话面板 → session-aware shift ──
-        # 只支持纯整数 bar 的 shift（日内）/ 或已解析为 common_periods 的 shift
-        # 整日/混合窗口解析后 product_periods 不同时走 per-product 分支
-        from .timeline import shift_positions
+        # 异步面板使用初始 observed mask 压紧；union 对齐插入的行不计作本品种 bar。
+        from .timeline import compact_observed, scatter_observed
 
+        packed, ordinals, observed = compact_observed(operand_val, timeline)
         if common:
-            lookups = shift_positions(timeline, int(common_periods), operand_val)
+            shifted = packed.shift(int(common_periods))
         else:
-            lookups = pd.DataFrame(-1, index=operand_val.index, columns=operand_val.columns, dtype=int)
-            for periods, products_group in [
-                (p, [pr for pr, pd_val in product_periods.items() if pd_val == p])
-                for p in set(product_periods.values())
-            ]:
-                sub = operand_val[products_group]
-                sub_lookups = shift_positions(timeline, int(periods), sub)
-                for col in sub.columns:
-                    lookups[col] = sub_lookups[col]
-
-        result = pd.DataFrame(np.nan, index=operand_val.index, columns=operand_val.columns)
-        arr = operand_val.to_numpy(dtype=float)
-        lookup_arr = lookups.to_numpy(dtype=int)
-        rows = np.arange(len(result.index))
-        for j in range(len(result.columns)):
-            valid = lookup_arr[:, j] >= 0
-            result.iloc[valid, j] = arr[lookup_arr[valid, j], j]
-
-        return result
+            shifted = pd.DataFrame(np.nan, index=packed.index, columns=packed.columns)
+            for periods in set(product_periods.values()):
+                columns = [
+                    product for product, value in product_periods.items()
+                    if value == periods and product in packed.columns
+                ]
+                if columns:
+                    shifted[columns] = packed[columns].shift(int(periods))
+        return scatter_observed(shifted, operand_val, ordinals, observed)
 
     # ── 展示方法 ──
 
@@ -164,5 +148,4 @@ def _strip_latex_time_subscript(latex: str) -> str:
     if latex.endswith('_t'):
         return latex[:-len('_t')]
     return latex
-
 

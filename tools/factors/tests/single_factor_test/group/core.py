@@ -153,6 +153,62 @@ def build_target_amounts(
     return targets
 
 
+def build_multi_session_target_amounts(
+    curr_mask_all: np.ndarray,
+    prev_end_amounts: np.ndarray,
+    wealth_before_trade: np.ndarray,
+    has_bar: np.ndarray,
+    close_fee_vec: np.ndarray,
+) -> np.ndarray:
+    """Build multi-session target holdings for all groups in one matrix pass."""
+    curr_mask = np.asarray(curr_mask_all, dtype=bool)
+    prev_amounts = np.asarray(prev_end_amounts, dtype=float)
+    wealth = np.asarray(wealth_before_trade, dtype=float)
+    has_bar_vec = np.asarray(has_bar, dtype=bool)
+    close_fees = np.asarray(close_fee_vec, dtype=float)
+
+    non_empty = curr_mask.any(axis=1)
+    targets = np.zeros_like(prev_amounts, dtype=float)
+    if not non_empty.any():
+        return targets
+
+    prev_mask = prev_amounts > 0
+    staying = curr_mask & prev_mask
+    exiting = prev_mask & (~curr_mask)
+    entering = curr_mask & (~prev_mask)
+    exiting_with_bar = exiting & has_bar_vec[np.newaxis, :]
+    exiting_without_bar = exiting & (~has_bar_vec[np.newaxis, :])
+    entering_with_bar = entering & has_bar_vec[np.newaxis, :]
+
+    sell_amounts = prev_amounts * exiting_with_bar
+    recycled = np.maximum(
+        0.0,
+        sell_amounts.sum(axis=1) - (sell_amounts * close_fees[np.newaxis, :]).sum(axis=1),
+    )
+    entering_counts = entering_with_bar.sum(axis=1).astype(float)
+
+    targets = prev_amounts * (staying | exiting_without_bar)
+    funded = non_empty & (entering_counts > 0) & (recycled > 0)
+    if funded.any():
+        targets[funded] += (
+            entering_with_bar[funded].astype(float)
+            * (recycled[funded] / entering_counts[funded])[:, np.newaxis]
+        )
+
+    initial_funding = non_empty & (~prev_mask.any(axis=1)) & (entering_counts > 0)
+    if initial_funding.any():
+        targets[initial_funding] = (
+            entering_with_bar[initial_funding].astype(float)
+            * (wealth[initial_funding] / entering_counts[initial_funding])[:, np.newaxis]
+        )
+
+    totals = targets.sum(axis=1)
+    rescale = non_empty & (totals > 0) & (np.abs(totals - wealth) > 1e-12)
+    if rescale.any():
+        targets[rescale] *= (wealth[rescale] / totals[rescale])[:, np.newaxis]
+    return targets
+
+
 def compute_group_gross_returns(
     target_amounts: np.ndarray,
     wealth_before_trade: np.ndarray,
@@ -266,8 +322,8 @@ def test_by_group_single_factor(
     # - signal NaN 可能是用户刻意过滤 universe
     # - union 对齐也会引入插入行 NaN
     #
-    # 优先使用 FactorRunResult.data_present_mask（由 Factor.evaluate 在预加载/对齐时生成）；
-    # 若不可用，则回退到 returns 的可用性推断（有限但比 signal NaN 更合理）。
+    # 使用 FactorRunResult.data_present_mask（由 Factor.evaluate 在预加载/对齐时生成）。
+    # 必须可用，不可用时抛异常。
     present_src: Optional[pd.DataFrame] = None
     if r is not None and hasattr(r, "data_present_mask"):
         try:
@@ -333,16 +389,19 @@ def test_by_group_single_factor(
             present_src = present_src.iloc[trim_start:trim_end]
         present_np = present_src.to_numpy(dtype=bool)
     else:
-        # 回退：用 returns 可用性近似表示“是否有原始 bar”
-        present_np = np.isfinite(returns_np) & (returns_np > -1.0)
+        raise ValueError(f"{factor.alias}: data_present_mask 不可用，无法进行分组测试。")
 
     # 排除“首部未上市/未有数据”的影响：对每列，把第一个 True 之前的 False 视为 True
     # （这些 False 不应触发多时段策略）
     col_has_any_present = np.asarray(present_np.any(axis=0), dtype=bool)
+    # 对于从头到尾都没有数据的列（col_has_any_present=False），视为"始终不存在"，
+    # 强制设 True 以避免触发多时段策略（这些品种直接跳过，不在 valid_cols 中参与交易）
     first_present = np.argmax(present_np, axis=0)  # 全 False 列会得到 0，但会被 col_has_any_present 屏蔽
     row_idx = np.arange(T, dtype=int)[:, np.newaxis]
     head_missing = (row_idx < first_present[np.newaxis, :]) & col_has_any_present[np.newaxis, :]
     present_filled = np.where(head_missing, True, present_np)
+    # 全 False 列：视为始终不存在，强制填 True（这些品种不会在 valid_cols 中参与交易）
+    present_filled[:, ~col_has_any_present] = True
 
     _mixed_mask = np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
     multi_session_active = bool(_mixed_mask.any())
@@ -399,9 +458,9 @@ def test_by_group_single_factor(
             bucket_idx = np.floor(
                 np.linspace(0, len(active_groups), len(new_idx), endpoint=False)
             ).astype(int)
-            for slot, g in enumerate(active_groups):
-                assigned = new_idx[bucket_idx == slot]
-                current_members[g, assigned] = True
+            current_members[np.ix_(active_groups, new_idx)] = (
+                np.arange(len(active_groups))[:, np.newaxis] == bucket_idx[np.newaxis, :]
+            )
 
         membership_np[t] = current_members
 
@@ -490,52 +549,13 @@ def test_by_group_single_factor(
         if is_mixed_t:
             # ===== 多时段品种策略（逐期自适应）=====
             multi_session_triggered_count += 1
-
-            prev_mask_all = prev_end_amounts > 0    # (n_groups, P) — 上期持仓
-
-            # 对非空组逐组计算（因涉及跨品种资金转移，需知道每组的 staying/exiting/entering）
-            for g in ne_idx:
-                cm = curr_mask_all[g]                # (P,) — 当期成员
-                pm = prev_mask_all[g]                # (P,) — 上期持仓
-                pa = prev_end_amounts[g]             # (P,) — 上期金额
-                wb = wealth_before_trade[g]
-
-                staying = cm & pm
-                exiting = pm & (~cm)
-                entering = cm & (~pm)
-
-                # 退出产品中：有 bar 的卖出，无 bar 的保留金额
-                exiting_sig = exiting & has_bar_t
-                exiting_nosig = exiting & (~has_bar_t)
-
-                # 进入产品中：只有有 bar 的才真正进入
-                entering_sig = entering & has_bar_t
-                n_entering = int(entering_sig.sum())
-
-                # 卖出有信号的退出产品（扣除手续费）
-                sell_exit = pa * exiting_sig.astype(float)
-                sell_gross = float(sell_exit.sum())
-                sell_fee_exit = float((sell_exit * close_fee_vec).sum())
-                recycled = max(0.0, sell_gross - sell_fee_exit)
-
-                tg = np.zeros(P, dtype=float)
-
-                # 无信号的退出产品：保留金额
-                if exiting_nosig.any():
-                    tg += pa * exiting_nosig.astype(float)
-                # 留存产品：保留金额
-                if staying.any():
-                    tg += pa * staying.astype(float)
-                # 新进入者：用回收资金买入
-                if n_entering > 0 and recycled > 0:
-                    tg += entering_sig.astype(float) * (recycled / n_entering)
-
-                # 归一化到 wealth_before_trade
-                total_tg = float(tg.sum())
-                if total_tg > 0 and abs(total_tg - wb) > 1e-12:
-                    tg *= (wb / total_tg)
-
-                target_amounts[g] = tg
+            target_amounts = build_multi_session_target_amounts(
+                curr_mask_all,
+                prev_end_amounts,
+                wealth_before_trade,
+                has_bar_t,
+                close_fee_vec,
+            )
 
         elif rebalance_mode in {"each_period", "buy_and_hold", "recycle"}:
             target_amounts = build_target_amounts(
@@ -576,7 +596,7 @@ def test_by_group_single_factor(
         prev_end_amounts[ne_idx] = new_prev
 
     if multi_session_active:
-        print(f"[INFO] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
+        print(f"[WARN] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
     returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
 
@@ -585,21 +605,23 @@ def test_by_group_single_factor(
     cumulative_returns_np = np.cumprod(1 + cum_rets_filled, axis=0)
 
     avg_turnover = np.zeros(n_groups, dtype=float)
-    for g in range(n_groups):
-        turnovers = []
-        for t in range(1, T):
-            prev = membership_np[t - 1, g]
-            curr = membership_np[t, g]
-            prev_count = int(prev.sum())
-            curr_count = int(curr.sum())
-            if curr_count == 0 and prev_count == 0:
-                continue
-            avg_count = (prev_count + curr_count) / 2.0
-            if avg_count == 0:
-                continue
-            changed = int((prev ^ curr).sum()) / 2.0
-            turnovers.append(changed / avg_count)
-        avg_turnover[g] = float(np.mean(turnovers)) if turnovers else 0.0
+    if T > 1:
+        transition_counts = (member_counts[1:] + member_counts[:-1]) / 2.0
+        turnover_valid = transition_counts > 0
+        changed = np.logical_xor(membership_np[1:], membership_np[:-1]).sum(axis=2) / 2.0
+        turnover_ratio = np.divide(
+            changed,
+            transition_counts,
+            out=np.zeros_like(changed, dtype=float),
+            where=turnover_valid,
+        )
+        turnover_observations = turnover_valid.sum(axis=0)
+        avg_turnover = np.divide(
+            turnover_ratio.sum(axis=0),
+            turnover_observations,
+            out=np.zeros(n_groups, dtype=float),
+            where=turnover_observations > 0,
+        )
 
     signal_times = pd.DatetimeIndex(index_list)
     mask_report = np.ones(T, dtype=bool)
