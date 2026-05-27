@@ -169,6 +169,7 @@ class FactorTester(UniqueObject):
             self._sync_lock = threading.Lock()
             # Factor 计算结果（keyed by Factor 实例） — 所有 per-run 状态集中在此
             self.results: Dict['Factor', FactorRunResult] = {}
+            self._results_lock = threading.RLock()
             self.last_group_factor: Optional['Factor'] = None
             if time_range is not None:
                 self.update_time_range(time_range)
@@ -206,7 +207,10 @@ class FactorTester(UniqueObject):
             except Exception:
                 pass
         # 清空 per-factor 缓存
-        self.results.clear()
+        with self._results_lock:
+            for result in self.results.values():
+                result.clear_caches()
+            self.results.clear()
         self.factors.clear()
         self.products = set()
         self.all_products = set()
@@ -227,9 +231,21 @@ class FactorTester(UniqueObject):
 
     def _get_result(self, factor: 'Factor') -> FactorRunResult:
         """获取或创建 factor 对应的 FactorRunResult（公用的访问入口）。"""
-        if factor not in self.results:
-            self.results[factor] = FactorRunResult(factor=factor)
-        return self.results[factor]
+        with self._results_lock:
+            if factor not in self.results:
+                self.results[factor] = FactorRunResult(factor=factor)
+            return self.results[factor]
+
+    def discard_result(self, factor: 'Factor', *, clear_factor: bool = True) -> None:
+        """释放不再可达的 factor 运行结果及其中间表。"""
+        with self._results_lock:
+            result = self.results.pop(factor, None)
+        if result is not None:
+            result.clear_caches()
+        if self.last_group_factor is factor:
+            self.last_group_factor = None
+        if clear_factor:
+            factor.clear()
 
     def update_time_range(self, time_range: Tuple):
         """更新测试时间区间并记录日志。start_calc_point 与 start_date 为同一概念。"""

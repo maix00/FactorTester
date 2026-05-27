@@ -455,6 +455,8 @@ def _build_ic_response(
         else:
             for i, ef in enumerate(tester.factors):
                 if ef.alias == f.alias:
+                    if ef is not f and hasattr(tester, 'discard_result'):
+                        tester.discard_result(ef)
                     tester.factors[i] = f
                     break
 

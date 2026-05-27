@@ -85,7 +85,7 @@ DSL 核心。三层结构：
 - `Factor._source_data`：表达式求值的原始结果（高频，未对齐）
 - `Factor._data`：信号对齐后的结果
 - `Factor._intermediate_factor_data`：中间因子缓存，按 structural_key 索引
-- `FactorTester._factor_results`：管理所有 FactorRunResult 实例
+- `FactorTester.results`：仅持有当前可交互的 `FactorRunResult`；IC scratch 因子及被同 alias 新结果替换的旧因子必须及时释放
 
 ### 中间因子 (Intermediate Factor)
 
@@ -181,6 +181,8 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 3. `_chinese_names_cache` — 因子描述一次性加载
 4. `Factor._source_data` / `_intermediate_factor_data` — 表达式结果按 `structural_key` 去重
 5. `IdleResourceManager` — DataFrame 缓存，5 分钟 TTL，namespace=`datameta`
+
+IC / 分组测试结果的保留边界见 ADR-008：保留最新图表与分组详情所需结果，不保留内部 scratch 或重跑后被替换的大表；页面暂时未显示不等于可删除提交。
 
 ### 命名约定
 
