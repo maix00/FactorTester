@@ -152,3 +152,25 @@ def test_cs_zscore_maps_constant_cross_section_to_neutral_values():
     assert pd.isna(result.loc[0, "C"])
     assert result.loc[1].notna().all()
     assert result.loc[2].isna().all()
+
+
+def test_one_bar_normalized_time_center_is_neutral_on_observed_values():
+    values = pd.DataFrame({"A": [4.0, float("nan")], "B": [2.0, 3.0]})
+
+    result = RollingOp("rolling_argmin", ConstExpr(1), _FrameExpr(values)).evaluate(
+        ctx=EvaluateContext(["A", "B"], DataFreq.MIN1, None, {}, None, None)
+    )
+
+    expected = pd.DataFrame({"A": [0.0, float("nan")], "B": [0.0, 0.0]})
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_undefined_constant_cross_section_ic_propagates_as_nan():
+    signal = pd.DataFrame({"A": [0.0, 0.0], "B": [0.0, 0.0]})
+    returns = pd.DataFrame({"A": [1.0, 2.0], "B": [3.0, 1.0]})
+
+    result = CrossSectionalOp(
+        "cs_spearman", _FrameExpr(signal), _FrameExpr(returns),
+    ).evaluate(ctx=EvaluateContext(["A", "B"], DataFreq.MIN1, None, {}, None, None))
+
+    assert result["IC"].isna().all()
