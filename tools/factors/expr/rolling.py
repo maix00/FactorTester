@@ -599,13 +599,11 @@ def _rolling_argmaxmin(
 
     n_rows = len(df)
 
-    # window=1 快速路径：位置始终为 0
+    # 单 bar 窗口的时间重心没有跨度，约定有效观察位置为中性点 0。
+    # 这让时间重心因子形成常数信号，由 IC 层表达其“无排序信息”为 NaN。
     if window == 1:
-        result = np.zeros((n_rows, df.shape[1]))
-        if normalize:
-            result[:] = np.nan  # window=1 归一化无意义
-        else:
-            result[0, :] = np.nan  # 第一行不足窗口
+        values = df.to_numpy(dtype=float)
+        result = np.where(np.isnan(values), np.nan, 0.0)
         return pd.DataFrame(result, index=df.index, columns=df.columns)
 
     if n_rows < window:

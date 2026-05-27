@@ -186,7 +186,7 @@ class Factor(UniqueObject, FactorExpr):
              SignalAlign 的 _structural_key 包含对齐参数 → 不同对齐不同 key
              neg() 包裹 → pos/neg 不同 key
           3. self._aligned_table = result（pandas CoW 零拷贝）
-          4. 删除全 NaN 或常数列
+          4. 保留常数或全 NaN 列，由测试消费层表达“无信息”结果
 
         freq: 可选，手动指定数据源频率。None 时自动推断。
         """
@@ -305,10 +305,9 @@ class Factor(UniqueObject, FactorExpr):
             else:
                 break
 
-        # ── 3. 删除无贡献的列 ──
-        nunique: pd.Series = cast(pd.Series, result.nunique(dropna=True))
-        col_todrop = cast(pd.Index, cast(pd.Series, nunique[nunique <= 1]).index).tolist()
-        result.drop(columns=col_todrop, inplace=True)
+        # ── 3. 保留无信息信号 ──
+        # 常数信号是合法的研究结果；其 IC 应为 NaN，而不是因列被删除导致求值失败。
+        # 全 NaN 信号同样交由 IC/分组测试层决定如何呈现或提示。
         if result.empty:
             raise ValueError(f"{self}: 计算结果为空，无法计算因子值")
 

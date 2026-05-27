@@ -53,6 +53,15 @@ class _DeclaredMinuteSourceDailySignal(_DailyWindowMinuteSignal):
     source_freq = "1m"
 
 
+class _ConstantMinuteSignal(FactorFamily):
+    source_freq = "1m"
+
+    @staticmethod
+    def factor_expr():
+        close = ColumnRef(DataColumn.CLOSE)
+        return close - close
+
+
 class _DailyOnlyProduct(_Product):
     name = "DAILY_ONLY_PRODUCT"
 
@@ -94,3 +103,13 @@ def test_declared_source_frequency_skips_products_without_that_source():
     result = factor.evaluate([minute_product, _DailyOnlyProduct()])
 
     assert list(result.columns) == [minute_product]
+
+
+def test_constant_factor_values_are_retained_for_visualization_and_ic():
+    product = _Product()
+    factor = _ConstantMinuteSignal().get_factor(**{"$F": "1m", "$Rev": "0"})
+
+    result = factor.evaluate([product])
+
+    assert list(result.columns) == [product]
+    assert (result[product] == 0.0).all()
