@@ -4,61 +4,109 @@
 """
 
 import os
+import json
+import concurrent.futures
 from turtle import left
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-contract_mapping_path = '../data/wind_mapping.parquet'
-contract_mapping_path_truncated = '../data/wind_mapping_truncated.parquet'
-dayk_path = '../data/data_dayk.parquet'
-minute_data_dir = '../data/data_mink'               # 原始分钟分片数据目录
-minute_data_preprocessed_dir = '../data/data_mink_product' # 预处理后按 uid 存储的分钟数据目录
-minute_index_path = '../data/minute_index.parquet'  # 索引文件保存路径
-main_mink_folder = '../data/main_mink/'             # 输出分钟主力序列文件夹
-roller_info_path = '../data/roller_info.csv'        # 展期信息输出路径
-main_dayk_folder = '../data/main_dayk/'             # 日线主力序列输出文件
+CONTRACT_MAPPING_PATH = '../data/wind_mapping.parquet'
+CONTRACT_MAPPING_PATH_TRUNCATED = '../data/wind_mapping_truncated.parquet'
+DAYK_PATH = '../data/data_dayk.parquet'
+MINUTE_DATA_DIR = '../data/data_mink'               # 原始分钟分片数据目录
+MINUTE_DATA_PREPROCESSED_DIR = '../data/data_mink_product' # 预处理后按 uid 存储的分钟数据目录
+MINUTE_INDEX_PATH = '../data/minute_index.parquet'  # 索引文件保存路径
+MAIN_MINK_FOLDER = '../data/main_mink/'             # 输出分钟主力序列文件夹
+ROLLER_INFO_PATH = '../data/roller_info.csv'        # 展期信息输出路径
+MAIN_DAYK_FOLDER = '../data/main_dayk/'             # 日线主力序列输出文件
+
+_MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
+
 
 def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_rebuild: bool = True):
-    """并行预处理分钟数据，生成每个 uid 的独立 parquet 文件"""
+    """预处理分钟数据，生成每个 uid 的独立 parquet 文件。
+
+    force_rebuild=True 时清空并全量重建；False 时按原始 parquet 的
+    size/mtime 增量处理新增或变化的分片。
+    """
     import shutil
-    from pandarallel import pandarallel
 
-    if not force_rebuild and os.path.exists(minute_product_dir) and len(os.listdir(minute_product_dir)) > 0:
-        print("Minute product data already exists. Skipping rebuild.")
-        return
+    if not os.path.isdir(minute_raw_dir):
+        raise FileNotFoundError(f"原始分钟数据目录不存在: {minute_raw_dir}")
+    raw_files = sorted(
+        os.path.join(minute_raw_dir, f)
+        for f in os.listdir(minute_raw_dir) if f.endswith('.parquet')
+    )
+    if not raw_files:
+        raise ValueError(f"原始分钟数据目录没有 parquet 文件: {minute_raw_dir}")
 
-    if os.path.exists(minute_product_dir):
+    if force_rebuild and os.path.exists(minute_product_dir):
         shutil.rmtree(minute_product_dir)
     os.makedirs(minute_product_dir, exist_ok=True)
 
-    print("Loading all minute data...")
-    all_data = pd.concat([pd.read_parquet(os.path.join(minute_raw_dir, f))
-                          for f in os.listdir(minute_raw_dir) if f.endswith('.parquet')], ignore_index=True)
-    print(f"Total rows: {len(all_data)}")
+    # 增量模式：加载已有 manifest，对比文件签名
+    manifest_path = os.path.join(minute_product_dir, _MINUTE_PREPROCESS_MANIFEST)
+    manifest = {} if force_rebuild else (json.load(open(manifest_path, encoding='utf-8')) if os.path.exists(manifest_path) else {})
+    files_to_process = []
+    for path in raw_files:
+        stat = os.stat(path)
+        sig = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
+        key = os.path.basename(path)
+        if not force_rebuild and manifest.get(key) == sig:
+            continue
+        files_to_process.append((path, key, sig))
 
-    pandarallel.initialize(progress_bar=True)
+    if not files_to_process:
+        print("Minute product data is up to date. Skipping preprocessing.")
+        return
 
-    def process_group(group):
-        uid = group['unique_instrument_id'].iloc[0]
+    print(f"Preprocessing {len(files_to_process)} / {len(raw_files)} minute parquet files...")
+
+    def _write_uid_group(uid: str, group: pd.DataFrame) -> None:
         out_path = os.path.join(minute_product_dir, f"{uid}.parquet")
-        group.drop_duplicates(subset='trade_timestamp').sort_values('trade_timestamp').to_parquet(out_path, index=False)
+        group = group.drop_duplicates(subset='trade_timestamp').sort_values('trade_timestamp')
+        if os.path.exists(out_path):
+            existing = pd.read_parquet(out_path)
+            group = (
+                pd.concat([existing, group], ignore_index=True)
+                .drop_duplicates(subset='trade_timestamp', keep='last')
+                .sort_values('trade_timestamp')
+            )
+        group.to_parquet(out_path, index=False)
 
-    all_data.groupby('unique_instrument_id').parallel_apply(process_group)  # type: ignore
+    for path, key, sig in tqdm(files_to_process, desc="Preprocessing minute raw files"):
+        df = pd.read_parquet(path)
+        if df.empty:
+            manifest[key] = sig
+            continue
+        required = {'unique_instrument_id', 'trade_timestamp'}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"{path} 缺少必要列: {sorted(missing)}")
 
-    del all_data
+        groups = list(df.groupby('unique_instrument_id', sort=False))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(groups))) as executor:
+            futures = [executor.submit(_write_uid_group, str(uid), g) for uid, g in groups]
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
+
+        manifest[key] = sig
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2, sort_keys=True)
+        del df
+
     import gc
     gc.collect()
-
     print("\nMinute data preprocessing completed.")
 
-def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = contract_mapping_path, 
-                                  dayk_path: str = dayk_path,
-                                  minute_data_dir: str = minute_data_dir, 
-                                  minute_data_preprocessed_dir: str = minute_data_preprocessed_dir,
-                                  main_mink_folder_path: str = main_mink_folder, 
-                                  main_dayk_folder_path: str = main_dayk_folder, 
-                                  roller_info_path: str = roller_info_path, 
+def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CONTRACT_MAPPING_PATH, 
+                                  dayk_path: str = DAYK_PATH,
+                                  minute_data_dir: str = MINUTE_DATA_DIR, 
+                                  minute_data_preprocessed_dir: str = MINUTE_DATA_PREPROCESSED_DIR,
+                                  main_mink_folder_path: str = MAIN_MINK_FOLDER, 
+                                  main_dayk_folder_path: str = MAIN_DAYK_FOLDER, 
+                                  roller_info_path: str = ROLLER_INFO_PATH, 
                                   products_list: list = [],
                                   rebuild_minute_product: bool = True,
                                   rebuild_roller_info: bool = False,) -> pd.DataFrame:
@@ -67,8 +115,11 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = co
     使用分钟数据索引，按需加载分钟数据。
     """
     # ========== 1. 处理分钟索引 ==========
-    if rebuild_minute_product:
-        preprocess_minute_data(minute_data_dir, minute_data_preprocessed_dir, force_rebuild=True)
+    preprocess_minute_data(
+        minute_data_dir,
+        minute_data_preprocessed_dir,
+        force_rebuild=bool(rebuild_minute_product),
+    )
 
     # ========== 2. 加载已有 roller_info ==========
     existing = pd.DataFrame(columns=['PRODUCT', 'CONTRACT', 'STARTDATE', 'ENDDATE', 'PREV_CLOSE', 'END_CLOSE', 'FORWARD_BASE_DATE', 'FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO'])
@@ -128,20 +179,26 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = co
     def truncate_contract_data(row):
         if row['STARTDATE'] is pd.NaT or row['ENDDATE'] is pd.NaT:
             return np.nan, np.nan, pd.DataFrame(), None, pd.DataFrame()
-        
-        df_dayk = dayk_groups.get(row['CONTRACT_UID'], pd.DataFrame(columns=['trading_day', 'close_price']))
-        left = df_dayk['trading_day'].searchsorted(row['STARTDATE'], side='left')
-        right = df_dayk['trading_day'].searchsorted(row['ENDDATE'], side='right')
-        interval_data = df_dayk.iloc[left:right]
-        end_close = interval_data['close_price'].iloc[-1] if not interval_data.empty else np.nan
-        
+
         def load_contract_data_mink(uid: str, start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:
             file_path = os.path.join(minute_data_preprocessed_dir, f"{uid}.parquet")
             if not os.path.exists(file_path):
                 return pd.DataFrame(columns=['trading_day', 'close_price', 'trade_time'])
             return ((df := pd.read_parquet(file_path, filters=[('trading_day', '>=', start_date), ('trading_day', '<=', end_date)]))
                 .assign(trading_day=pd.to_datetime(df['trading_day']))).rename(columns={'unique_instrument_id': 'contract_uid'})
+        
         df_mink = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
+        df_dayk = dayk_groups.get(row['CONTRACT_UID'], pd.DataFrame(columns=['trading_day', 'close_price']))
+        left = df_dayk['trading_day'].searchsorted(row['STARTDATE'], side='left')
+        right = df_dayk['trading_day'].searchsorted(row['ENDDATE'], side='right')
+        interval_data = df_dayk.iloc[left:right]
+        end_close = interval_data['close_price'].iloc[-1] if not interval_data.empty else np.nan
+
+        if (pd.isna(end_close) or interval_data.empty) and not df_mink.empty:
+            end_close = df_mink['close_price'].iloc[-1]
+            prev_close = df_dayk['close_price'].iloc[left - 1] if left > 0 else df_mink['close_price'].iloc[0]
+            start_interval = df_mink['trading_day'].iloc[0]
+            return prev_close, end_close, interval_data, start_interval, df_mink
         
         if left > 0:
             return df_dayk['close_price'].iloc[left - 1], end_close, interval_data, None, df_mink
@@ -240,7 +297,7 @@ if __name__ == '__main__':
         cutoff = pd.to_datetime('2025-05-30').strftime('%Y%m%d')
         # 截断合约映射表，只保留 STARTDATE <= cutoff_date 的合约
         def _cutoff(g): g.iloc[-1] = cutoff; return pd.to_datetime(g)
-        df = ((df := pd.read_parquet(contract_mapping_path, 
+        df = ((df := pd.read_parquet(CONTRACT_MAPPING_PATH, 
                 filters=[('S_INFO_WINDCODE', 'in', test_products), ('STARTDATE', '<=', cutoff)])
             .rename(columns={'S_INFO_WINDCODE': 'PRODUCT', 'FS_MAPPING_WINDCODE': 'CONTRACT'})
             .sort_values(['PRODUCT', 'STARTDATE']))
