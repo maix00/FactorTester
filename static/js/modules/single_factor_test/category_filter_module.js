@@ -187,7 +187,7 @@
                         fetch('/update_submission_paths', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ id_time: found.id, selected_paths: minimalPaths, new_name: newName })
+                            body: JSON.stringify({ id_time: found.id, selected_paths: minimalPaths, new_name: newName, page_uuid: window._pageUuid || '' })
                         })
                         .then(function(r) { return r.json(); })
                         .then(function(data) {
@@ -207,7 +207,7 @@
                         fetch('/rename_submission', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ id_time: found.id, new_name: newName })
+                            body: JSON.stringify({ id_time: found.id, new_name: newName, page_uuid: window._pageUuid || '' })
                         })
                         .then(function(r) { return r.json(); })
                         .then(function(data) {
@@ -306,7 +306,7 @@
                 fetch('/reorder_submissions', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ new_order: submissions.map(function(s) { return s.id; }) })
+                    body: JSON.stringify({ new_order: submissions.map(function(s) { return s.id; }), page_uuid: window._pageUuid || '' })
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -322,7 +322,7 @@
                 fetch('/delete_submission', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ id_time: sub.id })
+                    body: JSON.stringify({ id_time: sub.id, page_uuid: window._pageUuid || '' })
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -349,7 +349,7 @@
                 fetch('/delete_path_of_submission', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ id_time: sub.id, new_paths: newPaths })
+                    body: JSON.stringify({ id_time: sub.id, new_paths: newPaths, page_uuid: window._pageUuid || '' })
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
@@ -359,7 +359,7 @@
                             fetch('/delete_submission', {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ id_time: sub.id })
+                                body: JSON.stringify({ id_time: sub.id, page_uuid: window._pageUuid || '' })
                             })
                             .then(function(r) { return r.json(); })
                             .then(function(d2) {

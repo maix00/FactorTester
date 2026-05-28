@@ -184,6 +184,8 @@ start_server.py          ← 入口：Flask + Waitress + 热插拔重载
 
 IC / 分组测试结果的保留边界见 ADR-008：保留最新图表与分组详情所需结果，不保留内部 scratch 或重跑后被替换的大表；页面暂时未显示不等于可删除提交。
 
+单因子页面中的产品提交运行时状态以 `page_uuid` 隔离；提交增删改排与列表同步不得跨页返回或修改 `FactorTester`。完整决策见 ADR-009。
+
 ### 命名约定
 
 - `UniqueObject.name`：`{user_prefix}:{alias}:{uuid}` — 全局唯一
