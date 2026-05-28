@@ -296,40 +296,8 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
 
 # 使用示例
 if __name__ == '__main__':
-    # 测试截断再补全
-    test_products = []
-    # test_products = ['A.DCE', 'AD.SHF', 'AD_S.SHF', 'AF-S.CFE', 'AG.SHF', 'AG_S.SHF']
-    
-    if test_products:
-        cutoff = pd.to_datetime('2025-05-30').strftime('%Y%m%d')
-        # 截断合约映射表，只保留 STARTDATE <= cutoff_date 的合约
-        def _cutoff(g): g.iloc[-1] = cutoff; return pd.to_datetime(g)
-        df = ((df := pd.read_parquet(CONTRACT_MAPPING_PATH, 
-                filters=[('S_INFO_WINDCODE', 'in', test_products), ('STARTDATE', '<=', cutoff)])
-            .rename(columns={'S_INFO_WINDCODE': 'PRODUCT', 'FS_MAPPING_WINDCODE': 'CONTRACT'})
-            .sort_values(['PRODUCT', 'STARTDATE']))
-            .assign(ENDDATE=df.groupby('PRODUCT')['ENDDATE'].transform(_cutoff))
-            .assign(STARTDATE=pd.to_datetime(df['STARTDATE']))
-            .reset_index(drop=True))
-
-        # 调用主函数
-        df = generate_main_contract_series(
-            contract_start_end_path=df,
-            rebuild_roller_info=True, # 强制重建展期信息，覆盖原文件
-            rebuild_minute_product=False, # 不强制重建分钟数据，假设之前已经处理过了
-        )
-        print(df)
-
-        # 增量更新（假设有新数据）
-        df = generate_main_contract_series(
-            products_list=test_products, # 只更新测试产品
-            rebuild_minute_product=False, # 不重建分钟数据，使用之前处理好的数据
-        )
-        print(df)
-
-    else:
-        df = generate_main_contract_series(
-            rebuild_roller_info=True,
-            rebuild_minute_product=False,
-        )
-        print(df)
+    df = generate_main_contract_series(
+        rebuild_roller_info=True,
+        rebuild_minute_product=False,
+    )
+    print(df)
