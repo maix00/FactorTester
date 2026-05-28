@@ -953,9 +953,7 @@
     function fmtFeeRate(value) {
         if (value == null || isNaN(value) || !isFinite(value)) return '—';
         var bp = value * 10000;
-        var abs = Math.abs(bp);
-        var dec = abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8;
-        return bp.toFixed(dec) + ' bp';
+        return bp.toFixed(5) + ' bp';
     }
 
     /** 检查行数据的 product.fee._is_real_fee，判断是否为原始费率而非回测参数 */
@@ -1380,7 +1378,7 @@
     }
 
     function fmtBp(value) {
-        return value == null ? '—' : (value * 10000).toFixed(2) + ' bp';
+        return value == null ? '—' : (value * 10000).toFixed(5) + ' bp';
     }
 
     var _groupIntradayRows = [];
