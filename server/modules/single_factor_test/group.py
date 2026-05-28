@@ -28,9 +28,9 @@ def _safe_float(v):
     return None if (math.isnan(fv) or math.isinf(fv)) else fv
 
 
-def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_like=None) -> dict:
-    """从 Long-Short 收益率序列计算绩效指标。"""
-    s = pd.Series(r_ls_array).replace([np.inf, -np.inf], np.nan).dropna()
+def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
+    """从收益率序列计算绩效指标。"""
+    s = pd.Series(r_array).replace([np.inf, -np.inf], np.nan).dropna()
     n = len(s)
     if n == 0:
         return {}
@@ -50,10 +50,132 @@ def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_l
         'Mean Return':   _safe_float(s.mean() * 100),
         'Skewness':      _safe_float(s.skew()),
         'Kurtosis':      _safe_float(s.kurtosis()),
-        'Avg Turnover':  round(float(
-            (report_df['Avg Turnover'].iloc[0] + report_df['Avg Turnover'].iloc[-1]) / 2
-        ), 4) if not report_df.empty and 'Avg Turnover' in report_df.columns else None,
+        'Avg Turnover':  _safe_float(avg_turnover),
     }
+
+
+def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_like=None) -> dict:
+    """从 Long-Short 收益率序列计算绩效指标。"""
+    avg_turnover = round(float(
+        (report_df['Avg Turnover'].iloc[0] + report_df['Avg Turnover'].iloc[-1]) / 2
+    ), 4) if not report_df.empty and 'Avg Turnover' in report_df.columns else None
+    return _compute_return_metrics(r_ls_array, index_like=index_like, avg_turnover=avg_turnover)
+
+
+def _serialize_float_series(values: np.ndarray | list, default=0.0) -> list:
+    result = []
+    for value in values:
+        try:
+            fv = float(value)
+        except (TypeError, ValueError):
+            result.append(default)
+            continue
+        result.append(round(fv, 8) if not (math.isnan(fv) or math.isinf(fv)) else default)
+    return result
+
+
+def _returns_to_cumulative(returns: np.ndarray) -> np.ndarray:
+    safe = np.nan_to_num(np.asarray(returns, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+    return np.cumprod(1.0 + safe)
+
+
+def _normalize_weighted_legs(raw_legs, default_group: int) -> list[dict]:
+    if not isinstance(raw_legs, list) or not raw_legs:
+        raw_legs = [{'group': default_group, 'weight': 0.5}]
+    legs = []
+    for item in raw_legs:
+        try:
+            group = int(item.get('group'))
+            weight = float(item.get('weight'))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if weight > 0:
+            legs.append({'group': group, 'weight': weight})
+    total = sum(x['weight'] for x in legs)
+    if total > 0:
+        for leg in legs:
+            leg['weight'] = leg['weight'] / total * 0.5
+    return legs
+
+
+def _parse_ls_config(data: dict, n_groups: int) -> dict:
+    raw = data.get('ls_config') or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        'name': str(raw.get('name') or 'Long-Short').strip() or 'Long-Short',
+        'long': _normalize_weighted_legs(raw.get('long'), 0),
+        'short': _normalize_weighted_legs(raw.get('short'), n_groups - 1),
+    }
+
+
+def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_config: dict, n_groups: int) -> tuple[np.ndarray, np.ndarray]:
+    gross_np = np.asarray(gross_np, dtype=float)
+    fee_np = np.asarray(fee_np, dtype=float)
+    legs = []
+    for leg in ls_config.get('long') or []:
+        if 0 <= leg['group'] < n_groups:
+            legs.append({'side': 1.0, 'group': leg['group'], 'cap': leg['weight']})
+    for leg in ls_config.get('short') or []:
+        if 0 <= leg['group'] < n_groups:
+            legs.append({'side': -1.0, 'group': leg['group'], 'cap': leg['weight']})
+    if not legs:
+        legs = [{'side': 1.0, 'group': 0, 'cap': 0.5}, {'side': -1.0, 'group': n_groups - 1, 'cap': 0.5}]
+
+    total_cap = sum(leg['cap'] for leg in legs) or 1.0
+    r_ls_list = []
+    ls_cum_list = []
+    for row_idx in range(gross_np.shape[0]):
+        for leg in legs:
+            group = leg['group']
+            gross = leg['side'] * gross_np[row_idx, group]
+            fee = fee_np[row_idx, group]
+            net = (1.0 - fee) * (1.0 + gross) - 1.0
+            net = 0.0 if (np.isnan(net) or np.isinf(net)) else float(net)
+            leg['cap'] *= 1.0 + net
+        new_total = sum(leg['cap'] for leg in legs)
+        r_ls_list.append(new_total / total_cap - 1.0)
+        ls_cum_list.append(new_total)
+        total_cap = new_total
+    return np.array(r_ls_list, dtype=float), np.array(ls_cum_list, dtype=float)
+
+
+def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str) -> tuple[dict, dict]:
+    from tools.products.product_utils import product_display_name
+
+    contrib = getattr(group_result, 'product_gross_contrib_np', None)
+    valid_cols = getattr(group_result, 'valid_cols', None)
+    idx_list = getattr(group_result, 'index_list', None) or []
+    if contrib is None or valid_cols is None:
+        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+    contrib_np = np.asarray(contrib, dtype=float)
+    if contrib_np.ndim != 3 or group_index < 0 or group_index >= contrib_np.shape[1]:
+        raise ValueError('基准组不存在或逐品种贡献维度异常')
+
+    display_names = [product_display_name(product)['name'] for product in valid_cols]
+    selected = {str(name) for name in (product_names or [])}
+    selected_idx = [idx for idx, display_name in enumerate(display_names) if display_name in selected]
+    if not selected_idx:
+        raise ValueError('请至少选择一个有效品种')
+
+    returns = np.nan_to_num(contrib_np[:, group_index, selected_idx].sum(axis=1), nan=0.0, posinf=0.0, neginf=0.0)
+    cumulative = _returns_to_cumulative(returns)
+    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+    metric = _compute_return_metrics(returns, index_like=idx_list, avg_turnover=None)
+    group = {
+        'name': name or f'第{group_index + 1}组精选',
+        'timestamps': timestamps,
+        'cumulative_returns': _serialize_float_series(cumulative, default=None),
+        'gross_returns': _serialize_float_series(returns, default=0.0),
+        'fee_costs': [0.0] * len(returns),
+        'trade_notional_ratios': [0.0] * len(returns),
+        'is_derived': True,
+        'derived': {
+            'base_group': group_index,
+            'product_names': [display_names[idx] for idx in selected_idx],
+        },
+    }
+    return group, metric
 
 
 def _latest_group_result(tester):
@@ -165,6 +287,7 @@ def run_group_test():
     factor_alias   = data.get('factor_alias')
     n_groups       = data.get('n_groups', 5)
     fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data)
+    ls_config = _parse_ls_config(data, int(n_groups))
     rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
@@ -238,22 +361,7 @@ def run_group_test():
                 _fee_np = group_result.fee_costs_np if group_result is not None else None
                 fee_np_arr = _fee_np if _fee_np is not None else np.zeros((len(timestamps), n_groups))
 
-                long_net  = (1.0 - fee_np_arr[:, 0]) * (1.0 + gross_np[:, 0]) - 1.0
-                short_net = (1.0 - fee_np_arr[:, n_groups - 1]) * (1.0 - gross_np[:, n_groups-1]) - 1.0
-
-                long_cap = short_cap = 0.5
-                total_cap = 1.0
-                r_ls_arr = []
-                for rl, rs in zip(long_net, short_net):
-                    rl = 0.0 if (np.isnan(rl) or np.isinf(rl)) else float(rl)
-                    rs = 0.0 if (np.isnan(rs) or np.isinf(rs)) else float(rs)
-                    long_cap  *= (1.0 + rl)
-                    short_cap *= (1.0 + rs)
-                    new_total  = long_cap + short_cap
-                    r_ls_arr.append(new_total / total_cap - 1.0)
-                    total_cap = new_total
-
-                r_ls_np = np.array(r_ls_arr, dtype=float)
+                r_ls_np, _ = _compute_weighted_ls_returns(gross_np, fee_np_arr, ls_config, n_groups)
                 ls_metric = _compute_ls_metrics(r_ls_np, report_df, idx_list)
                 freq_label = str(rf_str) if rf_str else factor.freq.name if factor.freq else 'base'
                 multi_horizon_results.append({
@@ -312,27 +420,9 @@ def run_group_test():
                 ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
             })
 
-        long_net  = (1.0 - fee_np[:, 0])           * (1.0 + gross_np[:, 0])          - 1.0
-        short_net = (1.0 - fee_np[:, n_groups - 1]) * (1.0 - gross_np[:, n_groups-1]) - 1.0
-
-        long_cap = short_cap = 0.5
-        total_cap = 1.0
-        ls_cum_list: list = []
-        r_ls_list:   list = []
-        for rl, rs in zip(long_net, short_net):
-            rl = 0.0 if (np.isnan(rl) or np.isinf(rl)) else float(rl)
-            rs = 0.0 if (np.isnan(rs) or np.isinf(rs)) else float(rs)
-            long_cap  *= (1.0 + rl)
-            short_cap *= (1.0 + rs)
-            new_total  = long_cap + short_cap
-            r_ls_list.append(new_total / total_cap - 1.0)
-            ls_cum_list.append(new_total)
-            total_cap = new_total
-
-        r_ls       = np.array(r_ls_list, dtype=float)
-        ls_cum_arr = np.array(ls_cum_list, dtype=float)
+        r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
         ls_vals    = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
-        groups_data.append({'name': 'Long-Short', 'timestamps': timestamps, 'cumulative_returns': ls_vals, 'is_ls': True})
+        groups_data.append({'name': ls_config['name'], 'timestamps': timestamps, 'cumulative_returns': ls_vals, 'is_ls': True})
 
         ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
 
@@ -532,6 +622,32 @@ def get_group_detail():
             group_result.close_today_fee_vec if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/create_derived_group', methods=['POST'])
+def create_derived_group():
+    """Create a chart/metric payload for a user-defined product subset group."""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    group_index = data.get('group_index')
+    product_names = data.get('product_names') or []
+    name = str(data.get('name') or '').strip()
+    if submission_id is None or group_index is None:
+        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
+    try:
+        tester = runtime_state.get_factor_tester(submission_id, caller='create_derived_group')
+        group_result = _latest_group_result(tester)
+        if group_result is None:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        group, metric = _build_derived_group_payload(
+            group_result,
+            int(group_index),
+            [str(x) for x in product_names],
+            name or f'第{int(group_index) + 1}组精选',
+        )
+        return jsonify({'success': True, 'group': group, 'metric': metric})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 

@@ -729,8 +729,10 @@
             var isLS = (g === 'LS');
             if (isLS) {
                 theadHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
-            } else {
+            } else if (/^\d+$/.test(String(g))) {
                 theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">第' + (parseInt(g)+1) + '组</th>';
+            } else {
+                theadHtml += '<th style="background:#f8fbff;">' + escapeHtml(g) + '</th>';
             }
         });
         theadHtml += '</tr>';
@@ -853,8 +855,8 @@
     function renderGroupFrequency(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
-        rows.slice(0, 12).forEach(function(row) {
+        var html = '<table class="group-detail-table"><thead><tr><th style="width:34px;"><input type="checkbox" id="derived-select-all-products" title="全选当前显示品种"></th><th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        rows.forEach(function(row) {
             var meanRet = row.mean_return;
             var fee = (row.product && row.product.fee) || {};
             var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
@@ -862,7 +864,8 @@
             var prod = row.product;
             var name = (prod && prod.name) || '—';
             var desc = (prod && prod.desc && prod.desc !== name) ? prod.desc : '—';
-            html += '<tr' + highlight + '><td>' + name + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + desc + '</td>'
+            html += '<tr' + highlight + '><td><input type="checkbox" class="derived-product-checkbox" data-product-name="' + escapeHtml(name) + '"></td>'
+                + '<td>' + escapeHtml(name) + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + escapeHtml(desc) + '</td>'
                 + '<td>' + fmtFeeRate(meanRet) + '</td>'
                 + '<td>' + fmtFeeRate(fee.open) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_today) + '</td>'
@@ -870,6 +873,157 @@
                 + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
         });
         return html + '</tbody></table>';
+    }
+
+    function getDerivedGroupsForCurrentBase(groupIndex) {
+        return _derivedGroups.filter(function(item) { return item.baseGroup === groupIndex; });
+    }
+
+    function renderDerivedGroupsPanel(groupIndex) {
+        var el = document.getElementById('group-derived-groups-panel');
+        if (!el) return;
+        var defs = getDerivedGroupsForCurrentBase(groupIndex);
+        var defaultName = '第' + (groupIndex + 1) + '组精选' + (_derivedGroupSeq || 1);
+        var html = '<div class="derived-group-panel">'
+            + '<div class="derived-group-toolbar">'
+            + '<b>派生组</b>'
+            + '<input id="derived-group-name-input" placeholder="派生组名称，默认 ' + escapeHtml(defaultName) + '">'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" id="derived-group-define-btn">保存定义</button>'
+            + '<button type="button" class="btn btn-sm btn-primary" id="derived-group-generate-all-btn">生成全部派生组</button>'
+            + '<span class="group-detail-muted">先勾选下方品种；生成后才追加曲线和统计数字。</span>'
+            + '</div>';
+        defs.forEach(function(def) {
+            html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(def.id) + '">'
+                + '<span><b>' + escapeHtml(def.name) + '</b> · 第' + (def.baseGroup + 1) + '组 · ' + def.productNames.length + '个品种'
+                + (def.generated ? ' · 已生成' : ' · 未生成') + '</span>'
+                + '<span class="derived-group-actions">'
+                + '<button type="button" class="btn btn-sm btn-outline-primary derived-group-generate-btn" data-derived-id="' + escapeHtml(def.id) + '">生成曲线/统计</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger derived-group-delete-btn" data-derived-id="' + escapeHtml(def.id) + '">删除</button>'
+                + '</span></div>';
+        });
+        html += '</div>';
+        el.innerHTML = html;
+        bindDerivedGroupPanelEvents(groupIndex);
+    }
+
+    function bindDerivedGroupPanelEvents(groupIndex) {
+        var selectAll = document.getElementById('derived-select-all-products');
+        if (selectAll) {
+            selectAll.addEventListener('change', function() {
+                document.querySelectorAll('.derived-product-checkbox').forEach(function(cb) {
+                    cb.checked = selectAll.checked;
+                });
+            });
+        }
+        var defineBtn = document.getElementById('derived-group-define-btn');
+        if (defineBtn) defineBtn.addEventListener('click', function() { defineDerivedGroup(groupIndex); });
+        var generateAllBtn = document.getElementById('derived-group-generate-all-btn');
+        if (generateAllBtn) {
+            generateAllBtn.addEventListener('click', function() {
+                getDerivedGroupsForCurrentBase(groupIndex).forEach(function(def) { generateDerivedGroup(def.id); });
+            });
+        }
+        document.querySelectorAll('.derived-group-generate-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() { generateDerivedGroup(btn.getAttribute('data-derived-id')); });
+        });
+        document.querySelectorAll('.derived-group-delete-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() { deleteDerivedGroup(btn.getAttribute('data-derived-id')); });
+        });
+    }
+
+    function collectSelectedDerivedProducts() {
+        var names = [];
+        document.querySelectorAll('.derived-product-checkbox:checked').forEach(function(cb) {
+            var name = cb.getAttribute('data-product-name');
+            if (name) names.push(name);
+        });
+        return names;
+    }
+
+    function defineDerivedGroup(groupIndex) {
+        var productNames = collectSelectedDerivedProducts();
+        if (!productNames.length) {
+            alert('请先勾选至少一个入组产品。');
+            return;
+        }
+        var input = document.getElementById('derived-group-name-input');
+        var name = (input && input.value ? input.value.trim() : '') || ('第' + (groupIndex + 1) + '组精选' + _derivedGroupSeq);
+        var id = 'D' + _derivedGroupSeq++;
+        _derivedGroups.push({
+            id: id,
+            metricKey: name,
+            name: name,
+            baseGroup: groupIndex,
+            productNames: productNames,
+            generated: false
+        });
+        renderDerivedGroupsPanel(groupIndex);
+    }
+
+    function makeUniqueMetricKey(name, ownId) {
+        var base = name || ownId || '派生组';
+        var key = base;
+        var suffix = 2;
+        while (_lastMetrics && _lastMetrics[key]) {
+            var owner = _derivedGroups.find(function(item) { return item.metricKey === key; });
+            if (owner && owner.id === ownId) break;
+            key = base + ' #' + suffix++;
+        }
+        return key;
+    }
+
+    function removeGeneratedDerivedArtifacts(id) {
+        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        if (_lastGrossData) {
+            _lastGrossData = _lastGrossData.filter(function(group) {
+                return !(group && group.is_derived && group.derived && group.derived.id === id);
+            });
+        }
+        if (def && _lastMetrics && def.metricKey) delete _lastMetrics[def.metricKey];
+        if (def) def.generated = false;
+    }
+
+    async function generateDerivedGroup(id) {
+        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        var context = getCurrentContext();
+        if (!def || !context || !context.submission_id) return;
+        if (!_lastGrossData || !_lastMetrics) {
+            alert('请先运行分组测试，再生成派生组曲线。');
+            return;
+        }
+        var resp = await GT.api.createDerivedGroup({
+            submission_id: context.submission_id,
+            group_index: def.baseGroup,
+            product_names: def.productNames,
+            name: def.name
+        });
+        if (!resp || !resp.success) {
+            alert('生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
+            return;
+        }
+        removeGeneratedDerivedArtifacts(def.id);
+        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.generated = true;
+        var group = resp.group || {};
+        group.name = def.name;
+        group.is_derived = true;
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        _lastGrossData.push(group);
+        _lastMetrics[def.metricKey] = resp.metric || {};
+        drawGroupChart(_lastGrossData);
+        renderMetricsTable(_lastMetrics);
+        updateActiveGroupCache();
+        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
+    }
+
+    function deleteDerivedGroup(id) {
+        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        removeGeneratedDerivedArtifacts(id);
+        _derivedGroups = _derivedGroups.filter(function(item) { return item.id !== id; });
+        if (_lastGrossData) drawGroupChart(_lastGrossData);
+        if (_lastMetrics) renderMetricsTable(_lastMetrics);
+        updateActiveGroupCache();
+        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? (def ? def.baseGroup : 0) : _currentGroupDetailIndex);
     }
 
     function renderPositiveRuns(rows) {
@@ -948,6 +1102,15 @@
 
     function formatGroupProducts(products) {
         return (products || []).map(formatGroupProduct).join('、');
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function fmtFeeRate(value) {
@@ -1113,6 +1276,7 @@
             summaryEl.innerHTML = renderGroupSummaryCards(detail.summary || {});
         }
         document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
+        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? 0 : _currentGroupDetailIndex);
         document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
         document.getElementById('group-detail-bottom-periods').innerHTML = renderGroupDetailTable(detail.bottom_periods);
         var q = (detail.distribution || {}).quantiles || {};
@@ -1419,6 +1583,7 @@
     async function openGroupDetail(groupIndex) {
         var context = getCurrentContext();
         if (!context || !context.submission_id) return;
+        _currentGroupDetailIndex = groupIndex;
         var overlay = document.getElementById('group-detail-overlay');
         var loading = document.getElementById('group-detail-loading');
         var content = document.getElementById('group-detail-content');
@@ -1666,6 +1831,38 @@
         });
     }
 
+    function parseCsvNumbers(value) {
+        return String(value || '').split(',')
+            .map(function(x) { return parseFloat(x.trim()); })
+            .filter(function(x) { return !isNaN(x) && isFinite(x); });
+    }
+
+    function buildLsLegs(groupsValue, weightsValue, defaultGroups) {
+        var groups = parseCsvNumbers(groupsValue);
+        if (!groups.length) groups = defaultGroups || [];
+        var weights = parseCsvNumbers(weightsValue);
+        if (!weights.length) weights = groups.map(function() { return 1; });
+        return groups.map(function(groupNo, idx) {
+            return {
+                group: Math.max(0, Math.floor(groupNo) - 1),
+                weight: weights[idx] != null ? weights[idx] : weights[weights.length - 1]
+            };
+        }).filter(function(leg) { return leg.weight > 0; });
+    }
+
+    function collectLongShortConfig(nGroups) {
+        var longGroupsEl = document.getElementById('ls_long_groups');
+        var longWeightsEl = document.getElementById('ls_long_weights');
+        var shortGroupsEl = document.getElementById('ls_short_groups');
+        var shortWeightsEl = document.getElementById('ls_short_weights');
+        var nameEl = document.getElementById('ls_name');
+        return {
+            name: (nameEl && nameEl.value ? nameEl.value.trim() : '') || 'Long-Short',
+            long: buildLsLegs(longGroupsEl ? longGroupsEl.value : '1', longWeightsEl ? longWeightsEl.value : '1', [1]),
+            short: buildLsLegs(shortGroupsEl ? shortGroupsEl.value : '', shortWeightsEl ? shortWeightsEl.value : '1', [nGroups])
+        };
+    }
+
     async function collectGroupRunPayload(context, factorAlias) {
         var statusSpan = document.getElementById('group_test_status');
         var currentSubmissionId = context && context.submission_id;
@@ -1747,7 +1944,8 @@
                 start_date: start_date,
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
-                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold'
+                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold',
+                ls_config: collectLongShortConfig(n_groups)
             },
             statusEl: statusSpan,
         };
@@ -1773,6 +1971,8 @@
             closeSnapshotDrawer();
             _lastGrossData = null;
             _lastMetrics = null;
+            _derivedGroups = [];
+            _derivedGroupSeq = 1;
             renderMultiHorizonTable(data.results, data.n_groups);
             return;
         }
@@ -1782,6 +1982,11 @@
         _lastMetrics = data.metrics;
         _lastNgroups = data.n_groups;
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
+        _derivedGroups = (data._derivedGroups || []).map(function(item) { return Object.assign({}, item); });
+        _derivedGroupSeq = _derivedGroups.reduce(function(maxSeq, item) {
+            var num = parseInt(String(item.id || '').replace(/^D/, ''), 10);
+            return isNaN(num) ? maxSeq : Math.max(maxSeq, num + 1);
+        }, 1);
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
         var slider = document.getElementById('fee_sensitivity_slider');
@@ -1933,6 +2138,9 @@
     var _groupResultsBySubmission = {};
     var _activeGroupSubmissionId = null;
     var _activeGroupFactorBySubmission = {};
+    var _derivedGroups = [];
+    var _derivedGroupSeq = 1;
+    var _currentGroupDetailIndex = null;
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
@@ -1942,6 +2150,16 @@
 
     function getCachedGroupResult(submissionId, factorAlias) {
         return _groupResultsBySubmission[submissionId] && _groupResultsBySubmission[submissionId][factorAlias];
+    }
+
+    function updateActiveGroupCache() {
+        var context = getCurrentContext();
+        if (!context || !context.submission_id || !context.factor_alias) return;
+        var cached = getCachedGroupResult(context.submission_id, context.factor_alias);
+        if (!cached) return;
+        cached.groups = _lastGrossData;
+        cached.metrics = _lastMetrics;
+        cached._derivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item); });
     }
 
     function clearCachedGroupResultsForSubmission(submissionId) {
