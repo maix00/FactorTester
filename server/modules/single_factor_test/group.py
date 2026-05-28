@@ -109,6 +109,29 @@ def _parse_ls_config(data: dict, n_groups: int) -> dict:
     }
 
 
+def _parse_ls_configs(data: dict, n_groups: int) -> list[dict]:
+    raw_configs = data.get('ls_configs')
+    if isinstance(raw_configs, list) and raw_configs:
+        configs = []
+        for raw in raw_configs:
+            if not isinstance(raw, dict):
+                continue
+            configs.append(_parse_ls_config({'ls_config': raw}, n_groups))
+        return configs or [_parse_ls_config(data, n_groups)]
+    return [_parse_ls_config(data, n_groups)]
+
+
+def _unique_metric_key(name: str, used: set[str], default: str = 'LS') -> str:
+    base = name or default
+    key = default if base == 'Long-Short' and default not in used else base
+    suffix = 2
+    while key in used:
+        key = f'{base} #{suffix}'
+        suffix += 1
+    used.add(key)
+    return key
+
+
 def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_config: dict, n_groups: int) -> tuple[np.ndarray, np.ndarray]:
     gross_np = np.asarray(gross_np, dtype=float)
     fee_np = np.asarray(fee_np, dtype=float)
@@ -287,7 +310,7 @@ def run_group_test():
     factor_alias   = data.get('factor_alias')
     n_groups       = data.get('n_groups', 5)
     fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data)
-    ls_config = _parse_ls_config(data, int(n_groups))
+    ls_configs = _parse_ls_configs(data, int(n_groups))
     rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
@@ -361,7 +384,7 @@ def run_group_test():
                 _fee_np = group_result.fee_costs_np if group_result is not None else None
                 fee_np_arr = _fee_np if _fee_np is not None else np.zeros((len(timestamps), n_groups))
 
-                r_ls_np, _ = _compute_weighted_ls_returns(gross_np, fee_np_arr, ls_config, n_groups)
+                r_ls_np, _ = _compute_weighted_ls_returns(gross_np, fee_np_arr, ls_configs[0], n_groups)
                 ls_metric = _compute_ls_metrics(r_ls_np, report_df, idx_list)
                 freq_label = str(rf_str) if rf_str else factor.freq.name if factor.freq else 'base'
                 multi_horizon_results.append({
@@ -376,6 +399,7 @@ def run_group_test():
                 tester.results[factor].returns = _saved_returns
             
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups,
+                            'structure_key': data.get('structure_key'),
                             'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
                             'rebalance_mode': rebalance_mode,
                             'submission_id': submission_id, 'factor_alias': factor_alias,
@@ -420,12 +444,6 @@ def run_group_test():
                 ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
             })
 
-        r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
-        ls_vals    = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
-        groups_data.append({'name': ls_config['name'], 'timestamps': timestamps, 'cumulative_returns': ls_vals, 'is_ls': True})
-
-        ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
-
         metrics: dict = {}
         if not report_df.empty:
             metrics = {
@@ -433,9 +451,27 @@ def run_group_test():
                          for mk, mv in v.items()}
                 for k, v in report_df.to_dict(orient='index').items()
             }
-        metrics['LS'] = ls_metric
+        used_metric_keys = set(metrics.keys())
+        for ls_config in ls_configs:
+            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
+            metric_key = _unique_metric_key(ls_config['name'], used_metric_keys, default='LS')
+            ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
+            groups_data.append({
+                'name': ls_config['name'],
+                'metric_key': metric_key,
+                'timestamps': timestamps,
+                'cumulative_returns': ls_vals,
+                'gross_returns': _serialize_float_series(r_ls, default=0.0),
+                'fee_costs': [0.0] * len(r_ls),
+                'trade_notional_ratios': [0.0] * len(r_ls),
+                'is_ls': True,
+                'is_derived': True,
+                'derived': {'type': 'long_short', 'metric_key': metric_key, 'config': ls_config},
+            })
+            metrics[metric_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
 
         return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups,
+                        'structure_key': data.get('structure_key'),
                         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
                         'rebalance_mode': rebalance_mode,
                         'submission_id': submission_id, 'factor_alias': factor_alias,

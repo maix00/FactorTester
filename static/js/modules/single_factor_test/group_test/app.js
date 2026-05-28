@@ -728,11 +728,11 @@
         groupLabels.forEach(function(g) {
             var isLS = (g === 'LS');
             if (isLS) {
-                theadHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">Long-Short</th>';
             } else if (/^\d+$/.test(String(g))) {
                 theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">第' + (parseInt(g)+1) + '组</th>';
             } else {
-                theadHtml += '<th style="background:#f8fbff;">' + escapeHtml(g) + '</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + escapeHtml(g) + '" style="background:#f8fbff;" title="查看组合详情">' + escapeHtml(g) + '</th>';
             }
         });
         theadHtml += '</tr>';
@@ -835,6 +835,11 @@
                 openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
             });
         });
+        document.querySelectorAll('#metrics_head .portfolio-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                openPortfolioDetail(th.getAttribute('data-metric-key'));
+            });
+        });
         var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
         if (rankingHead) {
             rankingHead.addEventListener('click', openGroupRankingDetail);
@@ -852,10 +857,13 @@
         return html + '</tbody></table>';
     }
 
-    function renderGroupFrequency(rows) {
+    function renderGroupFrequency(rows, selectable) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
+        selectable = selectable !== false;
         var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
-        var html = '<table class="group-detail-table"><thead><tr><th style="width:34px;"><input type="checkbox" id="derived-select-all-products" title="全选当前显示品种"></th><th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        var html = '<table class="group-detail-table"><thead><tr>'
+            + (selectable ? '<th style="width:34px;"><input type="checkbox" id="derived-select-all-products" title="全选当前显示品种"></th>' : '')
+            + '<th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.forEach(function(row) {
             var meanRet = row.mean_return;
             var fee = (row.product && row.product.fee) || {};
@@ -864,13 +872,14 @@
             var prod = row.product;
             var name = (prod && prod.name) || '—';
             var desc = (prod && prod.desc && prod.desc !== name) ? prod.desc : '—';
-            html += '<tr' + highlight + '><td><input type="checkbox" class="derived-product-checkbox" data-product-name="' + escapeHtml(name) + '"></td>'
+            html += '<tr' + highlight + '>'
+                + (selectable ? '<td><input type="checkbox" class="derived-product-checkbox" data-product-name="' + escapeHtml(name) + '"></td>' : '')
                 + '<td>' + escapeHtml(name) + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + escapeHtml(desc) + '</td>'
                 + '<td>' + fmtFeeRate(meanRet) + '</td>'
                 + '<td>' + fmtFeeRate(fee.open) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_today) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>'
-                + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+                + '<td>' + (row.count == null ? '—' : row.count) + '</td><td>' + (row.frequency == null ? '—' : (row.frequency * 100).toFixed(1) + '%') + '</td></tr>';
         });
         return html + '</tbody></table>';
     }
@@ -1270,13 +1279,19 @@
         return d.toLocaleString();
     }
 
-    function renderGroupDetail(detail) {
+    function renderGroupDetail(detail, options) {
+        options = options || {};
         var summaryEl = document.getElementById('group-detail-summary');
         if (summaryEl) {
             summaryEl.innerHTML = renderGroupSummaryCards(detail.summary || {});
         }
-        document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
-        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? 0 : _currentGroupDetailIndex);
+        document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency, options.showDerivedPanel !== false);
+        var derivedPanel = document.getElementById('group-derived-groups-panel');
+        if (options.showDerivedPanel === false) {
+            if (derivedPanel) derivedPanel.innerHTML = '';
+        } else {
+            renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? 0 : _currentGroupDetailIndex);
+        }
         document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
         document.getElementById('group-detail-bottom-periods').innerHTML = renderGroupDetailTable(detail.bottom_periods);
         var q = (detail.distribution || {}).quantiles || {};
@@ -1301,6 +1316,79 @@
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
+    }
+
+    function buildPortfolioDetail(group, metric) {
+        var timestamps = group.timestamps || [];
+        var returns = group.gross_returns || [];
+        if ((!returns || !returns.length) && group.cumulative_returns) {
+            returns = [];
+            var prev = 1.0;
+            (group.cumulative_returns || []).forEach(function(value) {
+                var cur = Number(value);
+                if (!isFinite(cur) || prev === 0) {
+                    returns.push(0);
+                    return;
+                }
+                returns.push(cur / prev - 1.0);
+                prev = cur;
+            });
+        }
+        var wealth = 1.0;
+        var returnSeries = returns.map(function(value, idx) {
+            var ret = Number(value);
+            if (!isFinite(ret)) ret = 0;
+            wealth *= (1 + ret);
+            return {
+                timestamp: new Date(timestamps[idx]).toISOString(),
+                return: ret,
+                cumulative_return: wealth
+            };
+        });
+        var periods = returnSeries.map(function(row) {
+            return { timestamp: row.timestamp, return: row.return, products: [] };
+        }).sort(function(a, b) { return b.return - a.return; });
+        var cleanReturns = returns.map(Number).filter(function(v) { return isFinite(v); });
+        var quantiles = {};
+        if (cleanReturns.length) {
+            var sorted = cleanReturns.slice().sort(function(a, b) { return a - b; });
+            var qv = function(p) { return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)))]; };
+            quantiles = { p05: qv(0.05), p25: qv(0.25), p50: qv(0.50), p75: qv(0.75), p95: qv(0.95) };
+        }
+        var entryFrequency = [];
+        if (group.derived && Array.isArray(group.derived.product_names)) {
+            entryFrequency = group.derived.product_names.map(function(name) {
+                return { product: { name: name, desc: name }, count: null, frequency: 0, mean_return: null };
+            });
+        } else if (group.derived && group.derived.config) {
+            var config = group.derived.config;
+            (config.long || []).forEach(function(leg) {
+                entryFrequency.push({ product: { name: 'Long 第' + (leg.group + 1) + '组', desc: '权重 ' + leg.weight.toFixed(3) }, count: null, frequency: 0, mean_return: null });
+            });
+            (config.short || []).forEach(function(leg) {
+                entryFrequency.push({ product: { name: 'Short 第' + (leg.group + 1) + '组', desc: '权重 ' + leg.weight.toFixed(3) }, count: null, frequency: 0, mean_return: null });
+            });
+        }
+        return {
+            summary: metric || {},
+            entry_frequency: entryFrequency,
+            top_periods: periods.slice(0, 10),
+            bottom_periods: periods.slice(-10).reverse(),
+            distribution: { histogram: [], quantiles: quantiles, period_count: cleanReturns.length },
+            return_series: returnSeries,
+            positive_run_analysis: {},
+            intraday_analysis: {},
+            daily_analysis: {},
+            calendar_analysis: {},
+            holding_analysis: {},
+            capacity_analysis: {},
+            rolling_analysis: {},
+            tradability_analysis: {},
+            period_robustness: {},
+            robustness_summary: {},
+            product_analysis: {},
+            explanations: [],
+        };
     }
 
     function renderGroupSummaryCards(summary) {
@@ -1607,6 +1695,34 @@
         }
     }
 
+    function findGeneratedPortfolio(metricKey) {
+        if (!_lastGrossData) return null;
+        return _lastGrossData.find(function(group) {
+            if (!group || (!group.is_derived && !group.is_ls)) return false;
+            if (group.metric_key === metricKey) return true;
+            if (group.derived && group.derived.metric_key === metricKey) return true;
+            return metricKey === 'LS' && group.is_ls && (group.name === 'Long-Short' || group.metric_key === 'LS');
+        });
+    }
+
+    function openPortfolioDetail(metricKey) {
+        var group = findGeneratedPortfolio(metricKey);
+        if (!group) {
+            alert('未找到该派生组/Long-Short 的已生成结果。');
+            return;
+        }
+        var overlay = document.getElementById('group-detail-overlay');
+        var loading = document.getElementById('group-detail-loading');
+        var content = document.getElementById('group-detail-content');
+        document.getElementById('group-detail-title').textContent = (group.name || metricKey || '派生组') + '详情';
+        overlay.classList.add('open');
+        loading.style.display = 'none';
+        content.style.display = '';
+        renderGroupDetail(buildPortfolioDetail(group, (_lastMetrics || {})[metricKey] || {}), { showDerivedPanel: false });
+        var summary = document.getElementById('group-detail-frequency-summary');
+        if (summary) summary.textContent = group.is_ls ? 'Long-Short 组合腿配置' : '派生组所选品种';
+    }
+
     function renderGroupRankingAdjacent(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         var html = '<table class="group-detail-table"><thead><tr><th>组间</th><th>平均差</th><th>为正占比</th></tr></thead><tbody>';
@@ -1851,16 +1967,83 @@
     }
 
     function collectLongShortConfig(nGroups) {
-        var longGroupsEl = document.getElementById('ls_long_groups');
-        var longWeightsEl = document.getElementById('ls_long_weights');
-        var shortGroupsEl = document.getElementById('ls_short_groups');
-        var shortWeightsEl = document.getElementById('ls_short_weights');
-        var nameEl = document.getElementById('ls_name');
+        var def = (_longShortDefinitions && _longShortDefinitions[0]) || defaultLongShortDefinition();
+        return buildLongShortPayload(def, nGroups);
+    }
+
+    function defaultLongShortDefinition() {
+        return { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' };
+    }
+
+    function buildLongShortPayload(def, nGroups) {
         return {
-            name: (nameEl && nameEl.value ? nameEl.value.trim() : '') || 'Long-Short',
-            long: buildLsLegs(longGroupsEl ? longGroupsEl.value : '1', longWeightsEl ? longWeightsEl.value : '1', [1]),
-            short: buildLsLegs(shortGroupsEl ? shortGroupsEl.value : '', shortWeightsEl ? shortWeightsEl.value : '1', [nGroups])
+            name: (def.name || '').trim() || 'Long-Short',
+            long: buildLsLegs(def.longGroups || '1', def.longWeights || '1', [1]),
+            short: buildLsLegs(def.shortGroups || '', def.shortWeights || '1', [nGroups])
         };
+    }
+
+    function collectLongShortConfigs(nGroups) {
+        if (!_longShortDefinitions.length) _longShortDefinitions = [defaultLongShortDefinition()];
+        return _longShortDefinitions.map(function(def) {
+            return buildLongShortPayload(def, nGroups);
+        });
+    }
+
+    function buildGroupStructureKey(submissionId, factorAlias, nGroups, startDate, endDate, returnFreqs) {
+        return [
+            String(submissionId || ''),
+            String(factorAlias || ''),
+            String(nGroups || ''),
+            String(startDate || ''),
+            String(endDate || ''),
+            (returnFreqs || []).join(',')
+        ].join('|');
+    }
+
+    function updateLongShortSummary() {
+        var el = document.getElementById('long-short-summary');
+        if (!el) return;
+        if (!_longShortDefinitions.length) _longShortDefinitions = [defaultLongShortDefinition()];
+        el.textContent = _longShortDefinitions.map(function(def) {
+            return (def.name || 'Long-Short') + ': L(' + (def.longGroups || '1') + ') / S(' + (def.shortGroups || '末组') + ')';
+        }).join('；');
+    }
+
+    function renderLongShortConfigList() {
+        if (!_longShortDefinitions.length) _longShortDefinitions = [defaultLongShortDefinition()];
+        var el = document.getElementById('long-short-config-list');
+        if (!el) return;
+        var html = '';
+        _longShortDefinitions.forEach(function(def) {
+            html += '<div class="long-short-config-row" data-ls-id="' + escapeHtml(def.id) + '">'
+                + '<input data-field="name" value="' + escapeHtml(def.name || '') + '" placeholder="组合名称">'
+                + '<input data-field="longGroups" value="' + escapeHtml(def.longGroups || '') + '" placeholder="Long组">'
+                + '<input data-field="longWeights" value="' + escapeHtml(def.longWeights || '') + '" placeholder="Long权重">'
+                + '<input data-field="shortGroups" value="' + escapeHtml(def.shortGroups || '') + '" placeholder="Short组">'
+                + '<input data-field="shortWeights" value="' + escapeHtml(def.shortWeights || '') + '" placeholder="Short权重">'
+                + '<button type="button" class="btn btn-outline-danger btn-sm long-short-delete-btn" data-ls-id="' + escapeHtml(def.id) + '">删除</button>'
+                + '</div>';
+        });
+        el.innerHTML = html;
+        el.querySelectorAll('input[data-field]').forEach(function(input) {
+            input.addEventListener('input', function() {
+                var row = input.closest('.long-short-config-row');
+                var def = _longShortDefinitions.find(function(item) { return item.id === row.getAttribute('data-ls-id'); });
+                if (def) {
+                    def[input.getAttribute('data-field')] = input.value;
+                    updateLongShortSummary();
+                }
+            });
+        });
+        el.querySelectorAll('.long-short-delete-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                _longShortDefinitions = _longShortDefinitions.filter(function(item) { return item.id !== btn.getAttribute('data-ls-id'); });
+                if (!_longShortDefinitions.length) _longShortDefinitions = [defaultLongShortDefinition()];
+                renderLongShortConfigList();
+                updateLongShortSummary();
+            });
+        });
     }
 
     async function collectGroupRunPayload(context, factorAlias) {
@@ -1945,7 +2128,9 @@
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
                 rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold',
-                ls_config: collectLongShortConfig(n_groups)
+                ls_config: collectLongShortConfig(n_groups),
+                ls_configs: collectLongShortConfigs(n_groups),
+                structure_key: buildGroupStructureKey(currentSubmissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
             },
             statusEl: statusSpan,
         };
@@ -1973,16 +2158,22 @@
             _lastMetrics = null;
             _derivedGroups = [];
             _derivedGroupSeq = 1;
+            _lastGroupStructureKey = data.structure_key || null;
             renderMultiHorizonTable(data.results, data.n_groups);
             return;
         }
 
         updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
+        var previousDerivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item, { generated: false }); });
+        var sameStructure = !!data.structure_key && data.structure_key === _lastGroupStructureKey;
         _lastGrossData = data.groups;
         _lastMetrics = data.metrics;
         _lastNgroups = data.n_groups;
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
-        _derivedGroups = (data._derivedGroups || []).map(function(item) { return Object.assign({}, item); });
+        _lastGroupStructureKey = data.structure_key || null;
+        _derivedGroups = Array.isArray(data._derivedGroups)
+            ? data._derivedGroups.map(function(item) { return Object.assign({}, item); })
+            : (sameStructure ? previousDerivedGroups : []);
         _derivedGroupSeq = _derivedGroups.reduce(function(maxSeq, item) {
             var num = parseInt(String(item.id || '').replace(/^D/, ''), 10);
             return isNaN(num) ? maxSeq : Math.max(maxSeq, num + 1);
@@ -2141,6 +2332,8 @@
     var _derivedGroups = [];
     var _derivedGroupSeq = 1;
     var _currentGroupDetailIndex = null;
+    var _longShortDefinitions = [defaultLongShortDefinition()];
+    var _lastGroupStructureKey = null;
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
@@ -2160,6 +2353,7 @@
         cached.groups = _lastGrossData;
         cached.metrics = _lastMetrics;
         cached._derivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item); });
+        cached.structure_key = _lastGroupStructureKey;
     }
 
     function clearCachedGroupResultsForSubmission(submissionId) {
@@ -2812,6 +3006,28 @@
         if (overlay) overlay.addEventListener('click', function(event) {
             if (event.target === overlay) overlay.classList.remove('open');
         });
+        var lsOverlay = document.getElementById('long-short-drawer');
+        var lsOpenBtn = document.getElementById('long-short-drawer-trigger');
+        var lsCloseBtn = document.getElementById('long-short-drawer-close');
+        var lsAddBtn = document.getElementById('long-short-add-btn');
+        if (lsOpenBtn) lsOpenBtn.addEventListener('click', function() {
+            renderLongShortConfigList();
+            updateLongShortSummary();
+            if (lsOverlay) lsOverlay.classList.add('open');
+        });
+        if (lsCloseBtn) lsCloseBtn.addEventListener('click', function() {
+            if (lsOverlay) lsOverlay.classList.remove('open');
+        });
+        if (lsOverlay) lsOverlay.addEventListener('click', function(event) {
+            if (event.target === lsOverlay) lsOverlay.classList.remove('open');
+        });
+        if (lsAddBtn) lsAddBtn.addEventListener('click', function() {
+            var nextId = 'LS' + (Date.now());
+            _longShortDefinitions.push({ id: nextId, name: 'Long-Short ' + _longShortDefinitions.length, longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' });
+            renderLongShortConfigList();
+            updateLongShortSummary();
+        });
+        updateLongShortSummary();
         var rankingOverlay = document.getElementById('group-ranking-overlay');
         var rankingCloseBtn = document.getElementById('group-ranking-close');
         if (rankingCloseBtn) rankingCloseBtn.addEventListener('click', function() {

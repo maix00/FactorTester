@@ -175,12 +175,13 @@ async function selectSingleFactorFamily(factorId, factorType, ownerUsername, opt
     const body = document.getElementById('editor-body');
     const title = document.getElementById('editor-title');
     const factor = findSingleFactorFamily(factorId, factorType, ownerUsername);
+    const displayName = factor?.chinese_name || factor?.name || factorId || '因子家族';
     if (title) {
-        const label = factor?.name || factorId || '因子家族';
         const typeLabel = _sftCurrentFactorType === 'custom' ? '自定义因子' : '公共因子';
         const owner = factor?.owner_alias && _sftCurrentFactorType === 'custom' ? ` / ${factor.owner_alias}` : '';
-        title.textContent = `${label}（${typeLabel}${owner}）`;
+        title.textContent = `${displayName}（${typeLabel}${owner}）`;
     }
+    document.title = displayName + ' - 单因子测试';
     if (body) body.innerHTML = '<div class="single-factor-loading">正在加载测试模块...</div>';
 
     const params = new URLSearchParams();

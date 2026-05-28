@@ -31,13 +31,8 @@
         <div class="group-setting-row" style="align-items:flex-start;">
             <label style="margin-bottom:0;white-space:nowrap;padding-top:4px;">Long-Short：</label>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                <input type="text" id="ls_long_groups" value="1" title="做多组，1 起算；多个组用逗号分隔" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
-                <input type="text" id="ls_long_weights" value="1" title="做多组资金权重；可留空等权" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="font-size:12px;color:#666;">Long 组/权重</span>
-                <input type="text" id="ls_short_groups" value="" placeholder="默认末组" title="做空组，1 起算；多个组用逗号分隔" style="width:92px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
-                <input type="text" id="ls_short_weights" value="1" title="做空组资金权重；可留空等权" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
-                <span style="font-size:12px;color:#666;">Short 组/权重</span>
-                <input type="text" id="ls_name" value="Long-Short" title="组合名称" style="width:120px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+                <button id="long-short-drawer-trigger" type="button" class="btn btn-outline-primary btn-sm">配置 Long-Short 组合</button>
+                <span id="long-short-summary" style="font-size:12px;color:#666;">默认：Long 第1组 / Short 末组</span>
             </div>
         </div>
 
@@ -163,6 +158,18 @@
                 <div style="margin-top:8px;font-size:12px;color:#888;">
                     提示：可手动修改开仓比率和平仓比率，修改过的单元格会以 <span style="background:#fff3cd;padding:1px 4px;border-radius:3px;">黄色背景</span> 标记。修改仅在当前会话有效，不保存到后端。
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-drawer-overlay" id="long-short-drawer">
+        <div class="settings-drawer-panel group-detail-panel">
+            <div class="drawer-inner-container">
+                <button class="drawer-close-btn" id="long-short-drawer-close">✕ 关闭</button>
+                <h5 style="margin-bottom:12px;">Long-Short 组合设置</h5>
+                <div style="font-size:12px;color:#667085;margin-bottom:10px;">组号从 1 开始；多个组用逗号分隔。Long 侧和 Short 侧会分别归一到 50% 资金。</div>
+                <div id="long-short-config-list"></div>
+                <button id="long-short-add-btn" type="button" class="btn btn-outline-primary btn-sm" style="margin-top:10px;">+ 添加 Long-Short 组合</button>
             </div>
         </div>
     </div>
@@ -596,6 +603,7 @@
         color: #667085;
     }
     #group_test_module .group-detail-trigger,
+    #group_test_module .portfolio-detail-trigger,
     #group_test_module .group-ranking-trigger {
         cursor: pointer;
         color: #0f4c81;
@@ -747,6 +755,24 @@
     }
     #group_test_module .derived-group-actions button {
         margin-left: 6px;
+    }
+    #group_test_module .long-short-config-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 1.2fr) repeat(4, minmax(82px, 1fr)) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        background: #fff;
+    }
+    #group_test_module .long-short-config-row input {
+        padding: 5px 7px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+        font-size: 12px;
+        min-width: 0;
     }
     /* Best-value highlight in sectioned metrics table (align with IC module style) */
     #group_test_module .group-best-cell {

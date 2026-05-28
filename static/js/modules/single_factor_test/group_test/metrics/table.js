@@ -182,12 +182,13 @@
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
             if (g === 'LS') {
-                headHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
+                headHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">Long-Short</th>';
             } else if (/^\d+$/.test(String(g))) {
                 headHtml += '<th class="group-detail-trigger" data-group-index="' + String(g) + '" title="查看该组详情">第'
                     + (parseInt(g, 10) + 1) + '组</th>';
             } else {
-                headHtml += '<th style="background:#f8fbff;">' + String(g).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</th>';
+                headHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">'
+                    + String(g).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</th>';
             }
         });
         headHtml += '</tr>';
