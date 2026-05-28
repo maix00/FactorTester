@@ -852,7 +852,8 @@
 
     function renderGroupFrequency(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率</th><th>平今费率</th><th>平昨费率</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.slice(0, 12).forEach(function(row) {
             html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
         });
@@ -891,7 +892,8 @@
 
     function renderProductContributionRows(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率</th><th>平今费率</th><th>平昨费率</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
+        var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
         rows.forEach(function(row) {
             html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.active_period_count + '</td><td>'
                 + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(row.mean_active_contribution) + '</td></tr>';
@@ -937,6 +939,11 @@
         var abs = Math.abs(bp);
         var dec = abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8;
         return bp.toFixed(dec) + ' bp';
+    }
+
+    /** 检查行数据的 product.fee._is_real_fee，判断是否为原始费率而非回测参数 */
+    function isRealFee(row) {
+        return !!(row && row.product && row.product.fee && row.product.fee._is_real_fee);
     }
 
     function renderProductFeeCells(product) {
@@ -1118,6 +1125,17 @@
     }
 
     function renderGroupSummaryCards(summary) {
+        function formatPct(pct) {
+            if (pct == null || isNaN(pct) || !isFinite(pct)) return '—';
+            var abs = Math.abs(pct);
+            var dec;
+            if (abs >= 10) dec = 2;
+            else if (abs >= 1) dec = 3;
+            else if (abs >= 0.1) dec = 4;
+            else if (abs >= 0.01) dec = 5;
+            else dec = 6;
+            return pct.toFixed(dec) + '%';
+        }
         var items = [
             ['Total Return', '总收益率'],
             ['Mean Return', '均值收益率'],
@@ -1131,7 +1149,7 @@
             var value = summary[key];
             var display = '—';
             if (value != null && !isNaN(value) && isFinite(value)) {
-                display = key === 'Avg Turnover' ? fmtPct(value) : formatPercentAdaptive(Number(value), key);
+                display = key === 'Avg Turnover' ? formatPct(value) : formatPercentAdaptive(Number(value), key);
             }
             return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
                 + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
