@@ -541,6 +541,10 @@ def _build_product_fee_rates(
     close_fee_vec: np.ndarray | None,
     close_today_fee_vec: np.ndarray | None = None,
 ) -> dict[str, dict[str, float]]:
+    """返回 {产品名: {open, close, close_today, close_yesterday, total, _is_real_fee}}。
+
+    如果回测中所有品种费率均为 0（用户未设置），则从全局费率表获取真实费率并标记 _is_real_fee。
+    """
     if not valid_cols or open_fee_vec is None or close_fee_vec is None:
         return {}
     open_rates = np.asarray(open_fee_vec, dtype=float)
@@ -551,15 +555,42 @@ def _build_product_fee_rates(
     )
     if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
         return {}
+
+    # 用户是否设置了费率
+    user_has_fee = bool(np.any(open_rates > 0) or np.any(close_rates > 0))
+    use_real_fee = not user_has_fee
+
+    if use_real_fee:
+        from sources.FeeData import load_latest
+        df_fees = load_latest()
+        fee_by_code = {}
+        if not df_fees.empty:
+            for _, row in df_fees.iterrows():
+                fee_by_code[str(row['variety_code']).upper()] = row
+
     rows = {}
     for idx, product in enumerate(valid_cols):
         display = product_display_name(product)
+        if use_real_fee:
+            code = str(product if isinstance(product, str) else getattr(product, 'name', product)).split('.')[0].upper()
+            variety_fee = fee_by_code.get(code)
+            if variety_fee is not None:
+                o = float(variety_fee['open_ratio']) if pd.notna(variety_fee['open_ratio']) else 0.0
+                c = float(variety_fee['close_ratio']) if pd.notna(variety_fee['close_ratio']) else 0.0
+                ct = float(variety_fee['closetoday_ratio']) if pd.notna(variety_fee['closetoday_ratio']) else c
+            else:
+                o = c = ct = 0.0
+        else:
+            o = float(open_rates[idx])
+            c = float(close_rates[idx])
+            ct = float(close_today_rates[idx])
         rows[display['name']] = {
-            'open': float(open_rates[idx]),
-            'close': float(close_rates[idx]),
-            'close_today': float(close_today_rates[idx]),
-            'close_yesterday': float(close_rates[idx]),
-            'total': float(open_rates[idx] + close_rates[idx]),
+            'open': o,
+            'close': c,
+            'close_today': ct,
+            'close_yesterday': c,
+            'total': o + c,
+            '_is_real_fee': use_real_fee,
         }
     return rows
 
