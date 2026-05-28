@@ -32,9 +32,23 @@
         return typeof v === 'number' && isFinite(v) && !isNaN(v);
     }
 
-    function fmtPctAdaptive(decimal, metricName) {
-        if (!isFiniteNumber(decimal)) return '—';
-        var pct = decimal * 100;
+    var percentUnitMetrics = {
+        'Total Return': true,
+        'Annual Return': true,
+        'Mean Return': true,
+        'Win Rate': true,
+        'Volatility': true,
+        'Max Drawdown': true,
+    };
+
+    var decimalRatioMetrics = {
+        'Avg Turnover': true,
+        'Avg Turnover Accel': true,
+        'Up Ratio': true,
+    };
+
+    function fmtPercentUnits(pct, metricName) {
+        if (!isFiniteNumber(pct)) return '—';
         var abs = Math.abs(pct);
 
         if (metricName === 'Mean Return' && abs < 0.1) {
@@ -52,6 +66,11 @@
         return pct.toFixed(dec) + '%';
     }
 
+    function fmtDecimalRatio(decimal, metricName) {
+        if (!isFiniteNumber(decimal)) return '—';
+        return fmtPercentUnits(decimal * 100, metricName);
+    }
+
     function fmtNumber(v, decimals) {
         if (!isFiniteNumber(v)) return '—';
         return Number(v).toFixed(decimals == null ? 4 : decimals);
@@ -61,11 +80,11 @@
         if (v == null) return '—';
         if (!isFiniteNumber(v)) return '—';
 
-        if (metricName.indexOf('Return') >= 0 || metricName.indexOf('Rate') >= 0 || metricName.indexOf('Drawdown') >= 0 || metricName === 'Win Rate') {
-            return fmtPctAdaptive(v, metricName);
+        if (percentUnitMetrics[metricName] || metricName.indexOf('Return') >= 0 || metricName.indexOf('Drawdown') >= 0) {
+            return fmtPercentUnits(v, metricName);
         }
-        if (metricName === 'Avg Turnover' || metricName === 'Avg Turnover Accel' || metricName === 'Up Ratio') {
-            return fmtPctAdaptive(v, metricName);
+        if (decimalRatioMetrics[metricName]) {
+            return fmtDecimalRatio(v, metricName);
         }
         if (metricName === 'Avg Position Changes') {
             return fmtNumber(v, 1);

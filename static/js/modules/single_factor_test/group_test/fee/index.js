@@ -16,7 +16,7 @@
     // ---- internal state ----
     var _useCloseToday = false;
     var _feeTableData = [];
-    var _feeModifications = {}; // { variety_code: { open_ratio, close_ratio } }
+    var _feeModifications = {}; // { variety_code: { open_ratio, close_ratio, closetoday_ratio } }
 
     function deepClone(obj) {
         return JSON.parse(JSON.stringify(obj || {}));
@@ -47,9 +47,10 @@
     function _getEffectiveRow(row) {
         var code = (row.variety_code || '').toLowerCase();
         var mod = _feeModifications[code] || {};
+        var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
         var openR = (mod.open_ratio !== undefined) ? mod.open_ratio : (parseFloat(row.open_ratio) || 0);
-        var closeR = (mod.close_ratio !== undefined)
-            ? mod.close_ratio
+        var closeR = (mod[closeField] !== undefined)
+            ? mod[closeField]
             : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
         return { code: code, openR: openR, closeR: closeR };
     }
@@ -117,4 +118,3 @@
     window._getFeeModifications = window._getFeeModifications || getModifications;
     window._applyFeeModifications = window._applyFeeModifications || applyModifications;
 })();
-
