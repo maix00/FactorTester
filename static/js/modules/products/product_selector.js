@@ -64,15 +64,20 @@
             checkbox: true,
             selectMode: 3,
             init: function(e, data) {
-                // Fix: Fancytree 拦截触摸板/鼠标滚轮，手动滚动容器
+                // Fix: Fancytree 内容撑开容器但 overflow:auto 未激活滚动条。
+                // 强制 reflow 让浏览器重新计算是否需要滚动。
                 var el = $container[0];
+                el.style.overflow = 'hidden';
+                void el.offsetHeight; // force reflow
+                el.style.overflow = 'auto';
+
                 el.addEventListener('wheel', function(ev) {
                     var scrollTop = el.scrollTop;
                     var maxScroll = el.scrollHeight - el.clientHeight;
                     var atTop = scrollTop <= 0;
                     var atBottom = scrollTop >= maxScroll - 1;
                     if ((ev.deltaY < 0 && atTop) || (ev.deltaY > 0 && atBottom)) {
-                        return; // 边界放行
+                        return;
                     }
                     ev.preventDefault();
                     el.scrollTop = scrollTop + ev.deltaY;
