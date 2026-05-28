@@ -370,8 +370,13 @@
             init: function(event, data) {
                 treeInstance = data.tree;
                 $container.find('> div:first-child').remove();
-                // Fix: Fancytree 拦截触摸板/鼠标滚轮，手动滚动容器
+                // Fix: Fancytree 内容撑开容器但 overflow:auto 未激活滚动条。
+                // 强制 reflow 让浏览器重新计算是否需要滚动。
                 var el = $container[0];
+                el.style.overflow = 'hidden';
+                void el.offsetHeight;
+                el.style.overflow = 'auto';
+
                 el.addEventListener('wheel', function(ev) {
                     var scrollTop = el.scrollTop;
                     var maxScroll = el.scrollHeight - el.clientHeight;
