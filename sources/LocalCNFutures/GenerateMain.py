@@ -189,6 +189,9 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         
         df_mink = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
         df_dayk = dayk_groups.get(row['CONTRACT_UID'], pd.DataFrame(columns=['trading_day', 'close_price']))
+        # searchsorted 要求数据已排序；dayk_df 按多列排序后 groupby 不保证 trading_day 单调递增
+        if not df_dayk['trading_day'].is_monotonic_increasing:
+            df_dayk = df_dayk.sort_values('trading_day')
         left = df_dayk['trading_day'].searchsorted(row['STARTDATE'], side='left')
         right = df_dayk['trading_day'].searchsorted(row['ENDDATE'], side='right')
         interval_data = df_dayk.iloc[left:right]
@@ -229,7 +232,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         first_added = added_df[added_df['PRODUCT'] == product].iloc[0] # added_df 中该产品的第一行
         if last_existing['CONTRACT'] == first_added['CONTRACT']:
             assert last_existing['STARTDATE'] == first_added['STARTDATE']
-            assert last_existing['PREV_CLOSE'] == first_added['PREV_CLOSE']
+            assert last_existing['PREV_CLOSE'] == first_added['PREV_CLOSE'] or (pd.isna(last_existing['PREV_CLOSE']) and pd.isna(first_added['PREV_CLOSE']))
             existing.loc[last_existing.name, 'ENDDATE'] = first_added['ENDDATE'] # 更新 existing 该行的 ENDDATE
             existing.loc[last_existing.name, 'END_CLOSE'] = first_added['END_CLOSE'] # 更新 existing 该行的 END_CLOSE
             existing.loc[last_existing.name, '_SOURCE'] = 'added'
@@ -282,47 +285,19 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
                 existing_df = (tdf := pd.read_parquet(save_path, filters=[('trading_day', '<', added_first[product]['STARTDATE'])])).assign(trading_day=pd.to_datetime(tdf['trading_day']))
                 existing_df['adjustment_mul'] *= added_first[product]['BACKWARD_FACTOR'] # 后复权
                 df_list = [existing_df] + df_list
-            product_df = pd.concat(df_list, ignore_index=True).assign(unique_instrument_id=product).sort_values('trade_time')
+            product_df = (
+                pd.concat(df_list, ignore_index=True)
+                .assign(unique_instrument_id=product)
+                .sort_values('trade_time')
+            )
             product_df.to_parquet(save_path, index=False)
     
     return info_df
 
 # 使用示例
 if __name__ == '__main__':
-    # 测试截断再补全
-    test_products = []
-    # test_products = ['A.DCE', 'AD.SHF', 'AD_S.SHF', 'AF-S.CFE', 'AG.SHF', 'AG_S.SHF']
-    
-    if test_products:
-        cutoff = pd.to_datetime('2025-05-30').strftime('%Y%m%d')
-        # 截断合约映射表，只保留 STARTDATE <= cutoff_date 的合约
-        def _cutoff(g): g.iloc[-1] = cutoff; return pd.to_datetime(g)
-        df = ((df := pd.read_parquet(CONTRACT_MAPPING_PATH, 
-                filters=[('S_INFO_WINDCODE', 'in', test_products), ('STARTDATE', '<=', cutoff)])
-            .rename(columns={'S_INFO_WINDCODE': 'PRODUCT', 'FS_MAPPING_WINDCODE': 'CONTRACT'})
-            .sort_values(['PRODUCT', 'STARTDATE']))
-            .assign(ENDDATE=df.groupby('PRODUCT')['ENDDATE'].transform(_cutoff))
-            .assign(STARTDATE=pd.to_datetime(df['STARTDATE']))
-            .reset_index(drop=True))
-
-        # 调用主函数
-        df = generate_main_contract_series(
-            contract_start_end_path=df,
-            rebuild_roller_info=True, # 强制重建展期信息，覆盖原文件
-            rebuild_minute_product=False, # 不强制重建分钟数据，假设之前已经处理过了
-        )
-        print(df)
-
-        # 增量更新（假设有新数据）
-        df = generate_main_contract_series(
-            products_list=test_products, # 只更新测试产品
-            rebuild_minute_product=False, # 不重建分钟数据，使用之前处理好的数据
-        )
-        print(df)
-
-    else:
-        df = generate_main_contract_series(
-            rebuild_roller_info=True,
-            rebuild_minute_product=False,
-        )
-        print(df)
+    df = generate_main_contract_series(
+        rebuild_roller_info=True,
+        rebuild_minute_product=False,
+    )
+    print(df)
