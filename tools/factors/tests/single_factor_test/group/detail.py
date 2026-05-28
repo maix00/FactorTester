@@ -38,14 +38,33 @@ def build_group_detail(
             display = product_display_name(product)
             entry_counts.update([display['name']])
             product_display_map[display['name']] = display
+
+    # 矩阵运算：每个产品在组内每期的毛贡献，均值收益 = sum(contrib) / count(非零期数)
+    if product_gross_contrib_np is not None and valid_cols:
+        contrib_g = np.asarray(product_gross_contrib_np[:, group_index, :], dtype=float)  # (T, P)
+        contrib_sums = np.nansum(contrib_g, axis=0)  # (P,)
+        contrib_counts = np.sum(np.abs(contrib_g) > 0, axis=0)  # (P,) 出现次数
+        with np.errstate(invalid='ignore'):
+            contrib_means = np.divide(contrib_sums, contrib_counts)  # (P,)
+        contrib_means[np.isnan(contrib_means)] = 0.0
+        # 构建 product_name → mean_return 映射
+        mean_return_by_name = {}
+        for idx, product in enumerate(valid_cols):
+            name = product_display_name(product)['name']
+            mean_return_by_name[name] = float(contrib_means[idx])
+    else:
+        mean_return_by_name = {}
+
     entry_frequency = []
     for product, count in entry_counts.most_common():
         display = dict(product_display_map.get(product, {'name': product, 'desc': product}))
         display['fee'] = product_fee_rates.get(product)
+        mean_ret = mean_return_by_name.get(product)
         entry_frequency.append({
             'product': display,
             'count': count,
             'frequency': count / total_periods,
+            'mean_return': mean_ret,
         })
 
     periods = []

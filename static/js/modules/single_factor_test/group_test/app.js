@@ -853,9 +853,18 @@
     function renderGroupFrequency(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.slice(0, 12).forEach(function(row) {
-            html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+            var meanRet = row.mean_return;
+            var fee = (row.product && row.product.fee) || {};
+            var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
+            var highlight = (meanRet != null && isFinite(meanRet) && meanRet > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
+            html += '<tr' + highlight + '>' + renderProductFeeCells(row.product)
+                + '<td>' + fmtPct(meanRet) + '</td>'
+                + '<td>' + fmtFeeRate(fee.open) + '</td>'
+                + '<td>' + fmtFeeRate(fee.close_today) + '</td>'
+                + '<td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>'
+                + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
         });
         return html + '</tbody></table>';
     }
@@ -895,8 +904,13 @@
         var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
         var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
         rows.forEach(function(row) {
-            html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.active_period_count + '</td><td>'
-                + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(row.mean_active_contribution) + '</td></tr>';
+            var meanAct = row.mean_active_contribution;
+            var fee = (row.product && row.product.fee) || {};
+            var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
+            var highlight = (meanAct != null && isFinite(meanAct) && meanAct > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
+            html += '<tr' + highlight + '>' + renderProductFeeCells(row.product)
+                + '<td>' + row.active_period_count + '</td><td>'
+                + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(meanAct) + '</td></tr>';
         });
         return html + '</tbody></table>';
     }
