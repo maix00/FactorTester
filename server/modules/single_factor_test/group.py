@@ -78,6 +78,37 @@ def _parse_group_fee_config(data):
     return fee_uniform, fee_map, use_closetoday
 
 
+def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
+    valid_cols = getattr(group_result, 'valid_cols', None)
+    open_fee_vec = getattr(group_result, 'open_fee_vec', None)
+    close_fee_vec = getattr(group_result, 'close_fee_vec', None)
+    if not valid_cols or open_fee_vec is None or close_fee_vec is None:
+        return {}
+    from tools.products.product_utils import product_display_name
+
+    open_rates = np.asarray(open_fee_vec, dtype=float)
+    close_rates = np.asarray(close_fee_vec, dtype=float)
+    if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
+        return {}
+    rates = {}
+    for idx, product in enumerate(valid_cols):
+        name = product_display_name(product)['name']
+        rates[name] = {
+            'open': float(open_rates[idx]),
+            'close': float(close_rates[idx]),
+            'total': float(open_rates[idx] + close_rates[idx]),
+        }
+    return rates
+
+
+def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, float]]) -> dict:
+    from tools.products.product_utils import product_display_name
+
+    display = product_display_name(product)
+    display['fee'] = fee_rates_by_name.get(display['name'])
+    return display
+
+
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
     data = request.get_json()
@@ -218,6 +249,10 @@ def run_group_test():
                 'cumulative_returns': vals,
                 'gross_returns': gross_vals,
                 'fee_costs': fee_vals,
+                'trade_notional_ratios': [
+                    round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0
+                    for v in group_result.trade_notional_ratio_np[:, g]
+                ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
             })
 
         long_net  = (1.0 - fee_np[:, 0])           * (1.0 + gross_np[:, 0])          - 1.0
@@ -335,19 +370,18 @@ def get_group_snapshot():
         current_pos = sorted_entries.index(best_idx_entry)
         prev_entry = sorted_entries[current_pos - 1] if current_pos > 0 else None
 
-        from tools.products.product_utils import product_display_name
-
         n_groups = len(products_dict)
+        fee_rates_by_name = _product_fee_rates_by_name(group_result)
         groups_detail = []
         for g in range(n_groups):
             current_raw = products_dict[g].get(best_idx_entry, [])
-            current_display = [product_display_name(x) for x in current_raw]
+            current_display = [_display_product_with_fee(x, fee_rates_by_name) for x in current_raw]
             # 按 name 排序
             current_display.sort(key=lambda d: d['name'])
 
             if prev_entry is not None:
                 prev_raw = products_dict[g].get(prev_entry, [])
-                prev_display = [product_display_name(x) for x in prev_raw]
+                prev_display = [_display_product_with_fee(x, fee_rates_by_name) for x in prev_raw]
                 prev_names = set(d['name'] for d in prev_display)
                 curr_names = set(d['name'] for d in current_display)
 
@@ -432,6 +466,9 @@ def get_group_detail():
         detail = build_group_detail(
             group_index, products, returns_np, index_list, summary,
             product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
+            group_result.fee_costs_np if group_result is not None else None,
+            group_result.open_fee_vec if group_result is not None else None,
+            group_result.close_fee_vec if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:

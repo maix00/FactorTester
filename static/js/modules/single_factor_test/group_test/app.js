@@ -924,7 +924,9 @@
         if (typeof product === 'string') return product;
         var name = product.name || '';
         var desc = product.desc && product.desc !== name ? ' · ' + product.desc : '';
-        return name + desc;
+        var fee = product.fee;
+        var feeText = fee ? ' · 费率 开' + fmtBp(fee.open) + '/平' + fmtBp(fee.close) : '';
+        return name + desc + feeText;
     }
 
     function formatGroupProducts(products) {
@@ -1228,11 +1230,17 @@
         var items = [
             ['avg_trade_notional_ratio', '平均资金换手'],
             ['median_trade_notional_ratio', '中位资金换手'],
+            ['avg_actual_fee_cost', '平均实际费率成本'],
+            ['actual_fee_per_traded_notional', '成交额加权实际费率'],
             ['break_even_fee', 'Break-even 成本'],
         ];
         document.getElementById('group-detail-tradability-summary-grid').innerHTML = items.map(function(item) {
             var value = analysis[item[0]];
-            var display = value == null ? '—' : (item[0] === 'break_even_fee' ? fmtBp(value) : fmtPct(value));
+            var display = value == null ? '—' : (
+                item[0] === 'break_even_fee' || item[0] === 'actual_fee_per_traded_notional'
+                    ? fmtBp(value)
+                    : fmtPct(value)
+            );
             return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
                 + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
         }).join('');
@@ -1895,8 +1903,7 @@
     /** 根据新费率重算累积净值（统一费率模式） */
     function recalcWithFee(newFeePct) {
         if (!_lastGrossData || _lastGrossData.length === 0) return;
-        var feeRatio = parseFloat(newFeePct) / 100.0;  // % → 小数
-        var halfFee = feeRatio / 2.0;
+        var feeRatio = parseFloat(newFeePct) / 100.0;  // 双边费率：% → 小数
 
         var nGroups = _lastNgroups;
         var recalcGroups = [];
@@ -1911,13 +1918,13 @@
             var cumVals = [];
             var wealth = 1.0;
             var gross = src.gross_returns;
-            var prevFee = src.fee_costs || [];  // 原始费率成本，供参考
+            var tradeNotional = src.trade_notional_ratios || [];
             for (var i = 0; i < gross.length; i++) {
                 var gRet = gross[i];
-                // 近似：净收益 = (1 - half_fee) * (1 + gross) - 1
-                //         ≈ gross - half_fee （费率很小时）
-                // 使用更精确的形式（与后台一致）：net = (1-fee)*(1+gross)-1
-                var net = (1.0 - feeRatio) * (1.0 + gRet) - 1.0;
+                // 后台统一费率会拆成开/平各一半；只有实际买卖的名义金额才扣费。
+                // trade_notional=2 表示全卖再全买一次，刚好扣完整双边费率。
+                var periodFee = feeRatio * ((tradeNotional[i] || 0.0) / 2.0);
+                var net = (1.0 - periodFee) * (1.0 + gRet) - 1.0;
                 if (isNaN(net) || !isFinite(net)) net = 0.0;
                 wealth *= (1.0 + net);
                 cumVals.push(roundVal(wealth));
@@ -1928,6 +1935,7 @@
                 cumulative_returns: cumVals,
                 gross_returns: src.gross_returns,
                 fee_costs: src.fee_costs,
+                trade_notional_ratios: src.trade_notional_ratios,
                 is_ls: false
             });
         }
@@ -1937,13 +1945,17 @@
         if (lsSrc && lsSrc.is_ls) {
             var topGross = _lastGrossData[0] ? _lastGrossData[0].gross_returns || [] : [];
             var botGross = _lastGrossData[nGroups - 1] ? _lastGrossData[nGroups - 1].gross_returns || [] : [];
+            var topTrade = _lastGrossData[0] ? _lastGrossData[0].trade_notional_ratios || [] : [];
+            var botTrade = _lastGrossData[nGroups - 1] ? _lastGrossData[nGroups - 1].trade_notional_ratios || [] : [];
             var longCap = 0.5, shortCap = 0.5, totalCap = 1.0;
             var lsCum = [];
             for (var i = 0; i < Math.min(topGross.length, botGross.length); i++) {
                 var longGross = topGross[i];
                 var shortGross = -botGross[i];
-                var longNet = (1.0 - feeRatio) * (1.0 + longGross) - 1.0;
-                var shortNet = (1.0 - feeRatio) * (1.0 + shortGross) - 1.0;
+                var longFee = feeRatio * ((topTrade[i] || 0.0) / 2.0);
+                var shortFee = feeRatio * ((botTrade[i] || 0.0) / 2.0);
+                var longNet = (1.0 - longFee) * (1.0 + longGross) - 1.0;
+                var shortNet = (1.0 - shortFee) * (1.0 + shortGross) - 1.0;
                 if (isNaN(longNet) || !isFinite(longNet)) longNet = 0.0;
                 if (isNaN(shortNet) || !isFinite(shortNet)) shortNet = 0.0;
                 longCap *= (1.0 + longNet);

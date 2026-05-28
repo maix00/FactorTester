@@ -227,6 +227,39 @@ def compute_group_net_returns(gross_returns: np.ndarray, fee_ratio: np.ndarray) 
     return (1.0 - fee_ratio) * (1.0 + gross_returns) - 1.0
 
 
+def compute_trade_costs(
+    target_amounts: np.ndarray,
+    prev_end_amounts: np.ndarray,
+    open_fee_vec: np.ndarray,
+    close_fee_vec: np.ndarray,
+    wealth_before_trade: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return buy/sell notionals plus fee and traded-notional ratios.
+
+    Fee rates are per-product decimal ratios. Staying holdings have zero trade
+    notional and therefore pay no fee in buy-and-hold mode.
+    """
+    buy = np.clip(target_amounts - prev_end_amounts, 0.0, None)
+    sell = np.clip(prev_end_amounts - target_amounts, 0.0, None)
+    fee = (
+        buy * open_fee_vec[np.newaxis, :]
+        + sell * close_fee_vec[np.newaxis, :]
+    ).sum(axis=1)
+    fee_ratio = np.divide(
+        fee,
+        wealth_before_trade,
+        out=np.zeros_like(fee, dtype=float),
+        where=wealth_before_trade > 0,
+    )
+    trade_notional_ratio = np.divide(
+        (buy + sell).sum(axis=1),
+        wealth_before_trade,
+        out=np.zeros_like(fee, dtype=float),
+        where=wealth_before_trade > 0,
+    )
+    return buy, sell, fee_ratio, trade_notional_ratio
+
+
 def test_by_group_single_factor(
     tester: Any,
     factor: Factor,
@@ -572,11 +605,13 @@ def test_by_group_single_factor(
         ne_cc = curr_count_all[ne_idx]               # (n_ne,)
         ne_ret = returns_filled[t]                   # (P,) — 本期收益
 
-        buy = np.clip(ne_target - ne_prev, 0.0, None)   # (n_ne, P)
-        sell = np.clip(ne_prev - ne_target, 0.0, None)  # (n_ne, P)
-        fee = (buy * open_fee_vec[np.newaxis, :] + sell * close_fee_vec[np.newaxis, :]).sum(axis=1)  # (n_ne,)
-        fee_ratio = fee / ne_wb
-        trade_notional_ratio = (buy + sell).sum(axis=1) / ne_wb
+        _, _, fee_ratio, trade_notional_ratio = compute_trade_costs(
+            ne_target,
+            ne_prev,
+            open_fee_vec,
+            close_fee_vec,
+            ne_wb,
+        )
 
         # 总收益
         product_gross_contrib, gross = compute_group_gross_returns(ne_target, ne_wb, ne_ret)
@@ -675,6 +710,8 @@ def test_by_group_single_factor(
         returns_np=group_returns_np,
         products_by_group=products_dict,
         valid_cols=valid_cols,
+        open_fee_vec=open_fee_vec,
+        close_fee_vec=close_fee_vec,
         index_list=index_list,
         multi_session_active=multi_session_active,
         report_df=report_df.copy(),
