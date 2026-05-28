@@ -1754,6 +1754,16 @@
     }
 
     function applyGroupTestResult(data, statusText) {
+        // DEBUG: log response identity to verify tester switching
+        console.log('[GroupTest] applyGroupTestResult:', {
+            submission_id: data.submission_id,
+            factor_alias: data.factor_alias,
+            tester_alias: data.tester_alias,
+            tester_product_count: data.tester_product_count,
+            n_groups: data.n_groups,
+            multi_horizon: data.multi_horizon,
+        });
+
         if (data.multi_horizon) {
             updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
             var chartContainer = document.getElementById('group_chart_container');
@@ -2706,7 +2716,10 @@
             }
             return;
         }
-        var result = getCachedGroupResult(activeBtn.getAttribute('data-submission-id'), activeBtn.getAttribute('data-factor-alias'));
+        var sid = activeBtn.getAttribute('data-submission-id');
+        var falias = activeBtn.getAttribute('data-factor-alias');
+        var result = getCachedGroupResult(sid, falias);
+        console.log('[GroupTest] restoreActiveGroupResult: sid=' + sid + ' factor=' + falias + ' cached=' + (result ? result.tester_alias || '(yes, no tester_alias)' : 'no'));
         clearResults({ clearStatus: !result });
         if (result && result.success) {
             applyGroupTestResult(result);
