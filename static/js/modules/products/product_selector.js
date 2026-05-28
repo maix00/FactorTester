@@ -64,20 +64,19 @@
             checkbox: true,
             selectMode: 3,
             init: function(e, data) {
-                // Fix: Fancytree 拦截鼠标滚轮，需手动转发到父容器
-                $($container).on('wheel', function(ev) {
-                    var $t = $(this);
-                    var scrollTop = $t.scrollTop();
-                    var scrollHeight = $t[0].scrollHeight;
-                    var clientHeight = $t[0].clientHeight;
+                // Fix: Fancytree 拦截触摸板/鼠标滚轮，手动滚动容器
+                var el = $container[0];
+                el.addEventListener('wheel', function(ev) {
+                    var scrollTop = el.scrollTop;
+                    var maxScroll = el.scrollHeight - el.clientHeight;
                     var atTop = scrollTop <= 0;
-                    var atBottom = scrollTop + clientHeight >= scrollHeight - 1;
-                    if ((ev.originalEvent.deltaY < 0 && atTop) || (ev.originalEvent.deltaY > 0 && atBottom)) {
-                        return; // 到边界了，让事件冒泡到外层
+                    var atBottom = scrollTop >= maxScroll - 1;
+                    if ((ev.deltaY < 0 && atTop) || (ev.deltaY > 0 && atBottom)) {
+                        return; // 边界放行
                     }
                     ev.preventDefault();
-                    $t.scrollTop(scrollTop + ev.originalEvent.deltaY);
-                });
+                    el.scrollTop = scrollTop + ev.deltaY;
+                }, {passive: false});
                 if (opts.onInit) opts.onInit(data.tree);
             },
             lazyLoad: function(e, data) {
