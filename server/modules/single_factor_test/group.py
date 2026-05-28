@@ -62,15 +62,29 @@ def _latest_group_result(tester):
     return result.group_result if result is not None else None
 
 
+def _parse_group_fee_config(data):
+    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
+    fee_map_raw = data.get('fee_map', {}) or {}
+    use_closetoday = bool(data.get('use_closetoday', False))
+
+    fee_map: dict[str, dict[str, float]] = {}
+    for code, rates in fee_map_raw.items():
+        open_r = float(rates.get('open_ratio', 0) or 0)
+        close_key = 'closetoday_ratio' if use_closetoday else 'close_ratio'
+        close_r = float(rates.get(close_key, 0) or 0)
+        if open_r > 0 or close_r > 0:
+            fee_map[str(code).upper()] = {'open': open_r, 'close': close_r}
+
+    return fee_uniform, fee_map, use_closetoday
+
+
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
     data = request.get_json()
     submission_id  = data.get('submission_id')
     factor_alias   = data.get('factor_alias')
     n_groups       = data.get('n_groups', 5)
-    fee_uniform    = float(data.get('fee', 0.0) or 0.0) / 100.0
-    fee_map_raw: dict = data.get('fee_map', {})
-    use_closetoday: bool = bool(data.get('use_closetoday', False))
+    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data)
     rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
@@ -110,14 +124,6 @@ def run_group_test():
                 return jsonify({'success': False, 'error': f'时间范围格式错误: {e}'}), 400
 
         _gt_token = _active_tester.set(tester)
-
-        fee_map: dict[str, dict[str, float]] = {}
-        for code, rates in fee_map_raw.items():
-            open_r  = float(rates.get('open_ratio', 0) or 0)
-            ct_key  = 'closetoday_ratio' if use_closetoday else 'close_ratio'
-            close_r = float(rates.get(ct_key, 0) or 0)
-            if open_r > 0 or close_r > 0:
-                fee_map[str(code).upper()] = {'open': open_r, 'close': close_r}
 
         # ─── 如果是多周期对比 ───
         if return_freqs and isinstance(return_freqs, list) and len(return_freqs) > 0:

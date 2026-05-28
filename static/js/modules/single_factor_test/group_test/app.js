@@ -2153,7 +2153,7 @@
     // ---------- 手续费表相关状态与函数 ----------
     var _useCloseToday = false;
     var _feeTableData = [];          // 原始费率数据（从后端获取的，不可变）
-    var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio}}
+    var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio, closetoday_ratio}}
 
     /** 获取当前费率修改（供单因子设置快照 collectSnapshot 调用） */
     window._getFeeModifications = function() {
@@ -2211,8 +2211,9 @@
     function _getEffectiveRow(row) {
         var code = (row.variety_code || '').toLowerCase();
         var mod = _feeModifications[code] || {};
+        var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
         var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
-        var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+        var closeR = (mod[closeField] !== undefined) ? mod[closeField] : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
         return { code: code, openR: openR, closeR: closeR };
     }
 
@@ -2232,8 +2233,9 @@
             var codeLower = code.toLowerCase();
             var eff = _getEffectiveRow(row);
             var total  = (eff.openR + eff.closeR) * 100;
+            var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
             var openModified  = !!(_feeModifications[codeLower] && _feeModifications[codeLower].open_ratio  !== undefined);
-            var closeModified = !!(_feeModifications[codeLower] && _feeModifications[codeLower].close_ratio !== undefined);
+            var closeModified = !!(_feeModifications[codeLower] && _feeModifications[codeLower][closeField] !== undefined);
             var openClass  = openModified  ? 'fee-cell-modified' : '';
             var closeClass = closeModified ? 'fee-cell-modified' : '';
 
@@ -2243,7 +2245,7 @@
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.exchange || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + (row.multiplier || '') + '</td>';
             html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.openR.toFixed(6) + '</td>';
-            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="close_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.closeR.toFixed(6) + '</td>';
+            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="' + closeField + '" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.closeR.toFixed(6) + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">';
             html += total > 0 ? total.toFixed(4) + '%' : '—';
             html += '</td>';
@@ -2282,7 +2284,7 @@
         if (!row) return;
         var origVal = field === 'open_ratio'
             ? (parseFloat(row.open_ratio) || 0)
-            : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+            : (field === 'closetoday_ratio' ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
 
         if (Math.abs(val - origVal) < 1e-9) {
             // 恢复为原始值，清除修改
@@ -2347,7 +2349,7 @@
             map[code] = {
                 open_ratio:        (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio)        || 0),
                 close_ratio:       (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio)       || 0),
-                closetoday_ratio:  parseFloat(row.closetoday_ratio)  || 0,
+                closetoday_ratio:  (mod.closetoday_ratio !== undefined) ? mod.closetoday_ratio : (parseFloat(row.closetoday_ratio)  || 0),
                 open_fixed:        parseFloat(row.open_fixed)        || 0,
                 close_fixed:       parseFloat(row.close_fixed)       || 0,
                 closetoday_fixed:  parseFloat(row.closetoday_fixed)  || 0,
