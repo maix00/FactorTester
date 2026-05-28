@@ -862,8 +862,8 @@
             var prod = row.product;
             var name = (prod && prod.name) || '—';
             var desc = (prod && prod.desc && prod.desc !== name) ? prod.desc : '—';
-            html += '<tr' + highlight + '><td>' + name + '</td><td>' + desc + '</td>'
-                + '<td>' + fmtPct(meanRet) + '</td>'
+            html += '<tr' + highlight + '><td>' + name + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + desc + '</td>'
+                + '<td>' + fmtFeeRate(meanRet) + '</td>'
                 + '<td>' + fmtFeeRate(fee.open) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_today) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>'
@@ -913,7 +913,7 @@
             var highlight = (meanAct != null && isFinite(meanAct) && meanAct > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
             html += '<tr' + highlight + '>' + renderProductFeeCells(row.product)
                 + '<td>' + row.active_period_count + '</td><td>'
-                + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(meanAct) + '</td></tr>';
+                + fmtPct(row.gross_contribution) + '</td><td>' + fmtFeeRate(meanAct) + '</td></tr>';
         });
         return html + '</tbody></table>';
     }
@@ -965,12 +965,12 @@
 
     function renderProductFeeCells(product) {
         if (!product || typeof product === 'string') {
-            return '<td>' + (product || '—') + '</td><td>—</td><td>—</td><td>—</td><td>—</td>';
+            return '<td>' + (product || '—') + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">—</td><td>—</td><td>—</td><td>—</td>';
         }
         var name = product.name || '—';
         var desc = product.desc && product.desc !== name ? product.desc : '—';
         var fee = product.fee || {};
-        return '<td>' + name + '</td><td>' + desc + '</td><td>' + fmtFeeRate(fee.open)
+        return '<td>' + name + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + desc + '</td><td>' + fmtFeeRate(fee.open)
             + '</td><td>' + fmtFeeRate(fee.close_today) + '</td><td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>';
     }
 
