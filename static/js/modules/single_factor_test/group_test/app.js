@@ -852,9 +852,9 @@
 
     function renderGroupFrequency(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率</th><th>平今费率</th><th>平昨费率</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.slice(0, 12).forEach(function(row) {
-            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
+            html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.count + '</td><td>' + (row.frequency * 100).toFixed(1) + '%</td></tr>';
         });
         return html + '</tbody></table>';
     }
@@ -891,9 +891,9 @@
 
     function renderProductContributionRows(rows) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
-        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
+        var html = '<table class="group-detail-table"><thead><tr><th>产品</th><th>产品描述</th><th>开仓费率</th><th>平今费率</th><th>平昨费率</th><th>活跃期</th><th>毛贡献</th><th>活跃期均值</th></tr></thead><tbody>';
         rows.forEach(function(row) {
-            html += '<tr><td>' + formatGroupProduct(row.product) + '</td><td>' + row.active_period_count + '</td><td>'
+            html += '<tr>' + renderProductFeeCells(row.product) + '<td>' + row.active_period_count + '</td><td>'
                 + fmtPct(row.gross_contribution) + '</td><td>' + fmtPct(row.mean_active_contribution) + '</td></tr>';
         });
         return html + '</tbody></table>';
@@ -924,13 +924,30 @@
         if (typeof product === 'string') return product;
         var name = product.name || '';
         var desc = product.desc && product.desc !== name ? ' · ' + product.desc : '';
-        var fee = product.fee;
-        var feeText = fee ? ' · 费率 开' + fmtBp(fee.open) + '/平' + fmtBp(fee.close) : '';
-        return name + desc + feeText;
+        return name + desc;
     }
 
     function formatGroupProducts(products) {
         return (products || []).map(formatGroupProduct).join('、');
+    }
+
+    function fmtFeeRate(value) {
+        if (value == null || isNaN(value) || !isFinite(value)) return '—';
+        var bp = value * 10000;
+        var abs = Math.abs(bp);
+        var dec = abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8;
+        return bp.toFixed(dec) + ' bp';
+    }
+
+    function renderProductFeeCells(product) {
+        if (!product || typeof product === 'string') {
+            return '<td>' + (product || '—') + '</td><td>—</td><td>—</td><td>—</td><td>—</td>';
+        }
+        var name = product.name || '—';
+        var desc = product.desc && product.desc !== name ? product.desc : '—';
+        var fee = product.fee || {};
+        return '<td>' + name + '</td><td>' + desc + '</td><td>' + fmtFeeRate(fee.open)
+            + '</td><td>' + fmtFeeRate(fee.close_today) + '</td><td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>';
     }
 
     function renderGroupDetailHistogram(histogram) {
@@ -1069,11 +1086,9 @@
     }
 
     function renderGroupDetail(detail) {
-        // Common metrics moved to the outer summary table (Issue #50).
-        // Keep overlay "概览" focused on deep-dive content.
         var summaryEl = document.getElementById('group-detail-summary');
         if (summaryEl) {
-            summaryEl.innerHTML = '<div class="group-detail-muted">本组的通用收益/风险指标已移至外部总表（按分区展示）。此处保留结构化分析与明细。</div>';
+            summaryEl.innerHTML = renderGroupSummaryCards(detail.summary || {});
         }
         document.getElementById('group-detail-frequency').innerHTML = renderGroupFrequency(detail.entry_frequency);
         document.getElementById('group-detail-top-periods').innerHTML = renderGroupDetailTable(detail.top_periods);
@@ -1100,6 +1115,27 @@
         renderRobustnessSummary(detail.robustness_summary || {}, detail.period_robustness || {});
         renderGroupDetailReturnChart(detail.return_series || []);
         renderGroupDetailHistogram((detail.distribution || {}).histogram || []);
+    }
+
+    function renderGroupSummaryCards(summary) {
+        var items = [
+            ['Total Return', '总收益率'],
+            ['Mean Return', '均值收益率'],
+            ['Win Rate', '胜率'],
+            ['Volatility', '年化波动率'],
+            ['Max Drawdown', '最大回撤'],
+            ['Avg Turnover', '平均换手率'],
+        ];
+        return items.map(function(item) {
+            var key = item[0];
+            var value = summary[key];
+            var display = '—';
+            if (value != null && !isNaN(value) && isFinite(value)) {
+                display = key === 'Avg Turnover' ? fmtPct(value) : formatPercentAdaptive(Number(value), key);
+            }
+            return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
+                + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
+        }).join('');
     }
 
     function renderPositiveRunAnalysis(analysis) {

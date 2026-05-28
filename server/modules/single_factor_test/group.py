@@ -70,10 +70,16 @@ def _parse_group_fee_config(data):
     fee_map: dict[str, dict[str, float]] = {}
     for code, rates in fee_map_raw.items():
         open_r = float(rates.get('open_ratio', 0) or 0)
-        close_key = 'closetoday_ratio' if use_closetoday else 'close_ratio'
-        close_r = float(rates.get(close_key, 0) or 0)
-        if open_r > 0 or close_r > 0:
-            fee_map[str(code).upper()] = {'open': open_r, 'close': close_r}
+        close_r = float(rates.get('close_ratio', 0) or 0)
+        close_today_r = float(rates.get('closetoday_ratio', close_r) or 0)
+        selected_close_r = close_today_r if use_closetoday else close_r
+        if open_r > 0 or close_r > 0 or close_today_r > 0:
+            fee_map[str(code).upper()] = {
+                'open': open_r,
+                'close': selected_close_r,
+                'close_today': close_today_r,
+                'close_yesterday': close_r,
+            }
 
     return fee_uniform, fee_map, use_closetoday
 
@@ -82,12 +88,17 @@ def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
     valid_cols = getattr(group_result, 'valid_cols', None)
     open_fee_vec = getattr(group_result, 'open_fee_vec', None)
     close_fee_vec = getattr(group_result, 'close_fee_vec', None)
+    close_today_fee_vec = getattr(group_result, 'close_today_fee_vec', None)
     if not valid_cols or open_fee_vec is None or close_fee_vec is None:
         return {}
     from tools.products.product_utils import product_display_name
 
     open_rates = np.asarray(open_fee_vec, dtype=float)
     close_rates = np.asarray(close_fee_vec, dtype=float)
+    close_today_rates = (
+        np.asarray(close_today_fee_vec, dtype=float)
+        if close_today_fee_vec is not None else close_rates
+    )
     if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
         return {}
     rates = {}
@@ -96,6 +107,8 @@ def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
         rates[name] = {
             'open': float(open_rates[idx]),
             'close': float(close_rates[idx]),
+            'close_today': float(close_today_rates[idx]),
+            'close_yesterday': float(close_rates[idx]),
             'total': float(open_rates[idx] + close_rates[idx]),
         }
     return rates
@@ -469,6 +482,7 @@ def get_group_detail():
             group_result.fee_costs_np if group_result is not None else None,
             group_result.open_fee_vec if group_result is not None else None,
             group_result.close_fee_vec if group_result is not None else None,
+            group_result.close_today_fee_vec if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:

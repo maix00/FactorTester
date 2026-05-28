@@ -56,8 +56,13 @@ def test_group_fee_config_parses_uniform_and_closetoday_rates():
         },
     })
     assert fee_uniform == 0
-    assert fee_map == {'RB': {'open': 0.0001, 'close': 0.0005}}
     assert use_closetoday is True
+    assert fee_map == {'RB': {
+        'open': 0.0001,
+        'close': 0.0005,
+        'close_today': 0.0005,
+        'close_yesterday': 0.0002,
+    }}
 
 
 def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
@@ -76,12 +81,18 @@ def test_group_detail_includes_product_fee_rates_and_actual_fee_costs():
         fee_costs_np=np.array([[0.0003], [0.0001]]),
         open_fee_vec=np.array([0.0001, 0.0002]),
         close_fee_vec=np.array([0.0003, 0.0004]),
+        close_today_fee_vec=np.array([0.0005, 0.0006]),
     )
 
     first_product = detail['entry_frequency'][0]['product']
     np.testing.assert_allclose(
-        [first_product['fee']['open'], first_product['fee']['close'], first_product['fee']['total']],
-        [0.0001, 0.0003, 0.0004],
+        [
+            first_product['fee']['open'],
+            first_product['fee']['close_today'],
+            first_product['fee']['close_yesterday'],
+            first_product['fee']['total'],
+        ],
+        [0.0001, 0.0005, 0.0003, 0.0004],
     )
     assert detail['top_periods'][0]['products'][0]['fee']['open'] in {0.0001, 0.0002}
     np.testing.assert_allclose(detail['tradability_analysis']['avg_actual_fee_cost'], 0.0002)

@@ -23,11 +23,12 @@ def build_group_detail(
     fee_costs_np: np.ndarray | None = None,
     open_fee_vec: np.ndarray | None = None,
     close_fee_vec: np.ndarray | None = None,
+    close_today_fee_vec: np.ndarray | None = None,
 ) -> dict[str, Any]:
     returns = np.asarray(group_returns_np[:, group_index], dtype=float)
     clean_returns = returns[np.isfinite(returns)]
     group_products = products_by_group.get(group_index, {})
-    product_fee_rates = _build_product_fee_rates(valid_cols, open_fee_vec, close_fee_vec)
+    product_fee_rates = _build_product_fee_rates(valid_cols, open_fee_vec, close_fee_vec, close_today_fee_vec)
     total_periods = max(len(index_list), 1)
 
     entry_counts = Counter()
@@ -538,11 +539,16 @@ def _build_product_fee_rates(
     valid_cols: list | None,
     open_fee_vec: np.ndarray | None,
     close_fee_vec: np.ndarray | None,
+    close_today_fee_vec: np.ndarray | None = None,
 ) -> dict[str, dict[str, float]]:
     if not valid_cols or open_fee_vec is None or close_fee_vec is None:
         return {}
     open_rates = np.asarray(open_fee_vec, dtype=float)
     close_rates = np.asarray(close_fee_vec, dtype=float)
+    close_today_rates = (
+        np.asarray(close_today_fee_vec, dtype=float)
+        if close_today_fee_vec is not None else close_rates
+    )
     if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
         return {}
     rows = {}
@@ -551,6 +557,8 @@ def _build_product_fee_rates(
         rows[display['name']] = {
             'open': float(open_rates[idx]),
             'close': float(close_rates[idx]),
+            'close_today': float(close_today_rates[idx]),
+            'close_yesterday': float(close_rates[idx]),
             'total': float(open_rates[idx] + close_rates[idx]),
         }
     return rows

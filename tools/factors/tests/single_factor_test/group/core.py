@@ -233,6 +233,7 @@ def compute_trade_costs(
     open_fee_vec: np.ndarray,
     close_fee_vec: np.ndarray,
     wealth_before_trade: np.ndarray,
+    close_today_fee_vec: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return buy/sell notionals plus fee and traded-notional ratios.
 
@@ -241,9 +242,13 @@ def compute_trade_costs(
     """
     buy = np.clip(target_amounts - prev_end_amounts, 0.0, None)
     sell = np.clip(prev_end_amounts - target_amounts, 0.0, None)
+    effective_close_fee_vec = np.asarray(
+        close_today_fee_vec if close_today_fee_vec is not None else close_fee_vec,
+        dtype=float,
+    )
     fee = (
         buy * open_fee_vec[np.newaxis, :]
-        + sell * close_fee_vec[np.newaxis, :]
+        + sell * effective_close_fee_vec[np.newaxis, :]
     ).sum(axis=1)
     fee_ratio = np.divide(
         fee,
@@ -521,6 +526,10 @@ def test_by_group_single_factor(
         float((fee_map.get(_variety(c), {}) or {}).get("close", half_fee))
         for c in valid_cols
     ], dtype=float)
+    close_today_fee_vec = np.array([
+        float((fee_map.get(_variety(c), {}) or {}).get("close_today", close_fee_vec[i]))
+        for i, c in enumerate(valid_cols)
+    ], dtype=float)
 
     group_gross_returns_np = np.zeros((T, n_groups), dtype=float)
     group_product_gross_contrib_np = np.zeros((T, n_groups, P), dtype=float)
@@ -712,6 +721,7 @@ def test_by_group_single_factor(
         valid_cols=valid_cols,
         open_fee_vec=open_fee_vec,
         close_fee_vec=close_fee_vec,
+        close_today_fee_vec=close_today_fee_vec,
         index_list=index_list,
         multi_session_active=multi_session_active,
         report_df=report_df.copy(),

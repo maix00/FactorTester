@@ -65,3 +65,17 @@ def test_trade_costs_use_each_products_open_and_close_rates():
 
     np.testing.assert_allclose(fee_ratio, [0.005])
     np.testing.assert_allclose(trade_notional_ratio, [2.0])
+
+
+def test_trade_costs_can_use_user_selected_close_today_rates():
+    _, _, fee_ratio, trade_notional_ratio = compute_trade_costs(
+        target_amounts=np.array([[0.0, 1.0]]),
+        prev_end_amounts=np.array([[1.0, 0.0]]),
+        open_fee_vec=np.array([0.001, 0.002]),
+        close_fee_vec=np.array([0.003, 0.004]),
+        close_today_fee_vec=np.array([0.007, 0.008]),
+        wealth_before_trade=np.array([1.0]),
+    )
+
+    np.testing.assert_allclose(fee_ratio, [0.009])
+    np.testing.assert_allclose(trade_notional_ratio, [2.0])
