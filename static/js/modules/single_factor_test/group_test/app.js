@@ -1149,7 +1149,7 @@
             var value = summary[key];
             var display = '—';
             if (value != null && !isNaN(value) && isFinite(value)) {
-                display = key === 'Avg Turnover' ? formatPct(value) : formatPercentAdaptive(Number(value), key);
+                display = formatPct(value);
             }
             return '<div class="group-detail-summary-item"><div class="group-detail-summary-label">'
                 + item[1] + '</div><div class="group-detail-summary-value">' + display + '</div></div>';
