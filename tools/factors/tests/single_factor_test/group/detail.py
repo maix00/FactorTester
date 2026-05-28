@@ -20,10 +20,14 @@ def build_group_detail(
     valid_cols: list | None = None,
     group_gross_returns_np: np.ndarray | None = None,
     trade_notional_ratio_np: np.ndarray | None = None,
+    fee_costs_np: np.ndarray | None = None,
+    open_fee_vec: np.ndarray | None = None,
+    close_fee_vec: np.ndarray | None = None,
 ) -> dict[str, Any]:
     returns = np.asarray(group_returns_np[:, group_index], dtype=float)
     clean_returns = returns[np.isfinite(returns)]
     group_products = products_by_group.get(group_index, {})
+    product_fee_rates = _build_product_fee_rates(valid_cols, open_fee_vec, close_fee_vec)
     total_periods = max(len(index_list), 1)
 
     entry_counts = Counter()
@@ -33,14 +37,15 @@ def build_group_detail(
             display = product_display_name(product)
             entry_counts.update([display['name']])
             product_display_map[display['name']] = display
-    entry_frequency = [
-        {
-            'product': product_display_map.get(product, {'name': product, 'desc': product}),
+    entry_frequency = []
+    for product, count in entry_counts.most_common():
+        display = dict(product_display_map.get(product, {'name': product, 'desc': product}))
+        display['fee'] = product_fee_rates.get(product)
+        entry_frequency.append({
+            'product': display,
             'count': count,
             'frequency': count / total_periods,
-        }
-        for product, count in entry_counts.most_common()
-    ]
+        })
 
     periods = []
     cumulative_return = 1.0
@@ -58,7 +63,7 @@ def build_group_detail(
         periods.append({
             'timestamp': pd.Timestamp(_signal_time(idx_entry)).isoformat(),
             'return': float(value),
-            'products': [product_display_name(product) for product in group_products.get(idx_entry, [])],
+            'products': [_display_with_fee(product, product_fee_rates) for product in group_products.get(idx_entry, [])],
         })
     periods_desc = sorted(periods, key=lambda item: item['return'], reverse=True)
     positive_run_analysis = _build_positive_run_analysis(return_series)
@@ -72,9 +77,10 @@ def build_group_detail(
         group_index,
         group_gross_returns_np,
         trade_notional_ratio_np,
+        fee_costs_np,
     )
     period_robustness = _build_period_robustness(return_series)
-    product_analysis = _build_product_analysis(group_index, product_gross_contrib_np, valid_cols)
+    product_analysis = _build_product_analysis(group_index, product_gross_contrib_np, valid_cols, product_fee_rates)
     robustness_summary = _build_robustness_summary(
         positive_run_analysis,
         daily_analysis,
@@ -344,6 +350,7 @@ def _build_product_analysis(
     group_index: int,
     product_gross_contrib_np: np.ndarray | None,
     valid_cols: list | None,
+    product_fee_rates: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     if product_gross_contrib_np is None or not valid_cols:
         return {'rows': [], 'top_products': [], 'bottom_products': [], 'is_concentrated': False}
@@ -353,6 +360,7 @@ def _build_product_analysis(
     rows = []
     for idx, product in enumerate(valid_cols):
         display = product_display_name(product)
+        display['fee'] = (product_fee_rates or {}).get(display['name'])
         rows.append({
             'product': display,
             'active_period_count': int(counts[idx]),
@@ -473,14 +481,20 @@ def _build_tradability_analysis(
     group_index: int,
     group_gross_returns_np: np.ndarray | None,
     trade_notional_ratio_np: np.ndarray | None,
+    fee_costs_np: np.ndarray | None = None,
 ) -> dict[str, Any]:
     if group_gross_returns_np is None or trade_notional_ratio_np is None:
         return {}
     gross = np.asarray(group_gross_returns_np[:, group_index], dtype=float)
     notional = np.asarray(trade_notional_ratio_np[:, group_index], dtype=float)
+    fee_cost = (
+        np.asarray(fee_costs_np[:, group_index], dtype=float)
+        if fee_costs_np is not None else np.full_like(gross, np.nan, dtype=float)
+    )
     valid = np.isfinite(gross) & np.isfinite(notional)
     gross = gross[valid]
     notional = notional[valid]
+    fee_cost = fee_cost[valid] if fee_cost.shape[0] == valid.shape[0] else np.asarray([], dtype=float)
     if gross.size == 0:
         return {}
 
@@ -509,9 +523,43 @@ def _build_tradability_analysis(
     return {
         'avg_trade_notional_ratio': float(np.mean(notional)),
         'median_trade_notional_ratio': float(np.median(notional)),
+        'avg_actual_fee_cost': float(np.nanmean(fee_cost)) if fee_cost.size and np.isfinite(fee_cost).any() else None,
+        'median_actual_fee_cost': float(np.nanmedian(fee_cost)) if fee_cost.size and np.isfinite(fee_cost).any() else None,
+        'actual_fee_per_traded_notional': (
+            float(np.nansum(fee_cost) / np.sum(notional))
+            if fee_cost.size and np.isfinite(fee_cost).any() and np.sum(notional) > 0 else None
+        ),
         'break_even_fee': break_even,
         'sensitivity': sensitivity,
     }
+
+
+def _build_product_fee_rates(
+    valid_cols: list | None,
+    open_fee_vec: np.ndarray | None,
+    close_fee_vec: np.ndarray | None,
+) -> dict[str, dict[str, float]]:
+    if not valid_cols or open_fee_vec is None or close_fee_vec is None:
+        return {}
+    open_rates = np.asarray(open_fee_vec, dtype=float)
+    close_rates = np.asarray(close_fee_vec, dtype=float)
+    if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
+        return {}
+    rows = {}
+    for idx, product in enumerate(valid_cols):
+        display = product_display_name(product)
+        rows[display['name']] = {
+            'open': float(open_rates[idx]),
+            'close': float(close_rates[idx]),
+            'total': float(open_rates[idx] + close_rates[idx]),
+        }
+    return rows
+
+
+def _display_with_fee(product: Any, product_fee_rates: dict[str, dict[str, float]]) -> dict[str, Any]:
+    display = product_display_name(product)
+    display['fee'] = product_fee_rates.get(display['name'])
+    return display
 
 
 def _build_capacity_analysis(group_products: dict, index_list: list) -> dict[str, Any]:

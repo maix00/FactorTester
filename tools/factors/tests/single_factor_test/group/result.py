@@ -19,6 +19,8 @@ class GroupRunResult:
     returns_np: np.ndarray
     products_by_group: dict
     valid_cols: list
+    open_fee_vec: np.ndarray
+    close_fee_vec: np.ndarray
     index_list: list
     multi_session_active: bool
     report_df: pd.DataFrame
