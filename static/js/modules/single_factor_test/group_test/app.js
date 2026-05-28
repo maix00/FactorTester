@@ -859,7 +859,10 @@
             var fee = (row.product && row.product.fee) || {};
             var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
             var highlight = (meanRet != null && isFinite(meanRet) && meanRet > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
-            html += '<tr' + highlight + '>' + renderProductFeeCells(row.product)
+            var prod = row.product;
+            var name = (prod && prod.name) || '—';
+            var desc = (prod && prod.desc && prod.desc !== name) ? prod.desc : '—';
+            html += '<tr' + highlight + '><td>' + name + '</td><td>' + desc + '</td>'
                 + '<td>' + fmtPct(meanRet) + '</td>'
                 + '<td>' + fmtFeeRate(fee.open) + '</td>'
                 + '<td>' + fmtFeeRate(fee.close_today) + '</td>'
