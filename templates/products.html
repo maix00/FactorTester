@@ -370,6 +370,20 @@
             init: function(event, data) {
                 treeInstance = data.tree;
                 $container.find('> div:first-child').remove();
+                // Fix: Fancytree 拦截鼠标滚轮，需手动转发到父容器
+                $container.on('wheel', function(ev) {
+                    var $t = $(this);
+                    var scrollTop = $t.scrollTop();
+                    var scrollHeight = $t[0].scrollHeight;
+                    var clientHeight = $t[0].clientHeight;
+                    var atTop = scrollTop <= 0;
+                    var atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+                    if ((ev.originalEvent.deltaY < 0 && atTop) || (ev.originalEvent.deltaY > 0 && atBottom)) {
+                        return;
+                    }
+                    ev.preventDefault();
+                    $t.scrollTop(scrollTop + ev.originalEvent.deltaY);
+                });
             },
             lazyLoad: function(event, data) {
                 var node = data.node;
