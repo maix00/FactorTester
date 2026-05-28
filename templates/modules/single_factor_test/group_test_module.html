@@ -28,6 +28,19 @@
             若所选产品交易时段不统一，出现“部分产品有信号、部分产品无信号”的混合期时，会自动启用多时段保护逻辑，并临时覆盖所选再平衡模式。
         </div>
 
+        <div class="group-setting-row" style="align-items:flex-start;">
+            <label style="margin-bottom:0;white-space:nowrap;padding-top:4px;">Long-Short：</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <input type="text" id="ls_long_groups" value="1" title="做多组，1 起算；多个组用逗号分隔" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+                <input type="text" id="ls_long_weights" value="1" title="做多组资金权重；可留空等权" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="font-size:12px;color:#666;">Long 组/权重</span>
+                <input type="text" id="ls_short_groups" value="" placeholder="默认末组" title="做空组，1 起算；多个组用逗号分隔" style="width:92px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+                <input type="text" id="ls_short_weights" value="1" title="做空组资金权重；可留空等权" style="width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="font-size:12px;color:#666;">Short 组/权重</span>
+                <input type="text" id="ls_name" value="Long-Short" title="组合名称" style="width:120px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;">
+            </div>
+        </div>
+
         <!-- 策略说明面板（运行后动态填充） -->
         <div id="strategy_info_panel" style="display:none;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
             <div style="display:flex;align-items:flex-start;gap:8px;">
@@ -212,6 +225,7 @@
                             <span class="group-detail-section-summary" id="group-detail-frequency-summary">哪些产品最常进入该组</span>
                         </button>
                         <div class="group-detail-section-body">
+                            <div id="group-derived-groups-panel"></div>
                             <div id="group-detail-frequency"></div>
                         </div>
                     </section>
@@ -703,6 +717,36 @@
         border-bottom: 1px solid #eef2f7;
         text-align: left;
         vertical-align: top;
+    }
+    #group_test_module .derived-group-panel {
+        border: 1px solid #dbeafe;
+        background: #f8fbff;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        font-size: 12px;
+    }
+    #group_test_module .derived-group-toolbar,
+    #group_test_module .derived-group-list-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    #group_test_module .derived-group-toolbar input {
+        min-width: 220px;
+        padding: 4px 6px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+    }
+    #group_test_module .derived-group-list-row {
+        justify-content: space-between;
+        padding-top: 8px;
+        margin-top: 8px;
+        border-top: 1px solid #e5e7eb;
+    }
+    #group_test_module .derived-group-actions button {
+        margin-left: 6px;
     }
     /* Best-value highlight in sectioned metrics table (align with IC module style) */
     #group_test_module .group-best-cell {

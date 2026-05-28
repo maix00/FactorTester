@@ -103,7 +103,14 @@
             // Long-Short column should be the first group column
             if (a === 'LS') return -1;
             if (b === 'LS') return 1;
-            return parseInt(a, 10) - parseInt(b, 10);
+            var ai = parseInt(a, 10);
+            var bi = parseInt(b, 10);
+            var an = String(ai) === String(a);
+            var bn = String(bi) === String(b);
+            if (an && bn) return ai - bi;
+            if (an) return -1;
+            if (bn) return 1;
+            return String(a).localeCompare(String(b));
         });
         return labels;
     }
@@ -176,9 +183,11 @@
         labels.forEach(function(g) {
             if (g === 'LS') {
                 headHtml += '<th style="background:#f0f0f0;">Long-Short</th>';
-            } else {
+            } else if (/^\d+$/.test(String(g))) {
                 headHtml += '<th class="group-detail-trigger" data-group-index="' + String(g) + '" title="查看该组详情">第'
                     + (parseInt(g, 10) + 1) + '组</th>';
+            } else {
+                headHtml += '<th style="background:#f8fbff;">' + String(g).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</th>';
             }
         });
         headHtml += '</tr>';
