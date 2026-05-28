@@ -1,7 +1,7 @@
 """
 Group test endpoint: /run_group_test /run_multi_horizon_group_test
 """
-import math, traceback
+import logging, math, traceback
 from typing import cast
 import numpy as np
 import pandas as pd
@@ -15,6 +15,8 @@ from tools.factors.tests.single_factor_test.group.monotonicity import build_grou
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
+
+_log = logging.getLogger(__name__)
 
 
 def _safe_float(v):
@@ -267,9 +269,17 @@ def run_group_test():
             
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups,
                             'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
-                            'rebalance_mode': rebalance_mode})
+                            'rebalance_mode': rebalance_mode,
+                            'submission_id': submission_id, 'factor_alias': factor_alias,
+                            'tester_alias': getattr(tester, 'alias', '?'),
+                            'tester_product_count': len(tester.products) if hasattr(tester, 'products') else 0})
 
         # ─── 原有单频率逻辑 ───
+        # DEBUG: log which tester is serving this request
+        tester_id = getattr(tester, 'alias', '?')
+        _log.info("run_group_test: submission_id=%s tester.alias=%s factor=%s n_products=%d",
+                  submission_id, tester_id, factor_alias, len(tester.products) if hasattr(tester, 'products') else 0)
+
         _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
             factors=factor, n_groups=n_groups, time_range=time_range,
             plot_flag=False, save_plot=False, plot_show=False,
@@ -337,7 +347,10 @@ def run_group_test():
 
         return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups,
                         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
-                        'rebalance_mode': rebalance_mode})
+                        'rebalance_mode': rebalance_mode,
+                        'submission_id': submission_id, 'factor_alias': factor_alias,
+                        'tester_alias': getattr(tester, 'alias', '?'),
+                        'tester_product_count': len(tester.products) if hasattr(tester, 'products') else 0})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
