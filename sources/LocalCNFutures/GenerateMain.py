@@ -189,6 +189,9 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         
         df_mink = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
         df_dayk = dayk_groups.get(row['CONTRACT_UID'], pd.DataFrame(columns=['trading_day', 'close_price']))
+        # searchsorted 要求数据已排序；dayk_df 按多列排序后 groupby 不保证 trading_day 单调递增
+        if not df_dayk['trading_day'].is_monotonic_increasing:
+            df_dayk = df_dayk.sort_values('trading_day')
         left = df_dayk['trading_day'].searchsorted(row['STARTDATE'], side='left')
         right = df_dayk['trading_day'].searchsorted(row['ENDDATE'], side='right')
         interval_data = df_dayk.iloc[left:right]
@@ -229,7 +232,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         first_added = added_df[added_df['PRODUCT'] == product].iloc[0] # added_df 中该产品的第一行
         if last_existing['CONTRACT'] == first_added['CONTRACT']:
             assert last_existing['STARTDATE'] == first_added['STARTDATE']
-            assert last_existing['PREV_CLOSE'] == first_added['PREV_CLOSE']
+            assert last_existing['PREV_CLOSE'] == first_added['PREV_CLOSE'] or (pd.isna(last_existing['PREV_CLOSE']) and pd.isna(first_added['PREV_CLOSE']))
             existing.loc[last_existing.name, 'ENDDATE'] = first_added['ENDDATE'] # 更新 existing 该行的 ENDDATE
             existing.loc[last_existing.name, 'END_CLOSE'] = first_added['END_CLOSE'] # 更新 existing 该行的 END_CLOSE
             existing.loc[last_existing.name, '_SOURCE'] = 'added'
@@ -282,7 +285,11 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
                 existing_df = (tdf := pd.read_parquet(save_path, filters=[('trading_day', '<', added_first[product]['STARTDATE'])])).assign(trading_day=pd.to_datetime(tdf['trading_day']))
                 existing_df['adjustment_mul'] *= added_first[product]['BACKWARD_FACTOR'] # 后复权
                 df_list = [existing_df] + df_list
-            product_df = pd.concat(df_list, ignore_index=True).assign(unique_instrument_id=product).sort_values('trade_time')
+            product_df = (
+                pd.concat(df_list, ignore_index=True)
+                .assign(unique_instrument_id=product)
+                .sort_values('trade_time')
+            )
             product_df.to_parquet(save_path, index=False)
     
     return info_df
