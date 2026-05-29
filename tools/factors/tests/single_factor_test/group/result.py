@@ -16,15 +16,24 @@ class GroupRunResult:
     trade_notional_ratio_np: np.ndarray
     gross_returns_np: np.ndarray
     product_gross_contrib_np: np.ndarray
+    product_fee_contrib_np: np.ndarray
     returns_np: np.ndarray
+    period_returns_np: np.ndarray
+    membership_np: np.ndarray
     products_by_group: dict
     valid_cols: list
     open_fee_vec: np.ndarray
-    close_fee_vec: np.ndarray
-    close_today_fee_vec: np.ndarray
+    close_fee_vec: np.ndarray        # 始终=平昨
+    close_today_fee_vec: np.ndarray  # 始终=平今
+    close_yesterday_fee_vec: np.ndarray  # 始终=平昨（同 close_fee_vec），用于前端分列展示
     index_list: list
     multi_session_active: bool
+    rebalance_mode: str
     report_df: pd.DataFrame
+    # 派生组（精选组）元信息
+    n_base: int = 0
+    n_derived: int = 0
+    derived_info: Any = None  # [{base_group, name, id, product_names}, ...] | None
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:

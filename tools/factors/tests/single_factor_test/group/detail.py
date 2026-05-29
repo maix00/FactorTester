@@ -10,6 +10,15 @@ from tools.factors.FactorTester import _signal_time
 from tools.products.product_utils import product_display_name
 
 
+def _safe_bool(obj) -> bool:
+    """安全求布尔值，避免 numpy 数组的 ambiguous truth value 错误。"""
+    if obj is None:
+        return False
+    if isinstance(obj, np.ndarray):
+        return bool(obj.size > 0)
+    return bool(obj)
+
+
 def build_group_detail(
     group_index: int,
     products_by_group: dict,
@@ -372,7 +381,7 @@ def _build_product_analysis(
     valid_cols: list | None,
     product_fee_rates: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
-    if product_gross_contrib_np is None or not valid_cols:
+    if product_gross_contrib_np is None or not _safe_bool(valid_cols):
         return {'rows': [], 'top_products': [], 'bottom_products': [], 'is_concentrated': False}
     contrib = np.asarray(product_gross_contrib_np[:, group_index, :], dtype=float)
     sums = np.nansum(contrib, axis=0)

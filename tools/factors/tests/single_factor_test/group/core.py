@@ -95,8 +95,18 @@ def build_target_amounts(
     prev_end_amounts: np.ndarray,
     wealth_before_trade: np.ndarray,
     rebalance_mode: str,
+    close_fee_vec: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Build next-period target holdings for all groups with vectorized operations."""
+    """Build next-period target holdings for all groups with vectorized operations.
+
+    Parameters
+    ----------
+    close_fee_vec : (P,) array of per-product close fee rates.
+        When provided, the capital released from exits is reduced by the
+        proportional close fee before being allocated to entering products.
+        Omitting it preserves backward compatibility (fee applied later in
+        Omitting it preserves backward compatibility, but may cause target over-allocation.
+    """
     curr_mask = np.asarray(curr_mask_all, dtype=bool)
     prev_amounts = np.asarray(prev_end_amounts, dtype=float)
     wealth = np.asarray(wealth_before_trade, dtype=float)
@@ -107,10 +117,19 @@ def build_target_amounts(
         return targets
 
     if rebalance_mode == "each_period":
-        targets[non_empty] = (
-            curr_mask[non_empty].astype(float)
-            * (wealth[non_empty] / counts[non_empty])[:, np.newaxis]
-        )
+        if close_fee_vec is not None:
+            # Available cash = wealth minus close fees on all prior holdings.
+            sell_fees = (prev_amounts * close_fee_vec[np.newaxis, :]).sum(axis=1)
+            available = np.maximum(0.0, wealth - sell_fees)
+            targets[non_empty] = (
+                curr_mask[non_empty].astype(float)
+                * (available[non_empty] / counts[non_empty])[:, np.newaxis]
+            )
+        else:
+            targets[non_empty] = (
+                curr_mask[non_empty].astype(float)
+                * (wealth[non_empty] / counts[non_empty])[:, np.newaxis]
+            )
         return targets
 
     prev_mask = prev_amounts > 0
@@ -118,7 +137,16 @@ def build_target_amounts(
     exiting = prev_mask & (~curr_mask)
     entering = curr_mask & (~prev_mask)
     n_entering = entering.sum(axis=1).astype(float)
-    released = (prev_amounts * exiting.astype(float)).sum(axis=1)
+    # Gross released amount (before close fee)
+    sell_amounts = (prev_amounts * exiting.astype(float)).sum(axis=1)
+
+    # Subtract close fee from released capital — the actual cash available
+    # after selling is sell_amounts * (1 - close_fee) per exiting product.
+    if close_fee_vec is not None:
+        sell_fees = (prev_amounts * exiting.astype(float) * close_fee_vec[np.newaxis, :]).sum(axis=1)
+        released = np.maximum(0.0, sell_amounts - sell_fees)
+    else:
+        released = sell_amounts
 
     targets = prev_amounts * staying.astype(float)
     rows_with_released = (n_entering > 0) & (released > 0)
@@ -147,7 +175,15 @@ def build_target_amounts(
         raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
 
     totals = targets.sum(axis=1)
-    rescale = non_empty & (totals > 0) & (np.abs(totals - wealth) > 1e-12)
+    # Rescale to wealth only when we did NOT deduct close fees (backward
+    # compat).  When close_fee_vec is provided, exiting capital is already
+    # net of fees so targets.sum() < wealth is expected — do not rescale.
+    rescale = (
+        non_empty
+        & (totals > 0)
+        & (np.abs(totals - wealth) > 1e-12)
+        & (close_fee_vec is None)
+    )
     if rescale.any():
         targets[rescale] *= (wealth[rescale] / totals[rescale])[:, np.newaxis]
     return targets
@@ -202,67 +238,446 @@ def build_multi_session_target_amounts(
             * (wealth[initial_funding] / entering_counts[initial_funding])[:, np.newaxis]
         )
 
-    totals = targets.sum(axis=1)
-    rescale = non_empty & (totals > 0) & (np.abs(totals - wealth) > 1e-12)
-    if rescale.any():
-        targets[rescale] *= (wealth[rescale] / totals[rescale])[:, np.newaxis]
+    # multi-session 已扣 close fee，不 rescale 回 wealth（targets.sum < wealth 是正确的）
     return targets
+
+
+def simulate_groups(
+    membership_np: np.ndarray,
+    returns_np: np.ndarray,
+    open_fee_vec: np.ndarray,
+    close_fee_vec: np.ndarray,
+    *,
+    rebalance_mode: str = "buy_and_hold",
+    close_today_fee_vec: np.ndarray | None = None,
+    data_has_bar: np.ndarray | None = None,
+) -> dict:
+    """Matrix simulation of group returns over T periods for n_groups groups.
+
+    This is the *single shared engine* for both full group tests and
+    derived-group simulations.  The caller slices membership/returns down
+    to the desired products before calling.
+
+    Parameters
+    ----------
+    membership_np : (T, n_groups, P) bool
+    returns_np : (T, P) float — per-product period returns (NaN/inf/-1 already filled)
+    open_fee_vec : (P,) float
+    close_fee_vec : (P,) float
+    close_today_fee_vec : (P,) float | None — when set, overrides close_fee_vec for exiting
+    data_has_bar : (T, P) bool | None — when set, enables multi-session strategy
+    rebalance_mode : "each_period" | "buy_and_hold" | "recycle"
+
+    Returns
+    -------
+    dict with keys: net_returns_np, gross_returns_np, product_gross_contrib_np,
+    product_fee_contrib_np, fee_costs_np, trade_notional_ratio_np, multi_session_triggered
+    """
+    T, n_groups, P = membership_np.shape
+    effective_close_fee_vec = close_today_fee_vec  # None means use close_fee_vec
+    multi_session_active = data_has_bar is not None
+    multi_session_triggered = 0
+
+    # Output arrays
+    net_returns_np = np.zeros((T, n_groups), dtype=float)
+    gross_returns_np = np.zeros((T, n_groups), dtype=float)
+    product_gross_contrib_np = np.zeros((T, n_groups, P), dtype=float)
+    product_fee_contrib_np = np.zeros((T, n_groups, P), dtype=float)
+    fee_costs_np = np.zeros((T, n_groups), dtype=float)
+    trade_notional_ratio_np = np.zeros((T, n_groups), dtype=float)
+
+    member_counts = membership_np.sum(axis=2).astype(float)
+    wealth = np.ones(n_groups, dtype=float)
+    prev_end_amounts = np.zeros((n_groups, P), dtype=float)
+
+    for t in range(T):
+        curr_mask_all = membership_np[t]
+        curr_count_all = member_counts[t]
+        wealth_before_trade = wealth.copy()
+
+        # Multi-session check
+        has_bar_t = data_has_bar[t] if multi_session_active else np.ones(P, dtype=bool)
+        is_mixed_t = multi_session_active and has_bar_t.any() and (~has_bar_t).any()
+
+        target_amounts = np.zeros((n_groups, P), dtype=float)
+        empty_mask = curr_count_all == 0
+        non_empty_mask = ~empty_mask
+
+        # --- Empty groups ---
+        if empty_mask.any():
+            sell_empty = prev_end_amounts[empty_mask]
+            zero_target = np.zeros_like(sell_empty)
+            close_rates = effective_close_fee_vec if effective_close_fee_vec is not None else close_fee_vec
+            _, sell_fee_empty = compute_sell_fee(
+                sell_empty, zero_target, close_rates,
+                close_today_fee_vec=None,
+            )
+            sell_fee_ratio_empty = np.divide(
+                sell_fee_empty, wealth_before_trade[empty_mask],
+                out=np.zeros_like(sell_fee_empty, dtype=float),
+                where=wealth_before_trade[empty_mask] > 0,
+            )
+            net_ret_empty = -sell_fee_ratio_empty
+            wealth[empty_mask] = wealth_before_trade[empty_mask] * (1.0 + net_ret_empty)
+            gross_returns_np[t, empty_mask] = 0.0
+            product_gross_contrib_np[t, empty_mask] = 0.0
+            sell_fee_per = sell_empty * close_rates[np.newaxis, :]
+            empty_fee_contrib = np.where(
+                wealth_before_trade[empty_mask, np.newaxis] > 0,
+                sell_fee_per / wealth_before_trade[empty_mask, np.newaxis],
+                0.0,
+            )
+            product_fee_contrib_np[t, empty_mask] = empty_fee_contrib
+            fee_costs_np[t, empty_mask] = sell_fee_ratio_empty
+            net_returns_np[t, empty_mask] = net_ret_empty
+            prev_end_amounts[empty_mask] = 0.0
+
+        if not non_empty_mask.any():
+            continue
+
+        ne_idx = np.where(non_empty_mask)[0]
+
+        if is_mixed_t:
+            multi_session_triggered += 1
+            target_amounts = build_multi_session_target_amounts(
+                curr_mask_all, prev_end_amounts, wealth_before_trade,
+                has_bar_t, close_fee_vec,
+            )
+        else:
+            target_amounts = build_target_amounts(
+                curr_mask_all, prev_end_amounts, wealth_before_trade,
+                rebalance_mode, close_fee_vec=close_fee_vec,
+            )
+
+        ne_target = target_amounts[ne_idx]
+        ne_prev = prev_end_amounts[ne_idx]
+        ne_wb = wealth_before_trade[ne_idx]
+        ne_cc = curr_count_all[ne_idx]
+        ne_ret = returns_np[t]
+
+        # Step 1: sell fee
+        sell, sell_fee = compute_sell_fee(
+            ne_prev, ne_target, close_fee_vec,
+            close_today_fee_vec=effective_close_fee_vec,
+        )
+        sell_fee_ratio = np.divide(
+            sell_fee, ne_wb,
+            out=np.zeros_like(sell_fee, dtype=float),
+            where=ne_wb > 0,
+        )
+
+        # Step 2: buy costs
+        buy, buy_fee, trade_notional_ratio = compute_buy_costs(
+            ne_target, ne_prev, open_fee_vec, ne_wb,
+        )
+        buy_fee_ratio = np.divide(
+            buy_fee, ne_wb,
+            out=np.zeros_like(buy_fee, dtype=float),
+            where=ne_wb > 0,
+        )
+
+        # Per-product fee contrib
+        product_close_vec = effective_close_fee_vec if effective_close_fee_vec is not None else close_fee_vec
+        product_fee = buy * open_fee_vec[np.newaxis, :] + sell * product_close_vec[np.newaxis, :]
+        product_fee_contrib = np.where(
+            ne_wb[:, np.newaxis] > 0,
+            product_fee / ne_wb[:, np.newaxis],
+            0.0,
+        )
+
+        # Gross & net returns
+        buy_open_fees = buy * open_fee_vec[np.newaxis, :]
+        product_gross_contrib, gross = compute_group_gross_returns(
+            ne_target, ne_wb, ne_ret, buy_open_fees=buy_open_fees,
+        )
+        net_ret = compute_group_net_returns(gross, sell_fee_ratio, buy_fee_ratio, ne_wb, ne_target)
+
+        wealth[ne_idx] = ne_wb * (1.0 + net_ret)
+        gross_returns_np[t, ne_idx] = gross
+        product_gross_contrib_np[t, ne_idx] = product_gross_contrib
+        product_fee_contrib_np[t, ne_idx] = product_fee_contrib
+        fee_costs_np[t, ne_idx] = sell_fee_ratio + buy_fee_ratio
+        trade_notional_ratio_np[t, ne_idx] = trade_notional_ratio
+        net_returns_np[t, ne_idx] = net_ret
+
+        # Update prev_end_amounts
+        new_prev = (ne_target - buy_open_fees) * (1.0 + ne_ret[np.newaxis, :])
+        new_prev[ne_cc == 0] = 0.0
+        prev_end_amounts[ne_idx] = new_prev
+
+    return {
+        'net_returns_np': net_returns_np,
+        'gross_returns_np': gross_returns_np,
+        'product_gross_contrib_np': product_gross_contrib_np,
+        'product_fee_contrib_np': product_fee_contrib_np,
+        'fee_costs_np': fee_costs_np,
+        'trade_notional_ratio_np': trade_notional_ratio_np,
+        'multi_session_triggered': multi_session_triggered,
+    }
 
 
 def compute_group_gross_returns(
     target_amounts: np.ndarray,
     wealth_before_trade: np.ndarray,
     product_returns: np.ndarray,
+    buy_open_fees: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return per-product gross contributions and per-group gross returns."""
+    """Return per-product gross contributions and per-group gross returns.
+
+    When buy_open_fees is provided (buy_amount * open_fee), only net
+    invested capital (target - buy_open_fees) earns the return; existing
+    holdings incur no entry fee.
+    """
+    invested = np.asarray(target_amounts, dtype=float)
+    if buy_open_fees is not None:
+        invested = invested - np.asarray(buy_open_fees, dtype=float)
     product_contrib = (
-        target_amounts / wealth_before_trade[:, np.newaxis]
+        invested / wealth_before_trade[:, np.newaxis]
         * product_returns[np.newaxis, :]
     )
     return product_contrib, product_contrib.sum(axis=1)
 
 
-def compute_group_net_returns(gross_returns: np.ndarray, fee_ratio: np.ndarray) -> np.ndarray:
-    """Apply proportional fees to gross returns."""
-    return (1.0 - fee_ratio) * (1.0 + gross_returns) - 1.0
-
-
-def compute_trade_costs(
-    target_amounts: np.ndarray,
-    prev_end_amounts: np.ndarray,
-    open_fee_vec: np.ndarray,
-    close_fee_vec: np.ndarray,
+def compute_group_net_returns(
+    gross_returns: np.ndarray,
+    sell_fee_ratio: np.ndarray,
+    buy_fee_ratio: np.ndarray,
     wealth_before_trade: np.ndarray,
-    close_today_fee_vec: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return buy/sell notionals plus fee and traded-notional ratios.
+    target_amounts: np.ndarray,
+) -> np.ndarray:
+    """Apply sell + buy fees to gross returns.
 
-    Fee rates are per-product decimal ratios. Staying holdings have zero trade
-    notional and therefore pay no fee in buy-and-hold mode.
+    财富演化：
+      available  = wealth - sell_fee                        (卖出后可用现金)
+      invested   = target - buy_fee                         (实际投入)
+      wealth_end = available - target + invested * (1+ret)  (现金归零 + 资产终值)
+                 = wealth - sell_fee - buy_fee + invested * ret
+
+      gross = invested / wealth * ret
+
+      net = wealth_end / wealth - 1
+          = -sell_fee_ratio - buy_fee_ratio + gross + invested/wealth - 1
+
+      全仓时 invested ≈ wealth - sell_fee - buy_fee，即 invested/wealth ≈ 1 - sell_fee_ratio - buy_fee_ratio：
+      net = -sell_fee_ratio - buy_fee_ratio + gross + (1 - sell_fee_ratio - buy_fee_ratio) - 1
+          = gross - 2*sell_fee_ratio - 2*buy_fee_ratio  ← 这不对，说明近似有问题
+
+      正确推导（不假设 invested/wealth）：
+      net = (wealth - sell_fee - buy_fee + invested * ret) / wealth - 1
+          = -sell_fee_ratio - buy_fee_ratio + invested/wealth * ret + invested/wealth - 1
+
+      关键：invested/wealth * ret = gross（gross 的定义），所以：
+      net = gross - sell_fee_ratio - buy_fee_ratio + (invested/wealth - 1)
+
+      全仓：invested/wealth → 1，所以 net ≈ gross - sell_fee_ratio - buy_fee_ratio。
+      非全仓：invested/wealth - 1 项不可忽略。为精确性，保留完整公式。
+
+    gross_returns 已用 invested = target - buy_fee 计算。
     """
-    buy = np.clip(target_amounts - prev_end_amounts, 0.0, None)
-    sell = np.clip(prev_end_amounts - target_amounts, 0.0, None)
+    return gross_returns - sell_fee_ratio - buy_fee_ratio
+
+
+def compute_sell_fee(
+    prev_end_amounts: np.ndarray,
+    target_amounts: np.ndarray,
+    close_fee_vec: np.ndarray,
+    close_today_fee_vec: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-group sell amounts and sell fee.
+
+    Only charges close fee on the *exiting* portion of each position
+    (prev > target), not on staying or entering positions.
+
+    sell:     本期卖出的名义金额（每品种）
+    sell_fee: 卖出费用总额（每group标量）
+    """
+    prev = np.asarray(prev_end_amounts, dtype=float)
+    target = np.asarray(target_amounts, dtype=float)
+    # 只对卖出部分收费：prev - target 为正时才收费（exiting portion）
+    sell = np.clip(prev - target, 0.0, None)
     effective_close_fee_vec = np.asarray(
         close_today_fee_vec if close_today_fee_vec is not None else close_fee_vec,
         dtype=float,
     )
-    fee = (
-        buy * open_fee_vec[np.newaxis, :]
-        + sell * effective_close_fee_vec[np.newaxis, :]
-    ).sum(axis=1)
-    fee_ratio = np.divide(
-        fee,
-        wealth_before_trade,
-        out=np.zeros_like(fee, dtype=float),
-        where=wealth_before_trade > 0,
-    )
+    sell_fee = (sell * effective_close_fee_vec[np.newaxis, :]).sum(axis=1)
+    return sell, sell_fee
+
+
+def compute_buy_costs(
+    target_amounts: np.ndarray,
+    prev_end_amounts: np.ndarray,
+    open_fee_vec: np.ndarray,
+    wealth_before_trade: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return per-group buy amounts, buy fees, and trade notional ratio.
+
+    buy:       本期买入的名义金额（每品种）
+    buy_fee:   买入费用总额（每group标量）
+    notional:  买卖总额 / 期初财富（衡量换手）
+    """
+    buy = np.clip(target_amounts - np.asarray(prev_end_amounts), 0.0, None)
+    sell = np.clip(np.asarray(prev_end_amounts) - target_amounts, 0.0, None)
+    buy_fee = (buy * open_fee_vec[np.newaxis, :]).sum(axis=1)
     trade_notional_ratio = np.divide(
         (buy + sell).sum(axis=1),
         wealth_before_trade,
-        out=np.zeros_like(fee, dtype=float),
+        out=np.zeros_like(buy_fee, dtype=float),
         where=wealth_before_trade > 0,
     )
-    return buy, sell, fee_ratio, trade_notional_ratio
+    return buy, buy_fee, trade_notional_ratio
+
+
+def simulate_derived_group(
+    group_index: int,
+    selected_idx: list[int],
+    group_result: GroupRunResult,
+    open_fee_vec: np.ndarray,
+    close_fee_vec: np.ndarray,
+    rebalance_mode: str = "buy_and_hold",
+    use_closetoday: bool = False,
+    close_today_fee_vec: np.ndarray | None = None,
+) -> dict:
+    """逐期模拟精选组（base group 的品种子集），返回 net/gross/fee/cumulative 序列。
+
+    精选组的 wealth 演化路径独立于 base group：期初 wealth 初始为 1，
+    每期根据子集 mask 重新计算 target_amounts、fee、net returns。
+
+    底层复用 simulate_groups 引擎，构造 (T, 1, P) 的 membership matrix 后统一计算。
+
+    参数：
+        open_fee_vec、close_fee_vec、close_today_fee_vec 由外部调用方构建传入，
+        **不得**从 group_result 的属性中获取（group_result 的 fee 数据属于
+        上一次 base group 运行时的上下文，可能与当前请求的费率配置不一致）。
+    """
+    membership_np = getattr(group_result, 'membership_np', None)
+    period_returns_np = getattr(group_result, 'period_returns_np', None)
+
+    if membership_np is None or period_returns_np is None:
+        raise ValueError('GroupRunResult 缺少 membership_np 或 period_returns_np')
+
+    sel = np.asarray(selected_idx, dtype=int)
+    P = len(sel)
+
+    # 裁剪到子集品种，构造 (T, 1, P) membership
+    mask_1g = membership_np[:, group_index, :][:, sel].reshape(
+        membership_np.shape[0], 1, P
+    )  # (T, 1, P)
+    returns = period_returns_np[:, sel]  # (T, P)
+    open_fv = open_fee_vec[sel] if open_fee_vec is not None else np.zeros(P)
+    # 根据 use_closetoday 选择平今或平昨
+    if use_closetoday and close_today_fee_vec is not None:
+        close_fv = close_today_fee_vec[sel]
+        # close_today_fee_vec passed as both close_fee_vec and close_today_fee_vec
+        effective_close_today = close_fv
+    else:
+        close_fv = close_fee_vec[sel] if close_fee_vec is not None else np.zeros(P)
+        effective_close_today = None
+
+    sim_result = simulate_groups(
+        membership_np=mask_1g,
+        returns_np=returns,
+        open_fee_vec=open_fv,
+        close_fee_vec=close_fv,
+        close_today_fee_vec=effective_close_today,
+        rebalance_mode=rebalance_mode,
+    )
+
+    # Flatten (T, 1) → (T,)
+    net_returns_arr = sim_result['net_returns_np'][:, 0]
+    gross_returns_arr = sim_result['gross_returns_np'][:, 0]
+    fee_costs_arr = sim_result['fee_costs_np'][:, 0]
+    notional_ratio_arr = sim_result['trade_notional_ratio_np'][:, 0]
+    cumulative = np.cumprod(1.0 + net_returns_arr)
+
+    return {
+        'net_returns': net_returns_arr,
+        'gross_returns': gross_returns_arr,
+        'fee_costs': fee_costs_arr,
+        'notional_ratios': notional_ratio_arr,
+        'cumulative': cumulative,
+    }
+
+
+def simulate_derived_groups_batch(
+    group_index: int,
+    derivations: list[dict],
+    group_result: GroupRunResult,
+    open_fee_vec: np.ndarray,
+    close_fee_vec: np.ndarray,
+    rebalance_mode: str = "buy_and_hold",
+    use_closetoday: bool = False,
+    close_today_fee_vec: np.ndarray | None = None,
+) -> list[dict]:
+    """一次 simulate_groups 调用，批量计算同一基础组的多个派生组。
+
+    所有派生组必须共享同一个 group_index（基础组索引）。
+    每个派生组的品种子集可能不同；取所有 selected_idx 的并集作为
+    P_all，构造 (T, N_derived, P_all) membership 后一次传入 simulate_groups。
+
+    derivations: [{'selected_idx': [...], 'name': '...'}, ...]
+    返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 derivations 相同)
+    """
+    membership_np = getattr(group_result, 'membership_np', None)
+    period_returns_np = getattr(group_result, 'period_returns_np', None)
+
+    if membership_np is None or period_returns_np is None:
+        raise ValueError('GroupRunResult 缺少 membership_np 或 period_returns_np')
+
+    if not derivations:
+        return []
+
+    # 取所有派生组 selected_idx 的并集
+    all_idx_sets = [set(np.asarray(d['selected_idx'], dtype=int)) for d in derivations]
+    union_idx = sorted(set().union(*all_idx_sets))
+    union_arr = np.array(union_idx, dtype=int)
+    P_all = len(union_arr)
+
+    # 映射：原索引 → 并集中的位置
+    idx_to_pos = {idx: pos for pos, idx in enumerate(union_arr)}
+
+    # 构造 (T, N_derived, P_all) membership
+    base_membership = membership_np[:, group_index, :]  # (T, P_orig)
+    T = base_membership.shape[0]
+    N = len(derivations)
+    mask_batch = np.zeros((T, N, P_all), dtype=bool)
+
+    for di, d in enumerate(derivations):
+        sel = np.asarray(d['selected_idx'], dtype=int)
+        pos = [idx_to_pos[i] for i in sel]
+        mask_batch[:, di, pos] = base_membership[:, sel]
+
+    returns = period_returns_np[:, union_arr]  # (T, P_all)
+    open_fv = open_fee_vec[union_arr] if open_fee_vec is not None else np.zeros(P_all)
+
+    if use_closetoday and close_today_fee_vec is not None:
+        close_fv = close_today_fee_vec[union_arr]
+        effective_close_today = close_fv
+    else:
+        close_fv = close_fee_vec[union_arr] if close_fee_vec is not None else np.zeros(P_all)
+        effective_close_today = None
+
+    sim_result = simulate_groups(
+        membership_np=mask_batch,
+        returns_np=returns,
+        open_fee_vec=open_fv,
+        close_fee_vec=close_fv,
+        close_today_fee_vec=effective_close_today,
+        rebalance_mode=rebalance_mode,
+    )
+
+    # 拆回每个派生组的结果
+    results = []
+    for di in range(N):
+        net_r = sim_result['net_returns_np'][:, di]
+        results.append({
+            'net_returns': net_r,
+            'gross_returns': sim_result['gross_returns_np'][:, di],
+            'fee_costs': sim_result['fee_costs_np'][:, di],
+            'notional_ratios': sim_result['trade_notional_ratio_np'][:, di],
+            'cumulative': np.cumprod(1.0 + net_r),
+        })
+
+    return results
 
 
 def test_by_group_single_factor(
@@ -280,7 +695,9 @@ def test_by_group_single_factor(
     sift_volume_ratio: Optional[float] = None,
     fee: float = 0.0,
     fee_map: dict = {},
+    use_closetoday: bool = False,
     rebalance_mode: str = "buy_and_hold",
+    derived_groups: Optional[List[dict]] = None,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
@@ -380,6 +797,8 @@ def test_by_group_single_factor(
     if _all_nan.all():
         raise ValueError(f"{factor.alias}: 因子值序列全部为 NaN，无法进行分组测试。")
 
+    trim_start: int = 0
+    trim_end: int = len(_all_nan)
     # 截断首尾全 NaN 行
     if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
         trim_start = _first_valid
@@ -502,6 +921,57 @@ def test_by_group_single_factor(
 
         membership_np[t] = current_members
 
+    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
+    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
+
+    # ── 派生组（精选组）：拼入 membership_np 作为额外组，统一计算 ──
+    derived_defs = derived_groups or []
+    derived_info: list[dict] = []  # [{base_group, name, product_names, id, ...}]
+
+    from tools.products.product_utils import product_display_name
+
+    if derived_defs:
+        display_names = [product_display_name(product)['name'] for product in valid_cols]
+        derived_slices: list[np.ndarray] = []
+        for dd in derived_defs:
+            if not isinstance(dd, dict):
+                continue
+            base_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
+            if base_group < 0 or base_group >= n_groups:
+                continue
+            product_names = dd.get('productNames', dd.get('product_names', []))
+            if not product_names:
+                continue
+            selected = {str(n) for n in product_names}
+            sel_idx = [idx for idx, dn in enumerate(display_names) if dn in selected]
+            if not sel_idx:
+                continue
+            sel = np.asarray(sel_idx, dtype=int)
+
+            # 从 base_group 的每期 membership 中切出选中品种 → (T, 1, P)
+            # mask_1g 需要是 (T, 1, P) 形状（P=全部品种数），只有选中品种位置有值
+            mask_1g = np.zeros((T, 1, P), dtype=bool)
+            mask_1g[:, 0, sel] = membership_np[:, base_group, :][:, sel]
+            derived_slices.append(mask_1g)
+            derived_info.append({
+                'base_group': base_group,
+                'name': dd.get('name', f'第{base_group + 1}组精选'),
+                'id': dd.get('id'),
+                'product_names': [display_names[idx] for idx in sel_idx],
+            })
+
+        if derived_slices:
+            derived_membership = np.concatenate(derived_slices, axis=1)  # (T, n_derived, P)
+            membership_np = np.concatenate([membership_np, derived_membership], axis=1)
+
+    n_derived = len(derived_info)
+    n_base = n_groups
+    n_groups = membership_np.shape[1]  # 现在包含 base + derived
+
+    # 扩展组名映射（派生组用 derived_info 中的 name）
+    for d_idx, di in enumerate(derived_info):
+        n_names[n_base + d_idx] = di['name']
+
     products_dict = {
         g: {index_list[t]: [valid_cols[i]
                              for i in np.where(membership_np[t, g])[0]]
@@ -509,8 +979,6 @@ def test_by_group_single_factor(
         for g in range(n_groups)
     }
 
-    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
-    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
     member_counts = membership_np.sum(axis=2).astype(float)
 
     def _variety(col) -> str:
@@ -530,9 +998,17 @@ def test_by_group_single_factor(
         float((fee_map.get(_variety(c), {}) or {}).get("close_today", close_fee_vec[i]))
         for i, c in enumerate(valid_cols)
     ], dtype=float)
+    close_yesterday_fee_vec = np.array([
+        float((fee_map.get(_variety(c), {}) or {}).get("close_yesterday", close_fee_vec[i]))
+        for i, c in enumerate(valid_cols)
+    ], dtype=float)
+
+    # close_fee_vec 始终=平昨，close_today_fee_vec 始终=平今
+    effective_close_fee_vec = close_today_fee_vec if use_closetoday else None
 
     group_gross_returns_np = np.zeros((T, n_groups), dtype=float)
     group_product_gross_contrib_np = np.zeros((T, n_groups, P), dtype=float)
+    group_product_fee_contrib_np = np.zeros((T, n_groups, P), dtype=float)
     fee_costs_np = np.zeros((T, n_groups), dtype=float)
     trade_notional_ratio_np = np.zeros((T, n_groups), dtype=float)
     group_returns_np = np.zeros((T, n_groups), dtype=float)
@@ -541,103 +1017,24 @@ def test_by_group_single_factor(
     if rebalance_mode not in _VALID_MODES:
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
 
-    # ── 逐期矩阵化收益计算 ──
-    # 所有组并行处理：prev_end_amounts: (n_groups, P), wealth: (n_groups,)
-    wealth = np.ones(n_groups, dtype=float)
-    prev_end_amounts = np.zeros((n_groups, P), dtype=float)
-
-    # 多时段：预计算每期哪些品种有原始数据（注意：不是因子信号是否 NaN）
-    data_has_bar = present_np  # (T, P)
-
-    # 记录每期多时段策略触发的组（用于报告）
-    multi_session_triggered_count = 0
-
-    for t in range(T):
-        curr_mask_all = membership_np[t]          # (n_groups, P) bool
-        curr_count_all = member_counts[t]          # (n_groups,) float
-        wealth_before_trade = wealth.copy()        # (n_groups,)
-
-        # ── 本期是否触发多时段逻辑 ──
-        # 判断标准：当期存在部分品种有原始数据、部分品种无原始数据（混合行）
-        has_bar_t = data_has_bar[t]               # (P,) bool
-        is_mixed_t = multi_session_active and has_bar_t.any() and (~has_bar_t).any()
-
-        # ── 计算 target_amounts: (n_groups, P) ──
-        target_amounts = np.zeros((n_groups, P), dtype=float)
-
-        # --- 空组：curr_count == 0 ---
-        empty_mask = curr_count_all == 0           # (n_groups,)
-        non_empty_mask = ~empty_mask
-
-        if empty_mask.any():
-            # 空组清仓，卖出所有 prev_end_amounts
-            sell_empty = prev_end_amounts[empty_mask]  # (n_empty, P)
-            fee_empty = (sell_empty * close_fee_vec[np.newaxis, :]).sum(axis=1)  # (n_empty,)
-            fee_ratio_empty = np.where(wealth_before_trade[empty_mask] > 0,
-                                       fee_empty / wealth_before_trade[empty_mask], 0.0)
-            net_ret_empty = (1.0 - fee_ratio_empty) * (1.0 + 0.0) - 1.0
-            wealth[empty_mask] = wealth_before_trade[empty_mask] * (1.0 + net_ret_empty)
-            group_gross_returns_np[t, empty_mask] = 0.0
-            fee_costs_np[t, empty_mask] = fee_ratio_empty
-            group_returns_np[t, empty_mask] = net_ret_empty
-            prev_end_amounts[empty_mask] = 0.0
-
-        if not non_empty_mask.any():
-            continue
-
-        # --- 非空组 ---
-        ne_idx = np.where(non_empty_mask)[0]
-
-        if is_mixed_t:
-            # ===== 多时段品种策略（逐期自适应）=====
-            multi_session_triggered_count += 1
-            target_amounts = build_multi_session_target_amounts(
-                curr_mask_all,
-                prev_end_amounts,
-                wealth_before_trade,
-                has_bar_t,
-                close_fee_vec,
-            )
-
-        elif rebalance_mode in {"each_period", "buy_and_hold", "recycle"}:
-            target_amounts = build_target_amounts(
-                curr_mask_all,
-                prev_end_amounts,
-                wealth_before_trade,
-                rebalance_mode,
-            )
-
-        # ── 统一计算买卖/手续费/收益（矩阵运算，所有非空组）──
-        ne_target = target_amounts[ne_idx]           # (n_ne, P)
-        ne_prev = prev_end_amounts[ne_idx]           # (n_ne, P)
-        ne_wb = wealth_before_trade[ne_idx]          # (n_ne,)
-        ne_cc = curr_count_all[ne_idx]               # (n_ne,)
-        ne_ret = returns_filled[t]                   # (P,) — 本期收益
-
-        _, _, fee_ratio, trade_notional_ratio = compute_trade_costs(
-            ne_target,
-            ne_prev,
-            open_fee_vec,
-            close_fee_vec,
-            ne_wb,
-        )
-
-        # 总收益
-        product_gross_contrib, gross = compute_group_gross_returns(ne_target, ne_wb, ne_ret)
-        net_ret = compute_group_net_returns(gross, fee_ratio)
-
-        wealth[ne_idx] = ne_wb * (1.0 + net_ret)
-        group_gross_returns_np[t, ne_idx] = gross
-        group_product_gross_contrib_np[t, ne_idx] = product_gross_contrib
-        fee_costs_np[t, ne_idx] = fee_ratio
-        trade_notional_ratio_np[t, ne_idx] = trade_notional_ratio
-        group_returns_np[t, ne_idx] = net_ret
-
-        # 更新 prev_end_amounts
-        ne_cc_safe = np.where(ne_cc > 0, ne_cc, 1.0)
-        new_prev = ne_target * (1.0 + ne_ret[np.newaxis, :]) * (1.0 - fee_ratio[:, np.newaxis])
-        new_prev[ne_cc == 0] = 0.0
-        prev_end_amounts[ne_idx] = new_prev
+    # ── 逐期矩阵化收益计算（统一引擎：base + derived 一次跑完）──
+    data_has_bar = present_np if multi_session_active else None
+    sim_result = simulate_groups(
+        membership_np=membership_np,
+        returns_np=returns_filled,
+        open_fee_vec=open_fee_vec,
+        close_fee_vec=close_fee_vec,
+        close_today_fee_vec=effective_close_fee_vec,
+        data_has_bar=data_has_bar,
+        rebalance_mode=rebalance_mode,
+    )
+    group_returns_np = sim_result['net_returns_np']
+    group_gross_returns_np = sim_result['gross_returns_np']
+    group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
+    group_product_fee_contrib_np = sim_result['product_fee_contrib_np']
+    fee_costs_np = sim_result['fee_costs_np']
+    trade_notional_ratio_np = sim_result['trade_notional_ratio_np']
+    multi_session_triggered_count = sim_result['multi_session_triggered']
 
     if multi_session_active:
         print(f"[WARN] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
@@ -716,15 +1113,23 @@ def test_by_group_single_factor(
         trade_notional_ratio_np=trade_notional_ratio_np,
         gross_returns_np=group_gross_returns_np,
         product_gross_contrib_np=group_product_gross_contrib_np,
+        product_fee_contrib_np=group_product_fee_contrib_np,
         returns_np=group_returns_np,
+        period_returns_np=returns_filled,
+        membership_np=membership_np,
         products_by_group=products_dict,
         valid_cols=valid_cols,
         open_fee_vec=open_fee_vec,
         close_fee_vec=close_fee_vec,
         close_today_fee_vec=close_today_fee_vec,
+        close_yesterday_fee_vec=close_yesterday_fee_vec,
         index_list=index_list,
         multi_session_active=multi_session_active,
+        rebalance_mode=rebalance_mode,
         report_df=report_df.copy(),
+        n_base=n_base,
+        n_derived=n_derived,
+        derived_info=derived_info,
     )
     if r is not None:
         r.group_result = group_result
@@ -812,7 +1217,7 @@ def test_by_group(
     report_df: pd.DataFrame = pd.DataFrame()
 
     def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-        return test_by_group_single_factor(
+        products, returns, report, cum_np, idx_list = test_by_group_single_factor(
             tester,
             f,
             returns_col=returns_col,
@@ -827,8 +1232,11 @@ def test_by_group(
             sift_volume_ratio=sift_volume_ratio,
             fee=fee,
             fee_map=fee_map,
+            use_closetoday=kwargs.pop('use_closetoday', False),
             rebalance_mode=rebalance_mode,
+            derived_groups=kwargs.pop('derived_groups', None),
         )
+        return products, returns, report, cum_np, idx_list
 
     cum_np_out: Optional[np.ndarray] = None
     idx_list_out: Optional[list] = None

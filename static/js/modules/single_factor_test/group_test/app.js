@@ -928,8 +928,60 @@
         if (defineBtn) defineBtn.addEventListener('click', function() { defineDerivedGroup(groupIndex); });
         var generateAllBtn = document.getElementById('derived-group-generate-all-btn');
         if (generateAllBtn) {
-            generateAllBtn.addEventListener('click', function() {
-                getDerivedGroupsForCurrentBase(groupIndex).forEach(function(def) { generateDerivedGroup(def.id); });
+            generateAllBtn.addEventListener('click', async function() {
+                var defs = getDerivedGroupsForCurrentBase(groupIndex).filter(function(d) { return !d.generated; });
+                if (!defs.length) return;
+                if (!_lastGrossData || !_lastMetrics) {
+                    alert('请先运行分组测试，再生成派生组曲线。');
+                    return;
+                }
+                var context = getCurrentContext();
+                if (!context || !context.submission_id) return;
+                var feePayload;
+                try {
+                    feePayload = await buildFeePayload();
+                } catch (err) {
+                    alert('获取费率失败: ' + err.message);
+                    return;
+                }
+                // 批量接口：后端一次调用，计算全部派生组
+                var entries = defs.map(function(def) {
+                    return { group_index: def.baseGroup, product_names: def.productNames, name: def.name };
+                });
+                var resp = await GT.api.createDerivedGroupsBatch({
+                    submission_id: context.submission_id,
+                    entries: entries,
+                    use_closetoday: _useCloseToday,
+                    fee: feePayload.fee,
+                    fee_map: feePayload.fee_map
+                });
+                if (!resp || !resp.success) {
+                    alert('批量生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
+                    return;
+                }
+                // 批量应用结果
+                var errors = [];
+                (resp.results || []).forEach(function(result, i) {
+                    if (result && result.success) {
+                        var def = defs[i];
+                        removeGeneratedDerivedArtifacts(def.id);
+                        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+                        def.generated = true;
+                        var group = result.group || {};
+                        group.name = def.name;
+                        group.is_derived = true;
+                        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+                        _lastGrossData.push(group);
+                        _lastMetrics[def.metricKey] = result.metric || {};
+                    } else if (result) {
+                        errors.push((defs[i] && defs[i].name) || '?');
+                    }
+                });
+                // 统一刷新一次
+                _refreshGroupView(groupIndex);
+                if (errors.length) {
+                    alert('以下派生组生成失败: ' + errors.join(', '));
+                }
             });
         }
         document.querySelectorAll('.derived-group-generate-btn').forEach(function(btn) {
@@ -992,37 +1044,76 @@
         if (def) def.generated = false;
     }
 
-    async function generateDerivedGroup(id) {
-        var def = _derivedGroups.find(function(item) { return item.id === id; });
+    /** 为单个派生组发请求，不画图；返回 {success, def, group, metric} 或 null。 */
+    async function _generateDerivedGroupOnce(def, feePayload) {
         var context = getCurrentContext();
-        if (!def || !context || !context.submission_id) return;
-        if (!_lastGrossData || !_lastMetrics) {
-            alert('请先运行分组测试，再生成派生组曲线。');
-            return;
+        if (!def || !context || !context.submission_id) return null;
+        if (def.baseGroup == null) return null;
+        try {
+            var resp = await GT.api.createDerivedGroup({
+                submission_id: context.submission_id,
+                group_index: def.baseGroup,
+                product_names: def.productNames,
+                name: def.name,
+                use_closetoday: _useCloseToday,
+                fee: feePayload.fee,
+                fee_map: feePayload.fee_map
+            });
+            if (!resp || !resp.success) return { success: false, def: def, error: (resp && resp.error) || '未知错误' };
+            return { success: true, def: def, group: resp.group || {}, metric: resp.metric || {} };
+        } catch (err) {
+            return { success: false, def: def, error: err.message || '网络错误' };
         }
-        var resp = await GT.api.createDerivedGroup({
-            submission_id: context.submission_id,
-            group_index: def.baseGroup,
-            product_names: def.productNames,
-            name: def.name
-        });
-        if (!resp || !resp.success) {
-            alert('生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
-            return;
-        }
+    }
+
+    /** 将 _generateDerivedGroupOnce 的结果应用到内存数据（不画图）。 */
+    function _applyDerivedGroupResult(result) {
+        var def = result.def;
         removeGeneratedDerivedArtifacts(def.id);
         def.metricKey = makeUniqueMetricKey(def.name, def.id);
         def.generated = true;
-        var group = resp.group || {};
+        var group = result.group;
         group.name = def.name;
         group.is_derived = true;
         group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
         _lastGrossData.push(group);
-        _lastMetrics[def.metricKey] = resp.metric || {};
+        _lastMetrics[def.metricKey] = result.metric;
+    }
+
+    /** 统一刷新：图表 + 指标表 + 面板。 */
+    function _refreshGroupView(baseGroupIndex) {
         drawGroupChart(_lastGrossData);
         renderMetricsTable(_lastMetrics);
         updateActiveGroupCache();
-        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
+        renderDerivedGroupsPanel(baseGroupIndex);
+    }
+
+    /** 单个派生组生成：发 1 次请求，更新数据，刷新 1 次。 */
+    async function generateDerivedGroup(id) {
+        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        if (!def) return;
+        if (def.baseGroup == null) {
+            alert('派生组缺少 baseGroup，请重新定义。');
+            return;
+        }
+        if (!_lastGrossData || !_lastMetrics) {
+            alert('请先运行分组测试，再生成派生组曲线。');
+            return;
+        }
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            alert('获取费率失败: ' + err.message);
+            return;
+        }
+        var result = await _generateDerivedGroupOnce(def, feePayload);
+        if (!result || !result.success) {
+            alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
+            return;
+        }
+        _applyDerivedGroupResult(result);
+        _refreshGroupView(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
     }
 
     function deleteDerivedGroup(id) {
@@ -2054,32 +2145,16 @@
         }
 
         var n_groups = parseInt(document.getElementById('group_count').value, 10);
-        var feeMode = 'none';
-        var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
-        if (feeModeEl) feeMode = feeModeEl.value;
-
-        var fee = 0.0;
-        var fee_map = {};
         var use_closetoday = _useCloseToday;
-        if (feeMode === 'uniform') {
-            fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
-        } else if (feeMode === 'per_product') {
-            if (!_feeTableData.length) {
-                if (statusSpan) {
-                    statusSpan.innerHTML = '正在获取品种费率...';
-                    statusSpan.style.color = '#0078d4';
-                }
-                try {
-                    await fetchFeeTable(false);
-                } catch (err) {
-                    return { error: '获取品种费率失败: ' + err.message };
-                }
-            }
-            fee_map = buildFeeMap();
-            if (!Object.keys(fee_map).length) {
-                return { error: '未获取到品种费率，请检查费率数据源。' };
-            }
+
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            return { error: err.message };
         }
+        var fee = feePayload.fee;
+        var fee_map = feePayload.fee_map;
 
         var sy = document.getElementById('group_start_year').value;
         var sm = document.getElementById('group_start_month').value;
@@ -2116,6 +2191,14 @@
         if (start_date > end_date) return { error: '起始日期不能晚于终止日期' };
 
         var return_freqs = getSelectedReturnFreqs();
+        var derivedPayload = _derivedGroups.map(function(d) {
+            return {
+                id: d.id,
+                name: d.name || d.label,
+                baseGroup: d.baseGroup,
+                productNames: d.productNames
+            };
+        });
         return {
             payload: {
                 submission_id: currentSubmissionId,
@@ -2130,6 +2213,7 @@
                 rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold',
                 ls_config: collectLongShortConfig(n_groups),
                 ls_configs: collectLongShortConfigs(n_groups),
+                derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
                 structure_key: buildGroupStructureKey(currentSubmissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
             },
             statusEl: statusSpan,
@@ -2164,24 +2248,95 @@
         }
 
         updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
-        var previousDerivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item, { generated: false }); });
-        var sameStructure = !!data.structure_key && data.structure_key === _lastGroupStructureKey;
         _lastGrossData = data.groups;
         _lastMetrics = data.metrics;
         _lastNgroups = data.n_groups;
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
         _lastGroupStructureKey = data.structure_key || null;
-        _derivedGroups = Array.isArray(data._derivedGroups)
-            ? data._derivedGroups.map(function(item) { return Object.assign({}, item); })
-            : (sameStructure ? previousDerivedGroups : []);
-        _derivedGroupSeq = _derivedGroups.reduce(function(maxSeq, item) {
-            var num = parseInt(String(item.id || '').replace(/^D/, ''), 10);
-            return isNaN(num) ? maxSeq : Math.max(maxSeq, num + 1);
-        }, 1);
+
+        // 从响应中重建 _derivedGroups（后端已统一计算，无需额外请求）
+        // 注意：跳过 LS 组（is_ls），其 derived 中无 base_group。
+        _derivedGroups = [];
+        _derivedGroupSeq = 1;
+        (data.groups || []).forEach(function(g) {
+            if (g.is_derived && g.derived && !g.is_ls) {
+                _derivedGroups.push({
+                    id: g.derived.id || ('D' + _derivedGroupSeq),
+                    name: g.name,
+                    baseGroup: g.derived.base_group,
+                    productNames: g.derived.product_names || [],
+                    metricKey: g.metric_key,
+                    generated: true
+                });
+                var num = parseInt(String(g.derived.id || '').replace(/^D/, ''), 10);
+                if (!isNaN(num)) _derivedGroupSeq = Math.max(_derivedGroupSeq, num + 1);
+            }
+        });
+
+        // 画图 + 指标表
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
+
         var slider = document.getElementById('fee_sensitivity_slider');
         if (slider) { slider.value = 0; updateSensitivityLabel(0); }
+    }
+
+    /** 批量重新生成全部精选组 + LS 组，所有请求完成后统一刷新图表一次。
+     *  通过 _derivedGeneration 废弃旧调用：如果 applyGroupTestResult 被再次触发，
+     *  旧的 refreshAllDerivedGroups 会在 drawGroupChart 前检查 generation 并静默退出。 */
+    async function refreshAllDerivedGroups(generation) {
+        var tasks = _derivedGroups.map(function(def) {
+            if (!def.id) return Promise.resolve();
+            return regenerateDerivedGroupQuiet(def, generation);
+        });
+        if (typeof buildLongShortGroups === 'function') {
+            tasks.push(Promise.resolve().then(function() {
+                try { buildLongShortGroups(); } catch(e) {}
+            }));
+        }
+        /* global buildLongShortGroups */
+        await Promise.all(tasks);
+        if (generation !== _derivedGeneration) return; // 已被更新的批次废弃
+        drawGroupChart(_lastGrossData);
+        renderMetricsTable(_lastMetrics);
+    }
+
+    /** 静默重新生成一个精选组（不发网络请求，只更新数据）—— 实际需要发请求，但不画图。
+     *  generation 用于废弃过期请求：如果 await 期间 applyGroupTestResult 被再次触发，
+     *  该请求的结果不再 push 到 _lastGrossData。 */
+    async function regenerateDerivedGroupQuiet(def, generation) {
+        var context = getCurrentContext();
+        if (!def || !context || !context.submission_id) return;
+        if (!_lastGrossData || !_lastMetrics) return;
+
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            return;
+        }
+        if (def.baseGroup == null) return;
+        var resp = await GT.api.createDerivedGroup({
+            submission_id: context.submission_id,
+            group_index: def.baseGroup,
+            product_names: def.productNames,
+            name: def.name,
+            use_closetoday: _useCloseToday,
+            fee: feePayload.fee,
+            fee_map: feePayload.fee_map
+        });
+        if (generation !== _derivedGeneration) return; // 已被更新的批次废弃
+        if (!resp || !resp.success) return;
+
+        removeGeneratedDerivedArtifacts(def.id);
+        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.generated = true;
+        var group = resp.group || {};
+        group.name = def.name;
+        group.is_derived = true;
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        _lastGrossData.push(group);
+        _lastMetrics[def.metricKey] = resp.metric || {};
     }
 
     function postGroupTest(payload) {
@@ -2331,6 +2486,7 @@
     var _activeGroupFactorBySubmission = {};
     var _derivedGroups = [];
     var _derivedGroupSeq = 1;
+    var _derivedGeneration = 0;      // 每次 run_group_test 递增，废弃旧的 refreshAllDerivedGroups
     var _currentGroupDetailIndex = null;
     var _longShortDefinitions = [defaultLongShortDefinition()];
     var _lastGroupStructureKey = null;
@@ -2711,44 +2867,39 @@
     }
 
     /** 获取某品种的当前显示值（优先使用修改值） */
-    function _getEffectiveRow(row) {
-        var code = (row.variety_code || '').toLowerCase();
-        var mod = _feeModifications[code] || {};
-        var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
-        var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
-        var closeR = (mod[closeField] !== undefined) ? mod[closeField] : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
-        return { code: code, openR: openR, closeR: closeR };
-    }
-
-    /** 渲染品种费率表（可编辑单元格） */
+    /** 渲染品种费率表（同时显示平今和平昨） */
     function renderFeeTable() {
         var tbody = document.getElementById('fee_table_body');
         if (!tbody) return;
-        var closeColEl = document.getElementById('fee_col_close');
-        if (closeColEl) closeColEl.textContent = _useCloseToday ? '平今比率' : '平仓比率';
         if (!_feeTableData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;text-align:center;color:#888;">暂无数据</td></tr>';
             return;
         }
         var html = '';
         _feeTableData.forEach(function(row) {
             var code = (row.variety_code || '');
             var codeLower = code.toLowerCase();
-            var eff = _getEffectiveRow(row);
-            var total  = (eff.openR + eff.closeR) * 100;
-            var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
-            var openModified  = !!(_feeModifications[codeLower] && _feeModifications[codeLower].open_ratio  !== undefined);
-            var closeModified = !!(_feeModifications[codeLower] && _feeModifications[codeLower][closeField] !== undefined);
+            var mod = _feeModifications[codeLower] || {};
+            var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
+            var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio) || 0);
+            var closeTodayR = (mod.closetoday_ratio !== undefined) ? mod.closetoday_ratio : (parseFloat(row.closetoday_ratio) || 0);
+            var total  = (openR + closeR) * 100;
+
+            var openModified  = !!(mod.open_ratio !== undefined);
+            var closeModified = !!(mod.close_ratio !== undefined);
+            var closeTodayModified = !!(mod.closetoday_ratio !== undefined);
             var openClass  = openModified  ? 'fee-cell-modified' : '';
             var closeClass = closeModified ? 'fee-cell-modified' : '';
+            var closeTodayClass = closeTodayModified ? 'fee-cell-modified' : '';
 
             html += '<tr>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;font-weight:600;">' + code + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.variety_name || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.exchange || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + (row.multiplier || '') + '</td>';
-            html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.openR.toFixed(6) + '</td>';
-            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="' + closeField + '" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.closeR.toFixed(6) + '</td>';
+            html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + openR.toFixed(6) + '</td>';
+            html += '<td class="' + closeTodayClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="closetoday_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + closeTodayR.toFixed(6) + '</td>';
+            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="close_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + closeR.toFixed(6) + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">';
             html += total > 0 ? total.toFixed(4) + '%' : '—';
             html += '</td>';
@@ -2776,18 +2927,16 @@
             // 恢复原始值
             var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
             if (row) {
-                var orig = _getEffectiveRow(row);
-                this.textContent = (field === 'open_ratio' ? orig.openR : orig.closeR).toFixed(6);
+                var origVal = parseFloat(row[field]) || 0;
+                this.textContent = origVal.toFixed(6);
             }
             return;
         }
 
-        // 对比原始值
+        // 对比原始值（直接读原始字段）
         var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
         if (!row) return;
-        var origVal = field === 'open_ratio'
-            ? (parseFloat(row.open_ratio) || 0)
-            : (field === 'closetoday_ratio' ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+        var origVal = parseFloat(row[field]) || 0;
 
         if (Math.abs(val - origVal) < 1e-9) {
             // 恢复为原始值，清除修改
@@ -2810,12 +2959,14 @@
         _refreshTotalColumn(variety);
     }
 
-    /** 刷新某品种的双边合计列 */
+    /** 刷新某品种的双边合计列（开仓+平昨） */
     function _refreshTotalColumn(variety) {
         var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
         if (!row) return;
-        var eff = _getEffectiveRow(row);
-        var total = (eff.openR + eff.closeR) * 100;
+        var mod = _feeModifications[variety] || {};
+        var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
+        var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio) || 0);
+        var total = (openR + closeR) * 100;
         var cells = document.querySelectorAll('#fee_table_body td[data-variety="' + variety + '"]');
         // 该行最后一个 td 是合计列（没有 contenteditable 属性）
         var allCellsInRow = [];
@@ -2859,6 +3010,33 @@
             };
         });
         return map;
+    }
+
+    /** 构建费率相关的 payload 字段（fee + fee_map），供 run_group_test 和 create_derived_group 共用 */
+    async function buildFeePayload() {
+        var fee = 0.0;
+        var fee_map = {};
+        var feeMode = 'none';
+        var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
+        if (feeModeEl) feeMode = feeModeEl.value;
+        if (feeMode === 'uniform') {
+            fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
+        } else if (feeMode === 'per_product') {
+            if (!_feeTableData.length) {
+                var statusSpan = document.getElementById('group_test_status');
+                if (statusSpan) {
+                    statusSpan.innerHTML = '正在获取品种费率...';
+                    statusSpan.style.color = '#0078d4';
+                }
+                try {
+                    await fetchFeeTable(false);
+                } catch (err) {
+                    throw new Error('获取品种费率失败: ' + err.message);
+                }
+            }
+            fee_map = buildFeeMap();
+        }
+        return { fee: fee, fee_map: fee_map };
     }
 
     /** 恢复所有费率为原始值 */
@@ -2936,6 +3114,11 @@
             _useCloseToday = !_useCloseToday;
             updateClosetodayUI();
             if (_feeTableData.length) renderFeeTable();
+            // 切换平今/平昨后重新生成所有精选组
+            if (_derivedGroups.length > 0) {
+                _derivedGeneration++;
+                refreshAllDerivedGroups(_derivedGeneration);
+            }
         });
 
         // 成本敏感性滑条（仅统一费率模式有效）

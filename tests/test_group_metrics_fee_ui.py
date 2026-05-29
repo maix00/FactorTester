@@ -41,6 +41,7 @@ def test_group_fee_config_parses_uniform_and_closetoday_rates():
 
     fee_uniform, fee_map, use_closetoday = _parse_group_fee_config({'fee': 0.03})
     assert fee_uniform == 0.0003
+    # 模式1/2：fee_map 为空时，不加载 FeeData，返回空字典
     assert fee_map == {}
     assert use_closetoday is False
 
@@ -57,9 +58,10 @@ def test_group_fee_config_parses_uniform_and_closetoday_rates():
     })
     assert fee_uniform == 0
     assert use_closetoday is True
+    # 模式3：前端传的 fee_map 只做字段名映射，不加载 FeeData 补全
     assert fee_map == {'RB': {
         'open': 0.0001,
-        'close': 0.0005,
+        'close': 0.0002,
         'close_today': 0.0005,
         'close_yesterday': 0.0002,
     }}

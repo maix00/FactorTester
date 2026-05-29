@@ -48,7 +48,8 @@ def test_multi_session_targets_vectorize_preserved_and_recycled_holdings():
     )
 
     np.testing.assert_allclose(targets[0], [0.4, 0.6, 0.0, 0.0])
-    np.testing.assert_allclose(targets[1], [0.0, 0.0, 0.0, 1.0])
+    # 第二组：品1退出(回收0.5-0.5*0.1=0.45)，品2退出(回收0.5) → recycled=0.95 → 全给品3
+    np.testing.assert_allclose(targets[1], [0.0, 0.0, 0.0, 0.95])
 
 
 def test_multi_session_initial_period_funds_tradable_members():
@@ -61,3 +62,31 @@ def test_multi_session_initial_period_funds_tradable_members():
     )
 
     np.testing.assert_allclose(targets, [[0.5, 0.0, 0.5]])
+
+
+def test_recycle_deducts_close_fee_from_released_capital():
+    """卖出释放的资金应扣除平仓费率后再分配给新品种。"""
+    # 品0保持，品1退出(prev=0.4)，品2新进
+    targets = build_target_amounts(
+        np.array([[True, False, True]]),
+        np.array([[0.6, 0.4, 0.0]]),
+        np.array([1.0]),
+        "recycle",
+        close_fee_vec=np.array([0.0, 0.02, 0.0]),  # 品1 卖出费 2%
+    )
+    # released = 0.4 - 0.4 * 0.02 = 0.392
+    # targets = staying(0.6) + entering(0.392) = [0.6, 0.0, 0.392]
+    np.testing.assert_allclose(targets, [[0.6, 0.0, 0.392]])
+
+
+def test_buy_and_hold_deducts_close_fee_from_released():
+    """buy_and_hold 模式下卖出释放资金也应扣手续费。"""
+    targets = build_target_amounts(
+        np.array([[True, False, True]]),
+        np.array([[0.5, 0.5, 0.0]]),
+        np.array([1.0]),
+        "buy_and_hold",
+        close_fee_vec=np.array([0.0, 0.03, 0.0]),
+    )
+    # released = 0.5 - 0.5 * 0.03 = 0.485
+    np.testing.assert_allclose(targets, [[0.5, 0.0, 0.485]])
