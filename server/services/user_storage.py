@@ -96,8 +96,16 @@ def save_user_templates(
         json.dump(templates, file, ensure_ascii=False, indent=2)
 
 
+_last_template_ts = 0
+
 def new_template_id() -> str:
-    return str(int(time.time() * 1000))
+    """Return a unique, monotonically-increasing millisecond-precision id."""
+    global _last_template_ts
+    ts = int(time.time() * 1000)
+    if ts <= _last_template_ts:
+        ts = _last_template_ts + 1
+    _last_template_ts = ts
+    return str(ts)
 
 
 def migrate_templates_on_rename(old_name: str, new_name: str) -> int:
