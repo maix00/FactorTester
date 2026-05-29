@@ -172,26 +172,12 @@ def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_co
     return np.array(r_ls_list, dtype=float), np.array(ls_cum_list, dtype=float)
 
 
-def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str,
-                                  use_closetoday: bool = False,
-                                  fee_map: dict | None = None,
-                                  fee_uniform: float = 0.0) -> tuple[dict, dict]:
-    from tools.products.product_utils import product_display_name
-    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group
-
+def _build_fee_vectors(group_result, fee_map, fee_uniform):
+    """从 group_result.valid_cols 构建 (open_fv, close_fv, close_today_fv) 向量."""
     valid_cols = getattr(group_result, 'valid_cols', None)
-    idx_list = getattr(group_result, 'index_list', None) or []
     if valid_cols is None:
-        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+        return None, None, None
 
-    display_names = [product_display_name(product)['name'] for product in valid_cols]
-    selected = {str(name) for name in (product_names or [])}
-    selected_idx = [idx for idx, display_name in enumerate(display_names) if display_name in selected]
-    if not selected_idx:
-        raise ValueError('请至少选择一个有效品种')
-
-    # 根据当前请求的 fee_map + use_closetoday 构建 fee vectors
-    # close_fee_vec 始终=平昨，close_today_fee_vec 始终=平今
     def _variety(col) -> str:
         nm = getattr(col, "name", str(col))
         return nm.split(".")[0].upper()
@@ -210,7 +196,37 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
         float((_fm.get(_variety(c), {}) or {}).get("close_today", close_fv[i]))
         for i, c in enumerate(valid_cols)
     ], dtype=float)
+    return open_fv, close_fv, close_today_fv
 
+
+def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str,
+                                  use_closetoday: bool = False,
+                                  fee_map: dict | None = None,
+                                  fee_uniform: float = 0.0,
+                                  open_fv: np.ndarray | None = None,
+                                  close_fv: np.ndarray | None = None,
+                                  close_today_fv: np.ndarray | None = None) -> tuple[dict, dict]:
+    from tools.products.product_utils import product_display_name
+    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group
+
+    valid_cols = getattr(group_result, 'valid_cols', None)
+    idx_list = getattr(group_result, 'index_list', None) or []
+    if valid_cols is None:
+        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+
+    display_names = [product_display_name(product)['name'] for product in valid_cols]
+    selected = {str(name) for name in (product_names or [])}
+    selected_idx = [idx for idx, display_name in enumerate(display_names) if display_name in selected]
+    if not selected_idx:
+        raise ValueError('请至少选择一个有效品种')
+
+    if open_fv is None:
+        _open_fv, _close_fv, _close_today_fv = _build_fee_vectors(group_result, fee_map, fee_uniform)
+        if _open_fv is None or _close_fv is None or _close_today_fv is None:
+            raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+        open_fv, close_fv, close_today_fv = _open_fv, _close_fv, _close_today_fv
+
+    assert close_fv is not None and close_today_fv is not None
     sim = simulate_derived_group(
         group_index=group_index,
         selected_idx=selected_idx,
@@ -239,6 +255,130 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
         },
     }
     return group, metric
+
+
+def _build_derived_groups_batch_payload(group_result, entries: list[dict],
+                                         use_closetoday: bool = False,
+                                         fee_map: dict | None = None,
+                                         fee_uniform: float = 0.0) -> list[dict]:
+    """一次 simulate_derived_groups_batch 调用，返回 [{success, group?, metric?, error?}, ...]。
+
+    同一 group_index 的条目合并为一次 simulate_groups 调用。
+    不同 group_index 的条目各自发送独立请求（此时回退到逐个 simulate_derived_group）。
+    """
+    from tools.products.product_utils import product_display_name
+    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group, simulate_derived_groups_batch
+
+    valid_cols = getattr(group_result, 'valid_cols', None)
+    idx_list = getattr(group_result, 'index_list', None) or []
+    if valid_cols is None:
+        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+
+    display_names = [product_display_name(product)['name'] for product in valid_cols]
+    _ofv, _cfv, _ctfv = _build_fee_vectors(group_result, fee_map, fee_uniform)
+    if _ofv is None or _cfv is None or _ctfv is None:
+        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
+    open_fv: np.ndarray = _ofv
+    close_fv: np.ndarray = _cfv
+    close_today_fv: np.ndarray = _ctfv
+
+    # 按 group_index 分组
+    groups_by_gi: dict = {}
+    for i, entry in enumerate(entries):
+        gi = entry.get('group_index')
+        pn = entry.get('product_names') or []
+        nm = str(entry.get('name') or '').strip()
+        if gi is None:
+            continue
+        if not nm:
+            nm = f'第{int(gi) + 1}组精选'
+        selected_idx = [idx for idx, dn in enumerate(display_names) if dn in {str(n) for n in pn}]
+        if not selected_idx:
+            continue
+        groups_by_gi.setdefault(int(gi), []).append({
+            'orig_index': i,
+            'group_index': int(gi),
+            'name': nm,
+            'selected_idx': selected_idx,
+        })
+
+    # 结果数组，按原始顺序填充
+    results: list = [None] * len(entries)
+
+    rebalance_mode = getattr(group_result, 'rebalance_mode', 'buy_and_hold')
+    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+
+    for gi, items in groups_by_gi.items():
+        if len(items) == 1:
+            # 只有 1 个派生组 → 回退到逐个 API
+            item = items[0]
+            try:
+                sim = simulate_derived_group(
+                    group_index=gi,
+                    selected_idx=item['selected_idx'],
+                    group_result=group_result,
+                    open_fee_vec=open_fv,
+                    close_fee_vec=close_fv,
+                    close_today_fee_vec=close_today_fv,
+                    rebalance_mode=rebalance_mode,
+                    use_closetoday=use_closetoday,
+                )
+                metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
+                results[item['orig_index']] = {
+                    'index': item['orig_index'],
+                    'success': True,
+                    'group': {
+                        'name': item['name'],
+                        'timestamps': timestamps,
+                        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+                        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
+                        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
+                        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
+                        'is_derived': True,
+                        'derived': {
+                            'base_group': gi,
+                            'product_names': [display_names[idx] for idx in item['selected_idx']],
+                        },
+                    },
+                    'metric': metric,
+                }
+            except Exception as e:
+                results[item['orig_index']] = {'index': item['orig_index'], 'success': False, 'error': str(e)}
+        else:
+            # 多个派生组共享同一基础组 → 批量一次 simulate_groups
+            sims = simulate_derived_groups_batch(
+                group_index=gi,
+                derivations=[{'selected_idx': item['selected_idx'], 'name': item['name']} for item in items],
+                group_result=group_result,
+                open_fee_vec=open_fv,
+                close_fee_vec=close_fv,
+                close_today_fee_vec=close_today_fv,
+                rebalance_mode=rebalance_mode,
+                use_closetoday=use_closetoday,
+            )
+            for j, item in enumerate(items):
+                sim = sims[j]
+                metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
+                results[item['orig_index']] = {
+                    'index': item['orig_index'],
+                    'success': True,
+                    'group': {
+                        'name': item['name'],
+                        'timestamps': timestamps,
+                        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+                        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
+                        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
+                        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
+                        'is_derived': True,
+                        'derived': {
+                            'base_group': gi,
+                            'product_names': [display_names[idx] for idx in item['selected_idx']],
+                        },
+                    },
+                    'metric': metric,
+                }
+
+    return results
 
 
 def _latest_group_result(tester):
@@ -410,6 +550,7 @@ def run_group_test():
                     fee=fee_uniform, fee_map=fee_map,
                     use_closetoday=use_closetoday,
                     rebalance_mode=rebalance_mode,
+                    derived_groups=data.get('derived_groups'),
                 )
                 # ... (computation logic unchanged) ...
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -454,22 +595,28 @@ def run_group_test():
             fee=fee_uniform, fee_map=fee_map,
             use_closetoday=use_closetoday,
             rebalance_mode=rebalance_mode,
+            derived_groups=data.get('derived_groups'),
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
         group_result = tester._get_result(factor).group_result
+        n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
+        n_base = getattr(group_result, 'n_base', n_groups) or n_groups
+        n_derived = getattr(group_result, 'n_derived', 0) or 0
+        derived_info = getattr(group_result, 'derived_info', None) or []
         _gross = group_result.gross_returns_np if group_result is not None else None
-        gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_groups))
+        gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
         _fee = group_result.fee_costs_np if group_result is not None else None
-        fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_groups))
+        fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
 
         groups_data = []
-        for g in range(n_groups):
+        for g in range(n_total):
+            is_derived = g >= n_base
             vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
             gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
             fee_vals   = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
-            groups_data.append({
+            entry = {
                 'name': f'Group {g+1}',
                 'timestamps': timestamps,
                 'cumulative_returns': vals,
@@ -479,15 +626,32 @@ def run_group_test():
                     round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0
                     for v in group_result.trade_notional_ratio_np[:, g]
                 ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
-            })
+            }
+            if is_derived:
+                di = derived_info[g - n_base]
+                entry['name'] = di.get('name', entry['name'])
+                entry['is_derived'] = True
+                entry['derived'] = {
+                    'base_group': di['base_group'],
+                    'product_names': di['product_names'],
+                    'id': di.get('id'),
+                }
+            groups_data.append(entry)
 
         metrics: dict = {}
+        # 建立派生组索引→名称的映射（用于 metrics key 替换）
+        _derived_name_map: dict = {}
+        for di_idx, di in enumerate(derived_info):
+            _derived_name_map[n_base + di_idx] = di.get('name', f'第{n_base + di_idx + 1}组精选')
         if not report_df.empty:
-            metrics = {
-                str(k): {mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
-                         for mk, mv in v.items()}
-                for k, v in report_df.to_dict(orient='index').items()
-            }
+            raw_metrics = report_df.to_dict(orient='index')
+            for k, v in raw_metrics.items():
+                key_int = int(k) if isinstance(k, (int, str)) and str(k).lstrip('-').isdigit() else None
+                display_key = _derived_name_map.get(key_int, str(k)) if key_int is not None else str(k)
+                metrics[display_key] = {
+                    mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
+                    for mk, mv in v.items()
+                }
         used_metric_keys = set(metrics.keys())
         for ls_config in ls_configs:
             r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
@@ -507,7 +671,8 @@ def run_group_test():
             })
             metrics[metric_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
 
-        return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_groups,
+        return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_total,
+                        'n_base': n_base,
                         'structure_key': data.get('structure_key'),
                         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
                         'rebalance_mode': rebalance_mode,
@@ -705,6 +870,30 @@ def get_group_detail():
             group_result.close_today_fee_vec if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+@sft_bp.route('/create_derived_groups_batch', methods=['POST'])
+def create_derived_groups_batch():
+    """批量生成多个派生组（一次调用，后端一次 simulate_groups 计算同基础组的所有派生组）。"""
+    data = request.get_json() or {}
+    submission_id = data.get('submission_id')
+    entries = data.get('entries') or []  # [{group_index, product_names, name}, ...]
+    use_closetoday = bool(data.get('use_closetoday', False))
+    if submission_id is None or not entries:
+        return jsonify({'success': False, 'error': '缺少 submission_id 或 entries'}), 400
+    try:
+        tester = runtime_state.get_factor_tester(submission_id, caller='create_derived_groups_batch')
+        group_result = _latest_group_result(tester)
+        if group_result is None:
+            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        fee_uniform, fee_map, _ = _parse_group_fee_config(data, getattr(tester, 'products', None))
+        results = _build_derived_groups_batch_payload(
+            group_result, entries,
+            use_closetoday=use_closetoday, fee_map=fee_map, fee_uniform=fee_uniform,
+        )
+        return jsonify({'success': True, 'results': results})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 

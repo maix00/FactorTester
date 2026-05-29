@@ -928,8 +928,60 @@
         if (defineBtn) defineBtn.addEventListener('click', function() { defineDerivedGroup(groupIndex); });
         var generateAllBtn = document.getElementById('derived-group-generate-all-btn');
         if (generateAllBtn) {
-            generateAllBtn.addEventListener('click', function() {
-                getDerivedGroupsForCurrentBase(groupIndex).forEach(function(def) { generateDerivedGroup(def.id); });
+            generateAllBtn.addEventListener('click', async function() {
+                var defs = getDerivedGroupsForCurrentBase(groupIndex).filter(function(d) { return !d.generated; });
+                if (!defs.length) return;
+                if (!_lastGrossData || !_lastMetrics) {
+                    alert('请先运行分组测试，再生成派生组曲线。');
+                    return;
+                }
+                var context = getCurrentContext();
+                if (!context || !context.submission_id) return;
+                var feePayload;
+                try {
+                    feePayload = await buildFeePayload();
+                } catch (err) {
+                    alert('获取费率失败: ' + err.message);
+                    return;
+                }
+                // 批量接口：后端一次调用，计算全部派生组
+                var entries = defs.map(function(def) {
+                    return { group_index: def.baseGroup, product_names: def.productNames, name: def.name };
+                });
+                var resp = await GT.api.createDerivedGroupsBatch({
+                    submission_id: context.submission_id,
+                    entries: entries,
+                    use_closetoday: _useCloseToday,
+                    fee: feePayload.fee,
+                    fee_map: feePayload.fee_map
+                });
+                if (!resp || !resp.success) {
+                    alert('批量生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
+                    return;
+                }
+                // 批量应用结果
+                var errors = [];
+                (resp.results || []).forEach(function(result, i) {
+                    if (result && result.success) {
+                        var def = defs[i];
+                        removeGeneratedDerivedArtifacts(def.id);
+                        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+                        def.generated = true;
+                        var group = result.group || {};
+                        group.name = def.name;
+                        group.is_derived = true;
+                        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+                        _lastGrossData.push(group);
+                        _lastMetrics[def.metricKey] = result.metric || {};
+                    } else if (result) {
+                        errors.push((defs[i] && defs[i].name) || '?');
+                    }
+                });
+                // 统一刷新一次
+                _refreshGroupView(groupIndex);
+                if (errors.length) {
+                    alert('以下派生组生成失败: ' + errors.join(', '));
+                }
             });
         }
         document.querySelectorAll('.derived-group-generate-btn').forEach(function(btn) {
@@ -992,10 +1044,58 @@
         if (def) def.generated = false;
     }
 
+    /** 为单个派生组发请求，不画图；返回 {success, def, group, metric} 或 null。 */
+    async function _generateDerivedGroupOnce(def, feePayload) {
+        var context = getCurrentContext();
+        if (!def || !context || !context.submission_id) return null;
+        if (def.baseGroup == null) return null;
+        try {
+            var resp = await GT.api.createDerivedGroup({
+                submission_id: context.submission_id,
+                group_index: def.baseGroup,
+                product_names: def.productNames,
+                name: def.name,
+                use_closetoday: _useCloseToday,
+                fee: feePayload.fee,
+                fee_map: feePayload.fee_map
+            });
+            if (!resp || !resp.success) return { success: false, def: def, error: (resp && resp.error) || '未知错误' };
+            return { success: true, def: def, group: resp.group || {}, metric: resp.metric || {} };
+        } catch (err) {
+            return { success: false, def: def, error: err.message || '网络错误' };
+        }
+    }
+
+    /** 将 _generateDerivedGroupOnce 的结果应用到内存数据（不画图）。 */
+    function _applyDerivedGroupResult(result) {
+        var def = result.def;
+        removeGeneratedDerivedArtifacts(def.id);
+        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.generated = true;
+        var group = result.group;
+        group.name = def.name;
+        group.is_derived = true;
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        _lastGrossData.push(group);
+        _lastMetrics[def.metricKey] = result.metric;
+    }
+
+    /** 统一刷新：图表 + 指标表 + 面板。 */
+    function _refreshGroupView(baseGroupIndex) {
+        drawGroupChart(_lastGrossData);
+        renderMetricsTable(_lastMetrics);
+        updateActiveGroupCache();
+        renderDerivedGroupsPanel(baseGroupIndex);
+    }
+
+    /** 单个派生组生成：发 1 次请求，更新数据，刷新 1 次。 */
     async function generateDerivedGroup(id) {
         var def = _derivedGroups.find(function(item) { return item.id === id; });
-        var context = getCurrentContext();
-        if (!def || !context || !context.submission_id) return;
+        if (!def) return;
+        if (def.baseGroup == null) {
+            alert('派生组缺少 baseGroup，请重新定义。');
+            return;
+        }
         if (!_lastGrossData || !_lastMetrics) {
             alert('请先运行分组测试，再生成派生组曲线。');
             return;
@@ -1007,32 +1107,13 @@
             alert('获取费率失败: ' + err.message);
             return;
         }
-        var resp = await GT.api.createDerivedGroup({
-            submission_id: context.submission_id,
-            group_index: def.baseGroup,
-            product_names: def.productNames,
-            name: def.name,
-            use_closetoday: _useCloseToday,
-            fee: feePayload.fee,
-            fee_map: feePayload.fee_map
-        });
-        if (!resp || !resp.success) {
-            alert('生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
+        var result = await _generateDerivedGroupOnce(def, feePayload);
+        if (!result || !result.success) {
+            alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;
         }
-        removeGeneratedDerivedArtifacts(def.id);
-        def.metricKey = makeUniqueMetricKey(def.name, def.id);
-        def.generated = true;
-        var group = resp.group || {};
-        group.name = def.name;
-        group.is_derived = true;
-        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
-        _lastGrossData.push(group);
-        _lastMetrics[def.metricKey] = resp.metric || {};
-        drawGroupChart(_lastGrossData);
-        renderMetricsTable(_lastMetrics);
-        updateActiveGroupCache();
-        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
+        _applyDerivedGroupResult(result);
+        _refreshGroupView(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
     }
 
     function deleteDerivedGroup(id) {
@@ -2110,6 +2191,14 @@
         if (start_date > end_date) return { error: '起始日期不能晚于终止日期' };
 
         var return_freqs = getSelectedReturnFreqs();
+        var derivedPayload = _derivedGroups.map(function(d) {
+            return {
+                id: d.id,
+                name: d.name || d.label,
+                baseGroup: d.baseGroup,
+                productNames: d.productNames
+            };
+        });
         return {
             payload: {
                 submission_id: currentSubmissionId,
@@ -2124,6 +2213,7 @@
                 rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold',
                 ls_config: collectLongShortConfig(n_groups),
                 ls_configs: collectLongShortConfigs(n_groups),
+                derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
                 structure_key: buildGroupStructureKey(currentSubmissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
             },
             statusEl: statusSpan,
@@ -2158,33 +2248,34 @@
         }
 
         updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
-        var previousDerivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item, { generated: false }); });
-        var sameStructure = !!data.structure_key && data.structure_key === _lastGroupStructureKey;
         _lastGrossData = data.groups;
         _lastMetrics = data.metrics;
         _lastNgroups = data.n_groups;
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
         _lastGroupStructureKey = data.structure_key || null;
-        _derivedGroups = Array.isArray(data._derivedGroups)
-            ? data._derivedGroups.map(function(item) { return Object.assign({}, item); })
-            : (sameStructure ? previousDerivedGroups : []);
-        _derivedGroupSeq = _derivedGroups.reduce(function(maxSeq, item) {
-            var num = parseInt(String(item.id || '').replace(/^D/, ''), 10);
-            return isNaN(num) ? maxSeq : Math.max(maxSeq, num + 1);
-        }, 1);
 
-        // 先画一般组（第一帧），等精选组都就绪后再一次刷新
+        // 从响应中重建 _derivedGroups（后端已统一计算，无需额外请求）
+        // 注意：跳过 LS 组（is_ls），其 derived 中无 base_group。
+        _derivedGroups = [];
+        _derivedGroupSeq = 1;
+        (data.groups || []).forEach(function(g) {
+            if (g.is_derived && g.derived && !g.is_ls) {
+                _derivedGroups.push({
+                    id: g.derived.id || ('D' + _derivedGroupSeq),
+                    name: g.name,
+                    baseGroup: g.derived.base_group,
+                    productNames: g.derived.product_names || [],
+                    metricKey: g.metric_key,
+                    generated: true
+                });
+                var num = parseInt(String(g.derived.id || '').replace(/^D/, ''), 10);
+                if (!isNaN(num)) _derivedGroupSeq = Math.max(_derivedGroupSeq, num + 1);
+            }
+        });
+
+        // 画图 + 指标表
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
-
-        // 递增 generation，使之前触发但未完成的 refreshAllDerivedGroups 静默废弃
-        _derivedGeneration++;
-        var currentGeneration = _derivedGeneration;
-
-        // 切换费率后自动重新生成所有之前定义的精选组
-        if (sameStructure && _derivedGroups.length > 0) {
-            refreshAllDerivedGroups(currentGeneration);
-        }
 
         var slider = document.getElementById('fee_sensitivity_slider');
         if (slider) { slider.value = 0; updateSensitivityLabel(0); }
@@ -2224,6 +2315,7 @@
         } catch (err) {
             return;
         }
+        if (def.baseGroup == null) return;
         var resp = await GT.api.createDerivedGroup({
             submission_id: context.submission_id,
             group_index: def.baseGroup,

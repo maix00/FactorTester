@@ -598,6 +598,88 @@ def simulate_derived_group(
     }
 
 
+def simulate_derived_groups_batch(
+    group_index: int,
+    derivations: list[dict],
+    group_result: GroupRunResult,
+    open_fee_vec: np.ndarray,
+    close_fee_vec: np.ndarray,
+    rebalance_mode: str = "buy_and_hold",
+    use_closetoday: bool = False,
+    close_today_fee_vec: np.ndarray | None = None,
+) -> list[dict]:
+    """一次 simulate_groups 调用，批量计算同一基础组的多个派生组。
+
+    所有派生组必须共享同一个 group_index（基础组索引）。
+    每个派生组的品种子集可能不同；取所有 selected_idx 的并集作为
+    P_all，构造 (T, N_derived, P_all) membership 后一次传入 simulate_groups。
+
+    derivations: [{'selected_idx': [...], 'name': '...'}, ...]
+    返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 derivations 相同)
+    """
+    membership_np = getattr(group_result, 'membership_np', None)
+    period_returns_np = getattr(group_result, 'period_returns_np', None)
+
+    if membership_np is None or period_returns_np is None:
+        raise ValueError('GroupRunResult 缺少 membership_np 或 period_returns_np')
+
+    if not derivations:
+        return []
+
+    # 取所有派生组 selected_idx 的并集
+    all_idx_sets = [set(np.asarray(d['selected_idx'], dtype=int)) for d in derivations]
+    union_idx = sorted(set().union(*all_idx_sets))
+    union_arr = np.array(union_idx, dtype=int)
+    P_all = len(union_arr)
+
+    # 映射：原索引 → 并集中的位置
+    idx_to_pos = {idx: pos for pos, idx in enumerate(union_arr)}
+
+    # 构造 (T, N_derived, P_all) membership
+    base_membership = membership_np[:, group_index, :]  # (T, P_orig)
+    T = base_membership.shape[0]
+    N = len(derivations)
+    mask_batch = np.zeros((T, N, P_all), dtype=bool)
+
+    for di, d in enumerate(derivations):
+        sel = np.asarray(d['selected_idx'], dtype=int)
+        pos = [idx_to_pos[i] for i in sel]
+        mask_batch[:, di, pos] = base_membership[:, sel]
+
+    returns = period_returns_np[:, union_arr]  # (T, P_all)
+    open_fv = open_fee_vec[union_arr] if open_fee_vec is not None else np.zeros(P_all)
+
+    if use_closetoday and close_today_fee_vec is not None:
+        close_fv = close_today_fee_vec[union_arr]
+        effective_close_today = close_fv
+    else:
+        close_fv = close_fee_vec[union_arr] if close_fee_vec is not None else np.zeros(P_all)
+        effective_close_today = None
+
+    sim_result = simulate_groups(
+        membership_np=mask_batch,
+        returns_np=returns,
+        open_fee_vec=open_fv,
+        close_fee_vec=close_fv,
+        close_today_fee_vec=effective_close_today,
+        rebalance_mode=rebalance_mode,
+    )
+
+    # 拆回每个派生组的结果
+    results = []
+    for di in range(N):
+        net_r = sim_result['net_returns_np'][:, di]
+        results.append({
+            'net_returns': net_r,
+            'gross_returns': sim_result['gross_returns_np'][:, di],
+            'fee_costs': sim_result['fee_costs_np'][:, di],
+            'notional_ratios': sim_result['trade_notional_ratio_np'][:, di],
+            'cumulative': np.cumprod(1.0 + net_r),
+        })
+
+    return results
+
+
 def test_by_group_single_factor(
     tester: Any,
     factor: Factor,
@@ -615,6 +697,7 @@ def test_by_group_single_factor(
     fee_map: dict = {},
     use_closetoday: bool = False,
     rebalance_mode: str = "buy_and_hold",
+    derived_groups: Optional[List[dict]] = None,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
@@ -838,6 +921,57 @@ def test_by_group_single_factor(
 
         membership_np[t] = current_members
 
+    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
+    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
+
+    # ── 派生组（精选组）：拼入 membership_np 作为额外组，统一计算 ──
+    derived_defs = derived_groups or []
+    derived_info: list[dict] = []  # [{base_group, name, product_names, id, ...}]
+
+    from tools.products.product_utils import product_display_name
+
+    if derived_defs:
+        display_names = [product_display_name(product)['name'] for product in valid_cols]
+        derived_slices: list[np.ndarray] = []
+        for dd in derived_defs:
+            if not isinstance(dd, dict):
+                continue
+            base_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
+            if base_group < 0 or base_group >= n_groups:
+                continue
+            product_names = dd.get('productNames', dd.get('product_names', []))
+            if not product_names:
+                continue
+            selected = {str(n) for n in product_names}
+            sel_idx = [idx for idx, dn in enumerate(display_names) if dn in selected]
+            if not sel_idx:
+                continue
+            sel = np.asarray(sel_idx, dtype=int)
+
+            # 从 base_group 的每期 membership 中切出选中品种 → (T, 1, P)
+            # mask_1g 需要是 (T, 1, P) 形状（P=全部品种数），只有选中品种位置有值
+            mask_1g = np.zeros((T, 1, P), dtype=bool)
+            mask_1g[:, 0, sel] = membership_np[:, base_group, :][:, sel]
+            derived_slices.append(mask_1g)
+            derived_info.append({
+                'base_group': base_group,
+                'name': dd.get('name', f'第{base_group + 1}组精选'),
+                'id': dd.get('id'),
+                'product_names': [display_names[idx] for idx in sel_idx],
+            })
+
+        if derived_slices:
+            derived_membership = np.concatenate(derived_slices, axis=1)  # (T, n_derived, P)
+            membership_np = np.concatenate([membership_np, derived_membership], axis=1)
+
+    n_derived = len(derived_info)
+    n_base = n_groups
+    n_groups = membership_np.shape[1]  # 现在包含 base + derived
+
+    # 扩展组名映射（派生组用 derived_info 中的 name）
+    for d_idx, di in enumerate(derived_info):
+        n_names[n_base + d_idx] = di['name']
+
     products_dict = {
         g: {index_list[t]: [valid_cols[i]
                              for i in np.where(membership_np[t, g])[0]]
@@ -845,8 +979,6 @@ def test_by_group_single_factor(
         for g in range(n_groups)
     }
 
-    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
-    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
     member_counts = membership_np.sum(axis=2).astype(float)
 
     def _variety(col) -> str:
@@ -885,7 +1017,7 @@ def test_by_group_single_factor(
     if rebalance_mode not in _VALID_MODES:
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
 
-    # ── 逐期矩阵化收益计算（统一引擎）──
+    # ── 逐期矩阵化收益计算（统一引擎：base + derived 一次跑完）──
     data_has_bar = present_np if multi_session_active else None
     sim_result = simulate_groups(
         membership_np=membership_np,
@@ -995,6 +1127,9 @@ def test_by_group_single_factor(
         multi_session_active=multi_session_active,
         rebalance_mode=rebalance_mode,
         report_df=report_df.copy(),
+        n_base=n_base,
+        n_derived=n_derived,
+        derived_info=derived_info,
     )
     if r is not None:
         r.group_result = group_result
@@ -1082,7 +1217,7 @@ def test_by_group(
     report_df: pd.DataFrame = pd.DataFrame()
 
     def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-        return test_by_group_single_factor(
+        products, returns, report, cum_np, idx_list = test_by_group_single_factor(
             tester,
             f,
             returns_col=returns_col,
@@ -1099,7 +1234,9 @@ def test_by_group(
             fee_map=fee_map,
             use_closetoday=kwargs.pop('use_closetoday', False),
             rebalance_mode=rebalance_mode,
+            derived_groups=kwargs.pop('derived_groups', None),
         )
+        return products, returns, report, cum_np, idx_list
 
     cum_np_out: Optional[np.ndarray] = None
     idx_list_out: Optional[list] = None

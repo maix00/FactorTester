@@ -30,6 +30,10 @@ class GroupRunResult:
     multi_session_active: bool
     rebalance_mode: str
     report_df: pd.DataFrame
+    # 派生组（精选组）元信息
+    n_base: int = 0
+    n_derived: int = 0
+    derived_info: Any = None  # [{base_group, name, id, product_names}, ...] | None
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:
