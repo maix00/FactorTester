@@ -102,18 +102,39 @@
         snapshot.return_freqs = returnFreqs;
 
         // 5. 分组测试设置
-        snapshot.group_settings = {
-            group_count: document.getElementById('group_count')?.value || '5',
-            fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
-            fee_rate: document.getElementById('fee_rate')?.value || '0.03',
-            use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
-            group_start_year: document.getElementById('group_start_year')?.value || '',
-            group_start_month: document.getElementById('group_start_month')?.value || '',
-            group_start_day: document.getElementById('group_start_day')?.value || '',
-            group_end_year: document.getElementById('group_end_year')?.value || '',
-            group_end_month: document.getElementById('group_end_month')?.value || '',
-            group_end_day: document.getElementById('group_end_day')?.value || ''
-        };
+        // Priority: GT.datamodel.settings (Issue #85 new datamodel) → DOM fallback (legacy)
+        if (window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings) {
+            snapshot.group_settings = window.GroupTest.datamodel.settings.snapshot();
+            if (snapshot.group_settings) {
+                // Also collect legacy DOM fields for backward-compat with old templates
+                snapshot.group_settings._legacy = {
+                    group_count: document.getElementById('group_count')?.value || '5',
+                    fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
+                    fee_rate: document.getElementById('fee_rate')?.value || '0.03',
+                    use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
+                    group_start_year: document.getElementById('group_start_year')?.value || '',
+                    group_start_month: document.getElementById('group_start_month')?.value || '',
+                    group_start_day: document.getElementById('group_start_day')?.value || '',
+                    group_end_year: document.getElementById('group_end_year')?.value || '',
+                    group_end_month: document.getElementById('group_end_month')?.value || '',
+                    group_end_day: document.getElementById('group_end_day')?.value || ''
+                };
+            }
+        } else {
+            // Fallback: legacy DOM-only collection
+            snapshot.group_settings = {
+                group_count: document.getElementById('group_count')?.value || '5',
+                fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
+                fee_rate: document.getElementById('fee_rate')?.value || '0.03',
+                use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
+                group_start_year: document.getElementById('group_start_year')?.value || '',
+                group_start_month: document.getElementById('group_start_month')?.value || '',
+                group_start_day: document.getElementById('group_start_day')?.value || '',
+                group_end_year: document.getElementById('group_end_year')?.value || '',
+                group_end_month: document.getElementById('group_end_month')?.value || '',
+                group_end_day: document.getElementById('group_end_day')?.value || ''
+            };
+        }
 
         // 6. 费率修改（按品种费率的手动编辑值）
         if (window._getFeeModifications) {
@@ -346,7 +367,19 @@
 
         // 5. 恢复分组测试设置
         if (snapshot.group_settings) {
-            const gs = snapshot.group_settings;
+            // Priority: GT.datamodel.settings.apply() (Issue #85 new datamodel)
+            if (window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings &&
+                (snapshot.group_settings.baseGroups || snapshot.group_settings.derivedGraph ||
+                 snapshot.group_settings.lsConfigs || snapshot.group_settings.registrations)) {
+                // New format snapshot (from GT.datamodel.settings.snapshot())
+                const applyResult = window.GroupTest.datamodel.settings.apply(snapshot.group_settings);
+                if (applyResult.errors && applyResult.errors.length > 0) {
+                    console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
+                }
+            }
+
+            // Always restore legacy DOM fields (backward compat or when new datamodel not available)
+            const gs = snapshot.group_settings._legacy || snapshot.group_settings;
             if (gs.group_count) {
                 const gc = document.getElementById('group_count');
                 if (gc) gc.value = gs.group_count;
@@ -360,6 +393,10 @@
             if (gs.fee_rate) {
                 const fr = document.getElementById('fee_rate');
                 if (fr) fr.value = gs.fee_rate;
+            }
+            if (gs.use_closetoday !== undefined) {
+                // Restore close-today state if present (legacy field)
+                // (handled by _applyFeeModifications below for per-product mode)
             }
             ['group_start_year','group_start_month','group_start_day','group_end_year','group_end_month','group_end_day'].forEach(id => {
                 if (gs[id]) {
