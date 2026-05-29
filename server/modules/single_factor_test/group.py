@@ -2,7 +2,7 @@
 Group test endpoint: /run_group_test /run_multi_horizon_group_test
 """
 import logging, math, traceback
-from typing import cast
+from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
@@ -26,6 +26,15 @@ def _safe_float(v):
     except (TypeError, ValueError):
         return None
     return None if (math.isnan(fv) or math.isinf(fv)) else fv
+
+
+def _safe_bool(obj) -> bool:
+    """安全求布尔值，避免 numpy 数组的 ambiguous truth value 错误。"""
+    if obj is None:
+        return False
+    if isinstance(obj, np.ndarray):
+        return bool(obj.size > 0)
+    return bool(obj)
 
 
 def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
@@ -62,7 +71,7 @@ def _compute_ls_metrics(r_ls_array: np.ndarray, report_df: pd.DataFrame, index_l
     return _compute_return_metrics(r_ls_array, index_like=index_like, avg_turnover=avg_turnover)
 
 
-def _serialize_float_series(values: np.ndarray | list, default=0.0) -> list:
+def _serialize_float_series(values: np.ndarray | list, default: float = 0.0) -> list:
     result = []
     for value in values:
         try:
@@ -85,8 +94,8 @@ def _normalize_weighted_legs(raw_legs, default_group: int) -> list[dict]:
     legs = []
     for item in raw_legs:
         try:
-            group = int(item.get('group'))
-            weight = float(item.get('weight'))
+            group = int(item.get('group') or 0)
+            weight = float(item.get('weight') or 0)
         except (AttributeError, TypeError, ValueError):
             continue
         if weight > 0:
@@ -163,17 +172,17 @@ def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_co
     return np.array(r_ls_list, dtype=float), np.array(ls_cum_list, dtype=float)
 
 
-def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str) -> tuple[dict, dict]:
+def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str,
+                                  use_closetoday: bool = False,
+                                  fee_map: dict | None = None,
+                                  fee_uniform: float = 0.0) -> tuple[dict, dict]:
     from tools.products.product_utils import product_display_name
+    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group
 
-    contrib = getattr(group_result, 'product_gross_contrib_np', None)
     valid_cols = getattr(group_result, 'valid_cols', None)
     idx_list = getattr(group_result, 'index_list', None) or []
-    if contrib is None or valid_cols is None:
+    if valid_cols is None:
         raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
-    contrib_np = np.asarray(contrib, dtype=float)
-    if contrib_np.ndim != 3 or group_index < 0 or group_index >= contrib_np.shape[1]:
-        raise ValueError('基准组不存在或逐品种贡献维度异常')
 
     display_names = [product_display_name(product)['name'] for product in valid_cols]
     selected = {str(name) for name in (product_names or [])}
@@ -181,17 +190,48 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
     if not selected_idx:
         raise ValueError('请至少选择一个有效品种')
 
-    returns = np.nan_to_num(contrib_np[:, group_index, selected_idx].sum(axis=1), nan=0.0, posinf=0.0, neginf=0.0)
-    cumulative = _returns_to_cumulative(returns)
+    # 根据当前请求的 fee_map + use_closetoday 构建 fee vectors
+    # close_fee_vec 始终=平昨，close_today_fee_vec 始终=平今
+    def _variety(col) -> str:
+        nm = getattr(col, "name", str(col))
+        return nm.split(".")[0].upper()
+
+    _fm = fee_map or {}
+    half_fee = float(fee_uniform) / 2.0
+    open_fv = np.array([
+        float((_fm.get(_variety(c), {}) or {}).get("open", half_fee))
+        for c in valid_cols
+    ], dtype=float)
+    close_fv = np.array([
+        float((_fm.get(_variety(c), {}) or {}).get("close", half_fee))
+        for c in valid_cols
+    ], dtype=float)
+    close_today_fv = np.array([
+        float((_fm.get(_variety(c), {}) or {}).get("close_today", close_fv[i]))
+        for i, c in enumerate(valid_cols)
+    ], dtype=float)
+
+    sim = simulate_derived_group(
+        group_index=group_index,
+        selected_idx=selected_idx,
+        group_result=group_result,
+        open_fee_vec=open_fv,
+        close_fee_vec=close_fv,
+        close_today_fee_vec=close_today_fv,
+        rebalance_mode=getattr(group_result, 'rebalance_mode', 'buy_and_hold'),
+        use_closetoday=use_closetoday,
+    )
+
     timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
-    metric = _compute_return_metrics(returns, index_like=idx_list, avg_turnover=None)
+    metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
+
     group = {
         'name': name or f'第{group_index + 1}组精选',
         'timestamps': timestamps,
-        'cumulative_returns': _serialize_float_series(cumulative, default=None),
-        'gross_returns': _serialize_float_series(returns, default=0.0),
-        'fee_costs': [0.0] * len(returns),
-        'trade_notional_ratios': [0.0] * len(returns),
+        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
+        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
+        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
         'is_derived': True,
         'derived': {
             'base_group': group_index,
@@ -209,40 +249,59 @@ def _latest_group_result(tester):
     return result.group_result if result is not None else None
 
 
-def _parse_group_fee_config(data):
+def _parse_group_fee_config(data, products: set | None = None):
+    """解析前端费率配置。
+
+    前端三种模式：
+    1. 不扣除费用 → fee=0, fee_map={}
+    2. 统一费率   → fee>0, fee_map={}
+    3. 按品种费率 → fee=0, fee_map 非空（来自前端 /get_fee_table 的 FeeData 全量，
+                   含用户 _feeModifications 覆盖 + 平今/平昨选择）
+
+    返回 (fee_uniform, fee_map, use_closetoday)，
+    其中 fee_map 仅在模式3时非空，key 格式：{open, close, close_today, close_yesterday}，
+    值为单边费率（按金额比例）。
+    模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
+    """
     fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
     fee_map_raw = data.get('fee_map', {}) or {}
     use_closetoday = bool(data.get('use_closetoday', False))
 
+    # 模式1/2：不扣除或统一费率 → fee_map 保持空
+    if not fee_map_raw:
+        return fee_uniform, {}, use_closetoday
+
+    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖，
+    # 只需做字段名映射：open_ratio→open, close_ratio→close, closetoday_ratio→close_today/close_yesterday
     fee_map: dict[str, dict[str, float]] = {}
     for code, rates in fee_map_raw.items():
-        open_r = float(rates.get('open_ratio', 0) or 0)
-        close_r = float(rates.get('close_ratio', 0) or 0)
-        close_today_r = float(rates.get('closetoday_ratio', close_r) or 0)
-        selected_close_r = close_today_r if use_closetoday else close_r
-        if open_r > 0 or close_r > 0 or close_today_r > 0:
-            fee_map[str(code).upper()] = {
-                'open': open_r,
-                'close': selected_close_r,
-                'close_today': close_today_r,
-                'close_yesterday': close_r,
-            }
+        code_upper = str(code).upper()
+        o = float(rates.get('open_ratio', 0) or 0)
+        c = float(rates.get('close_ratio', 0) or 0)
+        ct = float(rates.get('closetoday_ratio', 0) or 0)
+        fee_map[code_upper] = {
+            'open': o,
+            'close': c,
+            'close_today': ct,
+            'close_yesterday': c,  # 平昨=平仓费率
+        }
 
     return fee_uniform, fee_map, use_closetoday
 
 
 def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
-    """返回 {产品名: {open, close, close_today, close_yesterday, total, _is_real_fee}} 的费率字典。
+    """返回 {产品名: {open, close, close_today, close_yesterday, total}} 的费率字典。
 
-    如果回测中用户未设置费率（所有品种费率均为 0），
-    则从全局产品费率表 (sources.FeeData) 获取真实费率，
-    并标记 _is_real_fee=True 提示前端显示"原始费率"标注。
+    费率向量已在回测阶段按前端选择的模式（不扣除/统一/按品种）设置，
+    此处直接使用，按产品名索引。
     """
     valid_cols = getattr(group_result, 'valid_cols', None)
     open_fee_vec = getattr(group_result, 'open_fee_vec', None)
     close_fee_vec = getattr(group_result, 'close_fee_vec', None)
     close_today_fee_vec = getattr(group_result, 'close_today_fee_vec', None)
-    if not valid_cols or open_fee_vec is None or close_fee_vec is None:
+    _cy_vec = getattr(group_result, 'close_yesterday_fee_vec', None)
+    close_yesterday_fee_vec = _cy_vec if _cy_vec is not None else close_fee_vec
+    if not _safe_bool(valid_cols) or open_fee_vec is None or close_fee_vec is None:
         return {}
     from tools.products.product_utils import product_display_name
 
@@ -252,53 +311,28 @@ def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
         np.asarray(close_today_fee_vec, dtype=float)
         if close_today_fee_vec is not None else close_rates
     )
-    if len(valid_cols) != open_rates.shape[0] or len(valid_cols) != close_rates.shape[0]:
+    close_yesterday_rates = np.asarray(close_yesterday_fee_vec, dtype=float)
+    cols = valid_cols or []
+    if len(cols) != open_rates.shape[0] or len(cols) != close_rates.shape[0]:
         return {}
 
-    # 判断用户是否设置了费率：所有品种费率均为 0 → 未设置
-    user_has_fee = bool(np.any(open_rates > 0) or np.any(close_rates > 0))
-
-    # 如果用户未设置费率，从全局费率表获取真实费率
-    use_real_fee = not user_has_fee
-    if use_real_fee:
-        from sources.FeeData import load_latest
-        df_fees = load_latest()
-        fee_by_code = {}
-        if not df_fees.empty:
-            for _, row in df_fees.iterrows():
-                fee_by_code[str(row['variety_code']).upper()] = row
-
     rates = {}
-    for idx, product in enumerate(valid_cols):
+    for idx, product in enumerate(cols):
         name = product_display_name(product)['name']
-        if use_real_fee:
-            code = str(product if isinstance(product, str) else getattr(product, 'name', product)).split('.')[0].upper()
-            variety_fee = fee_by_code.get(code)
-            if variety_fee is not None:
-                o = float(variety_fee['open_ratio']) if pd.notna(variety_fee['open_ratio']) else 0.0
-                c = float(variety_fee['close_ratio']) if pd.notna(variety_fee['close_ratio']) else 0.0
-                ct = float(variety_fee['closetoday_ratio']) if pd.notna(variety_fee['closetoday_ratio']) else c
-            else:
-                o = c = ct = 0.0
-        else:
-            o = float(open_rates[idx])
-            c = float(close_rates[idx])
-            ct = float(close_today_rates[idx])
         rates[name] = {
-            'open': o,
-            'close': c,
-            'close_today': ct,
-            'close_yesterday': c,
-            'total': o + c,
-            '_is_real_fee': use_real_fee,
+            'open': float(open_rates[idx]),
+            'close': float(close_rates[idx]),
+            'close_today': float(close_today_rates[idx]),
+            'close_yesterday': float(close_yesterday_rates[idx]),
+            'total': float(open_rates[idx]) + float(close_rates[idx]),
         }
     return rates
 
 
-def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, float]]) -> dict:
+def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, float]]) -> dict[str, Any]:
     from tools.products.product_utils import product_display_name
 
-    display = product_display_name(product)
+    display: dict[str, Any] = product_display_name(product)
     display['fee'] = fee_rates_by_name.get(display['name'])
     return display
 
@@ -309,7 +343,6 @@ def run_group_test():
     submission_id  = data.get('submission_id')
     factor_alias   = data.get('factor_alias')
     n_groups       = data.get('n_groups', 5)
-    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data)
     ls_configs = _parse_ls_configs(data, int(n_groups))
     rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
@@ -321,6 +354,7 @@ def run_group_test():
     tester = None
     try:
         tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test')
+        fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data, getattr(tester, 'products', None))
 
         # 快照 products 以防并发请求（如 IC 测试或 delete_path）修改共享的 tester.products
         _saved_products = tester.products.copy()
@@ -374,6 +408,7 @@ def run_group_test():
                     factors=factor, n_groups=n_groups, time_range=time_range,
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
+                    use_closetoday=use_closetoday,
                     rebalance_mode=rebalance_mode,
                 )
                 # ... (computation logic unchanged) ...
@@ -398,9 +433,10 @@ def run_group_test():
                 tester.results[factor].return_freq = _saved_freq
                 tester.results[factor].returns = _saved_returns
             
+            _gr = tester._get_result(factor).group_result  # local ref for type narrowing
             return jsonify({'success': True, 'multi_horizon': True, 'results': multi_horizon_results, 'n_groups': n_groups,
                             'structure_key': data.get('structure_key'),
-                            'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
+                            'multi_session_active': bool(_gr.multi_session_active) if _gr is not None else False,
                             'rebalance_mode': rebalance_mode,
                             'submission_id': submission_id, 'factor_alias': factor_alias,
                             'tester_alias': getattr(tester, 'alias', '?'),
@@ -416,6 +452,7 @@ def run_group_test():
             factors=factor, n_groups=n_groups, time_range=time_range,
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
+            use_closetoday=use_closetoday,
             rebalance_mode=rebalance_mode,
         )
 
@@ -480,7 +517,7 @@ def run_group_test():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
     finally:
-        if _saved_products is not None:
+        if _saved_products is not None and tester is not None:
             tester.products = _saved_products
         if _gt_token is not None:
             _active_tester.reset(_gt_token)
@@ -515,9 +552,10 @@ def get_group_snapshot():
 
         group_result = _latest_group_result(tester)
         products_dict = group_result.products_by_group if group_result is not None else None
-        valid_cols = group_result.valid_cols if group_result is not None else None
-        if not products_dict or not valid_cols:
+        valid_cols_raw = group_result.valid_cols if group_result is not None else None
+        if not products_dict or not _safe_bool(valid_cols_raw):
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        valid_cols = valid_cols_raw
 
         # 找到最接近的时刻
         # products_dict: {group_idx: {index_entry: [product_names]}}
@@ -551,9 +589,18 @@ def get_group_snapshot():
         if best_idx_entry is None:
             return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
 
-        # 找到上一时刻
-        sorted_entries = sorted(first_group.keys(), key=lambda e: _signal_time(e))
-        current_pos = sorted_entries.index(best_idx_entry)
+        # 找到上一时刻 — 用 all_times 的 epoch 排序（避免 tuple/array 直接比较）
+        # 用 enumerate 添加位置索引作为 tiebreaker，防止 sorted 回退到 tuple 比较
+        # （idx_entry 可能为包含 numpy 类型的 tuple，其 __eq__ 会触发 ambiguous truth value）
+        sorted_times = [item for _, item in sorted(enumerate(all_times), key=lambda pair: (pair[1][0], pair[0]))]
+        sorted_entries = [item[1] for item in sorted_times]
+        current_pos = None
+        for pos, (_, entry) in enumerate(sorted_times):
+            if entry is best_idx_entry:
+                current_pos = pos
+                break
+        if current_pos is None:
+            current_pos = 0
         prev_entry = sorted_entries[current_pos - 1] if current_pos > 0 else None
 
         n_groups = len(products_dict)
@@ -670,6 +717,7 @@ def create_derived_group():
     group_index = data.get('group_index')
     product_names = data.get('product_names') or []
     name = str(data.get('name') or '').strip()
+    use_closetoday = bool(data.get('use_closetoday', False))
     if submission_id is None or group_index is None:
         return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
     try:
@@ -677,11 +725,16 @@ def create_derived_group():
         group_result = _latest_group_result(tester)
         if group_result is None:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
+        # 从请求中解析费率（与 run_group_test 相同的 _parse_group_fee_config）
+        fee_uniform, fee_map, _ = _parse_group_fee_config(data, getattr(tester, 'products', None))
         group, metric = _build_derived_group_payload(
             group_result,
             int(group_index),
             [str(x) for x in product_names],
             name or f'第{int(group_index) + 1}组精选',
+            use_closetoday=use_closetoday,
+            fee_map=fee_map,
+            fee_uniform=fee_uniform,
         )
         return jsonify({'success': True, 'group': group, 'metric': metric})
     except Exception as e:

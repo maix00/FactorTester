@@ -1000,11 +1000,21 @@
             alert('请先运行分组测试，再生成派生组曲线。');
             return;
         }
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            alert('获取费率失败: ' + err.message);
+            return;
+        }
         var resp = await GT.api.createDerivedGroup({
             submission_id: context.submission_id,
             group_index: def.baseGroup,
             product_names: def.productNames,
-            name: def.name
+            name: def.name,
+            use_closetoday: _useCloseToday,
+            fee: feePayload.fee,
+            fee_map: feePayload.fee_map
         });
         if (!resp || !resp.success) {
             alert('生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
@@ -2054,32 +2064,16 @@
         }
 
         var n_groups = parseInt(document.getElementById('group_count').value, 10);
-        var feeMode = 'none';
-        var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
-        if (feeModeEl) feeMode = feeModeEl.value;
-
-        var fee = 0.0;
-        var fee_map = {};
         var use_closetoday = _useCloseToday;
-        if (feeMode === 'uniform') {
-            fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
-        } else if (feeMode === 'per_product') {
-            if (!_feeTableData.length) {
-                if (statusSpan) {
-                    statusSpan.innerHTML = '正在获取品种费率...';
-                    statusSpan.style.color = '#0078d4';
-                }
-                try {
-                    await fetchFeeTable(false);
-                } catch (err) {
-                    return { error: '获取品种费率失败: ' + err.message };
-                }
-            }
-            fee_map = buildFeeMap();
-            if (!Object.keys(fee_map).length) {
-                return { error: '未获取到品种费率，请检查费率数据源。' };
-            }
+
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            return { error: err.message };
         }
+        var fee = feePayload.fee;
+        var fee_map = feePayload.fee_map;
 
         var sy = document.getElementById('group_start_year').value;
         var sm = document.getElementById('group_start_month').value;
@@ -2178,10 +2172,79 @@
             var num = parseInt(String(item.id || '').replace(/^D/, ''), 10);
             return isNaN(num) ? maxSeq : Math.max(maxSeq, num + 1);
         }, 1);
+
+        // 先画一般组（第一帧），等精选组都就绪后再一次刷新
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
+
+        // 递增 generation，使之前触发但未完成的 refreshAllDerivedGroups 静默废弃
+        _derivedGeneration++;
+        var currentGeneration = _derivedGeneration;
+
+        // 切换费率后自动重新生成所有之前定义的精选组
+        if (sameStructure && _derivedGroups.length > 0) {
+            refreshAllDerivedGroups(currentGeneration);
+        }
+
         var slider = document.getElementById('fee_sensitivity_slider');
         if (slider) { slider.value = 0; updateSensitivityLabel(0); }
+    }
+
+    /** 批量重新生成全部精选组 + LS 组，所有请求完成后统一刷新图表一次。
+     *  通过 _derivedGeneration 废弃旧调用：如果 applyGroupTestResult 被再次触发，
+     *  旧的 refreshAllDerivedGroups 会在 drawGroupChart 前检查 generation 并静默退出。 */
+    async function refreshAllDerivedGroups(generation) {
+        var tasks = _derivedGroups.map(function(def) {
+            if (!def.id) return Promise.resolve();
+            return regenerateDerivedGroupQuiet(def, generation);
+        });
+        if (typeof buildLongShortGroups === 'function') {
+            tasks.push(Promise.resolve().then(function() {
+                try { buildLongShortGroups(); } catch(e) {}
+            }));
+        }
+        /* global buildLongShortGroups */
+        await Promise.all(tasks);
+        if (generation !== _derivedGeneration) return; // 已被更新的批次废弃
+        drawGroupChart(_lastGrossData);
+        renderMetricsTable(_lastMetrics);
+    }
+
+    /** 静默重新生成一个精选组（不发网络请求，只更新数据）—— 实际需要发请求，但不画图。
+     *  generation 用于废弃过期请求：如果 await 期间 applyGroupTestResult 被再次触发，
+     *  该请求的结果不再 push 到 _lastGrossData。 */
+    async function regenerateDerivedGroupQuiet(def, generation) {
+        var context = getCurrentContext();
+        if (!def || !context || !context.submission_id) return;
+        if (!_lastGrossData || !_lastMetrics) return;
+
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            return;
+        }
+        var resp = await GT.api.createDerivedGroup({
+            submission_id: context.submission_id,
+            group_index: def.baseGroup,
+            product_names: def.productNames,
+            name: def.name,
+            use_closetoday: _useCloseToday,
+            fee: feePayload.fee,
+            fee_map: feePayload.fee_map
+        });
+        if (generation !== _derivedGeneration) return; // 已被更新的批次废弃
+        if (!resp || !resp.success) return;
+
+        removeGeneratedDerivedArtifacts(def.id);
+        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.generated = true;
+        var group = resp.group || {};
+        group.name = def.name;
+        group.is_derived = true;
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        _lastGrossData.push(group);
+        _lastMetrics[def.metricKey] = resp.metric || {};
     }
 
     function postGroupTest(payload) {
@@ -2331,6 +2394,7 @@
     var _activeGroupFactorBySubmission = {};
     var _derivedGroups = [];
     var _derivedGroupSeq = 1;
+    var _derivedGeneration = 0;      // 每次 run_group_test 递增，废弃旧的 refreshAllDerivedGroups
     var _currentGroupDetailIndex = null;
     var _longShortDefinitions = [defaultLongShortDefinition()];
     var _lastGroupStructureKey = null;
@@ -2711,44 +2775,39 @@
     }
 
     /** 获取某品种的当前显示值（优先使用修改值） */
-    function _getEffectiveRow(row) {
-        var code = (row.variety_code || '').toLowerCase();
-        var mod = _feeModifications[code] || {};
-        var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
-        var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
-        var closeR = (mod[closeField] !== undefined) ? mod[closeField] : (_useCloseToday ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
-        return { code: code, openR: openR, closeR: closeR };
-    }
-
-    /** 渲染品种费率表（可编辑单元格） */
+    /** 渲染品种费率表（同时显示平今和平昨） */
     function renderFeeTable() {
         var tbody = document.getElementById('fee_table_body');
         if (!tbody) return;
-        var closeColEl = document.getElementById('fee_col_close');
-        if (closeColEl) closeColEl.textContent = _useCloseToday ? '平今比率' : '平仓比率';
         if (!_feeTableData.length) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;text-align:center;color:#888;">暂无数据</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;text-align:center;color:#888;">暂无数据</td></tr>';
             return;
         }
         var html = '';
         _feeTableData.forEach(function(row) {
             var code = (row.variety_code || '');
             var codeLower = code.toLowerCase();
-            var eff = _getEffectiveRow(row);
-            var total  = (eff.openR + eff.closeR) * 100;
-            var closeField = _useCloseToday ? 'closetoday_ratio' : 'close_ratio';
-            var openModified  = !!(_feeModifications[codeLower] && _feeModifications[codeLower].open_ratio  !== undefined);
-            var closeModified = !!(_feeModifications[codeLower] && _feeModifications[codeLower][closeField] !== undefined);
+            var mod = _feeModifications[codeLower] || {};
+            var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
+            var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio) || 0);
+            var closeTodayR = (mod.closetoday_ratio !== undefined) ? mod.closetoday_ratio : (parseFloat(row.closetoday_ratio) || 0);
+            var total  = (openR + closeR) * 100;
+
+            var openModified  = !!(mod.open_ratio !== undefined);
+            var closeModified = !!(mod.close_ratio !== undefined);
+            var closeTodayModified = !!(mod.closetoday_ratio !== undefined);
             var openClass  = openModified  ? 'fee-cell-modified' : '';
             var closeClass = closeModified ? 'fee-cell-modified' : '';
+            var closeTodayClass = closeTodayModified ? 'fee-cell-modified' : '';
 
             html += '<tr>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;font-weight:600;">' + code + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.variety_name || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;">' + (row.exchange || '') + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + (row.multiplier || '') + '</td>';
-            html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.openR.toFixed(6) + '</td>';
-            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="' + closeField + '" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + eff.closeR.toFixed(6) + '</td>';
+            html += '<td class="' + openClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="open_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + openR.toFixed(6) + '</td>';
+            html += '<td class="' + closeTodayClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="closetoday_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + closeTodayR.toFixed(6) + '</td>';
+            html += '<td class="' + closeClass + '" contenteditable="true" data-variety="' + codeLower + '" data-field="close_ratio" style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">' + closeR.toFixed(6) + '</td>';
             html += '<td style="padding:6px 10px;border-bottom:1px solid #eef2f7;text-align:right;">';
             html += total > 0 ? total.toFixed(4) + '%' : '—';
             html += '</td>';
@@ -2776,18 +2835,16 @@
             // 恢复原始值
             var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
             if (row) {
-                var orig = _getEffectiveRow(row);
-                this.textContent = (field === 'open_ratio' ? orig.openR : orig.closeR).toFixed(6);
+                var origVal = parseFloat(row[field]) || 0;
+                this.textContent = origVal.toFixed(6);
             }
             return;
         }
 
-        // 对比原始值
+        // 对比原始值（直接读原始字段）
         var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
         if (!row) return;
-        var origVal = field === 'open_ratio'
-            ? (parseFloat(row.open_ratio) || 0)
-            : (field === 'closetoday_ratio' ? (parseFloat(row.closetoday_ratio) || 0) : (parseFloat(row.close_ratio) || 0));
+        var origVal = parseFloat(row[field]) || 0;
 
         if (Math.abs(val - origVal) < 1e-9) {
             // 恢复为原始值，清除修改
@@ -2810,12 +2867,14 @@
         _refreshTotalColumn(variety);
     }
 
-    /** 刷新某品种的双边合计列 */
+    /** 刷新某品种的双边合计列（开仓+平昨） */
     function _refreshTotalColumn(variety) {
         var row = _feeTableData.find(function(r) { return (r.variety_code || '').toLowerCase() === variety; });
         if (!row) return;
-        var eff = _getEffectiveRow(row);
-        var total = (eff.openR + eff.closeR) * 100;
+        var mod = _feeModifications[variety] || {};
+        var openR  = (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio) || 0);
+        var closeR = (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio) || 0);
+        var total = (openR + closeR) * 100;
         var cells = document.querySelectorAll('#fee_table_body td[data-variety="' + variety + '"]');
         // 该行最后一个 td 是合计列（没有 contenteditable 属性）
         var allCellsInRow = [];
@@ -2859,6 +2918,33 @@
             };
         });
         return map;
+    }
+
+    /** 构建费率相关的 payload 字段（fee + fee_map），供 run_group_test 和 create_derived_group 共用 */
+    async function buildFeePayload() {
+        var fee = 0.0;
+        var fee_map = {};
+        var feeMode = 'none';
+        var feeModeEl = document.querySelector('input[name="fee_mode"]:checked');
+        if (feeModeEl) feeMode = feeModeEl.value;
+        if (feeMode === 'uniform') {
+            fee = parseFloat(document.getElementById('fee_rate').value) || 0.0;
+        } else if (feeMode === 'per_product') {
+            if (!_feeTableData.length) {
+                var statusSpan = document.getElementById('group_test_status');
+                if (statusSpan) {
+                    statusSpan.innerHTML = '正在获取品种费率...';
+                    statusSpan.style.color = '#0078d4';
+                }
+                try {
+                    await fetchFeeTable(false);
+                } catch (err) {
+                    throw new Error('获取品种费率失败: ' + err.message);
+                }
+            }
+            fee_map = buildFeeMap();
+        }
+        return { fee: fee, fee_map: fee_map };
     }
 
     /** 恢复所有费率为原始值 */
@@ -2936,6 +3022,11 @@
             _useCloseToday = !_useCloseToday;
             updateClosetodayUI();
             if (_feeTableData.length) renderFeeTable();
+            // 切换平今/平昨后重新生成所有精选组
+            if (_derivedGroups.length > 0) {
+                _derivedGeneration++;
+                refreshAllDerivedGroups(_derivedGeneration);
+            }
         });
 
         // 成本敏感性滑条（仅统一费率模式有效）
