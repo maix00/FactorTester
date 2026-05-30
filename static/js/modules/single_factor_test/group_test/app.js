@@ -3120,31 +3120,10 @@
             }
 
             function _saveEditChanges() {
-                // Get the list panel's current edit selection
+                // Delegate to list panel for the actual batch sync
                 var listPanel = GT.panels && GT.panels.base && GT.panels.base.list;
-                if (!listPanel) { _exitEditMode(); return; }
-                var sel = listPanel.getEditSelection();
-                if (!sel || !sel.groupIds || sel.groupIds.length === 0) {
-                    alert('未选中任何批次');
-                    return;
-                }
-                // Use the first group as reference for shared settings
-                var refGroup = GT.datamodel.base_groups.get(sel.groupIds[0]);
-                if (!refGroup) { _exitEditMode(); return; }
-                // Batch-sync shared settings: feeMode, feeRate, closeTodayMode, rebalanceMode
-                // from the reference group to all groups in the batch
-                var sharedKeys = ['feeMode', 'feeRate', 'closeTodayMode', 'rebalanceMode', 'isAllGroups'];
-                for (var i = 0; i < sel.groupIds.length; i++) {
-                    var patch = {};
-                    for (var k = 0; k < sharedKeys.length; k++) {
-                        var key = sharedKeys[k];
-                        if (refGroup[key] !== undefined) {
-                            patch[key] = refGroup[key];
-                        }
-                    }
-                    try {
-                        GT.datamodel.base_groups.update(sel.groupIds[i], patch);
-                    } catch (err) { /* skip */ }
+                if (listPanel && typeof listPanel.saveEditChanges === 'function') {
+                    listPanel.saveEditChanges();
                 }
                 _exitEditMode();
             }

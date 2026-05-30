@@ -3,6 +3,9 @@
  *
  * Phase 3 UI panel. Renders base group table, handles CRUD via modal forms,
  * row selection/highlight. All data access through datamodel + state.
+ *
+ * Multi-select across batches: click batch header to toggle all groups in batch,
+ * click individual row to toggle single group. Selection stored as groupIds set.
  */
 (function() {
     var GT = window.GroupTest;
@@ -19,12 +22,14 @@
     // Track whether panel is currently mounted (sub-tab visible)
     var _mounted = false;
 
-    // Cache current active batch key for highlight tracking
-    // Batch key format: "testerId|factorAlias|groupCount"
-    var _activeBatchKey = null;
+    // Multi-select: set of selected group IDs (cross-batch)
+    var _selectedIds = {};  // { id1: true, id2: true, ... }
 
-    // Edit state for sub-tab-based edit mode
-    var _editSelection = null;  // { batchKey, groupIds:[id,...] }
+    /** Compute the current edit selection from _selectedIds */
+    function _getEditSelection() {
+        var ids = Object.keys(_selectedIds);
+        return ids.length > 0 ? { groupIds: ids } : null;
+    }
 
     /** Look up a submission label by testerId */
     function _testerLabel(testerId) {
@@ -186,6 +191,9 @@
             return;
         }
 
+        var anySelected = Object.keys(_selectedIds).length > 0;
+        var activeBgId = GT.state.getActiveBaseGroupId();
+
         var html = '';
         html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
         html += '<thead><tr style="background:#f6f8fa;border-bottom:2px solid #d0d5dd;">';
@@ -200,15 +208,21 @@
 
         for (var b = 0; b < batches.length; b++) {
             var batch = batches[b];
-            var isBatchActive = (batch.key === _activeBatchKey);
+            // Check if all groups in batch are selected
+            var batchAllSelected = batch.items.length > 0;
+            for (var bi = 0; bi < batch.items.length; bi++) {
+                if (!_selectedIds[batch.items[bi].id]) { batchAllSelected = false; break; }
+            }
+            var isBatchSelected = batchAllSelected;
 
             // ── Batch header row ──
-            var batchRowStyle = isBatchActive
+            var batchRowStyle = isBatchSelected
                 ? 'background:#e8f4fd;border-left:3px solid #0078d4;'
                 : 'background:#f9fafb;border-left:3px solid transparent;';
-            html += '<tr class="grouptest-batch-header" data-batch-key="' + escapeHTML(batch.key) + '"'
+            html += '<tr class="grouptest-batch-header gt-row' + (isBatchSelected ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batch.key) + '"'
+                + ' data-selected="' + (isBatchSelected ? '1' : '0') + '"'
                 + ' style="cursor:pointer;' + batchRowStyle + 'border-bottom:1px solid #d0d5dd;">';
-            html += '<td style="padding:6px 12px;font-weight:700;color:' + (isBatchActive ? '#0078d4' : '#333') + ';">'
+            html += '<td style="padding:6px 12px;font-weight:700;color:' + (isBatchSelected ? '#0078d4' : '#333') + ';">'
                 + '📋 ' + escapeHTML(batch.factorAlias) + '</td>';
             html += '<td style="padding:6px 12px;font-size:11px;color:#555;" colspan="2">'
                 + escapeHTML(_testerLabel(batch.testerId)) + ' — ' + batch.groupCount + ' 组</td>';
@@ -222,14 +236,23 @@
             html += '</td>';
             html += '</tr>';
 
-            // ── Child rows (hidden when batch collapsed? No — always show) ──
+            // ── Child rows ──
             for (var r = 0; r < batch.items.length; r++) {
                 var item = batch.items[r];
-                var isItemActive = (item.id === GT.state.getActiveBaseGroupId());
-                var itemRowStyle = isItemActive ? 'background:#eef6ff;' : '';
-                html += '<tr class="grouptest-base-row" data-bg-id="' + escapeHTML(item.id) + '"'
+                var isSelected = !!_selectedIds[item.id];
+                var isActive = (item.id === activeBgId);
+                var rowClass = 'grouptest-base-row gt-row';
+                var rowStyle = '';
+                if (isSelected) {
+                    rowClass += ' gt-row-selected';
+                    rowStyle = 'background:#e8f4fd;';
+                } else if (isActive && !anySelected) {
+                    rowStyle = 'background:#eef6ff;';
+                }
+                html += '<tr class="' + rowClass + '" data-bg-id="' + escapeHTML(item.id) + '"'
                     + ' data-batch-key="' + escapeHTML(batch.key) + '"'
-                    + ' style="cursor:pointer;border-bottom:1px solid #e8eaed;' + itemRowStyle + '">';
+                    + ' data-selected="' + (isSelected ? '1' : '0') + '"'
+                    + ' style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
                 html += '<td style="padding:6px 12px;font-weight:600;color:#0078d4;">' + escapeHTML(item.shortAlias || item.name) + '</td>';
                 html += '<td style="padding:6px 12px;font-size:11px;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(item.name) + '</td>';
                 html += '<td style="padding:6px 12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
@@ -252,26 +275,25 @@
     }
 
     function _bindRowEvents(container) {
-        // ── Batch header click → select batch, enter edit mode ──
+        // ── Batch header click → toggle all groups in batch ──
         var batchHeaders = container.querySelectorAll('.grouptest-batch-header');
         for (var i = 0; i < batchHeaders.length; i++) {
             batchHeaders[i].addEventListener('click', function(e) {
-                if (e.target.tagName === 'BUTTON') return; // don't select when clicking delete button
+                if (e.target.tagName === 'BUTTON') return;
                 var batchKey = this.getAttribute('data-batch-key');
-                _selectBatch(batchKey);
+                var isSelected = this.getAttribute('data-selected') === '1';
+                _toggleBatch(batchKey, !isSelected);
             });
         }
 
-        // ── Child row click → also select the parent batch (edit mode) ──
+        // ── Child row click → toggle single group ──
         var rows = container.querySelectorAll('.grouptest-base-row');
         for (var j = 0; j < rows.length; j++) {
             rows[j].addEventListener('click', function(e) {
                 if (e.target.tagName === 'BUTTON') return;
-                var batchKey = this.getAttribute('data-batch-key');
                 var bgId = this.getAttribute('data-bg-id');
-                // Select the batch AND the individual group as active
-                _selectBatch(batchKey);
-                GT.state.setActiveBaseGroupId(bgId);
+                var isSelected = this.getAttribute('data-selected') === '1';
+                _toggleGroup(bgId, !isSelected);
             });
         }
 
@@ -286,9 +308,9 @@
                 if (!confirm('确定删除整个批次（共 ' + groupIds.length + ' 个基础组）吗？此操作不可撤销。')) return;
                 for (var gi = 0; gi < groupIds.length; gi++) {
                     try { GT.datamodel.base_groups.remove(groupIds[gi]); } catch (err) { /* skip */ }
+                    delete _selectedIds[groupIds[gi]];
                 }
-                // Clear selection if we deleted the active batch
-                if (_activeBatchKey === batchKey) { _clearSelection(); }
+                _syncSelectionToApp();
             });
         }
 
@@ -302,51 +324,89 @@
                 if (!item) return;
                 if (!confirm('确定删除基础组 "' + (item.shortAlias || item.name) + '" 吗？')) return;
                 try { GT.datamodel.base_groups.remove(id); } catch (err) { alert('删除失败: ' + err.message); }
-                // Refresh edit selection if needed
-                if (_editSelection && _editSelection.groupIds.indexOf(id) >= 0) {
-                    _editSelection = null;
-                }
+                delete _selectedIds[id];
+                _syncSelectionToApp();
             });
         }
     }
 
-    /** Select a batch → enter list-level edit state */
-    function _selectBatch(batchKey) {
-        _activeBatchKey = batchKey;
+    /** Toggle a batch: add/remove all its group IDs from selection */
+    function _toggleBatch(batchKey, select) {
         var groupIds = _batchGroupIds(batchKey);
-        _editSelection = { batchKey: batchKey, groupIds: groupIds };
-        // Set the first group as active so sub-tab panels can edit it
-        if (groupIds.length > 0) {
-            GT.state.setActiveBaseGroupId(groupIds[0]);
+        for (var i = 0; i < groupIds.length; i++) {
+            if (select) {
+                _selectedIds[groupIds[i]] = true;
+            } else {
+                delete _selectedIds[groupIds[i]];
+            }
         }
-        // Notify app.js to enter edit mode
-        if (GT.ui && typeof GT.ui.enterEditMode === 'function') {
-            GT.ui.enterEditMode({ batchKey: batchKey, groupIds: groupIds });
-        }
-        // Re-render to update highlights
+        _syncSelectionToApp();
         render();
     }
 
-    /** Clear selection/exit edit */
+    /** Toggle a single group ID */
+    function _toggleGroup(bgId, select) {
+        if (select) {
+            _selectedIds[bgId] = true;
+        } else {
+            delete _selectedIds[bgId];
+        }
+        _syncSelectionToApp();
+        render();
+    }
+
+    /** Sync _selectedIds state to app.js (enter/exit edit mode) */
+    function _syncSelectionToApp() {
+        var sel = _getEditSelection();
+        if (sel && sel.groupIds.length > 0) {
+            // Set first selected group as active for sub-tab panels
+            GT.state.setActiveBaseGroupId(sel.groupIds[0]);
+            if (GT.ui && typeof GT.ui.enterEditMode === 'function') {
+                GT.ui.enterEditMode(sel);
+            }
+        } else {
+            if (GT.ui && typeof GT.ui.exitEditMode === 'function') {
+                GT.ui.exitEditMode();
+            }
+        }
+    }
+
+    /** Select a batch — replaced by _toggleBatch; kept for API compat */
+    function _selectBatch(batchKey) {
+        _toggleBatch(batchKey, true);
+    }
+
+    /** Clear all selection */
     function _clearSelection() {
-        _activeBatchKey = null;
-        _editSelection = null;
-        // Notify app.js to exit edit mode
-        if (GT.ui && typeof GT.ui.exitEditMode === 'function') {
-            GT.ui.exitEditMode();
-        }
+        _selectedIds = {};
+        _syncSelectionToApp();
         render();
     }
 
-    /** Save edits: apply current batch state to all groups in the batch */
+    /** Save edits: apply reference group params to all selected groups */
     function saveEditChanges() {
-        if (!_editSelection || !_editSelection.groupIds.length) {
-            alert('未选中任何批次');
+        var sel = _getEditSelection();
+        if (!sel || !sel.groupIds.length) {
+            alert('未选中任何基础组');
             return;
         }
-        // The actual save happens in the sub-tab panels (groups/fee/close_today/rebalance)
-        // which write via GT.datamodel.base_groups.update(). This function is called
-        // when user clicks "保存修改" — it just exits edit mode.
+        // Use first selected group as reference
+        var refGroup = GT.datamodel.base_groups.get(sel.groupIds[0]);
+        if (!refGroup) { _clearSelection(); return; }
+        // Batch-sync shared settings
+        var sharedKeys = ['feeMode', 'feeRate', 'useCloseToday', 'rebalanceMode', 'isAllGroups'];
+        for (var i = 0; i < sel.groupIds.length; i++) {
+            var patch = {};
+            for (var k = 0; k < sharedKeys.length; k++) {
+                var key = sharedKeys[k];
+                if (refGroup[key] !== undefined) {
+                    patch[key] = refGroup[key];
+                }
+            }
+            try {
+                GT.datamodel.base_groups.update(sel.groupIds[i], patch);
+            } catch (err) { /* skip */ }
+        }
         _clearSelection();
     }
 
@@ -387,14 +447,14 @@
         if (_mounted) { render(); }
     }
 
-    /** Get current edit selection */
+    /** Get current edit selection (computed from _selectedIds) */
     function getEditSelection() {
-        return _editSelection;
+        return _getEditSelection();
     }
 
-    /** Get active batch key */
-    function getActiveBatchKey() {
-        return _activeBatchKey;
+    /** Get whether any group is selected */
+    function hasSelection() {
+        return Object.keys(_selectedIds).length > 0;
     }
 
     // ---------------------------------------------------------------------------
@@ -406,12 +466,13 @@
         unmount: unmount,
         refresh: refresh,
         render: render,
-        // Batch operations
-        selectBatch: _selectBatch,
+        // Batch / multi-select operations
+        toggleBatch: _toggleBatch,
+        toggleGroup: _toggleGroup,
         clearSelection: _clearSelection,
         saveEditChanges: saveEditChanges,
         getEditSelection: getEditSelection,
-        getActiveBatchKey: getActiveBatchKey,
+        hasSelection: hasSelection,
     };
 
     GT.log('panels.base.list loaded');
