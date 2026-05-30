@@ -32,6 +32,20 @@
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    /** Look up a submission label by testerId (via baseGroupId → base_groups → testerId) */
+    function _testerLabel(node) {
+        if (!node.baseGroupId) return '—';
+        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+        if (!bg || !bg.testerId) return '—';
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(bg.testerId)) {
+                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
+            }
+        }
+        return bg.testerId || '—';
+    }
+
     /**
      * Count how many registrations reference this derived group.
      */
@@ -207,6 +221,11 @@
         htmlArr.push('<span class="derived-node-name">' + escapeHTML(node.name) + '</span>');
         htmlArr.push('</td>');
 
+        // Tester
+        htmlArr.push('<td style="padding:6px 8px;font-size:12px;color:#555;">');
+        htmlArr.push(escapeHTML(_testerLabel(node)));
+        htmlArr.push('</td>');
+
         // Badge
         htmlArr.push('<td style="padding:6px 8px;font-size:11px;color:#666;">');
         htmlArr.push(_nodeBadge(node));
@@ -243,6 +262,7 @@
             htmlArr.push('<thead><tr style="background:#f6f8fa;border-bottom:2px solid #d0d5dd;">');
             htmlArr.push('<th style="padding:6px 8px;width:32px;"></th>');
             htmlArr.push('<th style="padding:6px 8px;text-align:left;">名称</th>');
+            htmlArr.push('<th style="padding:6px 8px;text-align:left;">测试器</th>');
             htmlArr.push('<th style="padding:6px 8px;text-align:left;">类型</th>');
             htmlArr.push('<th style="padding:6px 8px;text-align:right;">操作</th>');
             htmlArr.push('</tr></thead><tbody>');

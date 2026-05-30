@@ -3101,6 +3101,21 @@
         if (window.submissions && window.submissions.length > 0) {
             window.renderGroupTabs(window.submissions);
         }
+
+        // 绑定分组组合设置折叠/展开
+        var sectionHeader = document.getElementById('gt-section-header');
+        var sectionToggle = document.getElementById('gt-section-toggle');
+        var layerTabs = document.getElementById('gt-layer-tabs');
+        if (sectionHeader && layerTabs && sectionToggle) {
+            // 移除 HTML 上的 inline onclick，用 JS 统一管理
+            sectionHeader.removeAttribute('onclick');
+            sectionHeader.addEventListener('click', function() {
+                var collapsed = layerTabs.classList.toggle('gt-collapsed');
+                sectionToggle.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+            });
+            // 初始箭头状态
+            sectionToggle.style.transform = 'rotate(0deg)';
+        }
     }
 
     function bindGroupDetailOverlay() {

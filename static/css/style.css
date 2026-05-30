@@ -491,3 +491,8 @@ th {
 .picker-scope-body {
     padding-left: 16px;
 }
+
+/* ── GroupTest: Foldable section header ── */
+#gt-layer-tabs.gt-collapsed {
+    display: none;
+}

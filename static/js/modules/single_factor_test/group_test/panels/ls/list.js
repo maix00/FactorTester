@@ -53,6 +53,22 @@
         return id;
     }
 
+    /** Look up tester label via derivedGroupId → baseGroupId → testerId */
+    function _testerLabel(dgId) {
+        if (!dgId) return '—';
+        var dg = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(dgId);
+        if (!dg || !dg.baseGroupId) return '—';
+        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(dg.baseGroupId);
+        if (!bg || !bg.testerId) return '—';
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(bg.testerId)) {
+                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
+            }
+        }
+        return bg.testerId || '—';
+    }
+
     // ---------------------------------------------------------------------------
     // Toolbar
     // ---------------------------------------------------------------------------
@@ -189,6 +205,7 @@
             html += '<th style="padding:8px 12px;text-align:left;">名称</th>';
             html += '<th style="padding:8px 12px;text-align:left;">多头组</th>';
             html += '<th style="padding:8px 12px;text-align:left;">空头组</th>';
+            html += '<th style="padding:8px 12px;text-align:left;">测试器</th>';
             html += '<th style="padding:8px 12px;text-align:center;">状态</th>';
             html += '<th style="padding:8px 12px;text-align:center;">操作</th>';
             html += '</tr></thead><tbody>';
@@ -200,11 +217,14 @@
                 var staleTag = item.needsRegenerate
                     ? '<span style="padding:1px 6px;background:#fef3c7;color:#d97706;border-radius:3px;font-size:11px;">待更新</span>'
                     : '<span style="padding:1px 6px;background:#d1fae5;color:#059669;border-radius:3px;font-size:11px;">就绪</span>';
+                // Show tester from long group (long/short should share same tester via base_groups)
+                var testerText = _testerLabel(item.longGroupId);
 
                 html += '<tr class="ls-config-row" data-ls-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
                 html += '<td style="padding:8px 12px;">' + escapeHTML(item.name) + '</td>';
                 html += '<td style="padding:8px 12px;font-family:monospace;font-size:12px;">' + escapeHTML(_dgName(item.longGroupId)) + '</td>';
                 html += '<td style="padding:8px 12px;font-family:monospace;font-size:12px;">' + escapeHTML(_dgName(item.shortGroupId)) + '</td>';
+                html += '<td style="padding:8px 12px;font-size:12px;color:#555;">' + escapeHTML(testerText) + '</td>';
                 html += '<td style="padding:8px 12px;text-align:center;">' + staleTag + '</td>';
                 html += '<td style="padding:8px 12px;text-align:center;white-space:nowrap;">';
                 html += '<button class="ls-edit-btn" data-ls-id="' + escapeHTML(item.id) + '" style="margin-right:4px;padding:2px 8px;font-size:12px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">✏️ 编辑</button>';
