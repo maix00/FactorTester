@@ -121,7 +121,8 @@
                     Promise.resolve(window.renderICTabs(submissions)).catch(function(e) {
                         console.error('刷新 IC 测试标签失败:', e);
                     });
-                } else if (typeof window.renderGroupTabs === 'function') {
+                }
+                if (typeof window.renderGroupTabs === 'function') {
                     window.renderGroupTabs(submissions);
                 }
             } catch (e) {
