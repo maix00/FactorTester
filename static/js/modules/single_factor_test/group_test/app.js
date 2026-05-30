@@ -2448,9 +2448,7 @@
         };
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
-        var runAllBtn = document.getElementById('run_all_group_tests_btn');
         if (runBtn) runBtn.disabled = true;
-        if (runAllBtn) runAllBtn.disabled = true;
         clearCachedGroupResultsForSubmission(submissionId);
         clearGroupFactorStatuses(submissionId);
         clearResults({ clearStatus: true });
@@ -2545,6 +2543,12 @@
         // Base tab panels
         if (P.base && P.base.list) {
             GT_PANEL_REGISTRY.base.push({ name: 'list', label: '基础组列表', containerId: 'base-groups-list', panel: P.base.list });
+        }
+        if (P.base && P.base.add_tester) {
+            GT_PANEL_REGISTRY.base.push({ name: 'add_tester', label: '测试器与分组数(序号)', containerId: 'base-add-tester', panel: P.base.add_tester });
+        }
+        if (P.base && P.base.add_factors) {
+            GT_PANEL_REGISTRY.base.push({ name: 'add_factors', label: '因子选择', containerId: 'base-add-factors', panel: P.base.add_factors });
         }
         if (P.base && P.base.groups) {
             GT_PANEL_REGISTRY.base.push({ name: 'groups', label: '分组设置', containerId: 'base-groups-settings', panel: P.base.groups });
@@ -2991,8 +2995,6 @@
         setTimeout(syncFromTimeModule, 0);
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
-        var runAllBtn = document.getElementById('run_all_group_tests_btn');
-        if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
 
@@ -3005,6 +3007,159 @@
 
             var _currentMainTab = 'base';
             var _currentPanel = null;
+            /** Current panel mode: 'list' (default), 'add' (adding new groups), 'edit' (editing selection) */
+            var _panelMode = 'list';
+            /** In add mode: { testerId, groupCount, allGroups (bool), groupIndex, selectedFactors:[alias] } */
+            var _addDraft = null;
+            /** In edit mode: Set of selected base-group IDs or batch keys */
+            var _editSelection = null;
+
+            /** Render the sub-tab action buttons based on current mode */
+            function _renderSubTabActions() {
+                var actionsBar = document.getElementById('gt-sub-tab-actions');
+                if (!actionsBar) return;
+                var html = '';
+                if (_panelMode === 'add') {
+                    html += '<button id="gt-action-submit" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">提交基础组</button>';
+                    html += '<button id="gt-action-cancel" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消新建</button>';
+                } else if (_panelMode === 'edit') {
+                    html += '<button id="gt-action-save" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存修改</button>';
+                    html += '<button id="gt-action-cancel-edit" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消编辑</button>';
+                } else {
+                    // Normal list mode: show add button
+                    html += '<button id="gt-action-add" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
+                }
+                actionsBar.innerHTML = html;
+                _bindActionButtons();
+            }
+
+            function _bindActionButtons() {
+                var addBtn = document.getElementById('gt-action-add');
+                if (addBtn) {
+                    addBtn.addEventListener('click', function() {
+                        _enterAddMode();
+                    });
+                }
+                var submitBtn = document.getElementById('gt-action-submit');
+                if (submitBtn) {
+                    submitBtn.addEventListener('click', function() {
+                        _submitAddBatches();
+                    });
+                }
+                var cancelBtn = document.getElementById('gt-action-cancel');
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', function() {
+                        _exitAddMode();
+                    });
+                }
+                var saveBtn = document.getElementById('gt-action-save');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', function() {
+                        _saveEditChanges();
+                    });
+                }
+                var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
+                if (cancelEditBtn) {
+                    cancelEditBtn.addEventListener('click', function() {
+                        _exitEditMode();
+                    });
+                }
+            }
+
+            function _enterAddMode() {
+                _panelMode = 'add';
+                _addDraft = { testerId: null, groupCount: 2, allGroups: true, groupIndex: 1, selectedFactors: [] };
+                _renderSubTabActions();
+                // Mount the first add-flow sub-tab
+                mountSubTab('base', 'add_tester');
+            }
+
+            function _exitAddMode() {
+                _panelMode = 'list';
+                _addDraft = null;
+                _renderSubTabActions();
+                mountSubTab('base', 'list');
+            }
+
+            function _submitAddBatches() {
+                if (!_addDraft || !_addDraft.testerId) { alert('请先选择测试器'); return; }
+                var gc = _addDraft.groupCount;
+                if (gc < 1) { alert('分组数必须 ≥ 1'); return; }
+                var factors = _addDraft.selectedFactors;
+                if (factors.length === 0) { alert('请至少选择一个因子'); return; }
+
+                // Use the add_factors panel to perform the batch creation
+                var addFactorsPanel = GT_PANEL_REGISTRY['base'].find(function(p) { return p.name === 'add_factors'; });
+                if (addFactorsPanel && addFactorsPanel.panel && typeof addFactorsPanel.panel.submitAddBatches === 'function') {
+                    var result = addFactorsPanel.panel.submitAddBatches(_addDraft);
+                    if (result && result.added) {
+                        GT.log('_submitAddBatches: added ' + result.added + ' groups');
+                    }
+                }
+                _exitAddMode();
+            }
+
+            function _enterEditMode(selection) {
+                _panelMode = 'edit';
+                _editSelection = selection || {};
+                _renderSubTabActions();
+            }
+
+            function _exitEditMode() {
+                _panelMode = 'list';
+                _editSelection = null;
+                _renderSubTabActions();
+                // Refresh the list panel to clear highlights
+                var listPanel = GT.panels && GT.panels.base && GT.panels.base.list;
+                if (listPanel && typeof listPanel.clearSelection === 'function') {
+                    listPanel.clearSelection();
+                }
+                if (_currentPanel && typeof _currentPanel.refresh === 'function') {
+                    _currentPanel.refresh();
+                }
+            }
+
+            function _saveEditChanges() {
+                // Get the list panel's current edit selection
+                var listPanel = GT.panels && GT.panels.base && GT.panels.base.list;
+                if (!listPanel) { _exitEditMode(); return; }
+                var sel = listPanel.getEditSelection();
+                if (!sel || !sel.groupIds || sel.groupIds.length === 0) {
+                    alert('未选中任何批次');
+                    return;
+                }
+                // Use the first group as reference for shared settings
+                var refGroup = GT.datamodel.base_groups.get(sel.groupIds[0]);
+                if (!refGroup) { _exitEditMode(); return; }
+                // Batch-sync shared settings: feeMode, feeRate, closeTodayMode, rebalanceMode
+                // from the reference group to all groups in the batch
+                var sharedKeys = ['feeMode', 'feeRate', 'closeTodayMode', 'rebalanceMode', 'isAllGroups'];
+                for (var i = 0; i < sel.groupIds.length; i++) {
+                    var patch = {};
+                    for (var k = 0; k < sharedKeys.length; k++) {
+                        var key = sharedKeys[k];
+                        if (refGroup[key] !== undefined) {
+                            patch[key] = refGroup[key];
+                        }
+                    }
+                    try {
+                        GT.datamodel.base_groups.update(sel.groupIds[i], patch);
+                    } catch (err) { /* skip */ }
+                }
+                _exitEditMode();
+            }
+
+            // Expose mode management
+            GT.ui.getPanelMode = function() { return _panelMode; };
+            GT.ui.getAddDraft = function() { return _addDraft; };
+            GT.ui.updateAddDraft = function(patch) { if (_addDraft) Object.assign(_addDraft, patch); };
+            GT.ui.getEditSelection = function() { return _editSelection; };
+            GT.ui.enterEditMode = _enterEditMode;
+            GT.ui.exitEditMode = _exitEditMode;
+            GT.ui.enterAddMode = _enterAddMode;
+            GT.ui.exitAddMode = _exitAddMode;
+            GT.ui.renderSubTabActions = _renderSubTabActions;
+            GT.ui.switchToAddSubTab = function(name) { mountSubTab('base', name); };
 
             /** Call unmount on currently mounted panel (if any) */
             function _unmountCurrent() {
@@ -3049,13 +3204,23 @@
                 _unmountCurrent();
                 var panelList = GT_PANEL_REGISTRY[mainTab];
                 if (!panelList) return;
-                var entry = panelList.find(function(p) { return p.name === subTabName; });
+
+                // Filter panels based on current mode
+                var filteredList = panelList;
+                if (_panelMode === 'add') {
+                    // In add mode, only show add_tester and add_factors
+                    filteredList = panelList.filter(function(p) {
+                        return p.name === 'add_tester' || p.name === 'add_factors';
+                    });
+                }
+
+                var entry = filteredList.find(function(p) { return p.name === subTabName; });
                 if (!entry) return;
 
-                // Render sub-tabs
+                // Render sub-tabs (filtered)
                 if (subTabsBar) {
                     var stHtml = '';
-                    panelList.forEach(function(p) {
+                    filteredList.forEach(function(p) {
                         stHtml += '<button class="gt-sub-tab' + (p.name === subTabName ? ' active' : '') + '" data-subtab="' + p.name + '">' + p.label + '</button>';
                     });
                     subTabsBar.innerHTML = stHtml;
@@ -3076,6 +3241,9 @@
                     entry.panel.mount();
                     _currentPanel = entry.panel;
                 }
+
+                // Always refresh sub-tab actions
+                _renderSubTabActions();
             }
 
             // Bind main tab clicks
@@ -3112,9 +3280,24 @@
             sectionHeader.addEventListener('click', function() {
                 var collapsed = layerTabs.classList.toggle('gt-collapsed');
                 sectionToggle.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+                // Scroll to reveal tab content when expanding
+                if (!collapsed && layerTabs) {
+                    layerTabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             });
             // 初始箭头状态
             sectionToggle.style.transform = 'rotate(0deg)';
+        }
+
+        // ── Click-on-empty-area exits edit mode ──
+        var panelContainer = document.getElementById('gt-panel-container');
+        if (panelContainer) {
+            panelContainer.addEventListener('click', function(e) {
+                // Only react if clicking the container itself (not children), and in edit mode
+                if (e.target === panelContainer && GT.ui.getPanelMode() === 'edit') {
+                    GT.ui.exitEditMode();
+                }
+            });
         }
     }
 
@@ -3175,18 +3358,15 @@
         var container = document.getElementById('group-tab-container');
         var subTabsContainer = document.getElementById('gt-submission-tabs');
         var runBtn = document.getElementById('run_group_test_btn');
-        var runAllBtn = document.getElementById('run_all_group_tests_btn');
 
         if (!submissions || submissions.length === 0) {
             // Update both old and new containers
             if (container) container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
             if (subTabsContainer) subTabsContainer.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
             if (runBtn) runBtn.style.display = 'none';
-            if (runAllBtn) runAllBtn.style.display = 'none';
             return;
         }
         if (runBtn) runBtn.style.display = '';
-        if (runAllBtn) runAllBtn.style.display = '';
 
         var factorList = window.factorList || [];
         var activeSubmission = submissions.find(function(sub) {
@@ -3438,9 +3618,7 @@
                     container.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
                 }
                 var runBtn = document.getElementById('run_group_test_btn');
-                var runAllBtn = document.getElementById('run_all_group_tests_btn');
                 if (runBtn) runBtn.style.display = 'none';
-                if (runAllBtn) runAllBtn.style.display = 'none';
             }
         });
     })();

@@ -15,14 +15,16 @@
     // ---------------------------------------------------------------------------
 
     var _containerId = 'base-groups-list';
-    var _modalId = 'base-group-form-modal';
-    var _formId = 'base-group-form';
 
     // Track whether panel is currently mounted (sub-tab visible)
     var _mounted = false;
 
-    // Cache current active ID for highlight tracking
-    var _activeId = null;
+    // Cache current active batch key for highlight tracking
+    // Batch key format: "testerId|factorAlias|groupCount"
+    var _activeBatchKey = null;
+
+    // Edit state for sub-tab-based edit mode
+    var _editSelection = null;  // { batchKey, groupIds:[id,...] }
 
     /** Look up a submission label by testerId */
     function _testerLabel(testerId) {
@@ -117,408 +119,51 @@
     }
 
     // ---------------------------------------------------------------------------
-    // Modal management
+    // Batch helpers
     // ---------------------------------------------------------------------------
 
-    /** Track state during Add modal (not used in Edit mode) */
-    var _addState = null;  // { step:1|2, testerId, groupCount, selectedFactors:[alias], allGroups:bool, groupIndex }
-
-    function _showModal(editData) {
-        var existing = $(_modalId);
-        if (existing) { existing.remove(); }
-
-        var isEdit = !!editData;
-        _addState = null;
-
-        var title = isEdit ? '编辑基础组' : '新增基础组';
-        var modalBody = isEdit ? _buildEditForm(editData) : _buildAddForm();
-
-        var html = '<div id="' + _modalId + '" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:flex-start;justify-content:center;z-index:10000;overflow-y:auto;padding:40px 0;">';
-        html += '<div style="background:#fff;border-radius:8px;padding:24px;min-width:520px;max-width:700px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">';
-        html += '<h3 style="margin:0 0 16px 0;">' + title + '</h3>';
-        html += '<form id="' + _formId + '" onsubmit="return false;">';
-        html += modalBody;
-        html += '</form></div></div>';
-
-        document.body.insertAdjacentHTML('beforeend', html);
-
-        // Store editing ID
-        $(_modalId)._editId = isEdit ? editData.id : null;
-
-        // Bind cancel
-        $('bgf-cancel').addEventListener('click', _closeModal);
-
-        // Bind backdrop click
-        $(_modalId).addEventListener('click', function(e) {
-            if (e.target === this) _closeModal();
-        });
-
-        if (isEdit) {
-            $(_formId).addEventListener('submit', _handleEditSubmit);
-        } else {
-            _initAddStep1();
-        }
+    /** Build a batch key from (testerId, factorAlias, groupCount) */
+    function _batchKey(testerId, factorAlias, groupCount) {
+        return String(testerId) + '|' + factorAlias + '|' + groupCount;
     }
 
-    // ── Edit form (simplified, allows overriding name/fields) ──
-
-    function _buildEditForm(editData) {
-        var subs = window.submissions || [];
-
-        var html = '';
-        html += '<label style="display:block;margin-bottom:12px;">';
-        html += '<span style="display:block;font-size:13px;margin-bottom:4px;">名称</span>';
-        html += '<input type="text" id="bgf_name" value="' + escapeHTML(editData.name || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '</label>';
-
-        html += '<label style="display:block;margin-bottom:12px;">';
-        html += '<span style="display:block;font-size:13px;margin-bottom:4px;">测试器</span>';
-        html += '<select id="bgf_testerId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        for (var i = 0; i < subs.length; i++) {
-            var subId = String(subs[i].id);
-            var isPg = !!subs[i].product_group;
-            var subLabel = isPg ? ('📦 ' + (subs[i].product_group || subs[i].label)) : (subs[i].label || ('测试器 #' + subId));
-            var sel = (String(editData.testerId) === subId) ? ' selected' : '';
-            html += '<option value="' + escapeHTML(subId) + '"' + sel + '>' + escapeHTML(subLabel) + '</option>';
-        }
-        html += '</select>';
-        html += '</label>';
-
-        html += '<label style="display:block;margin-bottom:12px;">';
-        html += '<span style="display:block;font-size:13px;margin-bottom:4px;">因子别名</span>';
-        html += '<input type="text" id="bgf_factorAlias" value="' + escapeHTML(editData.factorAlias || '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '</label>';
-
-        html += '<label style="display:block;margin-bottom:12px;">';
-        html += '<span style="display:block;font-size:13px;margin-bottom:4px;">分组数</span>';
-        html += '<input type="number" id="bgf_groupCount" value="' + (editData.groupCount || 2) + '" min="1" step="1" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '</label>';
-
-        html += '<label style="display:block;margin-bottom:12px;">';
-        html += '<span style="display:block;font-size:13px;margin-bottom:4px;">分组索引 (1-based)</span>';
-        html += '<input type="number" id="bgf_groupIndex" value="' + (editData.groupIndex || 1) + '" min="1" step="1" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '</label>';
-
-        html += '<label style="display:block;margin-bottom:16px;">';
-        html += '<input type="checkbox" id="bgf_isAllGroups" ' + (editData.isAllGroups ? 'checked' : '') + '>';
-        html += '<span style="font-size:13px;margin-left:4px;">所有分组</span>';
-        html += '</label>';
-
-        html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
-        html += '<button type="button" id="bgf-cancel" style="padding:6px 16px;border:1px solid #ddd;border-radius:4px;background:#f6f8fa;cursor:pointer;">取消</button>';
-        html += '<button type="submit" id="bgf-save" style="padding:6px 16px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">保存</button>';
-        html += '</div>';
-
-        return html;
-    }
-
-    function _handleEditSubmit(e) {
-        e.preventDefault();
-        var editId = $(_modalId)._editId;
-        var data = {
-            name: $('bgf_name').value.trim(),
-            testerId: $('bgf_testerId').value,
-            factorAlias: $('bgf_factorAlias').value.trim(),
-            groupCount: parseInt($('bgf_groupCount').value, 10) || 2,
-            groupIndex: parseInt($('bgf_groupIndex').value, 10) || 1,
-            isAllGroups: $('bgf_isAllGroups').checked,
-        };
-        try {
-            if (editId) {
-                GT.datamodel.base_groups.update(editId, data);
+    /** Group items into batches { key, testerId, factorAlias, groupCount, items:[...] } sorted by key */
+    function _buildBatches(items) {
+        var batchMap = {};
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var key = _batchKey(item.testerId, item.factorAlias, item.groupCount);
+            if (!batchMap[key]) {
+                batchMap[key] = {
+                    key: key,
+                    testerId: item.testerId,
+                    factorAlias: item.factorAlias,
+                    groupCount: item.groupCount,
+                    items: []
+                };
             }
-            _closeModal();
-        } catch (err) {
-            alert('操作失败: ' + err.message);
+            batchMap[key].items.push(item);
         }
+        // Sort batches by key for stable display
+        var keys = Object.keys(batchMap).sort();
+        var result = [];
+        for (var k = 0; k < keys.length; k++) {
+            result.push(batchMap[keys[k]]);
+        }
+        return result;
     }
 
-    // ── Add form (step-based) ──
-
-    function _buildAddForm() {
-        // Container with id=bgf-add-body that gets rebuilt on step transitions
-        var html = '<div id="bgf-add-body"></div>';
-        html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">';
-        html += '<button type="button" id="bgf-cancel" style="padding:6px 16px;border:1px solid #ddd;border-radius:4px;background:#f6f8fa;cursor:pointer;">取消</button>';
-        html += '</div>';
-        return html;
-    }
-
-    /** Step 1: pick tester (printed list, not dropdown) + group count */
-    function _initAddStep1() {
-        _addState = { step: 1, testerId: null, groupCount: 2, selectedFactors: [], allGroups: false, groupIndex: 1 };
-        var body = $('bgf-add-body');
-        if (!body) return;
-
-        var subs = window.submissions || [];
-        var html = '';
-
-        // Tester list
-        html += '<div style="margin-bottom:16px;">';
-        html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#333;">选择测试器 <span style="color:red;">*</span></div>';
-        if (subs.length === 0) {
-            html += '<div style="color:#888;font-size:12px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
-        } else {
-            html += '<div id="bgf-tester-list" style="display:flex;flex-wrap:wrap;gap:6px;">';
-            for (var i = 0; i < subs.length; i++) {
-                var sub = subs[i];
-                var subId = String(sub.id);
-                var isPg = !!sub.product_group;
-                var icon = isPg ? '📦 ' : '📁 ';
-                var label = isPg ? (sub.product_group || sub.label) : (sub.label || ('测试器 #' + subId));
-                var tag = isPg ? '<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;padding:1px 4px;border-radius:3px;margin-left:4px;">产品组</span>'
-                    : '<span style="font-size:10px;background:#fef3c7;color:#b45309;padding:1px 4px;border-radius:3px;margin-left:4px;">路径组</span>';
-                html += '<button type="button" class="bgf-tester-card" data-tester-id="' + escapeHTML(subId) + '"'
-                    + ' style="padding:8px 12px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;text-align:left;transition:all 0.15s;">'
-                    + icon + escapeHTML(label) + tag
-                    + '<br><span style="font-size:11px;color:#888;">ID:' + escapeHTML(subId) + '</span>'
-                    + '</button>';
-            }
-            html += '</div>';
-        }
-        html += '</div>';
-
-        // Group count
-        html += '<div style="margin-bottom:16px;">';
-        html += '<div style="font-size:13px;font-weight:600;margin-bottom:4px;color:#333;">分组数 <span style="color:red;">*</span></div>';
-        html += '<input type="number" id="bgf_groupCount" value="2" min="1" step="1" style="width:100px;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '<div style="font-size:11px;color:#888;margin-top:2px;">大于等于 1 的整数</div>';
-        html += '</div>';
-
-        // Batch add button
-        html += '<div style="margin-bottom:16px;">';
-        html += '<button type="button" id="bgf-batch-add" style="padding:8px 16px;border:none;border-radius:4px;background:#10b981;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">＋ 添加全部因子分组组合</button>';
-        html += '</div>';
-
-        // Divider
-        html += '<div style="border-top:1px solid #e5e7eb;margin:16px 0;position:relative;">';
-        html += '<span style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#fff;padding:0 8px;font-size:11px;color:#888;">或单独选择</span>';
-        html += '</div>';
-
-        // Factor list
-        html += '<div style="margin-bottom:16px;">';
-        html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#333;">选择因子 <span style="color:red;">*</span></div>';
-        var factors = window.factorList || [];
-        if (factors.length === 0) {
-            html += '<div style="color:#888;font-size:12px;">暂无因子数据</div>';
-        } else {
-            html += '<div id="bgf-factor-list" style="display:flex;flex-wrap:wrap;gap:6px;">';
-            for (var j = 0; j < factors.length; j++) {
-                var alias = factors[j].alias || factors[j].name || '';
-                html += '<button type="button" class="bgf-factor-card" data-factor-alias="' + escapeHTML(alias) + '"'
-                    + ' style="padding:6px 12px;border:1px solid #d0d5dd;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:all 0.15s;">'
-                    + escapeHTML(alias) + '</button>';
-            }
-            html += '</div>';
-        }
-        html += '</div>';
-
-        // Group index + "所有分组" checkbox on the right
-        html += '<div style="margin-bottom:16px;">';
-        html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#333;">分组索引 (从1开始)</div>';
-        html += '<div style="display:flex;align-items:center;gap:12px;">';
-        html += '<input type="number" id="bgf_groupIndex" value="1" min="1" step="1" style="width:100px;padding:6px;border:1px solid #ddd;border-radius:4px;">';
-        html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;white-space:nowrap;">';
-        html += '<input type="checkbox" id="bgf_isAllGroups"> <span>所有分组</span>';
-        html += '</label>';
-        html += '</div>';
-        html += '</div>';
-
-        // Single add button
-        html += '<div style="text-align:right;">';
-        html += '<button type="button" id="bgf-single-add" style="padding:6px 16px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;font-size:13px;">确认添加</button>';
-        html += '</div>';
-
-        body.innerHTML = html;
-
-        // ── Bind Step 1 events ──
-
-        // Tester cards
-        var testerCards = body.querySelectorAll('.bgf-tester-card');
-        for (var ti = 0; ti < testerCards.length; ti++) {
-            testerCards[ti].addEventListener('click', function() {
-                var tid = this.getAttribute('data-tester-id');
-                _addState.testerId = tid;
-                // Highlight
-                testerCards.forEach(function(c) {
-                    c.style.borderColor = '#d0d5dd';
-                    c.style.background = '#fff';
-                });
-                this.style.borderColor = '#0078d4';
-                this.style.background = '#e8f4fd';
-            });
-        }
-
-        // Factor cards
-        var factorCards = body.querySelectorAll('.bgf-factor-card');
-        for (var fi = 0; fi < factorCards.length; fi++) {
-            factorCards[fi].addEventListener('click', function() {
-                var alias = this.getAttribute('data-factor-alias');
-                var idx = _addState.selectedFactors.indexOf(alias);
-                if (idx >= 0) {
-                    _addState.selectedFactors.splice(idx, 1);
-                    this.style.borderColor = '#d0d5dd';
-                    this.style.background = '#fff';
-                } else {
-                    _addState.selectedFactors.push(alias);
-                    this.style.borderColor = '#0078d4';
-                    this.style.background = '#e8f4fd';
-                }
-            });
-        }
-
-        // Group count
-        var gcEl = $('bgf_groupCount');
-        if (gcEl) {
-            gcEl.addEventListener('input', function() {
-                var v = parseInt(this.value, 10);
-                if (v >= 1) _addState.groupCount = v;
-            });
-        }
-
-        // All groups checkbox → gray out group index
-        var allG = $('bgf_isAllGroups');
-        var gIdx = $('bgf_groupIndex');
-        if (allG && gIdx) {
-            allG.addEventListener('change', function() {
-                _addState.allGroups = this.checked;
-                gIdx.disabled = this.checked;
-                gIdx.style.background = this.checked ? '#f0f0f0' : '';
-                gIdx.style.color = this.checked ? '#999' : '';
-            });
-        }
-
-        // Group index
-        if (gIdx) {
-            gIdx.addEventListener('input', function() {
-                var v = parseInt(this.value, 10);
-                if (v >= 1) _addState.groupIndex = v;
-            });
-        }
-
-        // Batch add button
-        var batchBtn = $('bgf-batch-add');
-        if (batchBtn) {
-            batchBtn.addEventListener('click', function() {
-                if (!_addState.testerId) { alert('请先选择测试器'); return; }
-                var gc = parseInt($('bgf_groupCount').value, 10) || _addState.groupCount;
-                if (gc < 1) { alert('分组数必须 ≥ 1'); return; }
-                _addState.groupCount = gc;
-                _doBatchAdd(_addState.testerId, gc, window.factorList || []);
-            });
-        }
-
-        // Single add button
-        var singleBtn = $('bgf-single-add');
-        if (singleBtn) {
-            singleBtn.addEventListener('click', function() {
-                if (!_addState.testerId) { alert('请先选择测试器'); return; }
-                if (_addState.selectedFactors.length === 0) { alert('请至少选择一个因子'); return; }
-                var gc = parseInt($('bgf_groupCount').value, 10) || _addState.groupCount;
-                if (gc < 1) { alert('分组数必须 ≥ 1'); return; }
-                _addState.groupCount = gc;
-                _addState.allGroups = $('bgf_isAllGroups').checked;
-                _addState.groupIndex = parseInt($('bgf_groupIndex').value, 10) || 1;
-                _doSingleAdd();
-            });
-        }
-    }
-
-    /** Batch: add ALL factors × [1..groupCount] for the selected tester */
-    function _doBatchAdd(testerId, groupCount, factors) {
-        var aliases = [];
-        for (var fi = 0; fi < factors.length; fi++) {
-            var a = factors[fi].alias || factors[fi].name || '';
-            if (a) aliases.push(a);
-        }
-        var comboLetters = _preComputeComboLetters(testerId, aliases, groupCount);
-
-        var added = 0;
-        for (var fi2 = 0; fi2 < aliases.length; fi2++) {
-            var alias = aliases[fi2];
-            var comboKey = String(testerId) + '|' + alias + '|' + groupCount;
-            var letter = comboLetters[comboKey] || 'A';
-            for (var gi = 1; gi <= groupCount; gi++) {
-                var names = _makeNames(testerId, alias, groupCount, gi, letter);
-                try {
-                    GT.datamodel.base_groups.add({
-                        name: names.name,
-                        shortAlias: names.shortAlias,
-                        testerId: testerId,
-                        factorAlias: alias,
-                        groupCount: groupCount,
-                        groupIndex: gi,
-                        isAllGroups: false,
-                    });
-                    added++;
-                } catch (err) {
-                    // Just skip duplicates
-                }
+    /** Get all group IDs belonging to a batch key */
+    function _batchGroupIds(batchKey) {
+        var items = GT.datamodel.base_groups.getAll();
+        var ids = [];
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            if (_batchKey(item.testerId, item.factorAlias, item.groupCount) === batchKey) {
+                ids.push(item.id);
             }
         }
-        _closeModal();
-        if (added === 0) {
-            alert('未能添加任何基础组（可能全部重复）');
-        }
-    }
-
-    /** Single: add selected factors × (selected index or all groups) */
-    function _doSingleAdd() {
-        var testerId = _addState.testerId;
-        var groupCount = _addState.groupCount;
-        var factors = _addState.selectedFactors;
-        var allGroups = _addState.allGroups;
-        var groupIndex = _addState.groupIndex;
-
-        var comboLetters = _preComputeComboLetters(testerId, factors, groupCount);
-
-        var added = 0;
-        for (var fi = 0; fi < factors.length; fi++) {
-            var alias = factors[fi];
-            var comboKey = String(testerId) + '|' + alias + '|' + groupCount;
-            var letter = comboLetters[comboKey] || 'A';
-            if (allGroups) {
-                for (var gi = 1; gi <= groupCount; gi++) {
-                    var names = _makeNames(testerId, alias, groupCount, gi, letter);
-                    try {
-                        GT.datamodel.base_groups.add({
-                            name: names.name,
-                            shortAlias: names.shortAlias,
-                            testerId: testerId,
-                            factorAlias: alias,
-                            groupCount: groupCount,
-                            groupIndex: gi,
-                            isAllGroups: false,
-                        });
-                        added++;
-                    } catch (err) { /* skip dup */ }
-                }
-            } else {
-                var names2 = _makeNames(testerId, alias, groupCount, groupIndex, letter);
-                try {
-                    GT.datamodel.base_groups.add({
-                        name: names2.name,
-                        shortAlias: names2.shortAlias,
-                        testerId: testerId,
-                        factorAlias: alias,
-                        groupCount: groupCount,
-                        groupIndex: groupIndex,
-                        isAllGroups: false,
-                    });
-                    added++;
-                } catch (err) { /* skip dup */ }
-            }
-        }
-        _closeModal();
-        if (added === 0) {
-            alert('未能添加任何基础组（可能全部重复）');
-        }
-    }
-
-    function _closeModal() {
-        _addState = null;
-        var modal = $(_modalId);
-        if (modal) { modal.remove(); }
+        return ids;
     }
 
     // ---------------------------------------------------------------------------
@@ -527,27 +172,21 @@
 
     function render() {
         var container = $(_containerId);
-        if (!container) {
-            // No container yet — maybe this sub-tab is not mounted
-            return;
-        }
+        if (!container) return;
 
         var items = GT.datamodel.base_groups.getAll();
+        var batches = _buildBatches(items);
 
-        var addBtnHtml = '<button id="base-group-add-btn" style="margin-bottom:12px;padding:6px 16px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;font-size:13px;">＋ 新增基础组</button>';
-
-        if (items.length === 0) {
+        // --- Empty state ---
+        if (batches.length === 0) {
             container.innerHTML = '<div class="group-test-empty-state" style="padding:32px;text-align:center;color:#888;">'
                 + '<div style="margin-bottom:12px;">暂无基础组</div>'
-                + addBtnHtml
+                + '<div style="font-size:12px;color:#aaa;">点击上方 sub-tabs 的 ＋ 按钮新增</div>'
                 + '</div>';
-            // Bind add button
-            var emptyAddBtn = container.querySelector('#base-group-add-btn');
-            if (emptyAddBtn) emptyAddBtn.addEventListener('click', function() { _showModal(null); });
             return;
         }
 
-        var html = addBtnHtml;
+        var html = '';
         html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
         html += '<thead><tr style="background:#f6f8fa;border-bottom:2px solid #d0d5dd;">';
         html += '<th style="padding:8px 12px;text-align:left;">简称</th>';
@@ -559,116 +198,166 @@
         html += '<th style="padding:8px 12px;text-align:center;">操作</th>';
         html += '</tr></thead><tbody>';
 
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            var isActive = item.id === _activeId;
-            var rowClass = isActive ? 'grouptest-row-active' : '';
-            var rowStyle = isActive ? 'background:#e8f4fd;' : '';
+        for (var b = 0; b < batches.length; b++) {
+            var batch = batches[b];
+            var isBatchActive = (batch.key === _activeBatchKey);
 
-            html += '<tr class="grouptest-base-row ' + rowClass + '" data-bg-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
-            html += '<td style="padding:8px 12px;font-weight:600;color:#0078d4;">' + escapeHTML(item.shortAlias || item.name) + '</td>';
-            html += '<td style="padding:8px 12px;font-size:11px;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(item.name) + '</td>';
-            html += '<td style="padding:8px 12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
-            html += '<td style="padding:8px 12px;">' + escapeHTML(item.factorAlias) + '</td>';
-            html += '<td style="padding:8px 12px;text-align:center;">' + item.groupCount + '</td>';
-            html += '<td style="padding:8px 12px;text-align:center;">' + item.groupIndex + '</td>';
-            html += '<td style="padding:8px 12px;text-align:center;white-space:nowrap;">';
-            html += '<button class="grouptest-edit-btn" data-bg-id="' + escapeHTML(item.id) + '" style="margin-right:4px;padding:2px 8px;font-size:12px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">✏️ 编辑</button>';
-            html += '<button class="grouptest-del-btn" data-bg-id="' + escapeHTML(item.id) + '" style="padding:2px 8px;font-size:12px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">🗑️ 删除</button>';
+            // ── Batch header row ──
+            var batchRowStyle = isBatchActive
+                ? 'background:#e8f4fd;border-left:3px solid #0078d4;'
+                : 'background:#f9fafb;border-left:3px solid transparent;';
+            html += '<tr class="grouptest-batch-header" data-batch-key="' + escapeHTML(batch.key) + '"'
+                + ' style="cursor:pointer;' + batchRowStyle + 'border-bottom:1px solid #d0d5dd;">';
+            html += '<td style="padding:6px 12px;font-weight:700;color:' + (isBatchActive ? '#0078d4' : '#333') + ';">'
+                + '📋 ' + escapeHTML(batch.factorAlias) + '</td>';
+            html += '<td style="padding:6px 12px;font-size:11px;color:#555;" colspan="2">'
+                + escapeHTML(_testerLabel(batch.testerId)) + ' — ' + batch.groupCount + ' 组</td>';
+            html += '<td style="padding:6px 12px;"></td>';
+            html += '<td style="padding:6px 12px;text-align:center;"></td>';
+            html += '<td style="padding:6px 12px;text-align:center;"></td>';
+            html += '<td style="padding:6px 12px;text-align:center;white-space:nowrap;">';
+            html += '<button class="grouptest-batch-del-btn" data-batch-key="' + escapeHTML(batch.key) + '"'
+                + ' style="padding:2px 8px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;"'
+                + ' title="删除整个批次">🗑️ 删除批次</button>';
             html += '</td>';
             html += '</tr>';
+
+            // ── Child rows (hidden when batch collapsed? No — always show) ──
+            for (var r = 0; r < batch.items.length; r++) {
+                var item = batch.items[r];
+                var isItemActive = (item.id === GT.state.getActiveBaseGroupId());
+                var itemRowStyle = isItemActive ? 'background:#eef6ff;' : '';
+                html += '<tr class="grouptest-base-row" data-bg-id="' + escapeHTML(item.id) + '"'
+                    + ' data-batch-key="' + escapeHTML(batch.key) + '"'
+                    + ' style="cursor:pointer;border-bottom:1px solid #e8eaed;' + itemRowStyle + '">';
+                html += '<td style="padding:6px 12px;font-weight:600;color:#0078d4;">' + escapeHTML(item.shortAlias || item.name) + '</td>';
+                html += '<td style="padding:6px 12px;font-size:11px;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(item.name) + '</td>';
+                html += '<td style="padding:6px 12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
+                html += '<td style="padding:6px 12px;">' + escapeHTML(item.factorAlias) + '</td>';
+                html += '<td style="padding:6px 12px;text-align:center;">' + item.groupCount + '</td>';
+                html += '<td style="padding:6px 12px;text-align:center;">' + item.groupIndex + '</td>';
+                html += '<td style="padding:6px 12px;text-align:center;white-space:nowrap;">';
+                html += '<button class="grouptest-del-btn" data-bg-id="' + escapeHTML(item.id) + '"'
+                    + ' style="padding:2px 8px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">🗑️</button>';
+                html += '</td>';
+                html += '</tr>';
+            }
         }
 
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Bind add button
-        var addBtn = container.querySelector('#base-group-add-btn');
-        if (addBtn) addBtn.addEventListener('click', function() { _showModal(null); });
-
-        // Bind row clicks
+        // Bind events
         _bindRowEvents(container);
     }
 
     function _bindRowEvents(container) {
-        // Row click → select
+        // ── Batch header click → select batch, enter edit mode ──
+        var batchHeaders = container.querySelectorAll('.grouptest-batch-header');
+        for (var i = 0; i < batchHeaders.length; i++) {
+            batchHeaders[i].addEventListener('click', function(e) {
+                if (e.target.tagName === 'BUTTON') return; // don't select when clicking delete button
+                var batchKey = this.getAttribute('data-batch-key');
+                _selectBatch(batchKey);
+            });
+        }
+
+        // ── Child row click → also select the parent batch (edit mode) ──
         var rows = container.querySelectorAll('.grouptest-base-row');
-        for (var i = 0; i < rows.length; i++) {
-            rows[i].addEventListener('click', function(e) {
-                // Don't select if clicking a button
+        for (var j = 0; j < rows.length; j++) {
+            rows[j].addEventListener('click', function(e) {
                 if (e.target.tagName === 'BUTTON') return;
-                var id = this.getAttribute('data-bg-id');
-                GT.state.setActiveBaseGroupId(id);
+                var batchKey = this.getAttribute('data-batch-key');
+                var bgId = this.getAttribute('data-bg-id');
+                // Select the batch AND the individual group as active
+                _selectBatch(batchKey);
+                GT.state.setActiveBaseGroupId(bgId);
             });
         }
 
-        // Edit button
-        var editBtns = container.querySelectorAll('.grouptest-edit-btn');
-        for (var j = 0; j < editBtns.length; j++) {
-            editBtns[j].addEventListener('click', function(e) {
+        // ── Batch delete ──
+        var batchDelBtns = container.querySelectorAll('.grouptest-batch-del-btn');
+        for (var k = 0; k < batchDelBtns.length; k++) {
+            batchDelBtns[k].addEventListener('click', function(e) {
                 e.stopPropagation();
-                var id = this.getAttribute('data-bg-id');
-                var item = GT.datamodel.base_groups.get(id);
-                if (item) {
-                    _showModal(item);
+                var batchKey = this.getAttribute('data-batch-key');
+                var groupIds = _batchGroupIds(batchKey);
+                if (groupIds.length === 0) return;
+                if (!confirm('确定删除整个批次（共 ' + groupIds.length + ' 个基础组）吗？此操作不可撤销。')) return;
+                for (var gi = 0; gi < groupIds.length; gi++) {
+                    try { GT.datamodel.base_groups.remove(groupIds[gi]); } catch (err) { /* skip */ }
                 }
+                // Clear selection if we deleted the active batch
+                if (_activeBatchKey === batchKey) { _clearSelection(); }
             });
         }
 
-        // Delete button
+        // ── Individual delete ──
         var delBtns = container.querySelectorAll('.grouptest-del-btn');
-        for (var k = 0; k < delBtns.length; k++) {
-            delBtns[k].addEventListener('click', function(e) {
+        for (var d = 0; d < delBtns.length; d++) {
+            delBtns[d].addEventListener('click', function(e) {
                 e.stopPropagation();
                 var id = this.getAttribute('data-bg-id');
                 var item = GT.datamodel.base_groups.get(id);
-                if (item && confirm('确定删除基础组 "' + item.name + '" 吗？此操作不可撤销。')) {
-                    try {
-                        GT.datamodel.base_groups.remove(id);
-                        // Rerender handled by event
-                    } catch (err) {
-                        alert('删除失败: ' + err.message);
-                    }
+                if (!item) return;
+                if (!confirm('确定删除基础组 "' + (item.shortAlias || item.name) + '" 吗？')) return;
+                try { GT.datamodel.base_groups.remove(id); } catch (err) { alert('删除失败: ' + err.message); }
+                // Refresh edit selection if needed
+                if (_editSelection && _editSelection.groupIds.indexOf(id) >= 0) {
+                    _editSelection = null;
                 }
             });
         }
     }
 
-    function _highlightRow(id) {
-        _activeId = id;
-        var container = $(_containerId);
-        if (!container) return;
-
-        // Remove all highlights
-        var allRows = container.querySelectorAll('.grouptest-base-row');
-        for (var i = 0; i < allRows.length; i++) {
-            allRows[i].classList.remove('grouptest-row-active');
-            allRows[i].style.background = '';
+    /** Select a batch → enter list-level edit state */
+    function _selectBatch(batchKey) {
+        _activeBatchKey = batchKey;
+        var groupIds = _batchGroupIds(batchKey);
+        _editSelection = { batchKey: batchKey, groupIds: groupIds };
+        // Set the first group as active so sub-tab panels can edit it
+        if (groupIds.length > 0) {
+            GT.state.setActiveBaseGroupId(groupIds[0]);
         }
-
-        if (!id) return;
-
-        // Add highlight to matching row
-        var row = container.querySelector('.grouptest-base-row[data-bg-id="' + id + '"]');
-        if (row) {
-            row.classList.add('grouptest-row-active');
-            row.style.background = '#e8f4fd';
+        // Notify app.js to enter edit mode
+        if (GT.ui && typeof GT.ui.enterEditMode === 'function') {
+            GT.ui.enterEditMode({ batchKey: batchKey, groupIds: groupIds });
         }
+        // Re-render to update highlights
+        render();
     }
 
-    // ---------------------------------------------------------------------------
-    // Event handlers (for GT.state events)
-    // ---------------------------------------------------------------------------
+    /** Clear selection/exit edit */
+    function _clearSelection() {
+        _activeBatchKey = null;
+        _editSelection = null;
+        // Notify app.js to exit edit mode
+        if (GT.ui && typeof GT.ui.exitEditMode === 'function') {
+            GT.ui.exitEditMode();
+        }
+        render();
+    }
+
+    /** Save edits: apply current batch state to all groups in the batch */
+    function saveEditChanges() {
+        if (!_editSelection || !_editSelection.groupIds.length) {
+            alert('未选中任何批次');
+            return;
+        }
+        // The actual save happens in the sub-tab panels (groups/fee/close_today/rebalance)
+        // which write via GT.datamodel.base_groups.update(). This function is called
+        // when user clicks "保存修改" — it just exits edit mode.
+        _clearSelection();
+    }
 
     function _onBaseGroupsChanged(data) {
-        if (_mounted) {
-            render();
-        }
+        if (_mounted) { render(); }
     }
 
     function _onActiveBaseGroupChanged(data) {
         if (_mounted) {
-            _highlightRow(data.id);
+            // Re-render to update child row highlight
+            render();
         }
     }
 
@@ -676,49 +365,36 @@
     // Public API
     // ---------------------------------------------------------------------------
 
-    /**
-     * Mount the panel — set up container, render, bind events.
-     * Call when switching to this sub-tab.
-     */
     function mount() {
         _mounted = true;
-
-        // Ensure container exists
         var container = $(_containerId);
         if (!container) {
             GT.log('panels.base.list: container #' + _containerId + ' not found');
             return;
         }
-
-        // Sync active state
-        _activeId = GT.state.getActiveBaseGroupId();
-
-        // Listen for changes
         GT.state.on('baseGroupsChanged', _onBaseGroupsChanged);
         GT.state.on('activeBaseGroupChanged', _onActiveBaseGroupChanged);
-
-        // Initial render
         render();
     }
 
-    /**
-     * Unmount the panel — remove event listeners.
-     * Call when switching away from this sub-tab.
-     */
     function unmount() {
         _mounted = false;
         GT.state.off('baseGroupsChanged', _onBaseGroupsChanged);
         GT.state.off('activeBaseGroupChanged', _onActiveBaseGroupChanged);
     }
 
-    /**
-     * Force re-render (useful after manual DOM changes).
-     */
     function refresh() {
-        if (_mounted) {
-            _activeId = GT.state.getActiveBaseGroupId();
-            render();
-        }
+        if (_mounted) { render(); }
+    }
+
+    /** Get current edit selection */
+    function getEditSelection() {
+        return _editSelection;
+    }
+
+    /** Get active batch key */
+    function getActiveBatchKey() {
+        return _activeBatchKey;
     }
 
     // ---------------------------------------------------------------------------
@@ -729,9 +405,13 @@
         mount: mount,
         unmount: unmount,
         refresh: refresh,
-        render: render,       // exposed for testing
-        _showModal: _showModal, // exposed for testing
-        _closeModal: _closeModal,
+        render: render,
+        // Batch operations
+        selectBatch: _selectBatch,
+        clearSelection: _clearSelection,
+        saveEditChanges: saveEditChanges,
+        getEditSelection: getEditSelection,
+        getActiveBatchKey: getActiveBatchKey,
     };
 
     GT.log('panels.base.list loaded');
