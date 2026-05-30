@@ -2552,7 +2552,7 @@
         }
         if (P.base && P.base.fee) {
             // fee panel now includes closeToday toggle (merged from close_today)
-            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '手续费与平今', containerId: 'base-fee-settings', panel: P.base.fee });
+            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '费率', containerId: 'base-fee-settings', panel: P.base.fee });
         }
         if (P.base && P.base.rebalance) {
             GT_PANEL_REGISTRY.base.push({ name: 'rebalance', label: '再平衡', containerId: 'base-rebalance-settings', panel: P.base.rebalance });
