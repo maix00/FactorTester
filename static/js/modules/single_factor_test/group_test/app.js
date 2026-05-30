@@ -2,6 +2,9 @@
     var GT = window.GroupTest;
     if (!GT) { console.warn('[GroupTest] bootstrap missing'); return; }
 
+    // 确保 GT.ui 在全局代码使用前已初始化
+    GT.ui = GT.ui || {};
+
     // 时区：后端返回 UTC epoch，useUTC=false 按浏览器本地时区显示
     if (typeof Highcharts !== 'undefined') {
         Highcharts.setOptions({ global: { useUTC: false } });
@@ -2532,7 +2535,10 @@
     };
 
     /** Call this after all panel scripts loaded to register panels. */
+    var _panelsRegistered = false;
+
     function _registerPanels() {
+        if (_panelsRegistered) return;
         var P = GT.panels;
         if (!P) return;
 
@@ -2580,6 +2586,8 @@
         if (P.ls && P.ls.editor) {
             GT_PANEL_REGISTRY.ls.push({ name: 'editor', label: 'LS 编辑器', containerId: 'ls-editor', panel: P.ls.editor });
         }
+
+        _panelsRegistered = true;
     }
 
     function cacheGroupResult(submissionId, factorAlias, data) {
@@ -3005,7 +3013,8 @@
                 }
                 _currentPanel = null;
                 if (subTabsBar) subTabsBar.innerHTML = '';
-                if (panelContainer) panelContainer.innerHTML = '<div style="color:#888;padding:12px;text-align:center;font-size:13px;">请选择参数面板</div>';
+                // 仅清空容器，让 mountSubTab 负责填充实际内容
+                if (panelContainer) panelContainer.innerHTML = '';
             }
 
             /** Switch to a main tab */
@@ -3023,6 +3032,11 @@
                 var panelList = GT_PANEL_REGISTRY[tabName];
                 if (panelList && panelList.length > 0) {
                     mountSubTab(tabName, panelList[0].name);
+                } else {
+                    // 没有注册面板时显示提示（但不阻塞操作）
+                    if (panelContainer) {
+                        panelContainer.innerHTML = '<div style="color:#888;padding:24px;text-align:center;font-size:13px;">该面板暂未就绪，请稍候或选择提交记录</div>';
+                    }
                 }
 
                 // Show/hide LS drawer trigger
@@ -3214,19 +3228,18 @@
         bindGroupFactorNavigation();
         restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
 
-        // Panels are always mounted by _registerPanels' setTimeout.
-        // This is a safety net: if the panel container is still a placeholder
-        // (e.g., _registerPanels hasn't fired yet or failed), retry once.
+        // 当 submissions 到达时，总是重新挂载当前主 tab 的面板。
+        // 这确保面板能感知到新的 submission 上下文（如基础组列表按 testerId 筛选）。
         if (submissions.length > 0) {
-            var pc = document.getElementById('gt-panel-container');
-            if (pc && !pc.querySelector('.gt-panel-inner')) {
-                setTimeout(function() {
-                    var pc2 = document.getElementById('gt-panel-container');
-                    if (pc2 && !pc2.querySelector('.gt-panel-inner') && GT.ui.switchMainTab) {
-                        var el = document.querySelector('#gt-main-tabs .gt-main-tab.active');
-                        GT.ui.switchMainTab(el ? el.getAttribute('data-tab') : 'base');
-                    }
-                }, 100);
+            // 确保 GT_PANEL_REGISTRY 已注册（可能在 init 之前到达）
+            if (GT_PANEL_REGISTRY && (!GT_PANEL_REGISTRY.base || !GT_PANEL_REGISTRY.base.length)) {
+                _registerPanels();
+            }
+            // 重新挂载当前主 tab 的第一个子面板
+            var activeMainTab = document.querySelector('#gt-main-tabs .gt-main-tab.active');
+            var tabName = activeMainTab ? activeMainTab.getAttribute('data-tab') : 'base';
+            if (GT.ui.switchMainTab) {
+                GT.ui.switchMainTab(tabName);
             }
         }
     };
@@ -3324,7 +3337,6 @@
         init();
     }
     // Expose primary entrypoints under GroupTest (namespaced)
-    GT.ui = GT.ui || {};
     GT.ui.init = init;
     GT.ui.renderTabs = window.renderGroupTabs;
 
