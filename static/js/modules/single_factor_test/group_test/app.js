@@ -2582,8 +2582,15 @@
         }
     }
 
-    // Register panels after a short delay (all panel scripts should be loaded by now)
-    setTimeout(_registerPanels, 0);
+    // Register panels after a short delay (all panel scripts should be loaded by now).
+    // Once registered, always mount the default panel so the user never sees "请先选择提交记录".
+    setTimeout(function() {
+        _registerPanels();
+        // Always mount — no submission is ok; panels handle empty state internally.
+        var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
+        var tabName = panelEl ? panelEl.getAttribute('data-tab') : 'base';
+        switchMainTab(tabName);
+    }, 0);
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
@@ -3078,8 +3085,8 @@
             GT.ui.switchMainTab = switchMainTab;
             GT.ui.mountSubTab = mountSubTab;
 
-            // Auto-switch to base on init
-            switchMainTab('base');
+            // Note: Initial mount is deferred to _registerPanels' setTimeout callback,
+            // because GT_PANEL_REGISTRY is empty until panel scripts populate it.
         })();
         var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
         if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
@@ -3215,15 +3222,19 @@
         bindGroupFactorNavigation();
         restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
 
-        // 当有 submission 但主面板还是占位文本时，自动 mount 当前主 tab 的面板
-        // （模板导入 / 新增提交后 renderGroupTabs 被回调，需要刷新面板内容）
-        if (submissions.length > 0 && GT.ui.switchMainTab) {
-            var panelContainer = document.getElementById('gt-panel-container');
-            var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
-            var currentMainTab = panelEl ? panelEl.getAttribute('data-tab') : 'base';
-            // 只在面板无实际内容时触发（避免重复 mount）
-            if (panelContainer && !panelContainer.querySelector('.gt-panel-inner')) {
-                GT.ui.switchMainTab(currentMainTab);
+        // Panels are always mounted by _registerPanels' setTimeout.
+        // This is a safety net: if the panel container is still a placeholder
+        // (e.g., _registerPanels hasn't fired yet or failed), retry once.
+        if (submissions.length > 0) {
+            var pc = document.getElementById('gt-panel-container');
+            if (pc && !pc.querySelector('.gt-panel-inner')) {
+                setTimeout(function() {
+                    var pc2 = document.getElementById('gt-panel-container');
+                    if (pc2 && !pc2.querySelector('.gt-panel-inner') && GT.ui.switchMainTab) {
+                        var el = document.querySelector('#gt-main-tabs .gt-main-tab.active');
+                        GT.ui.switchMainTab(el ? el.getAttribute('data-tab') : 'base');
+                    }
+                }, 100);
             }
         }
     };
