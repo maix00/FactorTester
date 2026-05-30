@@ -947,3 +947,284 @@ def get_group_ranking_detail():
         return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np, index_list)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
+
+
+# ─────────────────────────────────────────────
+#  Issue #85: 批量分组任务端点
+# ─────────────────────────────────────────────
+
+def _merge_tasks_by_triple(run_tasks: list[dict]) -> dict[tuple, list[dict]]:
+    """按三元组 (submission_id, factor_alias, n_groups) 合并去重。
+
+    返回 {triple: [task, ...]}，同一三元组只执行一次 test_by_group。
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for task in run_tasks:
+        if not isinstance(task, dict):
+            continue
+        sid = str(task.get('submission_id', ''))
+        fa  = str(task.get('factor_alias', ''))
+        ng  = int(task.get('n_groups', 5))
+        triple = (sid, fa, ng)
+        groups.setdefault(triple, []).append(task)
+    return groups
+
+
+def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> dict:
+    """对单个三元组执行 test_by_group，然后为每个 task 计算其 LS/派生组。"""
+    n_groups = triple[2]
+    first = tasks[0]
+    start_date = first.get('start_date')
+    end_date   = first.get('end_date')
+
+    # 解析费率
+    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(first, getattr(tester, 'products', None))
+    rebalance_mode = str(first.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
+
+    time_range = None
+    if start_date and end_date:
+        start_dt = pd.to_datetime(start_date)
+        end_dt   = pd.to_datetime(end_date)
+        tz = getattr(tester.start_date, 'tz', None) if hasattr(tester.start_date, 'tz') else None
+        if tz:
+            if start_dt.tzinfo is None: start_dt = start_dt.tz_localize(tz)
+            if end_dt.tzinfo is None:   end_dt   = end_dt.tz_localize(tz)
+        time_range = (start_dt, end_dt)
+
+    # 收集所有 task 的派生组配置（合并去重）
+    all_derived: list[dict] = []
+    seen_dg: set = set()
+    for t in tasks:
+        for dg in (t.get('derived_groups') or []):
+            if not isinstance(dg, dict):
+                continue
+            key = (dg.get('base_group'), tuple(dg.get('product_names') or []))
+            if key not in seen_dg:
+                seen_dg.add(key)
+                all_derived.append(dg)
+
+    # 执行一次 test_by_group
+    _gt_token = _active_tester.set(tester)
+    _saved_products = tester.products.copy()
+    tester.products = set(_saved_products)
+    try:
+        _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
+            factors=factor, n_groups=n_groups, time_range=time_range,
+            plot_flag=False, save_plot=False, plot_show=False,
+            fee=fee_uniform, fee_map=fee_map,
+            use_closetoday=use_closetoday,
+            rebalance_mode=rebalance_mode,
+            derived_groups=all_derived if all_derived else None,
+        )
+    finally:
+        tester.products = _saved_products
+        _active_tester.reset(_gt_token)
+
+    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+    group_result = tester._get_result(factor).group_result
+    n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
+    n_base = getattr(group_result, 'n_base', n_groups) or n_groups
+    n_derived = getattr(group_result, 'n_derived', 0) or 0
+    derived_info = getattr(group_result, 'derived_info', None) or []
+    _gross = group_result.gross_returns_np if group_result is not None else None
+    gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
+    _fee = group_result.fee_costs_np if group_result is not None else None
+    fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
+
+    # 构建共享的 groups_data + metrics
+    groups_data = []
+    for g in range(n_total):
+        is_derived = g >= n_base
+        vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
+        gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
+        fee_vals   = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
+        entry = {
+            'name': f'Group {g+1}',
+            'timestamps': timestamps,
+            'cumulative_returns': vals,
+            'gross_returns': gross_vals,
+            'fee_costs': fee_vals,
+            'trade_notional_ratios': [
+                round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0
+                for v in group_result.trade_notional_ratio_np[:, g]
+            ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
+        }
+        if is_derived:
+            di = derived_info[g - n_base]
+            entry['name'] = di.get('name', entry['name'])
+            entry['is_derived'] = True
+            entry['derived'] = {
+                'base_group': di['base_group'],
+                'product_names': di['product_names'],
+                'id': di.get('id'),
+            }
+        groups_data.append(entry)
+
+    metrics: dict = {}
+    _derived_name_map: dict = {}
+    for di_idx, di in enumerate(derived_info):
+        _derived_name_map[n_base + di_idx] = di.get('name', f'第{n_base + di_idx + 1}组精选')
+    if not report_df.empty:
+        raw_metrics = report_df.to_dict(orient='index')
+        for k, v in raw_metrics.items():
+            key_int = int(k) if isinstance(k, (int, str)) and str(k).lstrip('-').isdigit() else None
+            display_key = _derived_name_map.get(key_int, str(k)) if key_int is not None else str(k)
+            metrics[display_key] = {
+                mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
+                for mk, mv in v.items()
+            }
+
+    # 为每个 task 计算其 LS 指标
+    task_results = []
+    for task in tasks:
+        ls_configs = _parse_ls_configs(task, n_groups)
+        ls_metrics_list = []
+        for ls_config in ls_configs:
+            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
+            ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
+            ls_metrics_list.append({
+                'name': ls_config['name'],
+                'metrics': ls_metric,
+            })
+        task_results.append({
+            'task_index': task.get('_task_index'),
+            'ls_metrics': ls_metrics_list,
+        })
+
+    return {
+        'triple': list(triple),
+        'groups': groups_data,
+        'metrics': metrics,
+        'n_groups': n_total,
+        'n_base': n_base,
+        'task_results': task_results,
+        'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
+        'rebalance_mode': rebalance_mode,
+    }
+
+
+@sft_bp.route('/run_group_tasks', methods=['POST'])
+def run_group_tasks():
+    """批量执行分组测试任务。
+
+    请求：{
+        run_tasks: [
+            {submission_id, factor_alias, n_groups, rebalance_mode,
+             fee, fee_map, use_closetoday, start_date, end_date,
+             derived_groups, ls_configs}
+        ]
+    }
+
+    按三元组 (submission_id, factor_alias, n_groups) 合并去重，同一三元组只执行一次 test_by_group。
+    返回按三元组分组的完整结果 + 每个 task 独立的 LS 指标。
+    """
+    data = request.get_json() or {}
+    run_tasks: list = data.get('run_tasks', [])
+    if not run_tasks:
+        return jsonify({'success': False, 'error': '缺少 run_tasks 列表'}), 400
+
+    # 标记 task 原始索引
+    for i, task in enumerate(run_tasks):
+        if isinstance(task, dict):
+            task['_task_index'] = i
+
+    triple_groups = _merge_tasks_by_triple(run_tasks)
+    triple_results = []
+
+    for triple, tasks in triple_groups.items():
+        submission_id = triple[0]
+        factor_alias = triple[1]
+        n_groups = triple[2]
+        try:
+            tester = runtime_state.get_factor_tester(submission_id, caller='run_group_tasks')
+            factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
+            if not factor:
+                if not getattr(tester, 'factors', None):
+                    triple_results.append({
+                        'triple': list(triple),
+                        'error': '当前测试器尚未生成因子实例。请先在 IC 测试模块运行一次 IC 测试。',
+                        'needs_ic_test': True,
+                    })
+                else:
+                    triple_results.append({
+                        'triple': list(triple),
+                        'error': f'未找到因子 {factor_alias}',
+                    })
+                continue
+
+            result = _execute_single_triple(tester, factor, triple, tasks)
+            result['submission_id'] = submission_id
+            result['factor_alias'] = factor_alias
+            result['tester_alias'] = getattr(tester, 'alias', '?')
+            result['tester_product_count'] = len(tester.products) if hasattr(tester, 'products') else 0
+            triple_results.append(result)
+        except Exception as e:
+            triple_results.append({
+                'triple': list(triple),
+                'error': str(e),
+                'traceback': traceback.format_exc(),
+            })
+
+    return jsonify({'success': True, 'triple_results': triple_results})
+
+
+@sft_bp.route('/get_tester_session_info', methods=['POST'])
+def get_tester_session_info():
+    """返回测试器会话摘要信息（供第3层策略通知表格使用）。
+
+    请求：{submission_ids: [str, ...]}  或  {submission_id: str}
+
+    返回：{
+        testers: [{
+            submission_id, tester_alias, product_count,
+            factors: [{
+                alias, name, freq,
+                n_groups: int,   // 上次分组测试用的组数
+                rebalance_mode,  // 上次使用的再平衡模式
+                has_results: bool,
+            }]
+        }]
+    }
+    """
+    data = request.get_json() or {}
+    ids = data.get('submission_ids') or []
+    if not ids and data.get('submission_id'):
+        ids = [data['submission_id']]
+    if not ids:
+        return jsonify({'success': False, 'error': '缺少 submission_ids'}), 400
+
+    testers_info = []
+    for sid in ids:
+        try:
+            tester = runtime_state.find_factor_tester(str(sid), allow_suffix=True)
+            if tester is None:
+                testers_info.append({'submission_id': str(sid), 'error': '未找到测试器实例'})
+                continue
+            factors_info = []
+            for f in (getattr(tester, 'factors', None) or []):
+                info = {
+                    'alias': getattr(f, 'alias', None) or getattr(f, 'name', '?'),
+                    'name': getattr(f, 'name', '?'),
+                    'freq': f.freq.name if hasattr(f, 'freq') and f.freq else None,
+                }
+                # 如果该因子有上次分组测试的结果
+                result = tester.results.get(f) if hasattr(tester, 'results') else None
+                if result is not None and result.group_result is not None:
+                    gr = result.group_result
+                    info['n_groups'] = getattr(gr, 'n_base', None)
+                    info['rebalance_mode'] = getattr(gr, 'rebalance_mode', None)
+                    info['has_results'] = True
+                else:
+                    info['has_results'] = False
+                factors_info.append(info)
+            testers_info.append({
+                'submission_id': str(sid),
+                'tester_alias': getattr(tester, 'alias', '?'),
+                'product_count': len(tester.products) if hasattr(tester, 'products') else 0,
+                'factors': factors_info,
+            })
+        except Exception as e:
+            testers_info.append({'submission_id': str(sid), 'error': str(e)})
+
+    return jsonify({'success': True, 'testers': testers_info})
+
