@@ -103,23 +103,39 @@
 
         // 5. 分组测试设置
         // Priority: GT.datamodel.settings (Issue #85 new datamodel) → DOM fallback (legacy)
-        if (window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings) {
-            snapshot.group_settings = window.GroupTest.datamodel.settings.snapshot();
-            if (snapshot.group_settings) {
-                // Also collect legacy DOM fields for backward-compat with old templates
-                snapshot.group_settings._legacy = {
-                    group_count: document.getElementById('group_count')?.value || '5',
-                    fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
-                    fee_rate: document.getElementById('fee_rate')?.value || '0.03',
-                    use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
-                    group_start_year: document.getElementById('group_start_year')?.value || '',
-                    group_start_month: document.getElementById('group_start_month')?.value || '',
-                    group_start_day: document.getElementById('group_start_day')?.value || '',
-                    group_end_year: document.getElementById('group_end_year')?.value || '',
-                    group_end_month: document.getElementById('group_end_month')?.value || '',
-                    group_end_day: document.getElementById('group_end_day')?.value || ''
-                };
-            }
+        var hasNewDatamodel = !!(window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings);
+        // Attempt to sync legacy state → datamodel so snapshot() captures fresh data
+        if (hasNewDatamodel && window.GroupTest.ui && typeof window.GroupTest.ui.syncLegacyStateToDatamodel === 'function') {
+            window.GroupTest.ui.syncLegacyStateToDatamodel();
+        }
+        // Determine if new datamodel has meaningful data (non-empty after sync)
+        var snapFromDatamodel = null;
+        var datamodelHasData = false;
+        if (hasNewDatamodel) {
+            snapFromDatamodel = window.GroupTest.datamodel.settings.snapshot();
+            datamodelHasData = snapFromDatamodel && (
+                (Array.isArray(snapFromDatamodel.baseGroups) && snapFromDatamodel.baseGroups.length > 0) ||
+                (Array.isArray(snapFromDatamodel.derivedGraph) && snapFromDatamodel.derivedGraph.length > 0) ||
+                (Array.isArray(snapFromDatamodel.lsConfigs) && snapFromDatamodel.lsConfigs.length > 0) ||
+                (Array.isArray(snapFromDatamodel.registrations) && snapFromDatamodel.registrations.length > 0)
+            );
+        }
+        if (hasNewDatamodel && datamodelHasData) {
+            // New datamodel has data — use it as primary source
+            snapshot.group_settings = snapFromDatamodel;
+            // Also collect legacy DOM fields for backward-compat
+            snapshot.group_settings._legacy = {
+                group_count: document.getElementById('group_count')?.value || '5',
+                fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
+                fee_rate: document.getElementById('fee_rate')?.value || '0.03',
+                use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
+                group_start_year: document.getElementById('group_start_year')?.value || '',
+                group_start_month: document.getElementById('group_start_month')?.value || '',
+                group_start_day: document.getElementById('group_start_day')?.value || '',
+                group_end_year: document.getElementById('group_end_year')?.value || '',
+                group_end_month: document.getElementById('group_end_month')?.value || '',
+                group_end_day: document.getElementById('group_end_day')?.value || ''
+            };
         } else {
             // Fallback: legacy DOM-only collection
             snapshot.group_settings = {

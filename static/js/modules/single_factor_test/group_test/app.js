@@ -3387,4 +3387,79 @@
     GT.ui = GT.ui || {};
     GT.ui.init = init;
     GT.ui.renderTabs = window.renderGroupTabs;
+
+    // ── Datamodel sync bridge (Issue #85 P7) ───────────────────────────────────
+    // When new datamodel is available, expose a sync function so that
+    // global_template_module.js can push legacy DOM/state into GT.datamodel
+    // before calling GT.datamodel.settings.snapshot() during template save.
+    GT.ui.syncLegacyStateToDatamodel = function() {
+        if (!GT.datamodel || !GT.datamodel.base_groups || !GT.datamodel.derived_graph ||
+            !GT.datamodel.ls_configs || !GT.datamodel.registrations) {
+            return false;
+        }
+        try {
+            GT.datamodel.base_groups._reset();
+            GT.datamodel.derived_graph._reset();
+            GT.datamodel.ls_configs._reset();
+            GT.datamodel.registrations._reset();
+
+            // Sync legacy _derivedGroups → datamodel.derived_graph
+            if (_derivedGroups && _derivedGroups.length > 0) {
+                // Sort: base-only first (no parent or parent==='0'), then by id
+                var sortedDerived = _derivedGroups.slice().sort(function(a, b) {
+                    var aIsBase = !a.parent || a.parent === '0';
+                    var bIsBase = !b.parent || b.parent === '0';
+                    if (aIsBase && !bIsBase) return -1;
+                    if (!aIsBase && bIsBase) return 1;
+                    return (a.id || '').localeCompare(b.id || '');
+                });
+                sortedDerived.forEach(function(dg) {
+                    var parentId = (!dg.parent || dg.parent === '0') ? null : dg.parent;
+                    try {
+                        GT.datamodel.derived_graph.add({
+                            name: dg.name || ('Group ' + dg.id),
+                            parentId: parentId,
+                            baseGroupId: dg.baseGroup,
+                            productMask: dg.productMask,
+                            feeOverride: (dg.feeMode && dg.feeMode !== 'none') ? {
+                                mode: dg.feeMode,
+                                rate: dg.feeRate,
+                                map: dg.feeMap,
+                                sensitivity: dg.feeSensitivity
+                            } : null,
+                            closeTodayOverride: dg.useCloseToday !== undefined ? !!dg.useCloseToday : null,
+                            rebalanceOverride: dg.rebalanceMode ? {
+                                mode: dg.rebalanceMode,
+                                period: dg.rebalancePeriod
+                            } : null
+                        });
+                    } catch (e) {
+                        console.warn('[app.js syncDatamodel] skip derived group:', dg.id, e.message);
+                    }
+                });
+            }
+
+            // Sync legacy _longShortDefinitions → datamodel.ls_configs
+            if (_longShortDefinitions && _longShortDefinitions.length > 0) {
+                _longShortDefinitions.forEach(function(ls) {
+                    try {
+                        GT.datamodel.ls_configs.add({
+                            name: ls.name || 'LS-' + ls.id,
+                            longGroups: (ls.longGroups || '').toString(),
+                            longWeights: (ls.longWeights || '').toString(),
+                            shortGroups: (ls.shortGroups || '').toString(),
+                            shortWeights: (ls.shortWeights || '').toString()
+                        });
+                    } catch (e) {
+                        console.warn('[app.js syncDatamodel] skip LS config:', ls.id, e.message);
+                    }
+                });
+            }
+
+            return true;
+        } catch (e) {
+            console.error('[app.js syncDatamodel] error:', e);
+            return false;
+        }
+    };
 })();
