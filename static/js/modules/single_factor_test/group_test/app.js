@@ -2582,15 +2582,14 @@
         }
     }
 
-    // Register panels after a short delay (all panel scripts should be loaded by now).
-    // Once registered, always mount the default panel so the user never sees "请先选择提交记录".
-    setTimeout(function() {
-        _registerPanels();
-        // Always mount — no submission is ok; panels handle empty state internally.
-        var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
-        var tabName = panelEl ? panelEl.getAttribute('data-tab') : 'base';
-        switchMainTab(tabName);
-    }, 0);
+    // Register panels synchronously — all panel scripts are already loaded
+    // (they appear before app.js in the HTML, so GT.panels is fully populated).
+    _registerPanels();
+    // Always mount the default panel so the user never sees "请先选择提交记录".
+    // No submission is ok; panels handle empty state internally.
+    var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
+    var tabName = panelEl ? panelEl.getAttribute('data-tab') : 'base';
+    switchMainTab(tabName);
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
