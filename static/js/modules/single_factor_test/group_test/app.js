@@ -3145,6 +3145,7 @@
     // Old #group-tab-container kept hidden for backward compat factor navigation.
     window.renderGroupTabs = function(submissions) {
         var container = document.getElementById('group-tab-container');
+        var subTabsContainer = document.getElementById('gt-submission-tabs');
         var runBtn = document.getElementById('run_group_test_btn');
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
 
@@ -3166,7 +3167,6 @@
         _activeGroupSubmissionId = activeSubmission ? String(activeSubmission.id) : null;
 
         // ── P7: Fill #gt-submission-tabs with horizontal pills ──
-        var subTabsContainer = document.getElementById('gt-submission-tabs');
         if (subTabsContainer) {
             var subTabsHtml = '';
             submissions.forEach(function(sub) {
