@@ -315,6 +315,7 @@
                     $s.html(data.success ? '✓ 顺序已更新' : '✗ 排序失败: ' + data.error)
                       .css('color', data.success ? '#28a745' : '#d40000');
                     setTimeout(function() { $s.html(''); }, 3000);
+                    if (data.success) refreshSubmissionDependents();
                 });
             },
             onDeleteSub: function(index) {
