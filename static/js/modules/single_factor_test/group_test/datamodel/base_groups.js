@@ -72,17 +72,17 @@
         }
 
         // groupCount
-        if (typeof config.groupCount !== 'number' || config.groupCount < 2 || config.groupCount > 10 || Math.floor(config.groupCount) !== config.groupCount) {
-            errors.push('groupCount must be an integer between 2 and 10');
+        if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
+            errors.push('groupCount must be a positive integer (≥ 1)');
         }
 
-        // groupIndex
+        // groupIndex (1-based index)
         if (config.groupIndex !== undefined && config.groupIndex !== null) {
-            if (typeof config.groupIndex !== 'number' || config.groupIndex < 0 || Math.floor(config.groupIndex) !== config.groupIndex) {
-                errors.push('groupIndex must be a non-negative integer');
+            if (typeof config.groupIndex !== 'number' || config.groupIndex < 1 || Math.floor(config.groupIndex) !== config.groupIndex) {
+                errors.push('groupIndex must be a positive integer (≥ 1)');
             }
-            if (config.groupCount && config.groupIndex >= config.groupCount) {
-                errors.push('groupIndex must be less than groupCount');
+            if (config.groupCount && config.groupIndex > config.groupCount) {
+                errors.push('groupIndex must not exceed groupCount');
             }
         }
 
@@ -131,7 +131,7 @@
             testerId: config.testerId.trim(),
             factorAlias: config.factorAlias.trim(),
             groupCount: config.groupCount,
-            groupIndex: config.groupIndex !== undefined ? config.groupIndex : 0,
+            groupIndex: config.groupIndex !== undefined ? config.groupIndex : 1,
             isAllGroups: config.isAllGroups !== undefined ? !!config.isAllGroups : false,
             feeMode: config.feeMode || 'none',
             feeRate: config.feeRate !== undefined ? config.feeRate : null,
