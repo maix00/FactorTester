@@ -366,6 +366,35 @@
             }
         }
 
+        // 3.5 重映射 group_settings 中的 testerId：模板保存时的旧 testerId → 重建后的新 testerId
+        //   按 snapshot.submissions 的位置一一对应
+        if (snapshot.group_settings && snapshot.group_settings.baseGroups && snapshot.submissions) {
+            // 构建 {旧testerId → 新testerId} 映射：按位置 i 匹配
+            var oldToNewTesterId = {};
+            var curSubmissions = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
+            for (var mi = 0; mi < snapshot.submissions.length; mi++) {
+                var oldId = snapshot.submissions[mi].id;
+                var newId = (curSubmissions[mi] && curSubmissions[mi].id) ? curSubmissions[mi].id : null;
+                if (oldId && newId) {
+                    oldToNewTesterId[String(oldId)] = String(newId);
+                }
+            }
+            // 替换 baseGroups 中的 testerId
+            snapshot.group_settings.baseGroups.forEach(function(bg) {
+                if (bg.testerId && oldToNewTesterId.hasOwnProperty(String(bg.testerId))) {
+                    bg.testerId = oldToNewTesterId[String(bg.testerId)];
+                }
+            });
+            // 同样处理 registrations 中的 testerId（如果存在）
+            if (snapshot.group_settings.registrations) {
+                snapshot.group_settings.registrations.forEach(function(reg) {
+                    if (reg.testerId && oldToNewTesterId.hasOwnProperty(String(reg.testerId))) {
+                        reg.testerId = oldToNewTesterId[String(reg.testerId)];
+                    }
+                });
+            }
+        }
+
         // 4. 恢复收益率频率
         if (snapshot.return_freqs && snapshot.return_freqs.length > 0) {
             snapshot.return_freqs.forEach(fr => {
@@ -698,6 +727,17 @@
     } else {
         initGlobalTemplateModule();
     }
+
+    // ── Submission bus subscriptions ────────────────────────────────────────────
+    (function() {
+        var bus = window._submissionBus;
+        if (!bus) return;
+
+        // React to any change: refresh outer summaries
+        bus.on('*', function(event) {
+            refreshOuterSummaries();
+        });
+    })();
 
     // 暴露给外部
     window._collectSnapshot = collectSnapshot;

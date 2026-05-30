@@ -3313,6 +3313,96 @@
     GT.ui.init = init;
     GT.ui.renderTabs = window.renderGroupTabs;
 
+    // ── Submission bus subscriptions ────────────────────────────────────────────
+    (function() {
+        var bus = window._submissionBus;
+        if (!bus) return;
+
+        // React to tester deletion: clean up base_groups, derived_graph, ls_configs, caches
+        bus.on(bus.EVENTS.REMOVED, function(data) {
+            if (!data || !data.id_time) return;
+            var removedTesterId = String(data.id_time);
+
+            // 1) Remove base_groups referencing this tester
+            if (GT.datamodel && GT.datamodel.base_groups) {
+                var allBase = GT.datamodel.base_groups.getAll();
+                allBase.forEach(function(bg) {
+                    if (String(bg.testerId) === removedTesterId) {
+                        try {
+                            GT.datamodel.base_groups.remove(bg.id);
+                        } catch(e) {
+                            console.warn('[group_test/bus] Failed to remove base_group:', bg.id, e);
+                        }
+                    }
+                });
+            }
+
+            // 2) Remove derived_graph nodes referencing removed base_groups
+            if (GT.datamodel && GT.datamodel.derived_graph) {
+                var allDerived = GT.datamodel.derived_graph.getAll();
+                allDerived.forEach(function(dg) {
+                    // Remove if baseGroupId points to a now-deleted base group
+                    var baseStillExists = false;
+                    if (GT.datamodel.base_groups) {
+                        var remaining = GT.datamodel.base_groups.getAll();
+                        baseStillExists = remaining.some(function(bg) {
+                            return String(bg.id) === String(dg.baseGroupId);
+                        });
+                    }
+                    if (!baseStillExists) {
+                        try {
+                            GT.datamodel.derived_graph.remove(dg.id);
+                        } catch(e) {
+                            console.warn('[group_test/bus] Failed to remove derived_graph node:', dg.id, e);
+                        }
+                    }
+                });
+            }
+
+            // 3) Clear ls_configs (these are tester-scoped)
+            if (GT.datamodel && GT.datamodel.ls_configs) {
+                try {
+                    GT.datamodel.ls_configs._reset();
+                } catch(e) {}
+            }
+
+            // 4) Clear registrations
+            if (GT.datamodel && GT.datamodel.registrations) {
+                try {
+                    GT.datamodel.registrations._reset();
+                } catch(e) {}
+            }
+
+            // 5) Clear group result cache for this tester
+            if (_groupResultsBySubmission[removedTesterId]) {
+                delete _groupResultsBySubmission[removedTesterId];
+            }
+            if (_activeGroupFactorBySubmission[removedTesterId]) {
+                delete _activeGroupFactorBySubmission[removedTesterId];
+            }
+            if (String(_activeGroupSubmissionId) === removedTesterId) {
+                _activeGroupSubmissionId = null;
+            }
+        });
+
+        // React to any change: re-render tabs
+        bus.on('*', function(event) {
+            if (window.submissions && window.submissions.length > 0) {
+                window.renderGroupTabs(window.submissions);
+            } else {
+                // Empty state
+                var container = document.getElementById('gt-submission-tabs');
+                if (container) {
+                    container.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
+                }
+                var runBtn = document.getElementById('run_group_test_btn');
+                var runAllBtn = document.getElementById('run_all_group_tests_btn');
+                if (runBtn) runBtn.style.display = 'none';
+                if (runAllBtn) runAllBtn.style.display = 'none';
+            }
+        });
+    })();
+
     // ── Datamodel sync bridge (Issue #85 P7) ───────────────────────────────────
     // When new datamodel is available, expose a sync function so that
     // global_template_module.js can push legacy DOM/state into GT.datamodel
