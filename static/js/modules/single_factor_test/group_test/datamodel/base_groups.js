@@ -139,6 +139,8 @@
             useCloseToday: config.useCloseToday !== undefined ? !!config.useCloseToday : false,
             rebalanceMode: config.rebalanceMode || 'each_period',
             needsRegenerate: true,
+            startDate: config.startDate || null,
+            endDate: config.endDate || null,
         };
 
         _items.push(item);

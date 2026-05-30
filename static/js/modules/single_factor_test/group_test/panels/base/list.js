@@ -24,6 +24,17 @@
     // Cache current active ID for highlight tracking
     var _activeId = null;
 
+    /** Look up a submission label by testerId */
+    function _testerLabel(testerId) {
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(testerId)) {
+                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
+            }
+        }
+        return testerId || '—';
+    }
+
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
@@ -59,7 +70,17 @@
 
         html += '<label style="display:block;margin-bottom:12px;">';
         html += '<span style="display:block;font-size:13px;margin-bottom:4px;">测试器 <span style="color:red;">*</span></span>';
-        html += '<input type="text" id="bgf_testerId" value="' + escapeHTML(isEdit ? editData.testerId : '') + '" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;" required>';
+        html += '<select id="bgf_testerId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;" required>';
+        html += '<option value="">-- 请选择测试器 --</option>';
+        // Populate from window.submissions (the list of FactorTester submissions)
+        var subs = window.submissions || [];
+        subs.forEach(function(sub) {
+            var subId = String(sub.id);
+            var subLabel = sub.product_group || sub.label || ('测试器 #' + subId);
+            var selected = (isEdit && String(editData.testerId) === subId) ? ' selected' : '';
+            html += '<option value="' + escapeHTML(subId) + '"' + selected + '>' + escapeHTML(subLabel) + ' (ID:' + escapeHTML(subId) + ')</option>';
+        });
+        html += '</select>';
         html += '</label>';
 
         html += '<label style="display:block;margin-bottom:12px;">';
@@ -114,9 +135,12 @@
         e.preventDefault();
 
         var editId = $(_modalId)._editId;
+        var testerSelect = $('bgf_testerId');
+        var testerId = testerSelect ? testerSelect.value : '';
+        var testerLabel = testerSelect && testerSelect.selectedIndex >= 0 ? testerSelect.options[testerSelect.selectedIndex].text : '';
         var data = {
             name: $('bgf_name').value.trim(),
-            testerId: $('bgf_testerId').value.trim(),
+            testerId: testerId,
             factorAlias: $('bgf_factorAlias').value.trim(),
             groupCount: parseInt($('bgf_groupCount').value, 10),
             groupIndex: parseInt($('bgf_groupIndex').value, 10) || 0,
@@ -172,7 +196,7 @@
 
             html += '<tr class="grouptest-base-row ' + rowClass + '" data-bg-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
             html += '<td style="padding:8px 12px;">' + escapeHTML(item.name) + '</td>';
-            html += '<td style="padding:8px 12px;">' + escapeHTML(item.testerId) + '</td>';
+            html += '<td style="padding:8px 12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
             html += '<td style="padding:8px 12px;">' + escapeHTML(item.factorAlias) + '</td>';
             html += '<td style="padding:8px 12px;text-align:center;">' + item.groupCount + '</td>';
             html += '<td style="padding:8px 12px;text-align:center;">' + item.groupIndex + '</td>';

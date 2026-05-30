@@ -2857,23 +2857,37 @@
             var endMonth = document.getElementById('end_month') ? document.getElementById('end_month').value : null;
             var endDay = document.getElementById('end_day') ? document.getElementById('end_day').value : null;
             
+            var startDate = null, endDate = null;
             if (startYear && startMonth && startDay) {
-                var ds = buildValidDate(startYear, startMonth, startDay);
-                if (ds) {
-                    var parts = ds.split('-');
+                startDate = buildValidDate(startYear, startMonth, startDay);
+                if (startDate) {
+                    var parts = startDate.split('-');
                     document.getElementById('group_start_year').value = parts[0];
                     document.getElementById('group_start_month').value = parseInt(parts[1], 10);
                     document.getElementById('group_start_day').value = parseInt(parts[2], 10);
                 }
             }
             if (endYear && endMonth && endDay) {
-                var de = buildValidDate(endYear, endMonth, endDay);
-                if (de) {
-                    var parts = de.split('-');
+                endDate = buildValidDate(endYear, endMonth, endDay);
+                if (endDate) {
+                    var parts = endDate.split('-');
                     document.getElementById('group_end_year').value = parts[0];
                     document.getElementById('group_end_month').value = parseInt(parts[1], 10);
                     document.getElementById('group_end_day').value = parseInt(parts[2], 10);
                 }
+            }
+
+            // P8: Persist time range into base_groups datamodel
+            if (GT.datamodel && GT.datamodel.base_groups && (startDate || endDate)) {
+                var allBase = GT.datamodel.base_groups.getAll();
+                allBase.forEach(function(bg) {
+                    try {
+                        var patch = {};
+                        if (startDate) patch.startDate = startDate;
+                        if (endDate) patch.endDate = endDate;
+                        GT.datamodel.base_groups.update(bg.id, patch);
+                    } catch (e) { /* skip */ }
+                });
             }
         });
     }
@@ -2889,6 +2903,31 @@
             var dst = document.getElementById(pair[1]);
             if (src && dst && src.value) dst.value = src.value;
         });
+
+        // P8: Also persist time range into base_groups datamodel so group
+        // definitions survive time-range changes (Issue #85 follow-up).
+        var sy = document.getElementById('group_start_year');
+        var sm = document.getElementById('group_start_month');
+        var sd = document.getElementById('group_start_day');
+        var ey = document.getElementById('group_end_year');
+        var em = document.getElementById('group_end_month');
+        var ed = document.getElementById('group_end_day');
+        var startDate = (sy && sm && sd) ? buildValidDate(sy.value, sm.value, sd.value) : null;
+        var endDate = (ey && em && ed) ? buildValidDate(ey.value, em.value, ed.value) : null;
+
+        if (GT.datamodel && GT.datamodel.base_groups && (startDate || endDate)) {
+            var allBase = GT.datamodel.base_groups.getAll();
+            allBase.forEach(function(bg) {
+                try {
+                    var patch = {};
+                    if (startDate) patch.startDate = startDate;
+                    if (endDate) patch.endDate = endDate;
+                    GT.datamodel.base_groups.update(bg.id, patch);
+                } catch (e) {
+                    // Silently skip if update fails (e.g. validation)
+                }
+            });
+        }
     }
 
     function bindTimeSyncListeners() {
@@ -3110,13 +3149,15 @@
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
 
         if (!submissions || submissions.length === 0) {
+            // Update both old and new containers
             if (container) container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
+            if (subTabsContainer) subTabsContainer.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
             if (runBtn) runBtn.style.display = 'none';
             if (runAllBtn) runAllBtn.style.display = 'none';
             return;
         }
         if (runBtn) runBtn.style.display = '';
-        if (runAllBtn) runBtn.style.display = '';
+        if (runAllBtn) runAllBtn.style.display = '';
 
         var factorList = window.factorList || [];
         var activeSubmission = submissions.find(function(sub) {
