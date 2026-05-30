@@ -175,6 +175,23 @@
     // Render table
     // ---------------------------------------------------------------------------
 
+    /** Look up label for fee mode */
+    function _feeLabel(mode) {
+        var map = { 'none': '无', 'percent': '百分比', 'fixed': '固定', 'table': '费率表', 'strategy': '策略' };
+        return map[mode] || (mode || '—');
+    }
+
+    /** Look up label for close-today mode */
+    function _closeTodayLabel(val) {
+        return val ? '✅ 平今' : '次日';
+    }
+
+    /** Look up label for rebalance mode */
+    function _rebalanceLabel(mode) {
+        var map = { 'each_period': '每期', 'weekly': '每周', 'monthly': '每月', 'none': '无' };
+        return map[mode] || (mode || '—');
+    }
+
     function render() {
         var container = $(_containerId);
         if (!container) return;
@@ -194,20 +211,55 @@
         var anySelected = Object.keys(_selectedIds).length > 0;
         var activeBgId = GT.state.getActiveBaseGroupId();
 
+        // Assign letters to multi-group batches (sorted by key), single-group batches get no letter
+        var letterIdx = 0;
+        var batchLetter = {};  // batchKey → letter (A,B,C) or null for single-group
+        for (var b = 0; b < batches.length; b++) {
+            if (batches[b].items.length > 1) {
+                batchLetter[batches[b].key] = _colLetter(letterIdx + 1);
+                letterIdx++;
+            } else {
+                batchLetter[batches[b].key] = null;
+            }
+        }
+        // Assign numeric aliases to single-group batches
+        var soloIdx = 0;
+        var soloNumber = {};  // batchKey → "1","2","3"...
+        for (var b2 = 0; b2 < batches.length; b2++) {
+            if (batchLetter[batches[b2].key] === null) {
+                soloIdx++;
+                soloNumber[batches[b2].key] = String(soloIdx);
+            }
+        }
+
+        // Build alias for a row: "A1" or "3"
+        function _rowAlias(batchKeyVal, groupIndex) {
+            var letter = batchLetter[batchKeyVal];
+            if (letter) {
+                return letter + groupIndex;
+            } else {
+                return soloNumber[batchKeyVal];
+            }
+        }
+
         var html = '';
         html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
         html += '<thead><tr style="background:#f6f8fa;border-bottom:2px solid #d0d5dd;">';
-        html += '<th style="padding:8px 12px;text-align:left;">简称</th>';
-        html += '<th style="padding:8px 12px;text-align:left;">名称</th>';
-        html += '<th style="padding:8px 12px;text-align:left;">测试器</th>';
-        html += '<th style="padding:8px 12px;text-align:left;">因子</th>';
-        html += '<th style="padding:8px 12px;text-align:center;">分组数</th>';
-        html += '<th style="padding:8px 12px;text-align:center;">索引</th>';
-        html += '<th style="padding:8px 12px;text-align:center;">操作</th>';
+        html += '<th style="padding:6px 10px;text-align:left;width:56px;">简称</th>';
+        html += '<th style="padding:6px 10px;text-align:left;">测试器</th>';
+        html += '<th style="padding:6px 10px;text-align:left;">因子</th>';
+        html += '<th style="padding:6px 8px;text-align:center;">分组</th>';
+        html += '<th style="padding:6px 8px;text-align:center;">手续费</th>';
+        html += '<th style="padding:6px 8px;text-align:center;">平今</th>';
+        html += '<th style="padding:6px 8px;text-align:center;">再平衡</th>';
+        html += '<th style="padding:6px 8px;text-align:center;width:50px;">操作</th>';
         html += '</tr></thead><tbody>';
 
-        for (var b = 0; b < batches.length; b++) {
-            var batch = batches[b];
+        for (var b3 = 0; b3 < batches.length; b3++) {
+            var batch = batches[b3];
+            var isMulti = batch.items.length > 1;
+            var letter = batchLetter[batch.key];
+
             // Check if all groups in batch are selected
             var batchAllSelected = batch.items.length > 0;
             for (var bi = 0; bi < batch.items.length; bi++) {
@@ -215,26 +267,29 @@
             }
             var isBatchSelected = batchAllSelected;
 
-            // ── Batch header row ──
-            var batchRowStyle = isBatchSelected
-                ? 'background:#e8f4fd;border-left:3px solid #0078d4;'
-                : 'background:#f9fafb;border-left:3px solid transparent;';
-            html += '<tr class="grouptest-batch-header gt-row' + (isBatchSelected ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batch.key) + '"'
-                + ' data-selected="' + (isBatchSelected ? '1' : '0') + '"'
-                + ' style="cursor:pointer;' + batchRowStyle + 'border-bottom:1px solid #d0d5dd;">';
-            html += '<td style="padding:6px 12px;font-weight:700;color:' + (isBatchSelected ? '#0078d4' : '#333') + ';">'
-                + '📋 ' + escapeHTML(batch.factorAlias) + '</td>';
-            html += '<td style="padding:6px 12px;font-size:11px;color:#555;" colspan="2">'
-                + escapeHTML(_testerLabel(batch.testerId)) + ' — ' + batch.groupCount + ' 组</td>';
-            html += '<td style="padding:6px 12px;"></td>';
-            html += '<td style="padding:6px 12px;text-align:center;"></td>';
-            html += '<td style="padding:6px 12px;text-align:center;"></td>';
-            html += '<td style="padding:6px 12px;text-align:center;white-space:nowrap;">';
-            html += '<button class="grouptest-batch-del-btn" data-batch-key="' + escapeHTML(batch.key) + '"'
-                + ' style="padding:2px 8px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;"'
-                + ' title="删除整个批次">🗑️ 删除批次</button>';
-            html += '</td>';
-            html += '</tr>';
+            // ── Batch header row (only for multi-group batches) ──
+            if (isMulti) {
+                var batchRowStyle = isBatchSelected
+                    ? 'background:#e8f4fd;border-left:3px solid #0078d4;'
+                    : 'background:#f9fafb;border-left:3px solid transparent;';
+                html += '<tr class="grouptest-batch-header gt-row' + (isBatchSelected ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batch.key) + '"'
+                    + ' data-selected="' + (isBatchSelected ? '1' : '0') + '"'
+                    + ' style="cursor:pointer;' + batchRowStyle + 'border-bottom:1px solid #d0d5dd;">';
+                html += '<td style="padding:6px 10px;font-weight:700;color:' + (isBatchSelected ? '#0078d4' : '#333') + ';">'
+                    + '📋 ' + (letter || '') + '</td>';
+                html += '<td style="padding:6px 10px;font-size:11px;color:#555;" colspan="2">'
+                    + escapeHTML(_testerLabel(batch.testerId)) + ' · ' + escapeHTML(batch.factorAlias) + ' — ' + batch.groupCount + ' 组</td>';
+                html += '<td style="padding:6px 8px;text-align:center;"></td>';
+                html += '<td style="padding:6px 8px;text-align:center;"></td>';
+                html += '<td style="padding:6px 8px;text-align:center;"></td>';
+                html += '<td style="padding:6px 8px;text-align:center;"></td>';
+                html += '<td style="padding:6px 8px;text-align:center;white-space:nowrap;">';
+                html += '<button class="grouptest-batch-del-btn" data-batch-key="' + escapeHTML(batch.key) + '"'
+                    + ' style="padding:2px 8px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;"'
+                    + ' title="删除整个批次">🗑️</button>';
+                html += '</td>';
+                html += '</tr>';
+            }
 
             // ── Child rows ──
             for (var r = 0; r < batch.items.length; r++) {
@@ -253,13 +308,16 @@
                     + ' data-batch-key="' + escapeHTML(batch.key) + '"'
                     + ' data-selected="' + (isSelected ? '1' : '0') + '"'
                     + ' style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
-                html += '<td style="padding:6px 12px;font-weight:600;color:#0078d4;">' + escapeHTML(item.shortAlias || item.name) + '</td>';
-                html += '<td style="padding:6px 12px;font-size:11px;color:#555;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(item.name) + '</td>';
-                html += '<td style="padding:6px 12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
-                html += '<td style="padding:6px 12px;">' + escapeHTML(item.factorAlias) + '</td>';
-                html += '<td style="padding:6px 12px;text-align:center;">' + item.groupCount + '</td>';
-                html += '<td style="padding:6px 12px;text-align:center;">' + item.groupIndex + '</td>';
-                html += '<td style="padding:6px 12px;text-align:center;white-space:nowrap;">';
+                // Alias: "A1" for batch groups, "5" for solo groups
+                html += '<td style="padding:6px 10px;font-weight:600;color:#0078d4;white-space:nowrap;">'
+                    + escapeHTML(_rowAlias(batch.key, item.groupIndex)) + '</td>';
+                html += '<td style="padding:6px 10px;font-size:12px;">' + escapeHTML(_testerLabel(item.testerId)) + '</td>';
+                html += '<td style="padding:6px 10px;">' + escapeHTML(item.factorAlias) + '</td>';
+                html += '<td style="padding:6px 8px;text-align:center;">' + item.groupIndex + '/' + item.groupCount + '</td>';
+                html += '<td style="padding:6px 8px;text-align:center;font-size:11px;">' + escapeHTML(_feeLabel(item.feeMode)) + '</td>';
+                html += '<td style="padding:6px 8px;text-align:center;font-size:11px;">' + escapeHTML(_closeTodayLabel(item.useCloseToday)) + '</td>';
+                html += '<td style="padding:6px 8px;text-align:center;font-size:11px;">' + escapeHTML(_rebalanceLabel(item.rebalanceMode)) + '</td>';
+                html += '<td style="padding:6px 8px;text-align:center;white-space:nowrap;">';
                 html += '<button class="grouptest-del-btn" data-bg-id="' + escapeHTML(item.id) + '"'
                     + ' style="padding:2px 8px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">🗑️</button>';
                 html += '</td>';
