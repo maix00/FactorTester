@@ -2144,7 +2144,32 @@
             return { error: '请先选择测试器和因子' };
         }
 
-        var n_groups = parseInt(document.getElementById('group_count').value, 10);
+        // P7: Read params from datamodel if available, else fallback to DOM
+        var n_groups = 5;
+        var rebalance_mode = 'buy_and_hold';
+        var start_date = null;
+        var end_date = null;
+
+        // Try datamodel first
+        if (GT.datamodel && GT.datamodel.base_groups) {
+            var allBase = GT.datamodel.base_groups.getAll();
+            if (allBase && allBase.length > 0) {
+                var bg = allBase[0];
+                n_groups = bg.groupCount || 5;
+                rebalance_mode = bg.rebalanceMode || 'buy_and_hold';
+                start_date = bg.startDate || null;
+                end_date = bg.endDate || null;
+            }
+        }
+
+        // Fallback: read from DOM (old inputs)
+        if (!start_date) {
+            var gcEl = document.getElementById('group_count');
+            if (gcEl) n_groups = parseInt(gcEl.value, 10) || 5;
+            var rmEl = document.getElementById('rebalance_mode');
+            if (rmEl) rebalance_mode = rmEl.value || 'buy_and_hold';
+        }
+
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
 
         var feePayload;
@@ -2156,16 +2181,21 @@
         var fee = feePayload.fee;
         var fee_map = feePayload.fee_map;
 
-        var sy = document.getElementById('group_start_year').value;
-        var sm = document.getElementById('group_start_month').value;
-        var sd = document.getElementById('group_start_day').value;
-        var ey = document.getElementById('group_end_year').value;
-        var em = document.getElementById('group_end_month').value;
-        var ed = document.getElementById('group_end_day').value;
+        // Read time range from layer-1 inputs or fallback
+        if (!start_date) {
+            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
+            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
+            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
+            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
+        }
+        if (!end_date) {
+            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
+            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
+            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
+            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
+        }
 
-        var start_date = (sy && sm && sd) ? buildValidDate(sy, sm, sd) : null;
-        var end_date = (ey && em && ed) ? buildValidDate(ey, em, ed) : null;
-
+        // Fallback: read from time module
         if (!start_date) {
             var timeSy = document.getElementById('start_year') ? document.getElementById('start_year').value : null;
             var timeSm = document.getElementById('start_month') ? document.getElementById('start_month').value : null;
@@ -2179,6 +2209,7 @@
             if (timeEy && timeEm && timeEd) end_date = buildValidDate(timeEy, timeEm, timeEd);
         }
 
+        // Fallback: use submission dates
         if (!start_date || !end_date) {
             var submission = window.submissions ? window.submissions.find(function(s) { return String(s.id) === String(currentSubmissionId); }) : null;
             if (submission) {
@@ -2210,7 +2241,7 @@
                 start_date: start_date,
                 end_date: end_date,
                 return_freqs: return_freqs.length > 0 ? return_freqs : null,
-                rebalance_mode: document.getElementById('rebalance_mode')?.value || 'buy_and_hold',
+                rebalance_mode: rebalance_mode,
                 ls_config: collectLongShortConfig(n_groups),
                 ls_configs: collectLongShortConfigs(n_groups),
                 derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
@@ -2490,6 +2521,69 @@
     var _currentGroupDetailIndex = null;
     var _longShortDefinitions = [defaultLongShortDefinition()];
     var _lastGroupStructureKey = null;
+
+    // ═══ P7: Panel registry — maps main-tab → list of sub-tab panels ═══
+    // Each entry: { name, label, containerId, panel }
+    // Populated lazily after all panel scripts have loaded.
+    var GT_PANEL_REGISTRY = {
+        base: [],
+        derived: [],
+        ls: [],
+    };
+
+    /** Call this after all panel scripts loaded to register panels. */
+    function _registerPanels() {
+        var P = GT.panels;
+        if (!P) return;
+
+        // Base tab panels
+        if (P.base && P.base.list) {
+            GT_PANEL_REGISTRY.base.push({ name: 'list', label: '基础组列表', containerId: 'base-groups-list', panel: P.base.list });
+        }
+        if (P.base && P.base.groups) {
+            GT_PANEL_REGISTRY.base.push({ name: 'groups', label: '分组设置', containerId: 'base-groups-settings', panel: P.base.groups });
+        }
+        if (P.base && P.base.fee) {
+            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '手续费', containerId: 'base-fee-settings', panel: P.base.fee });
+        }
+        if (P.base && P.base.close_today) {
+            GT_PANEL_REGISTRY.base.push({ name: 'close_today', label: '平今', containerId: 'base-close-today', panel: P.base.close_today });
+        }
+        if (P.base && P.base.rebalance) {
+            GT_PANEL_REGISTRY.base.push({ name: 'rebalance', label: '再平衡', containerId: 'base-rebalance-settings', panel: P.base.rebalance });
+        }
+
+        // Derived tab panels
+        if (P.derived && P.derived.tree) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'tree', label: '派生树', containerId: 'derived-tree', panel: P.derived.tree });
+        }
+        if (P.derived && P.derived.fee) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'fee', label: '手续费', containerId: 'derived-fee-settings', panel: P.derived.fee });
+        }
+        if (P.derived && P.derived.close_today) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'close_today', label: '平今', containerId: 'derived-close-today', panel: P.derived.close_today });
+        }
+        if (P.derived && P.derived.rebalance) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'rebalance', label: '再平衡', containerId: 'derived-rebalance-settings', panel: P.derived.rebalance });
+        }
+        if (P.derived && P.derived.products) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'products', label: '产品', containerId: 'derived-products', panel: P.derived.products });
+        }
+        if (P.derived && P.derived.summary) {
+            GT_PANEL_REGISTRY.derived.push({ name: 'summary', label: '摘要', containerId: 'derived-summary', panel: P.derived.summary });
+        }
+
+        // LS tab panels
+        if (P.ls && P.ls.list) {
+            GT_PANEL_REGISTRY.ls.push({ name: 'list', label: 'LS 列表', containerId: 'ls-list', panel: P.ls.list });
+        }
+        if (P.ls && P.ls.editor) {
+            GT_PANEL_REGISTRY.ls.push({ name: 'editor', label: 'LS 编辑器', containerId: 'ls-editor', panel: P.ls.editor });
+        }
+    }
+
+    // Register panels after a short delay (all panel scripts should be loaded by now)
+    setTimeout(_registerPanels, 0);
 
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
@@ -2857,6 +2951,97 @@
         if (runAllBtn) runAllBtn.addEventListener('click', runAllGroupTestsForCurrentSubmission);
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
+
+        // P7: Wire main tab switching (base / derived / ls)
+        (function bindMainTabs() {
+            var mainTabs = document.querySelectorAll('#gt-main-tabs .gt-main-tab');
+            var panelContainer = document.getElementById('gt-panel-container');
+            var subTabsBar = document.getElementById('gt-sub-tabs');
+            if (!mainTabs.length || !panelContainer) return;
+
+            var _currentMainTab = 'base';
+            var _currentPanel = null;
+
+            /** Call unmount on currently mounted panel (if any) */
+            function _unmountCurrent() {
+                if (_currentPanel && typeof _currentPanel.unmount === 'function') {
+                    _currentPanel.unmount();
+                }
+                _currentPanel = null;
+                if (subTabsBar) subTabsBar.innerHTML = '';
+                if (panelContainer) panelContainer.innerHTML = '<div style="color:#888;padding:12px;text-align:center;font-size:13px;">请选择参数面板</div>';
+            }
+
+            /** Switch to a main tab */
+            function switchMainTab(tabName) {
+                if (_currentMainTab === tabName && _currentPanel) return;
+                _unmountCurrent();
+                _currentMainTab = tabName;
+
+                // Update active class on main tabs
+                mainTabs.forEach(function(t) {
+                    t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
+                });
+
+                // Mount the first sub-tab panel for this main tab
+                var panelList = GT_PANEL_REGISTRY[tabName];
+                if (panelList && panelList.length > 0) {
+                    mountSubTab(tabName, panelList[0].name);
+                }
+
+                // Show/hide LS drawer trigger
+                var lsTrigger = document.getElementById('long-short-drawer-trigger');
+                if (lsTrigger) lsTrigger.style.display = (tabName === 'ls') ? '' : 'none';
+            }
+
+            /** Mount a specific sub-tab panel */
+            function mountSubTab(mainTab, subTabName) {
+                _unmountCurrent();
+                var panelList = GT_PANEL_REGISTRY[mainTab];
+                if (!panelList) return;
+                var entry = panelList.find(function(p) { return p.name === subTabName; });
+                if (!entry) return;
+
+                // Render sub-tabs
+                if (subTabsBar) {
+                    var stHtml = '';
+                    panelList.forEach(function(p) {
+                        stHtml += '<button class="gt-sub-tab' + (p.name === subTabName ? ' active' : '') + '" data-subtab="' + p.name + '">' + p.label + '</button>';
+                    });
+                    subTabsBar.innerHTML = stHtml;
+                    subTabsBar.querySelectorAll('.gt-sub-tab').forEach(function(st) {
+                        st.addEventListener('click', function() {
+                            mountSubTab(mainTab, st.getAttribute('data-subtab'));
+                        });
+                    });
+                }
+
+                // Ensure panel container exists
+                if (panelContainer) {
+                    panelContainer.innerHTML = '<div id="' + entry.containerId + '" class="gt-panel-inner"></div>';
+                }
+
+                // Mount the panel
+                if (entry.panel && typeof entry.panel.mount === 'function') {
+                    entry.panel.mount();
+                    _currentPanel = entry.panel;
+                }
+            }
+
+            // Bind main tab clicks
+            mainTabs.forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    switchMainTab(tab.getAttribute('data-tab'));
+                });
+            });
+
+            // Expose for external use
+            GT.ui.switchMainTab = switchMainTab;
+            GT.ui.mountSubTab = mountSubTab;
+
+            // Auto-switch to base on init
+            switchMainTab('base');
+        })();
         var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
         if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
 
@@ -2916,20 +3101,22 @@
         });
     }
 
-    // 暴露给外部调用：渲染分组测试的三级工作区（submission → factor → settings）
+    // 暴露给外部调用：渲染分组测试 UI（P7: 5-layer layout）
+    // Fills #gt-submission-tabs with horizontal pills.
+    // Old #group-tab-container kept hidden for backward compat factor navigation.
     window.renderGroupTabs = function(submissions) {
         var container = document.getElementById('group-tab-container');
         var runBtn = document.getElementById('run_group_test_btn');
         var runAllBtn = document.getElementById('run_all_group_tests_btn');
-        if (!container) return;
+
         if (!submissions || submissions.length === 0) {
-            container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
+            if (container) container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
             if (runBtn) runBtn.style.display = 'none';
             if (runAllBtn) runAllBtn.style.display = 'none';
             return;
         }
         if (runBtn) runBtn.style.display = '';
-        if (runAllBtn) runAllBtn.style.display = '';
+        if (runAllBtn) runBtn.style.display = '';
 
         var factorList = window.factorList || [];
         var activeSubmission = submissions.find(function(sub) {
@@ -2937,45 +3124,56 @@
         }) || submissions[0];
         _activeGroupSubmissionId = activeSubmission ? String(activeSubmission.id) : null;
 
-        var submissionsHtml = '<div class="group-nav-column"><div class="group-nav-title">产品组 / 测试器</div>';
-        submissions.forEach(function(sub, idx) {
-            var isActive = String(sub.id) === String(_activeGroupSubmissionId);
-            var tabLabel = sub.product_group || sub.label || ('测试器' + (idx+1));
-            var subMeta = sub.product_group ? '产品组' : (sub.factor_tester_serial || 'FactorTester');
-            submissionsHtml += '<button type="button" class="group-submission-nav-btn' + (isActive ? ' active' : '') + '" data-submission-id="' + escGrp(sub.id) + '">'
-                + '<span>' + (sub.product_group ? '📦 ' : '') + escGrp(tabLabel) + '</span>'
-                + '<small style="color:#667085;font-size:11px;">' + escGrp(subMeta) + '</small>'
-                + '</button>';
-        });
-        submissionsHtml += '</div>';
-
-        var factorsHtml = '<div class="group-factor-sidebar"><div class="group-nav-title">因子列表</div>';
-        if (factorList.length > 0 && _activeGroupSubmissionId) {
-            var activeFactorAlias = getActiveFactorAliasForSubmission(_activeGroupSubmissionId) || (factorList[0].alias || factorList[0].name || '');
-            _activeGroupFactorBySubmission[_activeGroupSubmissionId] = activeFactorAlias;
-            factorList.forEach(function(f) {
-                var alias = f.alias || f.name || '';
-                var isFactorActive = alias === activeFactorAlias;
-                var cached = getCachedGroupResult(_activeGroupSubmissionId, alias);
-                var status = cached ? (cached.success ? 'done' : 'error') : '';
-                factorsHtml += '<button type="button" class="group-factor-nav-btn' + (isFactorActive ? ' active' : '') + '" data-submission-id="' + escGrp(_activeGroupSubmissionId) + '" data-factor-alias="' + escGrp(alias) + '" data-run-status="' + status + '">'
-                    + '<span>' + escGrp(alias) + '</span>'
-                    + '<span class="group-factor-run-status" style="font-size:12px;color:' + (status === 'error' ? '#d40000' : '#28a745') + ';font-weight:700;">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
-                    + '</button>';
+        // ── P7: Fill #gt-submission-tabs with horizontal pills ──
+        var subTabsContainer = document.getElementById('gt-submission-tabs');
+        if (subTabsContainer) {
+            var subTabsHtml = '';
+            submissions.forEach(function(sub) {
+                var isActive = String(sub.id) === String(_activeGroupSubmissionId);
+                var tabLabel = sub.product_group || sub.label || ('测试器');
+                subTabsHtml += '<button type="button" class="gt-submission-tab' + (isActive ? ' active' : '') + '" data-submission-id="' + escGrp(sub.id) + '">'
+                    + escGrp(tabLabel) + '</button>';
             });
-        } else {
-            factorsHtml += '<div style="color:#888;font-size:12px;padding:8px;">暂无因子列表</div>';
+            subTabsContainer.innerHTML = subTabsHtml;
+            subTabsContainer.querySelectorAll('.gt-submission-tab').forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    _activeGroupSubmissionId = tab.getAttribute('data-submission-id');
+                    window.renderGroupTabs(submissions);
+                });
+            });
         }
-        factorsHtml += '</div>';
 
-        container.innerHTML = submissionsHtml + factorsHtml;
+        // ── P7: Fill old #group-tab-container (hidden) for factor navigation compat ──
+        var activeFactorAlias = getActiveFactorAliasForSubmission(_activeGroupSubmissionId)
+            || (factorList.length > 0 ? (factorList[0].alias || factorList[0].name || '') : null);
+        if (activeFactorAlias && _activeGroupSubmissionId) {
+            _activeGroupFactorBySubmission[_activeGroupSubmissionId] = activeFactorAlias;
+        }
+
+        if (container) {
+            var navHtml = '';
+            if (factorList.length > 0 && _activeGroupSubmissionId) {
+                factorList.forEach(function(f) {
+                    var alias = f.alias || f.name || '';
+                    var isFactorActive = alias === activeFactorAlias;
+                    var cached = getCachedGroupResult(_activeGroupSubmissionId, alias);
+                    var status = cached ? (cached.success ? 'done' : 'error') : '';
+                    navHtml += '<button type="button" class="group-factor-nav-btn' + (isFactorActive ? ' active' : '')
+                        + '" data-submission-id="' + escGrp(_activeGroupSubmissionId)
+                        + '" data-factor-alias="' + escGrp(alias)
+                        + '" data-run-status="' + status + '" style="display:none;">'
+                        + '<span>' + escGrp(alias) + '</span>'
+                        + '<span class="group-factor-run-status">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
+                        + '</button>';
+                });
+            }
+            container.innerHTML = navHtml;
+        }
 
         bindGroupFactorTabLongPress();
-        bindGroupSubmissionNavigation(submissions);
         bindGroupFactorNavigation();
         restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
     };
-
     function getActiveFactorAliasForSubmission(submissionId) {
         if (_activeGroupFactorBySubmission[submissionId]) return _activeGroupFactorBySubmission[submissionId];
         var activeBtn = document.querySelector('.group-factor-nav-btn.active[data-submission-id="' + cssEscape(String(submissionId)) + '"]');
