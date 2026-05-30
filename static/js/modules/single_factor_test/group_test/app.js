@@ -3214,6 +3214,18 @@
         bindGroupFactorTabLongPress();
         bindGroupFactorNavigation();
         restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
+
+        // 当有 submission 但主面板还是占位文本时，自动 mount 当前主 tab 的面板
+        // （模板导入 / 新增提交后 renderGroupTabs 被回调，需要刷新面板内容）
+        if (submissions.length > 0 && GT.ui.switchMainTab) {
+            var panelContainer = document.getElementById('gt-panel-container');
+            var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
+            var currentMainTab = panelEl ? panelEl.getAttribute('data-tab') : 'base';
+            // 只在面板无实际内容时触发（避免重复 mount）
+            if (panelContainer && !panelContainer.querySelector('.gt-panel-inner')) {
+                GT.ui.switchMainTab(currentMainTab);
+            }
+        }
     };
     function getActiveFactorAliasForSubmission(submissionId) {
         if (_activeGroupFactorBySubmission[submissionId]) return _activeGroupFactorBySubmission[submissionId];
