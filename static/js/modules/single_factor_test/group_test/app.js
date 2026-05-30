@@ -2550,14 +2550,9 @@
         if (P.base && P.base.add_factors) {
             GT_PANEL_REGISTRY.base.push({ name: 'add_factors', label: '因子选择', containerId: 'base-add-factors', panel: P.base.add_factors });
         }
-        if (P.base && P.base.groups) {
-            GT_PANEL_REGISTRY.base.push({ name: 'groups', label: '分组设置', containerId: 'base-groups-settings', panel: P.base.groups });
-        }
         if (P.base && P.base.fee) {
-            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '手续费', containerId: 'base-fee-settings', panel: P.base.fee });
-        }
-        if (P.base && P.base.close_today) {
-            GT_PANEL_REGISTRY.base.push({ name: 'close_today', label: '平今', containerId: 'base-close-today', panel: P.base.close_today });
+            // fee panel now includes closeToday toggle (merged from close_today)
+            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '手续费与平今', containerId: 'base-fee-settings', panel: P.base.fee });
         }
         if (P.base && P.base.rebalance) {
             GT_PANEL_REGISTRY.base.push({ name: 'rebalance', label: '再平衡', containerId: 'base-rebalance-settings', panel: P.base.rebalance });
@@ -3014,10 +3009,13 @@
             /** In edit mode: Set of selected base-group IDs or batch keys */
             var _editSelection = null;
 
+            // Separate refs: sub-tab buttons bar vs actions bar (both inside #gt-sub-tabs)
+            var _subTabBtnsBar = document.getElementById('gt-sub-tab-btns');
+            var _subTabActionsBar = document.getElementById('gt-sub-tab-actions');
+
             /** Render the sub-tab action buttons based on current mode */
             function _renderSubTabActions() {
-                var actionsBar = document.getElementById('gt-sub-tab-actions');
-                if (!actionsBar) return;
+                if (!_subTabActionsBar) return;
                 var html = '';
                 if (_panelMode === 'add') {
                     html += '<button id="gt-action-submit" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">提交基础组</button>';
@@ -3029,7 +3027,7 @@
                     // Normal list mode: show add button
                     html += '<button id="gt-action-add" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
                 }
-                actionsBar.innerHTML = html;
+                _subTabActionsBar.innerHTML = html;
                 _bindActionButtons();
             }
 
@@ -3146,7 +3144,7 @@
                     _currentPanel.unmount();
                 }
                 _currentPanel = null;
-                if (subTabsBar) subTabsBar.innerHTML = '';
+                if (_subTabBtnsBar) _subTabBtnsBar.innerHTML = '';
                 // 仅清空容器，让 mountSubTab 负责填充实际内容
                 if (panelContainer) panelContainer.innerHTML = '';
             }
@@ -3196,14 +3194,14 @@
                 var entry = filteredList.find(function(p) { return p.name === subTabName; });
                 if (!entry) return;
 
-                // Render sub-tabs (filtered)
-                if (subTabsBar) {
+                // Render sub-tabs (filtered) into #gt-sub-tab-btns
+                if (_subTabBtnsBar) {
                     var stHtml = '';
                     filteredList.forEach(function(p) {
                         stHtml += '<button class="gt-sub-tab' + (p.name === subTabName ? ' active' : '') + '" data-subtab="' + p.name + '">' + p.label + '</button>';
                     });
-                    subTabsBar.innerHTML = stHtml;
-                    subTabsBar.querySelectorAll('.gt-sub-tab').forEach(function(st) {
+                    _subTabBtnsBar.innerHTML = stHtml;
+                    _subTabBtnsBar.querySelectorAll('.gt-sub-tab').forEach(function(st) {
                         st.addEventListener('click', function() {
                             mountSubTab(mainTab, st.getAttribute('data-subtab'));
                         });

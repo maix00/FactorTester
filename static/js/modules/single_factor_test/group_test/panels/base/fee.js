@@ -1,7 +1,7 @@
 /**
- * panels/base/fee.js — Fee strategy config panel (Tab 1, sub-tab "费率策略")
+ * panels/base/fee.js — Fee strategy + close-today toggle (merged panel)
  *
- * Reads the active base group's feeMode/feeRate/feeMap/feeSensitivity,
+ * Reads the active base group's feeMode/feeRate/feeMap/feeSensitivity/useCloseToday,
  * renders appropriate controls, and saves changes via datamodel.
  */
 (function() {
@@ -14,7 +14,7 @@
     // Constants
     // ---------------------------------------------------------------------------
 
-    var CONTAINER_ID = 'base-fee-panel';
+    var CONTAINER_ID = 'base-fee-settings';
     var FEE_MODES = ['none', 'uniform', 'per_product', 'custom'];
     var FEE_MODE_LABELS = {
         none: '无手续费',
@@ -159,6 +159,20 @@
         // Sensitivity slider
         html += _makeSensitivitySlider(sensitivity);
 
+        // --- Close-today toggle ---
+        var useCT = !!group.useCloseToday;
+        var ctStateColor = useCT ? '#d97706' : '#0078d4';
+        var ctStateText = useCT ? '平今仓' : '平昨仓';
+        var ctBtnText = useCT ? '切换为平昨仓' : '切换为平今仓';
+        var ctBtnClass = useCT ? 'btn-outline-warning' : 'btn-outline-secondary';
+        html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">';
+        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">平仓口径</label>';
+        html += '<div style="display:flex;align-items:center;gap:8px;">';
+        html += '<strong id="' + CONTAINER_ID + '-ct-state" style="font-size:14px;color:' + ctStateColor + ';">' + ctStateText + '</strong>';
+        html += '<button id="' + CONTAINER_ID + '-ct-toggle" class="btn btn-sm ' + ctBtnClass + '" style="padding:4px 14px;">' + ctBtnText + '</button>';
+        html += '<span style="font-size:12px;color:#888;">影响品种费率表中平今/平昨比率的选择</span>';
+        html += '</div></div>';
+
         container.innerHTML = html;
 
         // Bind events
@@ -236,6 +250,17 @@
             });
             slider.addEventListener('change', function() {
                 _save({ feeSensitivity: parseFloat(this.value) });
+            });
+        }
+
+        // Close-today toggle
+        var ctToggle = $(CONTAINER_ID + '-ct-toggle');
+        if (ctToggle) {
+            ctToggle.addEventListener('click', function() {
+                if (!_activeId) return;
+                var current = GT.datamodel.base_groups.get(_activeId);
+                if (!current) return;
+                _save({ useCloseToday: !current.useCloseToday });
             });
         }
     }
