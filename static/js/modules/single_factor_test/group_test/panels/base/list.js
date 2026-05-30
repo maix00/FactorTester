@@ -173,12 +173,21 @@
 
         var items = GT.datamodel.base_groups.getAll();
 
+        var addBtnHtml = '<button id="base-group-add-btn" style="margin-bottom:12px;padding:6px 16px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;font-size:13px;">＋ 新增基础组</button>';
+
         if (items.length === 0) {
-            container.innerHTML = '<div class="group-test-empty-state" style="padding:32px;text-align:center;color:#888;">暂无基础组，点击上方「新增基础组」按钮创建</div>';
+            container.innerHTML = '<div class="group-test-empty-state" style="padding:32px;text-align:center;color:#888;">'
+                + '<div style="margin-bottom:12px;">暂无基础组</div>'
+                + addBtnHtml
+                + '</div>';
+            // Bind add button
+            var emptyAddBtn = container.querySelector('#base-group-add-btn');
+            if (emptyAddBtn) emptyAddBtn.addEventListener('click', function() { _showModal(null); });
             return;
         }
 
-        var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+        var html = addBtnHtml;
+        html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
         html += '<thead><tr style="background:#f6f8fa;border-bottom:2px solid #d0d5dd;">';
         html += '<th style="padding:8px 12px;text-align:left;">名称</th>';
         html += '<th style="padding:8px 12px;text-align:left;">测试器</th>';
@@ -209,6 +218,10 @@
 
         html += '</tbody></table>';
         container.innerHTML = html;
+
+        // Bind add button
+        var addBtn = container.querySelector('#base-group-add-btn');
+        if (addBtn) addBtn.addEventListener('click', function() { _showModal(null); });
 
         // Bind row clicks
         _bindRowEvents(container);
