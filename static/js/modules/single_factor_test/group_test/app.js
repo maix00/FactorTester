@@ -2582,15 +2582,6 @@
         }
     }
 
-    // Register panels synchronously — all panel scripts are already loaded
-    // (they appear before app.js in the HTML, so GT.panels is fully populated).
-    _registerPanels();
-    // Always mount the default panel so the user never sees "请先选择提交记录".
-    // No submission is ok; panels handle empty state internally.
-    var panelEl = document.querySelector('#gt-main-tabs .gt-main-tab.active');
-    var tabName = panelEl ? panelEl.getAttribute('data-tab') : 'base';
-    switchMainTab(tabName);
-
     function cacheGroupResult(submissionId, factorAlias, data) {
         if (!submissionId || !factorAlias || !data) return;
         if (!_groupResultsBySubmission[submissionId]) _groupResultsBySubmission[submissionId] = {};
@@ -3084,8 +3075,10 @@
             GT.ui.switchMainTab = switchMainTab;
             GT.ui.mountSubTab = mountSubTab;
 
-            // Note: Initial mount is deferred to _registerPanels' setTimeout callback,
-            // because GT_PANEL_REGISTRY is empty until panel scripts populate it.
+            // Register panels and always mount — panel scripts are already
+            // loaded (they appear before app.js in HTML, so GT.panels is full).
+            _registerPanels();
+            switchMainTab('base');
         })();
         var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
         if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
