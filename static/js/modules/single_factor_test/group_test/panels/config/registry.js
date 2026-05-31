@@ -191,6 +191,10 @@
         if (GT && GT.ui && typeof GT.ui.renderTabActions === 'function') {
             GT.ui.renderTabActions();
         }
+        // Notify list panel to refresh chips
+        if (GT && GT.state && typeof GT.state.emit === 'function') {
+            GT.state.emit('baseGroupsChanged');
+        }
         return true;
     }
 

@@ -33,6 +33,7 @@
     <div id="gt-section-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0f4f8;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-top:12px;user-select:none;">
         <span id="gt-section-toggle" style="font-size:14px;transition:transform 0.2s;display:inline-block;">▼</span>
         <span style="font-weight:600;font-size:14px;color:#1f2937;">📦 分组组合设置</span>
+        <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
             <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
             <span id="group_test_status" style="font-size:12px;color:#888;"></span>
@@ -45,7 +46,6 @@
         <!-- 2b-i. 统一 Tab 栏 + 操作按钮 -->
         <div id="gt-tab-bar" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
             <div id="gt-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
-            <div id="gt-tab-status" style="display:none;font-size:11px;white-space:nowrap;"></div>
             <div id="gt-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
         </div>
 

@@ -132,6 +132,19 @@
         ];
     }
 
+    function getChips(group) {
+        if (!group) return [];
+        var mode = group.rebalanceMode || 'buy_and_hold';
+        var label = MODE_LABELS[mode];
+        if (!label) return [];
+        var chipPlain = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+        return [{
+            label: 'rebalance-mode',
+            html: '⚖️ 再平衡:' + label,
+            style: chipPlain,
+        }];
+    }
+
     GT.panels.config = GT.panels.config || {};
     GT.panels.config.rebalance = {
         mount: mount,
@@ -139,6 +152,7 @@
         refresh: refresh,
         render: render,
         getTableColumns: getTableColumns,
+        getChips: getChips,
     };
 
     // Register as category-3 config panel

@@ -3033,27 +3033,27 @@
                 }
                 bar.innerHTML = html;
                 _bindActionButtons();
-                _renderTabStatus();
+                _renderSectionStatus();
             }
 
-            /** Render status inline in the tab bar (edit mode / dirty hint) */
-            function _renderTabStatus() {
-                var statusEl = document.getElementById('gt-tab-status');
-                if (!statusEl) return;
+            /** Render status beside "分组组合设置" title (edit mode / dirty hint) */
+            function _renderSectionStatus() {
+                var el = document.getElementById('gt-section-status');
+                if (!el) return;
 
                 if (_panelMode === 'edit') {
                     var REG = window.GT_CONFIG_REGISTRY;
                     var hasDirty = REG ? REG.hasDirty() : false;
-                    statusEl.style.display = '';
-                    statusEl.style.color = hasDirty ? '#e65100' : '#888';
-                    statusEl.textContent = hasDirty ? '⚠ 未保存' : '编辑中';
+                    el.style.display = '';
+                    el.style.color = hasDirty ? '#e65100' : '#888';
+                    el.textContent = hasDirty ? '⚠ 未保存' : '编辑中';
                 } else if (_panelMode === 'add') {
-                    statusEl.style.display = '';
-                    statusEl.style.color = '#1565c0';
-                    statusEl.textContent = '新建中';
+                    el.style.display = '';
+                    el.style.color = '#1565c0';
+                    el.textContent = '新建中';
                 } else {
-                    statusEl.style.display = 'none';
-                    statusEl.textContent = '';
+                    el.style.display = 'none';
+                    el.textContent = '';
                 }
             }
 
