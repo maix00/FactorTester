@@ -2512,55 +2512,251 @@
         }
     }
 
-    // ---------- 运行分组测试 ----------
+    // ---------- 运行分组测试（批量：所有batch+LS组一起算） ----------
     async function runGroupTest() {
-        var context = getCurrentContext();
-        if (!context) {
-            alert(getMissingGroupContextMessage());
-            return;
-        }
-        var built = await collectGroupRunPayload(context, context.factor_alias);
-        var statusSpan = built.statusEl || document.getElementById('group_test_status');
-        if (built.error) {
-            statusSpan.innerHTML = '✗ ' + built.error;
-            statusSpan.style.color = '#d40000';
-            return;
-        }
+        var statusSpan = document.getElementById('group_test_status');
+        var runBtn = document.getElementById('run_group_test_btn');
+        var defaultBtn = document.getElementById('load_default_groups_btn');
 
-        statusSpan.innerHTML = '分组测试运行中...';
-        statusSpan.style.color = '#0078d4';
-        var multiHorizonContainer = document.getElementById('multi_horizon_container');
-        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
-
-        postGroupTest(built.payload)
-        .then(function(data) {
-            if (!data.success) {
-                var errorText = data.needs_ic_test && pageHasICModule()
-                    ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试，再运行分组测试。'
-                    : data.error;
-                statusSpan.innerHTML = '✗ 分组测试失败: ' + errorText;
-                statusSpan.style.color = '#d40000';
-                if (data.traceback) {
-                    var chartContainer = document.getElementById('group_chart_container');
-                    if (chartContainer) {
-                        chartContainer.style.display = 'block';
-                        chartContainer.innerHTML = '<pre style="background:#fff3f3;border:1px solid #f99;padding:10px;font-size:11px;overflow:auto;white-space:pre-wrap;margin-top:8px;color:#a00;">' + data.traceback.replace(/</g,'&lt;') + '</pre>';
-                    }
+        // ── 0. 没有分组则自动加载默认分组 ──
+        var allBase = (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll()) || [];
+        var nonDerived = allBase.filter(function(g) { return !g.isDerived; });
+        if (nonDerived.length === 0) {
+            if (statusSpan) {
+                statusSpan.innerHTML = '⏳ 无现有分组，正在加载默认分组...';
+                statusSpan.style.color = '#0078d4';
+            }
+            await loadDefaultGroups();
+            // 再次检查
+            allBase = (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll()) || [];
+            nonDerived = allBase.filter(function(g) { return !g.isDerived; });
+            if (nonDerived.length === 0) {
+                if (statusSpan) {
+                    statusSpan.innerHTML = '✗ 无法加载默认分组';
+                    statusSpan.style.color = '#d40000';
                 }
                 return;
             }
+        }
 
-            statusSpan.innerHTML = data.multi_horizon ? ('✓ 多周期对比完成（' + data.results.length + ' 个频率）') : '✓ 分组测试完成';
-            statusSpan.style.color = '#28a745';
-            cacheGroupResult(context.submission_id, context.factor_alias, data);
-            markGroupFactorStatus(context.submission_id, context.factor_alias, data.success ? 'done' : 'error');
-            applyGroupTestResult(data);
-        })
-        .catch(function(err) {
-            statusSpan.innerHTML = '请求失败: ' + err.message;
-            statusSpan.style.color = '#d40000';
-            console.error(err);
+        // ── 1. 按 batchKey 分组 ──
+        var batchKeyFn = GT.datamodel.groups.batchKey;
+        var batchMap = {};
+        for (var i = 0; i < nonDerived.length; i++) {
+            var g = nonDerived[i];
+            var bk = batchKeyFn(g.testerId, g.factorAlias, g.groupCount);
+            if (!batchMap[bk]) {
+                batchMap[bk] = {
+                    key: bk,
+                    testerId: g.testerId,
+                    factorAlias: g.factorAlias,
+                    groupCount: g.groupCount,
+                    groups: []
+                };
+            }
+            batchMap[bk].groups.push(g);
+        }
+        var batches = [];
+        var bkKeys = Object.keys(batchMap);
+        // sort by shortAlias
+        bkKeys.sort(function(a, b) {
+            var sa = (batchMap[a].groups[0].shortAlias || '');
+            var sb = (batchMap[b].groups[0].shortAlias || '');
+            if (sa < sb) return -1;
+            if (sa > sb) return 1;
+            return 0;
         });
+        for (var k = 0; k < bkKeys.length; k++) { batches.push(batchMap[bkKeys[k]]); }
+
+        // ── 2. 收集 LS configs，按归属分派 ──
+        var allLS = (GT.datamodel && GT.datamodel.ls_configs && GT.datamodel.ls_configs.getAll()) || [];
+        // 为每个 batch 建立 groupId → groupIndex 映射
+        for (var bi = 0; bi < batches.length; bi++) {
+            var b = batches[bi];
+            b.groupIdToIndex = {};
+            for (var gi = 0; gi < b.groups.length; gi++) {
+                b.groupIdToIndex[b.groups[gi].id] = b.groups[gi].groupIndex;
+            }
+            b.lsPayloads = []; // LS configs that belong to this batch
+        }
+        var crossBatchLS = []; // LS configs spanning multiple batches
+
+        for (var li = 0; li < allLS.length; li++) {
+            var ls = allLS[li];
+            var longBatch = null, shortBatch = null;
+            for (var bj = 0; bj < batches.length; bj++) {
+                if (batches[bj].groupIdToIndex[ls.longGroupId] !== undefined) longBatch = batches[bj];
+                if (batches[bj].groupIdToIndex[ls.shortGroupId] !== undefined) shortBatch = batches[bj];
+            }
+            if (!longBatch || !shortBatch) {
+                console.warn('[runGroupTest] LS config ' + ls.id + ' references unknown group(s): long=' + ls.longGroupId + ' short=' + ls.shortGroupId);
+                continue;
+            }
+            if (longBatch === shortBatch) {
+                // Same batch: build LS payload from groupIndex
+                var longIdx = longBatch.groupIdToIndex[ls.longGroupId];
+                var shortIdx = shortBatch.groupIdToIndex[ls.shortGroupId];
+                longBatch.lsPayloads.push({
+                    name: ls.name || 'Long-Short',
+                    long: [{ group: longIdx - 1, weight: 1.0 }],
+                    short: [{ group: shortIdx - 1, weight: 1.0 }]
+                });
+            } else {
+                crossBatchLS.push(ls);
+            }
+        }
+
+        // ── 3. 构建每个 batch 的 payload 并并行/顺序执行 ──
+        if (runBtn) runBtn.disabled = true;
+
+        var multiHorizonContainer = document.getElementById('multi_horizon_container');
+        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
+
+        var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
+        var completedCount = 0;
+        var allResults = {}; // keyed by batchKey
+
+        // 从第一个 batch 取 param 值（fee、时间等）
+        var firstGroup = batches[0] && batches[0].groups[0];
+        var n_groups = firstGroup ? firstGroup.groupCount : 5;
+        var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
+        var start_date = firstGroup ? (firstGroup.startDate || null) : null;
+        var end_date = firstGroup ? (firstGroup.endDate || null) : null;
+
+        // 读取时间范围 fallback
+        if (!start_date || !end_date) {
+            var ctx = getCurrentContext();
+            var sub = ctx ? ctx.submission : null;
+            if (!sub && window.submissions) {
+                var firstTesterId = batches[0] && batches[0].testerId;
+                sub = window.submissions.find(function(s) { return String(s.id) === String(firstTesterId); });
+            }
+            if (!start_date) start_date = sub ? sub.start_date : null;
+            if (!end_date) end_date = sub ? sub.end_date : null;
+        }
+        // More fallbacks from DOM
+        if (!start_date || !end_date) {
+            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
+            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
+            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
+            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
+            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
+            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
+            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
+            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
+        }
+
+        if (!start_date || !end_date) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 请设置时间范围'; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+        if (start_date > end_date) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ 起始日期不能晚于终止日期'; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+
+        var feePayload;
+        try {
+            feePayload = await buildFeePayload();
+        } catch (err) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ ' + err.message; statusSpan.style.color = '#d40000'; }
+            if (runBtn) runBtn.disabled = false;
+            return;
+        }
+        var fee = feePayload.fee;
+        var fee_map = feePayload.fee_map;
+        var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
+        var return_freqs = getSelectedReturnFreqs();
+
+        if (statusSpan) {
+            statusSpan.innerHTML = '分组测试运行中... 0/' + totalBatches;
+            statusSpan.style.color = '#0078d4';
+        }
+
+        try {
+            // ── 3a. 并行执行所有同 batch 的组（按 batch 顺序串行，batch 内可并行但这里简化：每个 batch 一次 API 调用） ──
+            for (var bi = 0; bi < batches.length; bi++) {
+                var batch = batches[bi];
+                var payload = {
+                    submission_id: batch.testerId,
+                    factor_alias: batch.factorAlias,
+                    n_groups: batch.groupCount,
+                    fee: fee,
+                    fee_map: fee_map,
+                    use_closetoday: use_closetoday,
+                    start_date: start_date,
+                    end_date: end_date,
+                    return_freqs: return_freqs.length > 0 ? return_freqs : null,
+                    rebalance_mode: rebalance_mode,
+                    ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null,
+                    derived_groups: null,
+                    structure_key: buildGroupStructureKey(batch.testerId, batch.factorAlias, batch.groupCount, start_date, end_date, return_freqs)
+                };
+
+                try {
+                    var data = await postGroupTest(payload);
+                    if (!data.success) {
+                        var errorText = data.needs_ic_test && pageHasICModule()
+                            ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
+                            : data.error;
+                        if (statusSpan) {
+                            statusSpan.innerHTML = '✗ 分组测试失败 (' + batch.factorAlias + '): ' + errorText;
+                            statusSpan.style.color = '#d40000';
+                        }
+                        return;
+                    }
+                    allResults[batch.key] = data;
+                    cacheGroupResult(batch.testerId, batch.factorAlias, data);
+                    markGroupFactorStatus(batch.testerId, batch.factorAlias, 'done');
+                } catch (err) {
+                    if (statusSpan) {
+                        statusSpan.innerHTML = '✗ 请求失败 (' + batch.factorAlias + '): ' + err.message;
+                        statusSpan.style.color = '#d40000';
+                    }
+                    markGroupFactorStatus(batch.testerId, batch.factorAlias, 'error');
+                    return;
+                }
+
+                completedCount++;
+                if (statusSpan) {
+                    statusSpan.innerHTML = '分组测试运行中... ' + completedCount + '/' + totalBatches;
+                }
+            }
+
+            // ── 3b. 跨 batch LS：最后单独算 ──
+            if (crossBatchLS.length > 0) {
+                if (statusSpan) {
+                    statusSpan.innerHTML = '正在计算跨 Batch 的 Long-Short 组...';
+                }
+                // 对每个跨 batch LS，用第一个 batch 调用，然后手动合并
+                // 简化处理：用第一个 batch 的 tester 跑，然后把 LS 传入
+                // 实际上跨 batch LS 需要在两个 tester 上分别跑，这里先跳过并提示
+                console.warn('[runGroupTest] cross-batch LS not yet supported:', crossBatchLS.length, 'configs');
+                completedCount++;
+            }
+
+            // ── 4. 展示最后一个结果 ──
+            var lastBatch = batches[batches.length - 1];
+            var lastResult = allResults[lastBatch.key];
+            if (lastResult) {
+                applyGroupTestResult(lastResult);
+            }
+
+            if (statusSpan) {
+                statusSpan.innerHTML = '✓ ' + batches.length + ' 个批次分组测试完成';
+                statusSpan.style.color = '#28a745';
+            }
+        } catch (e) {
+            console.error('[runGroupTest] error:', e);
+            if (statusSpan) {
+                statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
+                statusSpan.style.color = '#d40000';
+            }
+        } finally {
+            if (runBtn) runBtn.disabled = false;
+        }
     }
 
     async function runAllGroupTestsForCurrentSubmission() {

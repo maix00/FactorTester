@@ -119,15 +119,18 @@ def _parse_ls_config(data: dict, n_groups: int) -> dict:
 
 
 def _parse_ls_configs(data: dict, n_groups: int) -> list[dict]:
+    """解析 LS configs 数组。只解析前端明确传入的 ls_configs，不传则返回空列表。"""
     raw_configs = data.get('ls_configs')
     if isinstance(raw_configs, list) and raw_configs:
         configs = []
         for raw in raw_configs:
             if not isinstance(raw, dict):
                 continue
-            configs.append(_parse_ls_config({'ls_config': raw}, n_groups))
-        return configs or [_parse_ls_config(data, n_groups)]
-    return [_parse_ls_config(data, n_groups)]
+            parsed = _parse_ls_config({'ls_config': raw}, n_groups)
+            if parsed['long'] and parsed['short']:
+                configs.append(parsed)
+        return configs
+    return []
 
 
 def _unique_metric_key(name: str, used: set[str], default: str = 'LS') -> str:
@@ -560,8 +563,8 @@ def run_group_test():
                 _fee_np = group_result.fee_costs_np if group_result is not None else None
                 fee_np_arr = _fee_np if _fee_np is not None else np.zeros((len(timestamps), n_groups))
 
-                r_ls_np, _ = _compute_weighted_ls_returns(gross_np, fee_np_arr, ls_configs[0], n_groups)
-                ls_metric = _compute_ls_metrics(r_ls_np, report_df, idx_list)
+                r_ls_np, _ = _compute_weighted_ls_returns(gross_np, fee_np_arr, ls_configs[0], n_groups) if ls_configs else (np.array([]), np.array([]))
+                ls_metric = _compute_ls_metrics(r_ls_np, report_df, idx_list) if ls_configs else {}
                 freq_label = str(rf_str) if rf_str else factor.freq.name if factor.freq else 'base'
                 multi_horizon_results.append({
                     'return_freq': freq_label,
