@@ -933,7 +933,7 @@
                 if (_selectedIds[id]) { delete _selectedIds[id]; }
                 else { _selectedIds[id] = true; }
                 _syncEditMode();
-                GT.state.emit('activeBaseGroupChanged', id);
+                GT.state.setActiveBaseGroupId(id);
             });
         });
 
