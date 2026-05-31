@@ -80,13 +80,38 @@
     }
 
     /**
+     * Build {CODE: desc} map from window.submissions for the given tester.
+     */
+    function _getProductDescMap(group) {
+        var map = {};
+        if (!group || !group.testerId) return map;
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(group.testerId)) {
+                var prods = subs[i].products;
+                if (Array.isArray(prods)) {
+                    for (var j = 0; j < prods.length; j++) {
+                        var p = prods[j];
+                        var key = typeof p === 'string' ? p.toUpperCase() : (p.name || '').toUpperCase();
+                        var desc = (p && p.desc) ? p.desc : '';
+                        if (key && desc) map[key] = desc;
+                    }
+                }
+                break;
+            }
+        }
+        return map;
+    }
+
+    /**
      * Merge group.feeMap overrides onto the raw fee rows.
-     * Returns [{ code, name, exchange, multiplier, open_ratio, close_ratio,
+     * Returns [{ code, name, desc, exchange, multiplier, min_tick, open_ratio, close_ratio,
      *            closetoday_ratio, openModified, closeModified, closeTodayModified }]
      */
     function _buildRows(group, products) {
         var rawRows = (GT.fee && typeof GT.fee.getFeeRows === 'function') ? GT.fee.getFeeRows() : [];
         var feeMap = group.feeMap || {};
+        var descMap = _getProductDescMap(group);
 
         // Build product filter set
         var filterSet = null;
@@ -120,9 +145,11 @@
 
             rows.push({
                 code:             code,
-                name:             r.name || '',
+                name:             r.name || r.variety_name || '',
+                desc:             descMap[code] || '',
                 exchange:         r.exchange || '',
                 multiplier:       r.multiplier || '',
+                min_tick:         r.min_tick || '',
                 open_ratio:       openR,
                 close_ratio:      closeR,
                 closetoday_ratio: closeTodayR,
@@ -172,8 +199,10 @@
         html += '<thead><tr style="background:#f0f4f8;position:sticky;top:0;z-index:2;">';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">品种代码</th>';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">品种名称</th>';
+        html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">描述</th>';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">交易所</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">乘数</th>';
+        html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">最小变动</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">开仓比率</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">平今比率</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">平昨比率</th>';
@@ -198,8 +227,10 @@
             html += '<tr style="border-bottom:1px solid #eef2f7;">';
             html += '<td style="padding:6px 10px;font-weight:600;font-family:monospace;">' + escapeHTML(row.code) + '</td>';
             html += '<td style="padding:6px 10px;color:#555;">' + escapeHTML(row.name) + '</td>';
+            html += '<td style="padding:6px 10px;color:#888;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHTML(row.desc || '') + '">' + escapeHTML(row.desc || '—') + '</td>';
             html += '<td style="padding:6px 10px;color:#555;">' + escapeHTML(row.exchange) + '</td>';
             html += '<td style="padding:6px 10px;text-align:right;">' + escapeHTML(row.multiplier) + '</td>';
+            html += '<td style="padding:6px 10px;text-align:right;font-family:monospace;">' + escapeHTML(row.min_tick) + '</td>';
 
             if (isEdit) {
                 html += '<td' + openClass + ' contenteditable="true" data-cf-variety="' + row.code.toLowerCase() + '" data-cf-field="open_ratio" style="padding:6px 10px;text-align:right;outline:none;">' + openR + '</td>';
@@ -216,7 +247,7 @@
         }
 
         if (rows.length === 0) {
-            html += '<tr><td colspan="8" style="padding:24px;text-align:center;color:#888;">暂无匹配的品种费率（请先获取费率数据）</td></tr>';
+            html += '<tr><td colspan="10" style="padding:24px;text-align:center;color:#888;">暂无匹配的品种费率（请先获取费率数据）</td></tr>';
         }
 
         html += '</tbody></table>';

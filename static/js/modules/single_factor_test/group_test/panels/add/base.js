@@ -391,13 +391,13 @@
             var comboKey = _batchKey(testerId, alias, groupCount);
             var letter = comboLetters[comboKey] || 'A';
 
-            var feeMode = draft.feeMode || 'none';
-            // Read dirty workspace for feeMap (populated by overlay's "写入暂存")
             var REG = window.GT_CONFIG_REGISTRY;
+            var feeMode = (REG && REG.hasDirty()) ? REG.getDirty('feeMode', draft.feeMode || 'none') : (draft.feeMode || 'none');
+            // Read dirty workspace for feeMap (populated by overlay's "写入暂存")
             var dirtyFeeMap = (REG && REG.hasDirty()) ? REG.getDirty('feeMap') : null;
             var feeMap = null;
             if (feeMode === 'per_product' || feeMode === 'custom') {
-                feeMap = (dirtyFeeMap && Object.keys(dirtyFeeMap).length > 0) ? dirtyFeeMap : {};
+                feeMap = (dirtyFeeMap && Object.keys(dirtyFeeMap).length > 0) ? dirtyFeeMap : null;
             }
             var feeRate = (REG && REG.hasDirty()) ? REG.getDirty('feeRate', draft.feeRate) : draft.feeRate;
             var feeSensitivity = (REG && REG.hasDirty()) ? REG.getDirty('feeSensitivity', draft.feeSensitivity) : draft.feeSensitivity;
