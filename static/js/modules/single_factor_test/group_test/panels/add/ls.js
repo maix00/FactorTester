@@ -175,8 +175,6 @@
      * @returns {{success: boolean, error: string|null}}
      */
     function handleSave() {
-        console.log('[LS save] _longId:', _longId, '_shortId:', _shortId);
-
         if (!_longId) return { success: false, error: '请先选择多头组' };
         if (!_shortId) return { success: false, error: '请先选择空头组' };
 
@@ -184,28 +182,20 @@
             var longDgId  = _resolveToDerived(_longId);
             var shortDgId = _resolveToDerived(_shortId);
 
-            console.log('[LS save] longDgId:', longDgId, 'shortDgId:', shortDgId);
-
             var gLong  = _getGroup(_longId);
             var gShort = _getGroup(_shortId);
 
-            // Build name from short aliases (dynamic, like display)
             var saLong  = _displayAlias(gLong) || 'L';
             var saShort = _displayAlias(gShort) || 'S';
             var name = saLong + '/' + saShort;
 
-            var data = {
+            GT.datamodel.ls_configs.add({
                 name: name,
                 longGroupId: longDgId,
                 shortGroupId: shortDgId,
-            };
-
-            console.log('[LS save] data:', JSON.stringify(data));
-
-            GT.datamodel.ls_configs.add(data);
+            });
             return { success: true, error: null };
         } catch (err) {
-            console.error('[LS save] error:', err);
             return { success: false, error: (err && err.message) || String(err) };
         }
     }
@@ -223,31 +213,22 @@
         if (!g) throw new Error('分组不存在: ' + groupId);
         if (g.isDerived) return groupId;
 
-        // Base group: find or create derived
+        // Find existing derived for this base
         var all = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
-        console.log('[LS _resolveToDerived] groupId:', groupId, 'isDerived:', g.isDerived, 'all.length:', all.length);
         for (var i = 0; i < all.length; i++) {
-            if (all[i].isDerived && all[i].baseGroupId === groupId) {
-                console.log('[LS _resolveToDerived] found existing derived:', all[i].id);
-                return all[i].id;
-            }
+            if (all[i].isDerived && all[i].baseGroupId === groupId) return all[i].id;
         }
 
-        // Compute derived shortAlias: baseGroupAlias:1 (each base has one derived in LS context)
+        // Create derived: baseGroupAlias:1
         var bgAlias = g.shortAlias || g.name || groupId;
         var dgShortAlias = bgAlias + ':1';
-        var dgName = dgShortAlias;
 
-        console.log('[LS _resolveToDerived] creating derived for:', groupId, 'name:', dgName);
-        var dg = GT.datamodel.groups.add({
-            name: dgName,
+        return GT.datamodel.groups.add({
+            name: dgShortAlias,
             shortAlias: dgShortAlias,
             baseGroupId: groupId,
             isDerived: true,
         });
-        console.log('[LS _resolveToDerived] groups.add returned:', dg, 'typeof:', typeof dg, 'id:', dg && dg.id);
-        if (dg && typeof dg.id === 'string') return dg.id;
-        throw new Error('groups.add did not return an object with id for groupId=' + groupId);
     }
 
     // =========================================================================
