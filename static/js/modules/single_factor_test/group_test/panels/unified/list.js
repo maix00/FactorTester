@@ -895,6 +895,7 @@
                 } else {
                     if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
                 }
+                GT.state.emit('baseGroupsChanged');
             });
         });
 
