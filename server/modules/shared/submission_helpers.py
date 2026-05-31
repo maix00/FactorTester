@@ -12,13 +12,13 @@ from tools.products.Futures import FuturesContract
 def tester_to_dict(t):
     """Convert FactorTester to frontend payload."""
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+    from tools.products.product_utils import get_contract_desc
     products_list = []
     if hasattr(t, 'products') and t.products:
         for p in t.products:
             prod_desc = getattr(p, 'desc', '') or ''
-            # FuturesContract 通常无 desc，继承父品种描述（与 /get_products 保持一致）
-            if not prod_desc and isinstance(p, FuturesContract):
-                from tools.products.product_utils import get_contract_desc
+            # 产品通常无 desc，从父品种/期现结构继承描述（与 /get_products 保持一致）
+            if not prod_desc:
                 prod_desc = get_contract_desc(getattr(p, 'name', str(p))) or ''
             products_list.append({
                 'name': getattr(p, 'name', str(p)),

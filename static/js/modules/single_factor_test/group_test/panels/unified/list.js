@@ -83,14 +83,29 @@
                         return { name: p.name || '', desc: p.desc || '' };
                     });
                 } else {
+                    // Fallback: 从 selected_paths 解析产品名（排除负向路径）
                     var paths = subs[i].selected_paths || [];
                     var allProds = {};
+                    var excluded = {};
+                    // 先收集排除集
                     for (var pi = 0; pi < paths.length; pi++) {
                         var path = paths[pi];
-                        if (path.indexOf('/_products/') !== -1) {
-                            var parts = path.split('/');
+                        if (path.charAt(0) === '-') {
+                            var exclParts = path.substring(1).split('/');
+                            var exclLeaf = exclParts[exclParts.length - 1];
+                            if (exclLeaf && exclLeaf !== '_products') excluded[exclLeaf] = true;
+                        }
+                    }
+                    // 再收集正向产品
+                    for (var pi2 = 0; pi2 < paths.length; pi2++) {
+                        var path2 = paths[pi2];
+                        if (path2.charAt(0) === '-') continue;
+                        if (path2.indexOf('/_products/') !== -1) {
+                            var parts = path2.split('/');
                             var leafName = parts[parts.length - 1];
-                            if (leafName && leafName !== '_products') allProds[leafName] = { name: leafName, desc: '' };
+                            if (leafName && leafName !== '_products' && !excluded[leafName]) {
+                                allProds[leafName] = { name: leafName, desc: '' };
+                            }
                         }
                     }
                     result = Object.values(allProds);
