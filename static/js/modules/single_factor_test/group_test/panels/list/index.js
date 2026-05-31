@@ -876,23 +876,24 @@
         });
 
         // ── Base batch ──
-        container.querySelectorAll('.unified-batch-header').forEach(function(header) {
-            header.addEventListener('click', function(e) {
+        // ── Base batch header (delegated) ──
+        container.addEventListener('click', function(e) {
+            var expandEl = e.target.closest('.unified-batch-expand');
+            if (expandEl) {
+                e.stopPropagation();
+                var header = expandEl.closest('.unified-batch-header');
+                if (!header) return;
+                var key = header.getAttribute('data-batch-key');
+                _expandedBatches[key] = !_expandedBatches[key];
+                fullRender();
+                return;
+            }
+            var header = e.target.closest('.unified-batch-header');
+            if (header) {
                 if (e.target.closest('button')) return;
-                var key = this.getAttribute('data-batch-key');
-                if (e.target.closest('.unified-batch-expand')) {
-                    e.stopPropagation();
-                    _expandedBatches[key] = !_expandedBatches[key];
-                    var expandEl = this.querySelector('.unified-batch-expand');
-                    if (expandEl) expandEl.textContent = _expandedBatches[key] ? '▾' : '▸';
-                    var body = this.nextElementSibling;
-                    if (body && body.classList.contains('unified-batch-body')) {
-                        body.style.display = _expandedBatches[key] ? '' : 'none';
-                    }
-                    return;
-                }
+                var key = header.getAttribute('data-batch-key');
                 _toggleBatchSelection(_batchMap[key]);
-            });
+            }
         });
 
         // ── Base group rows ──
