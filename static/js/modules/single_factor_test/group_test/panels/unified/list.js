@@ -621,7 +621,7 @@
         for (var pi = 0; pi < products.length; pi++) {
             if (pi > 0) h += ', ';
             var pn = products[pi].name;
-            h += '<a href="/price_viewer?product=' + encodeURIComponent(pn) + '" target="_blank" style="color:#0078d4;text-decoration:none;font-weight:600;" onclick="event.stopPropagation();">' + escapeHTML(pn) + '</a>';
+            h += '<a href="/products?product=' + encodeURIComponent(pn) + '" target="_blank" style="color:#0078d4;text-decoration:none;font-weight:600;" onclick="event.stopPropagation();">' + escapeHTML(pn) + '</a>';
         }
         if (products.length === 0) h += '—';
         h += '</div>';
