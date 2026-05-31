@@ -36,6 +36,7 @@
 
     /** Batch expand/collapse */
     var _expandedBatches = {};
+    var _lsSectionExpanded = true; // LS section expand/collapse
 
     /** Product list expand/collapse per derived node — synced with chips.js via REG._expandedProducts */
     // Aliased to REG._expandedProducts on first fullRender (REG must be loaded by then)
@@ -250,17 +251,23 @@
         if (items.length === 0) return '';
         var h = '';
 
-        // Section header
-        h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:8px;border-bottom:2px solid #e0e7ff;">';
+        // Section header with expand/collapse
+        h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e0e7ff;cursor:pointer;" id="ls-section-header">';
+        h += '<div style="display:flex;align-items:center;gap:6px;">';
+        h += '<span class="ls-section-expand" style="font-size:18px;line-height:1;width:20px;text-align:center;">' + (_lsSectionExpanded ? '▾' : '▸') + '</span>';
         h += '<span style="font-size:14px;font-weight:700;color:#3730a3;">⚡ Long-Short 组</span>';
+        h += '<span style="font-size:11px;color:#666;">(' + items.length + ')</span>';
+        h += '</div>';
         h += '</div>';
 
-        h += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-        // No table header — each row: shortAlias + chips + ✕
-        h += '<tbody>';
+        if (_lsSectionExpanded) {
+            h += '<div id="ls-section-body" style="margin-left:8px;border-left:2px solid #e0e7ff;padding-left:4px;">';
+            h += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+            // No table header — each row: shortAlias + chips + ✕
+            h += '<tbody>';
 
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
                 var isActive = item.id === (GT.state && GT.state.getActiveLsConfigId && GT.state.getActiveLsConfigId());
                 var rowStyle = isActive ? 'background:#eef2ff;' : '';
 
@@ -291,8 +298,10 @@
                 h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
                 h += '<button class="unified-ls-del-btn" data-ls-id="' + escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                 h += '</td></tr>';
+            }
+            h += '</tbody></table>';
+            h += '</div>';
         }
-        h += '</tbody></table>';
         return h;
     }
 
@@ -934,6 +943,14 @@
 
         // ── Batch / Derived header click (delegated once, survives fullRender) ──
         container.addEventListener('click', function(e) {
+            // LS section expand/collapse
+            var lsExpandEl = e.target.closest('.ls-section-expand');
+            if (lsExpandEl) {
+                e.stopPropagation();
+                _lsSectionExpanded = !_lsSectionExpanded;
+                fullRender();
+                return;
+            }
             // Triangle expand/collapse
             var expandEl = e.target.closest('.unified-batch-expand');
             if (expandEl) {
