@@ -225,8 +225,12 @@
 
         // Base group: find or create derived
         var all = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
+        console.log('[LS _resolveToDerived] groupId:', groupId, 'isDerived:', g.isDerived, 'all.length:', all.length);
         for (var i = 0; i < all.length; i++) {
-            if (all[i].isDerived && all[i].baseGroupId === groupId) return all[i].id;
+            if (all[i].isDerived && all[i].baseGroupId === groupId) {
+                console.log('[LS _resolveToDerived] found existing derived:', all[i].id);
+                return all[i].id;
+            }
         }
 
         // Compute derived shortAlias: baseGroupAlias:1 (each base has one derived in LS context)
@@ -234,13 +238,16 @@
         var dgShortAlias = bgAlias + ':1';
         var dgName = dgShortAlias;
 
+        console.log('[LS _resolveToDerived] creating derived for:', groupId, 'name:', dgName);
         var dg = GT.datamodel.groups.add({
             name: dgName,
             shortAlias: dgShortAlias,
             baseGroupId: groupId,
             isDerived: true,
         });
-        return dg.id;
+        console.log('[LS _resolveToDerived] groups.add returned:', dg, 'typeof:', typeof dg, 'id:', dg && dg.id);
+        if (dg && typeof dg.id === 'string') return dg.id;
+        throw new Error('groups.add did not return an object with id for groupId=' + groupId);
     }
 
     // =========================================================================
