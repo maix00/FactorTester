@@ -36,7 +36,7 @@
 
     /** Batch expand/collapse */
     var _expandedBatches = {};
-    var _lsSectionExpanded = true; // LS section expand/collapse
+    var _lsSectionExpanded = false; // LS section expand/collapse, default collapsed
 
     /** Product list expand/collapse per derived node — synced with chips.js via REG._expandedProducts */
     // Aliased to REG._expandedProducts on first fullRender (REG must be loaded by then)
@@ -569,7 +569,7 @@
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
             var batchId = batch.key;
-            var isExpanded = _expandedBatches[batchId] !== false;
+            var isExpanded = batches.length === 1 ? true : (_expandedBatches[batchId] === true);
             var isCollapsed = _collapsedIds[batchId];
 
             // Compute batch letter prefix from items' shortAliases
