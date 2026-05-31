@@ -19,6 +19,8 @@
     if (!GT.panels) { GT.panels = {}; }
     if (!GT.panels.config) { GT.panels.config = {}; }
 
+    var REG = window.GT_CONFIG_REGISTRY;
+
     var _containerId = 'config-rebalance';
     var _mounted = false;
 
@@ -34,54 +36,19 @@
         'recycle': '留存成员的持仓不动；有成员退出时，把释放出的资金优先分给新进成员。适合观察"旧仓尽量不动、只用退出资金补新仓"的过渡方式。',
     };
 
-    /** Extract group IDs from edit selection (supports {id:true} object and {groupIds:[]} formats) */
-    function _getEditGroupIds(sel) {
-        if (!sel) return [];
-        if (Array.isArray(sel.groupIds)) return sel.groupIds;
-        if (Array.isArray(sel)) return sel;
-        // Pure object like {id1: true, id2: true}
-        if (typeof sel === 'object') {
-            return Object.keys(sel).filter(function(k) { return sel[k]; });
-        }
-        return [];
-    }
-
     function $(id) { return document.getElementById(id); }
 
     function render() {
         var container = $(_containerId);
         if (!container) { return; }
 
-        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
-        var currentMode = 'each_period'; // default for add mode
-        var activeId = null;
-
-        if (mode === 'add') {
-            var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
-            currentMode = (draft && draft.rebalanceMode) || 'each_period';
-        } else if (mode === 'edit') {
-            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-            var groupIds = _getEditGroupIds(sel);
-            if (groupIds.length > 0) {
-                activeId = groupIds[0];
-            }
-        } else {
-            activeId = GT.state.getActiveBaseGroupId();
-        }
-
-        if (!activeId && mode !== 'add') {
+        var group = REG.getReferenceGroup();
+        if (!group) {
             container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">请先在基础组列表中选择一个基础组</div>';
             return;
         }
 
-        if (activeId) {
-            var item = GT.datamodel.base_groups.get(activeId);
-            if (!item) {
-                container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">未找到选中的基础组</div>';
-                return;
-            }
-            currentMode = item.rebalanceMode || 'each_period';
-        }
+        var currentMode = group.rebalanceMode || 'each_period';
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -108,36 +75,11 @@
         if (select) {
             select.addEventListener('change', function() {
                 var newMode = select.value;
-                var currentMode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
                 var descEl = $('rb-mode-desc');
                 if (descEl) {
                     descEl.textContent = MODE_DESCRIPTIONS[newMode] || '';
                 }
-                if (currentMode === 'add') {
-                    if (GT.ui && typeof GT.ui.updateAddDraft === 'function') {
-                        GT.ui.updateAddDraft({ rebalanceMode: newMode });
-                    }
-                    return;
-                }
-                var id = GT.state.getActiveBaseGroupId();
-                if (currentMode === 'edit') {
-                    var sel2 = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-                    var ids2 = _getEditGroupIds(sel2);
-                    if (ids2.length > 0) {
-                        for (var i = 0; i < ids2.length; i++) {
-                            try {
-                                GT.datamodel.base_groups.update(ids2[i], { rebalanceMode: newMode });
-                            } catch (err) { /* skip individual failures */ }
-                        }
-                    }
-                } else {
-                    if (!id) return;
-                    try {
-                        GT.datamodel.base_groups.update(id, { rebalanceMode: newMode });
-                    } catch (err) {
-                        alert('操作失败: ' + err.message);
-                    }
-                }
+                REG.savePatch({ rebalanceMode: newMode });
             });
         }
     }

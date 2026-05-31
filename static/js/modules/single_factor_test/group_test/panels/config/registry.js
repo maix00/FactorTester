@@ -103,6 +103,109 @@
     }
 
     // ---------------------------------------------------------------------------
+    // Shared helpers for config panels
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Extract group IDs from edit selection.
+     * Supports multiple formats:
+     *   - {groupIds: ['id1','id2']}  (wrapper object)
+     *   - ['id1','id2']              (plain array)
+     *   - {id1: true, id2: true}     (truthy-key object, from list panel _selectedIds)
+     *
+     * @param {*} sel — edit selection value from GT.ui.getEditSelection()
+     * @returns {string[]}
+     */
+    function getEditGroupIds(sel) {
+        if (!sel) return [];
+        if (Array.isArray(sel.groupIds)) return sel.groupIds;
+        if (Array.isArray(sel)) return sel;
+        if (typeof sel === 'object') {
+            return Object.keys(sel).filter(function(k) { return sel[k]; });
+        }
+        return [];
+    }
+
+    /**
+     * Determine the reference group for a config panel to display settings from.
+     * In edit mode: uses the first selected group.
+     * In list mode: uses the active base group from state.
+     * In add mode: returns the draft object (or null).
+     *
+     * @returns {object|null} — base group record from datamodel, or a synthetic draft object
+     */
+    function getReferenceGroup() {
+        var GT = window.GroupTest;
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+
+        if (mode === 'add') {
+            var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+            if (!draft) return null;
+            return {
+                id: '_add_draft',
+                feeMode: draft.feeMode || 'none',
+                feeRate: draft.feeRate,
+                feeMap: draft.feeMap,
+                feeSensitivity: draft.feeSensitivity,
+                rebalanceMode: draft.rebalanceMode,
+                useCloseToday: draft.useCloseToday || false,
+            };
+        }
+
+        if (mode === 'edit') {
+            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            var ids = getEditGroupIds(sel);
+            if (ids.length === 0) return null;
+            if (!GT.datamodel || !GT.datamodel.base_groups) return null;
+            return GT.datamodel.base_groups.get(ids[0]);
+        }
+
+        // list mode
+        var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+        if (!id) return null;
+        if (!GT.datamodel || !GT.datamodel.base_groups) return null;
+        return GT.datamodel.base_groups.get(id);
+    }
+
+    /**
+     * Apply a patch to all selected groups in edit mode, or to the active group in list mode.
+     * In add mode, saves to the add draft.
+     *
+     * @param {object} patch — key/value pairs to save
+     */
+    function savePatch(patch) {
+        var GT = window.GroupTest;
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+
+        if (mode === 'add') {
+            if (GT.ui && typeof GT.ui.updateAddDraft === 'function') {
+                GT.ui.updateAddDraft(patch);
+            }
+            return;
+        }
+
+        if (mode === 'edit') {
+            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            var ids = getEditGroupIds(sel);
+            for (var i = 0; i < ids.length; i++) {
+                try {
+                    GT.datamodel.base_groups.update(ids[i], patch);
+                } catch (err) { /* skip individual failures */ }
+            }
+            return;
+        }
+
+        // list mode
+        var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+        if (!id) return;
+        try {
+            GT.datamodel.base_groups.update(id, patch);
+        } catch (err) {
+            alert('保存失败: ' + err.message);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // Export
     // ---------------------------------------------------------------------------
 
@@ -111,6 +214,10 @@
         getAll: getAll,
         getTableColumns: getTableColumns,
         toPanelEntry: toPanelEntry,
+        // shared helpers
+        getEditGroupIds: getEditGroupIds,
+        getReferenceGroup: getReferenceGroup,
+        savePatch: savePatch,
     };
 
     GT.log('panels/config/registry loaded');
