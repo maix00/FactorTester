@@ -115,6 +115,27 @@
         return id;
     }
 
+    /** Get group by id (same as ls.js _getGroup) */
+    function _getGroup(id) {
+        return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
+    }
+
+    /** Render config chips for a derived group (for LS rows) */
+    function _renderConfigChipsForGroup(g) {
+        if (!g) return '';
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (!REG || typeof REG.getAllChips !== 'function') return '';
+        var allChips = REG.getAllChips(g);
+        var html = '';
+        for (var i = 0; i < allChips.length; i++) {
+            var chip = allChips[i];
+            if (chip.category !== 'config') continue;
+            var s = chip.style || CHIP_STYLE_PLAIN;
+            html += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+        }
+        return html;
+    }
+
     function _lsTesterLabel(dgId) {
         if (!dgId) return '—';
         var dg = GT.datamodel.groups && GT.datamodel.groups.get(dgId);
@@ -223,33 +244,36 @@
         h += '</div>';
 
         h += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-        h += '<thead><tr style="background:#f6f8fa;border-bottom:1px solid #d0d5dd;">';
-        h += '<th style="padding:6px 8px;text-align:left;">名称</th>';
-        h += '<th style="padding:6px 8px;text-align:left;">多头</th>';
-        h += '<th style="padding:6px 8px;text-align:left;">空头</th>';
-        h += '<th style="padding:6px 8px;text-align:left;">测试器</th>';
-        h += '<th style="padding:6px 8px;text-align:center;">状态</th>';
-        h += '<th style="padding:6px 8px;text-align:center;width:90px;">操作</th>';
-        h += '</tr></thead><tbody>';
+        // No table header — each row: shortAlias + chips + ✕
+        h += '<tbody>';
 
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
                 var isActive = item.id === (GT.state && GT.state.getActiveLsConfigId && GT.state.getActiveLsConfigId());
                 var rowStyle = isActive ? 'background:#eef2ff;' : '';
-                var testerText = _lsTesterLabel(item.longGroupId);
-                var staleTag = item.needsRegenerate
-                    ? '<span style="' + CHIP_STYLE + 'background:#fef3c7;color:#d97706;">待更新</span>'
-                    : '<span style="' + CHIP_STYLE + 'background:#d1fae5;color:#059669;">就绪</span>';
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
-                h += '<td style="padding:6px 8px;"><span style="' + CHIP_STYLE_PLAIN + '">' + escapeHTML(item.name) + '</span></td>';
-                h += '<td style="padding:6px 8px;font-size:12px;">' + escapeHTML(_dgName(item.longGroupId)) + '</td>';
-                h += '<td style="padding:6px 8px;font-size:12px;">' + escapeHTML(_dgName(item.shortGroupId)) + '</td>';
-                h += '<td style="padding:6px 8px;font-size:12px;color:#555;">' + escapeHTML(testerText) + '</td>';
-                h += '<td style="padding:6px 8px;text-align:center;">' + staleTag + '</td>';
-                h += '<td style="padding:6px 8px;text-align:center;white-space:nowrap;">';
-                h += '<button class="unified-ls-edit-btn" data-ls-id="' + escapeHTML(item.id) + '" style="padding:2px 6px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">✏️</button> ';
-                h += '<button class="unified-ls-del-btn" data-ls-id="' + escapeHTML(item.id) + '" style="padding:2px 6px;font-size:11px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">🗑️</button>';
+
+                // ── Short alias ──
+                h += '<td style="padding:6px 8px;white-space:nowrap;">';
+                h += '<span style="' + CHIP_STYLE_PLAIN + '">' + escapeHTML(item.name) + '</span>';
+                h += '</td>';
+
+                // ── Config chips (long + short side derived groups) ──
+                h += '<td style="padding:6px 4px;width:100%;">';
+                h += '<span style="display:flex;flex-wrap:wrap;gap:4px;">';
+                // Long side chips
+                var longDg = _getGroup(item.longGroupId);
+                if (longDg) h += _renderConfigChipsForGroup(longDg);
+                // Short side chips
+                var shortDg = _getGroup(item.shortGroupId);
+                if (shortDg) h += _renderConfigChipsForGroup(shortDg);
+                h += '</span>';
+                h += '</td>';
+
+                // ── Delete ──
+                h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
+                h += '<button class="unified-ls-del-btn" data-ls-id="' + escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                 h += '</td></tr>';
         }
         h += '</tbody></table>';
