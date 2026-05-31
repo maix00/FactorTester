@@ -769,6 +769,7 @@
             }
             h += '</div>';
             container.innerHTML = h;
+            console.log('[DEBUG] fullRender _selectedIds=', JSON.stringify(Object.keys(_selectedIds)));
             _bindEvents(container);
         }
 
@@ -854,10 +855,12 @@
                     if (!_selectedIds[batch.items[bi].id]) { allSelected = false; break; }
                 }
                 var newSelect = !allSelected;
+                console.log('[DEBUG] batch-header click key=' + key + ', allSelected=' + allSelected + ', newSelect=' + newSelect + ', _selectedIds BEFORE=', JSON.stringify(Object.keys(_selectedIds)));
                 for (var bi2 = 0; bi2 < batch.items.length; bi2++) {
                     if (newSelect) { _selectedIds[batch.items[bi2].id] = true; }
                     else { delete _selectedIds[batch.items[bi2].id]; }
                 }
+                console.log('[DEBUG] batch-header click _selectedIds AFTER=', JSON.stringify(Object.keys(_selectedIds)));
                 // Sync to app edit mode
                 var selCount = Object.keys(_selectedIds).length;
                 if (selCount > 0) {
@@ -873,9 +876,11 @@
             row.addEventListener('click', function(e) {
                 if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
                 var id = this.getAttribute('data-bg-id');
+                console.log('[DEBUG] bg-row click id=' + id + ', _selectedIds BEFORE=', JSON.stringify(Object.keys(_selectedIds)));
                 // multi-select: toggle
                 if (_selectedIds[id]) { delete _selectedIds[id]; }
                 else { _selectedIds[id] = true; }
+                console.log('[DEBUG] bg-row click _selectedIds AFTER=', JSON.stringify(Object.keys(_selectedIds)));
                 // Enter edit mode if any selected, otherwise back to list mode
                 var selCount = Object.keys(_selectedIds).length;
                 if (selCount > 0) {
