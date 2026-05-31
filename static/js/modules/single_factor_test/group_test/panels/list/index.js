@@ -120,8 +120,8 @@
         return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
     }
 
-    /** Render config chips for a derived group (for LS rows) */
-    function _renderConfigChipsForGroup(g) {
+    /** Render all chips for a group (for LS rows — info + config) */
+    function _renderAllChipsForGroup(g) {
         if (!g) return '';
         var REG = window.GT_CONFIG_REGISTRY;
         if (!REG || typeof REG.getAllChips !== 'function') return '';
@@ -129,7 +129,6 @@
         var html = '';
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
-            if (chip.category !== 'config') continue;
             var s = chip.style || CHIP_STYLE_PLAIN;
             html += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
         }
@@ -259,16 +258,20 @@
                 h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + escapeHTML(item.name) + '</span>';
                 h += '</td>';
 
-                // ── Config chips (long + short side derived groups) ──
-                h += '<td style="padding:6px 4px;width:100%;">';
-                h += '<span style="display:flex;flex-wrap:wrap;gap:4px;">';
-                // Long side chips
+                // ── Chips: two rows — long on top, short on bottom ──
+                h += '<td style="padding:2px 4px;width:100%;">';
                 var longDg = _getGroup(item.longGroupId);
-                if (longDg) h += _renderConfigChipsForGroup(longDg);
-                // Short side chips
                 var shortDg = _getGroup(item.shortGroupId);
-                if (shortDg) h += _renderConfigChipsForGroup(shortDg);
-                h += '</span>';
+                // Long row
+                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
+                h += '<span style="font-size:10px;color:#3b82f6;font-weight:600;margin-right:4px;">📈</span>';
+                if (longDg) h += _renderAllChipsForGroup(longDg);
+                h += '</div>';
+                // Short row
+                h += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:2px 0;">';
+                h += '<span style="font-size:10px;color:#8b5cf6;font-weight:600;margin-right:4px;">📉</span>';
+                if (shortDg) h += _renderAllChipsForGroup(shortDg);
+                h += '</div>';
                 h += '</td>';
 
                 // ── Delete ──
