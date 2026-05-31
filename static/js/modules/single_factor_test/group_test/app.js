@@ -2424,6 +2424,10 @@
         var GROUPS_PER_FACTOR = 5;
         var totalCreated = 0;
 
+        // Track batchKey → letter so same (testerId, factorAlias, groupCount) gets same letter
+        var batchLetterMap = {};
+        var nextLetterCode = 65; // A
+
         try {
             for (var si = 0; si < submissions.length; si++) {
                 var sub = submissions[si];
@@ -2432,8 +2436,16 @@
                     var factor = factorList[fi];
                     var factorAlias = factor.alias || factor.name || '';
 
+                    // Batch key: (testerId, factorAlias, groupCount) — same key → same letter prefix
+                    var bk = GT.datamodel.groups.batchKey(testerId, factorAlias, GROUPS_PER_FACTOR);
+                    var letter = batchLetterMap[bk];
+                    if (!letter) {
+                        letter = String.fromCharCode(nextLetterCode);
+                        nextLetterCode++;
+                        batchLetterMap[bk] = letter;
+                    }
+
                     // Create 5 base groups (groupIndex 1-5) for this factor
-                    // shortAlias is auto-assigned by groups.add: same (testerId, factorAlias, groupCount) → same letter
                     var createdIds = [];
                     for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
                         try {
@@ -2444,6 +2456,7 @@
                                 groupCount: GROUPS_PER_FACTOR,
                                 groupIndex: gi,
                                 isAllGroups: false,
+                                shortAlias: letter + gi,
                                 feeMode: 'none',
                                 useCloseToday: false,
                                 rebalanceMode: 'each_period'

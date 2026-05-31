@@ -317,15 +317,7 @@
             }
             _batchMap[key].items.push(item);
         }
-        var keys = Object.keys(_batchMap);
-        // Sort batches by their letter prefix (shortAlias), so A/B/C... in order
-        keys.sort(function(a, b) {
-            var letterA = GT.datamodel.groups.extractLetter ? (GT.datamodel.groups.extractLetter(_batchMap[a].items[0].shortAlias) || '') : '';
-            var letterB = GT.datamodel.groups.extractLetter ? (GT.datamodel.groups.extractLetter(_batchMap[b].items[0].shortAlias) || '') : '';
-            if (letterA < letterB) return -1;
-            if (letterA > letterB) return 1;
-            return 0;
-        });
+        var keys = Object.keys(_batchMap).sort();
         var result = [];
         for (var k = 0; k < keys.length; k++) { result.push(_batchMap[keys[k]]); }
         return result;
