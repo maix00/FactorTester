@@ -266,9 +266,9 @@
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
 
-                // ── Short alias (same style as base group shortAlias) ──
+                // ── Short alias ──
                 h += '<td style="padding:6px 8px;white-space:nowrap;">';
-                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + escapeHTML(item.name) + '</span>';
+                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + escapeHTML(item.shortAlias || item.name) + '</span>';
                 h += '</td>';
 
                 // ── Chips: two rows — long on top, short on bottom ──

@@ -129,9 +129,19 @@
             throw new Error('Validation failed: ' + result.errors.join('; '));
         }
 
+        // Compute shortAlias from long/short base groups
+        var groups = GT.datamodel.groups;
+        var longGroup = groups && groups.get(config.longGroupId);
+        var shortGroup = groups && groups.get(config.shortGroupId);
+        var shortAlias = '';
+        if (longGroup && shortGroup && longGroup.shortAlias && shortGroup.shortAlias) {
+            shortAlias = longGroup.shortAlias + '/' + shortGroup.shortAlias;
+        }
+
         var item = {
             id: _uuid(),
             name: config.name.trim(),
+            shortAlias: shortAlias,
             longGroupId: config.longGroupId,
             shortGroupId: config.shortGroupId,
             feeMode: config.feeMode || 'inherit',
