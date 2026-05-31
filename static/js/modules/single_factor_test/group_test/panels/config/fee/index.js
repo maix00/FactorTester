@@ -26,6 +26,7 @@
 
     var _feeTableData = [];          // 原始费率数据（从后端获取，不可变）
     var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio, closetoday_ratio}}
+    var _useCloseToday = false;       // 平今仓/平昨仓
 
     // ── Fee data API ───────────────────────────────────────────────────────────
 
@@ -88,6 +89,96 @@
         _feeModifications = mods && typeof mods === 'object' ? JSON.parse(JSON.stringify(mods)) : {};
         if (GT.state && typeof GT.state.emit === 'function') {
             GT.state.emit('feeDataChanged');
+        }
+    }
+
+    /** Whether close-today mode is active (checks dirty workspace first). */
+    function useCloseToday() {
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (REG) {
+            var group = REG.getReferenceGroup();
+            if (group) return !!REG.getDirty('useCloseToday', !!group.useCloseToday);
+        }
+        return _useCloseToday;
+    }
+
+    /** Set close-today mode. */
+    function setUseCloseToday(v) {
+        _useCloseToday = !!v;
+        if (GT.state && typeof GT.state.emit === 'function') {
+            GT.state.emit('feeDataChanged');
+        }
+    }
+
+    /**
+     * Build fee payload for group test submission.
+     * Reads mode/fee/map from the active group's config.
+     * @returns {Promise<{fee: number, fee_map: object}>}
+     */
+    function buildFeePayload() {
+        var REG = window.GT_CONFIG_REGISTRY;
+        var group = REG ? REG.getReferenceGroup() : null;
+        var feeMode = group ? (group.feeMode || 'none') : 'none';
+        var fee = 0;
+        var feeMap = {};
+
+        if (feeMode === 'uniform') {
+            fee = group.feeRate != null ? group.feeRate : 0.0025;
+        } else if (feeMode === 'per_product') {
+            if (!_feeTableData.length) {
+                return fetchFeeTable(false).then(function() {
+                    feeMap = buildFeeMap();
+                    // Apply group.feeMap overrides
+                    if (group && group.feeMap && typeof group.feeMap === 'object') {
+                        Object.keys(group.feeMap).forEach(function(code) {
+                            if (feeMap[code]) {
+                                var ov = group.feeMap[code];
+                                if (ov.open_ratio != null) feeMap[code].open_ratio = ov.open_ratio;
+                                if (ov.close_ratio != null) feeMap[code].close_ratio = ov.close_ratio;
+                                if (ov.closetoday_ratio != null) feeMap[code].closetoday_ratio = ov.closetoday_ratio;
+                            }
+                        });
+                    }
+                    return { fee: fee, fee_map: feeMap };
+                });
+            }
+            feeMap = buildFeeMap();
+            // Apply group.feeMap overrides
+            if (group && group.feeMap && typeof group.feeMap === 'object') {
+                Object.keys(group.feeMap).forEach(function(code) {
+                    if (feeMap[code]) {
+                        var ov = group.feeMap[code];
+                        if (ov.open_ratio != null) feeMap[code].open_ratio = ov.open_ratio;
+                        if (ov.close_ratio != null) feeMap[code].close_ratio = ov.close_ratio;
+                        if (ov.closetoday_ratio != null) feeMap[code].closetoday_ratio = ov.closetoday_ratio;
+                    }
+                });
+            }
+            return Promise.resolve({ fee: fee, fee_map: feeMap });
+        }
+
+        return Promise.resolve({ fee: fee, fee_map: feeMap });
+    }
+
+    /**
+     * Bind legacy DOM fee controls (bridge from app.js).
+     * Handles slider, radio buttons, close-today toggle that still exist in the DOM.
+     */
+    function bindFeeControls() {
+        // Sensitivity slider (legacy)
+        var slider = document.getElementById('fee_sensitivity_slider');
+        if (slider && !slider._feeBound) {
+            slider._feeBound = true;
+            slider.addEventListener('input', function() {
+                var lbl = document.getElementById('fee_sensitivity_label');
+                if (lbl) lbl.textContent = parseFloat(this.value).toFixed(3) + '%';
+            });
+            slider.addEventListener('change', function() {
+                var val = parseFloat(this.value);
+                if (GT.ui && typeof GT.ui.recalcWithFee === 'function') {
+                    GT.ui.recalcWithFee(val);
+                }
+            });
         }
     }
 
@@ -262,8 +353,13 @@
         if (saveBtn) {
             saveBtn.addEventListener('click', function() {
                 var ok = REG.commitDirty();
-                if (ok && GT.state && typeof GT.state.emit === 'function') {
-                    GT.state.emit('baseGroupsChanged');
+                if (ok) {
+                    // Sync _useCloseToday with committed state
+                    var group = REG.getReferenceGroup();
+                    if (group) _useCloseToday = !!group.useCloseToday;
+                    if (GT.state && typeof GT.state.emit === 'function') {
+                        GT.state.emit('baseGroupsChanged');
+                    }
                 }
                 render();
             });
@@ -402,6 +498,10 @@
         hasFeeData: hasFeeData,
         getModifications: getModifications,
         applyModifications: applyModifications,
+        useCloseToday: useCloseToday,
+        setUseCloseToday: setUseCloseToday,
+        buildFeePayload: buildFeePayload,
+        bind: bindFeeControls,
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
