@@ -34,6 +34,18 @@
         'recycle': '留存成员的持仓不动；有成员退出时，把释放出的资金优先分给新进成员。适合观察"旧仓尽量不动、只用退出资金补新仓"的过渡方式。',
     };
 
+    /** Extract group IDs from edit selection (supports {id:true} object and {groupIds:[]} formats) */
+    function _getEditGroupIds(sel) {
+        if (!sel) return [];
+        if (Array.isArray(sel.groupIds)) return sel.groupIds;
+        if (Array.isArray(sel)) return sel;
+        // Pure object like {id1: true, id2: true}
+        if (typeof sel === 'object') {
+            return Object.keys(sel).filter(function(k) { return sel[k]; });
+        }
+        return [];
+    }
+
     function $(id) { return document.getElementById(id); }
 
     function render() {
@@ -49,8 +61,9 @@
             currentMode = (draft && draft.rebalanceMode) || 'each_period';
         } else if (mode === 'edit') {
             var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-            if (sel && sel.groupIds && sel.groupIds.length > 0) {
-                activeId = sel.groupIds[0];
+            var groupIds = _getEditGroupIds(sel);
+            if (groupIds.length > 0) {
+                activeId = groupIds[0];
             }
         } else {
             activeId = GT.state.getActiveBaseGroupId();
@@ -108,12 +121,12 @@
                 }
                 var id = GT.state.getActiveBaseGroupId();
                 if (currentMode === 'edit') {
-                    var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-                    if (sel && sel.groupIds && sel.groupIds.length > 0) {
-                        var ids = sel.groupIds;
-                        for (var i = 0; i < ids.length; i++) {
+                    var sel2 = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+                    var ids2 = _getEditGroupIds(sel2);
+                    if (ids2.length > 0) {
+                        for (var i = 0; i < ids2.length; i++) {
                             try {
-                                GT.datamodel.base_groups.update(ids[i], { rebalanceMode: newMode });
+                                GT.datamodel.base_groups.update(ids2[i], { rebalanceMode: newMode });
                             } catch (err) { /* skip individual failures */ }
                         }
                     }

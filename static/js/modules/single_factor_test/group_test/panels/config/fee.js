@@ -32,6 +32,18 @@
 
     function $(id) { return document.getElementById(id); }
 
+    /** Extract group IDs from edit selection (supports {id:true} object and {groupIds:[]} formats) */
+    function _getEditGroupIds(sel) {
+        if (!sel) return [];
+        if (Array.isArray(sel.groupIds)) return sel.groupIds;
+        if (Array.isArray(sel)) return sel;
+        // Pure object like {id1: true, id2: true}
+        if (typeof sel === 'object') {
+            return Object.keys(sel).filter(function(k) { return sel[k]; });
+        }
+        return [];
+    }
+
     // ---------------------------------------------------------------------------
     // Render
     // ---------------------------------------------------------------------------
@@ -56,8 +68,9 @@
         // In edit mode, use first selected group as reference
         if (mode === 'edit') {
             var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-            if (!sel || !sel.groupIds || !sel.groupIds.length) return null;
-            return GT.datamodel.base_groups.get(sel.groupIds[0]);
+            var groupIds = _getEditGroupIds(sel);
+            if (groupIds.length === 0) return null;
+            return GT.datamodel.base_groups.get(groupIds[0]);
         }
         
         // List mode: use active group
@@ -82,7 +95,7 @@
         // In edit mode, apply to all selected groups
         if (mode === 'edit') {
             var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
-            var ids = sel && sel.groupIds ? sel.groupIds : [];
+            var ids = _getEditGroupIds(sel);
             for (var i = 0; i < ids.length; i++) {
                 try {
                     GT.datamodel.base_groups.update(ids[i], patch);
