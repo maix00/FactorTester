@@ -102,6 +102,42 @@
         };
     }
 
+    /**
+     * Aggregate chips from all registered config panels for a group.
+     * Each chip: { label, html, style, onClick }
+     *   - label: short key (used for dedup)
+     *   - html:  pre-rendered inner HTML
+     *   - style: optional CSS style string (defaults to plain chip)
+     *   - onClick: optional function(chipElement, group) for click binding
+     *
+     * Returns an array. Panels with no getChips method are skipped.
+     * Chips with the same label are deduplicated (first wins).
+     *
+     * @param {object} group — base group object from datamodel
+     * @returns {{label, html, style, onClick}[]}
+     */
+    function getChips(group) {
+        if (!group) return [];
+        var chips = [];
+        var seen = {};
+        for (var i = 0; i < _configs.length; i++) {
+            var panel = _configs[i].panel;
+            if (panel && typeof panel.getChips === 'function') {
+                var panelChips = panel.getChips(group);
+                if (panelChips && panelChips.length) {
+                    for (var j = 0; j < panelChips.length; j++) {
+                        var c = panelChips[j];
+                        if (c && c.label && !seen[c.label]) {
+                            seen[c.label] = true;
+                            chips.push(c);
+                        }
+                    }
+                }
+            }
+        }
+        return chips;
+    }
+
     // ---------------------------------------------------------------------------
     // Shared helpers for config panels
     // ---------------------------------------------------------------------------
@@ -253,6 +289,7 @@
         getAll: getAll,
         getTableColumns: getTableColumns,
         toPanelEntry: toPanelEntry,
+        getChips: getChips,
         // shared helpers
         getEditGroupIds: getEditGroupIds,
         getReferenceGroup: getReferenceGroup,

@@ -17,12 +17,11 @@
     // ---------------------------------------------------------------------------
 
     var CONTAINER_ID = 'config-fee';
-    var FEE_MODES = ['none', 'uniform', 'per_product', 'custom'];
+    var FEE_MODES = ['none', 'uniform', 'per_product'];
     var FEE_MODE_LABELS = {
         none: '无手续费',
         uniform: '统一费率',
-        per_product: '分品种费率',
-        custom: '自定义因子'
+        per_product: '分品种费率'
     };
 
     var _mounted = false;
@@ -137,7 +136,15 @@
         if (mode === 'uniform') {
             html += _makeUniformEditor(rate);
         } else if (mode === 'per_product') {
-            html += _makePerProductEditor(feeMap);
+            // Per-product: button to open configFeeTable overlay in EDIT mode
+            html += '<div id="' + CONTAINER_ID + '-pp-editor" style="margin-bottom:16px;padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
+            html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">分品种费率</label>';
+            html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+            html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✏️ 编辑品种费率</button>';
+            html += '<button id="' + CONTAINER_ID + '-browse-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#fff;color:#0078d4;cursor:pointer;">📋 查看品种费率表</button>';
+            html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，点击"编辑品种费率"设置自定义费率</span>';
+            html += '</div>';
+            html += '</div>';
         }
 
         // Sensitivity slider
@@ -208,47 +215,6 @@
             });
         }
 
-        // Per-product add
-        var addBtn = $(CONTAINER_ID + '-pp-add-btn');
-        var newProduct = $(CONTAINER_ID + '-pp-new-product');
-        var newRate = $(CONTAINER_ID + '-pp-new-rate');
-        if (addBtn && newProduct && newRate) {
-            addBtn.addEventListener('click', function() {
-                var product = newProduct.value.trim();
-                var rate = parseFloat(newRate.value);
-                if (!product) { alert('请输入品种代码'); return; }
-                if (isNaN(rate) || rate < 0) { alert('请输入有效费率'); return; }
-
-                var group = REG.getReferenceGroup();
-                if (!group) return;
-                var map = REG.getDirty('feeMap', group.feeMap);
-                map = map ? JSON.parse(JSON.stringify(map)) : {};
-                map[product] = rate;
-                REG.setDirty('feeMap', map);
-                render();
-
-                newProduct.value = '';
-                newRate.value = '';
-            });
-        }
-
-        // Per-product delete — delegate via container
-        container.addEventListener('click', function(e) {
-            if (e.target.classList.contains('grouptest-fee-pp-del')) {
-                var product = e.target.getAttribute('data-pp-product');
-                if (!product) return;
-                if (!confirm('确定删除品种 "' + product + '" 的费率吗？')) return;
-
-                var group = REG.getReferenceGroup();
-                if (!group) return;
-                var map = REG.getDirty('feeMap', group.feeMap);
-                map = map ? JSON.parse(JSON.stringify(map)) : {};
-                delete map[product];
-                REG.setDirty('feeMap', Object.keys(map).length > 0 ? map : null);
-                render();
-            }
-        });
-
         // Sensitivity slider
         var slider = $(CONTAINER_ID + '-sensitivity');
         if (slider) {
@@ -294,6 +260,43 @@
                 render();
             });
         }
+
+        // Per-product edit — open configFeeTable overlay in EDIT mode
+        var editFeeBtn = $(CONTAINER_ID + '-edit-fee-btn');
+        if (editFeeBtn) {
+            editFeeBtn.addEventListener('click', function() {
+                var group = REG.getReferenceGroup();
+                if (!group) return;
+                // Apply current dirty state to the group for the overlay
+                var current = JSON.parse(JSON.stringify(group));
+                if (REG.hasDirty()) {
+                    var dirtyKeys = ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday'];
+                    for (var dk = 0; dk < dirtyKeys.length; dk++) {
+                        var k = dirtyKeys[dk];
+                        var fallback = group[k];
+                        current[k] = REG.getDirty(k, fallback);
+                    }
+                }
+                if (GT.overlays && GT.overlays.configFeeTable) {
+                    GT.overlays.configFeeTable.open(current, 'edit', function() {
+                        // After overlay closes, re-render to show updated fee_map
+                        render();
+                    });
+                }
+            });
+        }
+
+        // Browse fee table button — view mode
+        var browseBtn = $(CONTAINER_ID + '-browse-fee-btn');
+        if (browseBtn) {
+            browseBtn.addEventListener('click', function() {
+                var group = REG.getReferenceGroup();
+                if (!group) return;
+                if (GT.overlays && GT.overlays.configFeeTable) {
+                    GT.overlays.configFeeTable.open(group, 'view');
+                }
+            });
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -331,6 +334,80 @@
     }
 
     // ---------------------------------------------------------------------------
+    // Config chips (consumed by list panel via REG.getChips)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * getChips(group) → [{{label, html, style, onClick}}]
+     *
+     * Rules:
+     *  - 'none':         no chips at all
+     *  - 'uniform':      [统一费率: 2.500000]  +  [费率倍数: 1.5x]  if sensitivity ≠ 1
+     *  - 'per_product':  [分品种费率] clickable → overlay
+     *                      if feeMap ≠ null & has entries → [分品种费率(自定义)] instead
+     *                    + [费率倍数: 1.5x]  if sensitivity ≠ 1
+     *                    + [平今/平昨]  always
+     *
+     * @param {object} group — base group from datamodel
+     * @returns {{label, html, style, onClick}[]}
+     */
+    function getChips(group) {
+        if (!group) return [];
+        var mode = group.feeMode || 'none';
+        if (mode === 'none') return [];
+
+        var chips = [];
+        var chipPlain = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+        var chipClickable = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
+
+        if (mode === 'uniform') {
+            // 统一费率 chip
+            var rateStr = (group.feeRate != null) ? Number(group.feeRate).toFixed(6) : '—';
+            chips.push({
+                label: 'fee-uniform',
+                html: '💰 统一费率:' + rateStr,
+                style: chipPlain
+            });
+        } else if (mode === 'per_product') {
+            // 分品种费率 chip — clickable → configFeeTable overlay (VIEW mode)
+            var feeMap = group.feeMap;
+            var hasCustom = feeMap && typeof feeMap === 'object' && Object.keys(feeMap).length > 0;
+            chips.push({
+                label: 'fee-per-product',
+                html: hasCustom ? '📊 分品种费率(自定义)' : '📊 分品种费率',
+                style: chipClickable,
+                onClick: function(chipEl, g) {
+                    if (GT.overlays && GT.overlays.configFeeTable) {
+                        GT.overlays.configFeeTable.open(g, 'view');
+                    }
+                }
+            });
+        }
+
+        // 费率倍数 chip (if ≠ 1)
+        var sens = group.feeSensitivity;
+        if (sens != null && sens !== 1) {
+            chips.push({
+                label: 'fee-sensitivity',
+                html: '⚡ 费率倍数:' + Number(sens).toFixed(1) + 'x',
+                style: chipPlain
+            });
+        }
+
+        // 平今/平昨 chip (only for per_product)
+        if (mode === 'per_product') {
+            var isCT = !!group.useCloseToday;
+            chips.push({
+                label: 'fee-close-today',
+                html: isCT ? '🗓️ 平今' : '🗓️ 平昨',
+                style: chipPlain
+            });
+        }
+
+        return chips;
+    }
+
+    // ---------------------------------------------------------------------------
     // Category-3 table column contribution
     // ---------------------------------------------------------------------------
 
@@ -339,31 +416,7 @@
      * Returns column definitions for fee-related columns.
      */
     function getTableColumns() {
-        return [
-            {
-                key: 'fee',
-                label: '手续费',
-                render: function(group) {
-                    var map = { 'none': '无', 'percent': '百分比', 'fixed': '固定', 'table': '费率表', 'strategy': '策略' };
-                    return map[group.feeMode] || (group.feeMode || '—');
-                }
-            },
-            {
-                key: 'closeToday',
-                label: '平今/平昨',
-                render: function(group) {
-                    if (group.feeMode === 'none' || group.feeMode === 'fixed') return '—';
-                    return group.useCloseToday ? '平今' : '平昨';
-                }
-            },
-            {
-                key: 'feeSensitivity',
-                label: '费率倍数',
-                render: function(group) {
-                    return group.feeSensitivity != null ? group.feeSensitivity.toFixed(1) + 'x' : '—';
-                }
-            }
-        ];
+        return []; // chips are now served via getChips; no separate columns needed
     }
 
     // ---------------------------------------------------------------------------
@@ -377,6 +430,7 @@
         refresh: refresh,
         render: render,
         getTableColumns: getTableColumns,
+        getChips: getChips,
     };
 
     // Register as category-3 config panel

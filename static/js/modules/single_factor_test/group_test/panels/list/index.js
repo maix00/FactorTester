@@ -68,6 +68,7 @@
     // ── Chip badge style (shared by tester, factor, fee chips) ──
     var CHIP_STYLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
     var CHIP_STYLE_PLAIN = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+    var REG = window.GT_CONFIG_REGISTRY;
 
     /** Get products list for a tester from window.submissions (cached) */
     function _testerProducts(testerId) {
@@ -321,17 +322,6 @@
         }
     }
 
-    /** Short fee display */
-    function _feeCellDisplay(group) {
-        if (!group) return '—';
-        var mode = group.feeMode;
-        if (mode === 'none' || !mode) return '—';
-        if (mode === 'uniform' || mode === 'fixed') return (group.feeRate != null) ? Number(group.feeRate).toFixed(6) : '—';
-        if (mode === 'per_product') { var m1 = group.feeMap || {}; return '按品种(' + Object.keys(m1).length + ')'; }
-        if (mode === 'custom') { var m2 = group.feeMap || {}; return '自定义(' + Object.keys(m2).length + ')'; }
-        return mode;
-    }
-
     // ── Derived node helpers ──
 
     function _nodeTesterId(node) {
@@ -508,21 +498,14 @@
                     // Group index / groupCount (from add tab's grouping params)
                     h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:8px;">' + (bg.groupIndex || (ri + 1)) + '/' + (bg.groupCount || batch.items.length) + '</span>';
                     h += '<span style="flex:1;"></span>';
-                    // Config chips — only show non-empty/non-none values
-                    var bgRebalance = _rebalanceLabel(bg.rebalanceMode);
-                    if (bgRebalance && bgRebalance !== '—' && bgRebalance !== '无') {
-                        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(bgRebalance) + '</span>';
-                    }
-                    var bgCloseToday = _closeTodayLabel(bg.feeMode, bg.useCloseToday);
-                    if (bgCloseToday && bgCloseToday !== '—') {
-                        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(bgCloseToday) + '</span>';
-                    }
-                    // Fee chip: hide when none, show value as plain when fixed/uniform, otherwise clickable
-                    if (bg.feeMode && bg.feeMode !== 'none') {
-                        if (bg.feeMode === 'fixed' || bg.feeMode === 'uniform') {
-                            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
-                        } else {
-                            h += '<span class="unified-fee-chip" data-gid="' + escapeHTML(bg.id) + '" data-fee-mode="' + escapeHTML(bg.feeMode || '') + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
+                    // Config chips — from registry (aggregates fee, rebalance, etc.)
+                    if (REG && typeof REG.getChips === 'function') {
+                        var chips = REG.getChips(bg);
+                        for (var ci = 0; ci < chips.length; ci++) {
+                            var chip = chips[ci];
+                            var s = chip.style || CHIP_STYLE_PLAIN;
+                            var cls = chip.onClick ? ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"' : '';
+                            h += '<span' + cls + ' style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
                         }
                     }
                     // Delete button (red X, always last)
@@ -608,14 +591,9 @@
         var isExp = (node._expanded !== false);
         var isActive = node.id === (GT.state && GT.state.getActiveDerivedNodeId && GT.state.getActiveDerivedNodeId());
         var hasKids = node.children && node.children.length > 0;
-        var feeLabel = _derivedFeeDisplay(node);
-        var rebalanceLabel = _derivedRebalanceLabel(node);
-        var closeTodayLabel = _derivedCloseTodayLabel(node);
         var testerLabel = _derivedTesterLabel(node);
         var badge = _nodeBadge(node);
         var products = _nodeProducts(node);
-        var derivedFeeMode = 'none';
-        try { derivedFeeMode = GT.datamodel.fee_strategy.resolveFee(node.id).mode; } catch(e) {}
 
         var rowStyle = isActive ? 'background:#eef2ff;' : (depth % 2 === 0 ? 'background:#fafafa;' : '');
 
@@ -640,18 +618,18 @@
         }
         h += '<span style="flex:1;"></span>';
         h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(node.testerId) + '" style="' + CHIP_STYLE + 'margin-right:8px;">' + escapeHTML(testerLabel) + '</span>';
-        if (derivedFeeMode && derivedFeeMode !== 'none') {
-            if (derivedFeeMode === 'fixed' || derivedFeeMode === 'uniform') {
-                h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">💰 ' + escapeHTML(feeLabel) + '</span>';
-            } else {
-                h += '<span class="unified-fee-chip" data-dgid="' + escapeHTML(node.id) + '" data-fee-mode="' + escapeHTML(derivedFeeMode || '') + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + escapeHTML(feeLabel) + '</span>';
+        // Config chips — from registry (aggregates fee, rebalance, etc.)
+        if (REG && typeof REG.getChips === 'function' && node.baseGroupId && node.baseGroupId !== '__batch__') {
+            var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+            if (bg) {
+                var dgChips = REG.getChips(bg);
+                for (var dci = 0; dci < dgChips.length; dci++) {
+                    var dchip = dgChips[dci];
+                    var ds = dchip.style || CHIP_STYLE_PLAIN;
+                    var dcls = dchip.onClick ? ' class="unified-config-chip" data-dgid="' + escapeHTML(node.id) + '" data-chip-label="' + escapeHTML(dchip.label) + '"' : '';
+                    h += '<span' + dcls + ' style="' + ds + ';margin-right:4px;">' + dchip.html + '</span>';
+                }
             }
-        }
-        if (rebalanceLabel && rebalanceLabel !== '—' && rebalanceLabel !== '无') {
-            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(rebalanceLabel) + '</span>';
-        }
-        if (closeTodayLabel && closeTodayLabel !== '—') {
-            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(closeTodayLabel) + '</span>';
         }
         h += '<button class="unified-dg-add-child-btn" data-dg-id="' + escapeHTML(node.id) + '" style="padding:1px 5px;font-size:10px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;">＋子</button>';
         h += '<button class="unified-dg-edit-btn" data-dg-id="' + escapeHTML(node.id) + '" style="margin-left:2px;padding:1px 5px;font-size:10px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">✏️</button>';
@@ -927,7 +905,7 @@
         // ── Base group rows ──
         container.querySelectorAll('.unified-bg-row').forEach(function(row) {
             row.addEventListener('click', function(e) {
-                if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
+                if (e.target.closest('button') || e.target.closest('.unified-config-chip') || e.target.closest('.unified-tester-chip')) return;
                 var id = this.getAttribute('data-bg-id');
                 // multi-select: toggle
                 if (_selectedIds[id]) { delete _selectedIds[id]; }
@@ -937,47 +915,32 @@
             });
         });
 
-        // ── Fee chips (base) ──
-        container.querySelectorAll('.unified-fee-chip[data-gid]').forEach(function(chip) {
+        // ── Config chips (base + derived) — unified event delegation ──
+        container.querySelectorAll('.unified-config-chip').forEach(function(chip) {
             chip.addEventListener('click', function(e) {
                 e.stopPropagation();
+                var chipLabel = this.getAttribute('data-chip-label');
                 var gid = this.getAttribute('data-gid');
-                var feeMode = this.getAttribute('data-fee-mode') || '';
-                GT.state.setActiveBaseGroupId(gid);
-                // Per-product or custom: show fee table overlay filtered by tester products
-                if ((feeMode === 'per_product' || feeMode === 'custom') && GT.overlays && GT.overlays.feeTable) {
-                    var group = GT.datamodel.base_groups.get(gid);
-                    var groupName = (group && group.name) ? group.name : ('#' + gid);
-                    // Collect product codes for this group's tester
-                    var testerId = group ? group.testerId : null;
-                    var products = testerId ? _testerProducts(testerId) : [];
-                    var productCodes = products.map(function(p) { return p.name; });
-                    GT.overlays.feeTable.open(groupName, productCodes);
-                } else {
-                    // Uniform or fixed: navigate to fee tab
-                    if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
-                }
-            });
-        });
-
-        // ── Fee chips (derived) ──
-        container.querySelectorAll('.unified-fee-chip[data-dgid]').forEach(function(chip) {
-            chip.addEventListener('click', function(e) {
-                e.stopPropagation();
                 var dgid = this.getAttribute('data-dgid');
-                var feeMode = this.getAttribute('data-fee-mode') || '';
-                GT.state.setActiveDerivedNodeId(dgid);
-                if ((feeMode === 'per_product' || feeMode === 'custom') && GT.overlays && GT.overlays.feeTable) {
-                    var nodeDesc = dgid;
-                    if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
-                        var node = GT.datamodel.derived_graph.get(dgid);
-                        if (node && node.label) nodeDesc = node.label;
+                // Determine group from gid (base) or dgid (derived)
+                var group = null;
+                if (gid) {
+                    group = GT.datamodel.base_groups && GT.datamodel.base_groups.get(gid);
+                    GT.state.setActiveBaseGroupId(gid);
+                } else if (dgid) {
+                    group = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(dgid);
+                    GT.state.setActiveDerivedNodeId(dgid);
+                }
+                if (!group) return;
+                // Look up chip by label and call its onClick
+                if (REG && typeof REG.getChips === 'function') {
+                    var chips = REG.getChips(group);
+                    for (var ci = 0; ci < chips.length; ci++) {
+                        if (chips[ci].label === chipLabel && typeof chips[ci].onClick === 'function') {
+                            chips[ci].onClick(this, group);
+                            break;
+                        }
                     }
-                    var nodeProducts = _nodeProducts(GT.datamodel.derived_graph.get(dgid));
-                    var productCodes = nodeProducts.map(function(p) { return p.name; });
-                    GT.overlays.feeTable.open(nodeDesc, productCodes);
-                } else {
-                    if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
                 }
             });
         });
@@ -998,7 +961,7 @@
         // ── Tree nodes ──
         container.querySelectorAll('.unified-node-header').forEach(function(header) {
             header.addEventListener('click', function(e) {
-                if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
+                if (e.target.closest('button') || e.target.closest('.unified-config-chip') || e.target.closest('.unified-tester-chip')) return;
                 var nodeId = this.parentElement.getAttribute('data-node-id');
                 // toggle expand
                 if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
