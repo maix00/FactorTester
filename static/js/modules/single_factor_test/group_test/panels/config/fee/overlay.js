@@ -227,6 +227,7 @@
             html += '<div id="' + PANEL_ID + '-footer" style="padding:12px 18px;border-top:1px solid #e5e7eb;background:' + (anyModified ? '#fff8e1' : '#f9fafb') + ';display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;">';
             html += '<span style="font-size:12px;color:#888;">提示：修改过的单元格以 <span style="background:#fff3cd;padding:1px 4px;border-radius:3px;">黄色背景</span> 标记。修改暂存在会话中，点击下方保存按钮写入。</span>';
             html += '<div style="display:flex;gap:6px;flex-shrink:0;">';
+            html += '<button id="' + PANEL_ID + '-reset-btn" style="padding:6px 16px;font-size:12px;border:1px solid #f0ad4e;border-radius:4px;background:#fff;color:#f0ad4e;cursor:pointer;">↺ 恢复初始</button>';
             html += '<button id="' + PANEL_ID + '-commit-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✓ 写入暂存</button>';
             html += '<button id="' + PANEL_ID + '-close-btn" style="padding:6px 16px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#333;cursor:pointer;">关闭</button>';
             html += '</div>';
@@ -248,6 +249,9 @@
         if (isEdit) {
             var commitBtn = document.getElementById(PANEL_ID + '-commit-btn');
             if (commitBtn) commitBtn.addEventListener('click', _commitDirtyRows);
+
+            var resetBtn = document.getElementById(PANEL_ID + '-reset-btn');
+            if (resetBtn) resetBtn.addEventListener('click', _resetToInitial);
 
             // Bind editable cell blur
             var panelEl = document.getElementById(PANEL_ID);
@@ -382,6 +386,21 @@
         // Update state for chip re-render
         _state.group.feeMap = cleaned;
         closeConfigFeeOverlay();
+    }
+
+    /**
+     * Reset all fee overrides: clear group.feeMap + REG dirty, re-render.
+     */
+    function _resetToInitial() {
+        if (!_state || _state.mode !== 'edit') return;
+
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (REG) REG.setDirty('feeMap', null);
+
+        _state.group.feeMap = {};
+
+        // Re-render with clean state (no overrides, so yellow highlights clear)
+        _render();
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
