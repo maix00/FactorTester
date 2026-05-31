@@ -579,18 +579,20 @@
                         }
                     }
                     h += '<span style="flex:1;"></span>';
-                    // Config chips — right side
+                    // Config chips — right side, fixed max-width with wrap
+                    h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:280px;flex-shrink:0;">';
                     for (ci = 0; ci < allChips.length; ci++) {
                         chip = allChips[ci];
                         if (chip.category !== 'config') continue;
                         s = chip.style || CHIP_STYLE_PLAIN;
                         if (chip.onClick) {
                             var cls2 = ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"';
-                            h += '<span' + cls2 + ' style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                            h += '<span' + cls2 + ' style="' + s + ';">' + chip.html + '</span>';
                         } else {
-                            h += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                            h += '<span style="' + s + ';">' + chip.html + '</span>';
                         }
                     }
+                    h += '</span>';
                     // Delete button (red X, always last)
                     h += '<button class="unified-bg-del-btn" data-bg-id="' + escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                     h += '</div>';
