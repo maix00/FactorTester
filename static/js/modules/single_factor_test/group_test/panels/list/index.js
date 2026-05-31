@@ -569,18 +569,28 @@
                     for (var ci = 0; ci < allChips.length; ci++) {
                         var chip = allChips[ci];
                         var s = chip.style || CHIP_STYLE_PLAIN;
+                        // Config chips render on the RIGHT (after spacer, before delete)
+                        if (chip.category === 'config') continue;
                         // Tester chip: attach click handler
                         if (chip.label === 'tester') {
                             h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
-                        } else if (chip.onClick) {
-                            // Config chips with onClick (e.g. per-product fee)
-                            var cls = ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"';
-                            h += '<span' + cls + ' style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
                         } else {
                             h += '<span style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
                         }
                     }
                     h += '<span style="flex:1;"></span>';
+                    // Config chips — right side
+                    for (ci = 0; ci < allChips.length; ci++) {
+                        chip = allChips[ci];
+                        if (chip.category !== 'config') continue;
+                        s = chip.style || CHIP_STYLE_PLAIN;
+                        if (chip.onClick) {
+                            var cls2 = ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"';
+                            h += '<span' + cls2 + ' style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                        } else {
+                            h += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                        }
+                    }
                     // Delete button (red X, always last)
                     h += '<button class="unified-bg-del-btn" data-bg-id="' + escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                     h += '</div>';
