@@ -1,5 +1,5 @@
 /**
- * overlays/config_fee_table.js — Config-level per-product fee table overlay
+ * panels/config/fee/overlay.js — Config-level per-product fee table overlay
  *
  * Used by the fee config panel (edit mode) and list chip click (view mode).
  *

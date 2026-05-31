@@ -1,5 +1,5 @@
 /**
- * overlays/tester_products.js — Tester product list overlay
+ * shared/overlays/tester_products.js — Tester product list overlay
  *
  * Clicking a tester link opens a centered overlay showing all products
  * with their descriptions. Each product name links to the products page.
