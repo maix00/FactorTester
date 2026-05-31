@@ -350,14 +350,60 @@
 
         var shortAliasMap = _lastShortAliasMap || {};
 
-        // ── 构建共享时间轴：所有时间戳去重排序（跳过休市，只包含有数据的点）──
-        var tset = {};
+        // ── 1. 计算 GCD ──
+        function gcd(a, b) {
+            a = Math.abs(a); b = Math.abs(b);
+            while (b) { var t = b; b = a % b; a = t; }
+            return a || 1;
+        }
+        var allDiffs = [];
+        var globalMin = Infinity, globalMax = -Infinity;
+        var groupRanges = []; // {min, max} for each group
         var i, j;
         for (i = 0; i < groups.length; i++) {
-            var tts = groups[i].timestamps || [];
-            for (j = 0; j < tts.length; j++) { tset[tts[j]] = true; }
+            var gts = groups[i].timestamps || [];
+            if (gts.length === 0) continue;
+            for (j = 1; j < gts.length; j++) {
+                var d = gts[j] - gts[j - 1];
+                if (d > 0) allDiffs.push(d);
+            }
+            groupRanges.push({ min: gts[0], max: gts[gts.length - 1] });
+            if (gts[0] < globalMin) globalMin = gts[0];
+            if (gts[gts.length - 1] > globalMax) globalMax = gts[gts.length - 1];
         }
-        var timeline = Object.keys(tset).map(Number).sort(function(a, b) { return a - b; });
+        var step = null;
+        for (i = 0; i < allDiffs.length; i++) {
+            step = (step === null) ? allDiffs[i] : gcd(step, allDiffs[i]);
+        }
+
+        // Fallback: 如果没有有效 step，回到去重排序
+        if (!step || step <= 0 || globalMin >= globalMax) {
+            step = null;
+        }
+
+        // ── 2. 构建 timeline：GCD 等间隔，过滤休市 ──
+        // 判定某时间点是否被至少一个 group 的覆盖区间包含
+        function isCovered(ts) {
+            for (var r = 0; r < groupRanges.length; r++) {
+                if (ts >= groupRanges[r].min && ts <= groupRanges[r].max) return true;
+            }
+            return false;
+        }
+
+        var timeline = [];
+        if (step) {
+            for (var t = globalMin; t <= globalMax; t += step) {
+                if (isCovered(t)) timeline.push(t);
+            }
+        } else {
+            // 回退：去重排序
+            var tset = {};
+            for (i = 0; i < groups.length; i++) {
+                var tts = groups[i].timestamps || [];
+                for (j = 0; j < tts.length; j++) { tset[tts[j]] = true; }
+            }
+            timeline = Object.keys(tset).map(Number).sort(function(a, b) { return a - b; });
+        }
 
         // 检测是否日内
         var isIntraday = false;
@@ -381,7 +427,7 @@
             }
         }
 
-        // ── 每个 group 映射到共享 timeline ──
+        // ── 3. 每个 group 映射到共享 timeline ──
         var series = groups.map(function(group) {
             var alias = shortAliasMap[group.name] || group.name;
             var gts = group.timestamps || [];
@@ -393,7 +439,7 @@
                 if (vals[k] !== null) valMap[gts[k]] = vals[k];
             }
 
-            // 映射到共享 timeline（有值为数据点，无值为 null）
+            // 映射到共享 timeline（有值为数据点，无值为 null，connectNulls 连线）
             var data = [];
             for (var ti = 0; ti < timeline.length; ti++) {
                 var ts = timeline[ti];
@@ -407,7 +453,7 @@
                 tooltip: { valueDecimals: 4 },
                 visible: true,
                 showInLegend: true,
-                connectNulls: true  // 低频线在 null 处连续不断开
+                connectNulls: true
             };
             if (group.is_ls) {
                 opts.color = '#000';
