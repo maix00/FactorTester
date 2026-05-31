@@ -2374,6 +2374,139 @@
         }).then(function(res) { return res.json(); });
     }
 
+    // ---------- 加载默认分组 ----------
+    async function loadDefaultGroups() {
+        var statusSpan = document.getElementById('group_test_status');
+        var runBtn = document.getElementById('run_group_test_btn');
+        var defaultBtn = document.getElementById('load_default_groups_btn');
+
+        var submissions = window.submissions || [];
+        var factorList = window.factorList || [];
+
+        if (!submissions.length) {
+            alert('暂无测试器，请先在产品类别筛选模块提交产品');
+            return;
+        }
+        if (!factorList.length) {
+            alert('暂无可用的因子列表，请先在 IC 测试模块运行 IC 测试');
+            return;
+        }
+
+        if (!GT.datamodel || !GT.datamodel.groups || !GT.datamodel.ls_configs) {
+            alert('数据模型未就绪，请刷新页面');
+            return;
+        }
+
+        var groups = GT.datamodel.groups;
+        var lsConfigs = GT.datamodel.ls_configs;
+
+        // Count existing groups
+        var existingBase = (groups.getAll() || []).filter(function(g) { return !g.isDerived; });
+        var existingLS = lsConfigs.getAll() || [];
+
+        if (existingBase.length > 0 || existingLS.length > 0) {
+            var confirmMsg = '当前已有 ' + existingBase.length + ' 个基础组和 ' + existingLS.length + ' 个 LS 组。\n';
+            confirmMsg += '加载默认分组将清空所有现有分组，确定继续？';
+            if (!confirm(confirmMsg)) return;
+        }
+
+        // Clear all existing groups and LS configs
+        (groups.getAll() || []).forEach(function(g) { groups.remove(g.id); });
+        (lsConfigs.getAll() || []).forEach(function(ls) { lsConfigs.remove(ls.id); });
+
+        if (defaultBtn) defaultBtn.disabled = true;
+        if (runBtn) runBtn.disabled = true;
+        if (statusSpan) {
+            statusSpan.innerHTML = '正在加载默认分组...';
+            statusSpan.style.color = '#0078d4';
+        }
+
+        var GROUPS_PER_FACTOR = 5;
+        var totalCreated = 0;
+
+        try {
+            for (var si = 0; si < submissions.length; si++) {
+                var sub = submissions[si];
+                var testerId = String(sub.id);
+                for (var fi = 0; fi < factorList.length; fi++) {
+                    var factor = factorList[fi];
+                    var factorAlias = factor.alias || factor.name || '';
+
+                    // Get existing shortAliases for this tester to compute letter prefix
+                    var existingForTester = (groups.getAll() || []).filter(function(g) {
+                        return !g.isDerived && g.testerId === testerId;
+                    });
+                    var nextLetterIndex = existingForTester.length;
+                    var letter = String.fromCharCode(65 + nextLetterIndex); // A, B, C, ...
+
+                    // Create 5 base groups (groupIndex 1-5) for this factor
+                    var createdIds = [];
+                    for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
+                        try {
+                            var shortAlias = letter + gi;
+                            var id = groups.add({
+                                name: factorAlias + ' · G' + gi + ' (' + (sub.product_group || sub.label || testerId) + ')',
+                                testerId: testerId,
+                                factorAlias: factorAlias,
+                                groupCount: GROUPS_PER_FACTOR,
+                                groupIndex: gi,
+                                isAllGroups: false,
+                                shortAlias: shortAlias,
+                                feeMode: 'none',
+                                useCloseToday: false,
+                                rebalanceMode: 'each_period'
+                            });
+                            createdIds.push({ id: id, index: gi });
+                        } catch (e) {
+                            console.error('创建分组失败 (' + factorAlias + ' G' + gi + '):', e);
+                        }
+                    }
+
+                    // Create LS: group 1 (long) vs group 5 (short)
+                    if (createdIds.length >= 5) {
+                        var longItem = createdIds[0];   // groupIndex 1
+                        var shortItem = createdIds[4];  // groupIndex 5
+                        try {
+                            lsConfigs.add({
+                                name: factorAlias + ' · ' + letter + '1/' + letter + '5',
+                                longGroupId: longItem.id,
+                                shortGroupId: shortItem.id
+                            });
+                        } catch (e) {
+                            console.error('创建 LS 组失败 (' + factorAlias + '):', e);
+                        }
+                    }
+
+                    totalCreated++;
+                    if (statusSpan) {
+                        statusSpan.innerHTML = '加载中... ' + totalCreated + ' 个因子分组';
+                    }
+                }
+            }
+
+            if (statusSpan) {
+                var totalBase = (groups.getAll() || []).filter(function(g) { return !g.isDerived; }).length;
+                var totalLS = (lsConfigs.getAll() || []).length;
+                statusSpan.innerHTML = '✓ 已加载 ' + totalBase + ' 个基础组 + ' + totalLS + ' 个 LS 组';
+                statusSpan.style.color = '#28a745';
+            }
+
+            // Refresh the panel
+            if (GT.ui && GT.ui.mountTab) {
+                GT.ui.mountTab('list');
+            }
+        } catch (e) {
+            console.error('加载默认分组失败:', e);
+            if (statusSpan) {
+                statusSpan.innerHTML = '✗ 加载失败: ' + (e.message || '未知错误');
+                statusSpan.style.color = '#d40000';
+            }
+        } finally {
+            if (defaultBtn) defaultBtn.disabled = false;
+            if (runBtn) runBtn.disabled = false;
+        }
+    }
+
     // ---------- 运行分组测试 ----------
     async function runGroupTest() {
         var context = getCurrentContext();
@@ -2967,6 +3100,8 @@
         setTimeout(syncFromTimeModule, 0);
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) runBtn.addEventListener('click', runGroupTest);
+        var defaultBtn = document.getElementById('load_default_groups_btn');
+        if (defaultBtn) defaultBtn.addEventListener('click', loadDefaultGroups);
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
 
@@ -3576,15 +3711,18 @@
         var container = document.getElementById('group-tab-container');
         var subTabsContainer = document.getElementById('gt-submission-tabs');
         var runBtn = document.getElementById('run_group_test_btn');
+        var defaultBtn = document.getElementById('load_default_groups_btn');
 
         if (!submissions || submissions.length === 0) {
             // Update both old and new containers
             if (container) container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
             if (subTabsContainer) subTabsContainer.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
             if (runBtn) runBtn.style.display = 'none';
+            if (defaultBtn) defaultBtn.style.display = 'none';
             return;
         }
         if (runBtn) runBtn.style.display = '';
+        if (defaultBtn) defaultBtn.style.display = '';
 
         var factorList = window.factorList || [];
         var activeSubmission = submissions.find(function(sub) {
