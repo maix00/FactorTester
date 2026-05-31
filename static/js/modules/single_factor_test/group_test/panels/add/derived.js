@@ -37,16 +37,17 @@
     /**
      * Collect all available products from base groups.
      * Resolves products via window.submissions using testerId.
+     * Returns [{name, desc}] objects.
      */
     function _allProducts() {
-        var set = {};
+        var map = {}; // keyed by name for dedup
         var baseGroups = GT.datamodel.base_groups.getAll();
         var seenTesterIds = {};
         for (var i = 0; i < baseGroups.length; i++) {
             var tid = baseGroups[i].testerId;
             if (tid && !seenTesterIds[tid]) {
                 seenTesterIds[tid] = true;
-                _addProductsFromTesterId(set, tid);
+                _addProductsFromTesterId(map, tid);
             }
         }
         // Also try the preselected base group from add draft
@@ -55,20 +56,23 @@
             var bg = GT.datamodel.base_groups.get(draft.preselectedBaseGroupId);
             if (bg && bg.testerId && !seenTesterIds[bg.testerId]) {
                 seenTesterIds[bg.testerId] = true;
-                _addProductsFromTesterId(set, bg.testerId);
+                _addProductsFromTesterId(map, bg.testerId);
             }
         }
-        return Object.keys(set).sort();
+        var names = Object.keys(map).sort();
+        return names.map(function(n) { return { name: n, desc: map[n] || '' }; });
     }
 
-    function _addProductsFromTesterId(set, testerId) {
+    function _addProductsFromTesterId(map, testerId) {
         var subs = window.submissions || [];
         for (var i = 0; i < subs.length; i++) {
             if (String(subs[i].id) === String(testerId)) {
                 var prods = subs[i].products || [];
                 for (var j = 0; j < prods.length; j++) {
-                    var raw = typeof prods[j] === 'string' ? prods[j] : (prods[j].name || '');
-                    if (raw) set[raw] = true;
+                    var raw = typeof prods[j] === 'string' ? { name: prods[j], desc: '' } : { name: prods[j].name || '', desc: prods[j].desc || '' };
+                    if (raw.name && !map[raw.name]) {
+                        map[raw.name] = raw.desc;
+                    }
                 }
                 break;
             }
@@ -124,10 +128,16 @@
             html += '<div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:8px;background:#fafbfc;">';
             for (var i = 0; i < allProducts.length; i++) {
                 var p = allProducts[i];
-                var checked = _selectedProducts[p] ? ' checked' : '';
-                html += '<label style="display:inline-flex;align-items:center;margin:3px 8px 3px 0;padding:3px 8px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:12px;' + (_selectedProducts[p] ? 'background:#e8f0fe;border-color:#80bdff;' : 'background:#fff;') + '">';
-                html += '<input type="checkbox" class="derived-product-cb" value="' + p + '"' + checked + ' style="margin-right:4px;">';
-                html += '<span style="font-family:monospace;">' + p + '</span>';
+                var name = p.name;
+                var desc = p.desc || '';
+                var checked = _selectedProducts[name] ? ' checked' : '';
+                var styleBg = _selectedProducts[name] ? 'background:#e8f0fe;border-color:#80bdff;' : 'background:#fff;';
+                html += '<label style="display:inline-flex;align-items:center;margin:3px 8px 3px 0;padding:3px 8px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:12px;' + styleBg + '">';
+                html += '<input type="checkbox" class="derived-product-cb" value="' + escapeHTML(name) + '"' + checked + ' style="margin-right:4px;">';
+                html += '<span style="font-family:monospace;font-weight:600;">' + escapeHTML(name) + '</span>';
+                if (desc) {
+                    html += '<span style="margin-left:5px;color:#888;font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHTML(desc) + '">' + escapeHTML(desc) + '</span>';
+                }
                 html += '</label>';
             }
             html += '</div>';
