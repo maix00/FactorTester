@@ -3643,8 +3643,9 @@
                     layerTabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             });
-            // 初始箭头状态
-            sectionToggle.style.transform = 'rotate(0deg)';
+            // 默认折叠
+            layerTabs.classList.add('gt-collapsed');
+            sectionToggle.style.transform = 'rotate(-90deg)';
         }
 
         // ── Click-on-empty-area exits edit mode ──
