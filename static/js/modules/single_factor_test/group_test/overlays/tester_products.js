@@ -42,8 +42,8 @@
     }
 
     function buildPriceViewerUrl(productName) {
-        // Navigate to price_viewer page with product name as param
-        return '/price_viewer?product=' + encodeURIComponent(productName);
+        // Navigate to products page with product name as param
+        return '/products?product=' + encodeURIComponent(productName);
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@
                 var desc = p.desc || '';
                 html += '<tr style="border-bottom:1px solid #eef2f7;">';
                 html += '<td style="padding:8px 14px;">';
-                html += '<a href="' + escapeHTML(buildPriceViewerUrl(name)) + '" target="_blank" style="font-weight:600;font-family:monospace;color:#0078d4;text-decoration:none;">' + escapeHTML(name) + '</a>';
+                html += '<span style="font-weight:600;font-family:monospace;color:#0078d4;">' + escapeHTML(name) + '</span>';
                 html += '</td>';
                 html += '<td style="padding:8px 14px;color:#555;">' + escapeHTML(desc) + '</td>';
                 html += '</tr>';
