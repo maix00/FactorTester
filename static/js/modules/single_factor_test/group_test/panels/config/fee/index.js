@@ -54,8 +54,13 @@
         });
     }
 
-    /** Get raw fee rows (immutable backend data). */
+    /** Get raw fee rows (immutable backend data), normalised with a `code` alias. */
     function getFeeRows() {
+        for (var i = 0; i < _feeTableData.length; i++) {
+            if (_feeTableData[i].variety_code && !_feeTableData[i].code) {
+                _feeTableData[i].code = _feeTableData[i].variety_code;
+            }
+        }
         return _feeTableData;
     }
 
@@ -64,7 +69,7 @@
         var map = {};
         for (var i = 0; i < _feeTableData.length; i++) {
             var r = _feeTableData[i];
-            var code = (r.code || '').toLowerCase();
+            var code = (r.variety_code || r.code || '').toLowerCase();
             map[code] = {
                 open_ratio: r.open_ratio,
                 close_ratio: r.close_ratio,

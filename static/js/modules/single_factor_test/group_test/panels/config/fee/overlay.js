@@ -102,7 +102,7 @@
 
         for (var j = 0; j < rawRows.length; j++) {
             var r = rawRows[j];
-            var code = String(r.code).toUpperCase();
+            var code = String(r.variety_code || r.code || '').toUpperCase();
             if (filterSet && !filterSet[code]) continue;
 
             var override = feeMap[code.toLowerCase()] || feeMap[code] || {};
