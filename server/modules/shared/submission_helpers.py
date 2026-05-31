@@ -37,17 +37,20 @@ def _resolve_source(source) -> tuple[list[str], list]:
     """分发 source 类型, 返回 (paths, product_objects)."""
     # tester 对象: 优先 selected_paths, 其次 products
     paths = getattr(source, 'selected_paths', None)
-    if paths is not None:
+    if paths:
         return resolve_selection_products(paths, tree)
 
     products = getattr(source, 'products', None)
-    if products is not None:
-        # tester 有 products 但没有 selected_paths
+    if products:
         return [], sorted(products, key=lambda p: getattr(p, 'name', str(p)))
 
     # 路径列表 (list of str)
     if isinstance(source, list) and source and isinstance(source[0], str):
         return resolve_selection_products(source, tree)
+
+    # tester 有 selected_paths/ products 但都是空的 → 兜底空列表
+    if paths is not None or products is not None:
+        return [], []
 
     # 其他可迭代 → 视为产品对象序列
     try:
