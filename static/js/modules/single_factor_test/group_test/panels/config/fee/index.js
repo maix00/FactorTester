@@ -36,8 +36,8 @@
             return Promise.resolve(_feeTableData);
         }
         return fetch('/get_fee_table', {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -244,13 +244,12 @@
             html += '<span style="font-size:12px;color:#888;">例如：0.002500 表示双边合计 0.25%</span>';
             html += '</div></div>';
         } else if (mode === 'per_product') {
-            // Per-product: button to open configFeeTable overlay in EDIT mode
+            // Per-product: single button to open configFeeTable overlay in EDIT mode
             html += '<div id="' + CONTAINER_ID + '-pp-editor" style="margin-bottom:16px;padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
             html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">分品种费率</label>';
             html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
-            html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✏️ 编辑品种费率</button>';
-            html += '<button id="' + CONTAINER_ID + '-browse-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#fff;color:#0078d4;cursor:pointer;">📋 查看品种费率表</button>';
-            html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，点击"编辑品种费率"设置自定义费率</span>';
+            html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">📋 查看/编辑品种费率表</button>';
+            html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，编辑费率表中可设置自定义费率</span>';
             html += '</div>';
             html += '</div>';
         }
@@ -358,18 +357,6 @@
                 }
             });
         }
-
-        // Browse fee table button — view mode
-        var browseBtn = $(CONTAINER_ID + '-browse-fee-btn');
-        if (browseBtn) {
-            browseBtn.addEventListener('click', function() {
-                var group = REG.getReferenceGroup();
-                if (!group) return;
-                if (GT.overlays && GT.overlays.configFeeTable) {
-                    GT.overlays.configFeeTable.open(group, 'view');
-                }
-            });
-        }
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
@@ -404,7 +391,8 @@
         var chipClickable = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
 
         if (mode === 'uniform') {
-            var rateStr = (group.feeRate != null) ? Number(group.feeRate).toFixed(6) : '—';
+            var rateVal = (group.feeRate != null) ? Number(group.feeRate) : 0.0025;
+            var rateStr = rateVal.toFixed(6);
             chips.push({
                 label: 'fee-uniform',
                 html: '💰 统一费率:' + rateStr,
