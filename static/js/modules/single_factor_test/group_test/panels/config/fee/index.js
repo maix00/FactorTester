@@ -1,0 +1,442 @@
+/**
+ * panels/config/fee/index.js — Fee data layer + config panel (merged)
+ *
+ * Data layer (GT.fee):
+ *   - fetchFeeTable / getFeeRows / buildFeeMap / hasFeeData
+ *   - Fee modifications (getModifications / applyModifications)
+ *
+ * Config panel (GT.panels.config.fee):
+ *   - Per-group fee mode selection (none/uniform/per_product)
+ *   - Dirty workspace via REG.setDirty / commitDirty / rollbackDirty
+ *   - getChips for list aggregation
+ *   - Uses GT.overlays.configFeeTable for per-product editing
+ *
+ * Dependencies:
+ *   - GT_CONFIG_REGISTRY (registry.js)
+ *   - GT.overlays.configFeeTable (overlay.js)
+ */
+
+(function() {
+    var GT = window.GroupTest;
+    if (!GT) throw new Error('GroupTest bootstrap not loaded');
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Data layer — Fee table management (GT.fee)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var _feeTableData = [];          // 原始费率数据（从后端获取，不可变）
+    var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio, closetoday_ratio}}
+
+    // ── Fee data API ───────────────────────────────────────────────────────────
+
+    /** Fetch fee table from backend (cache in _feeTableData). */
+    function fetchFeeTable(forceRefresh) {
+        if (_feeTableData.length > 0 && !forceRefresh) {
+            return Promise.resolve(_feeTableData);
+        }
+        return fetch('/get_fee_table', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.success && Array.isArray(data.data)) {
+                _feeTableData = data.data;
+            } else {
+                console.warn('Fee table fetch returned unexpected format');
+            }
+            return _feeTableData;
+        })
+        .catch(function(err) {
+            console.error('Failed to fetch fee table:', err);
+            return _feeTableData;
+        });
+    }
+
+    /** Get raw fee rows (immutable backend data). */
+    function getFeeRows() {
+        return _feeTableData;
+    }
+
+    /** Build a fee map {variety_code: {open_ratio, close_ratio, closetoday_ratio}} from raw data. */
+    function buildFeeMap() {
+        var map = {};
+        for (var i = 0; i < _feeTableData.length; i++) {
+            var r = _feeTableData[i];
+            var code = (r.code || '').toLowerCase();
+            map[code] = {
+                open_ratio: r.open_ratio,
+                close_ratio: r.close_ratio,
+                closetoday_ratio: r.closetoday_ratio
+            };
+        }
+        return map;
+    }
+
+    /** Whether fee data has been fetched. */
+    function hasFeeData() {
+        return _feeTableData.length > 0;
+    }
+
+    /** Get fee modifications snapshot. */
+    function getModifications() {
+        return JSON.parse(JSON.stringify(_feeModifications));
+    }
+
+    /** Apply fee modifications snapshot. */
+    function applyModifications(mods) {
+        _feeModifications = mods && typeof mods === 'object' ? JSON.parse(JSON.stringify(mods)) : {};
+        if (GT.state && typeof GT.state.emit === 'function') {
+            GT.state.emit('feeDataChanged');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Config panel — Per-group fee settings (GT.panels.config.fee)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var REG = null; // GT_CONFIG_REGISTRY, set on mount
+    var _mounted = false;
+
+    var CONTAINER_ID = 'config-fee';
+    var FEE_MODES = ['none', 'uniform', 'per_product'];
+
+    // ── DOM helpers ────────────────────────────────────────────────────────────
+
+    function $(id) { return document.getElementById(id); }
+
+    function escapeHTML(str) {
+        if (str === null || str === undefined) return '';
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
+
+    // ── Rendering ──────────────────────────────────────────────────────────────
+
+    function render() {
+        if (!_mounted) return;
+        if (!REG) REG = window.GT_CONFIG_REGISTRY;
+
+        var group = REG ? REG.getReferenceGroup() : null;
+        if (!group) return;
+
+        var container = $(CONTAINER_ID);
+        if (!container) return;
+
+        var mode = REG.getDirty('feeMode', group.feeMode || 'none');
+        var feeRate = REG.getDirty('feeRate', group.feeRate != null ? group.feeRate : 0.0025);
+        var sensitivity = REG.getDirty('feeSensitivity', group.feeSensitivity != null ? group.feeSensitivity : 1);
+        var useCT = REG.getDirty('useCloseToday', !!group.useCloseToday);
+        var feeMap = REG.getDirty('feeMap', group.feeMap);
+
+        var html = '';
+
+        // ── Mode selector ──
+        html += '<div style="margin-bottom:16px;">';
+        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">费率模式</label>';
+        html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+        for (var mi = 0; mi < FEE_MODES.length; mi++) {
+            var m = FEE_MODES[mi];
+            var mLabel = m === 'none' ? '不使用手续费' : (m === 'uniform' ? '统一费率' : '分品种费率');
+            var active = (m === mode);
+            html += '<button id="' + CONTAINER_ID + '-mode-' + m + '" style="padding:6px 14px;font-size:12px;border:1px solid ' + (active ? '#0078d4' : '#ccc') + ';border-radius:4px;background:' + (active ? '#0078d4' : '#fff') + ';color:' + (active ? '#fff' : '#333') + ';cursor:pointer;">' + mLabel + '</button>';
+        }
+        html += '</div></div>';
+
+        // ── Mode-specific UI ──
+        if (mode === 'uniform') {
+            html += '<div style="margin-bottom:16px;">';
+            html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">统一费率（双边合计）</label>';
+            html += '<div style="display:flex;align-items:center;gap:8px;">';
+            html += '<input id="' + CONTAINER_ID + '-fee-rate" type="number" step="0.000001" min="0" value="' + Number(feeRate).toFixed(6) + '" style="width:160px;padding:6px 8px;font-size:13px;border:1px solid #ccc;border-radius:4px;">';
+            html += '<span style="font-size:12px;color:#888;">例如：0.002500 表示双边合计 0.25%</span>';
+            html += '</div></div>';
+        } else if (mode === 'per_product') {
+            // Per-product: button to open configFeeTable overlay in EDIT mode
+            html += '<div id="' + CONTAINER_ID + '-pp-editor" style="margin-bottom:16px;padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
+            html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">分品种费率</label>';
+            html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+            html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✏️ 编辑品种费率</button>';
+            html += '<button id="' + CONTAINER_ID + '-browse-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#fff;color:#0078d4;cursor:pointer;">📋 查看品种费率表</button>';
+            html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，点击"编辑品种费率"设置自定义费率</span>';
+            html += '</div>';
+            html += '</div>';
+        }
+
+        // ── Sensitivity slider ──
+        html += '<div style="margin-bottom:16px;">';
+        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">费率倍数 <span id="' + CONTAINER_ID + '-sens-val" style="font-weight:700;color:#0078d4;">' + Number(sensitivity).toFixed(1) + '</span>x</label>';
+        html += '<input id="' + CONTAINER_ID + '-sensitivity" type="range" min="0.1" max="5" step="0.1" value="' + Number(sensitivity).toFixed(1) + '" style="width:100%;max-width:300px;">';
+        html += '</div>';
+
+        // ── Close-today toggle (per_product only) ──
+        if (mode === 'per_product') {
+            html += '<div style="margin-bottom:16px;padding:10px 14px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
+            html += '<label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer;">';
+            html += '<span>平仓口径</span>';
+            html += '<button id="' + CONTAINER_ID + '-ct-toggle" style="padding:4px 12px;font-size:12px;border:1px solid ' + (useCT ? '#0078d4' : '#ccc') + ';border-radius:4px;background:' + (useCT ? '#0078d4' : '#fff') + ';color:' + (useCT ? '#fff' : '#333') + ';cursor:pointer;">' + (useCT ? '平今仓' : '平昨仓') + '</button>';
+            html += '</label>';
+            html += '<div style="font-size:11px;color:#888;margin-top:4px;">平今仓模式使用 closetoday_ratio 计算手续费；平昨仓模式使用 close_ratio</div>';
+            html += '</div>';
+        }
+
+        // ── Save/Cancel bar ──
+        var hasDirty = REG ? REG.hasDirty() : false;
+        html += _makeSaveBar(hasDirty);
+
+        container.innerHTML = html;
+        _bindEvents();
+    }
+
+    function _makeSaveBar(hasDirty) {
+        var html = '';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;margin-top:12px;background:' + (hasDirty ? '#fff8e1' : '#f9fafb') + ';border-radius:6px;border:1px solid ' + (hasDirty ? '#ffc107' : '#e5e7eb') + ';">';
+        html += '<span style="font-size:12px;color:' + (hasDirty ? '#e65100' : '#888') + ';">' + (hasDirty ? '⚠️ 有未保存的更改' : '✓ 已保存') + '</span>';
+        html += '<div style="display:flex;gap:6px;">';
+        html += '<button id="' + CONTAINER_ID + '-save-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✓ 保存</button>';
+        html += '<button id="' + CONTAINER_ID + '-cancel-btn" style="padding:6px 16px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#333;cursor:pointer;">✕ 取消</button>';
+        html += '</div></div>';
+        return html;
+    }
+
+    // ── Event binding ──────────────────────────────────────────────────────────
+
+    function _bindEvents() {
+        var container = $(CONTAINER_ID);
+        if (!container) return;
+
+        // Mode buttons
+        for (var mi = 0; mi < FEE_MODES.length; mi++) {
+            var m = FEE_MODES[mi];
+            var btn = $(CONTAINER_ID + '-mode-' + m);
+            if (btn) {
+                btn.addEventListener('click', function(modeVal) {
+                    return function() {
+                        REG.setDirty('feeMode', modeVal);
+                        render();
+                    };
+                }(m));
+            }
+        }
+
+        // Uniform fee rate input
+        var rateInput = $(CONTAINER_ID + '-fee-rate');
+        if (rateInput) {
+            rateInput.addEventListener('change', function() {
+                var val = parseFloat(this.value);
+                if (!isNaN(val) && val >= 0) {
+                    REG.setDirty('feeRate', val);
+                    render();
+                }
+            });
+        }
+
+        // Sensitivity slider
+        var slider = $(CONTAINER_ID + '-sensitivity');
+        if (slider) {
+            slider.addEventListener('input', function() {
+                var label = $(CONTAINER_ID + '-sens-val');
+                if (label) label.textContent = parseFloat(this.value).toFixed(1);
+            });
+            slider.addEventListener('change', function() {
+                REG.setDirty('feeSensitivity', parseFloat(this.value));
+                render();
+            });
+        }
+
+        // Close-today toggle
+        var ctToggle = $(CONTAINER_ID + '-ct-toggle');
+        if (ctToggle) {
+            ctToggle.addEventListener('click', function() {
+                var group = REG.getReferenceGroup();
+                if (!group) return;
+                var current = !!REG.getDirty('useCloseToday', !!group.useCloseToday);
+                REG.setDirty('useCloseToday', !current);
+                render();
+            });
+        }
+
+        // Save button
+        var saveBtn = $(CONTAINER_ID + '-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+                var ok = REG.commitDirty();
+                if (ok && GT.state && typeof GT.state.emit === 'function') {
+                    GT.state.emit('baseGroupsChanged');
+                }
+                render();
+            });
+        }
+
+        // Cancel (rollback) button
+        var cancelBtn = $(CONTAINER_ID + '-cancel-btn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function() {
+                REG.rollbackDirty();
+                render();
+            });
+        }
+
+        // Per-product edit — open configFeeTable overlay in EDIT mode
+        var editFeeBtn = $(CONTAINER_ID + '-edit-fee-btn');
+        if (editFeeBtn) {
+            editFeeBtn.addEventListener('click', function() {
+                var group = REG.getReferenceGroup();
+                if (!group) return;
+                // Apply current dirty state to the group for the overlay
+                var current = JSON.parse(JSON.stringify(group));
+                if (REG.hasDirty()) {
+                    var dirtyKeys = ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday'];
+                    for (var dk = 0; dk < dirtyKeys.length; dk++) {
+                        var k = dirtyKeys[dk];
+                        var fallback = group[k];
+                        current[k] = REG.getDirty(k, fallback);
+                    }
+                }
+                if (GT.overlays && GT.overlays.configFeeTable) {
+                    GT.overlays.configFeeTable.open(current, 'edit', function() {
+                        render();
+                    });
+                }
+            });
+        }
+
+        // Browse fee table button — view mode
+        var browseBtn = $(CONTAINER_ID + '-browse-fee-btn');
+        if (browseBtn) {
+            browseBtn.addEventListener('click', function() {
+                var group = REG.getReferenceGroup();
+                if (!group) return;
+                if (GT.overlays && GT.overlays.configFeeTable) {
+                    GT.overlays.configFeeTable.open(group, 'view');
+                }
+            });
+        }
+    }
+
+    // ── Event handlers ────────────────────────────────────────────────────────
+
+    function _onDataChanged() {
+        if (_mounted) {
+            REG.rollbackDirty();
+            render();
+        }
+    }
+
+    // ── Config chips (consumed by list panel via REG.getChips) ────────────────
+
+    /**
+     * getChips(group) → [{label, html, style, onClick}]
+     *
+     * Rules:
+     *  - 'none':         no chips at all
+     *  - 'uniform':      [统一费率: 2.500000] + [费率倍数: 1.5x] if sensitivity ≠ 1
+     *  - 'per_product':  [分品种费率] clickable → configFeeTable overlay (view mode)
+     *                      if feeMap has entries → [分品种费率(自定义)]
+     *                    + [费率倍数: 1.5x] if sensitivity ≠ 1
+     *                    + [平今/平昨] always
+     */
+    function getChips(group) {
+        if (!group) return [];
+        var mode = group.feeMode || 'none';
+        if (mode === 'none') return [];
+
+        var chips = [];
+        var chipPlain = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+        var chipClickable = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
+
+        if (mode === 'uniform') {
+            var rateStr = (group.feeRate != null) ? Number(group.feeRate).toFixed(6) : '—';
+            chips.push({
+                label: 'fee-uniform',
+                html: '💰 统一费率:' + rateStr,
+                style: chipPlain
+            });
+        } else if (mode === 'per_product') {
+            var feeMap = group.feeMap;
+            var hasCustom = feeMap && typeof feeMap === 'object' && Object.keys(feeMap).length > 0;
+            chips.push({
+                label: 'fee-per-product',
+                html: hasCustom ? '📊 分品种费率(自定义)' : '📊 分品种费率',
+                style: chipClickable,
+                onClick: function(chipEl, g) {
+                    if (GT.overlays && GT.overlays.configFeeTable) {
+                        GT.overlays.configFeeTable.open(g, 'view');
+                    }
+                }
+            });
+        }
+
+        // 费率倍数 chip (if ≠ 1)
+        var sens = group.feeSensitivity;
+        if (sens != null && sens !== 1) {
+            chips.push({
+                label: 'fee-sensitivity',
+                html: '⚡ 费率倍数:' + Number(sens).toFixed(1) + 'x',
+                style: chipPlain
+            });
+        }
+
+        // 平今/平昨 chip (only for per_product)
+        if (mode === 'per_product') {
+            var isCT = !!group.useCloseToday;
+            chips.push({
+                label: 'fee-close-today',
+                html: isCT ? '🗓️ 平今' : '🗓️ 平昨',
+                style: chipPlain
+            });
+        }
+
+        return chips;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Public API — GT.fee (data layer)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    GT.fee = {
+        fetchFeeTable: fetchFeeTable,
+        getFeeRows: getFeeRows,
+        buildFeeMap: buildFeeMap,
+        hasFeeData: hasFeeData,
+        getModifications: getModifications,
+        applyModifications: applyModifications,
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Public API — GT.panels.config.fee (config panel)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function mount() {
+        _mounted = true;
+        REG = window.GT_CONFIG_REGISTRY;
+
+        GT.state.on('baseGroupsChanged', _onDataChanged);
+        GT.state.on('activeBaseGroupChanged', _onDataChanged);
+
+        render();
+    }
+
+    function unmount() {
+        _mounted = false;
+        GT.state.off('baseGroupsChanged', _onDataChanged);
+        GT.state.off('activeBaseGroupChanged', _onDataChanged);
+    }
+
+    function refresh() {
+        if (_mounted) render();
+    }
+
+    if (!GT.panels) GT.panels = {};
+    if (!GT.panels.config) GT.panels.config = {};
+
+    GT.panels.config.fee = {
+        mount: mount,
+        unmount: unmount,
+        refresh: refresh,
+        getChips: getChips,
+    };
+
+    GT.log('panels/config/fee/index.js loaded (fee data + config panel)');
+})();
