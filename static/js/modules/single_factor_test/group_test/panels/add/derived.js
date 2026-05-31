@@ -36,17 +36,43 @@
 
     /**
      * Collect all available products from base groups.
+     * Resolves products via window.submissions using testerId.
      */
     function _allProducts() {
         var set = {};
         var baseGroups = GT.datamodel.base_groups.getAll();
+        var seenTesterIds = {};
         for (var i = 0; i < baseGroups.length; i++) {
-            var prods = baseGroups[i].products || [];
-            for (var j = 0; j < prods.length; j++) {
-                set[prods[j]] = true;
+            var tid = baseGroups[i].testerId;
+            if (tid && !seenTesterIds[tid]) {
+                seenTesterIds[tid] = true;
+                _addProductsFromTesterId(set, tid);
+            }
+        }
+        // Also try the preselected base group from add draft
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        if (draft && draft.preselectedBaseGroupId) {
+            var bg = GT.datamodel.base_groups.get(draft.preselectedBaseGroupId);
+            if (bg && bg.testerId && !seenTesterIds[bg.testerId]) {
+                seenTesterIds[bg.testerId] = true;
+                _addProductsFromTesterId(set, bg.testerId);
             }
         }
         return Object.keys(set).sort();
+    }
+
+    function _addProductsFromTesterId(set, testerId) {
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(testerId)) {
+                var prods = subs[i].products || [];
+                for (var j = 0; j < prods.length; j++) {
+                    var raw = typeof prods[j] === 'string' ? prods[j] : (prods[j].name || '');
+                    if (raw) set[raw] = true;
+                }
+                break;
+            }
+        }
     }
 
     function _hasOverride(node) {
