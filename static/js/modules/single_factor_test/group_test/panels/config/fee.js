@@ -1,5 +1,5 @@
 /**
- * panels/base/fee.js — Fee strategy + close-today toggle (merged panel)
+ * panels/config/fee.js — Fee strategy + close-today toggle (category-3)
  *
  * Reads the active base group's feeMode/feeRate/feeMap/feeSensitivity/useCloseToday,
  * renders appropriate controls, and saves changes via datamodel.
@@ -8,13 +8,13 @@
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.panels) { GT.panels = {}; }
-    if (!GT.panels.base) { GT.panels.base = {}; }
+    if (!GT.panels.config) { GT.panels.config = {}; }
 
     // ---------------------------------------------------------------------------
     // Constants
     // ---------------------------------------------------------------------------
 
-    var CONTAINER_ID = 'base-fee-settings';
+    var CONTAINER_ID = 'config-fee';
     var FEE_MODES = ['none', 'uniform', 'per_product', 'custom'];
     var FEE_MODE_LABELS = {
         none: '无手续费',
@@ -386,7 +386,8 @@
     // Export
     // ---------------------------------------------------------------------------
 
-    GT.panels.base.fee = {
+    GT.panels.config = GT.panels.config || {};
+    GT.panels.config.fee = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
@@ -399,9 +400,9 @@
         window.GT_CONFIG_REGISTRY.register({
             name: 'fee',
             label: '费率',
-            panel: GT.panels.base.fee,
-        }, 'base-fee-settings');
+            panel: GT.panels.config.fee,
+        }, 'config-fee');
     }
 
-    GT.log('panels.base.fee loaded');
+    GT.log('panels.config.fee loaded');
 })();

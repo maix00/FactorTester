@@ -1,5 +1,5 @@
 /**
- * test_panels_base_fee.js — Node.js tests for panels/base/fee.js
+ * test_panels_base_fee.js — Node.js tests for panels/config/fee.js
  */
 
 var passed = 0, failed = 0;
@@ -154,10 +154,10 @@ global.window = {
 // Load module
 // ---------------------------------------------------------------------------
 
-require('../../static/js/modules/single_factor_test/group_test/panels/base/fee.js');
+require('../../static/js/modules/single_factor_test/group_test/panels/config/fee.js');
 
 var GT = window.GroupTest;
-var panel = GT.panels.base.fee;
+var panel = GT.panels.config.fee;
 
 // We need a helper to simulate DOM after render (since querySelector is called in _bindEvents)
 function _simulateRender() {
@@ -181,9 +181,9 @@ assert(typeof panel.render === 'function', 'exports: render exists');
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-var html = _domElements['base-fee-settings']._html;
+var html = _domElements['config-fee']._html;
 assert(html.indexOf('请先在「列表」中选择或创建一个基础组') !== -1, 'no active: shows placeholder');
 
 // ---------------------------------------------------------------------------
@@ -193,14 +193,14 @@ assert(html.indexOf('请先在「列表」中选择或创建一个基础组') !=
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
+html = _domElements['config-fee']._html;
 assert(html.indexOf('费率模式') !== -1, 'render none: shows mode selector');
 assert(html.indexOf('value="none"') !== -1, 'render none: has none radio');
 assert(html.indexOf('checked') !== -1, 'render none: none is checked');
 // Uniform editor should NOT appear for 'none' mode
-assert(html.indexOf('base-fee-settings-uniform-editor') === -1, 'render none: no uniform editor');
+assert(html.indexOf('config-fee-uniform-editor') === -1, 'render none: no uniform editor');
 
 // ---------------------------------------------------------------------------
 // 4. render — uniform mode
@@ -209,12 +209,12 @@ assert(html.indexOf('base-fee-settings-uniform-editor') === -1, 'render none: no
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'uniform', feeRate: 2.5 });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
-assert(html.indexOf('base-fee-settings-uniform-editor') !== -1, 'render uniform: shows editor');
+html = _domElements['config-fee']._html;
+assert(html.indexOf('config-fee-uniform-editor') !== -1, 'render uniform: shows editor');
 assert(html.indexOf('value="2.5"') !== -1, 'render uniform: rate is 2.5');
-assert(html.indexOf('base-fee-settings-feerate') !== -1, 'render uniform: has feerate input');
+assert(html.indexOf('config-fee-feerate') !== -1, 'render uniform: has feerate input');
 
 // ---------------------------------------------------------------------------
 // 5. render — per_product mode
@@ -223,10 +223,10 @@ assert(html.indexOf('base-fee-settings-feerate') !== -1, 'render uniform: has fe
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'per_product', feeMap: { 'ag': 1.5, 'rb': 2.0 } });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
-assert(html.indexOf('base-fee-settings-pp-editor') !== -1, 'render pp: shows editor');
+html = _domElements['config-fee']._html;
+assert(html.indexOf('config-fee-pp-editor') !== -1, 'render pp: shows editor');
 assert(html.indexOf('ag') !== -1, 'render pp: shows ag product');
 assert(html.indexOf('rb') !== -1, 'render pp: shows rb product');
 assert(html.indexOf('data-pp-product="ag"') !== -1, 'render pp: ag row has data attr');
@@ -238,10 +238,10 @@ assert(html.indexOf('data-pp-product="ag"') !== -1, 'render pp: ag row has data 
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'per_product', feeMap: null });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
-assert(html.indexOf('base-fee-settings-pp-editor') !== -1, 'render pp null: shows editor');
+html = _domElements['config-fee']._html;
+assert(html.indexOf('config-fee-pp-editor') !== -1, 'render pp null: shows editor');
 // Should not crash on null feeMap
 
 // ---------------------------------------------------------------------------
@@ -251,12 +251,12 @@ assert(html.indexOf('base-fee-settings-pp-editor') !== -1, 'render pp null: show
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'custom' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
+html = _domElements['config-fee']._html;
 assert(html.indexOf('value="custom"') !== -1, 'render custom: custom checked');
-assert(html.indexOf('base-fee-settings-uniform-editor') === -1, 'render custom: no uniform editor');
-assert(html.indexOf('base-fee-settings-pp-editor') === -1, 'render custom: no pp editor');
+assert(html.indexOf('config-fee-uniform-editor') === -1, 'render custom: no uniform editor');
+assert(html.indexOf('config-fee-pp-editor') === -1, 'render custom: no pp editor');
 
 // ---------------------------------------------------------------------------
 // 8. sensitivity slider always present
@@ -265,10 +265,10 @@ assert(html.indexOf('base-fee-settings-pp-editor') === -1, 'render custom: no pp
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none', feeSensitivity: 1.5 });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.render();
-html = _domElements['base-fee-settings']._html;
-assert(html.indexOf('base-fee-settings-sensitivity') !== -1, 'sensitivity: slider present');
+html = _domElements['config-fee']._html;
+assert(html.indexOf('config-fee-sensitivity') !== -1, 'sensitivity: slider present');
 assert(html.indexOf('value="1.5"') !== -1, 'sensitivity: value 1.5');
 assert(html.indexOf('1.5') !== -1, 'sensitivity: label shows 1.5');
 
@@ -279,9 +279,9 @@ assert(html.indexOf('1.5') !== -1, 'sensitivity: label shows 1.5');
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.mount();
-assert(_domElements['base-fee-settings']._html.indexOf('费率模式') !== -1, 'mount: renders');
+assert(_domElements['config-fee']._html.indexOf('费率模式') !== -1, 'mount: renders');
 // Should have registered handlers
 assert(global._events['baseGroupsChanged'].length >= 1, 'mount: registered baseGroupsChanged');
 assert(global._events['activeBaseGroupChanged'].length >= 1, 'mount: registered activeBaseGroupChanged');
@@ -298,16 +298,16 @@ assert(global._events['activeBaseGroupChanged'].length === 0, 'unmount: activeBa
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.mount();
 // Initially no selection
-assert(_domElements['base-fee-settings']._html.indexOf('请先在') !== -1, 'before select: placeholder');
+assert(_domElements['config-fee']._html.indexOf('请先在') !== -1, 'before select: placeholder');
 
 // Select a group
 mockBG.push({ id: 'bg_2', name: 'G2', testerId: 't', factorAlias: 'f', groupCount: 3, groupIndex: 0, feeMode: 'uniform', feeRate: 3.0 });
 global._mockActiveBGId = 'bg_2';
 GT.state.emit('activeBaseGroupChanged', { id: 'bg_2' });
-assert(_domElements['base-fee-settings']._html.indexOf('value="3"') !== -1, 'after select: shows 3.0 rate');
+assert(_domElements['config-fee']._html.indexOf('value="3"') !== -1, 'after select: shows 3.0 rate');
 
 panel.unmount();
 
@@ -316,15 +316,15 @@ panel.unmount();
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-settings');
+_makeContainer('config-fee');
 panel.mount();
 panel.unmount();
 
 // Change data — should NOT re-render
-var htmlBefore = _domElements['base-fee-settings']._html;
+var htmlBefore = _domElements['config-fee']._html;
 mockBG.push({ id: 'bg_3', name: 'G3', testerId: 't', factorAlias: 'f', groupCount: 2, groupIndex: 0, feeMode: 'per_product' });
 GT.state.emit('activeBaseGroupChanged', { id: 'bg_3' });
-var htmlAfter = _domElements['base-fee-settings']._html;
+var htmlAfter = _domElements['config-fee']._html;
 assertEquals(htmlAfter, htmlBefore, 'unmounted: does not react to events');
 
 // ---------------------------------------------------------------------------

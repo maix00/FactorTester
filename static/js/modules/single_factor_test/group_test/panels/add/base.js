@@ -1,5 +1,5 @@
 /**
- * panels/base/add.js — Add-flow sub-tab: "新建基础组" (合并原 add_tester + add_factors)
+ * panels/add/base.js — Add-flow panel: "新建基础组" (category-2)
  *
  * Renders tester selector → groupIndex/groupCount (side-by-side) → allGroups
  * checkbox → factor selector → submit handled by app.js
@@ -8,9 +8,9 @@
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.panels) { GT.panels = {}; }
-    if (!GT.panels.base) { GT.panels.base = {}; }
+    if (!GT.panels.add) { GT.panels.add = {}; }
 
-    var _containerId = 'base-add';
+    var _containerId = 'add-base';
     var _mounted = false;
 
     function $(id) { return document.getElementById(id); }
@@ -460,7 +460,8 @@
 
     // ── Export ──
 
-    GT.panels.base.add = {
+    GT.panels.add = GT.panels.add || {};
+    GT.panels.add.base = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,

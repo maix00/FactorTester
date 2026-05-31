@@ -1,5 +1,5 @@
 /**
- * panels/derived/products.js — Derived group products panel (Tab 2, sub-tab "品种")
+ * panels/add/derived.js — Add-flow panel: "新建派生组" (category-2)
  *
  * Dual-mode panel:
  *   ADD mode (no active node): product multi-select for creating new derived group
@@ -253,7 +253,8 @@
     // Export
     // ---------------------------------------------------------------------------
 
-    GT.panels.derived.products = {
+    GT.panels.add = GT.panels.add || {};
+    GT.panels.add.derived = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,

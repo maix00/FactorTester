@@ -1,5 +1,5 @@
 /**
- * test_panels_ls_editor.js — Node.js tests for panels/ls/editor.js
+ * test_panels_ls_editor.js — Node.js tests for panels/add/ls.js
  */
 
 var passed = 0, failed = 0;
@@ -138,7 +138,7 @@ global.window = {
 // ---------------------------------------------------------------------------
 
 try {
-    require('../../static/js/modules/single_factor_test/group_test/panels/ls/editor.js');
+    require('../../static/js/modules/single_factor_test/group_test/panels/add/ls.js');
 } catch (e) {
     console.log('MODULE LOAD ERROR: ' + e.message);
     console.log(e.stack);
@@ -146,7 +146,7 @@ try {
 }
 
 var GT = window.GroupTest;
-var panel = GT.panels.ls.editor;
+var panel = GT.panels.add.ls;
 
 // ---------------------------------------------------------------------------
 // 1. Module exports

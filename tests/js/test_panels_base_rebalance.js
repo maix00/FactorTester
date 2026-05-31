@@ -1,5 +1,5 @@
 /**
- * test_panels_base_rebalance.js — Node.js tests for panels/base/rebalance.js
+ * test_panels_base_rebalance.js — Node.js tests for panels/config/rebalance.js
  */
 
 var passed = 0, failed = 0;
@@ -137,10 +137,10 @@ global.window = {
 // Load module
 // ---------------------------------------------------------------------------
 
-require('../../static/js/modules/single_factor_test/group_test/panels/base/rebalance.js');
+require('../../static/js/modules/single_factor_test/group_test/panels/config/rebalance.js');
 
 var GT = window.GroupTest;
-var panel = GT.panels.base.rebalance;
+var panel = GT.panels.config.rebalance;
 
 // ---------------------------------------------------------------------------
 // 1. Module exports
@@ -158,9 +158,9 @@ assert(typeof panel.render === 'function', 'exports: render');
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
-var html = _domElements['base-rebalance']._html;
+var html = _domElements['config-rebalance']._html;
 assert(html.indexOf('请先在基础组列表中选择一个基础组') !== -1, 'no active: placeholder');
 
 // ---------------------------------------------------------------------------
@@ -170,9 +170,9 @@ assert(html.indexOf('请先在基础组列表中选择一个基础组') !== -1, 
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, rebalanceMode: 'buy_and_hold' });
 global._mockActiveBGId = 'bg_1';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
-html = _domElements['base-rebalance']._html;
+html = _domElements['config-rebalance']._html;
 assert(html.indexOf('组内持仓不动') !== -1, 'buy_and_hold: label shown');
 assert(html.indexOf('rb-mode-select') !== -1, 'buy_and_hold: select exists');
 
@@ -183,9 +183,9 @@ assert(html.indexOf('rb-mode-select') !== -1, 'buy_and_hold: select exists');
 resetAll();
 mockBG.push({ id: 'bg_2', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, rebalanceMode: 'each_period' });
 global._mockActiveBGId = 'bg_2';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
-html = _domElements['base-rebalance']._html;
+html = _domElements['config-rebalance']._html;
 assert(html.indexOf('每期等权再平衡') !== -1, 'each_period: label shown');
 assert(html.indexOf('换手通常最高') !== -1, 'each_period: description shown');
 
@@ -196,9 +196,9 @@ assert(html.indexOf('换手通常最高') !== -1, 'each_period: description show
 resetAll();
 mockBG.push({ id: 'bg_3', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, rebalanceMode: 'recycle' });
 global._mockActiveBGId = 'bg_3';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
-html = _domElements['base-rebalance']._html;
+html = _domElements['config-rebalance']._html;
 assert(html.indexOf('退出资金优先补新仓') !== -1, 'recycle: label shown');
 
 // ---------------------------------------------------------------------------
@@ -208,9 +208,9 @@ assert(html.indexOf('退出资金优先补新仓') !== -1, 'recycle: label shown
 resetAll();
 mockBG.push({ id: 'bg_4', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5 });
 global._mockActiveBGId = 'bg_4';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
-html = _domElements['base-rebalance']._html;
+html = _domElements['config-rebalance']._html;
 assert(html.indexOf('组内持仓不动') !== -1, 'default: buy_and_hold as default');
 
 // ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ assert(html.indexOf('组内持仓不动') !== -1, 'default: buy_and_hold as defa
 resetAll();
 mockBG.push({ id: 'bg_5', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, rebalanceMode: 'buy_and_hold' });
 global._mockActiveBGId = 'bg_5';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.render();
 
 var select = _domElements['rb-mode-select'];
@@ -244,11 +244,11 @@ assert(desc._textContent.indexOf('换手通常最高') !== -1, 'select: descript
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, rebalanceMode: 'each_period' });
 global._mockActiveBGId = 'bg_1';
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.mount();
 assert(global._events['baseGroupsChanged'].length >= 1, 'mount: registered baseGroupsChanged');
 assert(global._events['activeBaseGroupChanged'].length >= 1, 'mount: registered activeBaseGroupChanged');
-assert(_domElements['base-rebalance']._html.indexOf('每期等权再平衡') !== -1, 'mount: rendered');
+assert(_domElements['config-rebalance']._html.indexOf('每期等权再平衡') !== -1, 'mount: rendered');
 
 panel.unmount();
 assert(global._events['baseGroupsChanged'].length === 0, 'unmount: cleared baseGroupsChanged');
@@ -259,12 +259,12 @@ assert(global._events['activeBaseGroupChanged'].length === 0, 'unmount: cleared 
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeEl('base-rebalance');
+_makeEl('config-rebalance');
 panel.mount();
 mockBG.push({ id: 'bg_6', name: 'G6', testerId: 't', factorAlias: 'f', groupCount: 3, rebalanceMode: 'recycle' });
 global._mockActiveBGId = 'bg_6';
 GT.state.emit('activeBaseGroupChanged', { id: 'bg_6' });
-assert(_domElements['base-rebalance']._html.indexOf('退出资金优先补新仓') !== -1, 'after select: shows recycle');
+assert(_domElements['config-rebalance']._html.indexOf('退出资金优先补新仓') !== -1, 'after select: shows recycle');
 
 panel.unmount();
 

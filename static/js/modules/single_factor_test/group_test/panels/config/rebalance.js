@@ -1,5 +1,5 @@
 /**
- * panels/base/rebalance.js — Rebalance mode panel (Tab 1, sub-tab "再平衡")
+ * panels/config/rebalance.js — Rebalance mode panel (category-3)
  *
  * Phase 3 UI panel. Renders a dropdown for the selected base group's
  * rebalanceMode field with mode description. All data access through datamodel + state.
@@ -17,9 +17,9 @@
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.panels) { GT.panels = {}; }
-    if (!GT.panels.base) { GT.panels.base = {}; }
+    if (!GT.panels.config) { GT.panels.config = {}; }
 
-    var _containerId = 'base-rebalance';
+    var _containerId = 'config-rebalance';
     var _mounted = false;
 
     var MODE_LABELS = {
@@ -176,7 +176,8 @@
         ];
     }
 
-    GT.panels.base.rebalance = {
+    GT.panels.config = GT.panels.config || {};
+    GT.panels.config.rebalance = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
@@ -189,9 +190,9 @@
         window.GT_CONFIG_REGISTRY.register({
             name: 'rebalance',
             label: '再平衡',
-            panel: GT.panels.base.rebalance,
-        }, 'base-rebalance');
+            panel: GT.panels.config.rebalance,
+        }, 'config-rebalance');
     }
 
-    GT.log('panels.base.rebalance loaded');
+    GT.log('panels.config.rebalance loaded');
 })();

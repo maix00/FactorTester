@@ -1,5 +1,5 @@
 /**
- * panels/unified/list.js — Unified group list panel
+ * panels/list/index.js — Unified group list panel (category-1)
  *
  * Merges base groups, derived groups, and LS configs into a single panel
  * with two sections:
@@ -1008,5 +1008,5 @@
 
     window.GroupTest = window.GroupTest || {};
     window.GroupTest.panels = window.GroupTest.panels || {};
-    window.GroupTest.panels.unified = { list: _self };
+    window.GroupTest.panels.list = { index: _self };
 })();

@@ -2523,7 +2523,7 @@
     var _longShortDefinitions = [defaultLongShortDefinition()];
     var _lastGroupStructureKey = null;
 
-    // ═══ P7: Panel registry — unified flat tab list ═══
+    // ═══ Panel registry — unified flat tab list ═══
     // Each entry: { name, label, containerId, category, panel, addFlow }
     // - category: LIST (list view), CONFIG (settings), ADD (create flow)
     // - addFlow: 'base' | 'derived' | 'ls' — which add button invokes this panel
@@ -2533,7 +2533,7 @@
     var GT_TAB_CATEGORY = {
         LIST: 1,    // list views
         ADD: 2,     // add-flow panels (tester + factor selection)
-        CONFIG: 3,  // config panels (fee, rebalance, close_today)
+        CONFIG: 3,  // config panels (fee, rebalance)
     };
 
     var GT_PANEL_REGISTRY = [];
@@ -2546,30 +2546,28 @@
         var P = GT.panels;
         if (!P) return;
 
-        // Unified list — shows base, derived, and LS groups together
-        if (P.unified && P.unified.list) {
-            GT_PANEL_REGISTRY.push({ name: 'list', label: '📊 分组列表', containerId: 'unified-group-list', category: GT_TAB_CATEGORY.LIST, panel: P.unified.list });
+        // Unified list — shows base, derived, and LS groups together (category-1)
+        if (P.list && P.list.index) {
+            GT_PANEL_REGISTRY.push({ name: 'list', label: '📊 分组列表', containerId: 'unified-group-list', category: GT_TAB_CATEGORY.LIST, panel: P.list.index });
         }
 
-        // Add-flow panels (invoked by the three action buttons)
-        if (P.base && P.base.add) {
-            GT_PANEL_REGISTRY.push({ name: 'add-base', label: '新建基础组', containerId: 'base-add', category: GT_TAB_CATEGORY.ADD, panel: P.base.add, addFlow: 'base' });
+        // Add-flow panels (category-2)
+        if (P.add && P.add.base) {
+            GT_PANEL_REGISTRY.push({ name: 'add-base', label: '新建基础组', containerId: 'add-base', category: GT_TAB_CATEGORY.ADD, panel: P.add.base, addFlow: 'base' });
         }
-        if (P.derived && P.derived.products) {
-            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '新建派生组', containerId: 'derived-products-panel', category: GT_TAB_CATEGORY.ADD, panel: P.derived.products, addFlow: 'derived' });
+        if (P.add && P.add.derived) {
+            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '新建派生组', containerId: 'add-derived', category: GT_TAB_CATEGORY.ADD, panel: P.add.derived, addFlow: 'derived' });
         }
-        // LS add — use existing LS editor as the add flow
-        if (P.ls && P.ls.editor) {
-            GT_PANEL_REGISTRY.push({ name: 'add-ls', label: '新建 LS 组', containerId: 'ls-editor', category: GT_TAB_CATEGORY.ADD, panel: P.ls.editor, addFlow: 'ls' });
+        if (P.add && P.add.ls) {
+            GT_PANEL_REGISTRY.push({ name: 'add-ls', label: '新建 LS 组', containerId: 'add-ls', category: GT_TAB_CATEGORY.ADD, panel: P.add.ls, addFlow: 'ls' });
         }
 
-        // Config panels (shared across types)
-        // fee panel includes closeToday toggle (merged from close_today)
-        if (P.base && P.base.fee) {
-            GT_PANEL_REGISTRY.push({ name: 'fee', label: '💰 手续费与平今', containerId: 'base-fee-settings', category: GT_TAB_CATEGORY.CONFIG, panel: P.base.fee });
+        // Config panels (category-3)
+        if (P.config && P.config.fee) {
+            GT_PANEL_REGISTRY.push({ name: 'fee', label: '💰 手续费与平今', containerId: 'config-fee', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.fee });
         }
-        if (P.base && P.base.rebalance) {
-            GT_PANEL_REGISTRY.push({ name: 'rebalance', label: '⚖️ 再平衡', containerId: 'base-rebalance', category: GT_TAB_CATEGORY.CONFIG, panel: P.base.rebalance });
+        if (P.config && P.config.rebalance) {
+            GT_PANEL_REGISTRY.push({ name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.rebalance });
         }
 
         _panelsRegistered = true;

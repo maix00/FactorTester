@@ -1,5 +1,5 @@
 /**
- * test_panels_derived_products.js — Node.js tests for panels/derived/products.js
+ * test_panels_derived_products.js — Node.js tests for panels/add/derived.js
  *
  * Tests P4-5: derived group products display panel
  */
@@ -144,7 +144,7 @@ global.window = {
 // ---------------------------------------------------------------------------
 
 try {
-    require('../../static/js/modules/single_factor_test/group_test/panels/derived/products.js');
+    require('../../static/js/modules/single_factor_test/group_test/panels/add/derived.js');
 } catch (e) {
     console.log('MODULE LOAD ERROR: ' + e.message);
     console.log(e.stack);
@@ -152,7 +152,7 @@ try {
 }
 
 var GT = window.GroupTest;
-var panel = GT.panels.derived.products;
+var panel = GT.panels.add.derived;
 
 // ---------------------------------------------------------------------------
 // 1. Module exports

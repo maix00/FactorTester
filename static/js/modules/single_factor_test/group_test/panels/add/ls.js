@@ -1,5 +1,5 @@
 /**
- * panels/ls/editor.js — LS config editor panel (Tab 3 "多空", detail view)
+ * panels/add/ls.js — Add-flow panel: "新建 LS 组" (category-2)
  *
  * Phase 5 UI panel. Shows full detail of the selected LS config and allows
  * editing of optional override settings: fee override, close-today toggle,
@@ -212,7 +212,8 @@
     // Export
     // ---------------------------------------------------------------------------
 
-    GT.panels.ls.editor = {
+    GT.panels.add = GT.panels.add || {};
+    GT.panels.add.ls = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
