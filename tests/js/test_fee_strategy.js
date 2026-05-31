@@ -44,7 +44,7 @@ var GT = window.GroupTest;
 require('../../static/js/modules/single_factor_test/group_test/datamodel/base_groups.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/derived_graph.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/ls_configs.js');
-require('../../static/js/modules/single_factor_test/group_test/datamodel/fee_strategy.js');
+require('../../static/js/modules/single_factor_test/group_test/panels/config/fee/strategy.js');
 
 var bg = GT.datamodel.base_groups;
 var dg = GT.datamodel.derived_graph;

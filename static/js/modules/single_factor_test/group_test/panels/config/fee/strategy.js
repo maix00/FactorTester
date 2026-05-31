@@ -1,5 +1,5 @@
 /**
- * fee_strategy.js — Fee/CloseToday/Rebalance resolution strategy
+ * panels/config/fee/strategy.js — Fee/CloseToday/Rebalance resolution strategy
  *
  * Pure logic module. Zero DOM dependencies.
  * Part of Phase 1 datamodel layer for Issue #85.
