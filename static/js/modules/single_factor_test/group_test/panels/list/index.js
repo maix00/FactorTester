@@ -507,6 +507,8 @@
                     // Group index: "1/5"
                     h += '<span style="font-size:11px;color:#888;">' + (ri + 1) + '/' + batch.items.length + '</span>';
                     h += '<span style="flex:1;"></span>';
+                    // Delete button (red X)
+                    h += '<button class="unified-bg-del-btn" data-bg-id="' + escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                     // Config chips — only show non-empty/non-none values
                     var bgRebalance = _rebalanceLabel(bg.rebalanceMode);
                     if (bgRebalance && bgRebalance !== '—' && bgRebalance !== '无') {
@@ -892,6 +894,16 @@
                 var id = this.getAttribute('data-ls-id');
                 if (!confirm('确定删除此多空配置？')) return;
                 try { GT.datamodel.ls_configs.remove(id); } catch (err) { alert('删除失败: ' + err.message); }
+            });
+        });
+
+        // ── Base group delete buttons ──
+        container.querySelectorAll('.unified-bg-del-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var bgId = this.getAttribute('data-bg-id');
+                if (!confirm('确定删除此基础组？')) return;
+                try { GT.datamodel.base_groups.remove(bgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
 
