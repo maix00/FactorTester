@@ -237,6 +237,7 @@
             if (!draft) return null;
             return {
                 id: '_add_draft',
+                testerId: draft.testerId,
                 feeMode: draft.feeMode || 'none',
                 feeRate: draft.feeRate,
                 feeMap: draft.feeMap,
