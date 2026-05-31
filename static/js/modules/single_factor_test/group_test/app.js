@@ -3046,7 +3046,7 @@
                     var hasDirty = REG ? REG.hasDirty() : false;
                     el.style.display = '';
                     el.style.color = hasDirty ? '#e65100' : '#888';
-                    el.textContent = hasDirty ? '⚠ 未保存' : '编辑中';
+                    el.textContent = hasDirty ? '编辑中 - 未保存' : '编辑中';
                 } else if (_panelMode === 'add') {
                     el.style.display = '';
                     el.style.color = '#1565c0';
@@ -3280,11 +3280,36 @@
             GT.ui.createLSFromSelection = _createLSFromSelection;
 
             function _saveEditChanges() {
-                var listPanelEntry = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
-                if (listPanelEntry && listPanelEntry.panel && typeof listPanelEntry.panel.saveEditChanges === 'function') {
-                    listPanelEntry.panel.saveEditChanges();
+                // Commit any unsaved dirty state from config panels
+                var REG = window.GT_CONFIG_REGISTRY;
+                if (REG) REG.commitDirty();
+                // Exit edit mode without rollback (dirty already committed or none)
+                _panelMode = 'list';
+                _editSelection = null;
+                GT.state.setActiveBaseGroupId(null);
+                GT.state.setActiveDerivedNodeId(null);
+                GT.state.emit('editModeExited');
+                _renderTabActions();
+                // Refresh tab bar back to list-only
+                if (tabBtnsBar) {
+                    var L = GT_TAB_CATEGORY.LIST;
+                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) { return p.category === L; });
+                    if (visibleList.length >= 1) {
+                        var stHtml = '';
+                        visibleList.forEach(function(p) {
+                            stHtml += '<button class="gt-tab' + (p.name === _currentTab ? ' active' : '') + '" data-tab="' + p.name + '">' + p.label + '</button>';
+                        });
+                        tabBtnsBar.innerHTML = stHtml;
+                        tabBtnsBar.querySelectorAll('.gt-tab').forEach(function(st) {
+                            st.addEventListener('click', function() {
+                                mountTab(st.getAttribute('data-tab'));
+                            });
+                        });
+                    } else {
+                        tabBtnsBar.innerHTML = '';
+                    }
                 }
-                _exitEditMode();
+                mountTab('list');
             }
 
             // Expose mode management
