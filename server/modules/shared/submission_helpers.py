@@ -30,11 +30,7 @@ def resolve_products(
       (canonical_paths, [{attr: val, ...}, ...])
     """
     paths, products_objs = _resolve_source(source)
-    result = [product_attrs(p, *attrs) for p in products_objs]
-    print(f"[DEBUG resolve_products] source_type={type(source).__name__}, paths={paths[:3] if len(paths)>3 else paths}, attrs={attrs}, product_count={len(result)}")
-    if result:
-        print(f"[DEBUG resolve_products] first={result[0]}")
-    return paths, result
+    return paths, [product_attrs(p, *attrs) for p in products_objs]
 
 
 def _resolve_source(source) -> tuple[list[str], list]:
@@ -81,12 +77,7 @@ def tester_to_dict(t):
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
 
     selected_paths = getattr(t, 'selected_paths', None) or []
-    has_products = bool(getattr(t, 'products', None))
-    print(f"[DEBUG tester_to_dict] id={core_id}, name={t.name}, selected_paths_count={len(selected_paths)}, has_products={has_products}")
-    if selected_paths:
-        print(f"[DEBUG tester_to_dict] selected_paths[:3]={selected_paths[:3]}")
     _, products_list = resolve_products(t, 'name', 'desc')
-    print(f"[DEBUG tester_to_dict] products_list_count={len(products_list)}")
 
     return {
         'id':                   core_id,
