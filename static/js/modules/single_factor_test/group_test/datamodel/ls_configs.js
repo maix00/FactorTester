@@ -86,7 +86,7 @@
         } else if (GT.datamodel.groups && GT.datamodel.groups.get) {
             var shortDg = GT.datamodel.groups.get(config.shortGroupId);
             if (!shortDg || !shortDg.isDerived) {
-                errors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);
+                errors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);rrors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);
             }
         }
 

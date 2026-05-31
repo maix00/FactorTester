@@ -176,21 +176,25 @@
      */
     function handleSave() {
         if (!_longId) return { success: false, error: '请先选择多头组' };
+        if (!_shortId) return { success: false, error: '请先选择空头组' };
 
         try {
             var longDgId  = _resolveToDerived(_longId);
-            var shortDgId = _shortId ? _resolveToDerived(_shortId) : null;
+            var shortDgId = _resolveToDerived(_shortId);
 
             var gLong  = _getGroup(_longId);
-            var gShort = _shortId ? _getGroup(_shortId) : null;
+            var gShort = _getGroup(_shortId);
 
             // Build name from short aliases (dynamic, like display)
             var saLong  = _displayAlias(gLong) || 'L';
-            var saShort = gShort ? (_displayAlias(gShort) || 'S') : '';
-            var name = saShort ? (saLong + '/' + saShort) : saLong;
+            var saShort = _displayAlias(gShort) || 'S';
+            var name = saLong + '/' + saShort;
 
-            var data = { name: name, longGroupId: longDgId };
-            if (shortDgId) data.shortGroupId = shortDgId;
+            var data = {
+                name: name,
+                longGroupId: longDgId,
+                shortGroupId: shortDgId,
+            };
 
             GT.datamodel.ls_configs.add(data);
             return { success: true, error: null };
