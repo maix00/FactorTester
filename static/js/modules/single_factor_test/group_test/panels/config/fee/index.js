@@ -435,8 +435,19 @@
         mount: mount,
         unmount: unmount,
         refresh: refresh,
+        render: render,
+        getTableColumns: function() { return []; },
         getChips: getChips,
     };
+
+    // Register as category-3 config panel
+    if (window.GT_CONFIG_REGISTRY) {
+        window.GT_CONFIG_REGISTRY.register({
+            name: 'fee',
+            label: '费率',
+            panel: GT.panels.config.fee,
+        }, 'config-fee');
+    }
 
     GT.log('panels/config/fee/index.js loaded (fee data + config panel)');
 })();
