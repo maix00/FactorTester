@@ -812,6 +812,27 @@
             _bindEvents(container);
         }
 
+        // ── Batch header click (delegated once, survives fullRender) ──
+        container.addEventListener('click', function(e) {
+            // Triangle expand/collapse
+            var expandEl = e.target.closest('.unified-batch-expand');
+            if (expandEl) {
+                e.stopPropagation();
+                var header = expandEl.closest('.unified-batch-header');
+                if (!header) return;
+                var key = header.getAttribute('data-batch-key');
+                _expandedBatches[key] = !_expandedBatches[key];
+                fullRender();
+                return;
+            }
+            // Batch header row → toggle selection
+            var header = e.target.closest('.unified-batch-header');
+            if (header && !e.target.closest('button')) {
+                var key = header.getAttribute('data-batch-key');
+                _toggleBatchSelection(_batchMap[key]);
+            }
+        });
+
         fullRender();
 
         // Re-render on state changes
@@ -873,27 +894,6 @@
                 if (!confirm('确定删除此多空配置？')) return;
                 try { GT.datamodel.ls_configs.remove(id); } catch (err) { alert('删除失败: ' + err.message); }
             });
-        });
-
-        // ── Base batch ──
-        // ── Base batch header (delegated) ──
-        container.addEventListener('click', function(e) {
-            var expandEl = e.target.closest('.unified-batch-expand');
-            if (expandEl) {
-                e.stopPropagation();
-                var header = expandEl.closest('.unified-batch-header');
-                if (!header) return;
-                var key = header.getAttribute('data-batch-key');
-                _expandedBatches[key] = !_expandedBatches[key];
-                fullRender();
-                return;
-            }
-            var header = e.target.closest('.unified-batch-header');
-            if (header) {
-                if (e.target.closest('button')) return;
-                var key = header.getAttribute('data-batch-key');
-                _toggleBatchSelection(_batchMap[key]);
-            }
         });
 
         // ── Base group rows ──
