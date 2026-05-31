@@ -480,6 +480,7 @@
             h += '<span style="color:#555;">' + escapeHTML(testerLabel) + '</span>';
             h += '<span style="color:#888;font-size:11px;">' + batch.groupCount + '组</span>';
             h += '</span>';
+            h += '<button class="unified-batch-del-btn" data-batch-key="' + escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
             h += '</div>';
 
             if (isExpanded && !isCollapsed) {
@@ -894,6 +895,22 @@
                 var id = this.getAttribute('data-ls-id');
                 if (!confirm('确定删除此多空配置？')) return;
                 try { GT.datamodel.ls_configs.remove(id); } catch (err) { alert('删除失败: ' + err.message); }
+            });
+        });
+
+        // ── Batch delete buttons ──
+        container.querySelectorAll('.unified-batch-del-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var batchKey = this.getAttribute('data-batch-key');
+                var ids = _batchGroupIds(batchKey);
+                if (ids.length === 0) return;
+                if (!confirm('确定删除此批次（共 ' + ids.length + ' 组）？')) return;
+                try {
+                    for (var i = 0; i < ids.length; i++) {
+                        GT.datamodel.base_groups.remove(ids[i]);
+                    }
+                } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
 
