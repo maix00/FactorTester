@@ -471,7 +471,7 @@
                 batchHeaderStyle += 'background:#f1f5f9;';
             }
             h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="' + batchHeaderStyle + '">';
-            h += '<span class="unified-batch-expand" style="margin-right:6px;width:16px;text-align:center;cursor:pointer;">' + (isExpanded ? '▾' : '▸') + '</span>';
+            h += '<span class="unified-batch-expand" style="margin-right:6px;width:20px;text-align:center;cursor:pointer;font-size:18px;line-height:1;">' + (isExpanded ? '▾' : '▸') + '</span>';
             h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;">';
             if (batchLetter) {
                 h += '<span style="font-weight:700;color:#4338ca;min-width:24px;">' + escapeHTML(batchLetter) + '</span>';
@@ -623,9 +623,9 @@
         // Node header row
         h += '<div class="unified-node-header" style="display:flex;align-items:center;padding:3px 4px;margin-left:' + indent + 'px;border-radius:4px;cursor:pointer;' + rowStyle + '">';
         if (hasKids) {
-            h += '<span style="width:14px;text-align:center;margin-right:2px;font-size:10px;">' + (isExp ? '▾' : '▸') + '</span>';
+            h += '<span style="width:20px;text-align:center;margin-right:2px;font-size:14px;line-height:1;">' + (isExp ? '▾' : '▸') + '</span>';
         } else {
-            h += '<span style="width:14px;margin-right:2px;"></span>';
+            h += '<span style="width:20px;margin-right:2px;"></span>';
         }
         h += '<span style="font-weight:600;font-size:13px;color:#4338ca;">' + escapeHTML(node.name) + '</span>';
         if (node.shortName) {

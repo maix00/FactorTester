@@ -19,7 +19,7 @@
     if (!GT.panels) { GT.panels = {}; }
     if (!GT.panels.derived) { GT.panels.derived = {}; }
 
-    var CONTAINER_ID = 'derived-products-panel';
+    var CONTAINER_ID = 'add-derived';
 
     var _mounted = false;
     var _activeId = null;
