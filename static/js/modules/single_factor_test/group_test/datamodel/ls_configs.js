@@ -75,8 +75,8 @@
             errors.push('longGroupId is required (non-empty string)');
         } else if (GT.datamodel.groups && GT.datamodel.groups.get) {
             var longDg = GT.datamodel.groups.get(config.longGroupId);
-            if (!longDg || !longDg.isDerived) {
-                errors.push('longGroupId references non-existent derived group: ' + config.longGroupId);
+            if (!longDg) {
+                errors.push('longGroupId references a non-existent group: ' + config.longGroupId);
             }
         }
 
@@ -85,8 +85,8 @@
             errors.push('shortGroupId is required (non-empty string)');
         } else if (GT.datamodel.groups && GT.datamodel.groups.get) {
             var shortDg = GT.datamodel.groups.get(config.shortGroupId);
-            if (!shortDg || !shortDg.isDerived) {
-                errors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);rrors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);
+            if (!shortDg) {
+                errors.push('shortGroupId references a non-existent group: ' + config.shortGroupId);
             }
         }
 

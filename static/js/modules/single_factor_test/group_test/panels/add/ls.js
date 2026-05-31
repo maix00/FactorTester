@@ -179,9 +179,6 @@
         if (!_shortId) return { success: false, error: '请先选择空头组' };
 
         try {
-            var longDgId  = _resolveToDerived(_longId);
-            var shortDgId = _resolveToDerived(_shortId);
-
             var gLong  = _getGroup(_longId);
             var gShort = _getGroup(_shortId);
 
@@ -191,8 +188,8 @@
 
             GT.datamodel.ls_configs.add({
                 name: name,
-                longGroupId: longDgId,
-                shortGroupId: shortDgId,
+                longGroupId: _longId,
+                shortGroupId: _shortId,
             });
             return { success: true, error: null };
         } catch (err) {
@@ -206,29 +203,6 @@
 
     function _getGroup(id) {
         return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
-    }
-
-    function _resolveToDerived(groupId) {
-        var g = _getGroup(groupId);
-        if (!g) throw new Error('分组不存在: ' + groupId);
-        if (g.isDerived) return groupId;
-
-        // Find existing derived for this base
-        var all = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
-        for (var i = 0; i < all.length; i++) {
-            if (all[i].isDerived && all[i].baseGroupId === groupId) return all[i].id;
-        }
-
-        // Create derived: baseGroupAlias:1
-        var bgAlias = g.shortAlias || g.name || groupId;
-        var dgShortAlias = bgAlias + ':1';
-
-        return GT.datamodel.groups.add({
-            name: dgShortAlias,
-            shortAlias: dgShortAlias,
-            baseGroupId: groupId,
-            isDerived: true,
-        });
     }
 
     // =========================================================================
