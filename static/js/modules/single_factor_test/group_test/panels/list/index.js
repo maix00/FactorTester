@@ -496,14 +496,14 @@
 
                     h += '<div class="unified-bg-row" data-bg-id="' + escapeHTML(bg.id) + '" style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgActive ? 'background:#eef2ff;' : '') + (bgSelected ? 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;' : '') + '">';
                     h += '<span style="width:6px;height:6px;border-radius:50%;background:#6366f1;margin-right:8px;flex-shrink:0;"></span>';
+                    // Short alias like "A1" — first
+                    if (bg.shortAlias) {
+                        h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + escapeHTML(bg.shortAlias) + '</span>';
+                    }
                     // Factor alias (chip)
                     h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:8px;">' + escapeHTML(bg.factorAlias) + '</span>';
                     // Tester label (chip)
                     h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + CHIP_STYLE + ';margin-right:8px;">' + _testerLabel(bg.testerId) + '</span>';
-                    // Short alias like "A1"
-                    if (bg.shortAlias) {
-                        h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + escapeHTML(bg.shortAlias) + '</span>';
-                    }
                     // Group index: "1/5"
                     h += '<span style="font-size:11px;color:#888;">' + (ri + 1) + '/' + batch.items.length + '</span>';
                     h += '<span style="flex:1;"></span>';
