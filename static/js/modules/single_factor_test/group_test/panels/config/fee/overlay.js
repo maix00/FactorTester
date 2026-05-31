@@ -70,7 +70,12 @@
                 var products = subs[i].products;
                 if (Array.isArray(products)) {
                     return products.map(function(p) {
-                        return typeof p === 'string' ? p.toUpperCase() : (p.name || '').toUpperCase();
+                        var raw = typeof p === 'string' ? p : (p.name || '');
+                        // Product format is "VARIETY.EXCHANGE" (e.g., "A.DCE", "AG.SHFE")
+                        // fee table variety_code is just "A", "AG" — extract before the dot
+                        var dotIdx = raw.indexOf('.');
+                        var code = (dotIdx >= 0) ? raw.substring(0, dotIdx) : raw;
+                        return code.toUpperCase();
                     });
                 }
                 break;
@@ -80,38 +85,13 @@
     }
 
     /**
-     * Build {CODE: desc} map from window.submissions for the given tester.
-     */
-    function _getProductDescMap(group) {
-        var map = {};
-        if (!group || !group.testerId) return map;
-        var subs = window.submissions || [];
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) === String(group.testerId)) {
-                var prods = subs[i].products;
-                if (Array.isArray(prods)) {
-                    for (var j = 0; j < prods.length; j++) {
-                        var p = prods[j];
-                        var key = typeof p === 'string' ? p.toUpperCase() : (p.name || '').toUpperCase();
-                        var desc = (p && p.desc) ? p.desc : '';
-                        if (key && desc) map[key] = desc;
-                    }
-                }
-                break;
-            }
-        }
-        return map;
-    }
-
-    /**
      * Merge group.feeMap overrides onto the raw fee rows.
-     * Returns [{ code, name, desc, exchange, multiplier, min_tick, open_ratio, close_ratio,
+     * Returns [{ code, name, exchange, multiplier, min_tick, open_ratio, close_ratio,
      *            closetoday_ratio, openModified, closeModified, closeTodayModified }]
      */
     function _buildRows(group, products) {
         var rawRows = (GT.fee && typeof GT.fee.getFeeRows === 'function') ? GT.fee.getFeeRows() : [];
         var feeMap = group.feeMap || {};
-        var descMap = _getProductDescMap(group);
 
         // Build product filter set
         var filterSet = null;
@@ -124,11 +104,16 @@
 
         var useCT = !!group.useCloseToday;
         var rows = [];
+        var matchedCount = 0, skippedCount = 0;
 
         for (var j = 0; j < rawRows.length; j++) {
             var r = rawRows[j];
             var code = String(r.variety_code || r.code || '').toUpperCase();
-            if (filterSet && !filterSet[code]) continue;
+            if (filterSet && !filterSet[code]) {
+                skippedCount++;
+                continue;
+            }
+            matchedCount++;
 
             var override = feeMap[code.toLowerCase()] || feeMap[code] || {};
 
@@ -146,7 +131,6 @@
             rows.push({
                 code:             code,
                 name:             r.name || r.variety_name || '',
-                desc:             descMap[code] || '',
                 exchange:         r.exchange || '',
                 multiplier:       r.multiplier || '',
                 min_tick:         r.min_tick || '',
@@ -161,8 +145,6 @@
 
         return rows;
     }
-
-    // ── Render ───────────────────────────────────────────────────────────────
 
     function _render() {
         if (!_state) return;
@@ -199,7 +181,6 @@
         html += '<thead><tr style="background:#f0f4f8;position:sticky;top:0;z-index:2;">';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">品种代码</th>';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">品种名称</th>';
-        html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">描述</th>';
         html += '<th style="padding:8px 10px;text-align:left;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">交易所</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">乘数</th>';
         html += '<th style="padding:8px 10px;text-align:right;border-bottom:1px solid #dbe7f3;color:#0f4c81;font-weight:600;">最小变动</th>';
@@ -227,7 +208,6 @@
             html += '<tr style="border-bottom:1px solid #eef2f7;">';
             html += '<td style="padding:6px 10px;font-weight:600;font-family:monospace;">' + escapeHTML(row.code) + '</td>';
             html += '<td style="padding:6px 10px;color:#555;">' + escapeHTML(row.name) + '</td>';
-            html += '<td style="padding:6px 10px;color:#888;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHTML(row.desc || '') + '">' + escapeHTML(row.desc || '—') + '</td>';
             html += '<td style="padding:6px 10px;color:#555;">' + escapeHTML(row.exchange) + '</td>';
             html += '<td style="padding:6px 10px;text-align:right;">' + escapeHTML(row.multiplier) + '</td>';
             html += '<td style="padding:6px 10px;text-align:right;font-family:monospace;">' + escapeHTML(row.min_tick) + '</td>';
@@ -449,16 +429,21 @@
         ensureOverlay();
 
         // Ensure fee data is loaded
-        var feeRows = (GT.fee && typeof GT.fee.getFeeRows === 'function') ? GT.fee.getFeeRows() : [];
+        var gtFeeExists = !!(GT.fee && typeof GT.fee.getFeeRows === 'function');
+        var feeRows = gtFeeExists ? GT.fee.getFeeRows() : [];
+
         if (feeRows.length === 0) {
             if (GT.fee && typeof GT.fee.fetchFeeTable === 'function') {
                 if (!_fetchPromise) {
                     _fetchPromise = GT.fee.fetchFeeTable(false).then(function(rows) {
                         _fetchPromise = null;
-                        if (!rows || rows.length === 0) return; // fetch returned empty, don't retry
+                        if (!rows || rows.length === 0) {
+                            return;
+                        }
                         openConfigFeeOverlay(group, mode, onClose);
-                    }).catch(function() {
+                    }).catch(function(err) {
                         _fetchPromise = null;
+                        console.error('[openConfigFeeOverlay] fetch FAILED:', err);
                     });
                 }
             }

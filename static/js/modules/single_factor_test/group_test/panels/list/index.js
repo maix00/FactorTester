@@ -931,7 +931,9 @@
                     group = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(dgid);
                     GT.state.setActiveDerivedNodeId(dgid);
                 }
-                if (!group) return;
+                if (!group) {
+                    return;
+                }
                 // Look up chip by label and call its onClick
                 if (REG && typeof REG.getChips === 'function') {
                     var chips = REG.getChips(group);

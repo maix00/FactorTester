@@ -39,17 +39,17 @@
             method: 'POST',
             headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
         })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            return r.json();
+        })
         .then(function(data) {
             if (data && data.success && Array.isArray(data.rows)) {
                 _feeTableData = data.rows;
-            } else {
-                console.warn('Fee table fetch returned unexpected format');
             }
             return _feeTableData;
         })
         .catch(function(err) {
-            console.error('Failed to fetch fee table:', err);
+            console.error('[GT.fee.fetchFeeTable] FAILED:', err);
             return _feeTableData;
         });
     }
