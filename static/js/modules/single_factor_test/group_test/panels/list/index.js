@@ -564,23 +564,23 @@
                     if (bg.shortAlias) {
                         h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + escapeHTML(bg.shortAlias) + '</span>';
                     }
-                    // Factor alias (chip)
-                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:8px;">' + escapeHTML(bg.factorAlias) + '</span>';
-                    // Tester label (chip)
-                    h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + CHIP_STYLE + ';margin-right:8px;">' + _testerLabel(bg.testerId) + '</span>';
-                    // Group index / groupCount (from add tab's grouping params)
-                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:8px;">' + (bg.groupIndex || (ri + 1)) + '/' + (bg.groupCount || batch.items.length) + '</span>';
-                    h += '<span style="flex:1;"></span>';
-                    // Config chips — from registry (aggregates fee, rebalance, etc.)
-                    if (REG && typeof REG.getChips === 'function') {
-                        var chips = REG.getChips(bg);
-                        for (var ci = 0; ci < chips.length; ci++) {
-                            var chip = chips[ci];
-                            var s = chip.style || CHIP_STYLE_PLAIN;
-                            var cls = chip.onClick ? ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"' : '';
+                    // All chips — unified via GT_CONFIG_REGISTRY.getAllChips
+                    var allChips = (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(bg) : [];
+                    for (var ci = 0; ci < allChips.length; ci++) {
+                        var chip = allChips[ci];
+                        var s = chip.style || CHIP_STYLE_PLAIN;
+                        // Tester chip: attach click handler
+                        if (chip.label === 'tester') {
+                            h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
+                        } else if (chip.onClick) {
+                            // Config chips with onClick (e.g. per-product fee)
+                            var cls = ' class="unified-config-chip" data-gid="' + escapeHTML(bg.id) + '" data-chip-label="' + escapeHTML(chip.label) + '"';
                             h += '<span' + cls + ' style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                        } else {
+                            h += '<span style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
                         }
                     }
+                    h += '<span style="flex:1;"></span>';
                     // Delete button (red X, always last)
                     h += '<button class="unified-bg-del-btn" data-bg-id="' + escapeHTML(bg.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                     h += '</div>';

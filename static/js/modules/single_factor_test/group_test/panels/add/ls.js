@@ -134,94 +134,20 @@
         return html;
     }
 
-    // ── Chip styles (match list panel) ──
-    var CHIP_PLAIN    = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
-    var CHIP_CLICKABLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
+    // ── Chips: unified via GT_CONFIG_REGISTRY.getAllChips ──
 
-    /**
-     * Build config chip tags for a group.
-     * For derived groups: inherit fee fields from base so REG.getChips can show them.
-     * Uses REG.getChips (same as list panel) + tester/factor/group info.
-     */
     function _chipsHTML(g) {
-        var chips = [];
-        var REG = window.GT_CONFIG_REGISTRY;
-
-        // 1) factorAlias
-        if (g.factorAlias) {
-            chips.push('<span style="' + CHIP_PLAIN + '">' + escapeHTML(g.factorAlias) + '</span>');
-        }
-
-        // 2) testerId — resolve label through list panel's _testerLabel
-        var testerLabel = _testerLabelForGroup(g);
-        if (testerLabel) {
-            chips.push('<span style="' + CHIP_CLICKABLE + '">' + escapeHTML(testerLabel) + '</span>');
-        }
-
-        // 3) groupIndex / groupCount
-        if (!g.isDerived && g.groupCount) {
-            var gi = g.groupIndex || 1;
-            chips.push('<span style="' + CHIP_PLAIN + '">' + gi + '/' + g.groupCount + '</span>');
-        }
-
-        // 4) Config chips from REG (fee, rebalance, etc.)
-        //    For derived groups: inherit all config from base group (derived defaults are 'none' etc.)
-        //    For base groups: pass through directly
-        var synthGroup;
-        if (g && g.isDerived) {
-            // Derived group — always use base group's config (derived doesn't have independent fee/rebalance)
-            var bg = g.baseGroupId ? _getGroup(g.baseGroupId) : null;
-            synthGroup = bg || {
-                feeMode: 'none',
-                feeRate: null,
-                feeMap: null,
-                feeSensitivity: null,
-                useCloseToday: false,
-                rebalanceMode: 'buy_and_hold',
-            };
-        } else {
-            synthGroup = g;
-        }
-
-        if (REG && typeof REG.getChips === 'function') {
-            var regChips = REG.getChips(synthGroup);
-            for (var i = 0; i < regChips.length; i++) {
-                var chip = regChips[i];
-                var s = chip.style || CHIP_PLAIN;
-                chips.push('<span style="' + s + '">' + chip.html + '</span>');
-            }
-        }
-
-        return chips.join('');
-    }
-
-    /**
-     * Resolve tester label for a group.
-     * For derived groups, get tester from base group.
-     */
-    function _testerLabelForGroup(g) {
         if (!g) return '';
-        var testerId = g.testerId;
-        // For derived groups, get tester from base
-        if (!testerId && g.isDerived && g.baseGroupId) {
-            var bg = _getGroup(g.baseGroupId);
-            if (bg) testerId = bg.testerId;
-        }
-        if (!testerId) return '';
-        // Use the same resolution as list panel
-        return _resolveTesterLabel(testerId);
-    }
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (!REG || typeof REG.getAllChips !== 'function') return '';
 
-    /** Resolve tester label from window.submissions (same as list panel's _testerLabel) */
-    function _resolveTesterLabel(testerId) {
-        if (!testerId) return '';
-        var subs = window.submissions || [];
-        for (var i = 0; i < subs.length; i++) {
-            if (String(subs[i].id) === String(testerId)) {
-                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
-            }
+        var allChips = REG.getAllChips(g);
+        var html = '';
+        for (var i = 0; i < allChips.length; i++) {
+            var c = allChips[i];
+            html += '<span style="' + (c.style || '') + '">' + c.html + '</span>';
         }
-        return testerId;
+        return html;
     }
 
     // =========================================================================

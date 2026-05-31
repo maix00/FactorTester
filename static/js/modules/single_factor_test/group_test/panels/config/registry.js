@@ -13,6 +13,11 @@
  *   - label:  column header text
  *   - width:  optional CSS width (e.g. "80px")
  *   - render: function(group) → HTML string
+ *
+ * ── Chip System ──
+ *
+ * The unified chip system lives in panels/chips.js (loaded after this file).
+ * This registry auto-bridges config panel getChips → chip providers via REG._bridgeConfigToChipProvider.
  */
 (function() {
     var GT = window.GroupTest;
@@ -43,11 +48,22 @@
             if (_configs[i].name === def.name) {
                 GT.log('config/registry: duplicate config name "' + def.name + '", overwriting');
                 _configs[i] = def;
+                // Also re-register chip provider if applicable
+                _bridgeConfigToChipProvider(def);
                 return;
             }
         }
         def.containerId = containerId || ('gt-config-' + def.name);
         _configs.push(def);
+        // Bridge config panel getChips → chip provider
+        _bridgeConfigToChipProvider(def);
+    }
+
+    /** If chips.js is loaded, bridge config panel's getChips → chip provider. */
+    function _bridgeConfigToChipProvider(def) {
+        if (REG && typeof REG._bridgeConfigToChipProvider === 'function') {
+            REG._bridgeConfigToChipProvider(def);
+        }
     }
 
     /** Get all registered config panels */
