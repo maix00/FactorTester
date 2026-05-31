@@ -30,11 +30,12 @@
     function snapshot() {
         var snap = {};
 
+        // All groups (base + derived) are unified in base_groups.
+        // Separately filter for backward-compatible snapshop format.
         if (GT.datamodel.base_groups) {
-            snap.baseGroups = GT.datamodel.base_groups.getAll();
-        }
-        if (GT.datamodel.derived_graph) {
-            snap.derivedGraph = GT.datamodel.derived_graph.getAll();
+            var allGroups = GT.datamodel.base_groups.getAll();
+            snap.baseGroups = allGroups.filter(function(g) { return !g.isDerived; });
+            snap.derivedGraph = allGroups.filter(function(g) { return g.isDerived; });
         }
         if (GT.datamodel.ls_configs) {
             snap.lsConfigs = GT.datamodel.ls_configs.getAll();

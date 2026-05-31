@@ -3161,8 +3161,8 @@
                 }
                 // Resolve baseGroupId from parent derived node if not set directly
                 if (!baseGroupId && parentDerivedId) {
-                    var pNode = GT.datamodel.derived_graph.get(parentDerivedId);
-                    if (pNode) {
+                    var pNode = GT.datamodel.base_groups && GT.datamodel.base_groups.get(parentDerivedId);
+                    if (pNode && pNode.isDerived) {
                         baseGroupId = pNode.baseGroupId;
                     }
                     if (!baseGroupId) {
@@ -3291,13 +3291,15 @@
                 var selectedId = selIds[0];
 
                 // Determine if the selection is a base group or a derived group
+                // (Both are in base_groups, distinguished by isDerived flag)
                 var draft = { addFlow: 'derived' };
-                if (GT.datamodel.base_groups && GT.datamodel.base_groups.get(selectedId)) {
-                    // It's a base group
-                    draft.preselectedBaseGroupId = selectedId;
-                } else if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(selectedId)) {
-                    // It's a derived group
+                var sg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(selectedId);
+                if (sg && sg.isDerived) {
+                    // It's a derived group → use as parent
                     draft.preselectedParentDerivedId = selectedId;
+                } else if (sg) {
+                    // It's a base group → use as base
+                    draft.preselectedBaseGroupId = selectedId;
                 } else {
                     alert('无法识别选中的分组类型');
                     return;

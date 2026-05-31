@@ -315,30 +315,14 @@
         GT.state.emit('baseGroupsChanged');
     }
 
-    /** Enter or exit edit mode based on current _selectedIds count (base groups only). */
+    /** Enter or exit edit mode based on current _selectedIds count. All groups (base+derived) share IDs. */
     function _syncEditMode() {
-        // Filter to base-group IDs only — derived node IDs are excluded from config edit
-        var selCount = 0;
-        var bgOnly = {};
-        var hasDerived = false;
-        var allIds = Object.keys(_selectedIds);
-        for (var i = 0; i < allIds.length; i++) {
-            var id = allIds[i];
-            if (!_selectedIds[id]) continue;
-            if (GT.datamodel.base_groups && GT.datamodel.base_groups.get(id)) {
-                bgOnly[id] = true;
-                selCount++;
-            } else if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(id)) {
-                hasDerived = true;
-            }
-        }
+        var selCount = Object.keys(_selectedIds).filter(function(k) { return _selectedIds[k]; }).length;
         if (selCount > 0) {
-            if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(bgOnly);
-        } else if (!hasDerived) {
-            // Only exit edit mode if there are no selections at all (no base, no derived)
+            if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
+        } else {
             if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
         }
-        // If only derived nodes are selected, stay in current mode (don't exit)
     }
 
     // ── Derived node helpers ──
@@ -1078,17 +1062,16 @@
             });
         });
 
-        // ── Tree nodes: click row → activate node (no config edit for derived nodes)
+        // ── Tree nodes: click row → select + activate (unified edit mode, same as base groups)
         container.querySelectorAll('.unified-node-header').forEach(function(header) {
             header.addEventListener('click', function(e) {
                 if (e.target.closest('button') || e.target.closest('.unified-config-chip') || e.target.closest('.unified-dg-product-chip') || e.target.closest('.unified-tree-expand')) return;
                 var nodeId = this.parentElement.getAttribute('data-node-id');
-                // Toggle selection highlight for multi-select (used by "创建派生组" etc.)
+                // multi-select toggle (same as base groups)
                 if (_selectedIds[nodeId]) { delete _selectedIds[nodeId]; }
                 else { _selectedIds[nodeId] = true; }
-                // Derived nodes don't enter base-group config edit — just activate
+                _syncEditMode();
                 GT.state.setActiveDerivedNodeId(nodeId);
-                fullRender();
             });
         });
 
