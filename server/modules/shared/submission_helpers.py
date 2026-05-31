@@ -2,42 +2,79 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Iterable, Sequence, Union
 
 import server.services.runtime_state as runtime_state
 from server.modules.products.product_path_selection import resolve_selection_products
 from server.services.runtime_state import factor_testers_lock
 from server.services.product_tree import tree
-from tools.products.product_utils import get_contract_desc
 
 
-def _product_name_desc(p) -> dict:
-    """Return {name, desc} for a product object."""
-    name = getattr(p, 'name', str(p))
-    desc = getattr(p, 'desc', '') or ''
-    if not desc:
-        desc = get_contract_desc(name) or ''
-    return {'name': name, 'desc': desc}
+# ── 通用产品解析 ──────────────────────────────────────────────────
 
 
-def products_with_desc(products: Sequence) -> list[dict]:
-    """Convert a sequence of product objects to [{name, desc}, ...] with inherited descriptions."""
-    return [_product_name_desc(p) for p in products]
+def resolve_products(
+    source: Union[object, list[str], Iterable],
+    *attrs: str,
+) -> tuple[list[str], list[dict]]:
+    """从多种来源解析产品并提取指定属性（与具体产品类别无关）.
+
+    source 可以是:
+      - tester 对象 (有 selected_paths 或 products 属性)
+      - 路径列表 (如 ['Futures/IF', '-Futures/IF/IF2506'])
+      - 产品对象迭代器
+
+    正负路径: 通过 resolve_selection_products 处理, '-prefix' 路径会被排除.
+
+    Returns:
+      (canonical_paths, [{attr: val, ...}, ...])
+    """
+    paths, products_objs = _resolve_source(source)
+    return paths, [product_attrs(p, *attrs) for p in products_objs]
+
+
+def _resolve_source(source) -> tuple[list[str], list]:
+    """分发 source 类型, 返回 (paths, product_objects)."""
+    # tester 对象: 优先 selected_paths, 其次 products
+    paths = getattr(source, 'selected_paths', None)
+    if paths is not None:
+        return resolve_selection_products(paths, tree)
+
+    products = getattr(source, 'products', None)
+    if products is not None:
+        # tester 有 products 但没有 selected_paths
+        return [], sorted(products, key=lambda p: getattr(p, 'name', str(p)))
+
+    # 路径列表 (list of str)
+    if isinstance(source, list) and source and isinstance(source[0], str):
+        return resolve_selection_products(source, tree)
+
+    # 其他可迭代 → 视为产品对象序列
+    try:
+        prod_list = list(source)
+        return [], sorted(prod_list, key=lambda p: getattr(p, 'name', str(p)))
+    except TypeError:
+        return [], []
+
+
+def product_attrs(p, *attrs: str) -> dict:
+    """从产品对象按需提取属性, 纯 getattr, 不绑定任何产品类别."""
+    result = {}
+    for a in attrs:
+        val = getattr(p, a, '')
+        result[a] = '' if val is None else val
+    return result
+
+
+# ── tester / submission 专用 ──────────────────────────────────────
 
 
 def tester_to_dict(t):
     """Convert FactorTester to frontend payload."""
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
 
-    # 优先从 selected_paths 解析完整产品列表（含正向/负向路径）
     selected_paths = getattr(t, 'selected_paths', None) or []
-    if selected_paths:
-        _, resolved = resolve_selection_products(selected_paths, tree)
-        products_list = products_with_desc(resolved)
-    elif hasattr(t, 'products') and t.products:
-        products_list = products_with_desc(t.products)
-    else:
-        products_list = []
+    _, products_list = resolve_products(t, 'name', 'desc')
 
     return {
         'id':                   core_id,
