@@ -63,6 +63,7 @@
 
     // 用后端列表同步本地 submissions
     function syncFromServer(serverSubmissions) {
+        console.log('[DEBUG syncFromServer] count=' + serverSubmissions.length + ', first_has_products=' + (serverSubmissions.length ? (serverSubmissions[0].products ? serverSubmissions[0].products.length : 'undefined') : 'empty'));
         // 保留下标映射：用 id 作为 key
         var oldMap = {};
         submissions.forEach(function(sub, i) {

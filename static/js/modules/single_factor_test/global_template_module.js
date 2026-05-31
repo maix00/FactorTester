@@ -354,6 +354,7 @@
                         factor_tester_name: s.name || s.factor_tester_name,
                         factor_tester_serial: s.factor_tester_serial,
                         product_count: s.product_count,
+                        products: s.products || [],
                         count_desc: (s.product_count || 0) + ' 个产品',
                         timestamp: '',
                         start_date: '',

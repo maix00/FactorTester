@@ -442,7 +442,9 @@
             } catch (e) {}
             try {
                 if (typeof window._getCurrentSubmissions === 'function') {
-                    snapshot.submissions = JSON.parse(JSON.stringify(window._getCurrentSubmissions() || []));
+                    var curSubs = window._getCurrentSubmissions() || [];
+                    console.log('[DEBUG param snapshot] _getCurrentSubmissions count=' + curSubs.length + ', first_has_products=' + (curSubs.length ? (curSubs[0].products ? curSubs[0].products.length : 'undefined') : 'empty'));
+                    snapshot.submissions = JSON.parse(JSON.stringify(curSubs));
                 }
             } catch (e) {}
 
@@ -479,6 +481,7 @@
                         if (typeof window.updateTimeSummary === 'function') window.updateTimeSummary();
                     }
                     if (snapshot.submissions && typeof window._applySubmissions === 'function') {
+                        console.log('[DEBUG param finish] _applySubmissions count=' + snapshot.submissions.length + ', first_has_products=' + (snapshot.submissions.length ? (snapshot.submissions[0].products ? snapshot.submissions[0].products.length : 'undefined') : 'empty'));
                         window._applySubmissions(snapshot.submissions);
                     }
                     if (snapshot.paramDrawerOpen) {
