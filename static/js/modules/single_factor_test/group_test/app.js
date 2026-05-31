@@ -347,17 +347,67 @@
             return;
         }
         container.style.display = 'block';
-        var timestamps = (groups[0] && groups[0].timestamps) || [];
-        var axis = buildContinuousTimeAxis(timestamps, function(timestamp) { return timestamp; });
-        
+
+        var shortAliasMap = _lastShortAliasMap || {};
+
+        // ── 构建共享时间轴：所有时间戳去重排序（跳过休市，只包含有数据的点）──
+        var tset = {};
+        var i, j;
+        for (i = 0; i < groups.length; i++) {
+            var tts = groups[i].timestamps || [];
+            for (j = 0; j < tts.length; j++) { tset[tts[j]] = true; }
+        }
+        var timeline = Object.keys(tset).map(Number).sort(function(a, b) { return a - b; });
+
+        // 检测是否日内
+        var isIntraday = false;
+        if (timeline.length >= 2) {
+            isIntraday = (timeline[1] - timeline[0]) < 86400000;
+        }
+
+        // 格式化时间标签
+        function formatDateLabel(ts) {
+            var d = new Date(ts);
+            if (isIntraday) {
+                return d.getFullYear() + '-' +
+                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getDate()).padStart(2, '0') + ' ' +
+                    String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0');
+            } else {
+                return d.getFullYear() + '-' +
+                    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(d.getDate()).padStart(2, '0');
+            }
+        }
+
+        // ── 每个 group 映射到共享 timeline ──
         var series = groups.map(function(group) {
+            var alias = shortAliasMap[group.name] || group.name;
+            var gts = group.timestamps || [];
+            var vals = group.cumulative_returns || [];
+
+            // timestamp → value 映射
+            var valMap = {};
+            for (var k = 0; k < Math.min(gts.length, vals.length); k++) {
+                if (vals[k] !== null) valMap[gts[k]] = vals[k];
+            }
+
+            // 映射到共享 timeline（有值为数据点，无值为 null）
+            var data = [];
+            for (var ti = 0; ti < timeline.length; ti++) {
+                var ts = timeline[ti];
+                data.push([ti, valMap.hasOwnProperty(ts) ? valMap[ts] : null]);
+            }
+
             var opts = {
-                name: group.name,
+                name: alias,
                 type: 'line',
-                data: group.cumulative_returns
-                    .map(function(val, idx) { return val !== null ? [idx, val] : null; })
-                    .filter(function(pt) { return pt !== null; }),
-                tooltip: { valueDecimals: 4 }
+                data: data,
+                tooltip: { valueDecimals: 4 },
+                visible: true,
+                showInLegend: true,
+                connectNulls: true  // 低频线在 null 处连续不断开
             };
             if (group.is_ls) {
                 opts.color = '#000';
@@ -366,40 +416,55 @@
             }
             return opts;
         });
-        
-        // 判断是否为日内频率：相邻 timestamps 差值 < 1天
-        var isIntraday = false;
-        if (groups.length > 0 && groups[0].timestamps && groups[0].timestamps.length >= 2) {
-            var ts = groups[0].timestamps;
-            isIntraday = (ts[1] - ts[0]) < 86400000; // < 1天
-        }
+
+        // 图表参数：合理间隔标签
+        var labelEvery = Math.max(1, Math.floor(timeline.length / 12));
 
         _groupChart = Highcharts.stockChart(container, {
-            chart: { 
+            chart: {
                 zoomType: 'x',
                 events: {
                     click: function(e) {
-                        // 点击图表获取最近数据点的分组快照
-                        var sampleIndex = Math.round(e.xAxis[0].value);
-                        if (timestamps[sampleIndex] != null) fetchGroupSnapshot(timestamps[sampleIndex]);
+                        var idx = Math.round(e.xAxis[0].value);
+                        if (idx >= 0 && idx < timeline.length) {
+                            fetchGroupSnapshot(timeline[idx]);
+                        }
                     }
                 }
             },
             title: { text: '分组累计收益（初始净值 = 1）' },
-            xAxis: {
-                ordinal: false,
-                labels: {
-                    formatter: function() { return axis.labelAt(this.value); },
-                },
+            legend: {
+                enabled: true,
+                align: 'center',
+                verticalAlign: 'bottom',
+                layout: 'horizontal',
+                itemStyle: { fontSize: '11px' }
             },
-            yAxis: { title: { text: '净值' }, crosshair: true },
+            xAxis: {
+                type: 'linear',
+                labels: {
+                    step: labelEvery,
+                    formatter: function() {
+                        var idx = Math.round(this.value);
+                        if (idx >= 0 && idx < timeline.length) {
+                            return formatDateLabel(timeline[idx]);
+                        }
+                        return '';
+                    }
+                }
+            },
+            yAxis: { title: { text: '净值' }, crosshair: false },
             plotOptions: {
                 series: {
                     cursor: 'pointer',
+                    connectNulls: true,
                     point: {
                         events: {
                             click: function() {
-                                if (timestamps[this.x] != null) fetchGroupSnapshot(timestamps[this.x]);
+                                var idx = Math.round(this.x);
+                                if (idx >= 0 && idx < timeline.length) {
+                                    fetchGroupSnapshot(timeline[idx]);
+                                }
                             }
                         }
                     }
@@ -410,19 +475,12 @@
                 valueDecimals: 4,
                 useHTML: true,
                 formatter: function () {
-                    var timestamp = timestamps[Math.round(this.x)];
-                    var d = new Date(timestamp);
-                    var dateStr = isIntraday
-                        ? d.getFullYear() + '-' +
-                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                          String(d.getDate()).padStart(2, '0') + ' ' +
-                          String(d.getHours()).padStart(2, '0') + ':' +
-                          String(d.getMinutes()).padStart(2, '0')
-                        : d.getFullYear() + '-' +
-                          String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                          String(d.getDate()).padStart(2, '0');
+                    var idx = Math.round(this.x);
+                    var ts = (idx >= 0 && idx < timeline.length) ? timeline[idx] : null;
+                    var dateStr = ts ? formatDateLabel(ts) : '—';
                     var s = '<b>' + dateStr + '</b>';
                     this.points.forEach(function (p) {
+                        if (p.y === null || p.y === undefined) return;
                         var decimals = p.series.tooltipOptions.valueDecimals;
                         if (typeof decimals !== 'number') decimals = 4;
                         var val = typeof p.y === 'number' ? p.y.toFixed(decimals) : p.y;
@@ -724,18 +782,28 @@
             if (!metrics.hasOwnProperty(groupIdx)) continue;
             groupLabels.push(groupIdx);
         }
-        
+
+        var aliasMap = _lastMetricKeyToAlias || {};
+        function headerLabel(metricKey) {
+            var a = aliasMap[metricKey];
+            if (a) return a;
+            // fallback: 纯数字 → 第X组
+            if (/^\d+$/.test(String(metricKey))) return '第' + (parseInt(metricKey) + 1) + '组';
+            return String(metricKey);
+        }
+
         // 转置：行 = 指标名，列 = 分组
         // 表头：第一列「指标」，后面每个分组一列
         var theadHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         groupLabels.forEach(function(g) {
             var isLS = (g === 'LS');
+            var label = headerLabel(g);
             if (isLS) {
-                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">Long-Short</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
             } else if (/^\d+$/.test(String(g))) {
-                theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">第' + (parseInt(g)+1) + '组</th>';
+                theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">' + label + '</th>';
             } else {
-                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + escapeHtml(g) + '" style="background:#f8fbff;" title="查看组合详情">' + escapeHtml(g) + '</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + escapeHtml(g) + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
             }
         });
         theadHtml += '</tr>';
@@ -2281,6 +2349,18 @@
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
         _lastGroupStructureKey = data.structure_key || null;
 
+        // 构建 metric_key → shortAlias 映射（用于表格表头）
+        _lastMetricKeyToAlias = {};
+        var shortMap = _lastShortAliasMap || {};
+        (data.groups || []).forEach(function(g) {
+            var mk = g.metric_key;
+            if (mk !== undefined && mk !== null) {
+                // 优先用 group name 查 shortAliasMap，其次直接用 metric_key
+                var gname = g.name;
+                _lastMetricKeyToAlias[mk] = shortMap[gname] || gname || String(mk);
+            }
+        });
+
         // 从响应中重建 _derivedGroups（后端已统一计算，无需额外请求）
         // 注意：跳过 LS 组（is_ls），其 derived 中无 base_group。
         _derivedGroups = [];
@@ -2758,6 +2838,51 @@
                 markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
 
+            // 构建 shortAliasMap：后端 group name → 前端 shortAlias
+            // 后端为每个 batch 返回 "Group 1", "Group 2", ... 和 LS config name
+            var shortAliasMap = {};
+            for (var bi = 0; bi < batches.length; bi++) {
+                var batch = batches[bi];
+                var shortPrefix = (batch.groups[0] && batch.groups[0].shortAlias) ? batch.groups[0].shortAlias.replace(/[0-9]+$/, '') : '';
+                for (var gi = 0; gi < batch.groups.length; gi++) {
+                    var grp = batch.groups[gi];
+                    var backendName = 'Group ' + (grp.groupIndex);
+                    var alias = grp.shortAlias || (shortPrefix + (gi + 1));
+                    shortAliasMap[backendName] = alias;
+                }
+                // LS configs within the same batch
+                for (var lsi = 0; lsi < batch.lsPayloads.length; lsi++) {
+                    var lsp = batch.lsPayloads[lsi];
+                    var lsName = lsp.name || 'Long-Short';
+                    // build display name from long/short shortAliases
+                    var lGrp = lsp.long && lsp.long[0] ? lsp.long[0].group + 1 : 1;
+                    var sGrp = lsp.short && lsp.short[0] ? lsp.short[0].group + 1 : batch.groupCount;
+                    var longAlias = batch.groups[lGrp - 1] ? batch.groups[lGrp - 1].shortAlias : ('G' + lGrp);
+                    var shortAlias = batch.groups[sGrp - 1] ? batch.groups[sGrp - 1].shortAlias : ('G' + sGrp);
+                    shortAliasMap[lsName] = longAlias + '/' + shortAlias;
+                }
+            }
+            // 跨 batch LS
+            for (var cbi = 0; cbi < crossBatchLS.length; cbi++) {
+                var cLS = crossBatchLS[cbi];
+                var cName = cLS.name || 'Long-Short';
+                // 查找 long/short 组的 shortAlias
+                var cbLongAlias = '?', cbShortAlias = '?';
+                for (var bj = 0; bj < batches.length; bj++) {
+                    var gidMap = batches[bj].groupIdToIndex;
+                    if (gidMap[cLS.longGroupId] !== undefined) {
+                        var li = gidMap[cLS.longGroupId];
+                        cbLongAlias = batches[bj].groups[li - 1] ? batches[bj].groups[li - 1].shortAlias : '?';
+                    }
+                    if (gidMap[cLS.shortGroupId] !== undefined) {
+                        var si = gidMap[cLS.shortGroupId];
+                        cbShortAlias = batches[bj].groups[si - 1] ? batches[bj].groups[si - 1].shortAlias : '?';
+                    }
+                }
+                shortAliasMap[cName] = cbLongAlias + '/' + cbShortAlias;
+            }
+            _lastShortAliasMap = shortAliasMap;
+
             // 一次性渲染
             applyGroupTestResult(data);
 
@@ -2861,6 +2986,8 @@
     var _lastMetrics = null;
     var _lastTimestamps = [];
     var _lastNgroups = 0;
+    var _lastShortAliasMap = {}; // backend group name → shortAlias for chart/table display
+    var _lastMetricKeyToAlias = {}; // metric_key → shortAlias for table headers
     var _groupResultsBySubmission = {};
     var _activeGroupSubmissionId = null;
     var _activeGroupFactorBySubmission = {};
