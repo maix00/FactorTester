@@ -771,7 +771,7 @@ def run_group_test_batch():
         return result
 
     # ── 阶段 1：并行计算所有 batch ──
-    batch_results: list[dict] = [None] * len(batches_raw)  # 按原始顺序
+    batch_results: list[dict | None] = [None] * len(batches_raw)  # 按原始顺序
     errors = []
     max_workers = min(len(batches_raw), 6)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -803,19 +803,19 @@ def run_group_test_batch():
         }), 500
 
     # ── 阶段 2：跨 batch LS 计算 ──
-    def _find_raw(br_dict: dict) -> dict | None:
+    def _find_raw(br_dict: dict | None) -> dict | None:
         return br_dict.get('_raw') if br_dict else None
 
-    cross_ls_groups = []
-    cross_ls_metrics = {}
+    cross_ls_groups: list[dict] = []
+    cross_ls_metrics: dict = {}
 
     if cross_batch_ls_raw and not return_freqs:
         # 只有单频率才支持跨 batch LS
         for cb in cross_batch_ls_raw:
             if not isinstance(cb, dict):
                 continue
-            long_info = cb.get('long') or {}
-            short_info = cb.get('short') or {}
+            long_info: dict = cb.get('long') or {}
+            short_info: dict = cb.get('short') or {}
             ls_name = str(cb.get('name') or 'Long-Short').strip() or 'Long-Short'
 
             long_key = f"{long_info.get('submission_id','')}|{long_info.get('factor_alias','')}"
@@ -826,15 +826,19 @@ def run_group_test_batch():
             if long_bi is None or short_bi is None:
                 continue
 
-            long_raw = _find_raw(batch_results[long_bi])
-            short_raw = _find_raw(batch_results[short_bi])
+            long_br = batch_results[long_bi]
+            short_br = batch_results[short_bi]
+            if long_br is None or short_br is None:
+                continue
+            long_raw = _find_raw(long_br)
+            short_raw = _find_raw(short_br)
             if long_raw is None or short_raw is None:
                 continue
 
             long_group = int(long_info.get('group', 0))
             short_group = int(short_info.get('group', 0))
-            long_n = batch_results[long_bi].get('batch_n_groups', 5)
-            short_n = batch_results[short_bi].get('batch_n_groups', 5)
+            long_n = long_br.get('batch_n_groups', 5)
+            short_n = short_br.get('batch_n_groups', 5)
 
             # 跨 batch LS：从不同 batch 的 gross_np / fee_np 拼成 (T, 2) 数组
             gross_long = long_raw['gross_np'][:, long_group] if long_group < long_raw['gross_np'].shape[1] else np.zeros(long_raw['gross_np'].shape[0])
