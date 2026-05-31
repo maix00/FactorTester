@@ -41,13 +41,13 @@ global.window = {
 var GT = window.GroupTest;
 
 // Load all prior datamodel modules
-require('../../static/js/modules/single_factor_test/group_test/datamodel/base_groups.js');
-require('../../static/js/modules/single_factor_test/group_test/datamodel/derived_graph.js');
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/ls_configs.js');
 require('../../static/js/modules/single_factor_test/group_test/panels/config/fee/strategy.js');
 
-var bg = GT.datamodel.base_groups;
-var dg = GT.datamodel.derived_graph;
+var bg = GT.datamodel.groups;
+var dg = GT.datamodel.groups;
 var ls = GT.datamodel.ls_configs;
 var fs = GT.datamodel.fee_strategy;
 

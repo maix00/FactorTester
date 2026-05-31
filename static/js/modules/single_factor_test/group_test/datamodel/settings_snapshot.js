@@ -10,10 +10,9 @@
  *   - Diff two snapshots for auditing or merge-conflict preview.
  *
  * Loading order (apply):
- *   1. base_groups
- *   2. derived_graph
- *   3. ls_configs
- *   4. registrations
+ *   1. groups (unified storage for base + derived)
+ *   2. ls_configs
+ *   3. registrations
  *
  * Validation on apply: all cross-module references resolved.
  */
@@ -32,8 +31,8 @@
 
         // All groups (base + derived) are unified in base_groups.
         // Separately filter for backward-compatible snapshop format.
-        if (GT.datamodel.base_groups) {
-            var allGroups = GT.datamodel.base_groups.getAll();
+        if (GT.datamodel.groups) {
+            var allGroups = GT.datamodel.groups.getAll();
             snap.baseGroups = allGroups.filter(function(g) { return !g.isDerived; });
             snap.derivedGraph = allGroups.filter(function(g) { return g.isDerived; });
         }
@@ -65,7 +64,7 @@
         };
 
         // Validate required modules
-        var required = ['base_groups', 'derived_graph', 'ls_configs', 'registrations'];
+        var required = ['groups', 'ls_configs', 'registrations'];
         for (var i = 0; i < required.length; i++) {
             if (!GT.datamodel[required[i]]) {
                 result.errors.push('Missing datamodel module: ' + required[i]);
@@ -73,27 +72,22 @@
         }
         if (result.errors.length > 0) return result;
 
-        // 1) base_groups
-        GT.datamodel.base_groups._reset();
+        // 1) groups — reset once, then load base + derived (unified storage)
+        GT.datamodel.groups._reset();
         if (snap.baseGroups && Array.isArray(snap.baseGroups)) {
             for (var bi = 0; bi < snap.baseGroups.length; bi++) {
                 try {
-                    var bg = snap.baseGroups[bi];
-                    GT.datamodel.base_groups.add(bg);
+                    GT.datamodel.groups.add(snap.baseGroups[bi]);
                     result.applied.baseGroups++;
                 } catch (e) {
                     result.errors.push('baseGroups[' + bi + ']: ' + e.message);
                 }
             }
         }
-
-        // 2) derived_graph
-        GT.datamodel.derived_graph._reset();
         if (snap.derivedGraph && Array.isArray(snap.derivedGraph)) {
             for (var di = 0; di < snap.derivedGraph.length; di++) {
                 try {
-                    var dg = snap.derivedGraph[di];
-                    GT.datamodel.derived_graph.add(dg);
+                    GT.datamodel.groups.add(snap.derivedGraph[di]);
                     result.applied.derivedGraph++;
                 } catch (e) {
                     result.errors.push('derivedGraph[' + di + ']: ' + e.message);

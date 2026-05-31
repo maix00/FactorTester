@@ -193,7 +193,7 @@
         }
         // Notify list panel to refresh chips
         if (GT && GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('baseGroupsChanged');
+            GT.state.emit('groupsChanged');
         }
         return true;
     }
@@ -251,15 +251,15 @@
             var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
             var ids = getEditGroupIds(sel);
             if (ids.length === 0) return null;
-            if (!GT.datamodel || !GT.datamodel.base_groups) return null;
-            return GT.datamodel.base_groups.get(ids[0]);
+            if (!GT.datamodel || !GT.datamodel.groups) return null;
+            return GT.datamodel.groups.get(ids[0]);
         }
 
         // list mode
         var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
         if (!id) return null;
-        if (!GT.datamodel || !GT.datamodel.base_groups) return null;
-        return GT.datamodel.base_groups.get(id);
+        if (!GT.datamodel || !GT.datamodel.groups) return null;
+        return GT.datamodel.groups.get(id);
     }
 
     /**
@@ -284,7 +284,7 @@
             var ids = getEditGroupIds(sel);
             for (var i = 0; i < ids.length; i++) {
                 try {
-                    GT.datamodel.base_groups.update(ids[i], patch);
+                    GT.datamodel.groups.update(ids[i], patch);
                 } catch (err) { /* skip individual failures */ }
             }
             return;
@@ -294,7 +294,7 @@
         var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
         if (!id) return;
         try {
-            GT.datamodel.base_groups.update(id, patch);
+            GT.datamodel.groups.update(id, patch);
         } catch (err) {
             alert('保存失败: ' + err.message);
         }

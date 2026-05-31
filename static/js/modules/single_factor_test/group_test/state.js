@@ -94,12 +94,12 @@
     // Convenience lookup (delegate to datamodel)
     // -----------------------------------------------------------------------
     function getBaseGroup(id) {
-        if (!GT.datamodel || !GT.datamodel.base_groups) return null;
-        return GT.datamodel.base_groups.get(id);
+        if (!GT.datamodel || !GT.datamodel.groups) return null;
+        return GT.datamodel.groups.get(id);
     }
     function getDerivedNode(id) {
-        if (!GT.datamodel || !GT.datamodel.derived_graph) return null;
-        return GT.datamodel.derived_graph.get(id);
+        if (!GT.datamodel || !GT.datamodel.groups) return null;
+        return GT.datamodel.groups.get(id);
     }
     function getLsConfig(id) {
         if (!GT.datamodel || !GT.datamodel.ls_configs) return null;

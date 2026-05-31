@@ -90,7 +90,7 @@ global._events = {};
 global.window = {
     GroupTest: {
         datamodel: {
-            derived_graph: {
+            groups: {
                 get: function(id) {
                     for (var i = 0; i < mockDG.length; i++) {
                         if (mockDG[i].id === id) return mockDG[i];

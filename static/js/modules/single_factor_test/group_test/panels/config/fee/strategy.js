@@ -11,8 +11,8 @@
  *   4. Global default
  *
  * Dependencies:
- *   - GT.datamodel.derived_graph (get)
- *   - GT.datamodel.base_groups (get)
+ *   - GT.datamodel.groups (get)
+ *   - GT.datamodel.groups (get)
  */
 
 (function() {
@@ -29,15 +29,15 @@
     }
 
     function _getDG(id) {
-        if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
-            return GT.datamodel.derived_graph.get(id);
+        if (GT.datamodel.groups && GT.datamodel.groups.get) {
+            return GT.datamodel.groups.get(id);
         }
         return null;
     }
 
     function _getBG(id) {
-        if (GT.datamodel.base_groups && GT.datamodel.base_groups.get) {
-            return GT.datamodel.base_groups.get(id);
+        if (GT.datamodel.groups && GT.datamodel.groups.get) {
+            return GT.datamodel.groups.get(id);
         }
         return null;
     }
@@ -263,8 +263,8 @@
         }
 
         // Recurse to children that might have overrides
-        var descendants = GT.datamodel.derived_graph.getDescendants ?
-            GT.datamodel.derived_graph.getDescendants(node.id).slice(1) : [];
+        var descendants = GT.datamodel.groups.getDescendants ?
+            GT.datamodel.groups.getDescendants(node.id).slice(1) : [];
 
         descendants.forEach(function(childId) {
             _collectModsForNode(childId, mods);

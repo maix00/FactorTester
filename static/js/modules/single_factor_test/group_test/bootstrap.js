@@ -24,6 +24,12 @@
             try { console.log.apply(console, ['[GroupTest]'].concat([].slice.call(arguments))); }
             catch (_) {}
         },
+
+        /** HTML-escape a string to prevent XSS */
+        escapeHTML: function(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        },
     };
 
     window.GroupTest = GT;

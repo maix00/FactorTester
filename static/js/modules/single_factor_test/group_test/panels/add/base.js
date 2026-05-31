@@ -15,14 +15,11 @@
 
     function $(id) { return document.getElementById(id); }
 
-    function escapeHTML(str) {
-        if (str === null || str === undefined) return '';
-        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function escapeHTML(str) { return GT.escapeHTML(str); }
 
     // ── Delegated utilities ──
 
-    var _batchKey = GT.datamodel.base_groups.batchKey;
+    var _batchKey = GT.datamodel.groups.batchKey;
 
     /** Column-letter name: 1→A, 2→B, ... 26→Z, 27→AA, 28→AB, ... */
     function _colLetter(n) {
@@ -37,7 +34,7 @@
 
     function _preComputeComboLetters(testerId, factorAliases, groupCount) {
         var comboMap = {};
-        var existing = GT.datamodel.base_groups.getAll();
+        var existing = GT.datamodel.groups.getAll();
         var subs = window.submissions || [];
 
         for (var i = 0; i < factorAliases.length; i++) {
@@ -101,7 +98,7 @@
         var fullName = testerLabel + '_' + factorAlias + '_' + groupCount + '组_' + '第' + groupIndex + '组';
         var shortAlias = letter + groupIndex;
 
-        var allGroups = GT.datamodel.base_groups.getAll();
+        var allGroups = GT.datamodel.groups.getAll();
         var comboKey = String(testerId) + '|' + factorAlias + '|' + groupCount;
         var sameIndexCount = 0;
         var usedSuffixes = {};
@@ -406,7 +403,7 @@
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
                     try {
-                        GT.datamodel.base_groups.add({
+                        GT.datamodel.groups.add({
                             name: names.name,
                             shortAlias: names.shortAlias,
                             testerId: testerId,
@@ -427,7 +424,7 @@
             } else {
                 var names2 = _makeNames(testerId, alias, groupCount, groupIndex, letter);
                 try {
-                    GT.datamodel.base_groups.add({
+                    GT.datamodel.groups.add({
                         name: names2.name,
                         shortAlias: names2.shortAlias,
                         testerId: testerId,

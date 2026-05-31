@@ -26,12 +26,7 @@
 
     // ── DOM helpers ──────────────────────────────────────────────────────────
 
-    function escapeHTML(str) {
-        if (str === null || str === undefined) return '';
-        var div = document.createElement('div');
-        div.appendChild(document.createTextNode(String(str)));
-        return div.innerHTML;
-    }
+    function escapeHTML(str) { return GT.escapeHTML(str); }
 
     function ensureOverlay() {
         var overlay = document.getElementById(OVERLAY_ID);

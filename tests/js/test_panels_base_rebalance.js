@@ -92,7 +92,7 @@ global._events = {};
 global.window = {
     GroupTest: {
         datamodel: {
-            base_groups: {
+            groups: {
                 get: function(id) {
                     for (var i = 0; i < mockBG.length; i++) {
                         if (mockBG[i].id === id) return JSON.parse(JSON.stringify(mockBG[i]));
@@ -246,12 +246,12 @@ mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCo
 global._mockActiveBGId = 'bg_1';
 _makeEl('config-rebalance');
 panel.mount();
-assert(global._events['baseGroupsChanged'].length >= 1, 'mount: registered baseGroupsChanged');
+assert(global._events['groupsChanged'].length >= 1, 'mount: registered groupsChanged');
 assert(global._events['activeBaseGroupChanged'].length >= 1, 'mount: registered activeBaseGroupChanged');
 assert(_domElements['config-rebalance']._html.indexOf('每期等权再平衡') !== -1, 'mount: rendered');
 
 panel.unmount();
-assert(global._events['baseGroupsChanged'].length === 0, 'unmount: cleared baseGroupsChanged');
+assert(global._events['groupsChanged'].length === 0, 'unmount: cleared groupsChanged');
 assert(global._events['activeBaseGroupChanged'].length === 0, 'unmount: cleared activeBaseGroupChanged');
 
 // ---------------------------------------------------------------------------

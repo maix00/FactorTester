@@ -201,12 +201,7 @@
 
     function $(id) { return document.getElementById(id); }
 
-    function escapeHTML(str) {
-        if (str === null || str === undefined) return '';
-        var div = document.createElement('div');
-        div.appendChild(document.createTextNode(String(str)));
-        return div.innerHTML;
-    }
+    function escapeHTML(str) { return GT.escapeHTML(str); }
 
     // ── Rendering ──────────────────────────────────────────────────────────────
 
@@ -466,7 +461,7 @@
         _mounted = true;
         REG = window.GT_CONFIG_REGISTRY;
 
-        GT.state.on('baseGroupsChanged', _onDataChanged);
+        GT.state.on('groupsChanged', _onDataChanged);
         GT.state.on('activeBaseGroupChanged', _onDataChanged);
 
         render();
@@ -474,7 +469,7 @@
 
     function unmount() {
         _mounted = false;
-        GT.state.off('baseGroupsChanged', _onDataChanged);
+        GT.state.off('groupsChanged', _onDataChanged);
         GT.state.off('activeBaseGroupChanged', _onDataChanged);
     }
 

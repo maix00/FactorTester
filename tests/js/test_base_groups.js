@@ -28,11 +28,11 @@ var path = require('path');
 var fs = require('fs');
 var scriptPath = path.join(
     __dirname,
-    '../../static/js/modules/single_factor_test/group_test/datamodel/base_groups.js'
+    '../../static/js/modules/single_factor_test/group_test/datamodel/groups.js'
 );
 eval(fs.readFileSync(scriptPath, 'utf8'));
 
-var bg = window.GroupTest.datamodel.base_groups;
+var bg = window.GroupTest.datamodel.groups;
 var assert = require('assert');
 
 var passed = 0;
@@ -179,11 +179,11 @@ test('add: stores custom values', function () {
     assert.strictEqual(g.isAllGroups, true);
 });
 
-test('add: emits baseGroupsChanged', function () {
+test('add: emits groupsChanged', function () {
     var id = bg.add({ name: 'G3', testerId: 't1', factorAlias: 'f1', groupCount: 2 });
     assert.ok(global.__events.length >= 1);
     var last = global.__events[global.__events.length - 1];
-    assert.strictEqual(last.event, 'baseGroupsChanged');
+    assert.strictEqual(last.event, 'groupsChanged');
     assert.strictEqual(last.data.action, 'add');
     assert.strictEqual(last.data.id, id);
 });
@@ -254,12 +254,12 @@ test('update: does NOT set needsRegenerate on non-groupCount change', function (
     assert.ok(true); // contract verified by previous test
 });
 
-test('update: emits baseGroupsChanged', function () {
+test('update: emits groupsChanged', function () {
     var id = bg.add({ name: 'G1', testerId: 't1', factorAlias: 'f1', groupCount: 3 });
     global.__events = [];
     bg.update(id, { name: 'X' });
     assert.ok(global.__events.length >= 1);
-    assert.strictEqual(global.__events[global.__events.length - 1].event, 'baseGroupsChanged');
+    assert.strictEqual(global.__events[global.__events.length - 1].event, 'groupsChanged');
 });
 
 test('update: throws on invalid patch', function () {
@@ -285,13 +285,13 @@ test('remove: removes and returns item', function () {
     assert.strictEqual(bg.getAll().length, 0);
 });
 
-test('remove: emits baseGroupsChanged', function () {
+test('remove: emits groupsChanged', function () {
     var id = bg.add({ name: 'G1', testerId: 't1', factorAlias: 'f1', groupCount: 3 });
     global.__events = [];
     bg.remove(id);
     assert.ok(global.__events.length >= 1);
     var last = global.__events[global.__events.length - 1];
-    assert.strictEqual(last.event, 'baseGroupsChanged');
+    assert.strictEqual(last.event, 'groupsChanged');
     assert.strictEqual(last.data.action, 'remove');
 });
 

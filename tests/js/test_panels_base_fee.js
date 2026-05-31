@@ -83,7 +83,7 @@ global._events = {};
 global.window = {
     GroupTest: {
         datamodel: {
-            base_groups: {
+            groups: {
                 get: function(id) {
                     for (var i = 0; i < mockBG.length; i++) {
                         if (mockBG[i].id === id) return JSON.parse(JSON.stringify(mockBG[i]));
@@ -283,14 +283,14 @@ _makeContainer('config-fee');
 panel.mount();
 assert(_domElements['config-fee']._html.indexOf('费率模式') !== -1, 'mount: renders');
 // Should have registered handlers
-assert(global._events['baseGroupsChanged'].length >= 1, 'mount: registered baseGroupsChanged');
+assert(global._events['groupsChanged'].length >= 1, 'mount: registered groupsChanged');
 assert(global._events['activeBaseGroupChanged'].length >= 1, 'mount: registered activeBaseGroupChanged');
 
 // Unmount cleans up
 panel.unmount();
 // After unmount, events should be unregistered
 // (Our mock just removes them from array)
-assert(global._events['baseGroupsChanged'].length === 0, 'unmount: baseGroupsChanged cleared');
+assert(global._events['groupsChanged'].length === 0, 'unmount: groupsChanged cleared');
 assert(global._events['activeBaseGroupChanged'].length === 0, 'unmount: activeBaseGroupChanged cleared');
 
 // ---------------------------------------------------------------------------

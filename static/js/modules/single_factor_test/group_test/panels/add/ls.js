@@ -1,216 +1,318 @@
 /**
- * panels/add/ls.js — Add-flow panel: "新建 LS 组" (category-2)
+ * panels/add/ls.js — Add-flow panel: "创建 Long-Short 组" (category-2)
  *
- * Phase 5 UI panel. Shows full detail of the selected LS config and allows
- * editing of optional override settings: fee override, close-today toggle,
- * rebalance mode. Also displays long/short derived group references.
- *
- * Data shape: { id, name, longGroupId, shortGroupId, feeMode, feeRate,
- *               useCloseToday, rebalanceMode, needsRegenerate, metadata }
+ * Simplified display: two cards (long | short) with swap button.
+ * Preselected groups from GT.ui.getAddDraft().preselectedBaseGroupIds.
+ * Tabs-row submit button delegates to panel.handleSave().
  *
  * Contract:
- *   GT.state.getActiveLSConfigId() → id|null
- *   GT.state.on('activeLSConfigChanged', cb)
- *   GT.state.on('lsConfigsChanged', cb)
- *   GT.datamodel.ls_configs — CRUD
- *   GT.datamodel.derived_graph — for resolving group names
+ *   GT.datamodel.ls_configs — CRUD (add)
+ *   GT.datamodel.groups     — for reading group config
+ *   GT.ui                   — getAddDraft(), exitAddMode()
  */
 
 (function() {
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.panels) { GT.panels = {}; }
-    if (!GT.panels.ls) { GT.panels.ls = {}; }
 
-    var CONTAINER_ID = 'ls-config-editor';
-
-    var FEE_MODE_LABELS = { inherit: '继承自派生组', override: '覆盖费率' };
-    var REBALANCE_MODE_LABELS = { each_period: '每期再平衡', buy_and_hold: '买入持有', recycle: '循环再平衡' };
+    var CONTAINER_ID = 'add-ls';
 
     var _mounted = false;
+    var _longId = null;
+    var _shortId = null;
 
     function $(id) { return document.getElementById(id); }
 
-    function _getConfig() {
-        var id = GT.state.getActiveLSConfigId();
-        if (!id) return null;
-        return GT.datamodel.ls_configs.get(id);
+    function escapeHTML(str) { return GT.escapeHTML(str); }
+
+    // ── Colors ──
+    var COL_LONG  = { border: '3b82f6', bg: 'f0f7ff', text: '1e40af', chipBg: 'dbeafe', chipText: '1e3a8a' };
+    var COL_SHORT = { border: '8b5cf6', bg: 'f5f3ff', text: '5b21b6', chipBg: 'ede9fe', chipText: '4c1d95' };
+
+    // ── Short alias for display (dynamic for derived, like list panel) ──
+    function _displayAlias(g) {
+        if (!g) return '—';
+        if (!g.isDerived) return g.shortAlias || g.name || '—';
+        return _deriveShortAlias(g);
     }
 
-    function _dgName(id) {
-        if (!id) return '—';
-        if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
-            var dg = GT.datamodel.derived_graph.get(id);
-            if (dg) return dg.name || id;
+    /** Same logic as list panel's _deriveShortAlias */
+    function _deriveShortAlias(node) {
+        if (!node || !node.baseGroupId) return node ? (node.shortAlias || node.name || '?') : '?';
+        var bg = _getGroup(node.baseGroupId);
+        var bgAlias = bg ? (bg.shortAlias || bg.name || bg.id) : node.baseGroupId;
+        var allNodes = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
+        var siblings = [];
+        for (var i = 0; i < allNodes.length; i++) {
+            if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
+                siblings.push(allNodes[i]);
+            }
         }
-        return id;
+        var idx = -1;
+        for (var j = 0; j < siblings.length; j++) {
+            if (siblings[j].id === node.id) { idx = j; break; }
+        }
+        var num = idx >= 0 ? (idx + 1) : '?';
+        if (node.parentId) {
+            var parentNode = _getGroup(node.parentId);
+            if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
+                var parentAlias = _deriveShortAlias(parentNode);
+                return parentAlias + ':' + num;
+            }
+        }
+        return bgAlias + ':' + num;
     }
 
-    // ---------------------------------------------------------------------------
+    // =========================================================================
     // Render
-    // ---------------------------------------------------------------------------
+    // =========================================================================
 
     function render() {
         var container = $(CONTAINER_ID);
         if (!container) return;
 
-        var config = _getConfig();
-        if (!config) {
-            container.innerHTML = '<div style="padding:24px;text-align:center;color:#888;">请在左侧列表中选择一个多空配置</div>';
-            return;
-        }
+        var draft = (GT.ui && typeof GT.ui.getAddDraft === 'function') ? GT.ui.getAddDraft() : null;
+        var preselected = (draft && draft.preselectedBaseGroupIds) ? draft.preselectedBaseGroupIds : [];
+
+        _longId  = preselected[0] || null;
+        _shortId = preselected[1] || null;
+
+        var gLong  = _longId  ? _getGroup(_longId)  : null;
+        var gShort = _shortId ? _getGroup(_shortId) : null;
+
+        var saLong  = _displayAlias(gLong);
+        var saShort = _displayAlias(gShort);
 
         var html = '';
 
-        // Header
-        html += '<div style="margin-bottom:16px;">';
-        html += '<span style="font-size:16px;font-weight:700;">' + config.name + '</span>';
-        html += '<span style="margin-left:8px;font-size:11px;padding:2px 6px;border-radius:4px;'
-            + (config.needsRegenerate ? 'background:#fef3c7;color:#d97706;' : 'background:#d1fae5;color:#059669;')
-            + '">' + (config.needsRegenerate ? '待更新' : '就绪') + '</span>';
+        // ── Title ──
+        html += '<div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:16px;">';
+        html += escapeHTML(saLong) + ' / ' + escapeHTML(saShort);
         html += '</div>';
 
-        // Group references
-        html += '<div style="margin-bottom:16px;padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
-        html += '<table style="width:100%;">';
-        html += '<tr><td style="padding:4px 0;font-size:12px;color:#666;width:80px;">多头组</td>';
-        html += '<td style="font-size:13px;font-weight:500;">' + _dgName(config.longGroupId) + '</td></tr>';
-        html += '<tr><td style="padding:4px 0;font-size:12px;color:#666;">空头组</td>';
-        html += '<td style="font-size:13px;font-weight:500;">' + _dgName(config.shortGroupId) + '</td></tr>';
-        html += '</table></div>';
+        // ── Two-column cards ──
+        html += '<div style="display:flex;align-items:stretch;gap:0;">';
 
-        // --- Editable overrides ---
+        // LEFT: Long
+        html += _cardHTML(gLong, '📈 多头', COL_LONG);
 
-        // Fee override
-        html += _sectionHeader('费率设置');
-        html += '<label style="display:block;margin-bottom:8px;">';
-        html += '<select id="lsed-feeMode" style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;">';
-        Object.keys(FEE_MODE_LABELS).forEach(function(mode) {
-            var sel = config.feeMode === mode ? ' selected' : '';
-            html += '<option value="' + mode + '"' + sel + '>' + FEE_MODE_LABELS[mode] + '</option>';
-        });
-        html += '</select></label>';
-        if (config.feeMode === 'override') {
-            html += '<label style="display:block;margin-bottom:8px;">';
-            html += '<span style="font-size:12px;color:#666;">费率 (0 = 免手续费)</span>';
-            html += '<input type="number" id="lsed-feeRate" value="' + (config.feeRate !== null ? config.feeRate : '') + '" step="0.00001" min="0" style="width:120px;padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;margin-left:8px;">';
-            html += '</label>';
-        }
-
-        // Close today toggle
-        html += _sectionHeader('平今/昨');
-        var ctVal = config.useCloseToday;
-        html += '<div style="display:flex;gap:8px;">';
-        html += '<button id="lsed-closeToday-toggle" style="padding:6px 16px;border-radius:4px;font-size:13px;cursor:pointer;'
-            + (ctVal === true ? 'background:#0078d4;color:#fff;border:1px solid #0078d4;' : 'background:#fff;color:#333;border:1px solid #d0d5dd;')
-            + '">' + (ctVal === true ? '平今仓' : '平昨仓') + '</button>';
+        // CENTER: Swap
+        html += '<div style="display:flex;align-items:center;padding:0 12px;">';
+        html += '<button id="lsed-swap" title="交换多头/空头" style="width:36px;height:36px;border:1px solid #d0d5dd;border-radius:50%;background:#374151;color:#fff;cursor:pointer;font-size:16px;line-height:1;">↹</button>';
         html += '</div>';
 
-        // Rebalance mode
-        html += _sectionHeader('再平衡');
-        html += '<select id="lsed-rebalanceMode" style="padding:4px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;">';
-        html += '<option value="">— 继承 —</option>';
-        Object.keys(REBALANCE_MODE_LABELS).forEach(function(mode) {
-            var sel2 = config.rebalanceMode === mode ? ' selected' : '';
-            html += '<option value="' + mode + '"' + sel2 + '>' + REBALANCE_MODE_LABELS[mode] + '</option>';
-        });
-        html += '</select>';
+        // RIGHT: Short
+        html += _cardHTML(gShort, '📉 空头', COL_SHORT);
 
-        // Save button
-        html += '<div style="margin-top:20px;display:flex;gap:8px;">';
-        html += '<button id="lsed-save" style="padding:8px 20px;border:none;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;font-size:13px;">保存设置</button>';
-        html += '</div>';
+        html += '</div>'; // end two-column
 
         container.innerHTML = html;
-        _bindEvents(config);
+
+        _bindEvents();
     }
 
-    function _sectionHeader(title) {
-        return '<div style="margin-top:16px;margin-bottom:8px;font-size:13px;font-weight:600;color:#333;border-bottom:1px solid #e5e7eb;padding-bottom:4px;">' + title + '</div>';
+    /**
+     * Build a group card with name + config chips.
+     */
+    function _cardHTML(g, header, col) {
+        var name = _displayAlias(g);
+
+        var html = '';
+        html += '<div style="flex:1;min-width:200px;padding:14px;border:2px solid #' + col.border + ';border-radius:10px;background:#' + col.bg + ';">';
+        html += '<div style="font-size:14px;font-weight:700;color:#' + col.text + ';margin-bottom:6px;text-align:center;">' + header + '</div>';
+        html += '<div style="font-size:18px;font-weight:700;color:#111827;text-align:center;margin-bottom:10px;">' + name;
+        if (g && g.isDerived) html += ' <span style="font-size:11px;font-weight:400;color:#6b7280;">[派生]</span>';
+        html += '</div>';
+
+        // ── Config chips ──
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;">';
+        html += _chipsHTML(g);
+        html += '</div>';
+
+        html += '</div>';
+        return html;
     }
 
-    function _bindEvents(config) {
-        // Fee mode change → show/hide rate input → re-render
-        var feeModeSel = $('lsed-feeMode');
-        if (feeModeSel) {
-            feeModeSel.addEventListener('change', function() {
-                var patch = { feeMode: this.value };
-                if (this.value === 'inherit') patch.feeRate = null;
-                try {
-                    GT.datamodel.ls_configs.update(config.id, patch);
-                } catch (e) { alert(e.message); }
-            });
+    // ── Chip styles (match list panel) ──
+    var CHIP_PLAIN    = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
+    var CHIP_CLICKABLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
+
+    /**
+     * Build config chip tags for a group.
+     * For derived groups: inherit fee fields from base so REG.getChips can show them.
+     * Uses REG.getChips (same as list panel) + tester/factor/group info.
+     */
+    function _chipsHTML(g) {
+        var chips = [];
+        var REG = window.GT_CONFIG_REGISTRY;
+
+        // 1) factorAlias
+        if (g.factorAlias) {
+            chips.push('<span style="' + CHIP_PLAIN + '">' + escapeHTML(g.factorAlias) + '</span>');
         }
 
-        // Close-today toggle
-        var ctBtn = $('lsed-closeToday-toggle');
-        if (ctBtn) {
-            ctBtn.addEventListener('click', function() {
-                var cur = config.useCloseToday;
-                var next = cur === true ? null : true; // toggle: true → null → true
-                try {
-                    GT.datamodel.ls_configs.update(config.id, { useCloseToday: next });
-                } catch (e) { alert(e.message); }
-            });
+        // 2) testerId — resolve label through list panel's _testerLabel
+        var testerLabel = _testerLabelForGroup(g);
+        if (testerLabel) {
+            chips.push('<span style="' + CHIP_CLICKABLE + '">' + escapeHTML(testerLabel) + '</span>');
         }
 
-        // Rebalance mode
-        var rebalSel = $('lsed-rebalanceMode');
-        if (rebalSel) {
-            rebalSel.addEventListener('change', function() {
-                try {
-                    GT.datamodel.ls_configs.update(config.id, { rebalanceMode: this.value || null });
-                } catch (e) { alert(e.message); }
-            });
+        // 3) groupIndex / groupCount
+        if (!g.isDerived && g.groupCount) {
+            var gi = g.groupIndex || 1;
+            chips.push('<span style="' + CHIP_PLAIN + '">' + gi + '/' + g.groupCount + '</span>');
         }
 
-        // Save button (explicit save for fee rate)
-        var saveBtn = $('lsed-save');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', function() {
-                var patch = {};
-                var rateEl = $('lsed-feeRate');
-                if (rateEl && rateEl.value !== '') {
-                    patch.feeRate = parseFloat(rateEl.value);
-                }
-                if (Object.keys(patch).length === 0) return;
-                try {
-                    GT.datamodel.ls_configs.update(config.id, patch);
-                    alert('已保存');
-                } catch (e) { alert(e.message); }
+        // 4) Config chips from REG (fee, rebalance, etc.)
+        //    For derived groups: inherit all config from base group (derived defaults are 'none' etc.)
+        //    For base groups: pass through directly
+        var synthGroup;
+        if (g && g.isDerived) {
+            // Derived group — always use base group's config (derived doesn't have independent fee/rebalance)
+            var bg = g.baseGroupId ? _getGroup(g.baseGroupId) : null;
+            synthGroup = bg || {
+                feeMode: 'none',
+                feeRate: null,
+                feeMap: null,
+                feeSensitivity: null,
+                useCloseToday: false,
+                rebalanceMode: 'buy_and_hold',
+            };
+        } else {
+            synthGroup = g;
+        }
+
+        if (REG && typeof REG.getChips === 'function') {
+            var regChips = REG.getChips(synthGroup);
+            for (var i = 0; i < regChips.length; i++) {
+                var chip = regChips[i];
+                var s = chip.style || CHIP_PLAIN;
+                chips.push('<span style="' + s + '">' + chip.html + '</span>');
+            }
+        }
+
+        return chips.join('');
+    }
+
+    /**
+     * Resolve tester label for a group.
+     * For derived groups, get tester from base group.
+     */
+    function _testerLabelForGroup(g) {
+        if (!g) return '';
+        var testerId = g.testerId;
+        // For derived groups, get tester from base
+        if (!testerId && g.isDerived && g.baseGroupId) {
+            var bg = _getGroup(g.baseGroupId);
+            if (bg) testerId = bg.testerId;
+        }
+        if (!testerId) return '';
+        // Use the same resolution as list panel
+        return _resolveTesterLabel(testerId);
+    }
+
+    /** Resolve tester label from window.submissions (same as list panel's _testerLabel) */
+    function _resolveTesterLabel(testerId) {
+        if (!testerId) return '';
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) === String(testerId)) {
+                return subs[i].product_group || subs[i].label || ('测试器 #' + subs[i].id);
+            }
+        }
+        return testerId;
+    }
+
+    // =========================================================================
+    // Events
+    // =========================================================================
+
+    function _bindEvents() {
+        var swapBtn = $('lsed-swap');
+        if (swapBtn) {
+            swapBtn.addEventListener('click', function() {
+                var tmp = _longId;
+                _longId = _shortId;
+                _shortId = tmp;
+                render();
             });
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Event handlers
-    // ---------------------------------------------------------------------------
+    // =========================================================================
+    // Save (called by tabs-row submit button)
+    // =========================================================================
 
-    function _onActiveLSConfigChanged() { if (_mounted) render(); }
-    function _onLSConfigsChanged() { if (_mounted) render(); }
+    /**
+     * Called by app.js _submitAddLSGroup().
+     * @returns {{success: boolean, error: string|null}}
+     */
+    function handleSave() {
+        if (!_longId) return { success: false, error: '请先选择多头组' };
 
-    // ---------------------------------------------------------------------------
+        try {
+            var longDgId  = _resolveToDerived(_longId);
+            var shortDgId = _shortId ? _resolveToDerived(_shortId) : null;
+
+            var gLong  = _getGroup(_longId);
+            var gShort = _shortId ? _getGroup(_shortId) : null;
+
+            // Build name from short aliases (dynamic, like display)
+            var saLong  = _displayAlias(gLong) || 'L';
+            var saShort = gShort ? (_displayAlias(gShort) || 'S') : '';
+            var name = saShort ? (saLong + '/' + saShort) : saLong;
+
+            var data = { name: name, longGroupId: longDgId };
+            if (shortDgId) data.shortGroupId = shortDgId;
+
+            GT.datamodel.ls_configs.add(data);
+            return { success: true, error: null };
+        } catch (err) {
+            return { success: false, error: (err && err.message) || String(err) };
+        }
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    function _getGroup(id) {
+        return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
+    }
+
+    function _resolveToDerived(groupId) {
+        var g = _getGroup(groupId);
+        if (!g) throw new Error('分组不存在: ' + groupId);
+        if (g.isDerived) return groupId;
+
+        // Base group: find or create derived
+        var all = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].isDerived && all[i].baseGroupId === groupId) return all[i].id;
+        }
+
+        // Compute derived shortAlias: baseGroupAlias:1 (each base has one derived in LS context)
+        var bgAlias = g.shortAlias || g.name || groupId;
+        var dgShortAlias = bgAlias + ':1';
+        var dgName = dgShortAlias;
+
+        var dg = GT.datamodel.groups.add({
+            name: dgName,
+            shortAlias: dgShortAlias,
+            baseGroupId: groupId,
+            isDerived: true,
+        });
+        return dg.id;
+    }
+
+    // =========================================================================
     // Public API
-    // ---------------------------------------------------------------------------
+    // =========================================================================
 
-    function mount() {
-        _mounted = true;
-        GT.state.on('activeLSConfigChanged', _onActiveLSConfigChanged);
-        GT.state.on('lsConfigsChanged', _onLSConfigsChanged);
-        render();
-    }
-
-    function unmount() {
-        _mounted = false;
-        GT.state.off('activeLSConfigChanged', _onActiveLSConfigChanged);
-        GT.state.off('lsConfigsChanged', _onLSConfigsChanged);
-    }
-
+    function mount()   { _mounted = true;  render(); }
+    function unmount() { _mounted = false; }
     function refresh() { if (_mounted) render(); }
-
-    // ---------------------------------------------------------------------------
-    // Export
-    // ---------------------------------------------------------------------------
 
     GT.panels.add = GT.panels.add || {};
     GT.panels.add.ls = {
@@ -218,7 +320,6 @@
         unmount: unmount,
         refresh: refresh,
         render: render,
+        handleSave: handleSave
     };
-
-    GT.log('panels.ls.editor loaded');
 })();

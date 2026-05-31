@@ -30,8 +30,8 @@ global.window = {
 var GT = window.GroupTest;
 
 // Load all datamodel modules
-require('../../static/js/modules/single_factor_test/group_test/datamodel/base_groups.js');
-require('../../static/js/modules/single_factor_test/group_test/datamodel/derived_graph.js');
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/ls_configs.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/registrations.js');
 require('../../static/js/modules/single_factor_test/group_test/datamodel/settings_snapshot.js');
@@ -39,8 +39,8 @@ require('../../static/js/modules/single_factor_test/group_test/datamodel/setting
 var settings = GT.datamodel.settings;
 
 function resetAll() {
-    GT.datamodel.base_groups._reset();
-    GT.datamodel.derived_graph._reset();
+    GT.datamodel.groups._reset();
+    GT.datamodel.groups._reset();
     GT.datamodel.ls_configs._reset();
     GT.datamodel.registrations._reset();
     GT._events = [];
@@ -69,13 +69,13 @@ assertEquals(settings.snapshot(), { baseGroups: [], derivedGraph: [], lsConfigs:
 resetAll();
 
 // Build state
-GT.datamodel.base_groups.add({ name: 'base1', testerId: 't1', factorAlias: 'f1', groupCount: 3, dayPeriods: 5, feeMode: 'uniform', feeRate: 0.001 });
-GT.datamodel.base_groups.add({ name: 'base2', testerId: 't2', factorAlias: 'f2', groupCount: 2, dayPeriods: 10, feeMode: 'per_product', feeRate: null, feeMap: {} });
+GT.datamodel.groups.add({ name: 'base1', testerId: 't1', factorAlias: 'f1', groupCount: 3, dayPeriods: 5, feeMode: 'uniform', feeRate: 0.001 });
+GT.datamodel.groups.add({ name: 'base2', testerId: 't2', factorAlias: 'f2', groupCount: 2, dayPeriods: 10, feeMode: 'per_product', feeRate: null, feeMap: {} });
 
-GT.datamodel.derived_graph.add({ name: 'top', label: 'Top N', baseGroupId: GT.datamodel.base_groups.getAll()[0].id, autoMode: 'union' });
-GT.datamodel.derived_graph.add({ name: 'bottom', label: 'Bottom M', baseGroupId: GT.datamodel.base_groups.getAll()[1].id, autoMode: 'intersect' });
+GT.datamodel.groups.add({ name: 'top', label: 'Top N', isDerived: true, baseGroupId: GT.datamodel.groups.getAll()[0].id });
+GT.datamodel.groups.add({ name: 'bottom', label: 'Bottom M', isDerived: true, baseGroupId: GT.datamodel.groups.getAll()[1].id });
 
-var dgAll = GT.datamodel.derived_graph.getAll();
+var dgAll = GT.datamodel.groups.getAll();
 GT.datamodel.ls_configs.add({ name: 'ls1', longGroupId: dgAll[0].id, shortGroupId: dgAll[1].id, feeMode: 'inherit' });
 
 GT.datamodel.registrations.register(GT.datamodel.ls_configs.getAll()[0].id, dgAll[0].id, 'long', 1.0);
@@ -130,11 +130,11 @@ assertEquals(d3.keys, [], 'diff: zero differences for identical');
 // ---------------------------------------------------------------------------
 
 resetAll();
-var oldBase = GT.datamodel.base_groups;
-delete GT.datamodel.base_groups;
+var oldBase = GT.datamodel.groups;
+delete GT.datamodel.groups;
 var snapForError = { baseGroups: [{ name: 'b1', testerId: 't1', factorAlias: 'f1', groupCount: 3, dayPeriods: 5, feeMode: 'uniform', feeRate: 0.001 }], derivedGraph: [], lsConfigs: [], registrations: [] };
 var r1 = settings.apply(snapForError);
-GT.datamodel.base_groups = oldBase;
+GT.datamodel.groups = oldBase;
 assert(r1.errors.length > 0, 'apply: errors when datamodel missing');
 
 // ---------------------------------------------------------------------------

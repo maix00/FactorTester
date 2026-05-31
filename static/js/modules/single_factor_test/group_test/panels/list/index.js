@@ -12,8 +12,8 @@
  *   - Click derived node → edit mode: show config tabs (fee/rebalance/close_today)
  *
  * Data shape:
- *   GT.datamodel.base_groups     — base groups CRUD
- *   GT.datamodel.derived_graph   — derived tree CRUD + getTree()
+ *   GT.datamodel.groups     — base groups CRUD
+ *   GT.datamodel.groups   — derived tree CRUD + getTree()
  *   GT.datamodel.ls_configs      — LS configs CRUD
  *   GT.datamodel.fee_strategy    — resolveFee / resolveRebalance / resolveCloseToday
  *   GT.state                     — events + active IDs
@@ -63,10 +63,7 @@
 
     function $(id) { return document.getElementById(id); }
 
-    function escapeHTML(str) {
-        if (str === null || str === undefined) return '';
-        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function escapeHTML(str) { return GT.escapeHTML(str); }
 
     // ── Chip badge style (shared by tester, factor, fee chips) ──
     var CHIP_STYLE = 'display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;';
@@ -111,8 +108,8 @@
 
     function _dgName(id) {
         if (!id) return '—';
-        if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
-            var dg = GT.datamodel.derived_graph.get(id);
+        if (GT.datamodel.groups && GT.datamodel.groups.get) {
+            var dg = GT.datamodel.groups.get(id);
             if (dg) return dg.name || id;
         }
         return id;
@@ -120,9 +117,9 @@
 
     function _lsTesterLabel(dgId) {
         if (!dgId) return '—';
-        var dg = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(dgId);
+        var dg = GT.datamodel.groups && GT.datamodel.groups.get(dgId);
         if (!dg || !dg.baseGroupId) return '—';
-        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(dg.baseGroupId);
+        var bg = GT.datamodel.groups && GT.datamodel.groups.get(dg.baseGroupId);
         if (!bg || !bg.testerId) return '—';
         return _testerLabel(bg.testerId);
     }
@@ -143,8 +140,8 @@
         var title = isEdit ? '编辑多空配置' : '新增多空配置';
 
         var dgOptions = [];
-        if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.list) {
-            dgOptions = GT.datamodel.derived_graph.list();
+        if (GT.datamodel.groups && GT.datamodel.groups.list) {
+            dgOptions = GT.datamodel.groups.list();
         }
 
         var html = '<div id="' + _lsModalId + '" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;">';
@@ -265,14 +262,15 @@
 
     /** Get batchKey from datamodel */
     function _batchKey(testerId, factorAlias, groupCount) {
-        return GT.datamodel.base_groups.batchKey(testerId, factorAlias, groupCount);
+        return GT.datamodel.groups.batchKey(testerId, factorAlias, groupCount);
     }
 
-    /** Group base items into batches */
+    /** Group base items into batches (derived nodes are rendered under base groups, not as batches) */
     function _buildBatches(items) {
         _batchMap = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
+            if (item.isDerived) continue; // derived nodes belong under their base group, not as standalone batches
             var key = _batchKey(item.testerId, item.factorAlias, item.groupCount);
             if (!_batchMap[key]) {
                 _batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
@@ -286,9 +284,10 @@
     }
 
     function _batchGroupIds(batchKey) {
-        var items = GT.datamodel.base_groups.getAll();
+        var items = GT.datamodel.groups.getAll();
         var ids = [];
         for (var i = 0; i < items.length; i++) {
+            if (items[i].isDerived) continue;
             if (_batchKey(items[i].testerId, items[i].factorAlias, items[i].groupCount) === batchKey) {
                 ids.push(items[i].id);
             }
@@ -298,7 +297,7 @@
 
     /**
      * Toggle all items in a batch: if all selected → deselect all; otherwise → select all.
-     * Syncs edit mode and emits baseGroupsChanged.
+     * Syncs edit mode and emits groupsChanged.
      */
     function _toggleBatchSelection(batch) {
         if (!batch || !batch.items || batch.items.length === 0) return;
@@ -312,7 +311,7 @@
             else { delete _selectedIds[batch.items[i].id]; }
         }
         _syncEditMode();
-        GT.state.emit('baseGroupsChanged');
+        GT.state.emit('groupsChanged');
     }
 
     /** Enter or exit edit mode based on current _selectedIds count. All groups (base+derived) share IDs. */
@@ -329,7 +328,7 @@
 
     function _nodeTesterId(node) {
         if (!node.baseGroupId || node.baseGroupId === '__batch__') return null;
-        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+        var bg = GT.datamodel.groups && GT.datamodel.groups.get(node.baseGroupId);
         return bg ? bg.testerId : null;
     }
 
@@ -381,10 +380,10 @@
 
     function _deriveShortAlias(node) {
         if (!node || !node.baseGroupId) return node ? (node.name || '?') : '?';
-        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+        var bg = GT.datamodel.groups && GT.datamodel.groups.get(node.baseGroupId);
         var bgAlias = bg ? (bg.shortAlias || bg.label || bg.id) : node.baseGroupId;
         // Find this node's index among siblings (same parentId, same baseGroupId)
-        var allNodes = GT.datamodel.derived_graph && GT.datamodel.derived_graph.getAll();
+        var allNodes = GT.datamodel.groups && GT.datamodel.groups.getAll();
         if (!allNodes) return bgAlias + ':?';
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
@@ -399,7 +398,7 @@
         var num = idx >= 0 ? (idx + 1) : '?';
         // Build alias from parent chain: use parent's short alias as prefix if derived parent
         if (node.parentId) {
-            var parentNode = GT.datamodel.derived_graph.get(node.parentId);
+            var parentNode = GT.datamodel.groups.get(node.parentId);
             if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
                 var parentAlias = _deriveShortAlias(parentNode);
                 return parentAlias + ':' + num;
@@ -415,7 +414,7 @@
      */
     function _synthGroupForDerivedNode(node) {
         if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return null;
-        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+        var bg = GT.datamodel.groups && GT.datamodel.groups.get(node.baseGroupId);
         if (!bg) return null;
 
         var resolvedFee, resolvedCloseToday, resolvedRebalance;
@@ -440,7 +439,7 @@
      */
     function _deriveOverrideChips(node) {
         if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
-        var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(node.baseGroupId);
+        var bg = GT.datamodel.groups && GT.datamodel.groups.get(node.baseGroupId);
         if (!bg) return [];
         if (!REG || typeof REG.getChips !== 'function') return [];
 
@@ -497,7 +496,7 @@
     // ── Render: base groups section ──
 
     function _renderBaseSection() {
-        var items = GT.datamodel.base_groups.getAll();
+        var items = GT.datamodel.groups.getAll();
         if (items.length === 0) {
             return '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">'
                 + '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span></div>'
@@ -519,7 +518,7 @@
             // Compute batch letter prefix from items' shortAliases
             var batchLetter = '';
             if (batch.items.length > 0) {
-                var extractLetter = GT.datamodel.base_groups && GT.datamodel.base_groups.extractLetter;
+                var extractLetter = GT.datamodel.groups && GT.datamodel.groups.extractLetter;
                 if (extractLetter) {
                     batchLetter = extractLetter(batch.items[0].shortAlias) || '';
                 }
@@ -605,8 +604,8 @@
      * The rendered tree is indented under the base group row.
      */
     function _renderDerivedTreeForBase(baseGroupId) {
-        if (!GT.datamodel.derived_graph) return '';
-        var allNodes = GT.datamodel.derived_graph.getAll();
+        if (!GT.datamodel.groups) return '';
+        var allNodes = GT.datamodel.groups.getAll();
         // Filter nodes belonging to this base group
         var myNodes = [];
         for (var i = 0; i < allNodes.length; i++) {
@@ -617,7 +616,7 @@
         if (myNodes.length === 0) return '';
 
         // Build complete trees from the full graph so _renderNode gets children
-        var treeRoots = GT.datamodel.derived_graph.getTree();
+        var treeRoots = GT.datamodel.groups.getTree();
         var treeById = {};
         (function indexTree(nodes) {
             for (var i = 0; i < nodes.length; i++) {
@@ -749,7 +748,7 @@
         var isAddChild = !isEdit && !!parentNodeId;
         var title = isEdit ? '编辑派生组' : (isAddChild ? '新增子派生组' : '新增派生组');
 
-        var bgs = GT.datamodel.base_groups.getAll();
+        var bgs = GT.datamodel.groups.getAll();
         var html = '<div id="' + _dgModalId + '" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;">';
         html += '<div style="background:#fff;border-radius:8px;padding:24px;min-width:480px;max-width:600px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">';
         html += '<h3 style="margin:0 0 16px 0;">' + title + '</h3>';
@@ -778,7 +777,7 @@
         html += '<div id="dg-f-product-mask" style="max-height:120px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;">';
         var testerProds = [];
         if (isEdit) { testerProds = _nodeProducts(editData); }
-        else if (parentNodeId) { var pn = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(parentNodeId); testerProds = pn ? _nodeProducts(pn) : []; }
+        else if (parentNodeId) { var pn = GT.datamodel.groups && GT.datamodel.groups.get(parentNodeId); testerProds = pn ? _nodeProducts(pn) : []; }
         else {
             var allPs = {};
             for (var bi = 0; bi < bgs.length; bi++) {
@@ -820,7 +819,7 @@
         var modal = $(_dgModalId);
         var editId = modal._editId;
         var parentId = modal._parentId;
-        var data = { name: $('dg-f-name').value.trim() };
+        var data = { name: $('dg-f-name').value.trim(), isDerived: true };
         if (!editId) {
             data.baseGroupId = $('dg-f-baseGroupId').value;
             if (!data.baseGroupId) { alert('请选择基础组'); return; }
@@ -833,8 +832,8 @@
         data.productMask = mask;
 
         try {
-            if (editId) { GT.datamodel.derived_graph.update(editId, data); }
-            else { GT.datamodel.derived_graph.add(data); }
+            if (editId) { GT.datamodel.groups.update(editId, data); }
+            else { GT.datamodel.groups.add(data); }
             _dgCloseModal();
         } catch (err) { alert('操作失败: ' + err.message); }
     }
@@ -899,8 +898,8 @@
                 e.stopPropagation();
                 var nodeEl = treeExpand.closest('.unified-tree-node');
                 var nodeId = nodeEl ? nodeEl.getAttribute('data-node-id') : null;
-                if (nodeId && GT.datamodel.derived_graph && GT.datamodel.derived_graph.toggleExpanded) {
-                    GT.datamodel.derived_graph.toggleExpanded(nodeId);
+                if (nodeId && GT.datamodel.groups && GT.datamodel.groups.toggleExpanded) {
+                    GT.datamodel.groups.toggleExpanded(nodeId);
                     fullRender();
                 }
                 return;
@@ -918,7 +917,7 @@
         // Re-render on state changes
         function rerender() { fullRender(); }
         GT.state.on('lsConfigsChanged', rerender);
-        GT.state.on('baseGroupsChanged', rerender);
+        GT.state.on('groupsChanged', rerender);
         GT.state.on('derivedGraphChanged', rerender);
         GT.state.on('activeBaseGroupChanged', rerender);
         GT.state.on('activeDerivedNodeChanged', rerender);
@@ -928,7 +927,7 @@
 
         _self._unbind = function() {
             GT.state.off('lsConfigsChanged', rerender);
-            GT.state.off('baseGroupsChanged', rerender);
+            GT.state.off('groupsChanged', rerender);
             GT.state.off('derivedGraphChanged', rerender);
             GT.state.off('activeBaseGroupChanged', rerender);
             GT.state.off('activeDerivedNodeChanged', rerender);
@@ -986,7 +985,7 @@
                 if (!confirm('确定删除此批次（共 ' + ids.length + ' 组）？')) return;
                 try {
                     for (var i = 0; i < ids.length; i++) {
-                        GT.datamodel.base_groups.remove(ids[i]);
+                        GT.datamodel.groups.remove(ids[i]);
                     }
                 } catch (err) { alert('删除失败: ' + err.message); }
             });
@@ -998,7 +997,7 @@
                 e.stopPropagation();
                 var bgId = this.getAttribute('data-bg-id');
                 if (!confirm('确定删除此基础组？')) return;
-                try { GT.datamodel.base_groups.remove(bgId); } catch (err) { alert('删除失败: ' + err.message); }
+                try { GT.datamodel.groups.remove(bgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
 
@@ -1025,11 +1024,11 @@
                 var group = null;
                 var synthGroup = null; // synthetic group for REG.getChips
                 if (gid) {
-                    group = GT.datamodel.base_groups && GT.datamodel.base_groups.get(gid);
+                    group = GT.datamodel.groups && GT.datamodel.groups.get(gid);
                     synthGroup = group;
                     GT.state.setActiveBaseGroupId(gid);
                 } else if (dgid) {
-                    group = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(dgid);
+                    group = GT.datamodel.groups && GT.datamodel.groups.get(dgid);
                     // Build synthetic group from resolved config so REG.getChips works
                     synthGroup = _synthGroupForDerivedNode(group);
                     GT.state.setActiveDerivedNodeId(dgid);
@@ -1081,7 +1080,7 @@
                 e.stopPropagation();
                 var dgId = this.getAttribute('data-dg-id');
                 if (!confirm('确定删除此派生组及其所有子节点？')) return;
-                try { GT.datamodel.derived_graph.remove(dgId); } catch (err) { alert('删除失败: ' + err.message); }
+                try { GT.datamodel.groups.remove(dgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
     }
@@ -1089,6 +1088,9 @@
     // =========================================================================
     // Export
     // =========================================================================
+
+    // Expose LS form for other panels (e.g., add/ls.js)
+    _self._openLSForm = function() { _lsShowModal(); };
 
     window.GroupTest = window.GroupTest || {};
     window.GroupTest.panels = window.GroupTest.panels || {};

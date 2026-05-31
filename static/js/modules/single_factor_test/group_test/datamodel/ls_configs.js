@@ -9,7 +9,7 @@
  *     useCloseToday, rebalanceMode, needsRegenerate, metadata }
  *
  * Dependencies:
- *   - GT.datamodel.base_groups (for longGroupId/shortGroupId validation, unified storage)
+ *   - GT.datamodel.groups (for longGroupId/shortGroupId validation, unified storage)
  *   - GT.state.emit (for lsConfigsChanged events)
  */
 
@@ -73,8 +73,8 @@
         // Required: longGroupId
         if (!config.longGroupId || typeof config.longGroupId !== 'string') {
             errors.push('longGroupId is required (non-empty string)');
-        } else if (GT.datamodel.base_groups && GT.datamodel.base_groups.get) {
-            var longDg = GT.datamodel.base_groups.get(config.longGroupId);
+        } else if (GT.datamodel.groups && GT.datamodel.groups.get) {
+            var longDg = GT.datamodel.groups.get(config.longGroupId);
             if (!longDg || !longDg.isDerived) {
                 errors.push('longGroupId references non-existent derived group: ' + config.longGroupId);
             }
@@ -83,8 +83,8 @@
         // Required: shortGroupId
         if (!config.shortGroupId || typeof config.shortGroupId !== 'string') {
             errors.push('shortGroupId is required (non-empty string)');
-        } else if (GT.datamodel.base_groups && GT.datamodel.base_groups.get) {
-            var shortDg = GT.datamodel.base_groups.get(config.shortGroupId);
+        } else if (GT.datamodel.groups && GT.datamodel.groups.get) {
+            var shortDg = GT.datamodel.groups.get(config.shortGroupId);
             if (!shortDg || !shortDg.isDerived) {
                 errors.push('shortGroupId references non-existent derived group: ' + config.shortGroupId);
             }

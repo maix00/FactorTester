@@ -7,8 +7,8 @@
  * Contract (provided by P3-1 & datamodel):
  *   GT.state.getActiveBaseGroupId() → id|null
  *   GT.state.on('activeBaseGroupChanged', cb)
- *   GT.datamodel.base_groups.get(id) → {...}|null
- *   GT.datamodel.base_groups.update(id, patch)
+ *   GT.datamodel.groups.get(id) → {...}|null
+ *   GT.datamodel.groups.update(id, patch)
  *
  * Valid modes: each_period | buy_and_hold | recycle
  */
@@ -100,14 +100,14 @@
             GT.log('panels.base.rebalance: container #' + _containerId + ' not found');
             return;
         }
-        GT.state.on('baseGroupsChanged', _onBaseGroupsChanged);
+        GT.state.on('groupsChanged', _onBaseGroupsChanged);
         GT.state.on('activeBaseGroupChanged', _onActiveBaseGroupChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
-        GT.state.off('baseGroupsChanged', _onBaseGroupsChanged);
+        GT.state.off('groupsChanged', _onBaseGroupsChanged);
         GT.state.off('activeBaseGroupChanged', _onActiveBaseGroupChanged);
     }
 

@@ -26,7 +26,7 @@ function assertThrows(fn, msg) {
 global.window = {
     GroupTest: {
         datamodel: {
-            derived_graph: {
+            groups: {
                 get: function(id) { return window._dgStore[id] || null; }
             }
         },

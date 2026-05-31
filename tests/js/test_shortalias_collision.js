@@ -30,11 +30,11 @@ var fs = require('fs');
 // Load base_groups datamodel
 var bgPath = path.join(
     __dirname,
-    '../../static/js/modules/single_factor_test/group_test/datamodel/base_groups.js'
+    '../../static/js/modules/single_factor_test/group_test/datamodel/groups.js'
 );
 eval(fs.readFileSync(bgPath, 'utf8'));
 
-var bg = window.GroupTest.datamodel.base_groups;
+var bg = window.GroupTest.datamodel.groups;
 var assert = require('assert');
 
 var passed = 0;

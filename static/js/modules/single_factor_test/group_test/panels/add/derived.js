@@ -9,8 +9,8 @@
  *   GT.state.getActiveDerivedNodeId() → id|null
  *   GT.state.on('activeDerivedNodeChanged', cb)
  *   GT.state.on('derivedGraphChanged', cb)
- *   GT.datamodel.derived_graph.get(id) → node|null
- *   GT.datamodel.base_groups.getAll() → base groups (for product sourcing)
+ *   GT.datamodel.groups.get(id) → node|null
+ *   GT.datamodel.groups.getAll() → base groups (for product sourcing)
  */
 
 (function() {
@@ -28,15 +28,12 @@
 
     function $(id) { return document.getElementById(id); }
 
-    function escapeHTML(str) {
-        if (!str) return '';
-        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    function escapeHTML(str) { return GT.escapeHTML(str); }
 
     function _getNode() {
         var id = GT.state.getActiveDerivedNodeId();
         if (!id) return null;
-        return GT.datamodel.derived_graph.get(id);
+        return GT.datamodel.groups.get(id);
     }
 
     /**
@@ -46,14 +43,14 @@
      */
     function _allProducts() {
         var map = {}; // keyed by name for dedup
-        var baseGroups = GT.datamodel.base_groups.getAll();
+        var baseGroups = GT.datamodel.groups.getAll();
         var seenTesterIds = {};
 
         // Try the preselected parent derived group first — use its effective products
         var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         if (preselectedParentDerivedId) {
-            var pNode = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(preselectedParentDerivedId);
+            var pNode = GT.datamodel.groups && GT.datamodel.groups.get(preselectedParentDerivedId);
             if (pNode) {
                 var effProds = _effectiveProducts(pNode);
                 for (var ep = 0; ep < effProds.products.length; ep++) {
@@ -66,7 +63,7 @@
                 }
                 // Also add testerId products for richer desc
                 if (pNode.baseGroupId && pNode.baseGroupId !== '__batch__') {
-                    var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(pNode.baseGroupId);
+                    var bg = GT.datamodel.groups && GT.datamodel.groups.get(pNode.baseGroupId);
                     if (bg && bg.testerId) {
                         _addProductsFromTesterId(map, bg.testerId);
                     }
@@ -87,7 +84,7 @@
         // Also try the preselected base group from add draft
         var baseId = (draft && draft.preselectedBaseGroupId) || null;
         if (baseId) {
-            var bg = GT.datamodel.base_groups.get(baseId);
+            var bg = GT.datamodel.groups.get(baseId);
             if (bg && bg.testerId && !seenTesterIds[bg.testerId]) {
                 seenTesterIds[bg.testerId] = true;
                 _addProductsFromTesterId(map, bg.testerId);
@@ -126,10 +123,10 @@
             return { products: Object.keys(node.productMask).sort(), source: 'override' };
         }
         if (node.parentId) {
-            return _effectiveProducts(GT.datamodel.derived_graph.get(node.parentId));
+            return _effectiveProducts(GT.datamodel.groups.get(node.parentId));
         }
         if (node.baseGroupId) {
-            var bg = GT.datamodel.base_groups.get(node.baseGroupId);
+            var bg = GT.datamodel.groups.get(node.baseGroupId);
             if (bg) {
                 return { products: bg.products || [], source: 'baseGroup', name: bg.name || node.baseGroupId };
             }
@@ -152,11 +149,11 @@
         var parentType = ''; // 'base' or 'derived'
 
         if (preselectedParentDerivedId) {
-            var pNode = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(preselectedParentDerivedId);
+            var pNode = GT.datamodel.groups && GT.datamodel.groups.get(preselectedParentDerivedId);
             parentLabel = pNode ? (pNode.name || pNode.id) : preselectedParentDerivedId;
             parentType = 'derived';
         } else if (preselectedBaseGroupId) {
-            var bg = GT.datamodel.base_groups.get(preselectedBaseGroupId);
+            var bg = GT.datamodel.groups.get(preselectedBaseGroupId);
             parentLabel = bg ? (bg.name || bg.id) : preselectedBaseGroupId;
             parentType = 'base';
         }

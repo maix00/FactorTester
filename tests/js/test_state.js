@@ -21,11 +21,7 @@ function assertEquals(actual, expected, msg) {
 global.window = {
     GroupTest: {
         datamodel: {
-            base_groups: {
-                _items: {},
-                get: function(id) { return this._items[id] || null; },
-            },
-            derived_graph: {
+            groups: {
                 _items: {},
                 get: function(id) { return this._items[id] || null; },
             },
@@ -137,8 +133,8 @@ assertEquals(GT.state.getActiveLsConfigId(), 'ls_789', 'selection: lsConfigId se
 GT.state._resetAll();
 
 // Seed datamodel
-GT.datamodel.base_groups._items['bg_x'] = { id: 'bg_x', name: 'base_1' };
-GT.datamodel.derived_graph._items['dg_y'] = { id: 'dg_y', name: 'derived_1' };
+GT.datamodel.groups._items['bg_x'] = { id: 'bg_x', name: 'base_1' };
+GT.datamodel.groups._items['dg_y'] = { id: 'dg_y', name: 'derived_1' };
 GT.datamodel.ls_configs._items['ls_z'] = { id: 'ls_z', name: 'ls_1' };
 
 assertEquals(GT.state.getBaseGroup('bg_x'), { id: 'bg_x', name: 'base_1' }, 'lookup: getBaseGroup found');

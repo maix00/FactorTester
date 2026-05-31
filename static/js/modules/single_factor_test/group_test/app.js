@@ -1207,14 +1207,7 @@
         return (products || []).map(formatGroupProduct).join('、');
     }
 
-    function escapeHtml(value) {
-        return String(value == null ? '' : value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
+    function escapeHtml(value) { return GT.escapeHTML(value); }
 
     function fmtFeeRate(value) {
         if (value == null || isNaN(value) || !isFinite(value)) return '—';
@@ -2154,8 +2147,8 @@
         var end_date = null;
 
         // Try datamodel first
-        if (GT.datamodel && GT.datamodel.base_groups) {
-            var allBase = GT.datamodel.base_groups.getAll();
+        if (GT.datamodel && GT.datamodel.groups) {
+            var allBase = GT.datamodel.groups.getAll();
             if (allBase && allBase.length > 0) {
                 var bg = allBase[0];
                 n_groups = bg.groupCount || 5;
@@ -2865,15 +2858,15 @@
                 }
             }
 
-            // P8: Persist time range into base_groups datamodel
-            if (GT.datamodel && GT.datamodel.base_groups && (startDate || endDate)) {
-                var allBase = GT.datamodel.base_groups.getAll();
+            // P8: Persist time range into groups datamodel
+            if (GT.datamodel && GT.datamodel.groups && (startDate || endDate)) {
+                var allBase = GT.datamodel.groups.getAll();
                 allBase.forEach(function(bg) {
                     try {
                         var patch = {};
                         if (startDate) patch.startDate = startDate;
                         if (endDate) patch.endDate = endDate;
-                        GT.datamodel.base_groups.update(bg.id, patch);
+                        GT.datamodel.groups.update(bg.id, patch);
                     } catch (e) { /* skip */ }
                 });
             }
@@ -2892,7 +2885,7 @@
             if (src && dst && src.value) dst.value = src.value;
         });
 
-        // P8: Also persist time range into base_groups datamodel so group
+        // P8: Also persist time range into groups datamodel so group
         // definitions survive time-range changes (Issue #85 follow-up).
         var sy = document.getElementById('group_start_year');
         var sm = document.getElementById('group_start_month');
@@ -2903,14 +2896,14 @@
         var startDate = (sy && sm && sd) ? buildValidDate(sy.value, sm.value, sd.value) : null;
         var endDate = (ey && em && ed) ? buildValidDate(ey.value, em.value, ed.value) : null;
 
-        if (GT.datamodel && GT.datamodel.base_groups && (startDate || endDate)) {
-            var allBase = GT.datamodel.base_groups.getAll();
+        if (GT.datamodel && GT.datamodel.groups && (startDate || endDate)) {
+            var allBase = GT.datamodel.groups.getAll();
             allBase.forEach(function(bg) {
                 try {
                     var patch = {};
                     if (startDate) patch.startDate = startDate;
                     if (endDate) patch.endDate = endDate;
-                    GT.datamodel.base_groups.update(bg.id, patch);
+                    GT.datamodel.groups.update(bg.id, patch);
                 } catch (e) {
                     // Silently skip if update fails (e.g. validation)
                 }
@@ -3161,7 +3154,7 @@
                 }
                 // Resolve baseGroupId from parent derived node if not set directly
                 if (!baseGroupId && parentDerivedId) {
-                    var pNode = GT.datamodel.base_groups && GT.datamodel.base_groups.get(parentDerivedId);
+                    var pNode = GT.datamodel.groups && GT.datamodel.groups.get(parentDerivedId);
                     if (pNode && pNode.isDerived) {
                         baseGroupId = pNode.baseGroupId;
                     }
@@ -3182,6 +3175,7 @@
 
                 var config = {
                     name: '派生组',
+                    isDerived: true,
                     baseGroupId: baseGroupId,
                     productMask: productMask,
                 };
@@ -3190,7 +3184,7 @@
                 }
 
                 try {
-                    GT.datamodel.derived_graph.add(config);
+                    GT.datamodel.groups.add(config);
                 } catch (err) {
                     alert('创建派生组失败: ' + (err && err.message || err));
                     return;
@@ -3199,12 +3193,15 @@
             }
 
             function _submitAddLSGroup() {
-                // Delegate to the unified list panel
-                var listPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
-                if (listPanel && listPanel.panel && typeof listPanel.panel._openLSForm === 'function') {
-                    listPanel.panel._openLSForm();
+                var lsPanel = GT.panels.add && GT.panels.add.ls;
+                if (lsPanel && typeof lsPanel.handleSave === 'function') {
+                    var result = lsPanel.handleSave();
+                    if (result.success) {
+                        _exitAddMode();
+                    } else if (result.error) {
+                        alert('创建 LS 组失败: ' + result.error);
+                    }
                 }
-                _exitAddMode();
             }
 
             function _enterEditMode(selection) {
@@ -3291,9 +3288,9 @@
                 var selectedId = selIds[0];
 
                 // Determine if the selection is a base group or a derived group
-                // (Both are in base_groups, distinguished by isDerived flag)
+                // (Both are in groups, distinguished by isDerived flag)
                 var draft = { addFlow: 'derived' };
-                var sg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(selectedId);
+                var sg = GT.datamodel.groups && GT.datamodel.groups.get(selectedId);
                 if (sg && sg.isDerived) {
                     // It's a derived group → use as parent
                     draft.preselectedParentDerivedId = selectedId;
@@ -3759,45 +3756,25 @@
         var bus = window._submissionBus;
         if (!bus) return;
 
-        // React to tester deletion: clean up base_groups, derived_graph, ls_configs, caches
+        // React to tester deletion: clean up groups, ls_configs, registrations, caches
         bus.on(bus.EVENTS.REMOVED, function(data) {
             if (!data || !data.id_time) return;
             var removedTesterId = String(data.id_time);
 
-            // 1) Remove base_groups referencing this tester
-            if (GT.datamodel && GT.datamodel.base_groups) {
-                var allBase = GT.datamodel.base_groups.getAll();
-                allBase.forEach(function(bg) {
-                    if (String(bg.testerId) === removedTesterId) {
+            // 1) Remove all groups referencing this tester (base + derived via cascade)
+            if (GT.datamodel && GT.datamodel.groups) {
+                var allGroups = GT.datamodel.groups.getAll();
+                // First pass: remove all groups (base or derived) that reference this tester
+                for (var gi = 0; gi < allGroups.length; gi++) {
+                    var g = allGroups[gi];
+                    if (String(g.testerId) === removedTesterId) {
                         try {
-                            GT.datamodel.base_groups.remove(bg.id);
+                            GT.datamodel.groups.remove(g.id); // cascades to descendants
                         } catch(e) {
-                            console.warn('[group_test/bus] Failed to remove base_group:', bg.id, e);
+                            console.warn('[group_test/bus] Failed to remove group:', g.id, e);
                         }
                     }
-                });
-            }
-
-            // 2) Remove derived_graph nodes referencing removed base_groups
-            if (GT.datamodel && GT.datamodel.derived_graph) {
-                var allDerived = GT.datamodel.derived_graph.getAll();
-                allDerived.forEach(function(dg) {
-                    // Remove if baseGroupId points to a now-deleted base group
-                    var baseStillExists = false;
-                    if (GT.datamodel.base_groups) {
-                        var remaining = GT.datamodel.base_groups.getAll();
-                        baseStillExists = remaining.some(function(bg) {
-                            return String(bg.id) === String(dg.baseGroupId);
-                        });
-                    }
-                    if (!baseStillExists) {
-                        try {
-                            GT.datamodel.derived_graph.remove(dg.id);
-                        } catch(e) {
-                            console.warn('[group_test/bus] Failed to remove derived_graph node:', dg.id, e);
-                        }
-                    }
-                });
+                }
             }
 
             // 3) Clear ls_configs (these are tester-scoped)
@@ -3847,17 +3824,16 @@
     // global_template_module.js can push legacy DOM/state into GT.datamodel
     // before calling GT.datamodel.settings.snapshot() during template save.
     GT.ui.syncLegacyStateToDatamodel = function() {
-        if (!GT.datamodel || !GT.datamodel.base_groups || !GT.datamodel.derived_graph ||
+        if (!GT.datamodel || !GT.datamodel.groups ||
             !GT.datamodel.ls_configs || !GT.datamodel.registrations) {
             return false;
         }
         try {
-            GT.datamodel.base_groups._reset();
-            GT.datamodel.derived_graph._reset();
+            GT.datamodel.groups._reset();
             GT.datamodel.ls_configs._reset();
             GT.datamodel.registrations._reset();
 
-            // Sync legacy _derivedGroups → datamodel.derived_graph
+            // Sync legacy _derivedGroups → datamodel.groups (unified storage)
             if (_derivedGroups && _derivedGroups.length > 0) {
                 // Sort: base-only first (no parent or parent==='0'), then by id
                 var sortedDerived = _derivedGroups.slice().sort(function(a, b) {
@@ -3870,8 +3846,9 @@
                 sortedDerived.forEach(function(dg) {
                     var parentId = (!dg.parent || dg.parent === '0') ? null : dg.parent;
                     try {
-                        GT.datamodel.derived_graph.add({
+                        GT.datamodel.groups.add({
                             name: dg.name || ('Group ' + dg.id),
+                            isDerived: true,
                             parentId: parentId,
                             baseGroupId: dg.baseGroup,
                             productMask: dg.productMask,

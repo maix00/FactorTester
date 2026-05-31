@@ -1,7 +1,7 @@
 /**
  * derived_graph.js — Derived group compatibility wrapper
  *
- * ALL storage is unified in GT.datamodel.base_groups.
+ * ALL storage is unified in GT.datamodel.groups.
  * This file is a thin forwarding layer:
  *   - add() → base_groups.add({...config, isDerived:true})
  *   - get/getAll/update/remove → delegate to base_groups
@@ -11,7 +11,7 @@
  * All groups (base + derived) share one ID space (bg_*),
  * distinguished by isDerived:true and parentId.
  *
- * Depends on: GT.datamodel.base_groups (must load first).
+ * Depends on: GT.datamodel.groups (must load first).
  */
 
 (function() {
@@ -19,7 +19,7 @@
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.datamodel) { GT.datamodel = {}; }
 
-    var bg = GT.datamodel.base_groups;
+    var bg = GT.datamodel.groups;
     if (!bg) throw new Error('base_groups must be loaded before derived_graph');
 
     // ---------------------------------------------------------------------------
