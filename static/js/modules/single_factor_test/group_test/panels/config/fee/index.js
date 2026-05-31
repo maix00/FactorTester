@@ -41,8 +41,8 @@
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data && data.success && Array.isArray(data.data)) {
-                _feeTableData = data.data;
+            if (data && data.success && Array.isArray(data.rows)) {
+                _feeTableData = data.rows;
             } else {
                 console.warn('Fee table fetch returned unexpected format');
             }
