@@ -2737,12 +2737,51 @@
                 completedCount++;
             }
 
-            // ── 4. 展示最后一个结果 ──
-            var lastBatch = batches[batches.length - 1];
-            var lastResult = allResults[lastBatch.key];
-            if (lastResult) {
-                applyGroupTestResult(lastResult);
+            // ── 4. 合并所有 batch 的结果，一次性展示 ──
+            var mergedGroups = [];
+            var mergedMetrics = {};
+            var allTimestamps = [];
+            var lastNgroups = 0;
+            var lastMultiSession = false;
+            var lastRebalance = '';
+            var lastStructureKey = '';
+
+            for (var mi = 0; mi < batches.length; mi++) {
+                var bKey = batches[mi].key;
+                var result = allResults[bKey];
+                if (!result) continue;
+                if (result.groups) {
+                    mergedGroups = mergedGroups.concat(result.groups);
+                }
+                if (result.metrics) {
+                    for (var mk in result.metrics) {
+                        if (result.metrics.hasOwnProperty(mk)) {
+                            mergedMetrics[mk] = result.metrics[mk];
+                        }
+                    }
+                }
+                if (result.groups && result.groups.length > 0 && result.groups[0].timestamps) {
+                    allTimestamps = result.groups[0].timestamps;
+                }
+                lastNgroups = result.n_groups || lastNgroups;
+                lastMultiSession = result.multi_session_active || lastMultiSession;
+                lastRebalance = result.rebalance_mode || lastRebalance;
+                lastStructureKey = result.structure_key || lastStructureKey;
             }
+
+            // 构建合并后的 data 对象用于 applyGroupTestResult
+            var mergedData = {
+                success: true,
+                groups: mergedGroups,
+                metrics: mergedMetrics,
+                n_groups: lastNgroups,
+                submission_id: batches[0] && batches[0].testerId || '',
+                factor_alias: batches[0] && batches[0].factorAlias || '',
+                multi_session_active: lastMultiSession,
+                rebalance_mode: lastRebalance,
+                structure_key: lastStructureKey
+            };
+            applyGroupTestResult(mergedData);
 
             if (statusSpan) {
                 statusSpan.innerHTML = '✓ ' + batches.length + ' 个批次分组测试完成';
