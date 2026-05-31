@@ -142,16 +142,14 @@
                     }
                 }
 
-                // 1) Factor alias — derived inherits from base
-                var factorAlias = g.factorAlias;
-                if (!factorAlias && bg) factorAlias = bg.factorAlias;
+                // 1) Factor alias — derived always inherits from base
+                var factorAlias = g.isDerived && bg ? bg.factorAlias : g.factorAlias;
                 if (factorAlias) {
                     chips.push({ label: 'factor', html: factorAlias, style: CHIP_STYLE_PLAIN });
                 }
 
-                // 2) Tester label — derived inherits from base
-                var testerId = g.testerId;
-                if (!testerId && bg) testerId = bg.testerId;
+                // 2) Tester label — derived always inherits from base
+                var testerId = g.isDerived && bg ? bg.testerId : g.testerId;
                 if (testerId) {
                     var label = _resolveTesterLabel(testerId);
                     if (label) {
@@ -159,12 +157,14 @@
                     }
                 }
 
-                // 3) Group index / count — derived inherits from base
-                var groupCount = g.groupCount;
-                var groupIndex = g.groupIndex;
-                if (!groupCount && bg) {
+                // 3) Group index / count — derived always inherits from base
+                var groupCount, groupIndex;
+                if (g.isDerived && bg) {
                     groupCount = bg.groupCount;
                     groupIndex = bg.groupIndex;
+                } else {
+                    groupCount = g.groupCount;
+                    groupIndex = g.groupIndex;
                 }
                 if (groupCount) {
                     var gi = groupIndex || 1;
