@@ -149,6 +149,11 @@
     /** Stage a value into the dirty workspace (without persisting). */
     function setDirty(key, value) {
         _dirty[key] = value;
+        // Notify tab status to update if in edit mode
+        var GT = window.GroupTest;
+        if (GT && GT.ui && typeof GT.ui.renderTabActions === 'function') {
+            GT.ui.renderTabActions();
+        }
     }
 
     /** Get a value from the dirty workspace, falling back to the group. */
@@ -166,6 +171,11 @@
     /** Discard all staged changes. */
     function rollbackDirty() {
         _dirty = {};
+        // Notify tab status to update
+        var GT = window.GroupTest;
+        if (GT && GT.ui && typeof GT.ui.renderTabActions === 'function') {
+            GT.ui.renderTabActions();
+        }
     }
 
     /**
@@ -176,6 +186,11 @@
         if (!hasDirty()) return false;
         savePatch(_dirty);
         _dirty = {};
+        // Notify tab status to update
+        var GT = window.GroupTest;
+        if (GT && GT.ui && typeof GT.ui.renderTabActions === 'function') {
+            GT.ui.renderTabActions();
+        }
         return true;
     }
 
