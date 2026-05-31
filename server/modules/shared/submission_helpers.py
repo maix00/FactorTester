@@ -6,6 +6,7 @@ import server.services.runtime_state as runtime_state
 from server.modules.products.product_path_selection import resolve_selection_products
 from server.services.runtime_state import factor_testers_lock
 from server.services.product_tree import tree
+from tools.products.Futures import FuturesContract
 
 
 def tester_to_dict(t):
@@ -14,9 +15,14 @@ def tester_to_dict(t):
     products_list = []
     if hasattr(t, 'products') and t.products:
         for p in t.products:
+            prod_desc = getattr(p, 'desc', '') or ''
+            # FuturesContract 通常无 desc，继承父品种描述（与 /get_products 保持一致）
+            if not prod_desc and isinstance(p, FuturesContract):
+                from tools.products.product_utils import get_contract_desc
+                prod_desc = get_contract_desc(getattr(p, 'name', str(p))) or ''
             products_list.append({
                 'name': getattr(p, 'name', str(p)),
-                'desc': getattr(p, 'desc', '') or '',
+                'desc': prod_desc,
             })
     return {
         'id':                   core_id,

@@ -391,6 +391,8 @@
             var comboKey = _batchKey(testerId, alias, groupCount);
             var letter = comboLetters[comboKey] || 'A';
 
+            var feeMode = draft.feeMode || 'none';
+            var feeMap = (feeMode === 'per_product' || feeMode === 'custom') ? {} : null;
             if (allGroups) {
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
@@ -403,7 +405,8 @@
                             groupCount: groupCount,
                             groupIndex: gi,
                             isAllGroups: false,
-                            feeMode: draft.feeMode || 'none',
+                            feeMode: feeMode,
+                            feeMap: feeMap,
                             rebalanceMode: draft.rebalanceMode || 'each_period',
                         });
                         added++;
@@ -420,7 +423,8 @@
                         groupCount: groupCount,
                         groupIndex: groupIndex,
                         isAllGroups: false,
-                        feeMode: draft.feeMode || 'none',
+                        feeMode: feeMode,
+                        feeMap: feeMap,
                         rebalanceMode: draft.rebalanceMode || 'each_period',
                     });
                     added++;

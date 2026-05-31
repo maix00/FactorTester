@@ -3018,6 +3018,9 @@
                     } else if (_editSelection && Array.isArray(_editSelection)) {
                         selCount = _editSelection.length;
                         selIds = _editSelection;
+                    } else if (_editSelection && typeof _editSelection === 'object') {
+                        selIds = Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
+                        selCount = selIds.length;
                     }
                     if (selCount === 1) {
                         html += '<button id="gt-action-create-derived-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">🌳 创建派生组</button>';
@@ -3166,6 +3169,7 @@
                 _editSelection = null;
                 GT.state.setActiveBaseGroupId(null);
                 GT.state.setActiveDerivedNodeId(null);
+                GT.state.emit('editModeExited');
                 _renderTabActions();
                 // Refresh tab bar back to list-only
                 if (tabBtnsBar) {
@@ -3196,8 +3200,12 @@
                 var selIds;
                 if (_editSelection && _editSelection instanceof Set) {
                     selIds = Array.from(_editSelection);
+                } else if (_editSelection && Array.isArray(_editSelection)) {
+                    selIds = _editSelection;
+                } else if (_editSelection && typeof _editSelection === 'object') {
+                    selIds = Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
                 } else {
-                    selIds = _editSelection || [];
+                    selIds = [];
                 }
                 if (selIds.length !== 1) {
                     alert('请选择 1 个基础组来创建派生组');
@@ -3221,8 +3229,12 @@
                 var selIds;
                 if (_editSelection && _editSelection instanceof Set) {
                     selIds = Array.from(_editSelection);
+                } else if (_editSelection && Array.isArray(_editSelection)) {
+                    selIds = _editSelection;
+                } else if (_editSelection && typeof _editSelection === 'object') {
+                    selIds = Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
                 } else {
-                    selIds = _editSelection || [];
+                    selIds = [];
                 }
                 if (selIds.length < 2) {
                     alert('请至少选择 2 个基础组来创建 Long-Short 组');
@@ -3293,6 +3305,13 @@
                 var visibleList = GT_PANEL_REGISTRY.filter(function(p) {
                     return visibleCategories.indexOf(p.category) >= 0;
                 });
+
+                // In add mode, only show ADD tabs matching the current addFlow
+                if (_panelMode === 'add' && _addDraft && _addDraft.addFlow) {
+                    visibleList = visibleList.filter(function(p) {
+                        return p.category !== A || p.addFlow === _addDraft.addFlow;
+                    });
+                }
 
                 // Find the entry to mount: same as visibleList but in add mode
                 // only mount ADD panels whose name matches the requested add-flow

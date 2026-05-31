@@ -79,6 +79,7 @@
                 merged.product_group = s.product_group || merged.product_group || '';
                 merged.selected_paths = s.selected_paths;
                 merged.paths = s.selected_paths || merged.paths;
+                merged.products = s.products || merged.products || [];
                 return merged;
             }
             // 新提交：用后端 selected_paths 作为 paths
@@ -92,6 +93,7 @@
                 label: s.label || '',
                 product_count: s.product_count,
                 product_group: s.product_group || '',
+                products: s.products || [],
                 count_desc: s.product_count + ' 个产品',
                 timestamp: new Date().toLocaleTimeString(),
                 start_date: '',

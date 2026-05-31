@@ -32,10 +32,13 @@
     var _mounted = false;
 
     /** Multi-select: set of selected base-group IDs */
-    var _selectedIds = [];
+    var _selectedIds = {};
 
     /** Batch expand/collapse */
     var _expandedBatches = {};
+
+    /** Batch lookup by key (populated on render) */
+    var _batchMap = {};
 
     /** Derived tree collapse state */
     var _collapsedIds = {};
@@ -275,18 +278,18 @@
 
     /** Group base items into batches */
     function _buildBatches(items) {
-        var batchMap = {};
+        _batchMap = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             var key = _batchKey(item.testerId, item.factorAlias, item.groupCount);
-            if (!batchMap[key]) {
-                batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
+            if (!_batchMap[key]) {
+                _batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
             }
-            batchMap[key].items.push(item);
+            _batchMap[key].items.push(item);
         }
-        var keys = Object.keys(batchMap).sort();
+        var keys = Object.keys(_batchMap).sort();
         var result = [];
-        for (var k = 0; k < keys.length; k++) { result.push(batchMap[keys[k]]); }
+        for (var k = 0; k < keys.length; k++) { result.push(_batchMap[keys[k]]); }
         return result;
     }
 
@@ -416,13 +419,13 @@
         var items = GT.datamodel.base_groups.getAll();
         if (items.length === 0) {
             return '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">'
-                + '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 基础组</span></div>'
-                + '<div style="padding:16px;text-align:center;color:#888;font-size:12px;">暂无基础组</div>';
+                + '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span></div>'
+                + '<div style="padding:16px;text-align:center;color:#888;font-size:12px;">暂无分组组合</div>';
         }
         var batches = _buildBatches(items);
         var h = '';
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">';
-        h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 基础组</span>';
+        h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span>';
         h += '<span style="font-size:11px;color:#666;">' + items.length + ' 个组 / ' + batches.length + ' 批</span>';
         h += '</div>';
 
@@ -443,8 +446,9 @@
 
             // Batch header
             var testerLabel = _testerLabel(batch.testerId);
-            h += '<div class="unified-batch-header" data-batch-key="' + escapeHTML(batchId) + '" style="display:flex;align-items:center;padding:6px 8px;margin-top:4px;background:#f1f5f9;border-radius:6px;cursor:pointer;font-size:13px;">';
-            h += '<span style="margin-right:6px;width:16px;text-align:center;">' + (isExpanded ? '▾' : '▸') + '</span>';
+            var batchAllSelected = batch.items.every(function(bg) { return _selectedIds[bg.id]; });
+            h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="display:flex;align-items:center;padding:6px 8px;margin-top:4px;background:#f1f5f9;border-radius:6px;cursor:pointer;font-size:13px;">';
+            h += '<span class="unified-batch-expand" style="margin-right:6px;width:16px;text-align:center;cursor:pointer;">' + (isExpanded ? '▾' : '▸') + '</span>';
             h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;">';
             if (batchLetter) {
                 h += '<span style="font-weight:700;color:#4338ca;min-width:24px;">' + escapeHTML(batchLetter) + '</span>';
@@ -459,7 +463,7 @@
                 h += '<div class="unified-batch-body" style="margin-left:16px;border-left:2px solid #e2e8f0;padding-left:8px;">';
                 for (var ri = 0; ri < batch.items.length; ri++) {
                     var bg = batch.items[ri];
-                    var bgSelected = _selectedIds.indexOf(bg.id) >= 0;
+                    var bgSelected = !!_selectedIds[bg.id];
                     var bgActive = bg.id === (GT.state && GT.state.getActiveBaseGroupId && GT.state.getActiveBaseGroupId());
 
                     h += '<div class="unified-bg-row" data-bg-id="' + escapeHTML(bg.id) + '" style="display:flex;align-items:center;padding:4px 6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgActive ? 'background:#eef2ff;' : '') + (bgSelected ? 'outline:2px solid #6366f1;outline-offset:-1px;' : '') + '">';
@@ -474,13 +478,23 @@
                     h += '<span style="color:#888;margin:0 8px;">·</span>';
                     h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + CHIP_STYLE + '">' + _testerLabel(bg.testerId) + '</span>';
                     h += '<span style="flex:1;"></span>';
-                    // Config chips (same pattern as derived node chips)
+                    // Config chips — only show non-empty/non-none values
                     var bgRebalance = _rebalanceLabel(bg.rebalanceMode);
+                    if (bgRebalance && bgRebalance !== '—' && bgRebalance !== '无') {
+                        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(bgRebalance) + '</span>';
+                    }
                     var bgCloseToday = _closeTodayLabel(bg.feeMode, bg.useCloseToday);
-                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(bgRebalance) + '</span>';
-                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(bgCloseToday) + '</span>';
-                    // Fee chip (clickable)
-                    h += '<span class="unified-fee-chip" data-gid="' + escapeHTML(bg.id) + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
+                    if (bgCloseToday && bgCloseToday !== '—') {
+                        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(bgCloseToday) + '</span>';
+                    }
+                    // Fee chip: hide when none, show value as plain when fixed/uniform, otherwise clickable
+                    if (bg.feeMode && bg.feeMode !== 'none') {
+                        if (bg.feeMode === 'fixed' || bg.feeMode === 'uniform') {
+                            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
+                        } else {
+                            h += '<span class="unified-fee-chip" data-gid="' + escapeHTML(bg.id) + '" data-fee-mode="' + escapeHTML(bg.feeMode || '') + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
+                        }
+                    }
                     h += '<span style="width:8px;"></span>';
                     h += '<span style="font-size:11px;color:#888;">' + (bg.groupCount || '') + '</span>';
                     h += '</div>';
@@ -570,7 +584,8 @@
         var testerLabel = _derivedTesterLabel(node);
         var badge = _nodeBadge(node);
         var products = _nodeProducts(node);
-        var prodText = products.length > 0 ? products.map(function(p) { return p.name; }).join(', ') : '—';
+        var derivedFeeMode = 'none';
+        try { derivedFeeMode = GT.datamodel.fee_strategy.resolveFee(node.id).mode; } catch(e) {}
 
         var rowStyle = isActive ? 'background:#eef2ff;' : (depth % 2 === 0 ? 'background:#fafafa;' : '');
 
@@ -595,16 +610,33 @@
         }
         h += '<span style="flex:1;"></span>';
         h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(node.testerId) + '" style="' + CHIP_STYLE + 'margin-right:8px;">' + escapeHTML(testerLabel) + '</span>';
-        h += '<span class="unified-fee-chip" data-dgid="' + escapeHTML(node.id) + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + escapeHTML(feeLabel) + '</span>';
-        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(rebalanceLabel) + '</span>';
-        h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(closeTodayLabel) + '</span>';
+        if (derivedFeeMode && derivedFeeMode !== 'none') {
+            if (derivedFeeMode === 'fixed' || derivedFeeMode === 'uniform') {
+                h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">💰 ' + escapeHTML(feeLabel) + '</span>';
+            } else {
+                h += '<span class="unified-fee-chip" data-dgid="' + escapeHTML(node.id) + '" data-fee-mode="' + escapeHTML(derivedFeeMode || '') + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + escapeHTML(feeLabel) + '</span>';
+            }
+        }
+        if (rebalanceLabel && rebalanceLabel !== '—' && rebalanceLabel !== '无') {
+            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(rebalanceLabel) + '</span>';
+        }
+        if (closeTodayLabel && closeTodayLabel !== '—') {
+            h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(closeTodayLabel) + '</span>';
+        }
         h += '<button class="unified-dg-add-child-btn" data-dg-id="' + escapeHTML(node.id) + '" style="padding:1px 5px;font-size:10px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;">＋子</button>';
         h += '<button class="unified-dg-edit-btn" data-dg-id="' + escapeHTML(node.id) + '" style="margin-left:2px;padding:1px 5px;font-size:10px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">✏️</button>';
         h += '<button class="unified-dg-del-btn" data-dg-id="' + escapeHTML(node.id) + '" style="margin-left:2px;padding:1px 5px;font-size:10px;border:1px solid #d0d5dd;border-radius:3px;background:#fff;cursor:pointer;">🗑️</button>';
         h += '</div>';
 
-        // product sub-row
-        h += '<div style="margin-left:' + (indent + 16) + 'px;font-size:11px;color:#6b7280;padding:2px 4px;">品种：' + escapeHTML(prodText) + '</div>';
+        // product sub-row (clickable product names)
+        h += '<div style="margin-left:' + (indent + 16) + 'px;font-size:11px;color:#6b7280;padding:2px 4px;">品种：';
+        for (var pi = 0; pi < products.length; pi++) {
+            if (pi > 0) h += ', ';
+            var pn = products[pi].name;
+            h += '<a href="/price_viewer?product=' + encodeURIComponent(pn) + '" target="_blank" style="color:#0078d4;text-decoration:none;font-weight:600;" onclick="event.stopPropagation();">' + escapeHTML(pn) + '</a>';
+        }
+        if (products.length === 0) h += '—';
+        h += '</div>';
 
         // children
         if (isExp && hasKids) {
@@ -763,6 +795,7 @@
         GT.state.on('activeDerivedNodeChanged', rerender);
         GT.state.on('activeLSConfigChanged', rerender);
         GT.state.on('feeStrategyChanged', rerender);
+        GT.state.on('editModeExited', function() { _selectedIds = {}; rerender(); });
 
         _self._unbind = function() {
             GT.state.off('lsConfigsChanged', rerender);
@@ -772,6 +805,7 @@
             GT.state.off('activeDerivedNodeChanged', rerender);
             GT.state.off('activeLSConfigChanged', rerender);
             GT.state.off('feeStrategyChanged', rerender);
+            GT.state.off('editModeExited', rerender);
         };
     };
 
@@ -818,9 +852,31 @@
             header.addEventListener('click', function(e) {
                 if (e.target.closest('button')) return;
                 var key = this.getAttribute('data-batch-key');
-                _expandedBatches[key] = !_expandedBatches[key];
-                // re-render — trigger baseGroupsChanged
-                GT.state.emit('baseGroupsChanged');
+                // Expand/collapse on clicking the expand icon
+                if (e.target.closest('.unified-batch-expand')) {
+                    _expandedBatches[key] = !_expandedBatches[key];
+                    GT.state.emit('baseGroupsChanged');
+                    return;
+                }
+                // Toggle all items in this batch
+                var batch = _batchMap[key];
+                if (!batch) return;
+                var allSelected = true;
+                for (var bi = 0; bi < batch.items.length; bi++) {
+                    if (!_selectedIds[batch.items[bi].id]) { allSelected = false; break; }
+                }
+                var newSelect = !allSelected;
+                for (var bi2 = 0; bi2 < batch.items.length; bi2++) {
+                    if (newSelect) { _selectedIds[batch.items[bi2].id] = true; }
+                    else { delete _selectedIds[batch.items[bi2].id]; }
+                }
+                // Sync to app edit mode
+                var selCount = Object.keys(_selectedIds).length;
+                if (selCount > 0) {
+                    if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
+                } else {
+                    if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
+                }
             });
         });
 
@@ -830,11 +886,11 @@
                 if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
                 var id = this.getAttribute('data-bg-id');
                 // multi-select: toggle
-                var idx = _selectedIds.indexOf(id);
-                if (idx >= 0) { _selectedIds.splice(idx, 1); }
-                else { _selectedIds.push(id); }
+                if (_selectedIds[id]) { delete _selectedIds[id]; }
+                else { _selectedIds[id] = true; }
                 // Enter edit mode if any selected, otherwise back to list mode
-                if (_selectedIds.length > 0) {
+                var selCount = Object.keys(_selectedIds).length;
+                if (selCount > 0) {
                     if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
                 } else {
                     if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
@@ -848,9 +904,21 @@
             chip.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var gid = this.getAttribute('data-gid');
+                var feeMode = this.getAttribute('data-fee-mode') || '';
                 GT.state.setActiveBaseGroupId(gid);
-                // switch to fee panel if available
-                if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
+                // Per-product or custom: show fee table overlay filtered by tester products
+                if ((feeMode === 'per_product' || feeMode === 'custom') && GT.overlays && GT.overlays.feeTable) {
+                    var group = GT.datamodel.base_groups.get(gid);
+                    var groupName = (group && group.name) ? group.name : ('#' + gid);
+                    // Collect product codes for this group's tester
+                    var testerId = group ? group.testerId : null;
+                    var products = testerId ? _testerProducts(testerId) : [];
+                    var productCodes = products.map(function(p) { return p.name; });
+                    GT.overlays.feeTable.open(groupName, productCodes);
+                } else {
+                    // Uniform or fixed: navigate to fee tab
+                    if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
+                }
             });
         });
 
@@ -859,8 +927,20 @@
             chip.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var dgid = this.getAttribute('data-dgid');
+                var feeMode = this.getAttribute('data-fee-mode') || '';
                 GT.state.setActiveDerivedNodeId(dgid);
-                if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
+                if ((feeMode === 'per_product' || feeMode === 'custom') && GT.overlays && GT.overlays.feeTable) {
+                    var nodeDesc = dgid;
+                    if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get) {
+                        var node = GT.datamodel.derived_graph.get(dgid);
+                        if (node && node.label) nodeDesc = node.label;
+                    }
+                    var nodeProducts = _nodeProducts(GT.datamodel.derived_graph.get(dgid));
+                    var productCodes = nodeProducts.map(function(p) { return p.name; });
+                    GT.overlays.feeTable.open(nodeDesc, productCodes);
+                } else {
+                    if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
+                }
             });
         });
 
