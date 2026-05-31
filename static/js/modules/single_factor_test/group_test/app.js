@@ -2428,16 +2428,14 @@
             for (var si = 0; si < submissions.length; si++) {
                 var sub = submissions[si];
                 var testerId = String(sub.id);
+                var testerFactorIdx = 0;
                 for (var fi = 0; fi < factorList.length; fi++) {
                     var factor = factorList[fi];
                     var factorAlias = factor.alias || factor.name || '';
 
-                    // Get existing shortAliases for this tester to compute letter prefix
-                    var existingForTester = (groups.getAll() || []).filter(function(g) {
-                        return !g.isDerived && g.testerId === testerId;
-                    });
-                    var nextLetterIndex = existingForTester.length;
-                    var letter = String.fromCharCode(65 + nextLetterIndex); // A, B, C, ...
+                    // Letter prefix: A, B, C, ... per factor within this tester
+                    var letter = String.fromCharCode(65 + testerFactorIdx);
+                    testerFactorIdx++;
 
                     // Create 5 base groups (groupIndex 1-5) for this factor
                     var createdIds = [];
