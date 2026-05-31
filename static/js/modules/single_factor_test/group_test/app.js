@@ -2423,19 +2423,19 @@
 
         var GROUPS_PER_FACTOR = 5;
         var totalCreated = 0;
+        var globalLetterIdx = 0; // cross all testers, so A/B/C... never repeat
 
         try {
             for (var si = 0; si < submissions.length; si++) {
                 var sub = submissions[si];
                 var testerId = String(sub.id);
-                var testerFactorIdx = 0;
                 for (var fi = 0; fi < factorList.length; fi++) {
                     var factor = factorList[fi];
                     var factorAlias = factor.alias || factor.name || '';
 
-                    // Letter prefix: A, B, C, ... per factor within this tester
-                    var letter = String.fromCharCode(65 + testerFactorIdx);
-                    testerFactorIdx++;
+                    // Letter prefix: globally unique across all testers
+                    var letter = String.fromCharCode(65 + globalLetterIdx);
+                    globalLetterIdx++;
 
                     // Create 5 base groups (groupIndex 1-5) for this factor
                     var createdIds = [];
