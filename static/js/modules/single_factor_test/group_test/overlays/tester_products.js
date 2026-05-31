@@ -2,7 +2,7 @@
  * overlays/tester_products.js — Tester product list overlay
  *
  * Clicking a tester link opens a centered overlay showing all products
- * with their descriptions. Each product name links to the price viewer.
+ * with their descriptions.
  */
 (function() {
     var GT = window.GroupTest;
@@ -39,11 +39,6 @@
 
         document.body.appendChild(overlay);
         return overlay;
-    }
-
-    function buildPriceViewerUrl(productName) {
-        // Navigate to products page with product name as param
-        return '/products?product=' + encodeURIComponent(productName);
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
