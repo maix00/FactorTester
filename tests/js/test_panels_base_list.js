@@ -131,6 +131,14 @@ global.window = {
     GroupTest: {
         datamodel: {
             base_groups: {
+                batchKey: function(testerId, factorAlias, groupCount) {
+                    return String(testerId) + '|' + factorAlias + '|' + groupCount;
+                },
+                extractLetter: function(shortAlias) {
+                    if (!shortAlias) return null;
+                    var m = shortAlias.match(/^([A-Z]+)/);
+                    return m ? m[1] : null;
+                },
                 getAll: function() { return JSON.parse(JSON.stringify(mockBG)); },
                 get: function(id) {
                     for (var i = 0; i < mockBG.length; i++) {
@@ -181,6 +189,25 @@ global.window = {
         panels: {},
         log: function() {},
     },
+    GT_CONFIG_REGISTRY: {
+        _items: {},
+        register: function(def, containerId) {
+            this._items[def.name] = { def: def, containerId: containerId };
+        },
+        getAll: function() { return Object.values(this._items); },
+        getTableColumns: function() {
+            var cols = [];
+            Object.values(this._items).forEach(function(entry) {
+                if (entry.def.panel && entry.def.panel.getTableColumns) {
+                    cols = cols.concat(entry.def.panel.getTableColumns());
+                }
+            });
+            return cols;
+        },
+        toPanelEntry: function(name, label, containerId) {
+            return { name: name, label: label, containerId: containerId, category: 3, panel: this._items[name].def.panel };
+        },
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -214,34 +241,42 @@ var el = _domElements['base-groups-list'];
 assert(el._html.indexOf('暂无基础组') !== -1, 'render empty: shows empty message');
 
 // ---------------------------------------------------------------------------
-// 3. render — with data
+// 3. render — with data (single-group batches = numeric alias, no expand arrow)
 // ---------------------------------------------------------------------------
 
 resetAll();
 mockBG = [
-    { id: 'bg_1', name: 'Group A', testerId: 't1', factorAlias: 'factor_a', groupCount: 5, groupIndex: 0, isAllGroups: false },
-    { id: 'bg_2', name: 'Group B', testerId: 't2', factorAlias: 'factor_b', groupCount: 3, groupIndex: 1, isAllGroups: true },
+    { id: 'bg_1', name: 'Group A', shortAlias: '1', testerId: 't1', factorAlias: 'factor_a', groupCount: 5, groupIndex: 1, isAllGroups: false, feeMode: 'none', rebalanceMode: 'each_period' },
+    { id: 'bg_2', name: 'Group B', shortAlias: '2', testerId: 't2', factorAlias: 'factor_b', groupCount: 3, groupIndex: 2, isAllGroups: false, feeMode: 'none', rebalanceMode: 'each_period' },
 ];
 
 var container = _makeContainer('base-groups-list');
 panel.render();
 var html = container._html;
-assert(html.indexOf('Group A') !== -1, 'render: shows Group A name');
-assert(html.indexOf('Group B') !== -1, 'render: shows Group B name');
+// New list shows shortAlias (numeric alias) and factor, not "name"
 assert(html.indexOf('factor_a') !== -1, 'render: shows factor_a');
+assert(html.indexOf('factor_b') !== -1, 'render: shows factor_b');
 assert(html.indexOf('t2') !== -1, 'render: shows testerId t2');
-assert(html.indexOf('data-bg-id="bg_1"') !== -1, 'render: has data-bg-id for bg_1');
-assert(html.indexOf('data-bg-id="bg_2"') !== -1, 'render: has data-bg-id for bg_2');
+// ShortAlias (numeric) appears in the alias cell
+assert(html.indexOf('>1<') !== -1 || html.indexOf('>1</') !== -1, 'render: shows shortAlias 1');
+assert(html.indexOf('>2<') !== -1 || html.indexOf('>2</') !== -1, 'render: shows shortAlias 2');
+// Group index/count
+assert(html.indexOf('1/5') !== -1, 'render: shows 1/5');
+assert(html.indexOf('2/3') !== -1, 'render: shows 2/3');
+// data-bg-id only on expanded child rows (single-group batches are not expanded)
+// Batch header has data-batch-key
+assert(html.indexOf('data-batch-key=') !== -1, 'render: has data-batch-key');
 
 // ---------------------------------------------------------------------------
 // 4. mount — sets up event handlers, renders
 // ---------------------------------------------------------------------------
 
 resetAll();
-mockBG = [{ id: 'bg_x', name: 'x1', testerId: 't', factorAlias: 'f', groupCount: 2, groupIndex: 0, isAllGroups: false }];
+mockBG = [{ id: 'bg_x', name: 'x1', shortAlias: '1', testerId: 't', factorAlias: 'f', groupCount: 2, groupIndex: 1, isAllGroups: false, feeMode: 'none', rebalanceMode: 'each_period' }];
 _makeContainer('base-groups-list');
 panel.mount();
-assert(_domElements['base-groups-list']._html.indexOf('x1') !== -1, 'mount: renders data');
+assert(_domElements['base-groups-list']._html.indexOf('factor_a') === -1, 'mount: no stale factor_a');
+assert(_domElements['base-groups-list']._html.indexOf('>f<') !== -1 || _domElements['base-groups-list']._html.indexOf('>f</') !== -1, 'mount: renders factor f');
 panel.unmount();
 
 // ---------------------------------------------------------------------------
@@ -254,9 +289,10 @@ panel.render();
 assert(_domElements['base-groups-list']._html.indexOf('暂无基础组') !== -1, 'initial: empty');
 
 // Add via mock
-mockBG.push({ id: 'bg_new', name: 'NewGroup', testerId: 't1', factorAlias: 'f1', groupCount: 3, groupIndex: 0, isAllGroups: false });
+mockBG.push({ id: 'bg_new', name: 'NewGroup', shortAlias: '1', testerId: 't1', factorAlias: 'f1', groupCount: 3, groupIndex: 1, isAllGroups: false, feeMode: 'none', rebalanceMode: 'each_period' });
 panel.render();
-assert(_domElements['base-groups-list']._html.indexOf('NewGroup') !== -1, 'after add: shows NewGroup');
+assert(_domElements['base-groups-list']._html.indexOf('f1') !== -1, 'after add: shows factor f1');
+assert(_domElements['base-groups-list']._html.indexOf('1/3') !== -1, 'after add: shows 1/3');
 
 // Remove
 mockBG = [];

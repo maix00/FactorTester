@@ -2523,14 +2523,20 @@
     var _longShortDefinitions = [defaultLongShortDefinition()];
     var _lastGroupStructureKey = null;
 
-    // ═══ P7: Panel registry — maps main-tab → list of sub-tab panels ═══
-    // Each entry: { name, label, containerId, panel }
+    // ═══ P7: Panel registry — unified flat tab list ═══
+    // Each entry: { name, label, containerId, category, panel, addFlow }
+    // - category: LIST (list view), CONFIG (settings), ADD (create flow)
+    // - addFlow: 'base' | 'derived' | 'ls' — which add button invokes this panel
     // Populated lazily after all panel scripts have loaded.
-    var GT_PANEL_REGISTRY = {
-        base: [],
-        derived: [],
-        ls: [],
+
+    // Tab category constants — used for mode-based visibility filtering.
+    var GT_TAB_CATEGORY = {
+        LIST: 1,    // list views
+        ADD: 2,     // add-flow panels (tester + factor selection)
+        CONFIG: 3,  // config panels (fee, rebalance, close_today)
     };
+
+    var GT_PANEL_REGISTRY = [];
 
     /** Call this after all panel scripts loaded to register panels. */
     var _panelsRegistered = false;
@@ -2540,50 +2546,30 @@
         var P = GT.panels;
         if (!P) return;
 
-        // Base tab panels
-        if (P.base && P.base.list) {
-            GT_PANEL_REGISTRY.base.push({ name: 'list', label: '基础组列表', containerId: 'base-groups-list', panel: P.base.list });
-        }
-        if (P.base && P.base.add_tester) {
-            GT_PANEL_REGISTRY.base.push({ name: 'add_tester', label: '测试器与分组数(序号)', containerId: 'base-add-tester', panel: P.base.add_tester });
-        }
-        if (P.base && P.base.add_factors) {
-            GT_PANEL_REGISTRY.base.push({ name: 'add_factors', label: '因子选择', containerId: 'base-add-factors', panel: P.base.add_factors });
-        }
-        if (P.base && P.base.fee) {
-            // fee panel now includes closeToday toggle (merged from close_today)
-            GT_PANEL_REGISTRY.base.push({ name: 'fee', label: '费率', containerId: 'base-fee-settings', panel: P.base.fee });
-        }
-        if (P.base && P.base.rebalance) {
-            GT_PANEL_REGISTRY.base.push({ name: 'rebalance', label: '再平衡', containerId: 'base-rebalance-settings', panel: P.base.rebalance });
+        // Unified list — shows base, derived, and LS groups together
+        if (P.unified && P.unified.list) {
+            GT_PANEL_REGISTRY.push({ name: 'list', label: '📊 分组列表', containerId: 'unified-group-list', category: GT_TAB_CATEGORY.LIST, panel: P.unified.list });
         }
 
-        // Derived tab panels
-        if (P.derived && P.derived.tree) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'tree', label: '派生树', containerId: 'derived-tree', panel: P.derived.tree });
-        }
-        if (P.derived && P.derived.fee) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'fee', label: '手续费', containerId: 'derived-fee-settings', panel: P.derived.fee });
-        }
-        if (P.derived && P.derived.close_today) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'close_today', label: '平今', containerId: 'derived-close-today', panel: P.derived.close_today });
-        }
-        if (P.derived && P.derived.rebalance) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'rebalance', label: '再平衡', containerId: 'derived-rebalance-settings', panel: P.derived.rebalance });
+        // Add-flow panels (invoked by the three action buttons)
+        if (P.base && P.base.add) {
+            GT_PANEL_REGISTRY.push({ name: 'add-base', label: '新建基础组', containerId: 'base-add', category: GT_TAB_CATEGORY.ADD, panel: P.base.add, addFlow: 'base' });
         }
         if (P.derived && P.derived.products) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'products', label: '产品', containerId: 'derived-products', panel: P.derived.products });
+            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '新建派生组', containerId: 'derived-products-panel', category: GT_TAB_CATEGORY.ADD, panel: P.derived.products, addFlow: 'derived' });
         }
-        if (P.derived && P.derived.summary) {
-            GT_PANEL_REGISTRY.derived.push({ name: 'summary', label: '摘要', containerId: 'derived-summary', panel: P.derived.summary });
+        // LS add — use existing LS editor as the add flow
+        if (P.ls && P.ls.editor) {
+            GT_PANEL_REGISTRY.push({ name: 'add-ls', label: '新建 LS 组', containerId: 'ls-editor', category: GT_TAB_CATEGORY.ADD, panel: P.ls.editor, addFlow: 'ls' });
         }
 
-        // LS tab panels
-        if (P.ls && P.ls.list) {
-            GT_PANEL_REGISTRY.ls.push({ name: 'list', label: 'LS 列表', containerId: 'ls-list', panel: P.ls.list });
+        // Config panels (shared across types)
+        // fee panel includes closeToday toggle (merged from close_today)
+        if (P.base && P.base.fee) {
+            GT_PANEL_REGISTRY.push({ name: 'fee', label: '💰 手续费与平今', containerId: 'base-fee-settings', category: GT_TAB_CATEGORY.CONFIG, panel: P.base.fee });
         }
-        if (P.ls && P.ls.editor) {
-            GT_PANEL_REGISTRY.ls.push({ name: 'editor', label: 'LS 编辑器', containerId: 'ls-editor', panel: P.ls.editor });
+        if (P.base && P.base.rebalance) {
+            GT_PANEL_REGISTRY.push({ name: 'rebalance', label: '⚖️ 再平衡', containerId: 'base-rebalance', category: GT_TAB_CATEGORY.CONFIG, panel: P.base.rebalance });
         }
 
         _panelsRegistered = true;
@@ -2993,90 +2979,120 @@
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', updateRebalanceModeDescription);
 
-        // P7: Wire main tab switching (base / derived / ls)
-        (function bindMainTabs() {
-            var mainTabs = document.querySelectorAll('#gt-main-tabs .gt-main-tab');
+        // P7: Wire unified tab bar (single-level, was sub-tabs)
+        (function bindUnifiedTabs() {
             var panelContainer = document.getElementById('gt-panel-container');
-            var subTabsBar = document.getElementById('gt-sub-tabs');
-            if (!mainTabs.length || !panelContainer) return;
+            var tabBtnsBar = document.getElementById('gt-tab-btns');
+            if (!panelContainer) return;
 
-            var _currentMainTab = 'base';
             var _currentPanel = null;
+            var _currentTab = 'list';
             /** Current panel mode: 'list' (default), 'add' (adding new groups), 'edit' (editing selection) */
             var _panelMode = 'list';
-            /** In add mode: { testerId, groupCount, allGroups (bool), groupIndex, selectedFactors:[alias] } */
+            /** In add mode: { testerId, groupCount, allGroups (bool), groupIndex, selectedFactors:[alias], addFlow:'base'|'derived'|'ls' } */
             var _addDraft = null;
-            /** In edit mode: Set of selected base-group IDs or batch keys */
+            /** In edit mode: Set of selected base-group IDs */
             var _editSelection = null;
 
-            // Separate refs: sub-tab buttons bar vs actions bar (both inside #gt-sub-tabs)
-            var _subTabBtnsBar = document.getElementById('gt-sub-tab-btns');
-            var _subTabActionsBar = document.getElementById('gt-sub-tab-actions');
-
-            /** Render the sub-tab action buttons based on current mode */
-            function _renderSubTabActions() {
-                if (!_subTabActionsBar) return;
+            /** Render the action bar buttons (three create buttons always show, mode-buttons replace them in add/edit) */
+            function _renderTabActions() {
+                var bar = document.getElementById('gt-tab-actions');
+                if (!bar) return;
                 var html = '';
                 if (_panelMode === 'add') {
-                    html += '<button id="gt-action-submit" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">提交基础组</button>';
+                    if (_addDraft && _addDraft.addFlow === 'derived') {
+                        html += '<button id="gt-action-submit-derived" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">创建派生组</button>';
+                    } else if (_addDraft && _addDraft.addFlow === 'ls') {
+                        html += '<button id="gt-action-submit-ls" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存 LS 组</button>';
+                    } else {
+                        html += '<button id="gt-action-submit" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">提交基础组</button>';
+                    }
                     html += '<button id="gt-action-cancel" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消新建</button>';
                 } else if (_panelMode === 'edit') {
+                    // Check edit selection count
+                    var selCount = 0;
+                    var selIds = null;
+                    if (_editSelection && _editSelection instanceof Set) {
+                        selCount = _editSelection.size;
+                        selIds = Array.from(_editSelection);
+                    } else if (_editSelection && Array.isArray(_editSelection)) {
+                        selCount = _editSelection.length;
+                        selIds = _editSelection;
+                    }
+                    if (selCount === 1) {
+                        html += '<button id="gt-action-create-derived-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">🌳 创建派生组</button>';
+                    } else if (selCount >= 2) {
+                        html += '<button id="gt-action-create-ls-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">⚡ 创建 Long-Short 组</button>';
+                    }
                     html += '<button id="gt-action-save" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存修改</button>';
                     html += '<button id="gt-action-cancel-edit" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消编辑</button>';
                 } else {
-                    // Normal list mode: show add button
-                    html += '<button id="gt-action-add" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
+                    // Normal list mode: show "add base group" and "add LS group" buttons
+                    html += '<button id="gt-action-add-base" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
+                    html += '<button id="gt-action-add-ls" class="btn btn-outline-primary btn-sm" style="padding:4px 12px;font-size:12px;border:1px dashed #6366f1;">⚡ 新增 LS 组</button>';
                 }
-                _subTabActionsBar.innerHTML = html;
+                bar.innerHTML = html;
                 _bindActionButtons();
             }
 
             function _bindActionButtons() {
-                var addBtn = document.getElementById('gt-action-add');
-                if (addBtn) {
-                    addBtn.addEventListener('click', function() {
-                        _enterAddMode();
-                    });
-                }
+                // List mode buttons
+                var addBaseBtn = document.getElementById('gt-action-add-base');
+                if (addBaseBtn) addBaseBtn.addEventListener('click', function() { _enterAddMode('base'); });
+                var addDerivedBtn = document.getElementById('gt-action-add-derived');
+                if (addDerivedBtn) addDerivedBtn.addEventListener('click', function() { _enterAddMode('derived'); });
+                var addLSBtn = document.getElementById('gt-action-add-ls');
+                if (addLSBtn) addLSBtn.addEventListener('click', function() { _enterAddMode('ls'); });
+
+                // Add mode buttons
                 var submitBtn = document.getElementById('gt-action-submit');
-                if (submitBtn) {
-                    submitBtn.addEventListener('click', function() {
-                        _submitAddBatches();
-                    });
-                }
+                if (submitBtn) submitBtn.addEventListener('click', function() { _submitAddBatches(); });
+                var submitDerivedBtn = document.getElementById('gt-action-submit-derived');
+                if (submitDerivedBtn) submitDerivedBtn.addEventListener('click', function() { _submitAddDerivedGroup(); });
+                var submitLSBtn = document.getElementById('gt-action-submit-ls');
+                if (submitLSBtn) submitLSBtn.addEventListener('click', function() { _submitAddLSGroup(); });
                 var cancelBtn = document.getElementById('gt-action-cancel');
-                if (cancelBtn) {
-                    cancelBtn.addEventListener('click', function() {
-                        _exitAddMode();
-                    });
-                }
+                if (cancelBtn) cancelBtn.addEventListener('click', function() { _exitAddMode(); });
+
+                // Edit mode buttons
                 var saveBtn = document.getElementById('gt-action-save');
-                if (saveBtn) {
-                    saveBtn.addEventListener('click', function() {
-                        _saveEditChanges();
-                    });
-                }
+                if (saveBtn) saveBtn.addEventListener('click', function() { _saveEditChanges(); });
                 var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
-                if (cancelEditBtn) {
-                    cancelEditBtn.addEventListener('click', function() {
-                        _exitEditMode();
-                    });
-                }
+                if (cancelEditBtn) cancelEditBtn.addEventListener('click', function() { _exitEditMode(); });
+                var createDerivedBtn = document.getElementById('gt-action-create-derived-from-selection');
+                if (createDerivedBtn) createDerivedBtn.addEventListener('click', function() { _createDerivedFromSelection(); });
+                var createLSBtn = document.getElementById('gt-action-create-ls-from-selection');
+                if (createLSBtn) createLSBtn.addEventListener('click', function() { _createLSFromSelection(); });
             }
 
-            function _enterAddMode() {
+            function _enterAddMode(addFlow) {
                 _panelMode = 'add';
-                _addDraft = { testerId: null, groupCount: 2, allGroups: true, groupIndex: 1, selectedFactors: [] };
-                _renderSubTabActions();
-                // Mount the first add-flow sub-tab
-                mountSubTab('base', 'add_tester');
+                _addDraft = { addFlow: addFlow };
+                if (addFlow === 'base') {
+                    _addDraft.testerId = null;
+                    _addDraft.groupCount = 5;
+                    _addDraft.allGroups = true;
+                    _addDraft.groupIndex = 1;
+                    _addDraft.selectedFactors = [];
+                    _addDraft.feeMode = 'none';
+                    _addDraft.rebalanceMode = 'each_period';
+                    _renderTabActions();
+                    mountTab('add-base');
+                } else if (addFlow === 'derived') {
+                    _addDraft.derivedGroupId = null;
+                    _renderTabActions();
+                    mountTab('add-derived');
+                } else if (addFlow === 'ls') {
+                    _renderTabActions();
+                    mountTab('add-ls');
+                }
             }
 
             function _exitAddMode() {
                 _panelMode = 'list';
                 _addDraft = null;
-                _renderSubTabActions();
-                mountSubTab('base', 'list');
+                _renderTabActions();
+                mountTab('list');
             }
 
             function _submitAddBatches() {
@@ -3086,13 +3102,36 @@
                 var factors = _addDraft.selectedFactors;
                 if (factors.length === 0) { alert('请至少选择一个因子'); return; }
 
-                // Use the add_factors panel to perform the batch creation
-                var addFactorsPanel = GT_PANEL_REGISTRY['base'].find(function(p) { return p.name === 'add_factors'; });
-                if (addFactorsPanel && addFactorsPanel.panel && typeof addFactorsPanel.panel.submitAddBatches === 'function') {
-                    var result = addFactorsPanel.panel.submitAddBatches(_addDraft);
-                    if (result && result.added) {
-                        GT.log('_submitAddBatches: added ' + result.added + ' groups');
+                try {
+                    var addPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'add-base'; });
+                    if (addPanel && addPanel.panel && typeof addPanel.panel.submitAddBatches === 'function') {
+                        var result = addPanel.panel.submitAddBatches(_addDraft);
+                        if (result && result.added) {
+                            GT.log('_submitAddBatches: added ' + result.added + ' groups');
+                        }
                     }
+                } catch (err) {
+                    GT.log('_submitAddBatches error: ' + (err && err.message || err));
+                    alert('提交失败：' + (err && err.message || '未知错误'));
+                } finally {
+                    _exitAddMode();
+                }
+            }
+
+            function _submitAddDerivedGroup() {
+                // Delegate to the unified list panel's add-derived form
+                var listPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
+                if (listPanel && listPanel.panel && typeof listPanel.panel._openDerivedForm === 'function') {
+                    listPanel.panel._openDerivedForm(null, null);
+                }
+                _exitAddMode();
+            }
+
+            function _submitAddLSGroup() {
+                // Delegate to the unified list panel
+                var listPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
+                if (listPanel && listPanel.panel && typeof listPanel.panel._openLSForm === 'function') {
+                    listPanel.panel._openLSForm();
                 }
                 _exitAddMode();
             }
@@ -3100,28 +3139,110 @@
             function _enterEditMode(selection) {
                 _panelMode = 'edit';
                 _editSelection = selection || {};
-                _renderSubTabActions();
+                _renderTabActions();
+                // Don't remount the list panel — it's already showing.
+                // Just refresh the tab bar to show config tabs.
+                // Update the tab bar to show list + config tabs side by side
+                if (tabBtnsBar) {
+                    var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG;
+                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) { return p.category === L || p.category === C; });
+                    if (visibleList.length >= 1) {
+                        var stHtml = '';
+                        visibleList.forEach(function(p) {
+                            stHtml += '<button class="gt-tab' + (p.name === _currentTab ? ' active' : '') + '" data-tab="' + p.name + '">' + p.label + '</button>';
+                        });
+                        tabBtnsBar.innerHTML = stHtml;
+                        tabBtnsBar.querySelectorAll('.gt-tab').forEach(function(st) {
+                            st.addEventListener('click', function() {
+                                mountTab(st.getAttribute('data-tab'));
+                            });
+                        });
+                    }
+                }
             }
 
             function _exitEditMode() {
                 _panelMode = 'list';
                 _editSelection = null;
-                _renderSubTabActions();
-                // Refresh the list panel to clear highlights
-                var listPanel = GT.panels && GT.panels.base && GT.panels.base.list;
-                if (listPanel && typeof listPanel.clearSelection === 'function') {
-                    listPanel.clearSelection();
-                }
-                if (_currentPanel && typeof _currentPanel.refresh === 'function') {
-                    _currentPanel.refresh();
+                GT.state.setActiveBaseGroupId(null);
+                GT.state.setActiveDerivedNodeId(null);
+                _renderTabActions();
+                // Refresh tab bar back to list-only
+                if (tabBtnsBar) {
+                    var L = GT_TAB_CATEGORY.LIST;
+                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) { return p.category === L; });
+                    if (visibleList.length >= 1) {
+                        var stHtml = '';
+                        visibleList.forEach(function(p) {
+                            stHtml += '<button class="gt-tab' + (p.name === _currentTab ? ' active' : '') + '" data-tab="' + p.name + '">' + p.label + '</button>';
+                        });
+                        tabBtnsBar.innerHTML = stHtml;
+                        tabBtnsBar.querySelectorAll('.gt-tab').forEach(function(st) {
+                            st.addEventListener('click', function() {
+                                mountTab(st.getAttribute('data-tab'));
+                            });
+                        });
+                    } else {
+                        tabBtnsBar.innerHTML = '';
+                    }
                 }
             }
 
+            /**
+             * Create a derived group from a single selected base group.
+             * Opens the derived add modal pre-filled with the selected baseGroupId.
+             */
+            function _createDerivedFromSelection() {
+                var selIds;
+                if (_editSelection && _editSelection instanceof Set) {
+                    selIds = Array.from(_editSelection);
+                } else {
+                    selIds = _editSelection || [];
+                }
+                if (selIds.length !== 1) {
+                    alert('请选择 1 个基础组来创建派生组');
+                    return;
+                }
+                var baseGroupId = selIds[0];
+                // Switch to derived add mode with pre-selected base group
+                _exitEditMode();
+                _panelMode = 'add';
+                _addDraft = { addFlow: 'derived', preselectedBaseGroupId: baseGroupId };
+                mountTab('add-derived');
+                _renderTabActions();
+            }
+
+            /**
+             * Create a Long-Short group from 2+ selected base groups.
+             * Each selected base group gets its own derived node first,
+             * then an LS config is created pairing them.
+             */
+            function _createLSFromSelection() {
+                var selIds;
+                if (_editSelection && _editSelection instanceof Set) {
+                    selIds = Array.from(_editSelection);
+                } else {
+                    selIds = _editSelection || [];
+                }
+                if (selIds.length < 2) {
+                    alert('请至少选择 2 个基础组来创建 Long-Short 组');
+                    return;
+                }
+                // Switch to LS add mode with pre-selected base groups
+                _exitEditMode();
+                _panelMode = 'add';
+                _addDraft = { addFlow: 'ls', preselectedBaseGroupIds: selIds };
+                mountTab('add-ls');
+                _renderTabActions();
+            }
+
+            GT.ui.createDerivedFromSelection = _createDerivedFromSelection;
+            GT.ui.createLSFromSelection = _createLSFromSelection;
+
             function _saveEditChanges() {
-                // Delegate to list panel for the actual batch sync
-                var listPanel = GT.panels && GT.panels.base && GT.panels.base.list;
-                if (listPanel && typeof listPanel.saveEditChanges === 'function') {
-                    listPanel.saveEditChanges();
+                var listPanelEntry = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
+                if (listPanelEntry && listPanelEntry.panel && typeof listPanelEntry.panel.saveEditChanges === 'function') {
+                    listPanelEntry.panel.saveEditChanges();
                 }
                 _exitEditMode();
             }
@@ -3135,8 +3256,7 @@
             GT.ui.exitEditMode = _exitEditMode;
             GT.ui.enterAddMode = _enterAddMode;
             GT.ui.exitAddMode = _exitAddMode;
-            GT.ui.renderSubTabActions = _renderSubTabActions;
-            GT.ui.switchToAddSubTab = function(name) { mountSubTab('base', name); };
+            GT.ui.renderTabActions = _renderTabActions;
 
             /** Call unmount on currently mounted panel (if any) */
             function _unmountCurrent() {
@@ -3144,68 +3264,60 @@
                     _currentPanel.unmount();
                 }
                 _currentPanel = null;
-                if (_subTabBtnsBar) _subTabBtnsBar.innerHTML = '';
-                // 仅清空容器，让 mountSubTab 负责填充实际内容
+                if (tabBtnsBar) tabBtnsBar.innerHTML = '';
                 if (panelContainer) panelContainer.innerHTML = '';
             }
 
-            /** Switch to a main tab */
-            function switchMainTab(tabName) {
-                if (_currentMainTab === tabName && _currentPanel) return;
+            /** Mount a specific tab panel */
+            function mountTab(tabName) {
                 _unmountCurrent();
-                _currentMainTab = tabName;
+                _currentTab = tabName;
 
-                // Update active class on main tabs
-                mainTabs.forEach(function(t) {
-                    t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
+                // Tab visibility by mode:
+                //   list mode:  category-1 (LIST)
+                //   edit mode:  category-1 (LIST) + category-3 (CONFIG)
+                //   add mode:   category-2 (ADD) + category-3 (CONFIG)
+                var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG, A = GT_TAB_CATEGORY.ADD;
+                var visibleCategories;
+                if (_panelMode === 'list') {
+                    visibleCategories = [L];
+                } else if (_panelMode === 'edit') {
+                    visibleCategories = [L, C];
+                } else if (_panelMode === 'add') {
+                    visibleCategories = [A, C];
+                } else {
+                    visibleCategories = [L];
+                }
+
+                // All panels whose category is visible — used for rendering the tab bar
+                var visibleList = GT_PANEL_REGISTRY.filter(function(p) {
+                    return visibleCategories.indexOf(p.category) >= 0;
                 });
 
-                // Mount the first sub-tab panel for this main tab
-                var panelList = GT_PANEL_REGISTRY[tabName];
-                if (panelList && panelList.length > 0) {
-                    mountSubTab(tabName, panelList[0].name);
-                } else {
-                    // 没有注册面板时显示提示（但不阻塞操作）
-                    if (panelContainer) {
-                        panelContainer.innerHTML = '<div style="color:#888;padding:24px;text-align:center;font-size:13px;">该面板暂未就绪，请稍候或选择提交记录</div>';
-                    }
-                }
-
-                // Show/hide LS drawer trigger
-                var lsTrigger = document.getElementById('long-short-drawer-trigger');
-                if (lsTrigger) lsTrigger.style.display = (tabName === 'ls') ? '' : 'none';
-            }
-
-            /** Mount a specific sub-tab panel */
-            function mountSubTab(mainTab, subTabName) {
-                _unmountCurrent();
-                var panelList = GT_PANEL_REGISTRY[mainTab];
-                if (!panelList) return;
-
-                // Filter panels based on current mode
-                var filteredList = panelList;
-                if (_panelMode === 'add') {
-                    // In add mode, only show add_tester and add_factors
-                    filteredList = panelList.filter(function(p) {
-                        return p.name === 'add_tester' || p.name === 'add_factors';
-                    });
-                }
-
-                var entry = filteredList.find(function(p) { return p.name === subTabName; });
+                // Find the entry to mount: same as visibleList but in add mode
+                // only mount ADD panels whose name matches the requested add-flow
+                var entry = visibleList.find(function(p) {
+                    if (p.name !== tabName) return false;
+                    if (_panelMode === 'add' && p.category === A) return true; // ADD panels: exact name match
+                    return true; // CONFIG panels: name match is enough
+                });
                 if (!entry) return;
 
-                // Render sub-tabs (filtered) into #gt-sub-tab-btns
-                if (_subTabBtnsBar) {
+                // Render tabs into #gt-tab-btns — always show all visible tabs
+                if (tabBtnsBar && visibleList.length >= 1) {
                     var stHtml = '';
-                    filteredList.forEach(function(p) {
-                        stHtml += '<button class="gt-sub-tab' + (p.name === subTabName ? ' active' : '') + '" data-subtab="' + p.name + '">' + p.label + '</button>';
+                    visibleList.forEach(function(p) {
+                        stHtml += '<button class="gt-tab' + (p.name === tabName ? ' active' : '') + '" data-tab="' + p.name + '">' + p.label + '</button>';
                     });
-                    _subTabBtnsBar.innerHTML = stHtml;
-                    _subTabBtnsBar.querySelectorAll('.gt-sub-tab').forEach(function(st) {
+                    tabBtnsBar.innerHTML = stHtml;
+                    tabBtnsBar.querySelectorAll('.gt-tab').forEach(function(st) {
                         st.addEventListener('click', function() {
-                            mountSubTab(mainTab, st.getAttribute('data-subtab'));
+                            mountTab(st.getAttribute('data-tab'));
                         });
                     });
+                } else if (tabBtnsBar) {
+                    // Single panel (e.g., add mode) — hide tab bar
+                    tabBtnsBar.innerHTML = '';
                 }
 
                 // Ensure panel container exists
@@ -3213,31 +3325,27 @@
                     panelContainer.innerHTML = '<div id="' + entry.containerId + '" class="gt-panel-inner"></div>';
                 }
 
-                // Mount the panel
+                // Mount the panel — pass the container element
                 if (entry.panel && typeof entry.panel.mount === 'function') {
-                    entry.panel.mount();
-                    _currentPanel = entry.panel;
+                    var containerEl = document.getElementById(entry.containerId);
+                    if (containerEl) {
+                        entry.panel.mount(containerEl);
+                        _currentPanel = entry.panel;
+                    } else {
+                        console.warn('mountTab: container #' + entry.containerId + ' not found for tab ' + tabName);
+                    }
                 }
 
-                // Always refresh sub-tab actions
-                _renderSubTabActions();
+                // Always refresh action buttons
+                _renderTabActions();
             }
 
-            // Bind main tab clicks
-            mainTabs.forEach(function(tab) {
-                tab.addEventListener('click', function() {
-                    switchMainTab(tab.getAttribute('data-tab'));
-                });
-            });
-
             // Expose for external use
-            GT.ui.switchMainTab = switchMainTab;
-            GT.ui.mountSubTab = mountSubTab;
+            GT.ui.mountTab = mountTab;
 
-            // Register panels and always mount — panel scripts are already
-            // loaded (they appear before app.js in HTML, so GT.panels is full).
+            // Register panels and mount initial
             _registerPanels();
-            switchMainTab('base');
+            mountTab('list');
         })();
         var addIntradayWindowBtn = document.getElementById('group-intraday-window-add');
         if (addIntradayWindowBtn) addIntradayWindowBtn.addEventListener('click', addSelectedIntradayWindow);
@@ -3400,18 +3508,16 @@
         bindGroupFactorNavigation();
         restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
 
-        // 当 submissions 到达时，总是重新挂载当前主 tab 的面板。
+        // 当 submissions 到达时，总是重新挂载当前面板。
         // 这确保面板能感知到新的 submission 上下文（如基础组列表按 testerId 筛选）。
         if (submissions.length > 0) {
             // 确保 GT_PANEL_REGISTRY 已注册（可能在 init 之前到达）
-            if (GT_PANEL_REGISTRY && (!GT_PANEL_REGISTRY.base || !GT_PANEL_REGISTRY.base.length)) {
+            if (GT_PANEL_REGISTRY && (!GT_PANEL_REGISTRY.length)) {
                 _registerPanels();
             }
-            // 重新挂载当前主 tab 的第一个子面板
-            var activeMainTab = document.querySelector('#gt-main-tabs .gt-main-tab.active');
-            var tabName = activeMainTab ? activeMainTab.getAttribute('data-tab') : 'base';
-            if (GT.ui.switchMainTab) {
-                GT.ui.switchMainTab(tabName);
+            // 重新挂载当前 tab
+            if (GT.ui.mountTab) {
+                GT.ui.mountTab('list');
             }
         }
     };

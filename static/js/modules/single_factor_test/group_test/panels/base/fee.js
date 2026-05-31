@@ -37,12 +37,61 @@
     // ---------------------------------------------------------------------------
 
     function _getGroup() {
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        
+        // In add mode, read from draft
+        if (mode === 'add') {
+            var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+            if (!draft) return null;
+            return {
+                id: '_add_draft',
+                feeMode: draft.feeMode || 'none',
+                feeRate: draft.feeRate,
+                feeMap: draft.feeMap,
+                feeSensitivity: draft.feeSensitivity,
+                useCloseToday: draft.useCloseToday || false,
+            };
+        }
+        
+        // In edit mode, use first selected group as reference
+        if (mode === 'edit') {
+            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            if (!sel || !sel.groupIds || !sel.groupIds.length) return null;
+            return GT.datamodel.base_groups.get(sel.groupIds[0]);
+        }
+        
+        // List mode: use active group
         var id = GT.state.getActiveBaseGroupId();
         if (!id) return null;
         return GT.datamodel.base_groups.get(id);
     }
 
     function _save(patch) {
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        
+        // In add mode, save to draft
+        if (mode === 'add') {
+            if (GT.ui && typeof GT.ui.updateAddDraft === 'function') {
+                GT.ui.updateAddDraft(patch);
+            }
+            // Re-render to show changes (fee.js re-renders on its own)
+            render();
+            return;
+        }
+
+        // In edit mode, apply to all selected groups
+        if (mode === 'edit') {
+            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            var ids = sel && sel.groupIds ? sel.groupIds : [];
+            for (var i = 0; i < ids.length; i++) {
+                try {
+                    GT.datamodel.base_groups.update(ids[i], patch);
+                } catch (err) { /* skip individual failures */ }
+            }
+            render();
+            return;
+        }
+        
         if (!_activeId) return;
         try {
             GT.datamodel.base_groups.update(_activeId, patch);
@@ -118,11 +167,11 @@
     }
 
     function _makeSensitivitySlider(value) {
-        var val = (value !== null && value !== undefined) ? value : 0;
+        var val = (value !== null && value !== undefined) ? value : 1;
         var html = '<div style="margin-bottom:16px;">';
-        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">费率灵敏度: <span id="' + CONTAINER_ID + '-sens-val">' + val.toFixed(1) + '</span></label>';
-        html += '<input type="range" id="' + CONTAINER_ID + '-sensitivity" value="' + val + '" min="0" max="2" step="0.1" style="width:100%;max-width:300px;">';
-        html += '<div style="font-size:11px;color:#888;">0 = 不敏感，2 = 极高敏感</div>';
+        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">费率倍数: <span id="' + CONTAINER_ID + '-sens-val">' + val.toFixed(1) + 'x</span></label>';
+        html += '<input type="range" id="' + CONTAINER_ID + '-sensitivity" value="' + val + '" min="0" max="5" step="0.1" style="width:100%;max-width:300px;">';
+        html += '<div style="font-size:11px;color:#888;">1x = 正常费率，0 = 忽略手续费，5x = 五倍费率压力测试</div>';
         html += '</div>';
         return html;
     }
@@ -142,7 +191,7 @@
         var mode = group.feeMode || 'none';
         var rate = group.feeRate;
         var feeMap = group.feeMap;
-        var sensitivity = group.feeSensitivity !== undefined ? group.feeSensitivity : 0;
+        var sensitivity = group.feeSensitivity !== undefined ? group.feeSensitivity : 1;
 
         var html = '';
 
@@ -257,10 +306,9 @@
         var ctToggle = $(CONTAINER_ID + '-ct-toggle');
         if (ctToggle) {
             ctToggle.addEventListener('click', function() {
-                if (!_activeId) return;
-                var current = GT.datamodel.base_groups.get(_activeId);
-                if (!current) return;
-                _save({ useCloseToday: !current.useCloseToday });
+                var group = _getGroup();
+                if (!group) return;
+                _save({ useCloseToday: !group.useCloseToday });
             });
         }
     }
@@ -299,6 +347,42 @@
     }
 
     // ---------------------------------------------------------------------------
+    // Category-3 table column contribution
+    // ---------------------------------------------------------------------------
+
+    /**
+     * getTableColumns — called by category-1 list panels to extend their table.
+     * Returns column definitions for fee-related columns.
+     */
+    function getTableColumns() {
+        return [
+            {
+                key: 'fee',
+                label: '手续费',
+                render: function(group) {
+                    var map = { 'none': '无', 'percent': '百分比', 'fixed': '固定', 'table': '费率表', 'strategy': '策略' };
+                    return map[group.feeMode] || (group.feeMode || '—');
+                }
+            },
+            {
+                key: 'closeToday',
+                label: '平今/平昨',
+                render: function(group) {
+                    if (group.feeMode === 'none' || group.feeMode === 'fixed') return '—';
+                    return group.useCloseToday ? '平今' : '平昨';
+                }
+            },
+            {
+                key: 'feeSensitivity',
+                label: '费率倍数',
+                render: function(group) {
+                    return group.feeSensitivity != null ? group.feeSensitivity.toFixed(1) + 'x' : '—';
+                }
+            }
+        ];
+    }
+
+    // ---------------------------------------------------------------------------
     // Export
     // ---------------------------------------------------------------------------
 
@@ -307,7 +391,17 @@
         unmount: unmount,
         refresh: refresh,
         render: render,
+        getTableColumns: getTableColumns,
     };
+
+    // Register as category-3 config panel
+    if (window.GT_CONFIG_REGISTRY) {
+        window.GT_CONFIG_REGISTRY.register({
+            name: 'fee',
+            label: '费率',
+            panel: GT.panels.base.fee,
+        }, 'base-fee-settings');
+    }
 
     GT.log('panels.base.fee loaded');
 })();

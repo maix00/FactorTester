@@ -81,10 +81,14 @@
             return { source: 'override', sourceName: '当前节点覆盖', sourceId: node.id };
         }
         if (node.parentId) {
-            var parentResult = _resolveSource(node.parentId);
-            if (parentResult.source !== 'default') return parentResult;
+            var parentNode = GT.datamodel.derived_graph.get(node.parentId);
+            // Skip batch organisational nodes in inheritance chain
+            if (!parentNode || parentNode.baseGroupId !== '__batch__') {
+                var parentResult = _resolveSource(node.parentId);
+                if (parentResult.source !== 'default') return parentResult;
+            }
         }
-        if (node.baseGroupId) {
+        if (node.baseGroupId && node.baseGroupId !== '__batch__') {
             var bg = GT.datamodel.base_groups.get(node.baseGroupId);
             if (bg && bg.feeMode && bg.feeMode !== 'none') {
                 return { source: 'baseGroup', sourceName: '基础组: ' + (bg.name || node.baseGroupId), sourceId: node.baseGroupId };
@@ -118,9 +122,21 @@
             html += '<div style="margin-top:4px;">费率: ' + (fee.rate !== null ? fee.rate + ' 万分比' : '未设置') + '</div>';
         } else if (fee.mode === 'per_product' || fee.mode === 'custom') {
             var map = fee.feeMap || {};
-            var keys = Object.keys(map);
+            var keys = Object.keys(map).sort();
             if (keys.length > 0) {
-                html += '<div style="margin-top:4px;font-size:12px;">品种数: ' + keys.length + '</div>';
+                html += '<div style="margin-top:8px;font-size:13px;font-weight:600;">品种费率明细:</div>';
+                html += '<table style="width:100%;margin-top:4px;border-collapse:collapse;font-size:13px;">';
+                html += '<thead><tr style="background:#e8f0fe;">';
+                html += '<th style="padding:4px 8px;text-align:left;border:1px solid #d0d5dd;">品种</th>';
+                html += '<th style="padding:4px 8px;text-align:left;border:1px solid #d0d5dd;">费率 (万分比)</th>';
+                html += '</tr></thead><tbody>';
+                for (var i = 0; i < keys.length; i++) {
+                    html += '<tr>';
+                    html += '<td style="padding:4px 8px;border:1px solid #d0d5dd;">' + keys[i] + '</td>';
+                    html += '<td style="padding:4px 8px;border:1px solid #d0d5dd;">' + map[keys[i]] + '</td>';
+                    html += '</tr>';
+                }
+                html += '</tbody></table>';
             } else {
                 html += '<div style="margin-top:4px;font-size:12px;">无品种配置</div>';
             }

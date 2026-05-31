@@ -42,6 +42,28 @@
     }
 
     // ---------------------------------------------------------------------------
+    // Shared utilities — single source of truth for batch/combo/alias logic
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Build the canonical batch/combo key from (testerId, factorAlias, groupCount).
+     * Used by both add (letter assignment) and list (batch grouping + display).
+     */
+    function batchKey(testerId, factorAlias, groupCount) {
+        return String(testerId) + '|' + factorAlias + '|' + groupCount;
+    }
+
+    /**
+     * Extract the letter prefix from a shortAlias (e.g. "A" from "A1a", "AB" from "AB3").
+     * Returns null for single-group numeric-only aliases like "5".
+     */
+    function extractLetter(shortAlias) {
+        if (!shortAlias) return null;
+        var m = shortAlias.match(/^([A-Z]+)/);
+        return m ? m[1] : null;
+    }
+
+    // ---------------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------------
 
@@ -128,6 +150,7 @@
         var item = {
             id: _uuid(),
             name: config.name.trim(),
+            shortAlias: config.shortAlias || '',
             testerId: config.testerId.trim(),
             factorAlias: config.factorAlias.trim(),
             groupCount: config.groupCount,
@@ -266,6 +289,8 @@
         remove: remove,
         list: list,
         validate: validate,
+        batchKey: batchKey,
+        extractLetter: extractLetter,
         _reset: _reset,
     };
 

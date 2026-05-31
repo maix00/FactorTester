@@ -90,6 +90,7 @@ global.window = {
                     }
                     return null;
                 },
+                getAll: function() { return JSON.parse(JSON.stringify(mockBG)); },
                 update: function(id, patch) {
                     _uiUpdates.push({ id: id, patch: JSON.parse(JSON.stringify(patch)) });
                     for (var i = 0; i < mockBG.length; i++) {
@@ -121,6 +122,31 @@ global.window = {
         },
         panels: {},
         log: function() {},
+        ui: {
+            getPanelMode: function() { return 'list'; },
+            getAddDraft: function() { return null; },
+            getEditSelection: function() { return null; },
+            updateAddDraft: function() {},
+        },
+    },
+    GT_CONFIG_REGISTRY: {
+        _items: {},
+        register: function(def, containerId) {
+            this._items[def.name] = { def: def, containerId: containerId };
+        },
+        getAll: function() { return Object.values(this._items); },
+        getTableColumns: function() {
+            var cols = [];
+            Object.values(this._items).forEach(function(entry) {
+                if (entry.def.panel && entry.def.panel.getTableColumns) {
+                    cols = cols.concat(entry.def.panel.getTableColumns());
+                }
+            });
+            return cols;
+        },
+        toPanelEntry: function(name, label, containerId) {
+            return { name: name, label: label, containerId: containerId, category: 3, panel: this._items[name].def.panel };
+        },
     },
 };
 
@@ -155,9 +181,9 @@ assert(typeof panel.render === 'function', 'exports: render exists');
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-var html = _domElements['base-fee-panel']._html;
+var html = _domElements['base-fee-settings']._html;
 assert(html.indexOf('请先在「列表」中选择或创建一个基础组') !== -1, 'no active: shows placeholder');
 
 // ---------------------------------------------------------------------------
@@ -167,14 +193,14 @@ assert(html.indexOf('请先在「列表」中选择或创建一个基础组') !=
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
+html = _domElements['base-fee-settings']._html;
 assert(html.indexOf('费率模式') !== -1, 'render none: shows mode selector');
 assert(html.indexOf('value="none"') !== -1, 'render none: has none radio');
 assert(html.indexOf('checked') !== -1, 'render none: none is checked');
 // Uniform editor should NOT appear for 'none' mode
-assert(html.indexOf('base-fee-panel-uniform-editor') === -1, 'render none: no uniform editor');
+assert(html.indexOf('base-fee-settings-uniform-editor') === -1, 'render none: no uniform editor');
 
 // ---------------------------------------------------------------------------
 // 4. render — uniform mode
@@ -183,12 +209,12 @@ assert(html.indexOf('base-fee-panel-uniform-editor') === -1, 'render none: no un
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'uniform', feeRate: 2.5 });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
-assert(html.indexOf('base-fee-panel-uniform-editor') !== -1, 'render uniform: shows editor');
+html = _domElements['base-fee-settings']._html;
+assert(html.indexOf('base-fee-settings-uniform-editor') !== -1, 'render uniform: shows editor');
 assert(html.indexOf('value="2.5"') !== -1, 'render uniform: rate is 2.5');
-assert(html.indexOf('base-fee-panel-feerate') !== -1, 'render uniform: has feerate input');
+assert(html.indexOf('base-fee-settings-feerate') !== -1, 'render uniform: has feerate input');
 
 // ---------------------------------------------------------------------------
 // 5. render — per_product mode
@@ -197,10 +223,10 @@ assert(html.indexOf('base-fee-panel-feerate') !== -1, 'render uniform: has feera
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'per_product', feeMap: { 'ag': 1.5, 'rb': 2.0 } });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
-assert(html.indexOf('base-fee-panel-pp-editor') !== -1, 'render pp: shows editor');
+html = _domElements['base-fee-settings']._html;
+assert(html.indexOf('base-fee-settings-pp-editor') !== -1, 'render pp: shows editor');
 assert(html.indexOf('ag') !== -1, 'render pp: shows ag product');
 assert(html.indexOf('rb') !== -1, 'render pp: shows rb product');
 assert(html.indexOf('data-pp-product="ag"') !== -1, 'render pp: ag row has data attr');
@@ -212,10 +238,10 @@ assert(html.indexOf('data-pp-product="ag"') !== -1, 'render pp: ag row has data 
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'per_product', feeMap: null });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
-assert(html.indexOf('base-fee-panel-pp-editor') !== -1, 'render pp null: shows editor');
+html = _domElements['base-fee-settings']._html;
+assert(html.indexOf('base-fee-settings-pp-editor') !== -1, 'render pp null: shows editor');
 // Should not crash on null feeMap
 
 // ---------------------------------------------------------------------------
@@ -225,12 +251,12 @@ assert(html.indexOf('base-fee-panel-pp-editor') !== -1, 'render pp null: shows e
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'custom' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
+html = _domElements['base-fee-settings']._html;
 assert(html.indexOf('value="custom"') !== -1, 'render custom: custom checked');
-assert(html.indexOf('base-fee-panel-uniform-editor') === -1, 'render custom: no uniform editor');
-assert(html.indexOf('base-fee-panel-pp-editor') === -1, 'render custom: no pp editor');
+assert(html.indexOf('base-fee-settings-uniform-editor') === -1, 'render custom: no uniform editor');
+assert(html.indexOf('base-fee-settings-pp-editor') === -1, 'render custom: no pp editor');
 
 // ---------------------------------------------------------------------------
 // 8. sensitivity slider always present
@@ -239,10 +265,10 @@ assert(html.indexOf('base-fee-panel-pp-editor') === -1, 'render custom: no pp ed
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none', feeSensitivity: 1.5 });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.render();
-html = _domElements['base-fee-panel']._html;
-assert(html.indexOf('base-fee-panel-sensitivity') !== -1, 'sensitivity: slider present');
+html = _domElements['base-fee-settings']._html;
+assert(html.indexOf('base-fee-settings-sensitivity') !== -1, 'sensitivity: slider present');
 assert(html.indexOf('value="1.5"') !== -1, 'sensitivity: value 1.5');
 assert(html.indexOf('1.5') !== -1, 'sensitivity: label shows 1.5');
 
@@ -253,9 +279,9 @@ assert(html.indexOf('1.5') !== -1, 'sensitivity: label shows 1.5');
 resetAll();
 mockBG.push({ id: 'bg_1', name: 'Test', testerId: 't', factorAlias: 'f', groupCount: 5, groupIndex: 0, feeMode: 'none' });
 global._mockActiveBGId = 'bg_1';
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.mount();
-assert(_domElements['base-fee-panel']._html.indexOf('费率模式') !== -1, 'mount: renders');
+assert(_domElements['base-fee-settings']._html.indexOf('费率模式') !== -1, 'mount: renders');
 // Should have registered handlers
 assert(global._events['baseGroupsChanged'].length >= 1, 'mount: registered baseGroupsChanged');
 assert(global._events['activeBaseGroupChanged'].length >= 1, 'mount: registered activeBaseGroupChanged');
@@ -272,16 +298,16 @@ assert(global._events['activeBaseGroupChanged'].length === 0, 'unmount: activeBa
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.mount();
 // Initially no selection
-assert(_domElements['base-fee-panel']._html.indexOf('请先在') !== -1, 'before select: placeholder');
+assert(_domElements['base-fee-settings']._html.indexOf('请先在') !== -1, 'before select: placeholder');
 
 // Select a group
 mockBG.push({ id: 'bg_2', name: 'G2', testerId: 't', factorAlias: 'f', groupCount: 3, groupIndex: 0, feeMode: 'uniform', feeRate: 3.0 });
 global._mockActiveBGId = 'bg_2';
 GT.state.emit('activeBaseGroupChanged', { id: 'bg_2' });
-assert(_domElements['base-fee-panel']._html.indexOf('value="3"') !== -1, 'after select: shows 3.0 rate');
+assert(_domElements['base-fee-settings']._html.indexOf('value="3"') !== -1, 'after select: shows 3.0 rate');
 
 panel.unmount();
 
@@ -290,15 +316,15 @@ panel.unmount();
 // ---------------------------------------------------------------------------
 
 resetAll();
-_makeContainer('base-fee-panel');
+_makeContainer('base-fee-settings');
 panel.mount();
 panel.unmount();
 
 // Change data — should NOT re-render
-var htmlBefore = _domElements['base-fee-panel']._html;
+var htmlBefore = _domElements['base-fee-settings']._html;
 mockBG.push({ id: 'bg_3', name: 'G3', testerId: 't', factorAlias: 'f', groupCount: 2, groupIndex: 0, feeMode: 'per_product' });
 GT.state.emit('activeBaseGroupChanged', { id: 'bg_3' });
-var htmlAfter = _domElements['base-fee-panel']._html;
+var htmlAfter = _domElements['base-fee-settings']._html;
 assertEquals(htmlAfter, htmlBefore, 'unmounted: does not react to events');
 
 // ---------------------------------------------------------------------------

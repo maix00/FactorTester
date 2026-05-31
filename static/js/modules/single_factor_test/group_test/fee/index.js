@@ -58,6 +58,30 @@
             return map;
         },
 
+        /** Whether fee table data has been loaded */
+        hasFeeData: function() { return _feeTableData.length > 0; },
+
+        /** Get fee rows with applied modifications (for per-product expand display).
+         *  Returns [{code, name, exchange, multiplier, open_ratio, close_ratio, closetoday_ratio, open_fixed, close_fixed, closetoday_fixed}] */
+        getFeeRows: function() {
+            return _feeTableData.map(function(row) {
+                var code = (row.variety_code || '').toLowerCase();
+                var mod = _feeModifications[code] || {};
+                return {
+                    code:             code,
+                    name:             row.variety_name || '',
+                    exchange:         row.exchange || '',
+                    multiplier:       row.multiplier || '',
+                    open_ratio:       (mod.open_ratio  !== undefined) ? mod.open_ratio  : (parseFloat(row.open_ratio)        || 0),
+                    close_ratio:      (mod.close_ratio !== undefined) ? mod.close_ratio : (parseFloat(row.close_ratio)       || 0),
+                    closetoday_ratio: (mod.closetoday_ratio !== undefined) ? mod.closetoday_ratio : (parseFloat(row.closetoday_ratio)  || 0),
+                    open_fixed:       parseFloat(row.open_fixed)        || 0,
+                    close_fixed:      parseFloat(row.close_fixed)       || 0,
+                    closetoday_fixed: parseFloat(row.closetoday_fixed)  || 0,
+                };
+            });
+        },
+
         /**
          * Build fee payload for API calls.
          * Returns Promise<{fee, fee_map}> — fetches table on demand in per_product mode.

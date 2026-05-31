@@ -40,20 +40,35 @@
         var container = $(_containerId);
         if (!container) { return; }
 
-        var activeId = GT.state.getActiveBaseGroupId();
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        var currentMode = 'each_period'; // default for add mode
+        var activeId = null;
 
-        if (!activeId) {
+        if (mode === 'add') {
+            var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+            currentMode = (draft && draft.rebalanceMode) || 'each_period';
+        } else if (mode === 'edit') {
+            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            if (sel && sel.groupIds && sel.groupIds.length > 0) {
+                activeId = sel.groupIds[0];
+            }
+        } else {
+            activeId = GT.state.getActiveBaseGroupId();
+        }
+
+        if (!activeId && mode !== 'add') {
             container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">请先在基础组列表中选择一个基础组</div>';
             return;
         }
 
-        var item = GT.datamodel.base_groups.get(activeId);
-        if (!item) {
-            container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">未找到选中的基础组</div>';
-            return;
+        if (activeId) {
+            var item = GT.datamodel.base_groups.get(activeId);
+            if (!item) {
+                container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">未找到选中的基础组</div>';
+                return;
+            }
+            currentMode = item.rebalanceMode || 'each_period';
         }
-
-        var currentMode = item.rebalanceMode || 'buy_and_hold';
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -79,17 +94,36 @@
         var select = $('rb-mode-select');
         if (select) {
             select.addEventListener('change', function() {
-                var id = GT.state.getActiveBaseGroupId();
-                if (!id) return;
                 var newMode = select.value;
+                var currentMode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
                 var descEl = $('rb-mode-desc');
                 if (descEl) {
                     descEl.textContent = MODE_DESCRIPTIONS[newMode] || '';
                 }
-                try {
-                    GT.datamodel.base_groups.update(id, { rebalanceMode: newMode });
-                } catch (err) {
-                    alert('操作失败: ' + err.message);
+                if (currentMode === 'add') {
+                    if (GT.ui && typeof GT.ui.updateAddDraft === 'function') {
+                        GT.ui.updateAddDraft({ rebalanceMode: newMode });
+                    }
+                    return;
+                }
+                var id = GT.state.getActiveBaseGroupId();
+                if (currentMode === 'edit') {
+                    var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+                    if (sel && sel.groupIds && sel.groupIds.length > 0) {
+                        var ids = sel.groupIds;
+                        for (var i = 0; i < ids.length; i++) {
+                            try {
+                                GT.datamodel.base_groups.update(ids[i], { rebalanceMode: newMode });
+                            } catch (err) { /* skip individual failures */ }
+                        }
+                    }
+                } else {
+                    if (!id) return;
+                    try {
+                        GT.datamodel.base_groups.update(id, { rebalanceMode: newMode });
+                    } catch (err) {
+                        alert('操作失败: ' + err.message);
+                    }
                 }
             });
         }
@@ -125,12 +159,39 @@
         if (_mounted) { render(); }
     }
 
+    // ---------------------------------------------------------------------------
+    // Category-3 table column contribution
+    // ---------------------------------------------------------------------------
+
+    function getTableColumns() {
+        return [
+            {
+                key: 'rebalance',
+                label: '再平衡',
+                render: function(group) {
+                    var map = { 'each_period': '每期', 'buy_and_hold': '持仓不动', 'recycle': '退出补新' };
+                    return map[group.rebalanceMode] || (group.rebalanceMode || '—');
+                }
+            }
+        ];
+    }
+
     GT.panels.base.rebalance = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
         render: render,
+        getTableColumns: getTableColumns,
     };
+
+    // Register as category-3 config panel
+    if (window.GT_CONFIG_REGISTRY) {
+        window.GT_CONFIG_REGISTRY.register({
+            name: 'rebalance',
+            label: '再平衡',
+            panel: GT.panels.base.rebalance,
+        }, 'base-rebalance');
+    }
 
     GT.log('panels.base.rebalance loaded');
 })();

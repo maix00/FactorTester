@@ -11,11 +11,19 @@ from server.services.product_tree import tree
 def tester_to_dict(t):
     """Convert FactorTester to frontend payload."""
     core_id = t.alias.split(':', 1)[-1] if ':' in t.alias else t.alias
+    products_list = []
+    if hasattr(t, 'products') and t.products:
+        for p in t.products:
+            products_list.append({
+                'name': getattr(p, 'name', str(p)),
+                'desc': getattr(p, 'desc', '') or '',
+            })
     return {
         'id':                   core_id,
         'name':                 t.name,
         'product_count':        len(t.products) if hasattr(t, 'products') and t.products else 0,
         'selected_paths':       getattr(t, 'selected_paths', []) or [],
+        'products':             products_list,
         'factor_tester_name':   t.name,
         'factor_tester_serial': f"#{core_id}" if core_id.isdigit() else t.alias,
         'label':                getattr(t, 'label', '') or '',

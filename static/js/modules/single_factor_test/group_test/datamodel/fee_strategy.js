@@ -85,9 +85,14 @@
             return _deepCopy(node[overrideField]);
         }
 
-        // Level 2: Recurse to parent
+        // Level 2: Recurse to parent (skip batch organisational nodes)
         if (fieldInfo.parentChain && node.parentId) {
-            return resolveParam(node.parentId, overrideField);
+            var parentNode = _getDG(node.parentId);
+            // Batch nodes (__batch__) are organisational, not fee-bearing.
+            // Skip them: fall through to baseGroup instead of inheriting from them.
+            if (!parentNode || parentNode.baseGroupId !== '__batch__') {
+                return resolveParam(node.parentId, overrideField);
+            }
         }
 
         // Level 3: Fall back to base group
@@ -128,13 +133,16 @@
             return _deepCopy(node.feeOverride);
         }
 
-        // Recurse parent
+        // Recurse parent (skip batch organisational nodes)
         if (node.parentId) {
-            return resolveFee(node.parentId);
+            var parentNode = _getDG(node.parentId);
+            if (parentNode && parentNode.baseGroupId !== '__batch__') {
+                return resolveFee(node.parentId);
+            }
         }
 
-        // Fall back to base group
-        if (node.baseGroupId) {
+        // Fall back to base group (skip batch sentinel nodes)
+        if (node.baseGroupId && node.baseGroupId !== '__batch__') {
             var bg = _getBG(node.baseGroupId);
             if (bg) {
                 return _buildFeeFromBaseGroup(bg);

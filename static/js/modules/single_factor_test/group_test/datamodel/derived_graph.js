@@ -129,11 +129,12 @@
             errors.push('name is required (non-empty string)');
         }
 
-        // Required: baseGroupId
+        // Required: baseGroupId (BATCH_SENTINEL allowed for organisational batch nodes)
+        var BATCH_SENTINEL = '__batch__';
         if (!config.baseGroupId || typeof config.baseGroupId !== 'string') {
             errors.push('baseGroupId is required (non-empty string)');
-        } else if (GT.datamodel.base_groups && GT.datamodel.base_groups.get) {
-            // Validate that the referenced base group exists
+        } else if (config.baseGroupId !== BATCH_SENTINEL && GT.datamodel.base_groups && GT.datamodel.base_groups.get) {
+            // Validate that the referenced base group exists (skip for batch sentinels)
             var bg = GT.datamodel.base_groups.get(config.baseGroupId);
             if (!bg) {
                 errors.push('baseGroupId references a non-existent base group: ' + config.baseGroupId);

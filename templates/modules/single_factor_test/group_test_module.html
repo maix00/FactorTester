@@ -39,23 +39,16 @@
         </div>
     </div>
     
-    <!-- 2b. 主 Tab + 面板区域（可折叠） -->
+    <!-- 2b. 统一 Tab + 面板区域（可折叠） -->
     <div class="group-test-layer" id="gt-layer-tabs" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
 
-        <!-- 2b-i. 主 Tab 栏 -->
-        <div id="gt-main-tabs" style="display:flex;border-bottom:1px solid #e5e7eb;background:#fff;">
-            <button class="gt-main-tab active" data-tab="base" type="button">📊 基础组定义</button>
-            <button class="gt-main-tab" data-tab="derived" type="button">🌲 单父派生组</button>
-            <button class="gt-main-tab" data-tab="ls" type="button">⚖️ Long-Short</button>
+        <!-- 2b-i. 统一 Tab 栏 + 操作按钮 -->
+        <div id="gt-tab-bar" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
+            <div id="gt-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
+            <div id="gt-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
         </div>
 
-        <!-- 2b-ii. 子 Tab 栏（由 panel 动态填充） -->
-        <div id="gt-sub-tabs" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
-            <div id="gt-sub-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
-            <div id="gt-sub-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
-        </div>
-
-        <!-- 2b-iii. Panel 渲染容器（由 JS 动态填充） -->
+        <!-- 2b-ii. Panel 渲染容器（由 JS 动态填充） -->
         <div id="gt-panel-container" style="padding:12px;min-height:200px;"></div>
     </div>
 
@@ -773,34 +766,8 @@
         border-radius: 8px;
     }
 
-    /* Main tabs */
-    #group_test_module .gt-main-tab {
-        width: 100%;
-        flex: 1;
-        padding: 10px 16px;
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-        color: #475467;
-        border-bottom: 2px solid transparent;
-        transition: all 0.15s;
-        white-space: nowrap;
-    }
-    #group_test_module .gt-main-tab:hover {
-        background: #f6f8fb;
-        color: #1f2937;
-    }
-    #group_test_module .gt-main-tab.active {
-        color: #0f4c81;
-        font-weight: 600;
-        border-bottom-color: #0f4c81;
-        background: #f0f6ff;
-    }
-
-    /* Sub tabs */
-    #group_test_module .gt-sub-tab {
+    /* Unified tabs (was sub-tabs, now the only tab level) */
+    #group_test_module .gt-tab {
         padding: 5px 12px;
         border: 1px solid #d0d5dd;
         border-radius: 4px;
@@ -810,11 +777,11 @@
         color: #475467;
         transition: all 0.12s;
     }
-    #group_test_module .gt-sub-tab:hover {
+    #group_test_module .gt-tab:hover {
         border-color: #9cc7f2;
         background: #eaf3fc;
     }
-    #group_test_module .gt-sub-tab.active {
+    #group_test_module .gt-tab.active {
         background: #e7f1ff;
         border-color: #9cc7f2;
         color: #0f4c81;
@@ -871,24 +838,24 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/fee_table.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/settings_snapshot.js') }}"></script>
 <!-- Panel layer (Issue #85 Phase 3-5) — UI components for each tab -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/list.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/add_tester.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/add_factors.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/registry.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/unified/list.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/add.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/fee.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/base/rebalance.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/tree.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/fee.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/close_today.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/rebalance.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/products.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/derived/summary.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ls/list.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ls/editor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/meta.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/overlays/group_detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/overlays/tester_products.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/overlays/fee_table.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/fee/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>
