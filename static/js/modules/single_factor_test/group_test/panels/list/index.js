@@ -505,8 +505,8 @@
                     h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:8px;">' + escapeHTML(bg.factorAlias) + '</span>';
                     // Tester label (chip)
                     h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + CHIP_STYLE + ';margin-right:8px;">' + _testerLabel(bg.testerId) + '</span>';
-                    // Group index: "1/5"
-                    h += '<span style="font-size:11px;color:#888;">' + (ri + 1) + '/' + batch.items.length + '</span>';
+                    // Group index / groupCount (from add tab's grouping params)
+                    h += '<span style="font-size:11px;color:#888;">' + (bg.groupIndex || (ri + 1)) + '/' + (bg.groupCount || batch.items.length) + '</span>';
                     h += '<span style="flex:1;"></span>';
                     // Config chips — only show non-empty/non-none values
                     var bgRebalance = _rebalanceLabel(bg.rebalanceMode);
