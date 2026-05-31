@@ -882,6 +882,8 @@
                 var key = this.getAttribute('data-batch-key');
                 if (e.target.closest('.unified-batch-expand')) {
                     _expandedBatches[key] = !_expandedBatches[key];
+                    render();
+                    return;
                 }
                 _toggleBatchSelection(_batchMap[key]);
             });
