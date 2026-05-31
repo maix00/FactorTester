@@ -292,6 +292,35 @@
         return ids;
     }
 
+    /**
+     * Toggle all items in a batch: if all selected → deselect all; otherwise → select all.
+     * Syncs edit mode and emits baseGroupsChanged.
+     */
+    function _toggleBatchSelection(batch) {
+        if (!batch || !batch.items || batch.items.length === 0) return;
+        var allSelected = true;
+        for (var i = 0; i < batch.items.length; i++) {
+            if (!_selectedIds[batch.items[i].id]) { allSelected = false; break; }
+        }
+        var newSelect = !allSelected;
+        for (var i = 0; i < batch.items.length; i++) {
+            if (newSelect) { _selectedIds[batch.items[i].id] = true; }
+            else { delete _selectedIds[batch.items[i].id]; }
+        }
+        _syncEditMode();
+        GT.state.emit('baseGroupsChanged');
+    }
+
+    /** Enter or exit edit mode based on current _selectedIds count. */
+    function _syncEditMode() {
+        var selCount = Object.keys(_selectedIds).length;
+        if (selCount > 0) {
+            if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
+        } else {
+            if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
+        }
+    }
+
     /** Short fee display */
     function _feeCellDisplay(group) {
         if (!group) return '—';
@@ -851,51 +880,10 @@
             header.addEventListener('click', function(e) {
                 if (e.target.closest('button')) return;
                 var key = this.getAttribute('data-batch-key');
-                // Expand/collapse on clicking the expand icon — also toggle selection
                 if (e.target.closest('.unified-batch-expand')) {
                     _expandedBatches[key] = !_expandedBatches[key];
-                    // Same select/deselect logic as clicking the header itself
-                    var batchExpand = _batchMap[key];
-                    if (batchExpand) {
-                        var allSel = true;
-                        for (var ei = 0; ei < batchExpand.items.length; ei++) {
-                            if (!_selectedIds[batchExpand.items[ei].id]) { allSel = false; break; }
-                        }
-                        var newSel = !allSel;
-                        for (var ej = 0; ej < batchExpand.items.length; ej++) {
-                            if (newSel) { _selectedIds[batchExpand.items[ej].id] = true; }
-                            else { delete _selectedIds[batchExpand.items[ej].id]; }
-                        }
-                        var sc = Object.keys(_selectedIds).length;
-                        if (sc > 0) {
-                            if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
-                        } else {
-                            if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
-                        }
-                    }
-                    GT.state.emit('baseGroupsChanged');
-                    return;
                 }
-                // Toggle all items in this batch
-                var batch = _batchMap[key];
-                if (!batch) return;
-                var allSelected = true;
-                for (var bi = 0; bi < batch.items.length; bi++) {
-                    if (!_selectedIds[batch.items[bi].id]) { allSelected = false; break; }
-                }
-                var newSelect = !allSelected;
-                for (var bi2 = 0; bi2 < batch.items.length; bi2++) {
-                    if (newSelect) { _selectedIds[batch.items[bi2].id] = true; }
-                    else { delete _selectedIds[batch.items[bi2].id]; }
-                }
-                // Sync to app edit mode
-                var selCount = Object.keys(_selectedIds).length;
-                if (selCount > 0) {
-                    if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
-                } else {
-                    if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
-                }
-                GT.state.emit('baseGroupsChanged');
+                _toggleBatchSelection(_batchMap[key]);
             });
         });
 
@@ -907,13 +895,7 @@
                 // multi-select: toggle
                 if (_selectedIds[id]) { delete _selectedIds[id]; }
                 else { _selectedIds[id] = true; }
-                // Enter edit mode if any selected, otherwise back to list mode
-                var selCount = Object.keys(_selectedIds).length;
-                if (selCount > 0) {
-                    if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(_selectedIds);
-                } else {
-                    if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
-                }
+                _syncEditMode();
                 GT.state.emit('activeBaseGroupChanged', id);
             });
         });
