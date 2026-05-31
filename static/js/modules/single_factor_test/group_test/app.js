@@ -3022,7 +3022,7 @@
                     }
                     if (selCount === 1) {
                         html += '<button id="gt-action-create-derived-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">🌳 创建派生组</button>';
-                    } else if (selCount >= 2) {
+                    } else if (selCount === 2) {
                         html += '<button id="gt-action-create-ls-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">⚡ 创建 Long-Short 组</button>';
                     }
                     html += '<button id="gt-action-save" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存修改</button>';
