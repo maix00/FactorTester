@@ -346,7 +346,9 @@
 
         // 初始化 Fancytree 产品树
         initFancytree();
-        const contractUid = new URLSearchParams(window.location.search).get('contract_uid');
+        const params = new URLSearchParams(window.location.search);
+        const contractUid = params.get('contract_uid');
+        const productName = params.get('product');
         if (contractUid) {
             selectProduct(contractUid, {
                 name: contractUid,
@@ -355,7 +357,42 @@
                 type: 'contract',
                 contract_uid: contractUid
             });
+        } else if (productName) {
+            // 延迟等待 Fancytree 加载完成后选中产品节点
+            waitForTreeAndSelect(productName);
         }
+    }
+
+    function waitForTreeAndSelect(productName) {
+        // 轮询等待 Fancytree 初始化完成，然后选中对应产品节点
+        var maxAttempts = 20;
+        var attempts = 0;
+        function trySelect() {
+            attempts++;
+            if (treeInstance) {
+                var found = findNodeByProductName(treeInstance.rootNode, productName);
+                if (found) {
+                    found.setActive(true);
+                    found.makeVisible({scrollIntoView: true});
+                }
+                // 不管树中有没有找到，都直接调用 selectProduct 加载图表
+                selectProduct(productName, {});
+            } else if (attempts < maxAttempts) {
+                setTimeout(trySelect, 200);
+            }
+        }
+        trySelect();
+    }
+
+    function findNodeByProductName(node, productName) {
+        if (node.data && node.data.product_name === productName) return node;
+        if (node.children) {
+            for (var i = 0; i < node.children.length; i++) {
+                var found = findNodeByProductName(node.children[i], productName);
+                if (found) return found;
+            }
+        }
+        return null;
     }
 
     function initFancytree() {

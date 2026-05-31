@@ -2,7 +2,7 @@
  * overlays/tester_products.js — Tester product list overlay
  *
  * Clicking a tester link opens a centered overlay showing all products
- * with their descriptions.
+ * with their descriptions. Each product name links to the products page.
  */
 (function() {
     var GT = window.GroupTest;
@@ -41,6 +41,10 @@
         return overlay;
     }
 
+    function buildProductsUrl(productName) {
+        return '/products?product=' + encodeURIComponent(productName);
+    }
+
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
@@ -76,7 +80,7 @@
                 var desc = p.desc || '';
                 html += '<tr style="border-bottom:1px solid #eef2f7;">';
                 html += '<td style="padding:8px 14px;">';
-                html += '<span style="font-weight:600;font-family:monospace;color:#0078d4;">' + escapeHTML(name) + '</span>';
+                html += '<a href="' + buildProductsUrl(name) + '" target="_blank" style="font-weight:600;font-family:monospace;color:#0078d4;text-decoration:none;" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">' + escapeHTML(name) + '</a>';
                 html += '</td>';
                 html += '<td style="padding:8px 14px;color:#555;">' + escapeHTML(desc) + '</td>';
                 html += '</tr>';
