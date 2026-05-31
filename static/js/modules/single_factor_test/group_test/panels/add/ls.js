@@ -175,12 +175,16 @@
      * @returns {{success: boolean, error: string|null}}
      */
     function handleSave() {
+        console.log('[LS save] _longId:', _longId, '_shortId:', _shortId);
+
         if (!_longId) return { success: false, error: '请先选择多头组' };
         if (!_shortId) return { success: false, error: '请先选择空头组' };
 
         try {
             var longDgId  = _resolveToDerived(_longId);
             var shortDgId = _resolveToDerived(_shortId);
+
+            console.log('[LS save] longDgId:', longDgId, 'shortDgId:', shortDgId);
 
             var gLong  = _getGroup(_longId);
             var gShort = _getGroup(_shortId);
@@ -196,9 +200,12 @@
                 shortGroupId: shortDgId,
             };
 
+            console.log('[LS save] data:', JSON.stringify(data));
+
             GT.datamodel.ls_configs.add(data);
             return { success: true, error: null };
         } catch (err) {
+            console.error('[LS save] error:', err);
             return { success: false, error: (err && err.message) || String(err) };
         }
     }

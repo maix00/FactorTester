@@ -579,8 +579,8 @@
                         }
                     }
                     h += '<span style="flex:1;"></span>';
-                    // Config chips — right side, fixed max-width with wrap
-                    h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:280px;flex-shrink:0;">';
+                    // Config chips — right side, wrap naturally, no max-width clamp
+                    h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
                     for (ci = 0; ci < allChips.length; ci++) {
                         chip = allChips[ci];
                         if (chip.category !== 'config') continue;

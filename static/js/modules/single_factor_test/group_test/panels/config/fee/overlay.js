@@ -48,6 +48,32 @@
         return overlay;
     }
 
+    // ── Toast (lightweight notification) ─────────────────────────────────────
+
+    function _showToast(msg, durationMs) {
+        var toast = document.createElement('div');
+        toast.className = 'grouptest-fee-toast';
+        toast.textContent = msg;
+        toast.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:99999;'
+            + 'padding:10px 24px;background:#1f2937;color:#fff;border-radius:8px;'
+            + 'font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,0.25);'
+            + 'pointer-events:none;transition:opacity 0.3s;';
+        document.body.appendChild(toast);
+
+        if (durationMs && durationMs > 0) {
+            setTimeout(function() { _dismissToast(toast); }, durationMs);
+        }
+        return toast;
+    }
+
+    function _dismissToast(toast) {
+        if (!toast || !toast.parentNode) return;
+        toast.style.opacity = '0';
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }
+
     // ── State ────────────────────────────────────────────────────────────────
 
     var _state = null; // { group, mode, products, feeMap, dirtyMap, closeFn }
@@ -430,17 +456,25 @@
         if (feeRows.length === 0) {
             if (GT.fee && typeof GT.fee.fetchFeeTable === 'function') {
                 if (!_fetchPromise) {
+                    // Show loading toast while fetching
+                    var toast = _showToast('⏳ 正在加载分品种费率数据...');
                     _fetchPromise = GT.fee.fetchFeeTable(false).then(function(rows) {
                         _fetchPromise = null;
+                        _dismissToast(toast);
                         if (!rows || rows.length === 0) {
+                            _showToast('⚠️ 费率数据为空，请检查数据源', 3000);
                             return;
                         }
                         openConfigFeeOverlay(group, mode, onClose);
                     }).catch(function(err) {
                         _fetchPromise = null;
+                        _dismissToast(toast);
+                        _showToast('❌ 费率数据加载失败: ' + (err && err.message || err), 5000);
                         console.error('[openConfigFeeOverlay] fetch FAILED:', err);
                     });
                 }
+            } else {
+                _showToast('⚠️ 费率模块未加载，无法配置分品种费率', 3000);
             }
             return;
         }
