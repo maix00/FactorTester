@@ -37,8 +37,9 @@
     /** Batch expand/collapse */
     var _expandedBatches = {};
 
-    /** Product list expand/collapse per derived node */
-    var _expandedProducts = {};
+    /** Product list expand/collapse per derived node — synced with chips.js via REG._expandedProducts */
+    // Aliased to REG._expandedProducts on first fullRender (REG must be loaded by then)
+    var _expandedProducts = null;
 
     /** Batch lookup by key (populated on render) */
     var _batchMap = {};
@@ -120,7 +121,8 @@
         return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
     }
 
-    /** Render all chips for a group (for LS rows — info + config) */
+    /** Render all chips for a group (for LS rows — info + config + derived).
+     *  Chips with onClick get 'unified-config-chip' class + data-gid/data-dgid for event delegation. */
     function _renderAllChipsForGroup(g) {
         if (!g) return '';
         var REG = window.GT_CONFIG_REGISTRY;
@@ -130,7 +132,18 @@
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
             var s = chip.style || CHIP_STYLE_PLAIN;
-            html += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+            if (chip.onClick) {
+                // Base groups use data-gid; derived groups use data-dgid
+                // (matches event delegation in _bindEvents which routes to _synthGroupForDerivedNode)
+                var attr = g.isDerived
+                    ? ('data-dgid="' + escapeHTML(g.id) + '"')
+                    : ('data-gid="' + escapeHTML(g.id) + '"');
+                html += '<span class="unified-config-chip" ' + attr
+                    + ' data-chip-label="' + escapeHTML(chip.label)
+                    + '" style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+            } else {
+                html += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+            }
         }
         return html;
     }
@@ -893,6 +906,8 @@
         var container = typeof containerEl === 'string' ? $(containerEl) : containerEl;
 
         function fullRender() {
+            // Bind _expandedProducts to chips.js shared state (same object reference)
+            if (!_expandedProducts && REG && REG._expandedProducts) { _expandedProducts = REG._expandedProducts; }
             _invalidateExpandCaches();
             var h = '<div id="unified-list-container">';
             var lsHtml = _renderLSSection();
