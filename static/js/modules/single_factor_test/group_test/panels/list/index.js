@@ -881,8 +881,14 @@
                 if (e.target.closest('button')) return;
                 var key = this.getAttribute('data-batch-key');
                 if (e.target.closest('.unified-batch-expand')) {
+                    e.stopPropagation();
                     _expandedBatches[key] = !_expandedBatches[key];
-                    render();
+                    var expandEl = this.querySelector('.unified-batch-expand');
+                    if (expandEl) expandEl.textContent = _expandedBatches[key] ? '▾' : '▸';
+                    var body = this.nextElementSibling;
+                    if (body && body.classList.contains('unified-batch-body')) {
+                        body.style.display = _expandedBatches[key] ? '' : 'none';
+                    }
                     return;
                 }
                 _toggleBatchSelection(_batchMap[key]);
