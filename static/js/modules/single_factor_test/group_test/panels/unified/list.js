@@ -242,7 +242,7 @@
 
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
-                var isActive = item.id === _activeLSId;
+                var isActive = item.id === (GT.state && GT.state.getActiveLsConfigId && GT.state.getActiveLsConfigId());
                 var rowStyle = isActive ? 'background:#eef2ff;' : '';
                 var testerText = _lsTesterLabel(item.longGroupId);
                 var staleTag = item.needsRegenerate
@@ -474,8 +474,13 @@
                     h += '<span style="color:#888;margin:0 8px;">·</span>';
                     h += '<span class="unified-tester-chip" data-tester-id="' + escapeHTML(bg.testerId) + '" style="' + CHIP_STYLE + '">' + _testerLabel(bg.testerId) + '</span>';
                     h += '<span style="flex:1;"></span>';
-                    // Fee chip
-                    h += '<span class="unified-fee-chip" data-gid="' + escapeHTML(bg.id) + '" style="' + CHIP_STYLE + ';cursor:pointer;">💰 ' + _feeCellDisplay(bg) + '</span>';
+                    // Config chips (same pattern as derived node chips)
+                    var bgRebalance = _rebalanceLabel(bg.rebalanceMode);
+                    var bgCloseToday = _closeTodayLabel(bg.feeMode, bg.useCloseToday);
+                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🔄 ' + escapeHTML(bgRebalance) + '</span>';
+                    h += '<span style="' + CHIP_STYLE_PLAIN + ';margin-right:4px;">🗓️ ' + escapeHTML(bgCloseToday) + '</span>';
+                    // Fee chip (clickable)
+                    h += '<span class="unified-fee-chip" data-gid="' + escapeHTML(bg.id) + '" style="' + CHIP_STYLE + ';cursor:pointer;margin-right:4px;">💰 ' + _feeCellDisplay(bg) + '</span>';
                     h += '<span style="width:8px;"></span>';
                     h += '<span style="font-size:11px;color:#888;">' + (bg.groupCount || '') + '</span>';
                     h += '</div>';
@@ -557,7 +562,7 @@
         if (!node) return '';
         var indent = depth * 18;
         var isExp = (node._expanded !== false);
-        var isActive = node.id === _activeDerivedId;
+        var isActive = node.id === (GT.state && GT.state.getActiveDerivedNodeId && GT.state.getActiveDerivedNodeId());
         var hasKids = node.children && node.children.length > 0;
         var feeLabel = _derivedFeeDisplay(node);
         var rebalanceLabel = _derivedRebalanceLabel(node);
@@ -786,7 +791,7 @@
             row.addEventListener('click', function(e) {
                 if (e.target.closest('button')) return;
                 var id = this.getAttribute('data-ls-id');
-                GT.state.setActiveLSConfig(id);
+                GT.state.setActiveLsConfigId(id);
             });
         });
 
@@ -822,7 +827,7 @@
         // ── Base group rows ──
         container.querySelectorAll('.unified-bg-row').forEach(function(row) {
             row.addEventListener('click', function(e) {
-                if (e.target.closest('button') || e.target.closest('.unified-fee-chip')) return;
+                if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
                 var id = this.getAttribute('data-bg-id');
                 // multi-select: toggle
                 var idx = _selectedIds.indexOf(id);
@@ -843,7 +848,7 @@
             chip.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var gid = this.getAttribute('data-gid');
-                GT.state.setActiveBaseGroup(gid);
+                GT.state.setActiveBaseGroupId(gid);
                 // switch to fee panel if available
                 if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
             });
@@ -854,7 +859,7 @@
             chip.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var dgid = this.getAttribute('data-dgid');
-                GT.state.setActiveDerivedNode(dgid);
+                GT.state.setActiveDerivedNodeId(dgid);
                 if (GT.ui && GT.ui.mountTab) GT.ui.mountTab('fee');
             });
         });
@@ -882,7 +887,7 @@
                     var node = GT.datamodel.derived_graph.get(nodeId);
                     if (node) { node._expanded = !node._expanded; }
                 }
-                GT.state.setActiveDerivedNode(nodeId);
+                GT.state.setActiveDerivedNodeId(nodeId);
             });
         });
 
