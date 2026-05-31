@@ -3036,35 +3036,24 @@
                 _renderTabStatus();
             }
 
-            /** Render the status bar below tabs (edit mode / dirty state) */
+            /** Render status inline in the tab bar (edit mode / dirty hint) */
             function _renderTabStatus() {
-                var statusBar = document.getElementById('gt-tab-status');
-                if (!statusBar) return;
+                var statusEl = document.getElementById('gt-tab-status');
+                if (!statusEl) return;
 
                 if (_panelMode === 'edit') {
                     var REG = window.GT_CONFIG_REGISTRY;
                     var hasDirty = REG ? REG.hasDirty() : false;
-                    if (hasDirty) {
-                        statusBar.style.display = '';
-                        statusBar.style.background = '#fff8e1';
-                        statusBar.style.color = '#e65100';
-                        statusBar.style.borderBottom = '1px solid #ffe082';
-                        statusBar.textContent = '⚠️ 编辑模式 — 有未保存的修改，请点击「保存修改」或「取消编辑」';
-                    } else {
-                        statusBar.style.display = '';
-                        statusBar.style.background = '#e8f5e9';
-                        statusBar.style.color = '#2e7d32';
-                        statusBar.style.borderBottom = '1px solid #a5d6a7';
-                        statusBar.textContent = '✏️ 编辑模式 — 所有修改已保存';
-                    }
+                    statusEl.style.display = '';
+                    statusEl.style.color = hasDirty ? '#e65100' : '#888';
+                    statusEl.textContent = hasDirty ? '⚠ 未保存' : '编辑中';
                 } else if (_panelMode === 'add') {
-                    statusBar.style.display = '';
-                    statusBar.style.background = '#e3f2fd';
-                    statusBar.style.color = '#1565c0';
-                    statusBar.style.borderBottom = '1px solid #90caf9';
-                    statusBar.textContent = '➕ 新建模式 — 配置完成后点击提交';
+                    statusEl.style.display = '';
+                    statusEl.style.color = '#1565c0';
+                    statusEl.textContent = '新建中';
                 } else {
-                    statusBar.style.display = 'none';
+                    statusEl.style.display = 'none';
+                    statusEl.textContent = '';
                 }
             }
 
@@ -3170,6 +3159,10 @@
             }
 
             function _enterEditMode(selection) {
+                // Clear any leftover dirty state from previous edit sessions
+                var REG = window.GT_CONFIG_REGISTRY;
+                if (REG) REG.rollbackDirty();
+
                 _panelMode = 'edit';
                 _editSelection = selection || {};
                 _renderTabActions();
@@ -3195,6 +3188,10 @@
             }
 
             function _exitEditMode() {
+                // Discard any unsaved dirty state
+                var REG = window.GT_CONFIG_REGISTRY;
+                if (REG) REG.rollbackDirty();
+
                 _panelMode = 'list';
                 _editSelection = null;
                 GT.state.setActiveBaseGroupId(null);
@@ -3220,6 +3217,7 @@
                         tabBtnsBar.innerHTML = '';
                     }
                 }
+                mountTab('list');
             }
 
             /**
