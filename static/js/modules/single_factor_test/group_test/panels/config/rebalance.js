@@ -48,7 +48,7 @@
             return;
         }
 
-        var currentMode = group.rebalanceMode || 'each_period';
+        var currentMode = REG.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -68,6 +68,9 @@
         html += '若所选产品交易时段不统一，出现"部分产品有信号、部分产品无信号"的混合期时，会自动启用多时段保护逻辑，并临时覆盖所选再平衡模式。';
         html += '</div>';
 
+        // --- Save / Cancel bar ---
+        html += _makeSaveBar();
+
         html += '</div>';
         container.innerHTML = html;
 
@@ -79,17 +82,56 @@
                 if (descEl) {
                     descEl.textContent = MODE_DESCRIPTIONS[newMode] || '';
                 }
-                REG.savePatch({ rebalanceMode: newMode });
+                REG.setDirty('rebalanceMode', newMode);
+                render();
+            });
+        }
+
+        // Save button
+        var saveBtn = $(_containerId + '-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+                var ok = REG.commitDirty();
+                if (ok && GT.state && typeof GT.state.emit === 'function') {
+                    GT.state.emit('baseGroupsChanged');
+                }
+                render();
+            });
+        }
+
+        // Cancel button
+        var cancelBtn = $(_containerId + '-cancel-btn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function() {
+                REG.rollbackDirty();
+                render();
             });
         }
     }
 
+    function _makeSaveBar() {
+        var dirty = REG.hasDirty();
+        var barStyle = 'margin-top:16px;padding:12px;display:flex;align-items:center;gap:8px;';
+        barStyle += 'border-top:1px solid #e5e7eb;';
+        if (dirty) barStyle += 'background:#fff8e1;border-radius:6px;';
+        var html = '<div id="' + _containerId + '-savebar" style="' + barStyle + '">';
+        if (dirty) {
+            html += '<span style="font-size:12px;color:#f57c00;flex:1;">⚠ 有未保存的修改</span>';
+        } else {
+            html += '<span style="font-size:12px;color:#888;flex:1;">✓ 已保存</span>';
+        }
+        html += '<button id="' + _containerId + '-save-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;"' + (dirty ? '' : ' disabled') + '>保存</button>';
+        html += '<button id="' + _containerId + '-cancel-btn" style="padding:6px 16px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#333;cursor:pointer;"' + (dirty ? '' : ' disabled') + '>撤销</button>';
+        html += '</div>';
+        return html;
+    }
+
     function _onBaseGroupsChanged() {
-        if (_mounted) { render(); }
+        if (_mounted) { REG.rollbackDirty(); render(); }
     }
 
     function _onActiveBaseGroupChanged() {
-        if (_mounted) { render(); }
+        if (_mounted) { REG.rollbackDirty(); render(); }
     }
 
     function mount() {

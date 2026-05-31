@@ -123,10 +123,10 @@
             return;
         }
 
-        var mode = group.feeMode || 'none';
-        var rate = group.feeRate;
-        var feeMap = group.feeMap;
-        var sensitivity = group.feeSensitivity !== undefined ? group.feeSensitivity : 1;
+        var mode = REG.getDirty('feeMode', group.feeMode || 'none');
+        var rate = REG.getDirty('feeRate', group.feeRate);
+        var feeMap = REG.getDirty('feeMap', group.feeMap);
+        var sensitivity = REG.getDirty('feeSensitivity', group.feeSensitivity !== undefined ? group.feeSensitivity : 1);
 
         var html = '';
 
@@ -144,7 +144,7 @@
         html += _makeSensitivitySlider(sensitivity);
 
         // --- Close-today toggle ---
-        var useCT = !!group.useCloseToday;
+        var useCT = !!REG.getDirty('useCloseToday', !!group.useCloseToday);
         var ctStateColor = useCT ? '#d97706' : '#0078d4';
         var ctStateText = useCT ? '平今仓' : '平昨仓';
         var ctBtnText = useCT ? '切换为平昨仓' : '切换为平今仓';
@@ -157,10 +157,30 @@
         html += '<span style="font-size:12px;color:#888;">影响品种费率表中平今/平昨比率的选择</span>';
         html += '</div></div>';
 
+        // --- Save / Cancel bar ---
+        html += _makeSaveBar();
+
         container.innerHTML = html;
 
         // Bind events
         _bindEvents(container);
+    }
+
+    function _makeSaveBar() {
+        var dirty = REG.hasDirty();
+        var barStyle = 'margin-top:16px;padding:12px;display:flex;align-items:center;gap:8px;';
+        barStyle += 'border-top:1px solid #e5e7eb;';
+        if (dirty) barStyle += 'background:#fff8e1;border-radius:6px;';
+        var html = '<div id="' + CONTAINER_ID + '-savebar" style="' + barStyle + '">';
+        if (dirty) {
+            html += '<span style="font-size:12px;color:#f57c00;flex:1;">⚠ 有未保存的修改</span>';
+        } else {
+            html += '<span style="font-size:12px;color:#888;flex:1;">✓ 已保存</span>';
+        }
+        html += '<button id="' + CONTAINER_ID + '-save-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;"' + (dirty ? '' : ' disabled') + '>保存</button>';
+        html += '<button id="' + CONTAINER_ID + '-cancel-btn" style="padding:6px 16px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#333;cursor:pointer;"' + (dirty ? '' : ' disabled') + '>撤销</button>';
+        html += '</div>';
+        return html;
     }
 
     // ---------------------------------------------------------------------------
@@ -172,7 +192,7 @@
         var radios = container.querySelectorAll('input[name="feemode"]');
         for (var i = 0; i < radios.length; i++) {
             radios[i].addEventListener('change', function() {
-                REG.savePatch({ feeMode: this.value });
+                REG.setDirty('feeMode', this.value);
                 render();
             });
         }
@@ -183,7 +203,7 @@
             rateInput.addEventListener('change', function() {
                 var v = this.value === '' ? null : parseFloat(this.value);
                 if (v !== null && (isNaN(v) || v < 0)) v = null;
-                REG.savePatch({ feeRate: v });
+                REG.setDirty('feeRate', v);
                 render();
             });
         }
@@ -201,9 +221,10 @@
 
                 var group = REG.getReferenceGroup();
                 if (!group) return;
-                var map = group.feeMap ? JSON.parse(JSON.stringify(group.feeMap)) : {};
+                var map = REG.getDirty('feeMap', group.feeMap);
+                map = map ? JSON.parse(JSON.stringify(map)) : {};
                 map[product] = rate;
-                REG.savePatch({ feeMap: map });
+                REG.setDirty('feeMap', map);
                 render();
 
                 newProduct.value = '';
@@ -220,9 +241,10 @@
 
                 var group = REG.getReferenceGroup();
                 if (!group) return;
-                var map = group.feeMap ? JSON.parse(JSON.stringify(group.feeMap)) : {};
+                var map = REG.getDirty('feeMap', group.feeMap);
+                map = map ? JSON.parse(JSON.stringify(map)) : {};
                 delete map[product];
-                REG.savePatch({ feeMap: Object.keys(map).length > 0 ? map : null });
+                REG.setDirty('feeMap', Object.keys(map).length > 0 ? map : null);
                 render();
             }
         });
@@ -235,7 +257,7 @@
                 if (label) label.textContent = parseFloat(this.value).toFixed(1);
             });
             slider.addEventListener('change', function() {
-                REG.savePatch({ feeSensitivity: parseFloat(this.value) });
+                REG.setDirty('feeSensitivity', parseFloat(this.value));
                 render();
             });
         }
@@ -246,7 +268,29 @@
             ctToggle.addEventListener('click', function() {
                 var group = REG.getReferenceGroup();
                 if (!group) return;
-                REG.savePatch({ useCloseToday: !group.useCloseToday });
+                var current = !!REG.getDirty('useCloseToday', !!group.useCloseToday);
+                REG.setDirty('useCloseToday', !current);
+                render();
+            });
+        }
+
+        // Save button
+        var saveBtn = $(CONTAINER_ID + '-save-btn');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', function() {
+                var ok = REG.commitDirty();
+                if (ok && GT.state && typeof GT.state.emit === 'function') {
+                    GT.state.emit('baseGroupsChanged');
+                }
+                render();
+            });
+        }
+
+        // Cancel (rollback) button
+        var cancelBtn = $(CONTAINER_ID + '-cancel-btn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function() {
+                REG.rollbackDirty();
                 render();
             });
         }
@@ -257,7 +301,10 @@
     // ---------------------------------------------------------------------------
 
     function _onDataChanged() {
-        if (_mounted) render();
+        if (_mounted) {
+            REG.rollbackDirty();
+            render();
+        }
     }
 
     // ---------------------------------------------------------------------------

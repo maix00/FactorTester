@@ -106,6 +106,45 @@
     // Shared helpers for config panels
     // ---------------------------------------------------------------------------
 
+    // ------- Dirty workspace (staged edits before Save) -------
+
+    var _dirty = {}; // { key: value, ... } staged patch
+
+    /** Stage a value into the dirty workspace (without persisting). */
+    function setDirty(key, value) {
+        _dirty[key] = value;
+    }
+
+    /** Get a value from the dirty workspace, falling back to the group. */
+    function getDirty(key, fallback) {
+        if (_dirty.hasOwnProperty(key)) return _dirty[key];
+        return fallback;
+    }
+
+    /** Check whether there are any unsaved changes. */
+    function hasDirty() {
+        for (var k in _dirty) { if (_dirty.hasOwnProperty(k)) return true; }
+        return false;
+    }
+
+    /** Discard all staged changes. */
+    function rollbackDirty() {
+        _dirty = {};
+    }
+
+    /**
+     * Persist staged changes via savePatch and clear the workspace.
+     * @returns {boolean} true if anything was committed
+     */
+    function commitDirty() {
+        if (!hasDirty()) return false;
+        savePatch(_dirty);
+        _dirty = {};
+        return true;
+    }
+
+    // ------- Group reference helpers -------
+
     /**
      * Extract group IDs from edit selection.
      * Supports multiple formats:
@@ -218,6 +257,12 @@
         getEditGroupIds: getEditGroupIds,
         getReferenceGroup: getReferenceGroup,
         savePatch: savePatch,
+        // dirty workspace
+        setDirty: setDirty,
+        getDirty: getDirty,
+        hasDirty: hasDirty,
+        rollbackDirty: rollbackDirty,
+        commitDirty: commitDirty,
     };
 
     GT.log('panels/config/registry loaded');
