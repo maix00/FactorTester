@@ -61,6 +61,7 @@
 
     /** If chips.js is loaded, bridge config panel's getChips → chip provider. */
     function _bridgeConfigToChipProvider(def) {
+        var REG = window.GT_CONFIG_REGISTRY;
         if (REG && typeof REG._bridgeConfigToChipProvider === 'function') {
             REG._bridgeConfigToChipProvider(def);
         }

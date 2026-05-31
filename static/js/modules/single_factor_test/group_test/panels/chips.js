@@ -132,30 +132,45 @@
             name: 'builtin-info',
             getChips: function(g) {
                 var chips = [];
-                // 1) Factor alias
-                if (g.factorAlias) {
-                    chips.push({ label: 'factor', html: g.factorAlias, style: CHIP_STYLE_PLAIN });
-                }
-                // 2) Tester label (resolved from submissions)
-                var testerId = g.testerId;
-                if (!testerId && g.isDerived && g.baseGroupId) {
+
+                // Resolve base group for derived groups
+                var bg = null;
+                if (g.isDerived && g.baseGroupId) {
                     var GT3 = window.GroupTest;
                     if (GT3 && GT3.datamodel && GT3.datamodel.groups) {
-                        var bg = GT3.datamodel.groups.get(g.baseGroupId);
-                        if (bg) testerId = bg.testerId;
+                        bg = GT3.datamodel.groups.get(g.baseGroupId);
                     }
                 }
+
+                // 1) Factor alias — derived inherits from base
+                var factorAlias = g.factorAlias;
+                if (!factorAlias && bg) factorAlias = bg.factorAlias;
+                if (factorAlias) {
+                    chips.push({ label: 'factor', html: factorAlias, style: CHIP_STYLE_PLAIN });
+                }
+
+                // 2) Tester label — derived inherits from base
+                var testerId = g.testerId;
+                if (!testerId && bg) testerId = bg.testerId;
                 if (testerId) {
                     var label = _resolveTesterLabel(testerId);
                     if (label) {
                         chips.push({ label: 'tester', html: label, style: CHIP_STYLE_CLICKABLE });
                     }
                 }
-                // 3) Group index / count (base groups only)
-                if (!g.isDerived && g.groupCount) {
-                    var gi = g.groupIndex || 1;
-                    chips.push({ label: 'group-index', html: gi + '/' + g.groupCount, style: CHIP_STYLE_PLAIN });
+
+                // 3) Group index / count — derived inherits from base
+                var groupCount = g.groupCount;
+                var groupIndex = g.groupIndex;
+                if (!groupCount && bg) {
+                    groupCount = bg.groupCount;
+                    groupIndex = bg.groupIndex;
                 }
+                if (groupCount) {
+                    var gi = groupIndex || 1;
+                    chips.push({ label: 'group-index', html: gi + '/' + groupCount, style: CHIP_STYLE_PLAIN });
+                }
+
                 return chips;
             }
         });
