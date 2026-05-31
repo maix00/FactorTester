@@ -435,7 +435,13 @@
             // Batch header
             var testerLabel = _testerLabel(batch.testerId);
             var batchAllSelected = batch.items.every(function(bg) { return _selectedIds[bg.id]; });
-            h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="display:flex;align-items:center;padding:6px 8px;margin-top:4px;background:#f1f5f9;border-radius:6px;cursor:pointer;font-size:13px;">';
+            var batchHeaderStyle = 'display:flex;align-items:center;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
+            if (batchAllSelected && batch.items.length > 0) {
+                batchHeaderStyle += 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;';
+            } else {
+                batchHeaderStyle += 'background:#f1f5f9;';
+            }
+            h += '<div class="unified-batch-header' + (batchAllSelected && batch.items.length > 0 ? ' gt-row-selected' : '') + '" data-batch-key="' + escapeHTML(batchId) + '" data-selected="' + (batchAllSelected ? '1' : '0') + '" style="' + batchHeaderStyle + '">';
             h += '<span class="unified-batch-expand" style="margin-right:6px;width:16px;text-align:center;cursor:pointer;">' + (isExpanded ? '▾' : '▸') + '</span>';
             h += '<span class="unified-batch-selector" style="display:inline-flex;align-items:center;gap:6px;flex:1;">';
             if (batchLetter) {
@@ -448,13 +454,18 @@
             h += '</div>';
 
             if (isExpanded && !isCollapsed) {
-                h += '<div class="unified-batch-body" style="margin-left:16px;border-left:2px solid #e2e8f0;padding-left:8px;">';
+                // Batch body gets a highlight border when all items are selected
+                var batchBodyStyle = 'margin-left:16px;border-left:2px solid #e2e8f0;padding-left:8px;';
+                if (batchAllSelected && batch.items.length > 0) {
+                    batchBodyStyle += 'background:rgba(238,242,255,0.5);border-left-color:#a5b4fc;border-radius:0 6px 6px 0;';
+                }
+                h += '<div class="unified-batch-body" style="' + batchBodyStyle + '">';
                 for (var ri = 0; ri < batch.items.length; ri++) {
                     var bg = batch.items[ri];
                     var bgSelected = !!_selectedIds[bg.id];
                     var bgActive = bg.id === (GT.state && GT.state.getActiveBaseGroupId && GT.state.getActiveBaseGroupId());
 
-                    h += '<div class="unified-bg-row" data-bg-id="' + escapeHTML(bg.id) + '" style="display:flex;align-items:center;padding:4px 6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgActive ? 'background:#eef2ff;' : '') + (bgSelected ? 'outline:2px solid #6366f1;outline-offset:-1px;' : '') + '">';
+                    h += '<div class="unified-bg-row" data-bg-id="' + escapeHTML(bg.id) + '" style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgActive ? 'background:#eef2ff;' : '') + (bgSelected ? 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;' : '') + '">';
                     h += '<span style="width:6px;height:6px;border-radius:50%;background:#6366f1;margin-right:8px;flex-shrink:0;"></span>';
                     // Short alias like "A1"
                     if (bg.shortAlias) {
@@ -769,7 +780,6 @@
             }
             h += '</div>';
             container.innerHTML = h;
-            console.log('[DEBUG] fullRender _selectedIds=', JSON.stringify(Object.keys(_selectedIds)));
             _bindEvents(container);
         }
 
@@ -855,12 +865,10 @@
                     if (!_selectedIds[batch.items[bi].id]) { allSelected = false; break; }
                 }
                 var newSelect = !allSelected;
-                console.log('[DEBUG] batch-header click key=' + key + ', allSelected=' + allSelected + ', newSelect=' + newSelect + ', _selectedIds BEFORE=', JSON.stringify(Object.keys(_selectedIds)));
                 for (var bi2 = 0; bi2 < batch.items.length; bi2++) {
                     if (newSelect) { _selectedIds[batch.items[bi2].id] = true; }
                     else { delete _selectedIds[batch.items[bi2].id]; }
                 }
-                console.log('[DEBUG] batch-header click _selectedIds AFTER=', JSON.stringify(Object.keys(_selectedIds)));
                 // Sync to app edit mode
                 var selCount = Object.keys(_selectedIds).length;
                 if (selCount > 0) {
@@ -876,11 +884,9 @@
             row.addEventListener('click', function(e) {
                 if (e.target.closest('button') || e.target.closest('.unified-fee-chip') || e.target.closest('.unified-tester-chip')) return;
                 var id = this.getAttribute('data-bg-id');
-                console.log('[DEBUG] bg-row click id=' + id + ', _selectedIds BEFORE=', JSON.stringify(Object.keys(_selectedIds)));
                 // multi-select: toggle
                 if (_selectedIds[id]) { delete _selectedIds[id]; }
                 else { _selectedIds[id] = true; }
-                console.log('[DEBUG] bg-row click _selectedIds AFTER=', JSON.stringify(Object.keys(_selectedIds)));
                 // Enter edit mode if any selected, otherwise back to list mode
                 var selCount = Object.keys(_selectedIds).length;
                 if (selCount > 0) {
