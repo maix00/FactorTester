@@ -2374,6 +2374,15 @@
         }).then(function(res) { return res.json(); });
     }
 
+    /** 批量分组测试（单次 POST，后端并行计算） */
+    function postBatchGroupTest(payload) {
+        return fetch('/run_group_test_batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function(res) { return res.json(); });
+    }
+
     // ---------- 加载默认分组 ----------
     async function loadDefaultGroups() {
         var statusSpan = document.getElementById('group_test_status');
@@ -2606,19 +2615,16 @@
             }
         }
 
-        // ── 3. 构建每个 batch 的 payload 并并行/顺序执行 ──
+        // ── 3. 构建批量 payload，单次 POST ──
         if (runBtn) runBtn.disabled = true;
 
         var multiHorizonContainer = document.getElementById('multi_horizon_container');
         if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
 
         var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
-        var completedCount = 0;
-        var allResults = {}; // keyed by batchKey
 
         // 从第一个 batch 取 param 值（fee、时间等）
         var firstGroup = batches[0] && batches[0].groups[0];
-        var n_groups = firstGroup ? firstGroup.groupCount : 5;
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
         var start_date = firstGroup ? (firstGroup.startDate || null) : null;
         var end_date = firstGroup ? (firstGroup.endDate || null) : null;
@@ -2671,120 +2677,96 @@
         var return_freqs = getSelectedReturnFreqs();
 
         if (statusSpan) {
-            statusSpan.innerHTML = '分组测试运行中... 0/' + totalBatches;
+            statusSpan.innerHTML = '分组测试运行中...（共 ' + totalBatches + ' 批次）';
             statusSpan.style.color = '#0078d4';
         }
 
+        // 构建批量 request payload
+        var batchPayloads = [];
+        for (var bi = 0; bi < batches.length; bi++) {
+            var batch = batches[bi];
+            batchPayloads.push({
+                submission_id: batch.testerId,
+                factor_alias: batch.factorAlias,
+                n_groups: batch.groupCount,
+                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
+            });
+        }
+
+        // 构建跨 batch LS payload
+        var crossBatchLSPayloads = [];
+        for (var ci = 0; ci < crossBatchLS.length; ci++) {
+            var cbLS = crossBatchLS[ci];
+            var cblLongBatch = null, cblShortBatch = null;
+            for (var bj = 0; bj < batches.length; bj++) {
+                if (batches[bj].groupIdToIndex[cbLS.longGroupId] !== undefined) cblLongBatch = batches[bj];
+                if (batches[bj].groupIdToIndex[cbLS.shortGroupId] !== undefined) cblShortBatch = batches[bj];
+            }
+            if (!cblLongBatch || !cblShortBatch) continue;
+
+            var cblLongIdx = cblLongBatch.groupIdToIndex[cbLS.longGroupId] - 1; // 0-based
+            var cblShortIdx = cblShortBatch.groupIdToIndex[cbLS.shortGroupId] - 1;
+
+            crossBatchLSPayloads.push({
+                name: cbLS.name || 'Long-Short',
+                long: {
+                    submission_id: cblLongBatch.testerId,
+                    factor_alias: cblLongBatch.factorAlias,
+                    group: cblLongIdx
+                },
+                short: {
+                    submission_id: cblShortBatch.testerId,
+                    factor_alias: cblShortBatch.factorAlias,
+                    group: cblShortIdx
+                }
+            });
+        }
+
+        var bulkPayload = {
+            batches: batchPayloads,
+            cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
+            fee: fee,
+            fee_map: fee_map,
+            use_closetoday: use_closetoday,
+            start_date: start_date,
+            end_date: end_date,
+            return_freqs: return_freqs.length > 0 ? return_freqs : null,
+            rebalance_mode: rebalance_mode,
+            derived_groups: null
+        };
+
         try {
-            // ── 3a. 并行执行所有同 batch 的组（按 batch 顺序串行，batch 内可并行但这里简化：每个 batch 一次 API 调用） ──
+            var data = await postBatchGroupTest(bulkPayload);
+            if (!data.success) {
+                var errorText = data.needs_ic_test && pageHasICModule()
+                    ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
+                    : data.error;
+                if (statusSpan) {
+                    statusSpan.innerHTML = '✗ 分组测试失败: ' + errorText;
+                    statusSpan.style.color = '#d40000';
+                }
+                if (data.batch_errors) {
+                    console.error('[runGroupTest] batch errors:', data.batch_errors);
+                }
+                return;
+            }
+
+            // 标记所有 batch 为 done
             for (var bi = 0; bi < batches.length; bi++) {
-                var batch = batches[bi];
-                var payload = {
-                    submission_id: batch.testerId,
-                    factor_alias: batch.factorAlias,
-                    n_groups: batch.groupCount,
-                    fee: fee,
-                    fee_map: fee_map,
-                    use_closetoday: use_closetoday,
-                    start_date: start_date,
-                    end_date: end_date,
-                    return_freqs: return_freqs.length > 0 ? return_freqs : null,
-                    rebalance_mode: rebalance_mode,
-                    ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null,
-                    derived_groups: null,
-                    structure_key: buildGroupStructureKey(batch.testerId, batch.factorAlias, batch.groupCount, start_date, end_date, return_freqs)
-                };
-
-                try {
-                    var data = await postGroupTest(payload);
-                    if (!data.success) {
-                        var errorText = data.needs_ic_test && pageHasICModule()
-                            ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
-                            : data.error;
-                        if (statusSpan) {
-                            statusSpan.innerHTML = '✗ 分组测试失败 (' + batch.factorAlias + '): ' + errorText;
-                            statusSpan.style.color = '#d40000';
-                        }
-                        return;
-                    }
-                    allResults[batch.key] = data;
-                    cacheGroupResult(batch.testerId, batch.factorAlias, data);
-                    markGroupFactorStatus(batch.testerId, batch.factorAlias, 'done');
-                } catch (err) {
-                    if (statusSpan) {
-                        statusSpan.innerHTML = '✗ 请求失败 (' + batch.factorAlias + '): ' + err.message;
-                        statusSpan.style.color = '#d40000';
-                    }
-                    markGroupFactorStatus(batch.testerId, batch.factorAlias, 'error');
-                    return;
-                }
-
-                completedCount++;
-                if (statusSpan) {
-                    statusSpan.innerHTML = '分组测试运行中... ' + completedCount + '/' + totalBatches;
-                }
+                var btch = batches[bi];
+                cacheGroupResult(btch.testerId, btch.factorAlias, data);
+                markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
 
-            // ── 3b. 跨 batch LS：最后单独算 ──
-            if (crossBatchLS.length > 0) {
-                if (statusSpan) {
-                    statusSpan.innerHTML = '正在计算跨 Batch 的 Long-Short 组...';
-                }
-                // 对每个跨 batch LS，用第一个 batch 调用，然后手动合并
-                // 简化处理：用第一个 batch 的 tester 跑，然后把 LS 传入
-                // 实际上跨 batch LS 需要在两个 tester 上分别跑，这里先跳过并提示
-                console.warn('[runGroupTest] cross-batch LS not yet supported:', crossBatchLS.length, 'configs');
-                completedCount++;
-            }
-
-            // ── 4. 合并所有 batch 的结果，一次性展示 ──
-            var mergedGroups = [];
-            var mergedMetrics = {};
-            var allTimestamps = [];
-            var lastNgroups = 0;
-            var lastMultiSession = false;
-            var lastRebalance = '';
-            var lastStructureKey = '';
-
-            for (var mi = 0; mi < batches.length; mi++) {
-                var bKey = batches[mi].key;
-                var result = allResults[bKey];
-                if (!result) continue;
-                if (result.groups) {
-                    mergedGroups = mergedGroups.concat(result.groups);
-                }
-                if (result.metrics) {
-                    for (var mk in result.metrics) {
-                        if (result.metrics.hasOwnProperty(mk)) {
-                            mergedMetrics[mk] = result.metrics[mk];
-                        }
-                    }
-                }
-                if (result.groups && result.groups.length > 0 && result.groups[0].timestamps) {
-                    allTimestamps = result.groups[0].timestamps;
-                }
-                lastNgroups = result.n_groups || lastNgroups;
-                lastMultiSession = result.multi_session_active || lastMultiSession;
-                lastRebalance = result.rebalance_mode || lastRebalance;
-                lastStructureKey = result.structure_key || lastStructureKey;
-            }
-
-            // 构建合并后的 data 对象用于 applyGroupTestResult
-            var mergedData = {
-                success: true,
-                groups: mergedGroups,
-                metrics: mergedMetrics,
-                n_groups: lastNgroups,
-                submission_id: batches[0] && batches[0].testerId || '',
-                factor_alias: batches[0] && batches[0].factorAlias || '',
-                multi_session_active: lastMultiSession,
-                rebalance_mode: lastRebalance,
-                structure_key: lastStructureKey
-            };
-            applyGroupTestResult(mergedData);
+            // 一次性渲染
+            applyGroupTestResult(data);
 
             if (statusSpan) {
-                statusSpan.innerHTML = '✓ ' + batches.length + ' 个批次分组测试完成';
+                var doneMsg = '✓ ' + data.batch_count + ' 批次完成';
+                if (data.cross_batch_ls_count) {
+                    doneMsg += '（含 ' + data.cross_batch_ls_count + ' 跨 Batch LS）';
+                }
+                statusSpan.innerHTML = doneMsg;
                 statusSpan.style.color = '#28a745';
             }
         } catch (e) {
