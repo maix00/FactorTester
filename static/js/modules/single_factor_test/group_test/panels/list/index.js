@@ -240,7 +240,7 @@
 
         // Section header
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:8px;border-bottom:2px solid #e0e7ff;">';
-        h += '<span style="font-size:14px;font-weight:700;color:#3730a3;">⚡ LS 多空组</span>';
+        h += '<span style="font-size:14px;font-weight:700;color:#3730a3;">⚡ Long-Short 组</span>';
         h += '</div>';
 
         h += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
@@ -254,9 +254,9 @@
 
                 h += '<tr class="unified-ls-row" data-ls-id="' + escapeHTML(item.id) + '" style="cursor:pointer;border-bottom:1px solid #e8eaed;' + rowStyle + '">';
 
-                // ── Short alias ──
+                // ── Short alias (same style as base group shortAlias) ──
                 h += '<td style="padding:6px 8px;white-space:nowrap;">';
-                h += '<span style="' + CHIP_STYLE_PLAIN + '">' + escapeHTML(item.name) + '</span>';
+                h += '<span style="font-weight:600;color:#4338ca;font-size:13px;">' + escapeHTML(item.name) + '</span>';
                 h += '</td>';
 
                 // ── Config chips (long + short side derived groups) ──
