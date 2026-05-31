@@ -74,9 +74,11 @@
         if (_testerProductsCache[testerId]) return _testerProductsCache[testerId];
         var subs = window.submissions || [];
         var result = [];
+        console.log('[DEBUG _testerProducts] testerId=' + testerId + ', submissions_count=' + subs.length);
         for (var i = 0; i < subs.length; i++) {
             if (String(subs[i].id) === String(testerId)) {
                 var products = subs[i].products;
+                console.log('[DEBUG _testerProducts] found sub[' + i + '] id=' + subs[i].id + ', products=' + JSON.stringify(products));
                 if (Array.isArray(products)) {
                     result = products.map(function(p) {
                         if (typeof p === 'string') return { name: p, desc: '' };
@@ -86,6 +88,7 @@
                 break;
             }
         }
+        console.log('[DEBUG _testerProducts] result_count=' + result.length + ', first=' + (result.length ? JSON.stringify(result[0]) : 'empty'));
         _testerProductsCache[testerId] = result;
         return result;
     }

@@ -54,6 +54,10 @@
      * @param {Array<{name:string, desc:string}>} products
      */
     function openTesterProductsOverlay(testerName, products) {
+        console.log('[DEBUG openTesterProductsOverlay] testerName=' + testerName + ', products_count=' + (Array.isArray(products) ? products.length : 'not_array'));
+        if (Array.isArray(products) && products.length > 0) {
+            console.log('[DEBUG openTesterProductsOverlay] first=' + JSON.stringify(products[0]));
+        }
         ensureOverlay();
 
         var panel = document.getElementById(PANEL_ID);
