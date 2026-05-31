@@ -317,7 +317,15 @@
             }
             _batchMap[key].items.push(item);
         }
-        var keys = Object.keys(_batchMap).sort();
+        var keys = Object.keys(_batchMap);
+        // Sort by shortAlias letter prefix (A, B, C...) instead of batchKey string
+        keys.sort(function(a, b) {
+            var aliasA = _batchMap[a].items[0].shortAlias || '';
+            var aliasB = _batchMap[b].items[0].shortAlias || '';
+            if (aliasA < aliasB) return -1;
+            if (aliasA > aliasB) return 1;
+            return 0;
+        });
         var result = [];
         for (var k = 0; k < keys.length; k++) { result.push(_batchMap[keys[k]]); }
         return result;
