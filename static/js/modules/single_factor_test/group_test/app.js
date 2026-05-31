@@ -3030,9 +3030,8 @@
                     html += '<button id="gt-action-save" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">保存修改</button>';
                     html += '<button id="gt-action-cancel-edit" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消编辑</button>';
                 } else {
-                    // Normal list mode: show "add base group" and "add LS group" buttons
+                    // Normal list mode: show "add base group" button only
                     html += '<button id="gt-action-add-base" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
-                    html += '<button id="gt-action-add-ls" class="btn btn-outline-primary btn-sm" style="padding:4px 12px;font-size:12px;border:1px dashed #6366f1;">⚡ 新增 LS 组</button>';
                 }
                 bar.innerHTML = html;
                 _bindActionButtons();
