@@ -28,6 +28,11 @@
 
     function $(id) { return document.getElementById(id); }
 
+    function escapeHTML(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function _getNode() {
         var id = GT.state.getActiveDerivedNodeId();
         if (!id) return null;
@@ -43,6 +48,35 @@
         var map = {}; // keyed by name for dedup
         var baseGroups = GT.datamodel.base_groups.getAll();
         var seenTesterIds = {};
+
+        // Try the preselected parent derived group first — use its effective products
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
+        if (preselectedParentDerivedId) {
+            var pNode = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(preselectedParentDerivedId);
+            if (pNode) {
+                var effProds = _effectiveProducts(pNode);
+                for (var ep = 0; ep < effProds.products.length; ep++) {
+                    var epn = effProds.products[ep];
+                    if (typeof epn === 'string') {
+                        map[epn] = '';
+                    } else if (epn && epn.name) {
+                        map[epn.name] = epn.desc || '';
+                    }
+                }
+                // Also add testerId products for richer desc
+                if (pNode.baseGroupId && pNode.baseGroupId !== '__batch__') {
+                    var bg = GT.datamodel.base_groups && GT.datamodel.base_groups.get(pNode.baseGroupId);
+                    if (bg && bg.testerId) {
+                        _addProductsFromTesterId(map, bg.testerId);
+                    }
+                }
+                var names = Object.keys(map).sort();
+                return names.map(function(n) { return { name: n, desc: map[n] || '' }; });
+            }
+        }
+
+        // Fallback: collect from all base groups
         for (var i = 0; i < baseGroups.length; i++) {
             var tid = baseGroups[i].testerId;
             if (tid && !seenTesterIds[tid]) {
@@ -51,9 +85,9 @@
             }
         }
         // Also try the preselected base group from add draft
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
-        if (draft && draft.preselectedBaseGroupId) {
-            var bg = GT.datamodel.base_groups.get(draft.preselectedBaseGroupId);
+        var baseId = (draft && draft.preselectedBaseGroupId) || null;
+        if (baseId) {
+            var bg = GT.datamodel.base_groups.get(baseId);
             if (bg && bg.testerId && !seenTesterIds[bg.testerId]) {
                 seenTesterIds[bg.testerId] = true;
                 _addProductsFromTesterId(map, bg.testerId);
@@ -110,9 +144,31 @@
     function _renderAddMode(container) {
         var allProducts = _allProducts();
 
+        // Determine parent info — could be a base group or another derived group
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var preselectedBaseGroupId = (draft && draft.preselectedBaseGroupId) || null;
+        var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
+        var parentLabel = '';
+        var parentType = ''; // 'base' or 'derived'
+
+        if (preselectedParentDerivedId) {
+            var pNode = GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(preselectedParentDerivedId);
+            parentLabel = pNode ? (pNode.name || pNode.id) : preselectedParentDerivedId;
+            parentType = 'derived';
+        } else if (preselectedBaseGroupId) {
+            var bg = GT.datamodel.base_groups.get(preselectedBaseGroupId);
+            parentLabel = bg ? (bg.name || bg.id) : preselectedBaseGroupId;
+            parentType = 'base';
+        }
+
         var html = '<div style="margin-bottom:16px;">';
         html += '<h3 style="margin:0 0 4px 0;font-size:15px;">品种筛选</h3>';
-        html += '<p style="margin:0;font-size:12px;color:#666;">选择派生组包含的品种（留空则继承基础组全部品种）</p>';
+        if (parentType === 'derived') {
+            html += '<p style="margin:0 0 8px 0;font-size:12px;color:#7c3aed;">关联上级派生组: <strong>' + escapeHTML(parentLabel) + '</strong></p>';
+        } else if (parentType === 'base') {
+            html += '<p style="margin:0 0 8px 0;font-size:12px;color:#0078d4;">关联基础组: <strong>' + escapeHTML(parentLabel) + '</strong></p>';
+        }
+        html += '<p style="margin:0;font-size:12px;color:#666;">选择派生组包含的品种（留空则继承上级全部品种）</p>';
         html += '</div>';
 
         if (allProducts.length === 0) {

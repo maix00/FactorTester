@@ -3102,6 +3102,15 @@
                     mountTab('add-base');
                 } else if (addFlow === 'derived') {
                     _addDraft.derivedGroupId = null;
+                    // If no preselected parent (from _createDerivedFromSelection or +子), try active state
+                    if (!_addDraft.preselectedBaseGroupId && !_addDraft.preselectedParentDerivedId) {
+                        var activeDerivedId = GT.state && GT.state.getActiveDerivedNodeId ? GT.state.getActiveDerivedNodeId() : null;
+                        if (activeDerivedId) {
+                            _addDraft.preselectedParentDerivedId = activeDerivedId;
+                        } else {
+                            _addDraft.preselectedBaseGroupId = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+                        }
+                    }
                     _renderTabActions();
                     mountTab('add-derived');
                 } else if (addFlow === 'ls') {
@@ -3141,10 +3150,50 @@
             }
 
             function _submitAddDerivedGroup() {
-                // Delegate to the unified list panel's add-derived form
-                var listPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'list'; });
-                if (listPanel && listPanel.panel && typeof listPanel.panel._openDerivedForm === 'function') {
-                    listPanel.panel._openDerivedForm(null, null);
+                if (!_addDraft) { alert('提交草稿丢失'); return; }
+                var baseGroupId = _addDraft.preselectedBaseGroupId;
+                var parentDerivedId = _addDraft.preselectedParentDerivedId;
+
+                // Must have either a base group or a parent derived group
+                if (!baseGroupId && !parentDerivedId) {
+                    alert('请先从列表中选择一个基础组或派生组作为上级');
+                    return;
+                }
+                // Resolve baseGroupId from parent derived node if not set directly
+                if (!baseGroupId && parentDerivedId) {
+                    var pNode = GT.datamodel.derived_graph.get(parentDerivedId);
+                    if (pNode) {
+                        baseGroupId = pNode.baseGroupId;
+                    }
+                    if (!baseGroupId) {
+                        alert('无法确定上级派生组关联的基础组');
+                        return;
+                    }
+                }
+
+                var derivedPanel = GT.panels.add && GT.panels.add.derived;
+                var selectedProducts = (derivedPanel && typeof derivedPanel.getSelectedProducts === 'function')
+                    ? derivedPanel.getSelectedProducts() : [];
+
+                var productMask = {};
+                for (var i = 0; i < selectedProducts.length; i++) {
+                    productMask[selectedProducts[i]] = true;
+                }
+
+                var config = {
+                    name: '派生组',
+                    baseGroupId: baseGroupId,
+                    productMask: productMask,
+                };
+                if (parentDerivedId) {
+                    config.parentId = parentDerivedId;
+                }
+
+                try {
+                    GT.datamodel.derived_graph.add(config);
+                } catch (err) {
+                    alert('创建派生组失败: ' + (err && err.message || err));
+                    return;
                 }
                 _exitAddMode();
             }
@@ -3221,8 +3270,8 @@
             }
 
             /**
-             * Create a derived group from a single selected base group.
-             * Opens the derived add modal pre-filled with the selected baseGroupId.
+             * Create a derived group from a single selected item (base group or derived group).
+             * Opens the derived add panel pre-filled with the selection as parent.
              */
             function _createDerivedFromSelection() {
                 var selIds;
@@ -3236,14 +3285,27 @@
                     selIds = [];
                 }
                 if (selIds.length !== 1) {
-                    alert('请选择 1 个基础组来创建派生组');
+                    alert('请选择 1 行来创建派生组');
                     return;
                 }
-                var baseGroupId = selIds[0];
-                // Switch to derived add mode with pre-selected base group
+                var selectedId = selIds[0];
+
+                // Determine if the selection is a base group or a derived group
+                var draft = { addFlow: 'derived' };
+                if (GT.datamodel.base_groups && GT.datamodel.base_groups.get(selectedId)) {
+                    // It's a base group
+                    draft.preselectedBaseGroupId = selectedId;
+                } else if (GT.datamodel.derived_graph && GT.datamodel.derived_graph.get(selectedId)) {
+                    // It's a derived group
+                    draft.preselectedParentDerivedId = selectedId;
+                } else {
+                    alert('无法识别选中的分组类型');
+                    return;
+                }
+
                 _exitEditMode();
                 _panelMode = 'add';
-                _addDraft = { addFlow: 'derived', preselectedBaseGroupId: baseGroupId };
+                _addDraft = draft;
                 mountTab('add-derived');
                 _renderTabActions();
             }

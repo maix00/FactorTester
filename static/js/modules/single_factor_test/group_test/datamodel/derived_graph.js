@@ -241,6 +241,19 @@
     }
 
     /**
+     * Toggle the _expanded flag on a source node (persists across re-renders).
+     * Returns the new expanded state, or null if node not found.
+     * @param {string} id
+     * @returns {boolean|null}
+     */
+    function toggleExpanded(id) {
+        var idx = _findIndex(id);
+        if (idx === -1) return null;
+        _nodes[idx]._expanded = !_nodes[idx]._expanded;
+        return _nodes[idx]._expanded;
+    }
+
+    /**
      * Get the tree structure starting from root nodes.
      * Each node includes a `children` array of nested sub-trees.
      * @returns {object[]}
@@ -386,6 +399,7 @@
         getAll: getAll,
         getTree: getTree,
         getDescendants: getDescendants,
+        toggleExpanded: toggleExpanded,
         update: update,
         remove: remove,
         list: list,
