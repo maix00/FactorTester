@@ -2423,7 +2423,6 @@
 
         var GROUPS_PER_FACTOR = 5;
         var totalCreated = 0;
-        var globalLetterIdx = 0; // cross all testers, so A/B/C... never repeat
 
         try {
             for (var si = 0; si < submissions.length; si++) {
@@ -2433,15 +2432,11 @@
                     var factor = factorList[fi];
                     var factorAlias = factor.alias || factor.name || '';
 
-                    // Letter prefix: globally unique across all testers
-                    var letter = String.fromCharCode(65 + globalLetterIdx);
-                    globalLetterIdx++;
-
                     // Create 5 base groups (groupIndex 1-5) for this factor
+                    // shortAlias is auto-assigned by groups.add: same (testerId, factorAlias, groupCount) → same letter
                     var createdIds = [];
                     for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
                         try {
-                            var shortAlias = letter + gi;
                             var id = groups.add({
                                 name: factorAlias + ' · G' + gi + ' (' + (sub.product_group || sub.label || testerId) + ')',
                                 testerId: testerId,
@@ -2449,7 +2444,6 @@
                                 groupCount: GROUPS_PER_FACTOR,
                                 groupIndex: gi,
                                 isAllGroups: false,
-                                shortAlias: shortAlias,
                                 feeMode: 'none',
                                 useCloseToday: false,
                                 rebalanceMode: 'each_period'
@@ -2466,7 +2460,7 @@
                         var shortItem = createdIds[4];  // groupIndex 5
                         try {
                             lsConfigs.add({
-                                name: factorAlias + ' · ' + letter + '1/' + letter + '5',
+                                name: factorAlias + ' · 多空',
                                 longGroupId: longItem.id,
                                 shortGroupId: shortItem.id
                             });

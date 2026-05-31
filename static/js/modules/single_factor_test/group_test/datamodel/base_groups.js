@@ -29,6 +29,8 @@
 
     var _items = [];          // array of base group objects
     var _idCounter = 0;
+    var _batchLetterMap = {}; // batchKey → letter (e.g., "A")
+    var _nextLetterCode = 65; // charCode for next new batch (A=65)
 
     // ---------------------------------------------------------------------------
     // Helpers
@@ -37,6 +39,13 @@
     function _uuid() {
         _idCounter += 1;
         return 'bg_' + Date.now().toString(36) + '_' + _idCounter.toString(36);
+    }
+
+    /** Return the next available letter code and advance. */
+    function _nextAvailableLetter() {
+        var letter = String.fromCharCode(_nextLetterCode);
+        _nextLetterCode++;
+        return letter;
     }
 
     function _deepCopy(obj) {
@@ -414,12 +423,25 @@
             // Base group: standard fields
             item.parentId = null;
             item.baseGroupId = null;
-            item.shortAlias = config.shortAlias || '';
             item.testerId = config.testerId.trim();
             item.factorAlias = config.factorAlias.trim();
             item.groupCount = config.groupCount;
             item.groupIndex = config.groupIndex !== undefined ? config.groupIndex : 1;
             item.isAllGroups = config.isAllGroups !== undefined ? !!config.isAllGroups : false;
+
+            // Auto-assign shortAlias: same batchKey → same letter; new batchKey → next available letter (join-order)
+            if (!config.shortAlias || config.shortAlias === '') {
+                var bk = batchKey(item.testerId, item.factorAlias, item.groupCount);
+                var existingLetter = _batchLetterMap[bk];
+                if (!existingLetter) {
+                    existingLetter = _nextAvailableLetter();
+                    _batchLetterMap[bk] = existingLetter;
+                }
+                item.shortAlias = existingLetter + item.groupIndex;
+            } else {
+                item.shortAlias = config.shortAlias;
+            }
+
             item.feeMode = config.feeMode || 'none';
             item.feeRate = config.feeRate !== undefined ? config.feeRate : null;
             item.feeMap = config.feeMap !== undefined ? config.feeMap : null;
@@ -539,6 +561,22 @@
         }
 
         _emit('groupsChanged', { action: 'remove', id: id, cascadeIds: idsToRemove });
+
+        // Clean up batch letter map if no remaining items for this batchKey
+        var remainingKeys = {};
+        for (var r2 = 0; r2 < _items.length; r2++) {
+            if (!_items[r2].isDerived) {
+                remainingKeys[batchKey(_items[r2].testerId, _items[r2].factorAlias, _items[r2].groupCount)] = true;
+            }
+        }
+        var staleKeys = [];
+        Object.keys(_batchLetterMap).forEach(function(bk) {
+            if (!remainingKeys[bk]) staleKeys.push(bk);
+        });
+        for (var s = 0; s < staleKeys.length; s++) {
+            delete _batchLetterMap[staleKeys[s]];
+        }
+
         return _deepCopy(removed);
     }
 
@@ -563,6 +601,8 @@
     function _reset() {
         _items = [];
         _idCounter = 0;
+        _batchLetterMap = {};
+        _nextLetterCode = 65;
     }
 
     // ---------------------------------------------------------------------------
