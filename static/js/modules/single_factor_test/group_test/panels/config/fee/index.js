@@ -255,11 +255,13 @@
             html += '</div>';
         }
 
-        // ── Sensitivity slider ──
-        html += '<div style="margin-bottom:16px;">';
-        html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">费率倍数 <span id="' + CONTAINER_ID + '-sens-val" style="font-weight:700;color:#0078d4;">' + Number(sensitivity).toFixed(1) + '</span>x</label>';
-        html += '<input id="' + CONTAINER_ID + '-sensitivity" type="range" min="0.1" max="5" step="0.1" value="' + Number(sensitivity).toFixed(1) + '" style="width:100%;max-width:300px;">';
-        html += '</div>';
+        // ── Sensitivity slider (per_product only) ──
+        if (mode === 'per_product') {
+            html += '<div style="margin-bottom:16px;">';
+            html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px;">费率倍数 <span id="' + CONTAINER_ID + '-sens-val" style="font-weight:700;color:#0078d4;">' + Number(sensitivity).toFixed(1) + '</span>x</label>';
+            html += '<input id="' + CONTAINER_ID + '-sensitivity" type="range" min="0.1" max="5" step="0.1" value="' + Number(sensitivity).toFixed(1) + '" style="width:100%;max-width:300px;">';
+            html += '</div>';
+        }
 
         // ── Close-today toggle (per_product only) ──
         if (mode === 'per_product') {
@@ -272,23 +274,8 @@
             html += '</div>';
         }
 
-        // ── Save/Cancel bar ──
-        var hasDirty = REG ? REG.hasDirty() : false;
-        html += _makeSaveBar(hasDirty);
-
         container.innerHTML = html;
         _bindEvents();
-    }
-
-    function _makeSaveBar(hasDirty) {
-        var html = '';
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;margin-top:12px;background:' + (hasDirty ? '#fff8e1' : '#f9fafb') + ';border-radius:6px;border:1px solid ' + (hasDirty ? '#ffc107' : '#e5e7eb') + ';">';
-        html += '<span style="font-size:12px;color:' + (hasDirty ? '#e65100' : '#888') + ';">' + (hasDirty ? '⚠️ 有未保存的更改' : '✓ 已保存') + '</span>';
-        html += '<div style="display:flex;gap:6px;">';
-        html += '<button id="' + CONTAINER_ID + '-save-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">✓ 保存</button>';
-        html += '<button id="' + CONTAINER_ID + '-cancel-btn" style="padding:6px 16px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#333;cursor:pointer;">✕ 取消</button>';
-        html += '</div></div>';
-        return html;
     }
 
     // ── Event binding ──────────────────────────────────────────────────────────
@@ -344,32 +331,6 @@
                 if (!group) return;
                 var current = !!REG.getDirty('useCloseToday', !!group.useCloseToday);
                 REG.setDirty('useCloseToday', !current);
-                render();
-            });
-        }
-
-        // Save button
-        var saveBtn = $(CONTAINER_ID + '-save-btn');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', function() {
-                var ok = REG.commitDirty();
-                if (ok) {
-                    // Sync _useCloseToday with committed state
-                    var group = REG.getReferenceGroup();
-                    if (group) _useCloseToday = !!group.useCloseToday;
-                    if (GT.state && typeof GT.state.emit === 'function') {
-                        GT.state.emit('baseGroupsChanged');
-                    }
-                }
-                render();
-            });
-        }
-
-        // Cancel (rollback) button
-        var cancelBtn = $(CONTAINER_ID + '-cancel-btn');
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', function() {
-                REG.rollbackDirty();
                 render();
             });
         }
