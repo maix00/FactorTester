@@ -393,6 +393,8 @@
      * @param {string}  mode             — 'edit' or 'view'
      * @param {function} [onClose]       — called after overlay closes (e.g. to re-render chips)
      */
+    var _fetchPromise = null; // Prevent concurrent fetches
+
     function openConfigFeeOverlay(group, mode, onClose) {
         ensureOverlay();
 
@@ -400,9 +402,15 @@
         var feeRows = (GT.fee && typeof GT.fee.getFeeRows === 'function') ? GT.fee.getFeeRows() : [];
         if (feeRows.length === 0) {
             if (GT.fee && typeof GT.fee.fetchFeeTable === 'function') {
-                GT.fee.fetchFeeTable(false).then(function() {
-                    openConfigFeeOverlay(group, mode, onClose);
-                }).catch(function() {});
+                if (!_fetchPromise) {
+                    _fetchPromise = GT.fee.fetchFeeTable(false).then(function(rows) {
+                        _fetchPromise = null;
+                        if (!rows || rows.length === 0) return; // fetch returned empty, don't retry
+                        openConfigFeeOverlay(group, mode, onClose);
+                    }).catch(function() {
+                        _fetchPromise = null;
+                    });
+                }
             }
             return;
         }
