@@ -955,6 +955,7 @@ def test_by_group_single_factor(
             derived_slices.append(mask_1g)
             derived_info.append({
                 'base_group': base_group,
+                'key': dd.get('key'),
                 'name': dd.get('name', f'第{base_group + 1}组精选'),
                 'id': dd.get('id'),
                 'product_names': [display_names[idx] for idx in sel_idx],

@@ -647,6 +647,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             entry = {
                 'key': group_key,
                 'name': group_name,
+                'group_index': g,
                 'timestamps': timestamps,
                 'cumulative_returns': vals,
                 'gross_returns': gross_vals,
@@ -678,7 +679,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         used_keys = set(metrics.keys())
         if ls_configs:
             for ls_config in ls_configs:
-                r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
+                r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
                 # LS key: 去重后的唯一标识，name: 原始描述
                 ls_name = ls_config['name'] or 'Long-Short'
                 ls_key = _unique_group_key(ls_name, used_keys)
@@ -1158,6 +1159,7 @@ def run_group_test():
             entry = {
                 'key': _group_display_key(g, n_base, derived_info),
                 'name': f'Group {g+1}',
+                'group_index': g,
                 'timestamps': timestamps,
                 'cumulative_returns': vals,
                 'gross_returns': gross_vals,
@@ -1193,7 +1195,7 @@ def run_group_test():
                 }
         used_keys = set(metrics.keys())
         for ls_config in ls_configs:
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
+            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
             ls_name = ls_config['name'] or 'Long-Short'
             ls_key = _unique_group_key(ls_name, used_keys)
             ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
@@ -1581,6 +1583,7 @@ def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> 
         entry = {
             'key': _group_display_key(g, n_base, derived_info),
             'name': f'Group {g+1}',
+            'group_index': g,
             'timestamps': timestamps,
             'cumulative_returns': vals,
             'gross_returns': gross_vals,
@@ -1620,7 +1623,7 @@ def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> 
         ls_configs = _parse_ls_configs(task, n_groups)
         ls_metrics_list = []
         for ls_config in ls_configs:
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
+            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
             ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
             ls_metrics_list.append({
                 'name': ls_config['name'],

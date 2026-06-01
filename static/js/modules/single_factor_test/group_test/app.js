@@ -1149,6 +1149,25 @@
         return [];
     }
 
+    function groupDisplayKey(group, allGroups) {
+        if (!group) return '';
+        if (!group.isDerived) return group.shortAlias || group.key || group.name || group.id || '';
+        allGroups = allGroups || (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll ? GT.datamodel.groups.getAll() : []);
+        var base = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(group.baseGroupId) : null;
+        var baseAlias = base ? (base.shortAlias || base.name || base.id) : (group.baseGroupId || '');
+        var siblings = allGroups.filter(function(item) {
+            return item && item.isDerived && item.baseGroupId === group.baseGroupId && item.parentId === group.parentId;
+        });
+        var pos = siblings.findIndex(function(item) { return item.id === group.id; });
+        var suffix = pos >= 0 ? String(pos + 1) : (group.name || group.id || '?');
+        if (group.parentId) {
+            var parent = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(group.parentId) : null;
+            var parentAlias = parent ? groupDisplayKey(parent, allGroups) : baseAlias;
+            return parentAlias + ':' + suffix;
+        }
+        return baseAlias + ':' + suffix;
+    }
+
     function collectDerivedPayloadForBatch(batch) {
         if (!batch || !GT.datamodel || !GT.datamodel.groups) return [];
         var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
@@ -1166,6 +1185,7 @@
             if (!products.length) return;
             payload.push({
                 id: group.id,
+                key: group.shortAlias || groupDisplayKey(group, all),
                 name: group.name || '派生组',
                 baseGroup: (base.groupIndex || 1) - 1,
                 productNames: products
@@ -2810,6 +2830,12 @@
             for (var gi = 0; gi < b.groups.length; gi++) {
                 b.groupIdToIndex[b.groups[gi].id] = b.groups[gi].groupIndex;
             }
+            b.derivedPayload = collectDerivedPayloadForBatch(b);
+            for (var di = 0; di < b.derivedPayload.length; di++) {
+                if (b.derivedPayload[di].id) {
+                    b.groupIdToIndex[b.derivedPayload[di].id] = Number(b.groupCount || b.groups.length) + di + 1;
+                }
+            }
             b.lsPayloads = []; // LS configs that belong to this batch
         }
         var crossBatchLS = []; // LS configs spanning multiple batches
@@ -2918,7 +2944,7 @@
                     groupNames[(g.groupIndex || (gi + 1)) - 1] = g.shortAlias;
                 }
             }
-            var derivedPayload = collectDerivedPayloadForBatch(batch);
+            var derivedPayload = batch.derivedPayload || [];
             batchPayloads.push({
                 submission_id: batch.testerId,
                 factor_alias: batch.factorAlias,

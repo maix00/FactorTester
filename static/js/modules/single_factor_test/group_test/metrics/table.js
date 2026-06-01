@@ -104,6 +104,16 @@
         return map;
     }
 
+    function buildGroupIndexMap(groups) {
+        var map = {};
+        (groups || []).forEach(function(g, idx) {
+            if (!g || g.is_ls || !g.key) return;
+            var groupIndex = g.group_index != null ? g.group_index : idx;
+            map[g.key] = groupIndex;
+        });
+        return map;
+    }
+
     function getGroupLabels(metricsByGroup) {
         var labels = [];
         for (var k in (metricsByGroup || {})) {
@@ -185,11 +195,9 @@
         if (!labels.length) return { headHtml: '', bodyHtml: '' };
 
         var lsMap = buildLsMap(groups);
+        var groupIndexMap = buildGroupIndexMap(groups);
         function isLsGroup(g) { return lsMap[g] || false; }
-        // label for a group key: LS groups use their name from groups[], base groups show "第N组" or key
         function groupLabel(g) {
-            if (lsMap[g]) return String(g);  // LS groups: key IS the name
-            if (/^\d+$/.test(String(g))) return '第' + (parseInt(g, 10) + 1) + '组';
             return String(g);
         }
 
@@ -198,8 +206,9 @@
             var label = groupLabel(g);
             if (isLsGroup(g)) {
                 headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
-            } else if (/^\d+$/.test(String(g))) {
-                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(g) + '" title="查看该组详情">' + label + '</th>';
+            } else if (groupIndexMap[g] != null || /^\d+$/.test(String(g))) {
+                var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : String(g);
+                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(groupIndex) + '" title="查看该组详情">' + label + '</th>';
             } else {
                 headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
             }
