@@ -25,9 +25,9 @@
     }
 
     // ---- Metrics helpers (sectioned summary table) ----
-    function renderSectionedMetricsTable(metricsByGroup) {
-        if (!GT.metrics || !GT.metrics.table || !GT.metrics.table.render) return;
-        var out = GT.metrics.table.render(metricsByGroup || {});
+    function renderSectionedMetricsTable(metricsByGroup, groups) {
+        if (!GT.metrics || !GT.metrics.table || !GT.metrics.table.build) return;
+        var out = GT.metrics.table.build(metricsByGroup || {}, groups || []);
         var head = document.getElementById('metrics_head');
         var body = document.getElementById('metrics_body');
         if (head) head.innerHTML = out.headHtml || '';

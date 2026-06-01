@@ -762,7 +762,7 @@
                 return;
             }
             containerMod.style.display = 'block';
-            GT.renderSectionedMetricsTable(metrics);
+            GT.renderSectionedMetricsTable(metrics, _lastGrossData);
             // Preserve existing bindings that rely on #metrics_head click targets.
             bindGroupDetailHeaders();
             // Hover popup still works because metric-name-cell class is preserved.
@@ -837,12 +837,13 @@
 
         // 转置：行 = 指标名，列 = 分组
         // 表头：第一列「指标」，后面每个分组一列
+        var lsMap = {};
+        (_lastGrossData || []).forEach(function(g) { if (g && g.key && g.is_ls) lsMap[g.key] = true; });
         var theadHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         groupLabels.forEach(function(g) {
-            var isLS = (g === 'LS');
             var label = headerLabel(g);
-            if (isLS) {
-                theadHtml += '<th class="portfolio-detail-trigger" data-group-key="LS" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
+            if (lsMap[g]) {
+                theadHtml += '<th class="portfolio-detail-trigger" data-group-key="' + escapeHtml(g) + '" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
             } else if (/^\d+$/.test(String(g))) {
                 theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">' + label + '</th>';
             } else {
@@ -912,7 +913,7 @@
 
             tbodyHtml += '<tr><td class="metric-name-cell" data-metric="' + name.replace(/"/g, '&quot;') + '" style="cursor:pointer;position:relative;">' + cnName + '</td>';
             groupLabels.forEach(function(g, gi) {
-                var isLS = (g === 'LS');
+                var isLS = lsMap[g] || false;
                 var val = metrics[g][name];
                 var cellClass = (gi === best) ? ' class="group-best-cell"' : '';
                 var style = isLS ? ' style="background:#f0f0f0;"' : '';
