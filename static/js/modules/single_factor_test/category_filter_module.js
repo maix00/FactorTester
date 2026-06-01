@@ -79,6 +79,7 @@
                 merged.product_group = s.product_group || merged.product_group || '';
                 merged.selected_paths = s.selected_paths;
                 merged.paths = s.selected_paths || merged.paths;
+                merged.products = s.products || merged.products || [];
                 return merged;
             }
             // 新提交：用后端 selected_paths 作为 paths
@@ -92,6 +93,7 @@
                 label: s.label || '',
                 product_count: s.product_count,
                 product_group: s.product_group || '',
+                products: s.products || [],
                 count_desc: s.product_count + ' 个产品',
                 timestamp: new Date().toLocaleTimeString(),
                 start_date: '',
@@ -108,6 +110,12 @@
     }
 
     function refreshSubmissionDependents() {
+        // Emit bus event so downstream modules (IC, GroupTest, global_template) can subscribe
+        var bus = window._submissionBus;
+        if (bus) {
+            bus.emit(bus.EVENTS.SYNCED, { submissions: submissions.slice() });
+        }
+        // Legacy direct calls (gradual migration to bus subscriptions)
         setTimeout(function() {
             try {
                 if (typeof window.updateCategorySummary === 'function') {
@@ -121,7 +129,8 @@
                     Promise.resolve(window.renderICTabs(submissions)).catch(function(e) {
                         console.error('刷新 IC 测试标签失败:', e);
                     });
-                } else if (typeof window.renderGroupTabs === 'function') {
+                }
+                if (typeof window.renderGroupTabs === 'function') {
                     window.renderGroupTabs(submissions);
                 }
             } catch (e) {
@@ -314,21 +323,40 @@
                     $s.html(data.success ? '✓ 顺序已更新' : '✗ 排序失败: ' + data.error)
                       .css('color', data.success ? '#28a745' : '#d40000');
                     setTimeout(function() { $s.html(''); }, 3000);
+                    if (data.success) {
+                        var bus = window._submissionBus;
+                        if (bus) bus.emit(bus.EVENTS.REORDERED, { submissions: submissions.slice() });
+                        refreshSubmissionDependents();
+                    }
                 });
             },
             onDeleteSub: function(index) {
                 var sub = submissions[index];
                 if (!sub) return;
+                // 确认弹窗：提示会级联删除关联的基础组、派生组、Long-Short
+                if (!confirm(
+                    '⚠️ 删除测试器将同时清除：\n' +
+                    '• 该测试器关联的所有基础组\n' +
+                    '• 所有派生组（精选组）\n' +
+                    '• 所有 Long-Short 配置\n\n' +
+                    '确定要删除 "' + (sub.label || sub.product_group || ('提交 #' + (index + 1))) + '" 吗？'
+                )) return;
+                var id_time = sub.id;
                 fetch('/delete_submission', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ id_time: sub.id, page_uuid: window._pageUuid || '' })
+                    body: JSON.stringify({ id_time: id_time, page_uuid: window._pageUuid || '' })
                 })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
                     if (data.success) {
                         $s.html('<div>✓ 提交已删除</div>').css('color', '#28a745');
+                        // Emit bus event before syncing so subscribers can cleanup first
+                        var bus = window._submissionBus;
+                        if (bus) {
+                            bus.emit(bus.EVENTS.REMOVED, { id_time: id_time, submission: sub });
+                        }
                         if (data.submissions) {
                             syncFromServer(data.submissions);
                         } else {
@@ -356,14 +384,18 @@
                     var $s = window.ProductSelector.getChangeStatusEl($moduleContainer);
                     if (data.success) {
                         if (newPaths.length === 0) {
+                            // 所有路径删除 → 提交也被删除，需要级联清理
+                            var id_time = sub.id;
                             fetch('/delete_submission', {
                                 method: 'POST',
                                 headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ id_time: sub.id, page_uuid: window._pageUuid || '' })
+                                body: JSON.stringify({ id_time: id_time, page_uuid: window._pageUuid || '' })
                             })
                             .then(function(r) { return r.json(); })
                             .then(function(d2) {
                                 if (d2.success) {
+                                    var bus = window._submissionBus;
+                                    if (bus) bus.emit(bus.EVENTS.REMOVED, { id_time: id_time, submission: sub });
                                     if (d2.submissions) syncFromServer(d2.submissions);
                                     else { submissions.splice(subIndex, 1); renderHistory(); refreshSubmissionDependents(); }
                                 }

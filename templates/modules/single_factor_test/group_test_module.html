@@ -1,132 +1,81 @@
 <div class="module" id="group_test_module" style="margin-top:24px;">
     <div class="section-title">分组测试</div>
 
-    <div class="group-test-workspace">
-        <div id="group-tab-container" class="group-test-nav-shell">
-            <div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         第1层：时间范围 + 同步时间模块
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
+        <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
+        <div class="group-setting-row" style="margin-bottom:0;">
+            <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
+            <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <span style="color:#999;">-</span>
+            <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <span style="color:#999;">-</span>
+            <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
         </div>
-
-        <div id="group-settings-panel" class="group-test-settings-panel">
+        <div class="group-setting-row" style="margin-bottom:0;">
+            <label style="margin-bottom:0;white-space:nowrap;">终止：</label>
+            <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <span style="color:#999;">-</span>
+            <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            <span style="color:#999;">-</span>
+            <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        </div>
+        <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="white-space:nowrap;">同步时间模块</button>
+        <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
+    </div>
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         第2层：可折叠标题行 + 主 Tab + 子面板区
+         ═══════════════════════════════════════════════════════════════════════ -->
     
-    <!-- 第一行：分组数量 + 手续费设置 -->
-    <div class="group-settings-grid">
-        <div class="group-setting-row">
-            <label style="margin-bottom:0;white-space:nowrap;">分组数量：</label>
-            <input type="number" id="group_count" value="5" min="2" max="10" step="1" style="width:70px;">
+    <!-- 2a. 可折叠标题行 -->
+    <div id="gt-section-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0f4f8;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;margin-top:12px;user-select:none;">
+        <span id="gt-section-toggle" style="font-size:14px;transition:transform 0.2s;display:inline-block;">▼</span>
+        <span style="font-weight:600;font-size:14px;color:#1f2937;">📦 分组组合设置</span>
+        <span id="gt-section-status" style="display:none;font-size:11px;white-space:nowrap;"></span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;" onclick="event.stopPropagation()">
+            <span id="group_test_status" style="font-size:12px;color:#888;"></span>
+            <button id="load_default_groups_btn" class="btn btn-outline-secondary btn-sm" style="display:none;">加载默认分组</button>
+            <button id="run_group_test_btn" class="btn btn-primary btn-sm" style="display:none;">运行分组测试</button>
+        </div>
+    </div>
+    
+    <!-- 2b. 统一 Tab + 面板区域（可折叠） -->
+    <div class="group-test-layer" id="gt-layer-tabs" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+
+        <!-- 2b-i. 统一 Tab 栏 + 操作按钮 -->
+        <div id="gt-tab-bar" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
+            <div id="gt-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
+            <div id="gt-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
         </div>
 
-        <div class="group-setting-row">
-            <label style="margin-bottom:0;white-space:nowrap;">再平衡模式：</label>
-            <select id="rebalance_mode" style="width:180px;">
-                <option value="each_period">每期等权再平衡</option>
-                <option value="buy_and_hold" selected>组内持仓不动</option>
-                <option value="recycle">退出资金优先补新仓</option>
-            </select>
-        </div>
-        <div id="rebalance_mode_description" class="group-setting-hint"></div>
-        <div class="group-setting-hint group-setting-hint-muted">
-            若所选产品交易时段不统一，出现“部分产品有信号、部分产品无信号”的混合期时，会自动启用多时段保护逻辑，并临时覆盖所选再平衡模式。
-        </div>
+        <!-- 2b-ii. Panel 渲染容器（由 JS 动态填充） -->
+        <div id="gt-panel-container" style="padding:12px;min-height:200px;"></div>
+    </div>
 
-        <div class="group-setting-row" style="align-items:flex-start;">
-            <label style="margin-bottom:0;white-space:nowrap;padding-top:4px;">Long-Short：</label>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                <button id="long-short-drawer-trigger" type="button" class="btn btn-outline-primary btn-sm">配置 Long-Short 组合</button>
-                <span id="long-short-summary" style="font-size:12px;color:#666;">默认：Long 第1组 / Short 末组</span>
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         第3层：策略通知表格（运行结果摘要）
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="group-test-layer" id="gt-layer-strategy" style="margin-top:12px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px 8px 0 0;background:#f9fafb;">
+            <span style="font-weight:600;font-size:13px;">📋 策略运行摘要</span>
+            <div style="display:flex;gap:6px;">
+                <button id="gt-recalc-fee-btn" class="btn btn-outline-secondary btn-sm" style="display:none;">💰 重算含手续费结果</button>
+                <span id="gt-strategy-status" style="font-size:12px;color:#888;"></span>
             </div>
         </div>
-
-        <!-- 策略说明面板（运行后动态填充） -->
-        <div id="strategy_info_panel" style="display:none;padding:12px 16px;border-radius:8px;border-left:4px solid;font-size:13px;line-height:1.6;">
-            <div style="display:flex;align-items:flex-start;gap:8px;">
-                <span id="strategy_icon" style="font-size:18px;"></span>
-                <div>
-                    <strong id="strategy_title" style="font-size:14px;"></strong>
-                    <div id="strategy_body" style="margin-top:4px;color:#555;"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="group-setting-row">
-            <label style="margin-bottom:0;white-space:nowrap;">扣费方式：</label>
-            <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="不扣除手续费">
-                <input type="radio" name="fee_mode" id="fee_mode_none" value="none" checked> 不扣除
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="所有品种使用相同费率">
-                <input type="radio" name="fee_mode" id="fee_mode_uniform" value="uniform"> 统一费率
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;margin-bottom:0;cursor:pointer;font-weight:normal;" title="按品种分别设置费率">
-                <input type="radio" name="fee_mode" id="fee_mode_per_product" value="per_product"> 按品种费率
-            </label>
-        </div>
-
-        <!-- 统一费率输入（独立缩进行） -->
-        <div id="fee_uniform_row" style="display:none;padding-left:28px;margin-top:-4px;margin-bottom:4px;">
-            <label style="display:inline-flex;align-items:center;gap:4px;margin-bottom:0;font-weight:normal;">
-                <input type="number" id="fee_rate" value="0.03" step="0.001" min="0" style="width:80px;" title="双边手续费率（%），例如 0.03 表示万分之三">
-                <span style="font-size:12px;color:#666;">%（双边）</span>
-            </label>
-            <span style="margin-left:12px;font-size:12px;color:#555;">敏感性:</span>
-            <input type="range" id="fee_sensitivity_slider" min="0" max="0.05" step="0.001" value="0" style="width:140px;">
-            <span id="fee_sensitivity_label" style="font-size:12px;color:#0078d4;white-space:nowrap;">0.000%</span>
-        </div>
-
-        <!-- 品种费率控件（始终可见；费率模式只决定运行时是否采用） -->
-        <div id="fee_per_product_row" class="group-setting-row" style="margin-top:-4px;margin-bottom:4px;">
-            <label style="margin-bottom:0;white-space:nowrap;">品种费率：</label>
-            <span id="closetoday_label" style="font-size:12px;color:#555;white-space:nowrap;">
-                平仓口径：<strong id="closetoday_state_text" style="color:#0078d4;">平昨仓</strong>
-            </span>
-            <button id="use_closetoday_btn" class="btn btn-outline-secondary btn-sm"
-                    title="点击切换平今/平昨模式，将影响费率计算"
-                    style="white-space:nowrap;">切换为平今仓</button>
-            <span id="group-fee-drawer-trigger" title="查看/编辑品种费率"
-                  style="display:inline-flex;cursor:pointer;align-items:center;gap:4px;padding:4px 10px;border:1px solid #d0d5dd;border-radius:4px;background:#f6f8fa;font-size:12px;white-space:nowrap;margin-left:4px;">
-                📋 品种费率 <span id="group-fee-summary" style="font-size:12px;color:#888;"></span>
-            </span>
+        <div id="gt-strategy-table-wrap" style="overflow-x:auto;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 8px 8px;max-height:300px;overflow-y:auto;">
+            <table id="gt-strategy-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead id="gt-strategy-head"></thead>
+                <tbody id="gt-strategy-body">
+                    <tr><td colspan="99" style="padding:16px;text-align:center;color:#888;">运行分组测试后这里展示各策略摘要</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
-    <!-- 时间范围 -->
-    <div class="group-setting-row" style="margin-bottom:16px;">
-        <label style="margin-bottom:0;white-space:nowrap;">起始时间：</label>
-        <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-        <span style="color:#999;">-</span>
-        <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-        <span style="color:#999;">-</span>
-        <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-    </div>
-    <div class="group-setting-row" style="margin-bottom:16px;">
-        <label style="margin-bottom:0;white-space:nowrap;">终止时间：</label>
-        <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-        <span style="color:#999;">-</span>
-        <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-        <span style="color:#999;">-</span>
-        <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-        <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="margin-left:8px;white-space:nowrap;">同步时间模块</button>
-    </div>
-
-    <!-- 扩展分析（折叠） -->
-    <details class="group-settings-grid" style="margin-bottom:12px;">
-        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:#1f2937;outline:none;padding:4px 0;">🔬 扩展分析</summary>
-        <div id="extended_analysis_content" style="padding-left:16px;border-left:3px solid #e5e7eb;margin-top:8px;">
-            <!-- 多周期对比内嵌到此处 -->
-            <div class="group-setting-row" style="margin-bottom:8px;">
-                <label style="margin-bottom:0;white-space:nowrap;font-weight:600;">多周期对比：</label>
-                <span id="return_freqs_checkboxes" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></span>
-                <span style="font-size:11px;color:#888;">（勾选后分组测试将同时对比多个收益周期的表现）</span>
-            </div>
-        </div>
-    </details>
-
-    <!-- 分组测试按钮 -->
-    <div class="group-run-actions" style="margin-top:12px;">
-        <button id="run_group_test_btn" class="btn btn-primary" style="display:none;">运行分组测试</button>
-        <button id="run_all_group_tests_btn" class="btn btn-outline-primary" style="display:none;margin-left:8px;">运行当前测试器全部因子</button>
-        <span id="group_test_status" style="margin-left:12px;font-size:13px;"></span>
-    </div>
-
-    <!-- 费率抽屉 -->
+    <!-- 费率 / Long-Short 抽屉 -->
     <div class="settings-drawer-overlay" id="group-fee-drawer">
         <div class="settings-drawer-panel group-fee-drawer-panel">
             <div class="drawer-inner-container">
@@ -175,11 +124,11 @@
         </div>
     </div>
 
-        </div>
-    </div>
+    <!-- 旧导航壳子（给旧 JS fallback） -->
+    <div id="group-tab-container" class="group-test-nav-shell" style="display:none;"></div>
 
     <!-- 图表容器 -->
-    <div id="group_chart_container" style="margin-top:16px;width:100%;height:500px;display:none;"></div>
+    <div id="group_chart_container" style="margin-top:16px;width:100%;height:600px;display:none;"></div>
 
     <!-- 指标表格 -->
     <div id="group_metrics_container" style="margin-top:16px;display:none;">
@@ -813,6 +762,68 @@
             grid-template-columns: 1fr;
         }
     }
+
+    /* ═══ Issue #85 P7: 5-layer layout styles ═══ */
+    #group_test_module .group-test-layer {
+        border-radius: 8px;
+    }
+
+    /* Unified tabs (was sub-tabs, now the only tab level) */
+    #group_test_module .gt-tab {
+        padding: 5px 12px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 12px;
+        color: #475467;
+        transition: all 0.12s;
+    }
+    #group_test_module .gt-tab:hover {
+        border-color: #9cc7f2;
+        background: #eaf3fc;
+    }
+    #group_test_module .gt-tab.active {
+        background: #e7f1ff;
+        border-color: #9cc7f2;
+        color: #0f4c81;
+        font-weight: 600;
+    }
+
+    /* Submission tabs in selector bar */
+    #group_test_module .gt-submission-tab {
+        padding: 4px 12px;
+        border: 1px solid #d0d5dd;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 12px;
+        color: #475467;
+        white-space: nowrap;
+        transition: all 0.12s;
+    }
+    #group_test_module .gt-submission-tab:hover {
+        border-color: #9cc7f2;
+        background: #eaf3fc;
+    }
+    #group_test_module .gt-submission-tab.active {
+        background: #e7f1ff;
+        border-color: #9cc7f2;
+        color: #0f4c81;
+        font-weight: 600;
+    }
+
+    /* Strategy table cells */
+    #group_test_module .gt-strategy-cell-success { color: #28a745; font-weight: 600; }
+    #group_test_module .gt-strategy-cell-error { color: #d40000; font-weight: 600; }
+    #group_test_module .gt-strategy-cell-running { color: #0078d4; font-style: italic; }
+    #group_test_module .gt-strategy-row {
+        cursor: pointer;
+        transition: background 0.1s;
+    }
+    #group_test_module .gt-strategy-row:hover {
+        background: #f6f8fb;
+    }
 </style>
 
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
@@ -820,11 +831,26 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/state.js') }}"></script>
+<!-- Datamodel layer (Issue #85 Phase 1) — pure logic, zero DOM -->
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/groups.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/ls_configs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/registrations.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/settings_snapshot.js') }}"></script>
+<!-- Panel layer — UI components by category -->
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/registry.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/chips.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/strategy.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/rebalance.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/derived.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/meta.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/overlays/group_detail.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/fee/index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>

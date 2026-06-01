@@ -1554,6 +1554,40 @@
         initICModule();
     }
 
+    // ── Submission bus subscriptions ────────────────────────────────────────────
+    (function() {
+        var bus = window._submissionBus;
+        if (!bus) return;
+
+        // React to tester deletion: clear IC caches for removed tester
+        bus.on(bus.EVENTS.REMOVED, function(data) {
+            if (!data || !data.id_time) return;
+            var removedId = String(data.id_time);
+
+            // Clear _icComparisonCache entries for this tester (keys are "subId-idx")
+            if (window._icComparisonCache) {
+                var prefix = removedId + '-';
+                Object.keys(window._icComparisonCache).forEach(function(key) {
+                    if (key.indexOf(prefix) === 0) {
+                        delete window._icComparisonCache[key];
+                    }
+                });
+            }
+
+            // Clear _icDataFactors entry for this tester
+            if (window._icDataFactors && window._icDataFactors[removedId]) {
+                delete window._icDataFactors[removedId];
+            }
+        });
+
+        // React to any change: re-render IC tabs
+        bus.on('*', function(event) {
+            if (window.submissions && window.submissions.length > 0) {
+                window.renderICTabs(window.submissions);
+            }
+        });
+    })();
+
     // 供参数模块调用，刷新因子列表和 IC 选项卡
     window.refreshICModule = async function() {
         console.log('刷新 IC 模块因子列表');

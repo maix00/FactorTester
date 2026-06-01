@@ -25,6 +25,7 @@ def list_single_factor_setting_templates(factor_family_alias):
             'name': template['name'],
             'ff_alias': template.get('ff_alias', ''),
             'factor_family_alias': factor_family_alias,
+            'snapshot': snapshot,
             'summary': build_snapshot_summary(snapshot),
         })
     return jsonify({'success': True, 'templates': result})

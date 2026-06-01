@@ -10,6 +10,7 @@
   exchange      : 交易所（SHFE/DCE/CZCE/CFFEX/INE/GFEX）
   variety_name  : 品种名称（中文）
   multiplier    : 合约乘数
+  min_tick      : 最小变动价位
   open_ratio    : 开仓手续费率（按金额比例，小数）
   open_fixed    : 开仓手续费（按手，元）
   close_ratio   : 平仓手续费率
@@ -48,6 +49,7 @@ _COL_INDICES = {
     'variety_code':      3,
     'variety_name':      4,
     'multiplier':        5,
+    'min_tick':          6,
     'open_ratio':        7,
     'open_fixed':        8,
     'close_ratio':       9,
@@ -77,7 +79,7 @@ def _parse_raw(df: pd.DataFrame) -> pd.DataFrame:
     df = df[keep].copy()
 
     # 类型转换
-    for col in ['multiplier', 'open_ratio', 'open_fixed', 'close_ratio', 'close_fixed',
+    for col in ['multiplier', 'min_tick', 'open_ratio', 'open_fixed', 'close_ratio', 'close_fixed',
                 'closetoday_ratio', 'closetoday_fixed', 'volume', 'open_interest']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -217,7 +219,7 @@ def get_table_for_display() -> list[dict]:
     if not daily_path.exists():
         fetch_and_save()
     df = load_latest()
-    cols = ['variety_code', 'variety_name', 'exchange', 'multiplier',
+    cols = ['variety_code', 'variety_name', 'exchange', 'multiplier', 'min_tick',
             'open_ratio', 'open_fixed', 'close_ratio', 'close_fixed',
             'closetoday_ratio', 'closetoday_fixed', 'date']
     df = df[[c for c in cols if c in df.columns]].copy()

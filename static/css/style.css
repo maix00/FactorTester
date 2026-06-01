@@ -491,3 +491,47 @@ th {
 .picker-scope-body {
     padding-left: 16px;
 }
+
+/* ── GroupTest: Foldable section header ── */
+#gt-layer-tabs.gt-collapsed {
+    display: none;
+}
+
+/* ── GroupTest: 批量运行进度条 ── */
+.gt-progress-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0;
+    padding: 8px 16px;
+    background: #f0f4ff;
+    border: 1px solid #c8d6f0;
+    border-radius: 6px;
+}
+.gt-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #e0e6f0;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+.gt-progress-indeterminate {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 30%;
+    background: linear-gradient(90deg, #4a90d9, #6db3f2);
+    border-radius: 3px;
+    animation: gt-progress-slide 1.5s ease-in-out infinite;
+}
+@keyframes gt-progress-slide {
+    0%   { left: -30%; }
+    100% { left: 100%; }
+}
+.gt-progress-text {
+    font-size: 13px;
+    color: #5a6a80;
+    white-space: nowrap;
+}

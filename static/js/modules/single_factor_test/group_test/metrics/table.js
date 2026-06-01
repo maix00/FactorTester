@@ -93,6 +93,27 @@
         return fmtNumber(v, 4);
     }
 
+    /**
+     * Build a map from group key → is_ls for quick lookup.
+     */
+    function buildLsMap(groups) {
+        var map = {};
+        (groups || []).forEach(function(g) {
+            if (g && g.key && g.is_ls) map[g.key] = true;
+        });
+        return map;
+    }
+
+    function buildGroupIndexMap(groups) {
+        var map = {};
+        (groups || []).forEach(function(g, idx) {
+            if (!g || g.is_ls || !g.key) return;
+            var groupIndex = g.group_index != null ? g.group_index : idx;
+            map[g.key] = groupIndex;
+        });
+        return map;
+    }
+
     function getGroupLabels(metricsByGroup) {
         var labels = [];
         for (var k in (metricsByGroup || {})) {
@@ -100,9 +121,6 @@
             labels.push(k);
         }
         labels.sort(function(a, b) {
-            // Long-Short column should be the first group column
-            if (a === 'LS') return -1;
-            if (b === 'LS') return 1;
             var ai = parseInt(a, 10);
             var bi = parseInt(b, 10);
             var an = String(ai) === String(a);
@@ -171,24 +189,28 @@
         return bestIdx;
     }
 
-    function render(metricsByGroup) {
+    function build(metricsByGroup, groups) {
         var sections = (GT.metrics.sections && GT.metrics.sections.buildSections) ? GT.metrics.sections.buildSections() : [];
         var labels = getGroupLabels(metricsByGroup);
         if (!labels.length) return { headHtml: '', bodyHtml: '' };
 
-        // Header triggers are used by group_test/app.js bindGroupDetailHeaders():
-        // - click "指标" to open ranking detail
-        // - click "第k组" to open group detail
+        var lsMap = buildLsMap(groups);
+        var groupIndexMap = buildGroupIndexMap(groups);
+        function isLsGroup(g) { return lsMap[g] || false; }
+        function groupLabel(g) {
+            return String(g);
+        }
+
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
-            if (g === 'LS') {
-                headHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">Long-Short</th>';
-            } else if (/^\d+$/.test(String(g))) {
-                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(g) + '" title="查看该组详情">第'
-                    + (parseInt(g, 10) + 1) + '组</th>';
+            var label = groupLabel(g);
+            if (isLsGroup(g)) {
+                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
+            } else if (groupIndexMap[g] != null || /^\d+$/.test(String(g))) {
+                var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : String(g);
+                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(groupIndex) + '" title="查看该组详情">' + label + '</th>';
             } else {
-                headHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">'
-                    + String(g).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</th>';
+                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
             }
         });
         headHtml += '</tr>';
@@ -223,7 +245,7 @@
     }
 
     GT.metrics.table = {
-        render: render,
+        build: build,
         metricNamesCN: metricNamesCN,
         metricDisplay: metricDisplay,
     };

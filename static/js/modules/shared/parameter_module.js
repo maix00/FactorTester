@@ -442,7 +442,8 @@
             } catch (e) {}
             try {
                 if (typeof window._getCurrentSubmissions === 'function') {
-                    snapshot.submissions = JSON.parse(JSON.stringify(window._getCurrentSubmissions() || []));
+                    var curSubs = window._getCurrentSubmissions() || [];
+                    snapshot.submissions = JSON.parse(JSON.stringify(curSubs));
                 }
             } catch (e) {}
 

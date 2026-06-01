@@ -56,7 +56,13 @@ def find_factor_tester(submission_id: str | int | None, allow_suffix: bool = Tru
 
 def get_factor_tester(alias: str, caller: Optional[Any] = None) -> 'FactorTester':
     tester = find_factor_tester(alias, allow_suffix=True)
-    assert tester is not None, f"{str(caller) + ': ' if caller is not None else ''}未找到对应的测试器实例"
+    if tester is None:
+        aliases = [getattr(t, 'alias', '?') for t in factor_testers]
+        raise AssertionError(
+            f"{str(caller) + ': ' if caller is not None else ''}"
+            f"未找到对应的测试器实例 alias={alias!r}, "
+            f"available={aliases}"
+        )
     return tester
 
 

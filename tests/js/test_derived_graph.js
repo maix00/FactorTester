@@ -1,0 +1,423 @@
+/**
+ * test_groups.js — Node.js tests for groups.js
+ *
+ * Run: node tests/js/test_groups.js
+ *
+ * Tests the derived graph CRUD data model in isolation.
+ * Mocks window.GroupTest with state.emit and depends on
+ * base_groups.js being loaded first.
+ */
+
+// ---------------------------------------------------------------------------
+// Test framework (minimal)
+// ---------------------------------------------------------------------------
+
+var passed = 0;
+var failed = 0;
+
+function assert(condition, msg) {
+    if (condition) { passed++; }
+    else { console.log('FAIL: ' + msg); failed++; }
+}
+
+function assertEquals(actual, expected, msg) {
+    var a = JSON.stringify(actual);
+    var e = JSON.stringify(expected);
+    if (a === e) { passed++; }
+    else {
+        console.log('FAIL: ' + msg);
+        console.log('  expected: ' + e);
+        console.log('  actual:   ' + a);
+        failed++;
+    }
+}
+
+function assertThrows(fn, msg) {
+    try { fn(); console.log('FAIL: ' + msg + ' (no throw)'); failed++; }
+    catch (_) { passed++; }
+}
+
+// ---------------------------------------------------------------------------
+// Setup mock environment
+// ---------------------------------------------------------------------------
+
+global.window = {
+    GroupTest: {
+        datamodel: {},
+        _lastEvent: null,
+        _events: [],
+        state: {
+            emit: function(event, data) {
+                window.GroupTest._lastEvent = { event: event, data: data };
+                window.GroupTest._events.push({ event: event, data: data });
+            }
+        },
+        log: function() {}
+    }
+};
+
+// Reset helper
+function resetEvents() {
+    window.GroupTest._lastEvent = null;
+    window.GroupTest._events = [];
+}
+
+// Load base_groups.js first (groups depends on it)
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
+// Load groups.js
+require('../../static/js/modules/single_factor_test/group_test/datamodel/groups.js');
+
+var dg = window.GroupTest.datamodel.groups;
+var bg = window.GroupTest.datamodel.groups;
+
+// Seed a base group for validation tests
+var _seedBgId;
+function seedBaseGroup() {
+    _seedBgId = bg.add({ name: 'Test BG', testerId: 't1', factorAlias: 'f1', groupCount: 5 });
+    return _seedBgId;
+}
+
+// ---------------------------------------------------------------------------
+// 1. validate()
+// ---------------------------------------------------------------------------
+
+// Rejects empty config
+assertThrows(function() {
+    dg.add({});
+}, 'validate: add({}) throws');
+
+// Rejects missing name
+var result = dg.validate({ baseGroupId: 'x' });
+assertEquals(result.valid, false, 'validate: rejects missing name');
+assert(result.errors.some(function(e) { return e.indexOf('name') !== -1; }), 'validate: missing name error message');
+
+// Rejects missing baseGroupId
+result = dg.validate({ name: 'test' });
+assertEquals(result.valid, false, 'validate: rejects missing baseGroupId');
+
+// Rejects non-existent baseGroupId
+seedBaseGroup();
+result = dg.validate({ name: 'test', baseGroupId: 'non-existent' });
+assertEquals(result.valid, false, 'validate: rejects non-existent baseGroupId');
+
+// Rejects non-existent parentId
+result = dg.validate({ name: 'test', baseGroupId: _seedBgId, parentId: 'dg_nonexistent' });
+assertEquals(result.valid, false, 'validate: rejects non-existent parentId');
+
+// Rejects non-object metadata
+result = dg.validate({ name: 'test', baseGroupId: _seedBgId, metadata: 'string' });
+assertEquals(result.valid, false, 'validate: rejects non-object metadata');
+
+// Accepts valid config
+result = dg.validate({ name: 'test', baseGroupId: _seedBgId });
+assertEquals(result.valid, true, 'validate: accepts valid config');
+
+// Accepts valid config with parentId=null
+result = dg.validate({ name: 'test', baseGroupId: _seedBgId, parentId: null });
+assertEquals(result.valid, true, 'validate: accepts null parentId');
+
+// ---------------------------------------------------------------------------
+// 2. add()
+// ---------------------------------------------------------------------------
+
+// Creates root node with defaults
+resetEvents();
+var n1 = dg.add({ name: 'Root 1', baseGroupId: _seedBgId });
+assert(typeof n1.id === 'string' && n1.id.indexOf('dg_') === 0, 'add: root node has dg_ prefix');
+assertEquals(n1.name, 'Root 1', 'add: stores name');
+assertEquals(n1.baseGroupId, _seedBgId, 'add: stores baseGroupId');
+assertEquals(n1.parentId, null, 'add: root node parentId is null');
+assertEquals(n1.productMask, {}, 'add: productMask defaults to {}');
+assertEquals(n1.feeOverride, null, 'add: feeOverride defaults to null');
+assertEquals(n1.closeTodayOverride, null, 'add: closeTodayOverride defaults to null');
+assertEquals(n1.rebalanceOverride, null, 'add: rebalanceOverride defaults to null');
+assertEquals(n1.metadata, {}, 'add: metadata defaults to {}');
+
+// Creates child node
+var n2 = dg.add({ name: 'Child 1', baseGroupId: _seedBgId, parentId: n1.id });
+assertEquals(n2.parentId, n1.id, 'add: child node has correct parentId');
+assertEquals(n2.name, 'Child 1', 'add: child name correct');
+
+// Stores custom values
+var n3 = dg.add({
+    name: 'Custom',
+    baseGroupId: _seedBgId,
+    parentId: n1.id,
+    productMask: { a: 1 },
+    feeOverride: 0.001,
+    closeTodayOverride: true,
+    rebalanceOverride: 'buy_and_hold',
+    metadata: { key: 'val' }
+});
+assertEquals(n3.productMask, { a: 1 }, 'add: stores productMask');
+assertEquals(n3.feeOverride, 0.001, 'add: stores feeOverride');
+assertEquals(n3.closeTodayOverride, true, 'add: stores closeTodayOverride');
+assertEquals(n3.rebalanceOverride, 'buy_and_hold', 'add: stores rebalanceOverride');
+assertEquals(n3.metadata, { key: 'val' }, 'add: stores metadata');
+
+// Returns deep copy (mutate return, check internal)
+var n3copy = dg.get(n3.id);
+n3copy.productMask.b = 2;
+var n3fresh = dg.get(n3.id);
+assertEquals(n3fresh.productMask, { a: 1 }, 'add: returned node is deep copy (productMask not mutated)');
+
+// ---------------------------------------------------------------------------
+// 3. add() errors
+// ---------------------------------------------------------------------------
+
+// Throws on invalid baseGroupId
+assertThrows(function() {
+    dg.add({ name: 'Bad', baseGroupId: 'non-existent' });
+}, 'add: throws on non-existent baseGroupId');
+
+// Throws on invalid parentId
+assertThrows(function() {
+    dg.add({ name: 'Bad', baseGroupId: _seedBgId, parentId: 'dg_non-existent' });
+}, 'add: throws on non-existent parentId');
+
+// ---------------------------------------------------------------------------
+// 4. add() events
+// ---------------------------------------------------------------------------
+
+// Emits groupsChanged
+resetEvents();
+var n4 = dg.add({ name: 'Event Test', baseGroupId: _seedBgId });
+var evt = window.GroupTest._lastEvent;
+assertEquals(evt.event, 'groupsChanged', 'add: emits groupsChanged');
+assertEquals(evt.data.action, 'add', 'add: event action is add');
+assertEquals(evt.data.id, n4.id, 'add: event has correct id');
+
+// ---------------------------------------------------------------------------
+// 5. get()
+// ---------------------------------------------------------------------------
+
+// Returns null for missing
+assertEquals(dg.get('non-existent'), null, 'get: returns null for missing');
+
+// Returns deep copy
+var g1 = dg.get(n1.id);
+g1.name = 'Mutated';
+var g2 = dg.get(n1.id);
+assertEquals(g2.name, 'Root 1', 'get: returns deep copy (name not mutated)');
+
+// ---------------------------------------------------------------------------
+// 6. getAll()
+// ---------------------------------------------------------------------------
+
+// Returns all nodes
+var all = dg.getAll();
+assert(all.length >= 4, 'getAll: returns at least seeded nodes');
+
+// Returns deep copy
+var allCopy = dg.getAll();
+allCopy[0].name = 'Mutated all';
+var allFresh = dg.getAll();
+assert(allFresh.some(function(n) { return n.name === 'Root 1'; }), 'getAll: returns deep copy');
+
+// ---------------------------------------------------------------------------
+// 7. getTree()
+// ---------------------------------------------------------------------------
+
+// Returns tree with root nodes and children
+var tree = dg.getTree();
+assert(tree.length >= 1, 'getTree: returns at least 1 root node');
+var root = tree[0];
+assert(Array.isArray(root.children), 'getTree: root has children array');
+assert(root.children.length >= 2, 'getTree: root has at least 2 children (Child 1 + Custom)');
+
+// Child has correct name in tree
+var childNamesInTree = root.children.map(function(c) { return c.name; });
+assert(childNamesInTree.indexOf('Child 1') !== -1, 'getTree: Child 1 present in root children');
+assert(childNamesInTree.indexOf('Custom') !== -1, 'getTree: Custom present in root children');
+
+// Deep copy (mutate tree, check internal)
+var treeCopy = dg.getTree();
+treeCopy[0].name = 'Mutated tree';
+var treeFresh = dg.getTree();
+assertEquals(treeFresh[0].name, 'Root 1', 'getTree: returns deep copy');
+
+// Tree with no nodes (after reset)
+dg._reset();
+assertEquals(dg.getTree(), [], 'getTree: empty array after reset');
+
+// Re-seed for subsequent tests
+seedBaseGroup();
+n1 = dg.add({ name: 'Root', baseGroupId: _seedBgId });
+n2 = dg.add({ name: 'Child', baseGroupId: _seedBgId, parentId: n1.id });
+n3 = dg.add({ name: 'Grandchild', baseGroupId: _seedBgId, parentId: n2.id });
+n4 = dg.add({ name: 'Root 2', baseGroupId: _seedBgId });
+
+// ---------------------------------------------------------------------------
+// 8. getDescendants()
+// ---------------------------------------------------------------------------
+
+// Root descendants include all
+var desc1 = dg.getDescendants(n1.id);
+assertEquals(desc1.sort(), [n1.id, n2.id, n3.id].sort(), 'getDescendants: root returns self + child + grandchild');
+
+// Child descendants
+var desc2 = dg.getDescendants(n2.id);
+assertEquals(desc2.sort(), [n2.id, n3.id].sort(), 'getDescendants: child returns self + grandchild');
+
+// Leaf has only self
+var desc3 = dg.getDescendants(n3.id);
+assertEquals(desc3, [n3.id], 'getDescendants: leaf returns only self');
+
+// Root 2 has only self
+var desc4 = dg.getDescendants(n4.id);
+assertEquals(desc4, [n4.id], 'getDescendants: isolated root returns only self');
+
+// Throws on nonexistent
+assertThrows(function() {
+    dg.getDescendants('non-existent');
+}, 'getDescendants: throws on nonexistent');
+
+// ---------------------------------------------------------------------------
+// 9. update()
+// ---------------------------------------------------------------------------
+
+// Patch name
+var updated = dg.update(n2.id, { name: 'Child Updated' });
+assertEquals(updated.name, 'Child Updated', 'update: patches name');
+assertEquals(dg.get(n2.id).name, 'Child Updated', 'update: name persisted');
+
+// Patch baseGroupId (should validate reference)
+var bg2 = bg.add({ name: 'BG2', testerId: 't2', factorAlias: 'f2', groupCount: 3 });
+var updated2 = dg.update(n4.id, { baseGroupId: bg2 });
+assertEquals(updated2.baseGroupId, bg2, 'update: patches baseGroupId');
+
+// Throws on invalid baseGroupId
+assertThrows(function() {
+    dg.update(n4.id, { baseGroupId: 'non-existent' });
+}, 'update: throws on non-existent baseGroupId');
+
+// Reparent (valid)
+var updated3 = dg.update(n4.id, { parentId: n1.id });
+assertEquals(updated3.parentId, n1.id, 'update: reparents to new parent');
+
+// Reparent to null (make root)
+var updated4 = dg.update(n4.id, { parentId: null });
+assertEquals(updated4.parentId, null, 'update: reparents to null (make root)');
+
+// Reparent fails: cycle (trying to make n1 child of n3)
+assertThrows(function() {
+    dg.update(n1.id, { parentId: n3.id });
+}, 'update: throws on cycle (parent is descendant)');
+
+// Reparent fails: self-parent
+assertThrows(function() {
+    dg.update(n1.id, { parentId: n1.id });
+}, 'update: throws on self-parent');
+
+// Reparent fails: non-existent parent
+assertThrows(function() {
+    dg.update(n1.id, { parentId: 'dg_non-existent' });
+}, 'update: throws on non-existent new parent');
+
+// Throws on nonexistent node
+assertThrows(function() {
+    dg.update('non-existent', { name: 'x' });
+}, 'update: throws on nonexistent node');
+
+// Returns deep copy
+var upCopy = dg.update(n2.id, { name: 'New Name' });
+upCopy.name = 'Mutated update';
+var upFresh = dg.get(n2.id);
+assertEquals(upFresh.name, 'New Name', 'update: returns deep copy');
+
+// ---------------------------------------------------------------------------
+// 10. update() events
+// ---------------------------------------------------------------------------
+
+resetEvents();
+dg.update(n2.id, { name: 'Event Name' });
+var uevt = window.GroupTest._lastEvent;
+assertEquals(uevt.event, 'groupsChanged', 'update: emits groupsChanged');
+assertEquals(uevt.data.action, 'update', 'update: event action is update');
+assertEquals(uevt.data.id, n2.id, 'update: event has correct id');
+
+// ---------------------------------------------------------------------------
+// 11. remove()
+// ---------------------------------------------------------------------------
+
+// Remove leaf (no cascade)
+var removed = dg.remove(n4.id);
+assertEquals(removed.id, n4.id, 'remove: returns removed node');
+assertEquals(dg.get(n4.id), null, 'remove: node is gone');
+
+// Remove node with children (cascade)
+var removed2 = dg.remove(n2.id);
+assertEquals(removed2.id, n2.id, 'remove: cascade returns removed root');
+assertEquals(dg.get(n2.id), null, 'remove: parent is gone');
+assertEquals(dg.get(n3.id), null, 'remove: grandchild cascade-deleted');
+
+// Children array in cascade result
+var childIdsInResult = removed2.children.map(function(c) { return c.id; });
+assert(childIdsInResult.indexOf(n3.id) !== -1, 'remove: cascade result has children');
+
+// Remove root
+var removed3 = dg.remove(n1.id);
+assertEquals(removed3.id, n1.id, 'remove: root remove succeeds');
+assertEquals(dg.getAll().length, 0, 'remove: all nodes cleared');
+
+// Throws on nonexistent
+assertThrows(function() {
+    dg.remove('non-existent');
+}, 'remove: throws on nonexistent');
+
+// ---------------------------------------------------------------------------
+// 12. remove() events
+// ---------------------------------------------------------------------------
+
+// Re-seed
+seedBaseGroup();
+n1 = dg.add({ name: 'Root', baseGroupId: _seedBgId });
+n2 = dg.add({ name: 'Child', baseGroupId: _seedBgId, parentId: n1.id });
+
+resetEvents();
+dg.remove(n1.id);
+var revt = window.GroupTest._lastEvent;
+assertEquals(revt.event, 'groupsChanged', 'remove: emits groupsChanged');
+assertEquals(revt.data.action, 'remove', 'remove: event action is remove');
+assertEquals(revt.data.id, n1.id, 'remove: event has correct id');
+assert(Array.isArray(revt.data.removedIds), 'remove: event has removedIds array');
+assert(revt.data.removedIds.indexOf(n2.id) !== -1, 'remove: cascade IDs in event');
+
+// ---------------------------------------------------------------------------
+// 13. list()
+// ---------------------------------------------------------------------------
+
+// Re-seed
+seedBaseGroup();
+n1 = dg.add({ name: 'L1', baseGroupId: _seedBgId });
+n2 = dg.add({ name: 'L2', baseGroupId: _seedBgId, parentId: n1.id });
+
+var summaries = dg.list();
+assert(summaries.length === 2, 'list: returns 2 summaries');
+assertEquals(summaries[0].name, 'L1', 'list: first node name correct');
+assertEquals(summaries[0].parentId, null, 'list: root parentId is null');
+assertEquals(summaries[1].parentId, n1.id, 'list: child parentId correct');
+
+// ---------------------------------------------------------------------------
+// 14. _reset()
+// ---------------------------------------------------------------------------
+
+dg._reset();
+assertEquals(dg.getAll().length, 0, '_reset: clears all nodes');
+assertEquals(dg.getTree().length, 0, '_reset: tree is empty');
+
+// After reset, new nodes get fresh IDs
+var n5 = dg.add({ name: 'Fresh', baseGroupId: _seedBgId });
+assert(typeof n5.id === 'string' && n5.id.indexOf('dg_') === 0, '_reset: new node has dg_ prefix');
+
+// ---------------------------------------------------------------------------
+// Results
+// ---------------------------------------------------------------------------
+
+console.log('\n=== Results ===');
+console.log('Passed: ' + passed);
+console.log('Failed: ' + failed);
+
+if (failed > 0) {
+    process.exit(1);
+}
