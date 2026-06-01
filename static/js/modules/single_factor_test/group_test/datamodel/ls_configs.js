@@ -139,7 +139,7 @@
         }
 
         var item = {
-            id: _uuid(),
+            id: (typeof config.id === 'string' && config.id.trim()) ? config.id : _uuid(),
             name: config.name.trim(),
             shortAlias: shortAlias,
             longGroupId: config.longGroupId,

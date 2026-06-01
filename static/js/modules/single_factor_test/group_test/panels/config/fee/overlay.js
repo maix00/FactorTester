@@ -397,9 +397,13 @@
             }
             if (origVal === null || origVal === undefined) origVal = 0;
 
-            if (Math.abs(rawVal - Number(origVal)) < 1e-9) continue; // not modified
+            if (Math.abs(rawVal - Number(origVal)) < 1e-9) {
+                if (existing[variety] && Object.prototype.hasOwnProperty.call(existing[variety], field)) {
+                    delete existing[variety][field];
+                }
+                continue;
+            }
 
-            // Stage
             if (!existing[variety]) existing[variety] = {};
             existing[variety][field] = rawVal;
         }

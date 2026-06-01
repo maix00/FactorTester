@@ -100,7 +100,7 @@
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
               return null;
           } },
-        { key: 'groupIndex',  type: 'number',  requiredFor: 'base',   defaultBase: 1,     defaultDerived: 1,
+        { key: 'groupIndex',  type: 'number',  requiredFor: 'none',   defaultBase: 1,     defaultDerived: 1,
           validate: function(v) {
               if (v === undefined || v === null) return null;
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupIndex must be a positive integer (≥ 1)';
@@ -179,7 +179,7 @@
      */
     function _buildItem(config) {
         var isDerived = !!(config.isDerived);
-        var item = { id: _uuid() };
+        var item = { id: (typeof config.id === 'string' && config.id.trim()) ? config.id : _uuid() };
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id') continue; // already set
