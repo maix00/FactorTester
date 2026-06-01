@@ -264,6 +264,42 @@ def test_simulate_close_fee_on_exit():
     np.testing.assert_allclose(cum, 1.10 * (1.0 + net[1]), atol=1e-12)
 
 
+def test_each_period_close_fee_is_paid_before_rebuilding_target():
+    """each_period should sell first, pay close fee, then equal-weight remaining wealth."""
+    T, N, P = 2, 1, 2
+    membership = np.zeros((T, N, P), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, :] = True
+
+    returns = np.zeros((T, P), dtype=float)
+    open_fee = np.zeros((N, P), dtype=float)
+    close_fee = np.full((N, P), 0.10, dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=open_fee,
+        close_fee_mat=close_fee,
+        rebalance_mode='each_period',
+    )
+
+    # At t=1: target x solves x = (1 - 0.10 * (1 - x)) / 2.
+    target_each = (1.0 - 0.10) / (2.0 - 0.10)
+    expected_sell_fee_ratio = (1.0 - target_each) * 0.10
+    np.testing.assert_allclose(
+        result['fee_costs_np'][1, 0],
+        expected_sell_fee_ratio,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        result['net_returns_np'][1, 0],
+        -expected_sell_fee_ratio,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════
 # recycle mode
 # ═══════════════════════════════════════════════════════════════════

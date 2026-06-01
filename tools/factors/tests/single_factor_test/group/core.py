@@ -96,6 +96,7 @@ def build_target_amounts(
     wealth_before_trade: np.ndarray,
     rebalance_mode: str,
     close_fee_vec: np.ndarray | None = None,
+    close_fee_already_paid: bool = False,
 ) -> np.ndarray:
     """Build next-period target holdings for all groups with vectorized operations.
 
@@ -105,6 +106,10 @@ def build_target_amounts(
         Accepts 1-D (P,) for backward compatibility and broadcasts to n_groups.
         When provided, the capital released from exits is reduced by the
         proportional close fee before being allocated to entering products.
+    close_fee_already_paid : bool
+        For each-period full rebalancing, treat ``wealth_before_trade`` as the
+        post-sell-fee available wealth.  This is used by the simulator after it
+        has computed the sell leg first.
     """
     curr_mask = np.asarray(curr_mask_all, dtype=bool)
     prev_amounts = np.asarray(prev_end_amounts, dtype=float)
@@ -120,19 +125,16 @@ def build_target_amounts(
         return targets
 
     if rebalance_mode == "each_period":
-        if close_fees is not None:
+        if close_fees is not None and not close_fee_already_paid:
             # Available cash = wealth minus close fees on all prior holdings.
             sell_fees = (prev_amounts * close_fees).sum(axis=1)
             available = np.maximum(0.0, wealth - sell_fees)
-            targets[non_empty] = (
-                curr_mask[non_empty].astype(float)
-                * (available[non_empty] / counts[non_empty])[:, np.newaxis]
-            )
         else:
-            targets[non_empty] = (
-                curr_mask[non_empty].astype(float)
-                * (wealth[non_empty] / counts[non_empty])[:, np.newaxis]
-            )
+            available = wealth
+        targets[non_empty] = (
+            curr_mask[non_empty].astype(float)
+            * (available[non_empty] / counts[non_empty])[:, np.newaxis]
+        )
         return targets
 
     prev_mask = prev_amounts > 0
@@ -391,33 +393,44 @@ def simulate_groups(
         ne_open_fee = open_fee_mat[ne_idx]      # (k, P)
         ne_close_fee = close_fee_mat[ne_idx]     # (k, P)
         ne_close_today = effective_close_fee_mat[ne_idx] if effective_close_fee_mat is not None else None
+        target_close_fee_mat = effective_close_fee_mat if effective_close_fee_mat is not None else close_fee_mat
 
         if is_mixed_t:
             multi_session_triggered += 1
-            target_amounts = build_multi_session_target_amounts(
-                curr_mask_all, prev_end_amounts, wealth_before_trade,
-                has_bar_t, close_fee_mat,
-            )
-        else:
-            unique_modes = list(dict.fromkeys(str(m or rebalance_mode) for m in rebalance_modes_arr))
-            if len(unique_modes) == 1:
-                target_amounts = build_target_amounts(
-                    curr_mask_all, prev_end_amounts, wealth_before_trade,
-                    unique_modes[0], close_fee_vec=close_fee_mat,
+        unique_modes = list(dict.fromkeys(str(m or rebalance_mode) for m in rebalance_modes_arr))
+
+        def _build_targets_for_wealth(
+            wealth_for_target: np.ndarray,
+            *,
+            close_fee_already_paid: bool = False,
+        ) -> np.ndarray:
+            if is_mixed_t:
+                return build_multi_session_target_amounts(
+                    curr_mask_all, prev_end_amounts, wealth_for_target,
+                    has_bar_t, target_close_fee_mat,
                 )
-            else:
-                target_amounts = np.zeros_like(prev_end_amounts, dtype=float)
-                for mode in unique_modes:
-                    mode_mask = rebalance_modes_arr == mode
-                    if not mode_mask.any():
-                        continue
-                    target_amounts[mode_mask] = build_target_amounts(
-                        curr_mask_all[mode_mask],
-                        prev_end_amounts[mode_mask],
-                        wealth_before_trade[mode_mask],
-                        mode,
-                        close_fee_vec=close_fee_mat[mode_mask],
-                    )
+            if len(unique_modes) == 1:
+                return build_target_amounts(
+                    curr_mask_all, prev_end_amounts, wealth_for_target,
+                    unique_modes[0], close_fee_vec=target_close_fee_mat,
+                    close_fee_already_paid=close_fee_already_paid,
+                )
+            next_targets = np.zeros_like(prev_end_amounts, dtype=float)
+            for mode in unique_modes:
+                mode_mask = rebalance_modes_arr == mode
+                if not mode_mask.any():
+                    continue
+                next_targets[mode_mask] = build_target_amounts(
+                    curr_mask_all[mode_mask],
+                    prev_end_amounts[mode_mask],
+                    wealth_for_target[mode_mask],
+                    mode,
+                    close_fee_vec=target_close_fee_mat[mode_mask],
+                    close_fee_already_paid=close_fee_already_paid,
+                )
+            return next_targets
+
+        target_amounts = _build_targets_for_wealth(wealth_before_trade)
 
         ne_target = target_amounts[ne_idx]
         ne_prev = prev_end_amounts[ne_idx]
@@ -425,7 +438,27 @@ def simulate_groups(
         ne_cc = curr_count_all[ne_idx]
         ne_ret = returns_np[t]
 
-        # Step 1: sell fee (per-group fee vectors)
+        # Step 1: sell first, pay sell fee, then rebuild target with remaining wealth.
+        for _ in range(8):
+            _, sell_fee_candidate = _compute_sell_fee_per_group(
+                ne_prev, ne_target, ne_close_fee,
+                close_today_fee_mat=ne_close_today,
+            )
+            wealth_after_sell_fee = wealth_before_trade.copy()
+            wealth_after_sell_fee[ne_idx] = np.maximum(0.0, ne_wb - sell_fee_candidate)
+            next_target_amounts = _build_targets_for_wealth(
+                wealth_after_sell_fee,
+                close_fee_already_paid=True,
+            )
+            next_ne_target = next_target_amounts[ne_idx]
+            if np.allclose(next_ne_target, ne_target, rtol=1e-12, atol=1e-12):
+                target_amounts = next_target_amounts
+                ne_target = next_ne_target
+                break
+            target_amounts = next_target_amounts
+            ne_target = next_ne_target
+
+        # Step 2: final sell fee (per-group fee vectors)
         sell, sell_fee = _compute_sell_fee_per_group(
             ne_prev, ne_target, ne_close_fee,
             close_today_fee_mat=ne_close_today,
@@ -436,7 +469,7 @@ def simulate_groups(
             where=ne_wb > 0,
         )
 
-        # Step 2: buy costs (per-group fee vectors)
+        # Step 3: buy costs (per-group fee vectors)
         buy, buy_fee, trade_notional_ratio = _compute_buy_costs_per_group(
             ne_target, ne_prev, ne_open_fee, ne_wb,
         )
