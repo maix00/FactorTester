@@ -18,6 +18,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     compute_group_gross_returns,
     compute_group_net_returns,
     simulate_derived_group,
+    simulate_groups,
     build_target_amounts,
 )
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
@@ -166,6 +167,60 @@ def test_two_step_fee_model_sell_then_target_then_buy():
         np.array([1.0]), target,
     )
     np.testing.assert_allclose(net, [0.0078808])
+
+
+# ── group variants: same groupIndex with different fee strategies ─────
+
+def test_simulate_groups_expands_same_group_to_fee_variants():
+    """同一个 groupIndex 可以扩展成多个 fee variant，并同时返回多列结果。"""
+    membership = np.ones((1, 1, 2), dtype=bool)
+    returns = np.array([[0.10, 0.02]], dtype=float)
+    open_fee = np.array([
+        [0.0, 0.0],      # variant 0: no fee
+        [0.001, 0.001],  # variant 1: open fee
+    ])
+    close_fee = np.zeros((2, 2), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=open_fee,
+        close_fee_mat=close_fee,
+        rebalance_mode='each_period',
+        group_to_variant=np.array([[True, True]], dtype=bool),
+    )
+
+    assert result['net_returns_np'].shape == (1, 2)
+    assert result['net_returns_np'][0, 0] > result['net_returns_np'][0, 1]
+    np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.06, atol=1e-12)
+
+
+def test_simulate_groups_applies_rebalance_per_variant():
+    """同一个 groupIndex 的不同 variant 可以使用不同再平衡策略。"""
+    membership = np.zeros((2, 1, 2), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, 0] = True
+    membership[1, 0, 1] = True
+    returns = np.array([
+        [0.10, 0.00],
+        [0.02, 0.08],
+    ], dtype=float)
+    fee = np.zeros((2, 2), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='buy_and_hold',
+        rebalance_modes=['recycle', 'buy_and_hold'],
+        group_to_variant=np.array([[True, True]], dtype=bool),
+    )
+
+    net = result['net_returns_np']
+    assert net.shape == (2, 2)
+    np.testing.assert_allclose(net[0], [0.10, 0.10], atol=1e-12)
+    assert not np.isclose(net[1, 0], net[1, 1])
 
 
 # ── simulate_derived_group: fee rate flows correctly ───────────────────

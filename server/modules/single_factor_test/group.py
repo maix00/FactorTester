@@ -156,6 +156,57 @@ def _normalize_group_names(group_names) -> dict[int, str]:
     return normalized
 
 
+def _parse_group_variants(group_names) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
+    """Parse group_names for variant support.
+
+    Accepts:
+        {0: "A1", 1: "A2"}               → regular names, no variants
+        {0: ["A1", "A1a"], 1: "A2"}     → group 0 has 2 variants (same group, different fees)
+
+    Returns:
+        (n_groups_name: dict[int, str], group_variants: dict[int, list[dict]] | None)
+        - n_groups_name: one-to-one mapping (group_index → display_name).
+          For variants, uses the first name as the group-level name.
+        - group_variants: None if no variants detected.
+          Otherwise, {group_index: [{name, fee_map}, ...]} where each variant has its own
+          fee_map (populated later by _run_single_batch).
+    """
+    if not isinstance(group_names, dict):
+        return {}, None
+    n_groups_name: dict[int, str] = {}
+    group_variants: dict[int, list[dict]] = {}
+    has_variants = False
+    for key, value in group_names.items():
+        try:
+            g = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, list):
+            has_variants = True
+            # Each element is either a str (name only) or a dict {name, fee_map}
+            var_list: list[dict] = []
+            for vi, item in enumerate(value):
+                if isinstance(item, str):
+                    var_list.append({'name': str(item), 'fee_map': None})
+                elif isinstance(item, dict):
+                    var_list.append({
+                        'name': str(item.get('name', f'group_{g}_var_{vi}')),
+                        'fee_map': item.get('fee_map') or None,
+                        'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
+                        'fee_rate': item.get('fee_rate', item.get('feeRate')),
+                        'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
+                        'rebalance_mode': item.get('rebalance_mode') or item.get('rebalanceMode') or None,
+                    })
+            group_variants[g] = var_list
+            # Use first variant's name as group-level display name
+            n_groups_name[g] = var_list[0]['name'] if var_list else f'group_{g}'
+        else:
+            n_groups_name[g] = str(value)
+    if has_variants:
+        return n_groups_name, group_variants
+    return n_groups_name, None
+
+
 def _group_display_key(group_idx: int, n_base: int, derived_info: list[dict], group_names=None) -> str:
     names = _normalize_group_names(group_names)
     if group_idx in names:
@@ -565,6 +616,13 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         _saved_products = tester.products.copy()
         tester.products = set(_saved_products)
 
+        # ── 解析 group_names 中的 variant（一对多费率）──
+        n_groups_name_parsed, group_variants = _parse_group_variants(group_names)
+        if n_groups_name_parsed:
+            n_groups_name = n_groups_name_parsed
+        else:
+            n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
+
         factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
         if not factor:
             if not getattr(tester, 'factors', None):
@@ -612,6 +670,8 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     rebalance_mode=rebalance_mode,
                     derived_groups=derived_groups,
                     group_fee_maps=group_fee_maps,
+                    n_groups_name=n_groups_name,
+                    group_variants=group_variants,
                 )
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
                 group_result = tester._get_result(factor).group_result
@@ -653,6 +713,8 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             rebalance_mode=rebalance_mode,
             derived_groups=derived_groups,
             group_fee_maps=group_fee_maps,
+            n_groups_name=n_groups_name,
+            group_variants=group_variants,
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -666,19 +728,19 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         _fee = group_result.fee_costs_np if group_result is not None else None
         fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
 
-        group_names = _normalize_group_names(group_names)
+        result_group_names = getattr(group_result, 'group_names', None) or _normalize_group_names(group_names)
         groups_data = []
         for g in range(n_total):
             is_derived = g >= n_base
             vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
             gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
             fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
-            group_key = _group_display_key(g, n_base, derived_info, group_names)
+            group_key = _group_display_key(g, n_base, derived_info, result_group_names)
             if is_derived:
                 di = derived_info[g - n_base]
                 group_name = di.get('name', f'Group {g + 1}')
             else:
-                group_name = f'Group {g + 1}'
+                group_name = group_key
             entry = {
                 'key': group_key,
                 'name': group_name,
@@ -706,7 +768,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         if not report_df.empty:
             raw_metrics = report_df.to_dict(orient='index')
             for k, v in raw_metrics.items():
-                display_key = _metric_display_key(k, n_base, derived_info, group_names)
+                display_key = _metric_display_key(k, n_base, derived_info, result_group_names)
                 metrics[display_key] = {
                     mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
                     for mk, mv in v.items()
@@ -732,37 +794,6 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     'derived': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
                 })
                 metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
-
-        # ── 过滤：group_names 非空时，只返回前端实际存在的组 ──
-        if group_names:
-            # 确定要保留的 base group index（包括未在 group_names 中显式列出但实际存在的）
-            # group_names values 是显示名，keys 是 0-based 组索引
-            kept_base_indices = set(group_names.keys())
-            kept_base_indices.discard(-1)  # 移除 sentinel
-            # 过滤 groups_data
-            filtered_groups = []
-            kept_group_keys = set()
-            for entry in groups_data:
-                gi = entry.get('group_index')
-                is_derived = entry.get('is_derived')
-                is_ls = entry.get('is_ls')
-                if is_ls:
-                    # LS 组总是保留
-                    filtered_groups.append(entry)
-                    kept_group_keys.add(entry['key'])
-                    continue
-                if is_derived:
-                    base_group = entry.get('derived', {}).get('base_group')
-                    if base_group is not None and base_group in kept_base_indices:
-                        filtered_groups.append(entry)
-                        kept_group_keys.add(entry['key'])
-                else:
-                    if gi is not None and gi in kept_base_indices:
-                        filtered_groups.append(entry)
-                        kept_group_keys.add(entry['key'])
-            groups_data = filtered_groups
-            # 过滤 metrics
-            metrics = {k: v for k, v in metrics.items() if k in kept_group_keys}
 
         return {
             'success': True,
@@ -853,7 +884,6 @@ def run_group_test_batch():
         factor_alias = batch.get('factor_alias')
         n_groups = batch.get('n_groups', 5)
         group_names = batch.get('group_names')
-        group_names = _normalize_group_names(group_names)
         batch_derived_groups = batch.get('derived_groups')
         if not isinstance(batch_derived_groups, list):
             batch_derived_groups = derived_groups

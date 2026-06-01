@@ -1193,6 +1193,35 @@
         return baseAlias + ':' + suffix;
     }
 
+    function serializeGroupFeeMap(feeMap) {
+        if (!feeMap || typeof feeMap !== 'object') return null;
+        var serialized = {};
+        Object.keys(feeMap).forEach(function(code) {
+            var ov = feeMap[code];
+            if (ov && typeof ov === 'object') {
+                serialized[String(code).toLowerCase()] = {
+                    open: ov.open_ratio != null ? ov.open_ratio : null,
+                    close: ov.close_ratio != null ? ov.close_ratio : null,
+                    close_today: ov.closetoday_ratio != null ? ov.closetoday_ratio : (ov.close_today_ratio != null ? ov.close_today_ratio : null)
+                };
+            }
+        });
+        return Object.keys(serialized).length > 0 ? serialized : null;
+    }
+
+    function serializeGroupVariant(group, fallbackName) {
+        if (!group) return null;
+        var mode = group.feeMode || 'none';
+        return {
+            name: group.shortAlias || group.name || fallbackName || group.id || '',
+            fee_mode: mode,
+            fee_rate: group.feeRate != null ? group.feeRate : null,
+            fee_map: (mode === 'per_product' || mode === 'custom') ? serializeGroupFeeMap(group.feeMap) : null,
+            use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
+            rebalance_mode: group.rebalanceMode || 'buy_and_hold'
+        };
+    }
+
     function collectDerivedPayloadForBatch(batch) {
         if (!batch || !GT.datamodel || !GT.datamodel.groups) return [];
         var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
@@ -1214,11 +1243,12 @@
                 name: group.name || '派生组',
                 baseGroup: (base.groupIndex || 1) - 1,
                 productNames: products,
-                feeMode: group.feeMode || 'none',
-                feeRate: group.feeRate != null ? group.feeRate : null,
-                feeMap: group.feeMap != null ? group.feeMap : null,
+                fee_mode: group.feeMode || 'none',
+                fee_rate: group.feeRate != null ? group.feeRate : null,
+                fee_map: serializeGroupFeeMap(group.feeMap),
                 useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
-                rebalanceMode: group.rebalanceMode || 'each_period'
+                rebalanceMode: group.rebalanceMode || 'each_period',
+                rebalance_mode: group.rebalanceMode || 'each_period'
             });
         });
         return payload;
@@ -2963,13 +2993,25 @@
         for (var bi = 0; bi < batches.length; bi++) {
             var b = batches[bi];
             b.groupIdToIndex = {};
+            var groupsByIndex = {};
             for (var gi = 0; gi < b.groups.length; gi++) {
-                b.groupIdToIndex[b.groups[gi].id] = b.groups[gi].groupIndex;
+                var originalIndex = Number(b.groups[gi].groupIndex || (gi + 1));
+                if (!groupsByIndex[originalIndex]) groupsByIndex[originalIndex] = [];
+                groupsByIndex[originalIndex].push(b.groups[gi]);
+            }
+            var expandedIndex = 1;
+            for (var baseIdx = 1; baseIdx <= Number(b.groupCount || b.groups.length || 0); baseIdx++) {
+                var variantsAtIndex = groupsByIndex[baseIdx] || [];
+                for (var vi = 0; vi < variantsAtIndex.length; vi++) {
+                    b.groupIdToIndex[variantsAtIndex[vi].id] = expandedIndex;
+                    expandedIndex += 1;
+                }
             }
             b.derivedPayload = collectDerivedPayloadForBatch(b);
             for (var di = 0; di < b.derivedPayload.length; di++) {
                 if (b.derivedPayload[di].id) {
-                    b.groupIdToIndex[b.derivedPayload[di].id] = Number(b.groupCount || b.groups.length) + di + 1;
+                    b.groupIdToIndex[b.derivedPayload[di].id] = expandedIndex;
+                    expandedIndex += 1;
                 }
             }
             b.lsPayloads = []; // LS configs that belong to this batch
@@ -3083,14 +3125,16 @@
         var batchPayloads = [];
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
-            // group_names: {0: "A1", 1: "A2", ...} — 按 0-based index 映射 shortAlias
+            // group_names: {0: [{name, fee_mode, ...}, ...], ...}
+            // 同一个 groupIndex 可以对应多个 variant（不同费率策略/名称），后端一次性扩展计算。
             var groupNames = {};
             for (var gi = 0; gi < batch.groups.length; gi++) {
                 var g = batch.groups[gi];
-                if (g.shortAlias) {
-                    // groupIndex 是 1-based，转为 0-based
-                    groupNames[(g.groupIndex || (gi + 1)) - 1] = g.shortAlias;
-                }
+                var groupIdx = (g.groupIndex || (gi + 1)) - 1; // groupIndex 是 1-based，转为 0-based
+                var variant = serializeGroupVariant(g, 'Group ' + (groupIdx + 1));
+                if (!variant) continue;
+                if (!groupNames[groupIdx]) groupNames[groupIdx] = [];
+                groupNames[groupIdx].push(variant);
             }
             var derivedPayload = batch.derivedPayload || [];
             batchPayloads.push({
@@ -3132,39 +3176,12 @@
             });
         }
 
-        // ── 构造 group_fee_maps：每个 base group 的独立品种费率覆盖 ──
-        var group_fee_maps = {};
-        for (var bi2 = 0; bi2 < batches.length; bi2++) {
-            var b2 = batches[bi2];
-            for (var gi2 = 0; gi2 < b2.groups.length; gi2++) {
-                var g2 = b2.groups[gi2];
-                if (g2.feeMode === 'per_product' && g2.feeMap && typeof g2.feeMap === 'object') {
-                    var gIdx = Number(g2.groupIndex || (gi2 + 1)) - 1; // 1-based → 0-based
-                    var gfm = {};
-                    Object.keys(g2.feeMap).forEach(function(code) {
-                        var ov = g2.feeMap[code];
-                        if (ov && typeof ov === 'object') {
-                            gfm[code.toLowerCase()] = {
-                                open: ov.open_ratio != null ? ov.open_ratio : null,
-                                close: ov.close_ratio != null ? ov.close_ratio : null,
-                                close_today: ov.closetoday_ratio != null ? ov.closetoday_ratio : null
-                            };
-                        }
-                    });
-                    if (Object.keys(gfm).length > 0) {
-                        group_fee_maps[gIdx] = gfm;
-                    }
-                }
-            }
-        }
-        if (Object.keys(group_fee_maps).length === 0) group_fee_maps = null;
-
         var bulkPayload = {
             batches: batchPayloads,
             cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
             fee: fee,
             fee_map: fee_map,
-            group_fee_maps: group_fee_maps,
+            group_fee_maps: null,
             use_closetoday: use_closetoday,
             start_date: start_date,
             end_date: end_date,
