@@ -3932,6 +3932,13 @@
                     }
                 }
 
+                // Derive a default name: explicit name > shortAlias of base group > base group name > fallback
+                var resolvedName = _addDraft.name || _addDraft.defaultName;
+                if (!resolvedName || (typeof resolvedName === 'string' && !resolvedName.trim())) {
+                    var bg = GT.datamodel.groups && GT.datamodel.groups.get(baseGroupId);
+                    resolvedName = (bg && (bg.shortAlias || bg.name)) || '派生组';
+                }
+
                 var derivedPanel = GT.panels.add && GT.panels.add.derived;
                 var selectedProducts = (derivedPanel && typeof derivedPanel.getSelectedProducts === 'function')
                     ? derivedPanel.getSelectedProducts() : [];
@@ -3942,7 +3949,7 @@
                 }
 
                 var config = {
-                    name: _addDraft.name || _addDraft.defaultName || '派生组',
+                    name: resolvedName,
                     isDerived: true,
                     baseGroupId: baseGroupId,
                     productMask: productMask,

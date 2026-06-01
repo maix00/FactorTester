@@ -295,8 +295,28 @@
         label: '品种分类',
         icon: '🌳',
         collect: function() {
-            if (window._getCurrentSubmissions) return window._getCurrentSubmissions();
-            return [];
+            var raw = (window._getCurrentSubmissions) ? window._getCurrentSubmissions() : [];
+            // 返回深拷贝，避免引用共享 + 按 id 去重
+            var seen = {};
+            var deduped = [];
+            for (var i = 0; i < raw.length; i++) {
+                var s = raw[i];
+                var sid = s.id;
+                if (!sid || seen[sid]) continue;
+                seen[sid] = true;
+                deduped.push({
+                    id: s.id,
+                    label: s.label || '',
+                    product_group: s.product_group || '',
+                    paths: (s.selected_paths || s.paths || []).slice(),
+                    selected_paths: (s.selected_paths || s.paths || []).slice(),
+                    factor_tester_name: s.factor_tester_name || '',
+                    factor_tester_serial: s.factor_tester_serial || '',
+                    product_count: s.product_count || 0,
+                    products: (s.products || []).slice()
+                });
+            }
+            return deduped;
         },
         apply: async function(subs) {
             // 先清空
@@ -305,9 +325,23 @@
                 if (typeof window._applySubmissions === 'function') window._applySubmissions([]);
             } catch (e) { console.error('清空旧测试器失败:', e); }
             if (!subs || subs.length === 0) return;
+
+            // 按 paths 去重（序列化比较），避免重复创建相同路径的测试器
+            var seenPaths = {};
+            var uniqueSubs = [];
+            for (var si = 0; si < subs.length; si++) {
+                var s = subs[si];
+                var paths = (s.selected_paths || s.paths || []).slice().sort();
+                var key = JSON.stringify(paths);
+                if (!seenPaths[key]) {
+                    seenPaths[key] = true;
+                    uniqueSubs.push(s);
+                }
+            }
+
             var latestServerSubmissions = null;
-            for (var i = 0; i < subs.length; i++) {
-                var sub = subs[i];
+            for (var i = 0; i < uniqueSubs.length; i++) {
+                var sub = uniqueSubs[i];
                 var paths = sub.selected_paths || sub.paths || [];
                 if (!paths.length) continue;
                 var id_time = Date.now() + '-' + i;
@@ -424,16 +458,27 @@
         },
         apply: function(gs, ctx) {
             // testerId 重映射（依赖 ctx.oldToNewTesterId，由 applyAll 在调用 submissions.apply 后设置）
-            if (gs && gs.baseGroups && ctx && ctx.oldToNewTesterId) {
+            var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
+            if (gs && gs.baseGroups) {
+                // 兜底：当只有一个当前 submission 时，用它覆盖所有未映射的 testerId
+                var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
+                var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
+
                 gs.baseGroups.forEach(function(bg) {
-                    if (bg.testerId && ctx.oldToNewTesterId.hasOwnProperty(String(bg.testerId))) {
-                        bg.testerId = ctx.oldToNewTesterId[String(bg.testerId)];
+                    if (bg.testerId && oldToNew.hasOwnProperty(String(bg.testerId))) {
+                        bg.testerId = oldToNew[String(bg.testerId)];
+                    } else if (bg.testerId && fallbackNewId) {
+                        // 旧 testerId 映射不到 + 当前只有一个 tester → 兜底替换
+                        console.warn('[global_template] testerId remap fallback: ' + bg.testerId + ' → ' + fallbackNewId);
+                        bg.testerId = fallbackNewId;
                     }
                 });
                 if (gs.registrations) {
                     gs.registrations.forEach(function(reg) {
-                        if (reg.testerId && ctx.oldToNewTesterId.hasOwnProperty(String(reg.testerId))) {
-                            reg.testerId = ctx.oldToNewTesterId[String(reg.testerId)];
+                        if (reg.testerId && oldToNew.hasOwnProperty(String(reg.testerId))) {
+                            reg.testerId = oldToNew[String(reg.testerId)];
+                        } else if (reg.testerId && fallbackNewId) {
+                            reg.testerId = fallbackNewId;
                         }
                     });
                 }
@@ -524,17 +569,22 @@
         // 这是跨注册项的依赖：group_settings(50) 依赖 submissions(30) 重映射后的 testerId
         // 通过 ctx 传递
         var subsEntry = SnapshotRegistry._registryByKey['submissions'];
-        // 在 submissions.apply 之后插入 testerId 重映射逻辑
-        // 方案：在 applyAll 之前先单独处理 submissions，设置 ctx.oldToNewTesterId
-        if (snapshot.submissions && subsEntry && snapshot.group_settings && snapshot.group_settings.baseGroups) {
-            // 先应用 submissions（它内部已经是 async）
-            // 但为了拿到 old→new 映射，我们需要包装一下
-            // 实际做法：先跑 submissions，再跑其余
-            await _applySubmissionsWithRemapping(snapshot.submissions, snapshot, ctx);
-            // 然后跳过 submissions，apply 其余项
-            await SnapshotRegistry.applyAll(snapshot, ctx, ['submissions']);
+        var hasSubs = snapshot.submissions && Array.isArray(snapshot.submissions) && snapshot.submissions.length > 0;
+        var hasGroups = snapshot.group_settings && snapshot.group_settings.baseGroups && snapshot.group_settings.baseGroups.length > 0;
+
+        if (hasGroups) {
+            // 有分组设置就需要 testerId 重映射（即使模板没有 submissions 也需要 fallback）
+            await _applySubmissionsWithRemapping(hasSubs ? snapshot.submissions : [], snapshot, ctx);
+            await SnapshotRegistry.applyAll(snapshot, ctx, hasSubs ? ['submissions'] : []);
         } else {
-            await SnapshotRegistry.applyAll(snapshot, ctx);
+            // 模板无 group_settings → 清空分组组合列表和 LS 组表
+            _clearGroupTestData();
+            if (hasSubs && subsEntry) {
+                await _applySubmissionsWithRemapping(snapshot.submissions, snapshot, ctx);
+                await SnapshotRegistry.applyAll(snapshot, ctx, ['submissions']);
+            } else {
+                await SnapshotRegistry.applyAll(snapshot, ctx);
+            }
         }
 
         refreshOuterSummaries();
@@ -542,8 +592,8 @@
 
     /** 专门处理 submissions apply + testerId 重映射 */
     async function _applySubmissionsWithRemapping(subs, snapshot, ctx) {
-        // 记录旧的 submission ids（用于构建映射）
-        var oldSubIds = (snapshot.submissions || []).map(function(s) { return s.id; });
+        // 记录旧的 submission ids 及其 product_group/label（用于匹配）
+        var oldSubs = snapshot.submissions || [];
 
         // 先执行 submissions apply（清空 + 重建）
         var subsEntry = SnapshotRegistry._registryByKey['submissions'];
@@ -552,16 +602,64 @@
         }
 
         // 构建 oldTesterId → newTesterId 映射
+        // 优先按数组位置，兜底按 product_group/label 匹配
         var curSubmissions = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
         var oldToNewTesterId = {};
-        for (var mi = 0; mi < oldSubIds.length; mi++) {
-            var oldId = oldSubIds[mi];
+
+        // 第一遍：按位置匹配
+        for (var mi = 0; mi < oldSubs.length && mi < curSubmissions.length; mi++) {
+            var oldId = oldSubs[mi].id;
             var newId = (curSubmissions[mi] && curSubmissions[mi].id) ? curSubmissions[mi].id : null;
             if (oldId && newId) {
                 oldToNewTesterId[String(oldId)] = String(newId);
             }
         }
+
+        // 第二遍：对未匹配的旧 submission，按 product_group/label 查找
+        for (var oi = 0; oi < oldSubs.length; oi++) {
+            var os = oldSubs[oi];
+            var oid = String(os.id);
+            if (oldToNewTesterId[oid]) continue; // 已匹配
+            var oldGroup = os.product_group || os.label || '';
+            if (!oldGroup) continue;
+            for (var ci = 0; ci < curSubmissions.length; ci++) {
+                var cs = curSubmissions[ci];
+                var cid = String(cs.id);
+                // 避免一个 newId 被匹配多次
+                var alreadyUsed = false;
+                var keys = Object.keys(oldToNewTesterId);
+                for (var ki = 0; ki < keys.length; ki++) {
+                    if (oldToNewTesterId[keys[ki]] === cid) { alreadyUsed = true; break; }
+                }
+                if (alreadyUsed) continue;
+                var curGroup = cs.product_group || cs.label || '';
+                if (oldGroup === curGroup) {
+                    oldToNewTesterId[oid] = cid;
+                    break;
+                }
+            }
+        }
+
         ctx.oldToNewTesterId = oldToNewTesterId;
+    }
+
+    /** 清空分组测试数据（分组组合列表和 LS 组表），用于模板无 group_settings 时重置。 */
+    function _clearGroupTestData() {
+        try {
+            if (window.GT && window.GT.datamodel) {
+                if (window.GT.datamodel.groups && typeof window.GT.datamodel.groups._reset === 'function') {
+                    window.GT.datamodel.groups._reset();
+                }
+                if (window.GT.datamodel.ls_configs && typeof window.GT.datamodel.ls_configs._reset === 'function') {
+                    window.GT.datamodel.ls_configs._reset();
+                }
+                if (window.GT.datamodel.registrations && typeof window.GT.datamodel.registrations._reset === 'function') {
+                    window.GT.datamodel.registrations._reset();
+                }
+            }
+        } catch (e) {
+            console.warn('[global_template] _clearGroupTestData failed:', e);
+        }
     }
 
     function refreshOuterSummaries() {

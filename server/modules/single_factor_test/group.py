@@ -805,7 +805,8 @@ def run_group_test_batch():
     # 费率从第一个 batch 的 tester 解析
     first_batch = batches_raw[0]
     try:
-        tester0 = runtime_state.get_factor_tester(first_batch.get('submission_id'), caller='run_group_test_batch')
+        sub_id = first_batch.get('submission_id')
+        tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test_batch')
         fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
