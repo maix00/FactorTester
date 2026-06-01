@@ -348,8 +348,6 @@
         }
         container.style.display = 'block';
 
-        var shortAliasMap = _lastShortAliasMap || {};
-
         // ── 1. 计算 GCD ──
         function gcd(a, b) {
             a = Math.abs(a); b = Math.abs(b);
@@ -429,7 +427,8 @@
 
         // ── 3. 每个 group 映射到共享 timeline ──
         var series = groups.map(function(group) {
-            var alias = shortAliasMap[group.name] || group.name;
+            // 直接用后端返回的 key 作为图例名
+            var alias = group.key || group.name;
             var gts = group.timestamps || [];
             var vals = group.cumulative_returns || [];
 
@@ -829,13 +828,11 @@
             groupLabels.push(groupIdx);
         }
 
-        var aliasMap = _lastMetricKeyToAlias || {};
-        function headerLabel(metricKey) {
-            var a = aliasMap[metricKey];
-            if (a) return a;
-            // fallback: 纯数字 → 第X组
-            if (/^\d+$/.test(String(metricKey))) return '第' + (parseInt(metricKey) + 1) + '组';
-            return String(metricKey);
+        // headerLabel: 参数就是 group/metrics 的 key（如 "B1"），直接返回
+        function headerLabel(key) {
+            // fallback: 纯数字 → 第X组（兼容旧数据）
+            if (/^\d+$/.test(String(key))) return '第' + (parseInt(key) + 1) + '组';
+            return String(key);
         }
 
         // 转置：行 = 指标名，列 = 分组
@@ -845,11 +842,11 @@
             var isLS = (g === 'LS');
             var label = headerLabel(g);
             if (isLS) {
-                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="LS" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-group-key="LS" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
             } else if (/^\d+$/.test(String(g))) {
                 theadHtml += '<th class="group-detail-trigger" data-group-index="' + g + '" title="查看该组详情">' + label + '</th>';
             } else {
-                theadHtml += '<th class="portfolio-detail-trigger" data-metric-key="' + escapeHtml(g) + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
+                theadHtml += '<th class="portfolio-detail-trigger" data-group-key="' + escapeHtml(g) + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
             }
         });
         theadHtml += '</tr>';
@@ -954,7 +951,7 @@
         });
         document.querySelectorAll('#metrics_head .portfolio-detail-trigger').forEach(function(th) {
             th.addEventListener('click', function() {
-                openPortfolioDetail(th.getAttribute('data-metric-key'));
+                openPortfolioDetail(th.getAttribute('data-group-key'));
             });
         });
         var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
@@ -1082,14 +1079,14 @@
                     if (result && result.success) {
                         var def = defs[i];
                         removeGeneratedDerivedArtifacts(def.id);
-                        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+                        def.key = makeUniqueGroupKey(def.name, def.id);
                         def.generated = true;
                         var group = result.group || {};
                         group.name = def.name;
                         group.is_derived = true;
-                        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+                        group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
                         _lastGrossData.push(group);
-                        _lastMetrics[def.metricKey] = result.metric || {};
+                        _lastMetrics[def.key] = result.metric || {};
                     } else if (result) {
                         errors.push((defs[i] && defs[i].name) || '?');
                     }
@@ -1129,7 +1126,7 @@
         var id = 'D' + _derivedGroupSeq++;
         _derivedGroups.push({
             id: id,
-            metricKey: name,
+            key: name,
             name: name,
             baseGroup: groupIndex,
             productNames: productNames,
@@ -1138,12 +1135,12 @@
         renderDerivedGroupsPanel(groupIndex);
     }
 
-    function makeUniqueMetricKey(name, ownId) {
+    function makeUniqueGroupKey(name, ownId) {
         var base = name || ownId || '派生组';
         var key = base;
         var suffix = 2;
         while (_lastMetrics && _lastMetrics[key]) {
-            var owner = _derivedGroups.find(function(item) { return item.metricKey === key; });
+            var owner = _derivedGroups.find(function(item) { return item.key === key; });
             if (owner && owner.id === ownId) break;
             key = base + ' #' + suffix++;
         }
@@ -1157,7 +1154,7 @@
                 return !(group && group.is_derived && group.derived && group.derived.id === id);
             });
         }
-        if (def && _lastMetrics && def.metricKey) delete _lastMetrics[def.metricKey];
+        if (def && _lastMetrics && def.key) delete _lastMetrics[def.key];
         if (def) def.generated = false;
     }
 
@@ -1187,14 +1184,14 @@
     function _applyDerivedGroupResult(result) {
         var def = result.def;
         removeGeneratedDerivedArtifacts(def.id);
-        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.key = makeUniqueGroupKey(def.name, def.id);
         def.generated = true;
         var group = result.group;
         group.name = def.name;
         group.is_derived = true;
-        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
         _lastGrossData.push(group);
-        _lastMetrics[def.metricKey] = result.metric;
+        _lastMetrics[def.key] = result.metric;
     }
 
     /** 统一刷新：图表 + 指标表 + 面板。 */
@@ -1896,18 +1893,18 @@
         }
     }
 
-    function findGeneratedPortfolio(metricKey) {
+    function findGeneratedPortfolio(key) {
         if (!_lastGrossData) return null;
         return _lastGrossData.find(function(group) {
             if (!group || (!group.is_derived && !group.is_ls)) return false;
-            if (group.metric_key === metricKey) return true;
-            if (group.derived && group.derived.metric_key === metricKey) return true;
-            return metricKey === 'LS' && group.is_ls && (group.name === 'Long-Short' || group.metric_key === 'LS');
+            if (group.key === key) return true;
+            if (group.derived && group.derived.key === key) return true;
+            return false;
         });
     }
 
-    function openPortfolioDetail(metricKey) {
-        var group = findGeneratedPortfolio(metricKey);
+    function openPortfolioDetail(key) {
+        var group = findGeneratedPortfolio(key);
         if (!group) {
             alert('未找到该派生组/Long-Short 的已生成结果。');
             return;
@@ -1915,11 +1912,11 @@
         var overlay = document.getElementById('group-detail-overlay');
         var loading = document.getElementById('group-detail-loading');
         var content = document.getElementById('group-detail-content');
-        document.getElementById('group-detail-title').textContent = (group.name || metricKey || '派生组') + '详情';
+        document.getElementById('group-detail-title').textContent = (group.name || key || '派生组') + '详情';
         overlay.classList.add('open');
         loading.style.display = 'none';
         content.style.display = '';
-        renderGroupDetail(buildPortfolioDetail(group, (_lastMetrics || {})[metricKey] || {}), { showDerivedPanel: false });
+        renderGroupDetail(buildPortfolioDetail(group, (_lastMetrics || {})[key] || {}), { showDerivedPanel: false });
         var summary = document.getElementById('group-detail-frequency-summary');
         if (summary) summary.textContent = group.is_ls ? 'Long-Short 组合腿配置' : '派生组所选品种';
     }
@@ -2395,17 +2392,7 @@
         _lastTimestamps = data.groups.length > 0 ? data.groups[0].timestamps : [];
         _lastGroupStructureKey = data.structure_key || null;
 
-        // 构建 metric_key → shortAlias 映射（用于表格表头）
-        _lastMetricKeyToAlias = {};
-        var shortMap = _lastShortAliasMap || {};
-        (data.groups || []).forEach(function(g) {
-            var mk = g.metric_key;
-            if (mk !== undefined && mk !== null) {
-                // 优先用 group name 查 shortAliasMap，其次直接用 metric_key
-                var gname = g.name;
-                _lastMetricKeyToAlias[mk] = shortMap[gname] || gname || String(mk);
-            }
-        });
+        // metrics key 即为 shortAlias，无需额外映射表
 
         // 从响应中重建 _derivedGroups（后端已统一计算，无需额外请求）
         // 注意：跳过 LS 组（is_ls），其 derived 中无 base_group。
@@ -2418,7 +2405,7 @@
                     name: g.name,
                     baseGroup: g.derived.base_group,
                     productNames: g.derived.product_names || [],
-                    metricKey: g.metric_key,
+                    key: g.key,
                     generated: true
                 });
                 var num = parseInt(String(g.derived.id || '').replace(/^D/, ''), 10);
@@ -2482,14 +2469,14 @@
         if (!resp || !resp.success) return;
 
         removeGeneratedDerivedArtifacts(def.id);
-        def.metricKey = makeUniqueMetricKey(def.name, def.id);
+        def.key = makeUniqueGroupKey(def.name, def.id);
         def.generated = true;
         var group = resp.group || {};
         group.name = def.name;
         group.is_derived = true;
-        group.derived = Object.assign({}, group.derived || {}, { id: def.id, metric_key: def.metricKey });
+        group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
         _lastGrossData.push(group);
-        _lastMetrics[def.metricKey] = resp.metric || {};
+        _lastMetrics[def.key] = resp.metric || {};
     }
 
     function postGroupTest(payload) {
@@ -2811,10 +2798,20 @@
         var batchPayloads = [];
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
+            // group_names: {0: "A1", 1: "A2", ...} — 按 0-based index 映射 shortAlias
+            var groupNames = {};
+            for (var gi = 0; gi < batch.groups.length; gi++) {
+                var g = batch.groups[gi];
+                if (g.shortAlias) {
+                    // groupIndex 是 1-based，转为 0-based
+                    groupNames[(g.groupIndex || (gi + 1)) - 1] = g.shortAlias;
+                }
+            }
             batchPayloads.push({
                 submission_id: batch.testerId,
                 factor_alias: batch.factorAlias,
                 n_groups: batch.groupCount,
+                group_names: Object.keys(groupNames).length > 0 ? groupNames : null,
                 ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
             });
         }
@@ -2862,6 +2859,21 @@
         };
 
         try {
+            // ── 进度条：indeterminate 条形动画 ──
+            var progressBarId = 'gt-batch-progress';
+            var progressBar = document.getElementById(progressBarId);
+            if (!progressBar) {
+                progressBar = document.createElement('div');
+                progressBar.id = progressBarId;
+                progressBar.className = 'gt-progress-container';
+                progressBar.innerHTML = '<div class="gt-progress-bar"><div class="gt-progress-indeterminate"></div></div>' +
+                                        '<span class="gt-progress-text">计算中...</span>';
+                var chartContainer = document.getElementById('group_chart_container');
+                var insertParent = chartContainer ? chartContainer.parentNode : runBtn.parentNode;
+                var insertBefore = chartContainer || runBtn.nextSibling;
+                insertParent.insertBefore(progressBar, insertBefore);
+            }
+
             var data = await postBatchGroupTest(bulkPayload);
             if (!data.success) {
                 var errorText = data.needs_ic_test && pageHasICModule()
@@ -2884,50 +2896,9 @@
                 markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
 
-            // 构建 shortAliasMap：后端 group name → 前端 shortAlias
-            // 后端为每个 batch 返回 "Group 1", "Group 2", ... 和 LS config name
-            var shortAliasMap = {};
-            for (var bi = 0; bi < batches.length; bi++) {
-                var batch = batches[bi];
-                var shortPrefix = (batch.groups[0] && batch.groups[0].shortAlias) ? batch.groups[0].shortAlias.replace(/[0-9]+$/, '') : '';
-                for (var gi = 0; gi < batch.groups.length; gi++) {
-                    var grp = batch.groups[gi];
-                    var backendName = 'Group ' + (grp.groupIndex);
-                    var alias = grp.shortAlias || (shortPrefix + (gi + 1));
-                    shortAliasMap[backendName] = alias;
-                }
-                // LS configs within the same batch
-                for (var lsi = 0; lsi < batch.lsPayloads.length; lsi++) {
-                    var lsp = batch.lsPayloads[lsi];
-                    var lsName = lsp.name || 'Long-Short';
-                    // build display name from long/short shortAliases
-                    var lGrp = lsp.long && lsp.long[0] ? lsp.long[0].group + 1 : 1;
-                    var sGrp = lsp.short && lsp.short[0] ? lsp.short[0].group + 1 : batch.groupCount;
-                    var longAlias = batch.groups[lGrp - 1] ? batch.groups[lGrp - 1].shortAlias : ('G' + lGrp);
-                    var shortAlias = batch.groups[sGrp - 1] ? batch.groups[sGrp - 1].shortAlias : ('G' + sGrp);
-                    shortAliasMap[lsName] = longAlias + '/' + shortAlias;
-                }
-            }
-            // 跨 batch LS
-            for (var cbi = 0; cbi < crossBatchLS.length; cbi++) {
-                var cLS = crossBatchLS[cbi];
-                var cName = cLS.name || 'Long-Short';
-                // 查找 long/short 组的 shortAlias
-                var cbLongAlias = '?', cbShortAlias = '?';
-                for (var bj = 0; bj < batches.length; bj++) {
-                    var gidMap = batches[bj].groupIdToIndex;
-                    if (gidMap[cLS.longGroupId] !== undefined) {
-                        var li = gidMap[cLS.longGroupId];
-                        cbLongAlias = batches[bj].groups[li - 1] ? batches[bj].groups[li - 1].shortAlias : '?';
-                    }
-                    if (gidMap[cLS.shortGroupId] !== undefined) {
-                        var si = gidMap[cLS.shortGroupId];
-                        cbShortAlias = batches[bj].groups[si - 1] ? batches[bj].groups[si - 1].shortAlias : '?';
-                    }
-                }
-                shortAliasMap[cName] = cbLongAlias + '/' + cbShortAlias;
-            }
-            _lastShortAliasMap = shortAliasMap;
+            // ── 数据已就绪：后端统一用 key 字段 + metrics key = shortAlias ──
+            // data.groups[i].key = "A1"/"B1"/... , data.metrics["A1"] = {...}
+            // 无需前端注入，直接渲染
 
             // 一次性渲染
             applyGroupTestResult(data);
@@ -2947,7 +2918,13 @@
                 statusSpan.style.color = '#d40000';
             }
         } finally {
-            if (runBtn) runBtn.disabled = false;
+            // 清理进度条
+            var _pb = document.getElementById('gt-batch-progress');
+            if (_pb) _pb.remove();
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.style.display = '';  // 恢复可能被 renderGroupTabs 隐藏的按钮
+            }
         }
     }
 
@@ -3032,8 +3009,6 @@
     var _lastMetrics = null;
     var _lastTimestamps = [];
     var _lastNgroups = 0;
-    var _lastShortAliasMap = {}; // backend group name → shortAlias for chart/table display
-    var _lastMetricKeyToAlias = {}; // metric_key → shortAlias for table headers
     var _groupResultsBySubmission = {};
     var _activeGroupSubmissionId = null;
     var _activeGroupFactorBySubmission = {};

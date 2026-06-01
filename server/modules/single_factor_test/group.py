@@ -133,12 +133,12 @@ def _parse_ls_configs(data: dict, n_groups: int) -> list[dict]:
     return []
 
 
-def _unique_metric_key(name: str, used: set[str], default: str = 'LS') -> str:
-    base = name or default
-    key = default if base == 'Long-Short' and default not in used else base
+def _unique_group_key(name: str, used: set[str]) -> str:
+    """去重：如果 name 已存在，追加 #2, #3..."""
+    key = name or 'LS'
     suffix = 2
     while key in used:
-        key = f'{base} #{suffix}'
+        key = f'{name} #{suffix}'
         suffix += 1
     used.add(key)
     return key
@@ -484,10 +484,14 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                       fee_uniform, fee_map, use_closetoday,
                       rebalance_mode, start_date, end_date,
                       return_freqs=None, derived_groups=None,
-                      ls_configs=None) -> dict:
+                      ls_configs=None, group_names=None) -> dict:
     """执行单个 batch 的分组测试，返回结果 dict（不含 Flask Response 包装）。
     
     此函数设计为线程安全：每个调用独立获取 tester、快照 products、计算后恢复。
+    
+    group_names: 可选 dict[int,str]，key 为 0-based 组索引，value 为显示名（如 {0:"B1", 3:"B4"}）。
+    若提供，groups_data 中每个组将带 key 字段，metrics 的 key 也用它。
+    若不提供，退化为 "Group N" (base) / derived name。
     """
     _gt_token = None
     _saved_products = None
@@ -597,14 +601,27 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         _fee = group_result.fee_costs_np if group_result is not None else None
         fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
 
+        group_names = dict(group_names) if isinstance(group_names, dict) else {}
         groups_data = []
         for g in range(n_total):
             is_derived = g >= n_base
             vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
             gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
             fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
+            # key: 优先用前端传入的 shortAlias（group_names[g]），其次退化为 "Group N"
+            # name: 默认的 "Group N"（含派生组名）
+            if g in group_names:
+                group_key = group_names[g]
+            else:
+                group_key = f'Group {g + 1}'
+            if is_derived:
+                di = derived_info[g - n_base]
+                group_name = di.get('name', f'Group {g + 1}')
+            else:
+                group_name = f'Group {g + 1}'
             entry = {
-                'name': f'Group {g + 1}',
+                'key': group_key,
+                'name': group_name,
                 'timestamps': timestamps,
                 'cumulative_returns': vals,
                 'gross_returns': gross_vals,
@@ -616,7 +633,6 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             }
             if is_derived:
                 di = derived_info[g - n_base]
-                entry['name'] = di.get('name', entry['name'])
                 entry['is_derived'] = True
                 entry['derived'] = {
                     'base_group': di['base_group'],
@@ -626,27 +642,30 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             groups_data.append(entry)
 
         metrics: dict = {}
-        _derived_name_map: dict = {}
-        for di_idx, di in enumerate(derived_info):
-            _derived_name_map[n_base + di_idx] = di.get('name', f'第{n_base + di_idx + 1}组精选')
         if not report_df.empty:
             raw_metrics = report_df.to_dict(orient='index')
             for k, v in raw_metrics.items():
                 key_int = int(k) if isinstance(k, (int, str)) and str(k).lstrip('-').isdigit() else None
-                display_key = _derived_name_map.get(key_int, str(k)) if key_int is not None else str(k)
+                # metrics key: 优先用 group_names[key_int]，其次用数字k
+                if key_int is not None and key_int in group_names:
+                    display_key = group_names[key_int]
+                else:
+                    display_key = str(k)
                 metrics[display_key] = {
                     mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
                     for mk, mv in v.items()
                 }
-        used_metric_keys = set(metrics.keys())
+        used_keys = set(metrics.keys())
         if ls_configs:
             for ls_config in ls_configs:
                 r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
-                metric_key = _unique_metric_key(ls_config['name'], used_metric_keys, default='LS')
+                # LS key: 去重后的唯一标识，name: 原始描述
+                ls_name = ls_config['name'] or 'Long-Short'
+                ls_key = _unique_group_key(ls_name, used_keys)
                 ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
                 groups_data.append({
-                    'name': ls_config['name'],
-                    'metric_key': metric_key,
+                    'key': ls_key,
+                    'name': ls_name,
                     'timestamps': timestamps,
                     'cumulative_returns': ls_vals,
                     'gross_returns': _serialize_float_series(r_ls, default=0.0),
@@ -654,9 +673,9 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     'trade_notional_ratios': [0.0] * len(r_ls),
                     'is_ls': True,
                     'is_derived': True,
-                    'derived': {'type': 'long_short', 'metric_key': metric_key, 'config': ls_config},
+                    'derived': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
                 })
-                metrics[metric_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
+                metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
 
         return {
             'success': True,
@@ -741,6 +760,9 @@ def run_group_test_batch():
         submission_id = batch.get('submission_id')
         factor_alias = batch.get('factor_alias')
         n_groups = batch.get('n_groups', 5)
+        group_names = batch.get('group_names')
+        if isinstance(group_names, dict):
+            group_names = {int(k): str(v) for k, v in group_names.items()}
         raw_ls = batch.get('ls_configs')
         ls_configs = None
         if isinstance(raw_ls, list) and raw_ls:
@@ -764,6 +786,7 @@ def run_group_test_batch():
             return_freqs=return_freqs,
             derived_groups=derived_groups,
             ls_configs=ls_configs,
+            group_names=group_names,
         )
         result['batch_submission_id'] = submission_id
         result['batch_factor_alias'] = factor_alias
@@ -871,10 +894,10 @@ def run_group_test_batch():
             timestamps = ref_raw['timestamps'][:min_len]
             ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
 
-            metric_key = ls_name
+            ls_key = ls_name
             cross_ls_groups.append({
+                'key': ls_key,
                 'name': ls_name,
-                'metric_key': metric_key,
                 'timestamps': timestamps,
                 'cumulative_returns': ls_vals,
                 'gross_returns': _serialize_float_series(r_ls, default=0.0),
@@ -885,12 +908,11 @@ def run_group_test_batch():
                 'is_cross_batch': True,
                 'derived': {
                     'type': 'long_short',
-                    'metric_key': metric_key,
                     'long_batch': long_info,
                     'short_batch': short_info,
                 },
             })
-            cross_ls_metrics[metric_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
+            cross_ls_metrics[ls_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
 
     # ── 阶段 3：合并结果 ──
     merged_groups = []
@@ -1119,14 +1141,15 @@ def run_group_test():
                     mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
                     for mk, mv in v.items()
                 }
-        used_metric_keys = set(metrics.keys())
+        used_keys = set(metrics.keys())
         for ls_config in ls_configs:
             r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_groups)
-            metric_key = _unique_metric_key(ls_config['name'], used_metric_keys, default='LS')
+            ls_name = ls_config['name'] or 'Long-Short'
+            ls_key = _unique_group_key(ls_name, used_keys)
             ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
             groups_data.append({
-                'name': ls_config['name'],
-                'metric_key': metric_key,
+                'key': ls_key,
+                'name': ls_name,
                 'timestamps': timestamps,
                 'cumulative_returns': ls_vals,
                 'gross_returns': _serialize_float_series(r_ls, default=0.0),
@@ -1134,9 +1157,9 @@ def run_group_test():
                 'trade_notional_ratios': [0.0] * len(r_ls),
                 'is_ls': True,
                 'is_derived': True,
-                'derived': {'type': 'long_short', 'metric_key': metric_key, 'config': ls_config},
+                'derived': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
             })
-            metrics[metric_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
+            metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
 
         return jsonify({'success': True, 'groups': groups_data, 'metrics': metrics, 'n_groups': n_total,
                         'n_base': n_base,
