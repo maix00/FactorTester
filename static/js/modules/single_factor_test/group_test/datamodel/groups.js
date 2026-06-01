@@ -77,7 +77,7 @@
     var FIELD_SCHEMA = [
         // ── Identity ──
         { key: 'id',          type: 'string',  requiredFor: 'none',    defaultBase: '',    defaultDerived: '',    allowPatch: false },
-        { key: 'name',        type: 'string',  requiredFor: 'both',    defaultBase: '',    defaultDerived: '',    validate: function(v) { return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
+        { key: 'name',        type: 'string',  requiredFor: 'base',    defaultBase: '',    defaultDerived: '',    validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
         { key: 'isDerived',   type: 'boolean', requiredFor: 'none',    defaultBase: false, defaultDerived: true,  allowPatch: false },
 
         // ── Tree / lineage (meaningful for derived; null for base) ──
