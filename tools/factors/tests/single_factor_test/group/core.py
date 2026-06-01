@@ -652,9 +652,10 @@ def simulate_groups(
         allocation_weights_t = None
         executable_capacity_t = None
         if liquidity_active_t:
+            _liq_cap = cast(np.ndarray, liquidity_capacity_arr)  # type-narrow: guarded by liquidity_active_t
             base_capacity = np.where(
-                np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
-                liquidity_capacity_arr[t],
+                np.isfinite(_liq_cap[t]) & (_liq_cap[t] > 0),
+                _liq_cap[t],
                 0.0,
             )
             percent_scale = np.clip(liquidity_percents_arr, 0.0, 100.0) / 100.0
@@ -1663,10 +1664,11 @@ def test_by_group_single_factor(
         variant_liquidity_percents = liquidity_percents_list
 
     if any(str(mode) == "percent" for mode in variant_liquidity_modes):
+        source_freq = cast(DataFreq, factor._source_freq if getattr(factor, "_source_freq", None) is not None else DataFreq.MIN1)
         liquidity_capacity_np = _build_normalized_liquidity_capacity(
             valid_cols,
             index_list,
-            factor._source_freq if getattr(factor, "_source_freq", None) is not None else DataFreq.MIN1,
+            source_freq,
             start_date,
             end_date,
         )
