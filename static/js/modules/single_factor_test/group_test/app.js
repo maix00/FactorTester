@@ -83,6 +83,47 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     }
 
+    function readGroupTimeRangeInput() {
+        var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
+        var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
+        var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
+        var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
+        var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
+        var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
+        return {
+            startDate: (sy && sm && sd) ? buildValidDate(sy, sm, sd) : null,
+            endDate: (ey && em && ed) ? buildValidDate(ey, em, ed) : null,
+        };
+    }
+
+    function persistGroupTimeRangeToDatamodel(startDate, endDate) {
+        if (!GT.datamodel || !GT.datamodel.groups || (!startDate && !endDate)) return;
+        var allGroups = GT.datamodel.groups.getAll() || [];
+        allGroups.forEach(function(group) {
+            try {
+                var patch = {};
+                if (startDate) patch.startDate = startDate;
+                if (endDate) patch.endDate = endDate;
+                GT.datamodel.groups.update(group.id, patch);
+            } catch (e) { /* skip invalid/stale group */ }
+        });
+    }
+
+    function resolveGroupRunTimeRange(savedStartDate, savedEndDate) {
+        var explicit = readGroupTimeRangeInput();
+        var startDate = explicit.startDate || savedStartDate || null;
+        var endDate = explicit.endDate || savedEndDate || null;
+        return {
+            startDate: startDate,
+            endDate: endDate,
+            explicitStartDate: explicit.startDate,
+            explicitEndDate: explicit.endDate,
+        };
+    }
+
+    GT.ui._readGroupTimeRangeInput = readGroupTimeRangeInput;
+    GT.ui._resolveGroupRunTimeRange = resolveGroupRunTimeRange;
+
     function getCurrentContext() {
         var ctx = window.SingleFactorSubmissionContext;
         var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
@@ -2599,19 +2640,11 @@
             }
         }
 
-        // Read time range from layer-1 inputs or fallback
-        if (!start_date) {
-            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
-            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
-            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
-            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
-        }
-        if (!end_date) {
-            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
-            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
-            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
-            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
-        }
+        // Explicit group time inputs win over saved group datamodel values.
+        var groupTimeRange = resolveGroupRunTimeRange(start_date, end_date);
+        start_date = groupTimeRange.startDate;
+        end_date = groupTimeRange.endDate;
+        persistGroupTimeRangeToDatamodel(groupTimeRange.explicitStartDate, groupTimeRange.explicitEndDate);
 
         // Fallback: read from time module
         if (!start_date) {
@@ -3124,20 +3157,13 @@
         // 从第一个 batch 取 param 值（fee、时间等）
         var firstGroup = batches[0] && batches[0].groups[0];
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
-        var start_date = firstGroup ? (firstGroup.startDate || null) : null;
-        var end_date = firstGroup ? (firstGroup.endDate || null) : null;
-
-        // 读取时间范围 fallback — 先读分组时间 DOM（用户显式设置），再 fallback 到 submission（主时间模块）
-        if (!start_date || !end_date) {
-            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
-            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
-            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
-            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
-            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
-            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
-            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
-            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
-        }
+        var resolvedRange = resolveGroupRunTimeRange(
+            firstGroup ? (firstGroup.startDate || null) : null,
+            firstGroup ? (firstGroup.endDate || null) : null
+        );
+        var start_date = resolvedRange.startDate;
+        var end_date = resolvedRange.endDate;
+        persistGroupTimeRangeToDatamodel(resolvedRange.explicitStartDate, resolvedRange.explicitEndDate);
         if (!start_date || !end_date) {
             var ctx = getCurrentContext();
             var sub = ctx ? ctx.submission : null;
