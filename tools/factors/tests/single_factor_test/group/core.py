@@ -355,13 +355,27 @@ def simulate_groups(
         empty_mask = curr_count_all == 0
         non_empty_mask = ~empty_mask
 
+        if multi_session_active and not has_bar_t.any():
+            target_amounts = prev_end_amounts.copy()
+            product_gross_contrib, gross = compute_group_gross_returns(
+                target_amounts, wealth_before_trade, returns_np[t],
+            )
+            wealth = wealth_before_trade * (1.0 + gross)
+            gross_returns_np[t] = gross
+            product_gross_contrib_np[t] = product_gross_contrib
+            net_returns_np[t] = gross
+            prev_end_amounts = target_amounts * (1.0 + returns_np[t][np.newaxis, :])
+            continue
+
         # --- Empty groups ---
         if empty_mask.any():
             sell_empty = prev_end_amounts[empty_mask]
-            zero_target = np.zeros_like(sell_empty)
+            empty_target = np.zeros_like(sell_empty)
+            if multi_session_active:
+                empty_target[:, ~has_bar_t] = sell_empty[:, ~has_bar_t]
             close_rates_empty = effective_close_fee_mat[empty_mask] if effective_close_fee_mat is not None else close_fee_mat[empty_mask]
             _, sell_fee_empty = compute_sell_fee(
-                sell_empty, zero_target, close_rates_empty,
+                sell_empty, empty_target, close_rates_empty,
                 close_today_fee_vec=None,
             )
             sell_fee_ratio_empty = np.divide(
@@ -369,11 +383,14 @@ def simulate_groups(
                 out=np.zeros_like(sell_fee_empty, dtype=float),
                 where=wealth_before_trade[empty_mask] > 0,
             )
-            net_ret_empty = -sell_fee_ratio_empty
+            empty_gross_contrib, gross_empty = compute_group_gross_returns(
+                empty_target, wealth_before_trade[empty_mask], returns_np[t],
+            )
+            net_ret_empty = gross_empty - sell_fee_ratio_empty
             wealth[empty_mask] = wealth_before_trade[empty_mask] * (1.0 + net_ret_empty)
-            gross_returns_np[t, empty_mask] = 0.0
-            product_gross_contrib_np[t, empty_mask] = 0.0
-            sell_fee_per = sell_empty * close_rates_empty
+            gross_returns_np[t, empty_mask] = gross_empty
+            product_gross_contrib_np[t, empty_mask] = empty_gross_contrib
+            sell_fee_per = np.clip(sell_empty - empty_target, 0.0, None) * close_rates_empty
             empty_fee_contrib = np.where(
                 wealth_before_trade[empty_mask, np.newaxis] > 0,
                 sell_fee_per / wealth_before_trade[empty_mask, np.newaxis],
@@ -382,7 +399,7 @@ def simulate_groups(
             product_fee_contrib_np[t, empty_mask] = empty_fee_contrib
             fee_costs_np[t, empty_mask] = sell_fee_ratio_empty
             net_returns_np[t, empty_mask] = net_ret_empty
-            prev_end_amounts[empty_mask] = 0.0
+            prev_end_amounts[empty_mask] = empty_target * (1.0 + returns_np[t][np.newaxis, :])
 
         if not non_empty_mask.any():
             continue

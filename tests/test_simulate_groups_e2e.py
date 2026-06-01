@@ -372,3 +372,40 @@ def test_simulate_close_today_overrides_close_fee():
     np.testing.assert_allclose(net[0], 0.0, atol=1e-12)
     # t=1: exit 1.0, close_today fee = 0.025 * 1.0 = 0.025
     np.testing.assert_allclose(net[1], -0.025, atol=1e-12)
+
+
+def test_empty_group_keeps_untradable_holding_in_multi_session():
+    """An empty current group should not liquidate holdings whose product has no bar."""
+    membership = np.zeros((2, 1, 1), dtype=bool)
+    membership[0, 0, 0] = True
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=np.zeros((2, 1), dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.full((1, 1), 0.10, dtype=float),
+        rebalance_mode='buy_and_hold',
+        data_has_bar=np.array([[True], [False]], dtype=bool),
+    )
+
+    np.testing.assert_allclose(result['fee_costs_np'][1, 0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], 0.0, atol=1e-12)
+
+
+def test_empty_group_sells_only_tradable_holdings_in_mixed_session():
+    """For mixed sessions, empty groups should keep no-bar holdings and sell tradable holdings."""
+    membership = np.zeros((2, 1, 2), dtype=bool)
+    membership[0, 0, :] = True
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=np.zeros((2, 2), dtype=float),
+        open_fee_mat=np.zeros((1, 2), dtype=float),
+        close_fee_mat=np.full((1, 2), 0.10, dtype=float),
+        rebalance_mode='buy_and_hold',
+        data_has_bar=np.array([[True, True], [False, True]], dtype=bool),
+    )
+
+    # t=0 holds 0.5/0.5; t=1 can only sell P1, so fee = 0.5 * 10%.
+    np.testing.assert_allclose(result['fee_costs_np'][1, 0], 0.05, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], -0.05, atol=1e-12)
