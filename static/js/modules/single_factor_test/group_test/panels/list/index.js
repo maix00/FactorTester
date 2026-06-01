@@ -486,7 +486,7 @@
             feeMode: resolvedFee ? (resolvedFee.mode || 'none') : 'none',
             feeRate: resolvedFee ? resolvedFee.rate : null,
             feeMap: resolvedFee ? resolvedFee.feeMap : null,
-            feeSensitivity: bg.feeSensitivity,
+            feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : bg.feeSensitivity,
             useCloseToday: resolvedCloseToday !== undefined ? !!resolvedCloseToday : !!bg.useCloseToday,
             rebalanceMode: resolvedRebalance !== undefined ? resolvedRebalance : (bg.rebalanceMode || 'buy_and_hold')
         };
@@ -517,16 +517,16 @@
         var baseChips = REG.getChips(baseSynth);
         var derivedChips = REG.getChips(derivedSynth);
 
-        // Only keep chips present in derived but NOT in base (same label = same value, skip it)
+        // Only keep chips whose rendered value differs from base.
         var baseLabels = {};
         for (var b = 0; b < baseChips.length; b++) {
-            baseLabels[baseChips[b].label] = true;
+            baseLabels[baseChips[b].label] = baseChips[b].html;
         }
 
         var diff = [];
         for (var d = 0; d < derivedChips.length; d++) {
             var dc = derivedChips[d];
-            if (!baseLabels[dc.label]) {
+            if (baseLabels[dc.label] !== dc.html) {
                 diff.push(dc);
             }
         }

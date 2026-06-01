@@ -377,10 +377,11 @@
 
         // 费率倍数 chip (if ≠ 1)
         var sens = group.feeSensitivity;
-        if (sens != null && sens !== 1) {
+        var sensNum = Number(sens);
+        if (sens != null && !Number.isNaN(sensNum) && sensNum !== 1) {
             chips.push({
                 label: 'fee-sensitivity',
-                html: '⚡ 费率倍数:' + Number(sens).toFixed(1) + 'x',
+                html: '⚡ 费率倍数:' + sensNum.toFixed(1) + 'x',
                 style: chipPlain
             });
         }

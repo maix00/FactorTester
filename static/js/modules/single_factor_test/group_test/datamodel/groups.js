@@ -141,6 +141,11 @@
               return null;
           } },
         { key: 'feeMap',      type: 'object',  default: null },
+        { key: 'feeSensitivity', type: 'number', default: 1,
+          validate: function(v) {
+              if (v !== undefined && v !== null && (typeof v !== 'number' || v < 0)) return 'feeSensitivity must be a non-negative number or null';
+              return null;
+          } },
 
         // ── Close-today / rebalance ──
         { key: 'useCloseToday',   type: 'boolean', default: false },
@@ -274,7 +279,7 @@
         }
 
         // feeMode
-        if (config.feeMode !== undefined && VALID_FEE_MODES.indexOf(config.feeMode) === -1) {
+        if (config.feeMode !== undefined && config.feeMode !== null && VALID_FEE_MODES.indexOf(config.feeMode) === -1) {
             errors.push('feeMode must be one of: ' + VALID_FEE_MODES.join(', '));
         }
 
@@ -283,13 +288,17 @@
             errors.push('feeRate must be a non-negative number or null');
         }
 
+        if (config.feeSensitivity !== undefined && config.feeSensitivity !== null && (typeof config.feeSensitivity !== 'number' || config.feeSensitivity < 0)) {
+            errors.push('feeSensitivity must be a non-negative number or null');
+        }
+
         // rebalanceMode
-        if (config.rebalanceMode !== undefined && VALID_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
+        if (config.rebalanceMode !== undefined && config.rebalanceMode !== null && VALID_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
             errors.push('rebalanceMode must be one of: ' + VALID_REBALANCE_MODES.join(', '));
         }
 
         // useCloseToday (boolean)
-        if (config.useCloseToday !== undefined && typeof config.useCloseToday !== 'boolean') {
+        if (config.useCloseToday !== undefined && config.useCloseToday !== null && typeof config.useCloseToday !== 'boolean') {
             errors.push('useCloseToday must be a boolean');
         }
 
@@ -332,6 +341,11 @@
             } else {
                 item[f.key] = (f.type === 'object') ? _deepCopy(f.default) : f.default;
             }
+        }
+        if (isDerived) {
+            ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                if (!config.hasOwnProperty(key)) item[key] = null;
+            });
         }
 
         _items.push(item);

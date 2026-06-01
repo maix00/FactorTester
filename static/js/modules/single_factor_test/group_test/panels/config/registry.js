@@ -306,7 +306,7 @@
             feeMode: resolvedFee ? (resolvedFee.mode || 'none') : 'none',
             feeRate: resolvedFee ? resolvedFee.rate : null,
             feeMap: resolvedFee ? resolvedFee.feeMap : null,
-            feeSensitivity: bg ? bg.feeSensitivity : 1,
+            feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : (bg ? bg.feeSensitivity : 1),
             useCloseToday: resolvedCloseToday !== undefined ? !!resolvedCloseToday : (bg ? !!bg.useCloseToday : false),
             rebalanceMode: resolvedRebalance !== undefined ? resolvedRebalance : (bg ? (bg.rebalanceMode || 'buy_and_hold') : 'buy_and_hold')
         };

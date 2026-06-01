@@ -47,7 +47,7 @@
     // Config field names that derive can differ on (compared to base group)
     // ---------------------------------------------------------------------------
 
-    var DIFFABLE_KEYS = ['feeMode', 'feeRate', 'feeMap', 'useCloseToday', 'rebalanceMode'];
+    var DIFFABLE_KEYS = ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'];
 
     // ---------------------------------------------------------------------------
     // Core resolution
@@ -132,12 +132,13 @@
                     mode: bg.feeMode || 'none',
                     rate: bg.feeRate !== undefined ? bg.feeRate : null,
                     feeMap: bg.feeMap !== undefined ? _deepCopy(bg.feeMap) : null,
+                    sensitivity: bg.feeSensitivity !== undefined ? bg.feeSensitivity : 1,
                 };
             }
         }
 
         // Default
-        return { mode: 'none', rate: null, feeMap: null };
+        return { mode: 'none', rate: null, feeMap: null, sensitivity: 1 };
     }
 
     /**

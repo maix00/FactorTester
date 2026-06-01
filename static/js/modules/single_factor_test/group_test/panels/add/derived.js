@@ -300,6 +300,14 @@
         var container = $(CONTAINER_ID);
         if (!container) return;
 
+        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        if ((mode === 'add' || mode === 'edit') && draft && draft.addFlow === 'derived') {
+            _activeId = null;
+            _renderAddMode(container);
+            return;
+        }
+
         var node = _getNode();
         if (!node) {
             // ADD mode — show product multi-select for new derived group

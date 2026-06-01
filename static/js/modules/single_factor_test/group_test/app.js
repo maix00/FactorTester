@@ -3836,6 +3836,56 @@
             /** In edit mode: Set of selected base-group IDs */
             var _editSelection = null;
 
+            function _selectedEditIds() {
+                if (_editSelection && _editSelection instanceof Set) return Array.from(_editSelection);
+                if (_editSelection && Array.isArray(_editSelection)) return _editSelection.slice();
+                if (_editSelection && typeof _editSelection === 'object') {
+                    return Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
+                }
+                return [];
+            }
+
+            function _resolvedConfigForDraft(group) {
+                var base = null;
+                if (group && group.isDerived && group.baseGroupId && GT.datamodel && GT.datamodel.groups) {
+                    base = GT.datamodel.groups.get(group.baseGroupId);
+                }
+                var resolvedFee = null;
+                if (group && group.isDerived && GT.datamodel && GT.datamodel.fee_strategy) {
+                    try { resolvedFee = GT.datamodel.fee_strategy.resolveFee(group.id); } catch (e) { resolvedFee = null; }
+                }
+                return {
+                    feeMode: resolvedFee ? (resolvedFee.mode || 'none') : (group && group.feeMode != null ? group.feeMode : (base && base.feeMode != null ? base.feeMode : 'none')),
+                    feeRate: resolvedFee ? resolvedFee.rate : (group && group.feeRate != null ? group.feeRate : (base ? base.feeRate : null)),
+                    feeMap: resolvedFee ? resolvedFee.feeMap : (group && group.feeMap != null ? group.feeMap : (base ? base.feeMap : null)),
+                    feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : (group && group.feeSensitivity != null ? group.feeSensitivity : (base && base.feeSensitivity != null ? base.feeSensitivity : 1)),
+                    useCloseToday: group && group.useCloseToday != null ? !!group.useCloseToday : !!(base && base.useCloseToday),
+                    rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period')
+                };
+            }
+
+            function _buildDerivedAddDraftFromSelection() {
+                var ids = _selectedEditIds();
+                if (ids.length !== 1 || !GT.datamodel || !GT.datamodel.groups) return { addFlow: 'derived' };
+                var selected = GT.datamodel.groups.get(ids[0]);
+                if (!selected) return { addFlow: 'derived' };
+                var draft = { addFlow: 'derived' };
+                if (selected.isDerived) {
+                    draft.preselectedParentDerivedId = selected.id;
+                    draft.preselectedBaseGroupId = selected.baseGroupId;
+                    draft.preselectedProducts = effectiveDerivedProductNames(selected);
+                } else {
+                    draft.preselectedBaseGroupId = selected.id;
+                }
+                var cfg = _resolvedConfigForDraft(selected);
+                Object.assign(draft, cfg);
+                draft._inheritedConfigKeys = {};
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                    draft._inheritedConfigKeys[key] = true;
+                });
+                return draft;
+            }
+
             /** Render the action bar buttons (three create buttons always show, mode-buttons replace them in add/edit) */
             function _renderTabActions() {
                 var bar = document.getElementById('gt-tab-actions');
@@ -3852,19 +3902,11 @@
                     html += '<button id="gt-action-cancel" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消新建</button>';
                 } else if (_panelMode === 'edit') {
                     // Check edit selection count
-                    var selCount = 0;
-                    var selIds = null;
-                    if (_editSelection && _editSelection instanceof Set) {
-                        selCount = _editSelection.size;
-                        selIds = Array.from(_editSelection);
-                    } else if (_editSelection && Array.isArray(_editSelection)) {
-                        selCount = _editSelection.length;
-                        selIds = _editSelection;
-                    } else if (_editSelection && typeof _editSelection === 'object') {
-                        selIds = Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
-                        selCount = selIds.length;
-                    }
-                    if (selCount === 1) {
+                    var selIds = _selectedEditIds();
+                    var selCount = selIds.length;
+                    if (_currentTab === 'add-derived') {
+                        html += '<button id="gt-action-submit-derived" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">创建派生组</button>';
+                    } else if (selCount === 1) {
                         html += '<button id="gt-action-create-derived-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">🌳 创建派生组</button>';
                     } else if (selCount === 2) {
                         html += '<button id="gt-action-create-ls-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">⚡ 创建 Long-Short 组</button>';
@@ -3945,14 +3987,26 @@
                     _renderTabActions();
                     mountTab('add-base');
                 } else if (addFlow === 'derived') {
-                    _addDraft.derivedGroupId = null;
                     // If no preselected parent (from _createDerivedFromSelection or +子), try active state
                     if (!_addDraft.preselectedBaseGroupId && !_addDraft.preselectedParentDerivedId) {
                         var activeDerivedId = GT.state && GT.state.getActiveDerivedNodeId ? GT.state.getActiveDerivedNodeId() : null;
                         if (activeDerivedId) {
                             _addDraft.preselectedParentDerivedId = activeDerivedId;
+                            var activeDerived = GT.datamodel.groups && GT.datamodel.groups.get(activeDerivedId);
+                            if (activeDerived) {
+                                _addDraft.preselectedBaseGroupId = activeDerived.baseGroupId;
+                                _addDraft.preselectedProducts = effectiveDerivedProductNames(activeDerived);
+                                Object.assign(_addDraft, _resolvedConfigForDraft(activeDerived));
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                            }
                         } else {
-                            _addDraft.preselectedBaseGroupId = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+                            var activeBaseId = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+                            _addDraft.preselectedBaseGroupId = activeBaseId;
+                            var activeBase = GT.datamodel.groups && GT.datamodel.groups.get(activeBaseId);
+                            if (activeBase) {
+                                Object.assign(_addDraft, _resolvedConfigForDraft(activeBase));
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                            }
                         }
                     }
                     _renderTabActions();
@@ -4037,6 +4091,10 @@
                     baseGroupId: baseGroupId,
                     productMask: productMask,
                 };
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                    var inherited = _addDraft._inheritedConfigKeys && _addDraft._inheritedConfigKeys[key];
+                    if (!inherited && _addDraft[key] !== undefined) config[key] = _addDraft[key];
+                });
                 if (parentDerivedId) {
                     config.parentId = parentDerivedId;
                 }
@@ -4073,9 +4131,11 @@
                 // Don't remount the list panel — it's already showing.
                 // Just refresh the tab bar to show config tabs.
                 // Update the tab bar to show list + config tabs side by side
-                if (tabBtnsBar) {
-                    var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG;
-                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) { return p.category === L || p.category === C; });
+	                if (tabBtnsBar) {
+	                    var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG, A = GT_TAB_CATEGORY.ADD;
+	                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) {
+	                        return p.category === L || p.category === C || (p.category === A && p.addFlow === 'derived');
+	                    });
                     if (visibleList.length >= 1) {
                         var stHtml = '';
                         visibleList.forEach(function(p) {
@@ -4129,33 +4189,13 @@
              * Opens the derived add panel pre-filled with the selection as parent.
              */
             function _createDerivedFromSelection() {
-                var selIds;
-                if (_editSelection && _editSelection instanceof Set) {
-                    selIds = Array.from(_editSelection);
-                } else if (_editSelection && Array.isArray(_editSelection)) {
-                    selIds = _editSelection;
-                } else if (_editSelection && typeof _editSelection === 'object') {
-                    selIds = Object.keys(_editSelection).filter(function(k) { return _editSelection[k]; });
-                } else {
-                    selIds = [];
-                }
+                var selIds = _selectedEditIds();
                 if (selIds.length !== 1) {
                     alert('请选择 1 行来创建派生组');
                     return;
                 }
-                var selectedId = selIds[0];
-
-                // Determine if the selection is a base group or a derived group
-                // (Both are in groups, distinguished by isDerived flag)
-                var draft = { addFlow: 'derived' };
-                var sg = GT.datamodel.groups && GT.datamodel.groups.get(selectedId);
-                if (sg && sg.isDerived) {
-                    // It's a derived group → use as parent
-                    draft.preselectedParentDerivedId = selectedId;
-                } else if (sg) {
-                    // It's a base group → use as base
-                    draft.preselectedBaseGroupId = selectedId;
-                } else {
+                var draft = _buildDerivedAddDraftFromSelection();
+                if (!draft.preselectedBaseGroupId && !draft.preselectedParentDerivedId) {
                     alert('无法识别选中的分组类型');
                     return;
                 }
@@ -4234,7 +4274,13 @@
             // Expose mode management
             GT.ui.getPanelMode = function() { return _panelMode; };
             GT.ui.getAddDraft = function() { return _addDraft; };
-            GT.ui.updateAddDraft = function(patch) { if (_addDraft) Object.assign(_addDraft, patch); };
+            GT.ui.updateAddDraft = function(patch) {
+                if (!_addDraft) return;
+                Object.assign(_addDraft, patch);
+                if (_addDraft._inheritedConfigKeys && patch) {
+                    Object.keys(patch).forEach(function(key) { delete _addDraft._inheritedConfigKeys[key]; });
+                }
+            };
             GT.ui.getEditSelection = function() { return _editSelection; };
             GT.ui.enterEditMode = _enterEditMode;
             GT.ui.exitEditMode = _exitEditMode;
@@ -4266,7 +4312,7 @@
                 if (_panelMode === 'list') {
                     visibleCategories = [L];
                 } else if (_panelMode === 'edit') {
-                    visibleCategories = [L, C];
+                    visibleCategories = [L, C, A];
                 } else if (_panelMode === 'add') {
                     visibleCategories = [A, C];
                 } else {
@@ -4283,6 +4329,10 @@
                     visibleList = visibleList.filter(function(p) {
                         return p.category !== A || p.addFlow === _addDraft.addFlow;
                     });
+                } else if (_panelMode === 'edit') {
+                    visibleList = visibleList.filter(function(p) {
+                        return p.category !== A || p.addFlow === 'derived';
+                    });
                 }
 
                 // Find the entry to mount: same as visibleList but in add mode
@@ -4293,6 +4343,9 @@
                     return true; // CONFIG panels: name match is enough
                 });
                 if (!entry) return;
+                if (_panelMode === 'edit' && tabName === 'add-derived') {
+                    _addDraft = _buildDerivedAddDraftFromSelection();
+                }
 
                 // Render tabs into #gt-tab-btns — always show all visible tabs
                 if (tabBtnsBar && visibleList.length >= 1) {
