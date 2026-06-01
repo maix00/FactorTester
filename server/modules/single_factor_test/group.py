@@ -189,8 +189,10 @@ def _parse_group_variants(group_names) -> tuple[dict[int, str], dict[int, list[d
                 if isinstance(item, str):
                     var_list.append({'name': str(item), 'fee_map': None})
                 elif isinstance(item, dict):
+                    display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}_var_{vi}'
                     var_list.append({
-                        'name': str(item.get('name', f'group_{g}_var_{vi}')),
+                        'name': str(display_name),
+                        'key': str(display_name),
                         'fee_map': item.get('fee_map') or None,
                         'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
                         'fee_rate': item.get('fee_rate', item.get('feeRate')),

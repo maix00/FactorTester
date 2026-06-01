@@ -1090,6 +1090,7 @@ def test_by_group_single_factor(
             if not sel_idx:
                 continue
             sel = np.asarray(sel_idx, dtype=int)
+            display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{base_group + 1}组精选'
 
             # 从 base_group 的每期 membership 中切出选中品种 → (T, 1, P)
             # mask_1g 需要是 (T, 1, P) 形状（P=全部品种数），只有选中品种位置有值
@@ -1098,8 +1099,8 @@ def test_by_group_single_factor(
             derived_slices.append(mask_1g)
             derived_info.append({
                 'base_group': base_group,
-                'key': dd.get('key'),
-                'name': dd.get('name', f'第{base_group + 1}组精选'),
+                'key': display_name,
+                'name': display_name,
                 'id': dd.get('id'),
                 'product_names': [display_names[idx] for idx in sel_idx],
                 'fee_mode': dd.get('fee_mode', dd.get('feeMode')),

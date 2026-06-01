@@ -81,6 +81,7 @@ var appliedSubmissions = [{
 }];
 var serverSubmissions = [];
 var createdTesterId = null;
+var fetchEvents = [];
 global._getCurrentSubmissions = function() { return appliedSubmissions; };
 global._applySubmissions = function(newSubmissions) { appliedSubmissions = Array.isArray(newSubmissions) ? newSubmissions : []; };
 global.fetch = async function(url, options) {
@@ -89,6 +90,7 @@ global.fetch = async function(url, options) {
     if (options && options.body) {
         try { body = JSON.parse(options.body); } catch (e) { body = {}; }
     }
+    fetchEvents.push({ url: urlText, body: body });
     if (urlText.indexOf('/api/single_factor_setting_templates/') !== -1) {
         return { json: async function() { return { success: true, templates: [] }; } };
     }
@@ -100,6 +102,7 @@ global.fetch = async function(url, options) {
         return { json: async function() { return { success: true, submissions: [] }; } };
     }
     if (urlText.indexOf('/submit_selected_products') !== -1) {
+        assert.strictEqual(body.page_uuid, 'p1', 'template apply must restore time/page_uuid before recreating testers');
         createdTesterId = body.id_time;
         serverSubmissions.push({
             id: body.id_time,
@@ -167,14 +170,25 @@ console.log = originalConsoleLog;
         shortGroupId: dgId,
     });
     GroupTest.datamodel.registrations.register(ls.id, dgId, 'long', 1);
+    var dirtyCommitted = false;
+    global.GT_CONFIG_REGISTRY = {
+        hasDirty: function() { return !dirtyCommitted; },
+        commitDirty: function() {
+            dirtyCommitted = true;
+            GroupTest.datamodel.groups.update(bgId, { rebalanceMode: 'recycle' });
+            return true;
+        },
+    };
 
     var snap = await window._collectSnapshot();
+    assert.strictEqual(dirtyCommitted, true);
     assert(!Object.prototype.hasOwnProperty.call(snap, 'fee_modifications'));
     assert.strictEqual(snap.submissions[0].id, 'tester-old');
     assert.strictEqual(Object.keys(snap.group_settings.baseGroups[0].feeMap.rb).length, 1);
     assert.strictEqual(snap.group_settings.baseGroups[0].feeMap.rb.close_ratio, 0.2);
     assert.strictEqual(snap.group_settings.derivedGraph[0].baseGroupId, 'bg_saved');
     assert.strictEqual(snap.group_settings.lsConfigs[0].longGroupId, 'bg_saved');
+    assert.strictEqual(snap.group_settings.baseGroups[0].rebalanceMode, 'recycle');
     var summaryHtml = window._snapshotRegistry.summarizeAll(snap);
     assert(summaryHtml.indexOf('产品类别筛选') !== -1);
     assert(summaryHtml.indexOf('分组测试') !== -1);
@@ -184,6 +198,7 @@ console.log = originalConsoleLog;
     groups._reset();
     GroupTest.datamodel.ls_configs._reset();
     GroupTest.datamodel.registrations._reset();
+    fetchEvents = [];
     await window._applySnapshot(snap, 'tpl1');
 
     var restored = GroupTest.datamodel.settings.snapshot();
@@ -199,6 +214,9 @@ console.log = originalConsoleLog;
     assert.strictEqual(restored.lsConfigs[0].shortGroupId, 'dg_saved');
     assert.strictEqual(restored.registrations[0].lsConfigId, 'ls_saved');
     assert.strictEqual(restored.registrations[0].registrations[0].groupId, 'dg_saved');
+    var setTimeIndex = fetchEvents.findIndex(function(e) { return e.url.indexOf('/set_time_range') !== -1; });
+    var submitIndex = fetchEvents.findIndex(function(e) { return e.url.indexOf('/submit_selected_products') !== -1; });
+    assert(setTimeIndex >= 0 && submitIndex >= 0 && setTimeIndex < submitIndex, 'time_data must apply before submissions');
     console.log('global template group snapshot OK');
 })().catch(function(err) {
     console.error(err);

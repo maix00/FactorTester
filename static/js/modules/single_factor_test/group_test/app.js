@@ -1193,6 +1193,17 @@
         return baseAlias + ':' + suffix;
     }
 
+    function lsDisplayName(ls) {
+        if (!ls) return 'Long-Short';
+        if (ls.shortAlias) return ls.shortAlias;
+        var groups = GT.datamodel && GT.datamodel.groups;
+        var longGroup = groups && groups.get ? groups.get(ls.longGroupId) : null;
+        var shortGroup = groups && groups.get ? groups.get(ls.shortGroupId) : null;
+        var longAlias = groupDisplayKey(longGroup) || 'Long';
+        var shortAlias = groupDisplayKey(shortGroup) || 'Short';
+        return longAlias + '/' + shortAlias;
+    }
+
     function serializeGroupFeeMap(feeMap) {
         if (!feeMap || typeof feeMap !== 'object') return null;
         var serialized = {};
@@ -1212,8 +1223,10 @@
     function serializeGroupVariant(group, fallbackName) {
         if (!group) return null;
         var mode = group.feeMode || 'none';
+        var displayName = group.shortAlias || group.name || fallbackName || group.id || '';
         return {
-            name: group.shortAlias || group.name || fallbackName || group.id || '',
+            name: displayName,
+            key: displayName,
             fee_mode: mode,
             fee_rate: group.feeRate != null ? group.feeRate : null,
             fee_map: (mode === 'per_product' || mode === 'custom') ? serializeGroupFeeMap(group.feeMap) : null,
@@ -1237,10 +1250,11 @@
             if (!base) return;
             var products = effectiveDerivedProductNames(group);
             if (!products.length) return;
+            var displayName = group.shortAlias || groupDisplayKey(group, all) || group.name || '派生组';
             payload.push({
                 id: group.id,
-                key: group.shortAlias || groupDisplayKey(group, all),
-                name: group.name || '派生组',
+                key: displayName,
+                name: displayName,
                 baseGroup: (base.groupIndex || 1) - 1,
                 productNames: products,
                 fee_mode: group.feeMode || 'none',
@@ -2937,6 +2951,11 @@
         var runBtn = document.getElementById('run_group_test_btn');
         var defaultBtn = document.getElementById('load_default_groups_btn');
 
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
+            REG.commitDirty();
+        }
+
         // ── 0. 没有分组则自动加载默认分组 ──
         var allBase = (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll()) || [];
         var nonDerived = allBase.filter(function(g) { return !g.isDerived; });
@@ -3033,8 +3052,10 @@
                 // Same batch: build LS payload from groupIndex
                 var longIdx = longBatch.groupIdToIndex[ls.longGroupId];
                 var shortIdx = shortBatch.groupIdToIndex[ls.shortGroupId];
+                var sameBatchName = lsDisplayName(ls);
                 longBatch.lsPayloads.push({
-                    name: ls.name || 'Long-Short',
+                    name: sameBatchName,
+                    key: sameBatchName,
                     long: [{ group: longIdx - 1, weight: 1.0 }],
                     short: [{ group: shortIdx - 1, weight: 1.0 }]
                 });
@@ -3160,9 +3181,11 @@
 
             var cblLongIdx = cblLongBatch.groupIdToIndex[cbLS.longGroupId] - 1; // 0-based
             var cblShortIdx = cblShortBatch.groupIdToIndex[cbLS.shortGroupId] - 1;
+            var crossBatchName = lsDisplayName(cbLS);
 
             crossBatchLSPayloads.push({
-                name: cbLS.name || 'Long-Short',
+                name: crossBatchName,
+                key: crossBatchName,
                 long: {
                     submission_id: cblLongBatch.testerId,
                     factor_alias: cblLongBatch.factorAlias,

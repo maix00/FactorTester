@@ -48,6 +48,47 @@
         return -1;
     }
 
+    function _groupAlias(group) {
+        if (!group) return '';
+        if (group.shortAlias) return group.shortAlias;
+        if (!group.isDerived) return group.name || group.id || '';
+        return _deriveDerivedAlias(group);
+    }
+
+    function _deriveDerivedAlias(node) {
+        if (!node || !node.baseGroupId) return node ? (node.name || node.id || '') : '';
+        var groups = GT.datamodel.groups;
+        var base = groups && groups.get ? groups.get(node.baseGroupId) : null;
+        var baseAlias = _groupAlias(base) || node.baseGroupId || '';
+        var allGroups = groups && groups.getAll ? groups.getAll() : [];
+        var siblings = allGroups.filter(function(item) {
+            return item && item.isDerived && item.baseGroupId === node.baseGroupId && item.parentId === node.parentId;
+        });
+        var pos = siblings.findIndex(function(item) { return item.id === node.id; });
+        var suffix = pos >= 0 ? String(pos + 1) : (node.name || node.id || '?');
+        if (node.parentId) {
+            var parent = groups && groups.get ? groups.get(node.parentId) : null;
+            return (_groupAlias(parent) || baseAlias) + ':' + suffix;
+        }
+        return baseAlias + ':' + suffix;
+    }
+
+    function _deriveShortAlias(config) {
+        if (config.shortAlias && typeof config.shortAlias === 'string' && config.shortAlias.trim()) {
+            return config.shortAlias.trim();
+        }
+        return _deriveLegShortAlias(config);
+    }
+
+    function _deriveLegShortAlias(config) {
+        var groups = GT.datamodel.groups;
+        var longGroup = groups && groups.get(config.longGroupId);
+        var shortGroup = groups && groups.get(config.shortGroupId);
+        var longAlias = _groupAlias(longGroup) || 'Long';
+        var shortAlias = _groupAlias(shortGroup) || 'Short';
+        return longAlias + '/' + shortAlias;
+    }
+
     // ---------------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------------
@@ -129,19 +170,10 @@
             throw new Error('Validation failed: ' + result.errors.join('; '));
         }
 
-        // Compute shortAlias from long/short base groups
-        var groups = GT.datamodel.groups;
-        var longGroup = groups && groups.get(config.longGroupId);
-        var shortGroup = groups && groups.get(config.shortGroupId);
-        var shortAlias = '';
-        if (longGroup && shortGroup && longGroup.shortAlias && shortGroup.shortAlias) {
-            shortAlias = longGroup.shortAlias + '/' + shortGroup.shortAlias;
-        }
-
         var item = {
             id: (typeof config.id === 'string' && config.id.trim()) ? config.id : _uuid(),
             name: config.name.trim(),
-            shortAlias: shortAlias,
+            shortAlias: _deriveShortAlias(config),
             longGroupId: config.longGroupId,
             shortGroupId: config.shortGroupId,
             feeMode: config.feeMode || 'inherit',
@@ -199,6 +231,9 @@
         Object.keys(patch).forEach(function(key) {
             _items[idx][key] = patch[key];
         });
+        if ('longGroupId' in patch || 'shortGroupId' in patch || 'shortAlias' in patch) {
+            _items[idx].shortAlias = ('shortAlias' in patch) ? _deriveShortAlias(_items[idx]) : _deriveLegShortAlias(_items[idx]);
+        }
 
         _emit('lsConfigsChanged', { action: 'update', id: id });
         return _deepCopy(_items[idx]);

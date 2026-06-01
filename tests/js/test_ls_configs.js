@@ -27,7 +27,8 @@ global.window = {
     GroupTest: {
         datamodel: {
             groups: {
-                get: function(id) { return window._dgStore[id] || null; }
+                get: function(id) { return window._dgStore[id] || null; },
+                getAll: function() { return Object.keys(window._dgStore).map(function(k) { return window._dgStore[k]; }); }
             }
         },
         _lastEvent: null,
@@ -60,6 +61,8 @@ var ls = window.GroupTest.datamodel.ls_configs;
 // Seed mock derived groups
 seedDG('dg_001');
 seedDG('dg_002');
+window._dgStore.dg_001.shortAlias = 'A1';
+window._dgStore.dg_002.shortAlias = 'A5';
 
 // ---------------------------------------------------------------------------
 // 1. validate
@@ -129,6 +132,7 @@ assertEquals(c1.useCloseToday, null, 'add: useCloseToday defaults to null');
 assertEquals(c1.rebalanceMode, null, 'add: rebalanceMode defaults to null');
 assertEquals(c1.needsRegenerate, true, 'add: needsRegenerate defaults to true');
 assertEquals(c1.metadata, {}, 'add: metadata defaults to {}');
+assertEquals(c1.shortAlias, 'A1/A5', 'add: stores fixed shortAlias from legs');
 
 // add with custom values
 var c2 = ls.add({
@@ -179,6 +183,8 @@ assert(all.length === 2, 'getAll: returns 2 items');
 var u1 = ls.update(c1.id, { name: 'Updated LS', feeMode: 'override' });
 assertEquals(u1.name, 'Updated LS', 'update: patches name');
 assertEquals(u1.feeMode, 'override', 'update: patches feeMode');
+var uAlias = ls.update(c1.id, { longGroupId: 'dg_002', shortGroupId: 'dg_001' });
+assertEquals(uAlias.shortAlias, 'A5/A1', 'update: recomputes fixed shortAlias when legs change');
 
 // update emits
 resetEvents();

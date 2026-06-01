@@ -120,6 +120,24 @@
         }
     };
 
+    async function _applyEntriesWhere(snapshot, ctx, predicate) {
+        if (!snapshot) return;
+        for (var i = 0; i < _registry.length; i++) {
+            var entry = _registry[i];
+            if (!predicate(entry)) continue;
+            var data = snapshot[entry.key];
+            if (data === undefined || data === null) continue;
+            try {
+                var result = entry.apply(data, ctx);
+                if (result && typeof result.then === 'function') {
+                    await result;
+                }
+            } catch (e) {
+                console.error('[SnapshotRegistry] apply failed for:', entry.key, e);
+            }
+        }
+    }
+
     /** 构建一条摘要行 HTML */
     function _buildSummaryRow(label, value, icon) {
         var valStr = '';
@@ -640,7 +658,7 @@
             }
             if (baseGroups.length) {
                 var feeModes = { none: '无费率', uniform: '统一费率', per_product: '分品种费率', custom: '自定义费率' };
-                var rebalanceModes = { hold: '组内持仓不动', daily: '每日调仓', signal: '信号频率调仓' };
+                var rebalanceModes = { each_period: '每期等权再平衡', buy_and_hold: '组内持仓不动', recycle: '退出资金优先补新仓' };
                 var feeLines = baseGroups.slice(0, 8).map(function(bg) {
                     var label = bg.shortAlias || bg.name || [bg.testerId, bg.factorAlias, bg.groupCount, bg.groupIndex].filter(Boolean).join('/');
                     var groupText = (bg.groupIndex !== undefined && bg.groupCount !== undefined) ? ('第' + bg.groupIndex + '/' + bg.groupCount + '组') : '分组未设置';
@@ -651,7 +669,8 @@
                     if ((mode === 'per_product' || mode === 'custom') && feeMapSize) {
                         feeLabel += '(' + feeMapSize + ' 个品种)';
                     }
-                    var rebalance = bg.rebalanceConfig && bg.rebalanceConfig.mode ? (rebalanceModes[bg.rebalanceConfig.mode] || bg.rebalanceConfig.mode) : '默认调仓';
+                    var rbMode = bg.rebalanceMode || (bg.rebalanceConfig && bg.rebalanceConfig.mode);
+                    var rebalance = rbMode ? (rebalanceModes[rbMode] || rbMode) : '默认调仓';
                     return label + ' · ' + groupText + ' · ' + factorText + ' · ' + feeLabel + ' · ' + rebalance;
                 });
                 if (baseGroups.length > 8) feeLines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
@@ -703,6 +722,7 @@
 
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
+        _commitGroupConfigDirty();
         return await SnapshotRegistry.collectAll();
     }
 
@@ -722,9 +742,16 @@
         var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
 
         if (hasSubsKey && subsEntry) {
-            // submissions 是 tester 的权威快照：加载时必须先清空旧 tester，再逐条重建并生成旧→新 ID 映射。
+            // 先恢复 time/params 等上游状态，确保 tester 重建时使用模板中的时间范围和参数。
+            await _applyEntriesWhere(snapshot, ctx, function(entry) {
+                return entry.key !== 'submissions' && entry.order < subsEntry.order;
+            });
+            // submissions 是 tester 的权威快照：随后清空旧 tester，再逐条重建并生成旧→新 ID 映射。
             await _applySubmissionsWithRemapping(snapshot.submissions || [], snapshot, ctx);
-            await SnapshotRegistry.applyAll(snapshot, ctx, ['submissions']);
+            // 最后恢复依赖 testerId 映射的模块（尤其 group_settings）。
+            await _applyEntriesWhere(snapshot, ctx, function(entry) {
+                return entry.key !== 'submissions' && entry.order > subsEntry.order;
+            });
         } else {
             // 没有保存 submissions 的旧模板不主动删除当前 tester；但若也没有分组配置，就清空分组 UI 状态。
             if (!hasGroups) _clearGroupTestData();
@@ -732,6 +759,17 @@
         }
 
         refreshOuterSummaries();
+    }
+
+    function _commitGroupConfigDirty() {
+        try {
+            var reg = window.GT_CONFIG_REGISTRY;
+            if (reg && typeof reg.hasDirty === 'function' && reg.hasDirty() && typeof reg.commitDirty === 'function') {
+                reg.commitDirty();
+            }
+        } catch (e) {
+            console.warn('[global_template] commit group config dirty failed:', e);
+        }
     }
 
     /** 专门处理 submissions apply + testerId 重映射 */
