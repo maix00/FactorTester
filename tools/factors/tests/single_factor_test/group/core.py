@@ -17,6 +17,10 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
+_TARGET_REBUILD_MAX_ITERATIONS = 8
+_EACH_PERIOD_TARGET_MAX_ITERATIONS = 16
+
+
 def infer_periods_per_year(index_like) -> float:
     """Infer strategy periods/year from realised signal timestamps."""
     idx = pd.DatetimeIndex(_extract_signal_index(pd.Index(index_like)))
@@ -37,6 +41,47 @@ def infer_periods_per_year(index_like) -> float:
     if business_days <= 0:
         return 252.0
     return max(1.0, len(unique_days) / business_days * 252.0)
+
+
+def _build_each_period_targets_with_sell_fee(
+    curr_mask: np.ndarray,
+    prev_amounts: np.ndarray,
+    wealth: np.ndarray,
+    close_fees: np.ndarray,
+) -> np.ndarray:
+    """Solve equal-weight targets after paying sell fees without rebuilding targets repeatedly."""
+    counts = curr_mask.sum(axis=1).astype(float)
+    targets = np.zeros_like(prev_amounts, dtype=float)
+    non_empty = counts > 0
+    if not non_empty.any():
+        return targets
+
+    non_member_fee = (prev_amounts * (~curr_mask).astype(float) * close_fees).sum(axis=1)
+    active = curr_mask & (prev_amounts > 0)
+    target_each = np.zeros_like(wealth, dtype=float)
+
+    for _ in range(_EACH_PERIOD_TARGET_MAX_ITERATIONS):
+        active_fee_sum = (active.astype(float) * close_fees).sum(axis=1)
+        active_fee_amount = (prev_amounts * active.astype(float) * close_fees).sum(axis=1)
+        denom = np.maximum(counts - active_fee_sum, 1e-12)
+        next_target_each = np.divide(
+            wealth - non_member_fee - active_fee_amount,
+            denom,
+            out=np.zeros_like(wealth, dtype=float),
+            where=non_empty,
+        )
+        next_target_each = np.maximum(0.0, next_target_each)
+        next_active = curr_mask & (prev_amounts > next_target_each[:, np.newaxis])
+        target_each = next_target_each
+        if np.array_equal(next_active, active):
+            break
+        active = next_active
+
+    targets[non_empty] = (
+        curr_mask[non_empty].astype(float)
+        * target_each[non_empty, np.newaxis]
+    )
+    return targets
 
 
 def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFrame:
@@ -126,9 +171,9 @@ def build_target_amounts(
 
     if rebalance_mode == "each_period":
         if close_fees is not None and not close_fee_already_paid:
-            # Available cash = wealth minus close fees on all prior holdings.
-            sell_fees = (prev_amounts * close_fees).sum(axis=1)
-            available = np.maximum(0.0, wealth - sell_fees)
+            return _build_each_period_targets_with_sell_fee(
+                curr_mask, prev_amounts, wealth, np.broadcast_to(close_fees, prev_amounts.shape)
+            )
         else:
             available = wealth
         targets[non_empty] = (
@@ -456,30 +501,35 @@ def simulate_groups(
         ne_ret = returns_np[t]
 
         # Step 1: sell first, pay sell fee, then rebuild target with remaining wealth.
-        for _ in range(8):
-            _, sell_fee_candidate = _compute_sell_fee_per_group(
-                ne_prev, ne_target, ne_close_fee,
-                close_today_fee_mat=ne_close_today,
-            )
-            wealth_after_sell_fee = wealth_before_trade.copy()
-            wealth_after_sell_fee[ne_idx] = np.maximum(0.0, ne_wb - sell_fee_candidate)
-            next_target_amounts = _build_targets_for_wealth(
-                wealth_after_sell_fee,
-                close_fee_already_paid=True,
-            )
-            next_ne_target = next_target_amounts[ne_idx]
-            if np.allclose(next_ne_target, ne_target, rtol=1e-12, atol=1e-12):
-                target_amounts = next_target_amounts
-                ne_target = next_ne_target
-                break
-            target_amounts = next_target_amounts
-            ne_target = next_ne_target
-
-        # Step 2: final sell fee (per-group fee vectors)
-        sell, sell_fee = _compute_sell_fee_per_group(
+        sell, sell_fee_candidate = _compute_sell_fee_per_group(
             ne_prev, ne_target, ne_close_fee,
             close_today_fee_mat=ne_close_today,
         )
+        needs_rebuild = sell_fee_candidate > 0
+        if not is_mixed_t:
+            needs_rebuild &= rebalance_modes_arr[ne_idx] != "each_period"
+        if np.any(needs_rebuild):
+            for _ in range(_TARGET_REBUILD_MAX_ITERATIONS):
+                wealth_after_sell_fee = wealth_before_trade.copy()
+                wealth_after_sell_fee[ne_idx] = np.maximum(0.0, ne_wb - sell_fee_candidate)
+                next_target_amounts = _build_targets_for_wealth(
+                    wealth_after_sell_fee,
+                    close_fee_already_paid=True,
+                )
+                next_ne_target = next_target_amounts[ne_idx]
+                if np.allclose(next_ne_target, ne_target, rtol=1e-12, atol=1e-12):
+                    target_amounts = next_target_amounts
+                    ne_target = next_ne_target
+                    break
+                target_amounts = next_target_amounts
+                ne_target = next_ne_target
+                sell, sell_fee_candidate = _compute_sell_fee_per_group(
+                    ne_prev, ne_target, ne_close_fee,
+                    close_today_fee_mat=ne_close_today,
+                )
+
+        # Step 2: final sell fee (per-group fee vectors)
+        sell_fee = sell_fee_candidate
         sell_fee_ratio = np.divide(
             sell_fee, ne_wb,
             out=np.zeros_like(sell_fee, dtype=float),
