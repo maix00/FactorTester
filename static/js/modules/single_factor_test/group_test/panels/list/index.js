@@ -762,15 +762,19 @@
         if (shortAlias) {
             h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + escapeHTML(shortAlias) + '</span>';
         }
-        // Config override chips — only fields that differ from base group
-        for (var dci = 0; dci < chips.length; dci++) {
-            var dchip = chips[dci];
-            var ds = dchip.style || CHIP_STYLE_PLAIN;
-            var dcls = dchip.onClick ? ' class="unified-config-chip" data-dgid="' + escapeHTML(node.id) + '" data-chip-label="' + escapeHTML(dchip.label) + '"' : '';
-            h += '<span' + dcls + ' style="' + ds + ';margin-right:4px;">' + dchip.html + '</span>';
-        }
         // Spacer
         h += '<span style="flex:1;"></span>';
+        // Config override chips (right side) — only fields that differ from base group
+        if (chips.length > 0) {
+            h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;margin-right:4px;">';
+            for (var dci = 0; dci < chips.length; dci++) {
+                var dchip = chips[dci];
+                var ds = dchip.style || CHIP_STYLE_PLAIN;
+                var dcls = dchip.onClick ? ' class="unified-config-chip" data-dgid="' + escapeHTML(node.id) + '" data-chip-label="' + escapeHTML(dchip.label) + '"' : '';
+                h += '<span' + dcls + ' style="' + ds + ';">' + dchip.html + '</span>';
+            }
+            h += '</span>';
+        }
         // Product chip — clickable with triangle, toggles expanded product list with desc
         var tri = prodExpanded ? '▾' : '▸';
         h += '<span class="unified-dg-product-chip" data-dg-id="' + escapeHTML(node.id) + '" style="display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;">📋 ' + products.length + '品种 ' + tri + '</span>';

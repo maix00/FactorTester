@@ -1,8 +1,8 @@
 /**
- * panels/add/derived.js — Add-flow panel: "新建派生组" (category-2)
+ * panels/config/derived.js — 品种筛选面板 (CONFIG category)
  *
- * Dual-mode panel:
- *   ADD mode (no active node): product multi-select for creating new derived group
+ * Dual-mode panel for editing a derived group's product mask:
+ *   Edit mode: product multi-select with inherited/overridden state
  *   View mode (active node): read-only display of inherited or overridden product mask
  *
  * Contract:
@@ -17,13 +17,13 @@
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
     if (!GT.panels) { GT.panels = {}; }
-    if (!GT.panels.derived) { GT.panels.derived = {}; }
+    if (!GT.panels.config) { GT.panels.config = {}; }
 
-    var CONTAINER_ID = 'add-derived';
+    var CONTAINER_ID = 'config-derived';
 
     var _mounted = false;
     var _activeId = null;
-    /** In add mode, tracks selected product codes */
+    /** Tracks selected product codes */
     var _selectedProducts = {};
 
     function $(id) { return document.getElementById(id); }
@@ -46,7 +46,7 @@
         var baseGroups = GT.datamodel.groups.getAll();
         var seenTesterIds = {};
 
-        // Try the preselected parent derived group first — use its effective products
+        // Try the active derived node first — use its effective products
         var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         if (preselectedParentDerivedId) {
@@ -61,7 +61,6 @@
                         map[epn.name] = epn.desc || '';
                     }
                 }
-                // Also add testerId products for richer desc
                 if (pNode.baseGroupId && pNode.baseGroupId !== '__batch__') {
                     var bg = GT.datamodel.groups && GT.datamodel.groups.get(pNode.baseGroupId);
                     if (bg && bg.testerId) {
@@ -81,17 +80,16 @@
                 _addProductsFromTesterId(map, tid);
             }
         }
-        // Also try the preselected base group from add draft
         var baseId = (draft && draft.preselectedBaseGroupId) || null;
         if (baseId) {
-            var bg = GT.datamodel.groups.get(baseId);
-            if (bg && bg.testerId && !seenTesterIds[bg.testerId]) {
-                seenTesterIds[bg.testerId] = true;
-                _addProductsFromTesterId(map, bg.testerId);
+            var bg2 = GT.datamodel.groups.get(baseId);
+            if (bg2 && bg2.testerId && !seenTesterIds[bg2.testerId]) {
+                seenTesterIds[bg2.testerId] = true;
+                _addProductsFromTesterId(map, bg2.testerId);
             }
         }
-        var names = Object.keys(map).sort();
-        return names.map(function(n) { return { name: n, desc: map[n] || '' }; });
+        var sorted = Object.keys(map).sort();
+        return sorted.map(function(n) { return { name: n, desc: map[n] || '' }; });
     }
 
     function _addProductsFromTesterId(map, testerId) {
@@ -135,18 +133,18 @@
     }
 
     // ---------------------------------------------------------------------------
-    // Render: Add mode (no active node) — product multi-select
+    // Render: Edit mode — product multi-select
     // ---------------------------------------------------------------------------
 
-    function _renderAddMode(container) {
+    function _renderEditMode(container) {
         var allProducts = _allProducts();
 
-        // Determine parent info — could be a base group or another derived group
+        // Determine parent info
         var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
         var preselectedBaseGroupId = (draft && draft.preselectedBaseGroupId) || null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         var parentLabel = '';
-        var parentType = ''; // 'base' or 'derived'
+        var parentType = '';
 
         if (preselectedParentDerivedId) {
             var pNode = GT.datamodel.groups && GT.datamodel.groups.get(preselectedParentDerivedId);
@@ -169,7 +167,7 @@
         html += '</div>';
 
         if (allProducts.length === 0) {
-            html += '<div style="padding:24px;text-align:center;color:#888;">未找到品种数据，请先在基础组定义中创建基础组</div>';
+            html += '<div style="padding:24px;text-align:center;color:#888;">未找到品种数据</div>';
         } else {
             // Select all / Deselect all
             html += '<div style="margin-bottom:8px;">';
@@ -197,11 +195,10 @@
         }
 
         container.innerHTML = html;
-        _bindAddModeEvents(container, allProducts);
+        _bindEvents(container, allProducts);
     }
 
-    function _bindAddModeEvents(container, allProducts) {
-        // Checkbox toggle
+    function _bindEvents(container, allProducts) {
         var cbs = container.querySelectorAll('.derived-product-cb');
         for (var i = 0; i < cbs.length; i++) {
             cbs[i].addEventListener('change', function() {
@@ -211,23 +208,21 @@
             });
         }
 
-        // Select all
         var selectAll = container.querySelector('#derived-products-select-all');
         if (selectAll) {
             selectAll.addEventListener('click', function() {
                 for (var j = 0; j < allProducts.length; j++) {
                     _selectedProducts[allProducts[j].name] = true;
                 }
-                _renderAddMode(container);
+                _renderEditMode(container);
             });
         }
 
-        // Deselect all
         var deselectAll = container.querySelector('#derived-products-deselect-all');
         if (deselectAll) {
             deselectAll.addEventListener('click', function() {
                 _selectedProducts = {};
-                _renderAddMode(container);
+                _renderEditMode(container);
             });
         }
     }
@@ -247,12 +242,19 @@
         }
     }
 
-    function _applyPreselectedProductsFromDraft() {
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
-        var products = draft && Array.isArray(draft.preselectedProducts) ? draft.preselectedProducts : [];
+    /** Load product selection from edit selection (derived group's productMask). */
+    function _loadProductMaskFromSelection() {
         _selectedProducts = {};
-        for (var i = 0; i < products.length; i++) {
-            if (products[i]) _selectedProducts[products[i]] = true;
+        var ids = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+        if (!ids) return;
+        var selIds = Array.isArray(ids) ? ids : (ids.groupIds || Object.keys(ids).filter(function(k) { return ids[k]; }));
+        if (selIds.length !== 1) return;
+        var node = GT.datamodel.groups && GT.datamodel.groups.get(selIds[0]);
+        if (!node || !node.isDerived) return;
+        var mask = node.productMask || {};
+        var keys = Object.keys(mask);
+        for (var i = 0; i < keys.length; i++) {
+            if (mask[keys[i]]) _selectedProducts[keys[i]] = true;
         }
     }
 
@@ -266,7 +268,6 @@
         var products = eff.products;
 
         var html = '';
-
         html += '<div style="margin-bottom:16px;">';
         html += '<span style="font-size:14px;font-weight:600;">品种来源: </span>';
         if (isOverridden) {
@@ -301,18 +302,17 @@
         if (!container) return;
 
         var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
-        if ((mode === 'add' || mode === 'edit') && draft && draft.addFlow === 'derived') {
+        if (mode === 'edit') {
+            // In edit mode, always show the product multi-select
             _activeId = null;
-            _renderAddMode(container);
+            _renderEditMode(container);
             return;
         }
 
         var node = _getNode();
         if (!node) {
-            // ADD mode — show product multi-select for new derived group
             _activeId = null;
-            _renderAddMode(container);
+            _renderEditMode(container);
         } else {
             _activeId = node.id;
             _renderViewMode(container, node);
@@ -333,8 +333,17 @@
     function mount() {
         _mounted = true;
         _activeId = GT.state.getActiveDerivedNodeId();
-        // Reset product selection on mount for fresh add-mode state
-        _applyPreselectedProductsFromDraft();
+        // Load from edit selection (derived group's productMask) or add draft (preselected products)
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        if (draft && draft.addFlow === 'derived' && draft.preselectedProducts) {
+            _selectedProducts = {};
+            var preselectedProducts = draft.preselectedProducts;
+            for (var i = 0; i < preselectedProducts.length; i++) {
+                _selectedProducts[preselectedProducts[i]] = true;
+            }
+        } else {
+            _loadProductMaskFromSelection();
+        }
         GT.state.on('activeDerivedNodeChanged', _onDerivedNodeChanged);
         GT.state.on('derivedGraphChanged', _onDerivedGraphChanged);
         render();
@@ -350,23 +359,26 @@
 
     function refresh() { if (_mounted) render(); }
 
-    // Expose selected products for external consumption (e.g., by submit)
     function getSelectedProducts() {
         return Object.keys(_selectedProducts).filter(function(k) { return _selectedProducts[k]; });
+    }
+
+    function getAllProducts() {
+        return _allProducts().map(function(p) { return p.name; });
     }
 
     // ---------------------------------------------------------------------------
     // Export
     // ---------------------------------------------------------------------------
 
-    GT.panels.add = GT.panels.add || {};
-    GT.panels.add.derived = {
+    GT.panels.config.derived = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
         render: render,
         getSelectedProducts: getSelectedProducts,
+        getAllProducts: getAllProducts,
     };
 
-    GT.log('panels.derived.products loaded');
+    GT.log('panels.config.derived loaded');
 })();

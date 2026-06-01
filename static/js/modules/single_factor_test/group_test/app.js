@@ -1363,7 +1363,7 @@
             defaultName: name,
         };
         if (GT.state && GT.state.setActiveDerivedNodeId) GT.state.setActiveDerivedNodeId(null);
-        mountTab('add-derived');
+        mountTab('config-derived');
         _renderTabActions();
         var overlay = document.getElementById('group-detail-overlay');
         if (overlay) overlay.classList.remove('open');
@@ -3453,8 +3453,8 @@
         if (P.add && P.add.base) {
             GT_PANEL_REGISTRY.push({ name: 'add-base', label: '新建基础组', containerId: 'add-base', category: GT_TAB_CATEGORY.ADD, panel: P.add.base, addFlow: 'base' });
         }
-        if (P.add && P.add.derived) {
-            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '派生组定义 - 品种筛选', containerId: 'add-derived', category: GT_TAB_CATEGORY.ADD, panel: P.add.derived, addFlow: 'derived' });
+        if (P.config && P.config.derived) {
+            GT_PANEL_REGISTRY.push({ name: 'config-derived', label: '品种筛选', containerId: 'config-derived', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.derived });
         }
         if (P.add && P.add.ls) {
             GT_PANEL_REGISTRY.push({ name: 'add-ls', label: '新建 LS 组', containerId: 'add-ls', category: GT_TAB_CATEGORY.ADD, panel: P.add.ls, addFlow: 'ls' });
@@ -3931,6 +3931,7 @@
                 } else {
                     draft.preselectedBaseGroupId = selected.id;
                 }
+                // Inherit resolved config from selected group (works for both base and derived)
                 var cfg = _resolvedConfigForDraft(selected);
                 Object.assign(draft, cfg);
                 draft._inheritedConfigKeys = {};
@@ -3958,8 +3959,10 @@
                     // Check edit selection count
                     var selIds = _selectedEditIds();
                     var selCount = selIds.length;
-                    if (_currentTab === 'add-derived') {
-                        html += '<button id="gt-action-submit-derived" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">创建派生组</button>';
+                    if (_currentTab === 'config-derived') {
+                        // In edit mode with config-derived tab, the user is modifying
+                        // product selection of an existing derived group — show normal
+                        // edit actions (save/cancel) instead of "create derived".
                     } else if (selCount === 1) {
                         html += '<button id="gt-action-create-derived-from-selection" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">🌳 创建派生组</button>';
                     } else if (selCount === 2) {
@@ -4064,7 +4067,7 @@
                         }
                     }
                     _renderTabActions();
-                    mountTab('add-derived');
+                    mountTab('config-derived');
                 } else if (addFlow === 'ls') {
                     _renderTabActions();
                     mountTab('add-ls');
@@ -4130,13 +4133,19 @@
                     resolvedName = (bg && (bg.shortAlias || bg.name)) || '派生组';
                 }
 
-                var derivedPanel = GT.panels.add && GT.panels.add.derived;
+                // Product mask: only set if user explicitly narrowed selection; default empty = inherit all
+                var derivedPanel = GT.panels.config && GT.panels.config.derived;
                 var selectedProducts = (derivedPanel && typeof derivedPanel.getSelectedProducts === 'function')
                     ? derivedPanel.getSelectedProducts() : [];
+                // Count total available products to know if user narrowed
+                var allProducts = (derivedPanel && typeof derivedPanel.getAllProducts === 'function')
+                    ? derivedPanel.getAllProducts() : [];
 
                 var productMask = {};
-                for (var i = 0; i < selectedProducts.length; i++) {
-                    productMask[selectedProducts[i]] = true;
+                if (selectedProducts.length > 0 && selectedProducts.length < allProducts.length) {
+                    for (var i = 0; i < selectedProducts.length; i++) {
+                        productMask[selectedProducts[i]] = true;
+                    }
                 }
 
                 var config = {
@@ -4193,9 +4202,18 @@
                 // Just refresh the tab bar to show config tabs.
                 // Update the tab bar to show list + config tabs side by side
 	                if (tabBtnsBar) {
-	                    var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG, A = GT_TAB_CATEGORY.ADD;
+	                    var L = GT_TAB_CATEGORY.LIST, C = GT_TAB_CATEGORY.CONFIG;
+	                    // Check if any selected group is a derived group
+	                    var selIds = _selectedEditIds();
+	                    var hasDerived = selIds.some(function(sid) {
+	                        var g = GT.datamodel.groups && GT.datamodel.groups.get(sid);
+	                        return g && g.isDerived;
+	                    });
 	                    var visibleList = GT_PANEL_REGISTRY.filter(function(p) {
-	                        return p.category === L || p.category === C || (p.category === A && p.addFlow === 'derived');
+	                        if (p.category === L) return true;
+	                        if (p.category === C && p.name === 'config-derived' && !hasDerived) return false;
+	                        if (p.category === C) return true;
+	                        return false;
 	                    });
                     if (visibleList.length >= 1) {
                         var stHtml = '';
@@ -4264,7 +4282,7 @@
                 _exitEditMode();
                 _panelMode = 'add';
                 _addDraft = draft;
-                mountTab('add-derived');
+                mountTab('config-derived');
                 _renderTabActions();
             }
 
@@ -4303,6 +4321,28 @@
                 // Commit any unsaved dirty state from config panels
                 var REG = window.GT_CONFIG_REGISTRY;
                 if (REG) REG.commitDirty();
+
+                // If the user was editing product selection for a derived group,
+                // save the productMask to the existing derived group.
+                if (_currentTab === 'config-derived') {
+                    var selIds = _selectedEditIds();
+                    if (selIds.length === 1) {
+                        var derivedPanel = GT.panels.config && GT.panels.config.derived;
+                        if (derivedPanel && typeof derivedPanel.getSelectedProducts === 'function') {
+                            var selectedProds = derivedPanel.getSelectedProducts();
+                            var productMask = {};
+                            for (var pi = 0; pi < selectedProds.length; pi++) {
+                                productMask[selectedProds[pi]] = true;
+                            }
+                            try {
+                                GT.datamodel.groups.update(selIds[0], { productMask: productMask });
+                            } catch (e) {
+                                alert('保存品种修改失败: ' + (e && e.message || e));
+                                return;
+                            }
+                        }
+                    }
+                }
                 // Exit edit mode without rollback (dirty already committed or none)
                 _panelMode = 'list';
                 _editSelection = null;
@@ -4391,8 +4431,17 @@
                         return p.category !== A || p.addFlow === _addDraft.addFlow;
                     });
                 } else if (_panelMode === 'edit') {
+                    // In edit mode, show LIST + CONFIG only (no ADD panels).
+                    // But hide config-derived unless at least one selected group is a derived group.
+                    var selIds = _selectedEditIds();
+                    var hasDerived = selIds.some(function(sid) {
+                        var g = GT.datamodel.groups && GT.datamodel.groups.get(sid);
+                        return g && g.isDerived;
+                    });
                     visibleList = visibleList.filter(function(p) {
-                        return p.category !== A || p.addFlow === 'derived';
+                        if (p.category === A) return false;
+                        if (p.name === 'config-derived' && !hasDerived) return false;
+                        return true;
                     });
                 }
 
@@ -4404,7 +4453,7 @@
                     return true; // CONFIG panels: name match is enough
                 });
                 if (!entry) return;
-                if (_panelMode === 'edit' && tabName === 'add-derived') {
+                if (_panelMode === 'edit' && tabName === 'config-derived') {
                     _addDraft = _buildDerivedAddDraftFromSelection();
                 }
 
