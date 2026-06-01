@@ -215,11 +215,13 @@ def build_target_amounts(
                 * (wealth[fallback_rows] / counts[fallback_rows])[:, np.newaxis]
             )
     elif rebalance_mode == "recycle":
-        # Keep staying holdings; fund entrants with an equal-weight top-up when no capital was released.
-        if fallback_rows.any():
-            targets[fallback_rows] += (
-                entering[fallback_rows].astype(float)
-                * (wealth[fallback_rows] / counts[fallback_rows])[:, np.newaxis]
+        # Keep staying holdings; only released exit capital can fund entrants.
+        # If no capital was released, do not inject external cash into new members.
+        initial_rows = fallback_rows & (~prev_mask.any(axis=1))
+        if initial_rows.any():
+            targets[initial_rows] = (
+                curr_mask[initial_rows].astype(float)
+                * (wealth[initial_rows] / counts[initial_rows])[:, np.newaxis]
             )
     else:
         raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")

@@ -38,6 +38,19 @@ def test_target_amounts_preserve_group_wealth():
     np.testing.assert_allclose(targets.sum(axis=1), [1.0, 1.0])
 
 
+def test_recycle_does_not_inject_cash_when_membership_expands_without_exits():
+    targets = build_target_amounts(
+        np.array([[True, True]]),
+        np.array([[1.0, 0.0]]),
+        np.array([1.0]),
+        "recycle",
+        close_fee_vec=np.zeros((1, 2)),
+    )
+
+    np.testing.assert_allclose(targets, [[1.0, 0.0]])
+    assert targets.sum() <= 1.0
+
+
 def test_multi_session_targets_vectorize_preserved_and_recycled_holdings():
     targets = build_multi_session_target_amounts(
         np.array([[False, True, True, False], [True, False, False, True]]),

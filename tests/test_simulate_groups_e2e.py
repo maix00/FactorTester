@@ -305,9 +305,7 @@ def test_each_period_close_fee_is_paid_before_rebuilding_target():
 # ═══════════════════════════════════════════════════════════════════
 
 def test_simulate_recycle_vs_buy_and_hold_expanding():
-    """recycle: when membership expands with no exiting capital,
-    new entrants are funded by equal-weight top-up (not full rebalance).
-    """
+    """recycle should not create leverage when membership expands with no exit capital."""
     T, N, P = 2, 1, 2
     membership = np.zeros((T, N, P), dtype=bool)
     membership[0, 0, 0] = True   # only P0
@@ -335,11 +333,33 @@ def test_simulate_recycle_vs_buy_and_hold_expanding():
     np.testing.assert_allclose(net_r[0], net_b[0])
     np.testing.assert_allclose(net_r[0], 0.10, atol=1e-12)
 
-    # t=1: recycle adds P1 as equal-weight top-up
-    #       buy_and_hold does equal-weight rebalance of whole group
-    # They should differ because recycle keeps P0's position and
-    # only allocates newly injected capital to P1.
+    # t=1: recycle keeps P0 only; buy_and_hold equal-weights the whole group.
+    # They differ because recycle can only fund entrants with released capital.
     assert not np.isclose(net_r[1], net_b[1])
+    np.testing.assert_allclose(net_r[1], 0.02, atol=1e-12)
+
+
+def test_recycle_expansion_does_not_compound_unfunded_new_member_returns():
+    membership = np.ones((5, 1, 2), dtype=bool)
+    membership[0, 0, 1] = False
+    returns = np.array([
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+    ], dtype=float)
+    fee = np.zeros((1, 2), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='recycle',
+    )
+
+    np.testing.assert_allclose(result['net_returns_np'][:, 0], 0.0, atol=1e-12)
 
 
 # ═══════════════════════════════════════════════════════════════════
