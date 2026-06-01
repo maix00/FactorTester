@@ -226,9 +226,11 @@
             return { valid: false, errors: ['config must be an object'] };
         }
 
-        // Required: name (always)
+        // Required: name (base groups: required; derived groups: auto-resolve from baseGroup)
         if (!config.name || typeof config.name !== 'string' || !config.name.trim()) {
-            errors.push('name is required (non-empty string)');
+            if (!isDerived) {
+                errors.push('name is required (non-empty string)');
+            }
         }
 
         if (isDerived) {
