@@ -137,6 +137,114 @@
             + '</div>';
     }
 
+    function _deepClone(obj) {
+        if (obj === undefined || obj === null) return obj;
+        try {
+            return JSON.parse(JSON.stringify(obj));
+        } catch (e) {
+            return obj;
+        }
+    }
+
+    function _asArray(value) {
+        return Array.isArray(value) ? value : [];
+    }
+
+    function _firstNonEmpty(values, fallback) {
+        for (var i = 0; i < values.length; i++) {
+            if (values[i] !== undefined && values[i] !== null && String(values[i]).trim() !== '') {
+                return String(values[i]).trim();
+            }
+        }
+        return fallback || '';
+    }
+
+    function _formatDateTime(dateValue, timeValue) {
+        var d = dateValue || '';
+        var t = timeValue || '';
+        return (d && t) ? (d + ' ' + t) : (d || t || '未设置');
+    }
+
+    function _normalizeSubmissionForTemplate(s) {
+        var paths = _asArray(s && (s.selected_paths || s.paths)).slice();
+        return {
+            id: s && s.id,
+            label: (s && s.label) || '',
+            product_group: (s && s.product_group) || '',
+            paths: paths.slice(),
+            selected_paths: paths.slice(),
+            factor_tester_name: (s && (s.factor_tester_name || s.name)) || '',
+            factor_tester_serial: (s && s.factor_tester_serial) || '',
+            product_count: (s && s.product_count) || 0,
+            products: _asArray(s && s.products).slice()
+        };
+    }
+
+    function _normalizeServerSubmission(s) {
+        var paths = _asArray(s && (s.selected_paths || s.paths)).slice();
+        return {
+            id: s && s.id,
+            label: (s && s.label) || '',
+            product_group: (s && s.product_group) || '',
+            paths: paths.slice(),
+            selected_paths: paths.slice(),
+            pathsDescMap: {},
+            factor_tester_name: (s && (s.name || s.factor_tester_name)) || '',
+            factor_tester_serial: (s && s.factor_tester_serial) || '',
+            product_count: (s && s.product_count) || 0,
+            products: _asArray(s && s.products).slice(),
+            count_desc: ((s && s.product_count) || 0) + ' 个产品',
+            timestamp: '',
+            start_date: '',
+            end_date: '',
+            start_time: '',
+            end_time: ''
+        };
+    }
+
+    function _submissionTitle(s, index) {
+        return _firstNonEmpty([
+            s && s.product_group,
+            s && s.label,
+            s && s.factor_tester_serial,
+            s && s.id
+        ], '#' + (index + 1));
+    }
+
+    function _findCreatedSubmission(serverSubs, expectedId, oldSub, usedIds) {
+        var subs = _asArray(serverSubs);
+        var expected = expectedId !== undefined && expectedId !== null ? String(expectedId) : '';
+        for (var i = 0; i < subs.length; i++) {
+            if (subs[i] && String(subs[i].id) === expected) return subs[i];
+        }
+        var oldPaths = JSON.stringify(_asArray(oldSub && (oldSub.selected_paths || oldSub.paths)).slice().sort());
+        var oldName = (oldSub && (oldSub.product_group || oldSub.label)) || '';
+        for (var j = subs.length - 1; j >= 0; j--) {
+            var candidate = subs[j];
+            if (!candidate || !candidate.id || usedIds[String(candidate.id)]) continue;
+            var candPaths = JSON.stringify(_asArray(candidate.selected_paths || candidate.paths).slice().sort());
+            var candName = candidate.product_group || candidate.label || '';
+            if (candPaths === oldPaths && (!oldName || !candName || oldName === candName)) return candidate;
+        }
+        for (var k = subs.length - 1; k >= 0; k--) {
+            if (subs[k] && subs[k].id && !usedIds[String(subs[k].id)]) return subs[k];
+        }
+        return null;
+    }
+
+    function _hasOwn(obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj || {}, key);
+    }
+
+    function _hasGroupSettingsSnapshot(gs) {
+        if (!gs) return false;
+        return (_asArray(gs.baseGroups).length > 0) ||
+            (_asArray(gs.derivedGraph).length > 0) ||
+            (_asArray(gs.lsConfigs).length > 0) ||
+            (_asArray(gs.registrations).length > 0) ||
+            !!(gs.group_count || gs.fee_mode || gs._legacy);
+    }
+
     // 暴露注册表
     window._snapshotRegistry = SnapshotRegistry;
 
@@ -223,7 +331,12 @@
             } catch (e) { console.error('恢复时间范围失败:', e); }
         },
         summarize: function(td) {
-            return (td.start_date || '') + ' ~ ' + (td.end_date || '');
+            var mode = td.is_trading_day ? '交易日' : (td.is_cn_futures_day ? '期货日盘' : (td.is_cn_futures_night ? '期货夜盘' : '自然时间'));
+            return [
+                '起始: ' + _formatDateTime(td.start_date, td.start_time),
+                '终止: ' + _formatDateTime(td.end_date, td.end_time),
+                '时区: ' + (td.timezone || 'Asia/Shanghai') + ' · ' + mode
+            ];
         }
     });
 
@@ -282,8 +395,12 @@
             } catch (e) { alert('恢复参数异常: ' + e.message); }
         },
         summarize: function(pl) {
-            return pl.map(function(row) {
-                return Object.values(row).join(', ');
+            return pl.map(function(row, idx) {
+                var parts = [];
+                Object.keys(row || {}).forEach(function(k) {
+                    parts.push(k + '=' + row[k]);
+                });
+                return '参数组' + (idx + 1) + ': ' + (parts.join(', ') || '未设置');
             });
         }
     });
@@ -292,7 +409,7 @@
     SnapshotRegistry.register({
         key: 'submissions',
         order: 30,
-        label: '品种分类',
+        label: '产品类别筛选',
         icon: '🌳',
         collect: function() {
             var raw = (window._getCurrentSubmissions) ? window._getCurrentSubmissions() : [];
@@ -300,51 +417,39 @@
             var seen = {};
             var deduped = [];
             for (var i = 0; i < raw.length; i++) {
-                var s = raw[i];
+                var s = _normalizeSubmissionForTemplate(raw[i]);
                 var sid = s.id;
                 if (!sid || seen[sid]) continue;
                 seen[sid] = true;
-                deduped.push({
-                    id: s.id,
-                    label: s.label || '',
-                    product_group: s.product_group || '',
-                    paths: (s.selected_paths || s.paths || []).slice(),
-                    selected_paths: (s.selected_paths || s.paths || []).slice(),
-                    factor_tester_name: s.factor_tester_name || '',
-                    factor_tester_serial: s.factor_tester_serial || '',
-                    product_count: s.product_count || 0,
-                    products: (s.products || []).slice()
-                });
+                deduped.push(s);
             }
             return deduped;
         },
-        apply: async function(subs) {
+        apply: async function(subs, ctx) {
+            ctx = ctx || {};
+            var savedSubs = _asArray(subs);
+            var oldToNewTesterId = {};
+            var latestServerSubmissions = [];
+
             // 先清空
             try {
-                await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
+                var clearResp = await fetch('/clear_all_submissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_uuid: window._pageUuid || '' }) });
+                var clearData = await clearResp.json();
+                if (clearData && clearData.submissions) latestServerSubmissions = clearData.submissions;
                 if (typeof window._applySubmissions === 'function') window._applySubmissions([]);
             } catch (e) { console.error('清空旧测试器失败:', e); }
-            if (!subs || subs.length === 0) return;
-
-            // 按 paths 去重（序列化比较），避免重复创建相同路径的测试器
-            var seenPaths = {};
-            var uniqueSubs = [];
-            for (var si = 0; si < subs.length; si++) {
-                var s = subs[si];
-                var paths = (s.selected_paths || s.paths || []).slice().sort();
-                var key = JSON.stringify(paths);
-                if (!seenPaths[key]) {
-                    seenPaths[key] = true;
-                    uniqueSubs.push(s);
-                }
+            if (!savedSubs.length) {
+                ctx.oldToNewTesterId = oldToNewTesterId;
+                ctx.newSubmissions = [];
+                return { oldToNewTesterId: oldToNewTesterId, submissions: [] };
             }
 
-            var latestServerSubmissions = null;
-            for (var i = 0; i < uniqueSubs.length; i++) {
-                var sub = uniqueSubs[i];
+            var usedNewIds = {};
+            for (var i = 0; i < savedSubs.length; i++) {
+                var sub = _normalizeSubmissionForTemplate(savedSubs[i]);
                 var paths = sub.selected_paths || sub.paths || [];
                 if (!paths.length) continue;
-                var id_time = Date.now() + '-' + i;
+                var id_time = 'tpl-' + Date.now() + '-' + i;
                 try {
                     var resp = await fetch('/submit_selected_products', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -352,10 +457,18 @@
                     });
                     var result = await resp.json();
                     if (result.success) {
-                        if (sub.label) {
-                            try { await fetch('/rename_submission', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_time: id_time, new_name: sub.label, page_uuid: window._pageUuid || '' }) }); } catch (e) {}
-                        }
                         latestServerSubmissions = result.submissions || latestServerSubmissions;
+                        var created = _findCreatedSubmission(latestServerSubmissions, id_time, sub, usedNewIds);
+                        var newId = created && created.id ? String(created.id) : String(id_time);
+                        if (sub.id) oldToNewTesterId[String(sub.id)] = newId;
+                        usedNewIds[newId] = true;
+                        if (sub.label) {
+                            try {
+                                var renameResp = await fetch('/rename_submission', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id_time: newId, new_name: sub.label, page_uuid: window._pageUuid || '' }) });
+                                var renameData = await renameResp.json();
+                                if (renameData && renameData.submissions) latestServerSubmissions = renameData.submissions;
+                            } catch (e) {}
+                        }
                     }
                 } catch (e) { console.error('重新提交测试器失败:', sub.id, e); }
             }
@@ -364,14 +477,21 @@
                 var listData = await listResp.json();
                 if (listData.success && listData.submissions) latestServerSubmissions = listData.submissions;
             } catch (e) {}
+            var normalized = _asArray(latestServerSubmissions).map(_normalizeServerSubmission);
             if (latestServerSubmissions && typeof window._applySubmissions === 'function') {
-                window._applySubmissions(latestServerSubmissions.map(function(s) {
-                    return { id: s.id, label: s.label || '', product_group: s.product_group || '', paths: s.selected_paths || [], selected_paths: s.selected_paths || [], pathsDescMap: {}, factor_tester_name: s.name || s.factor_tester_name, factor_tester_serial: s.factor_tester_serial, product_count: s.product_count, products: s.products || [], count_desc: (s.product_count || 0) + ' 个产品', timestamp: '', start_date: '', end_date: '', start_time: '', end_time: '' };
-                }));
+                window._applySubmissions(normalized);
             }
+            ctx.oldToNewTesterId = oldToNewTesterId;
+            ctx.newSubmissions = normalized;
+            return { oldToNewTesterId: oldToNewTesterId, submissions: normalized };
         },
         summarize: function(subs) {
-            return subs.map(function(s) { return s.label || s.product_group || '(未命名)'; });
+            return _asArray(subs).map(function(s, idx) {
+                var paths = _asArray(s.selected_paths || s.paths);
+                var count = s.product_count ? (s.product_count + ' 个产品') : '产品数待计算';
+                var pathText = paths.length ? ('路径: ' + paths.join('；')) : '未选择路径';
+                return _submissionTitle(s, idx) + ' · ' + count + ' · ' + pathText;
+            });
         }
     });
 
@@ -404,7 +524,7 @@
         },
         summarize: function(freqs) {
             var checked = freqs.filter(function(f) { return f.checked; });
-            return checked.map(function(f) { return f.alias + '(' + (f.return_freq || '?') + ')'; });
+            return checked.map(function(f) { return (f.alias || '未命名因子') + ' · 收益率频率 ' + (f.return_freq || '未设置'); });
         }
     });
 
@@ -457,14 +577,15 @@
             };
         },
         apply: function(gs, ctx) {
+            var working = _deepClone(gs) || {};
             // testerId 重映射（依赖 ctx.oldToNewTesterId，由 applyAll 在调用 submissions.apply 后设置）
             var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
-            if (gs && gs.baseGroups) {
+            if (working && working.baseGroups) {
                 // 兜底：当只有一个当前 submission 时，用它覆盖所有未映射的 testerId
                 var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
                 var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
 
-                gs.baseGroups.forEach(function(bg) {
+                working.baseGroups.forEach(function(bg) {
                     if (bg.testerId && oldToNew.hasOwnProperty(String(bg.testerId))) {
                         bg.testerId = oldToNew[String(bg.testerId)];
                     } else if (bg.testerId && fallbackNewId) {
@@ -473,8 +594,8 @@
                         bg.testerId = fallbackNewId;
                     }
                 });
-                if (gs.registrations) {
-                    gs.registrations.forEach(function(reg) {
+                if (working.registrations) {
+                    working.registrations.forEach(function(reg) {
                         if (reg.testerId && oldToNew.hasOwnProperty(String(reg.testerId))) {
                             reg.testerId = oldToNew[String(reg.testerId)];
                         } else if (reg.testerId && fallbackNewId) {
@@ -485,8 +606,8 @@
             }
             // Apply via datamodel
             if (window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings &&
-                (gs.baseGroups || gs.derivedGraph || gs.lsConfigs || gs.registrations)) {
-                var applyResult = window.GroupTest.datamodel.settings.apply(gs);
+                (working.baseGroups || working.derivedGraph || working.lsConfigs || working.registrations)) {
+                var applyResult = window.GroupTest.datamodel.settings.apply(working);
                 if (applyResult.errors && applyResult.errors.length > 0) {
                     console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                 }
@@ -495,7 +616,7 @@
                 }
             }
             // Legacy DOM fields
-            var legacy = gs._legacy || gs;
+            var legacy = working._legacy || working;
             if (legacy.group_count) { var gc = document.getElementById('group_count'); if (gc) gc.value = legacy.group_count; }
             if (legacy.fee_mode) {
                 var radio = document.querySelector('input[name="fee_mode"][value="' + legacy.fee_mode + '"]');
@@ -509,23 +630,51 @@
         },
         summarize: function(gs) {
             var parts = [];
-            if (gs.baseGroups && gs.baseGroups.length) parts.push('基础组:' + gs.baseGroups.length);
-            if (gs.derivedGraph && gs.derivedGraph.length) parts.push('派生:' + gs.derivedGraph.length);
-            if (gs.lsConfigs && gs.lsConfigs.length) parts.push('LS:' + gs.lsConfigs.length);
-            if (gs.baseGroups && gs.baseGroups.length) {
+            var baseGroups = _asArray(gs.baseGroups);
+            var derivedGroups = _asArray(gs.derivedGraph);
+            var lsConfigs = _asArray(gs.lsConfigs);
+            var regs = _asArray(gs.registrations);
+            var legacy = gs._legacy || gs;
+            if (baseGroups.length || derivedGroups.length || lsConfigs.length || regs.length) {
+                parts.push('基础组 ' + baseGroups.length + ' 个 · 派生组 ' + derivedGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个');
+            }
+            if (baseGroups.length) {
                 var feeModes = { none: '无费率', uniform: '统一费率', per_product: '分品种费率', custom: '自定义费率' };
-                var feeLines = gs.baseGroups.slice(0, 6).map(function(bg) {
+                var rebalanceModes = { hold: '组内持仓不动', daily: '每日调仓', signal: '信号频率调仓' };
+                var feeLines = baseGroups.slice(0, 8).map(function(bg) {
                     var label = bg.shortAlias || bg.name || [bg.testerId, bg.factorAlias, bg.groupCount, bg.groupIndex].filter(Boolean).join('/');
+                    var groupText = (bg.groupIndex !== undefined && bg.groupCount !== undefined) ? ('第' + bg.groupIndex + '/' + bg.groupCount + '组') : '分组未设置';
+                    var factorText = bg.factorAlias ? ('因子 ' + bg.factorAlias) : '因子未设置';
                     var mode = bg.feeMode || 'none';
                     var feeLabel = feeModes[mode] || mode;
                     var feeMapSize = bg.feeMap && typeof bg.feeMap === 'object' ? Object.keys(bg.feeMap).length : 0;
                     if ((mode === 'per_product' || mode === 'custom') && feeMapSize) {
-                        feeLabel += '(' + feeMapSize + ')';
+                        feeLabel += '(' + feeMapSize + ' 个品种)';
                     }
-                    return label + ':' + feeLabel;
+                    var rebalance = bg.rebalanceConfig && bg.rebalanceConfig.mode ? (rebalanceModes[bg.rebalanceConfig.mode] || bg.rebalanceConfig.mode) : '默认调仓';
+                    return label + ' · ' + groupText + ' · ' + factorText + ' · ' + feeLabel + ' · ' + rebalance;
                 });
-                if (gs.baseGroups.length > 6) feeLines.push('…另 ' + (gs.baseGroups.length - 6) + ' 个组合');
+                if (baseGroups.length > 8) feeLines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
                 parts = parts.concat(feeLines);
+            }
+            if (derivedGroups.length) {
+                parts = parts.concat(derivedGroups.slice(0, 4).map(function(dg) {
+                    return '派生组 ' + (dg.shortAlias || dg.name || dg.id) + ' · 来源 ' + (dg.baseGroupId || '未设置');
+                }));
+                if (derivedGroups.length > 4) parts.push('…另 ' + (derivedGroups.length - 4) + ' 个派生组');
+            }
+            if (lsConfigs.length) {
+                parts = parts.concat(lsConfigs.slice(0, 4).map(function(ls) {
+                    return 'Long-Short ' + (ls.shortAlias || ls.name || ls.id) + ' · Long ' + (ls.longGroupId || '未设置') + ' · Short ' + (ls.shortGroupId || '未设置');
+                }));
+                if (lsConfigs.length > 4) parts.push('…另 ' + (lsConfigs.length - 4) + ' 个 Long-Short');
+            }
+            if (!parts.length && legacy) {
+                var feeModesLegacy = { none: '无费率', uniform: '统一费率', per_product: '分品种费率', custom: '自定义费率' };
+                parts.push('分组数 ' + (legacy.group_count || '5') + ' · ' + (feeModesLegacy[legacy.fee_mode] || legacy.fee_mode || '无费率') + ' · 费率 ' + (legacy.fee_rate || '0.03'));
+                if (legacy.group_start_year || legacy.group_end_year) {
+                    parts.push('分组区间 ' + [legacy.group_start_year, legacy.group_start_month, legacy.group_start_day].filter(Boolean).join('-') + ' ~ ' + [legacy.group_end_year, legacy.group_end_month, legacy.group_end_day].filter(Boolean).join('-'));
+                }
             }
             if (!parts.length) parts.push('未设置');
             return parts;
@@ -569,22 +718,17 @@
         // 这是跨注册项的依赖：group_settings(50) 依赖 submissions(30) 重映射后的 testerId
         // 通过 ctx 传递
         var subsEntry = SnapshotRegistry._registryByKey['submissions'];
-        var hasSubs = snapshot.submissions && Array.isArray(snapshot.submissions) && snapshot.submissions.length > 0;
-        var hasGroups = snapshot.group_settings && snapshot.group_settings.baseGroups && snapshot.group_settings.baseGroups.length > 0;
+        var hasSubsKey = _hasOwn(snapshot, 'submissions') && Array.isArray(snapshot.submissions);
+        var hasGroups = _hasGroupSettingsSnapshot(snapshot.group_settings);
 
-        if (hasGroups) {
-            // 有分组设置就需要 testerId 重映射（即使模板没有 submissions 也需要 fallback）
-            await _applySubmissionsWithRemapping(hasSubs ? snapshot.submissions : [], snapshot, ctx);
-            await SnapshotRegistry.applyAll(snapshot, ctx, hasSubs ? ['submissions'] : []);
+        if (hasSubsKey && subsEntry) {
+            // submissions 是 tester 的权威快照：加载时必须先清空旧 tester，再逐条重建并生成旧→新 ID 映射。
+            await _applySubmissionsWithRemapping(snapshot.submissions || [], snapshot, ctx);
+            await SnapshotRegistry.applyAll(snapshot, ctx, ['submissions']);
         } else {
-            // 模板无 group_settings → 清空分组组合列表和 LS 组表
-            _clearGroupTestData();
-            if (hasSubs && subsEntry) {
-                await _applySubmissionsWithRemapping(snapshot.submissions, snapshot, ctx);
-                await SnapshotRegistry.applyAll(snapshot, ctx, ['submissions']);
-            } else {
-                await SnapshotRegistry.applyAll(snapshot, ctx);
-            }
+            // 没有保存 submissions 的旧模板不主动删除当前 tester；但若也没有分组配置，就清空分组 UI 状态。
+            if (!hasGroups) _clearGroupTestData();
+            await SnapshotRegistry.applyAll(snapshot, ctx);
         }
 
         refreshOuterSummaries();
@@ -597,8 +741,13 @@
 
         // 先执行 submissions apply（清空 + 重建）
         var subsEntry = SnapshotRegistry._registryByKey['submissions'];
+        var applyResult = null;
         if (subsEntry) {
-            await subsEntry.apply(subs, ctx);
+            applyResult = await subsEntry.apply(subs, ctx);
+        }
+        if (applyResult && applyResult.oldToNewTesterId) {
+            ctx.oldToNewTesterId = applyResult.oldToNewTesterId;
+            return;
         }
 
         // 构建 oldTesterId → newTesterId 映射
@@ -646,15 +795,16 @@
     /** 清空分组测试数据（分组组合列表和 LS 组表），用于模板无 group_settings 时重置。 */
     function _clearGroupTestData() {
         try {
-            if (window.GT && window.GT.datamodel) {
-                if (window.GT.datamodel.groups && typeof window.GT.datamodel.groups._reset === 'function') {
-                    window.GT.datamodel.groups._reset();
+            var gt = window.GroupTest || window.GT;
+            if (gt && gt.datamodel) {
+                if (gt.datamodel.groups && typeof gt.datamodel.groups._reset === 'function') {
+                    gt.datamodel.groups._reset();
                 }
-                if (window.GT.datamodel.ls_configs && typeof window.GT.datamodel.ls_configs._reset === 'function') {
-                    window.GT.datamodel.ls_configs._reset();
+                if (gt.datamodel.ls_configs && typeof gt.datamodel.ls_configs._reset === 'function') {
+                    gt.datamodel.ls_configs._reset();
                 }
-                if (window.GT.datamodel.registrations && typeof window.GT.datamodel.registrations._reset === 'function') {
-                    window.GT.datamodel.registrations._reset();
+                if (gt.datamodel.registrations && typeof gt.datamodel.registrations._reset === 'function') {
+                    gt.datamodel.registrations._reset();
                 }
             }
         } catch (e) {
@@ -755,8 +905,8 @@
                 if (!summaryHtml && summary) {
                     summaryHtml += buildSummaryRow('时间范围', summary.time_range, '📅');
                     summaryHtml += buildSummaryRow('参数设置', summary.params, '⚙️');
-                    summaryHtml += buildSummaryRow('品种分类', summary.products, '🌳');
-                    summaryHtml += buildSummaryRow('因子参数', summary.return_freqs, '📈');
+                    summaryHtml += buildSummaryRow('产品类别筛选', summary.products, '🌳');
+                    summaryHtml += buildSummaryRow('收益率频率', summary.return_freqs, '📈');
                     summaryHtml += buildSummaryRow('分组测试', summary.group_test, '🧪');
                 }
                 if (!summaryHtml) {

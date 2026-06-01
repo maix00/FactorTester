@@ -319,7 +319,11 @@
 
         // Build item from FIELD_SCHEMA — same shape for base and derived
         var isDerived = !!(config.isDerived);
-        var item = { id: _uuid(), name: config.name.trim(), isDerived: isDerived };
+        var itemId = (config.id && typeof config.id === 'string' && config.id.trim()) ? config.id.trim() : _uuid();
+        if (_findIndex(itemId) !== -1) {
+            throw new Error('Duplicate group id: ' + itemId);
+        }
+        var item = { id: itemId, name: config.name.trim(), isDerived: isDerived };
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id' || f.key === 'name' || f.key === 'isDerived') continue;

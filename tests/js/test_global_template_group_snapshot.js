@@ -69,12 +69,57 @@ global.document = {
     querySelectorAll: function() { return []; },
     addEventListener: function() {},
 };
-global.fetch = async function(url) {
-    if (String(url).indexOf('/api/single_factor_setting_templates/') !== -1) {
+var appliedSubmissions = [{
+    id: 'tester-old',
+    label: '旧测试器',
+    product_group: '旧产品组',
+    selected_paths: ['Root/Old'],
+    paths: ['Root/Old'],
+    factor_tester_serial: '#tester-old',
+    product_count: 2,
+    products: ['rb', 'hc'],
+}];
+var serverSubmissions = [];
+var createdTesterId = null;
+global._getCurrentSubmissions = function() { return appliedSubmissions; };
+global._applySubmissions = function(newSubmissions) { appliedSubmissions = Array.isArray(newSubmissions) ? newSubmissions : []; };
+global.fetch = async function(url, options) {
+    var urlText = String(url);
+    var body = {};
+    if (options && options.body) {
+        try { body = JSON.parse(options.body); } catch (e) { body = {}; }
+    }
+    if (urlText.indexOf('/api/single_factor_setting_templates/') !== -1) {
         return { json: async function() { return { success: true, templates: [] }; } };
     }
-    if (String(url).indexOf('/set_time_range') !== -1) {
+    if (urlText.indexOf('/set_time_range') !== -1) {
         return { json: async function() { return { page_uuid: 'p1' }; } };
+    }
+    if (urlText.indexOf('/clear_all_submissions') !== -1) {
+        serverSubmissions = [];
+        return { json: async function() { return { success: true, submissions: [] }; } };
+    }
+    if (urlText.indexOf('/submit_selected_products') !== -1) {
+        createdTesterId = body.id_time;
+        serverSubmissions.push({
+            id: body.id_time,
+            label: '',
+            product_group: body.group_name || '',
+            selected_paths: body.selected_paths || [],
+            factor_tester_serial: '#' + body.id_time,
+            product_count: 2,
+            products: ['rb', 'hc'],
+        });
+        return { json: async function() { return { success: true, submissions: serverSubmissions.slice() }; } };
+    }
+    if (urlText.indexOf('/rename_submission') !== -1) {
+        serverSubmissions.forEach(function(s) {
+            if (String(s.id) === String(body.id_time)) s.label = body.new_name || '';
+        });
+        return { json: async function() { return { success: true, submissions: serverSubmissions.slice() }; } };
+    }
+    if (urlText.indexOf('/api/list_submissions') !== -1) {
+        return { json: async function() { return { success: true, submissions: serverSubmissions.slice() }; } };
     }
     return { json: async function() { return { success: true, submissions: [] }; } };
 };
@@ -125,11 +170,16 @@ console.log = originalConsoleLog;
 
     var snap = await window._collectSnapshot();
     assert(!Object.prototype.hasOwnProperty.call(snap, 'fee_modifications'));
+    assert.strictEqual(snap.submissions[0].id, 'tester-old');
     assert.strictEqual(Object.keys(snap.group_settings.baseGroups[0].feeMap.rb).length, 1);
     assert.strictEqual(snap.group_settings.baseGroups[0].feeMap.rb.close_ratio, 0.2);
     assert.strictEqual(snap.group_settings.derivedGraph[0].baseGroupId, 'bg_saved');
     assert.strictEqual(snap.group_settings.lsConfigs[0].longGroupId, 'bg_saved');
-    assert(window._snapshotRegistry.summarizeAll(snap).indexOf('A1:分品种费率(1)') !== -1);
+    var summaryHtml = window._snapshotRegistry.summarizeAll(snap);
+    assert(summaryHtml.indexOf('产品类别筛选') !== -1);
+    assert(summaryHtml.indexOf('分组测试') !== -1);
+    assert(summaryHtml.indexOf('A1') !== -1);
+    assert(summaryHtml.indexOf('分品种费率') !== -1);
 
     groups._reset();
     GroupTest.datamodel.ls_configs._reset();
@@ -138,6 +188,10 @@ console.log = originalConsoleLog;
 
     var restored = GroupTest.datamodel.settings.snapshot();
     assert.strictEqual(restored.baseGroups[0].id, 'bg_saved');
+    assert.strictEqual(restored.baseGroups[0].testerId, createdTesterId);
+    assert.notStrictEqual(restored.baseGroups[0].testerId, 'tester-old');
+    assert.strictEqual(appliedSubmissions.length, 1);
+    assert.strictEqual(appliedSubmissions[0].id, createdTesterId);
     assert.strictEqual(Object.keys(restored.baseGroups[0].feeMap.rb).length, 1);
     assert.strictEqual(restored.baseGroups[0].feeMap.rb.close_ratio, 0.2);
     assert.strictEqual(restored.derivedGraph[0].baseGroupId, 'bg_saved');
