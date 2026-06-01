@@ -116,75 +116,15 @@
     }
 
     /**
-     * Build fee payload for group test submission.
-     * Reads mode/fee/map from the active group's config.
-     * @returns {Promise<{fee: number, fee_map: object}>}
+     * Idempotently ensure the global fee table is loaded from the backend.
+     * Always returns a fresh fee map built from loaded data.
+     *
+     * @returns {Promise<object>} — {variety_code: {open_ratio, close_ratio, closetoday_ratio}}
      */
-    function buildFeePayload() {
-        var REG = window.GT_CONFIG_REGISTRY;
-        var group = REG ? REG.getReferenceGroup() : null;
-        var feeMode = group ? (group.feeMode || 'none') : 'none';
-        var fee = 0;
-        var feeMap = {};
-
-        if (feeMode === 'uniform') {
-            fee = group.feeRate != null ? group.feeRate : 0.0025;
-        } else if (feeMode === 'per_product') {
-            if (!_feeTableData.length) {
-                return fetchFeeTable(false).then(function() {
-                    feeMap = buildFeeMap();
-                    // Apply group.feeMap overrides
-                    if (group && group.feeMap && typeof group.feeMap === 'object') {
-                        Object.keys(group.feeMap).forEach(function(code) {
-                            if (feeMap[code]) {
-                                var ov = group.feeMap[code];
-                                if (ov.open_ratio != null) feeMap[code].open_ratio = ov.open_ratio;
-                                if (ov.close_ratio != null) feeMap[code].close_ratio = ov.close_ratio;
-                                if (ov.closetoday_ratio != null) feeMap[code].closetoday_ratio = ov.closetoday_ratio;
-                            }
-                        });
-                    }
-                    return { fee: fee, fee_map: feeMap };
-                });
-            }
-            feeMap = buildFeeMap();
-            // Apply group.feeMap overrides
-            if (group && group.feeMap && typeof group.feeMap === 'object') {
-                Object.keys(group.feeMap).forEach(function(code) {
-                    if (feeMap[code]) {
-                        var ov = group.feeMap[code];
-                        if (ov.open_ratio != null) feeMap[code].open_ratio = ov.open_ratio;
-                        if (ov.close_ratio != null) feeMap[code].close_ratio = ov.close_ratio;
-                        if (ov.closetoday_ratio != null) feeMap[code].closetoday_ratio = ov.closetoday_ratio;
-                    }
-                });
-            }
-            return Promise.resolve({ fee: fee, fee_map: feeMap });
-        }
-
-        return Promise.resolve({ fee: fee, fee_map: feeMap });
-    }
-
-    /**
-     * Bind legacy DOM fee controls (bridge from app.js).
-     * Handles slider, radio buttons, close-today toggle that still exist in the DOM.
-     */
-    function bindFeeControls() {
-        // Sensitivity slider (legacy)
-        var slider = document.getElementById('fee_sensitivity_slider');
-        if (slider && !slider._feeBound) {
-            slider._feeBound = true;
-            slider.addEventListener('input', function() {
-                var lbl = document.getElementById('fee_sensitivity_label');
-                if (lbl) lbl.textContent = parseFloat(this.value).toFixed(3) + '%';
-            });
-            slider.addEventListener('change', function() {
-                var val = parseFloat(this.value);
-                if (GT.ui && typeof GT.ui.recalcWithFee === 'function') {
-                    GT.ui.recalcWithFee(val);
-                }
-            });
-        }
+    function ensureFeeData() {
+        return fetchFeeTable(true).then(function() {
+            return buildFeeMap();
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -444,12 +384,12 @@
         fetchFeeTable: fetchFeeTable,
         getFeeRows: getFeeRows,
         buildFeeMap: buildFeeMap,
+        ensureFeeData: ensureFeeData,
         hasFeeData: hasFeeData,
         getModifications: getModifications,
         applyModifications: applyModifications,
         useCloseToday: useCloseToday,
         setUseCloseToday: setUseCloseToday,
-        buildFeePayload: buildFeePayload,
         bind: bindFeeControls,
     };
 

@@ -1327,7 +1327,7 @@
     }
 
     /** 为单个派生组发请求，不画图；返回 {success, def, group, metric} 或 null。 */
-    async function _generateDerivedGroupOnce(def, feePayload) {
+    async function _generateDerivedGroupOnce(def, fee, fee_map) {
         var context = getCurrentContext();
         if (!def || !context || !context.submission_id) return null;
         if (def.baseGroup == null) return null;
@@ -1338,8 +1338,8 @@
                 product_names: def.productNames,
                 name: def.name,
                 use_closetoday: def.useCloseToday !== undefined ? !!def.useCloseToday : false,
-                fee: feePayload.fee,
-                fee_map: feePayload.fee_map
+                fee: fee || 0,
+                fee_map: fee_map || {}
             });
             if (!resp || !resp.success) return { success: false, def: def, error: (resp && resp.error) || '未知错误' };
             return { success: true, def: def, group: resp.group || {}, metric: resp.metric || {} };
@@ -1383,19 +1383,25 @@
             alert('请先运行分组测试，再生成派生组曲线。');
             return;
         }
-        var feePayload;
-        try {
-            feePayload = await buildFeePayload();
-        } catch (err) {
-            alert('获取费率失败: ' + err.message);
-            return;
-        }
+        // 找到 base group（解析费率用）
+        var baseNode = GT.datamodel.groups.get(node.baseGroupId);
         // 找到 baseGroupIndex（0-based，从 _lastGrossData 匹配 key）
         var baseGroupIndex = _currentGroupDetailIndex;
-        if (baseGroupIndex == null) {
-            var baseNode = GT.datamodel.groups.get(node.baseGroupId);
-            if (baseNode) {
-                baseGroupIndex = (baseNode.groupIndex || 1) - 1;
+        if (baseGroupIndex == null && baseNode) {
+            baseGroupIndex = (baseNode.groupIndex || 1) - 1;
+        }
+        // 从 base group 聚合费率
+        var fee = 0;
+        var fee_map = {};
+        if (baseNode) {
+            if (baseNode.feeMode === 'uniform') {
+                fee = baseNode.feeRate != null ? baseNode.feeRate : 0.0025;
+            } else if (baseNode.feeMode === 'per_product') {
+                try {
+                    fee_map = await GT.fee.ensureFeeData();
+                } catch (err) {
+                    console.error('[generateDerivedGroup] ensureFeeData failed:', err);
+                }
             }
         }
         var def = {
@@ -1406,7 +1412,7 @@
             productNames: products,
             productMask: node.productMask || {}
         };
-        var result = await _generateDerivedGroupOnce(def, feePayload);
+        var result = await _generateDerivedGroupOnce(def, fee, fee_map);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;
@@ -2476,14 +2482,29 @@
 
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
 
-        var feePayload;
-        try {
-            feePayload = await buildFeePayload();
-        } catch (err) {
-            return { error: err.message };
+        // ── 费率聚合：遍历所有 base group 决定 fee + fee_map ──
+        var fee = 0;
+        var fee_map = {};
+        var hasPerProduct = false;
+        if (GT.datamodel && GT.datamodel.groups) {
+            var allFeeGroups = GT.datamodel.groups.getAll() || [];
+            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
+                var fg = allFeeGroups[fgi];
+                if (fg.isDerived) continue;
+                if (fg.feeMode === 'per_product') hasPerProduct = true;
+                // 统一费率取第一个 effective group 的值
+                if (fg.feeMode === 'uniform' && fee === 0) {
+                    fee = fg.feeRate != null ? fg.feeRate : 0.0025;
+                }
+            }
         }
-        var fee = feePayload.fee;
-        var fee_map = feePayload.fee_map;
+        if (hasPerProduct && GT.fee) {
+            try {
+                fee_map = await GT.fee.ensureFeeData();
+            } catch (err) {
+                console.error('[collectGroupRunPayload] ensureFeeData failed:', err);
+            }
+        }
 
         // Read time range from layer-1 inputs or fallback
         if (!start_date) {
@@ -2676,22 +2697,40 @@
         var context = getCurrentContext();
         if (!def || !context || !context.submission_id) return;
         if (!_lastGrossData || !_lastMetrics) return;
-
-        var feePayload;
-        try {
-            feePayload = await buildFeePayload();
-        } catch (err) {
-            return;
-        }
         if (def.baseGroup == null) return;
+
+        // 从所有 base group 找对应 baseGroup (0-based index) 的费率配置
+        var fee = 0;
+        var fee_map = {};
+        if (GT.datamodel && GT.datamodel.groups) {
+            var allFeeGroups = GT.datamodel.groups.getAll() || [];
+            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
+                var fg = allFeeGroups[fgi];
+                if (fg.isDerived) continue;
+                var gIdx = Number(fg.groupIndex || 1) - 1;
+                if (gIdx === def.baseGroup) {
+                    if (fg.feeMode === 'uniform') {
+                        fee = fg.feeRate != null ? fg.feeRate : 0.0025;
+                    } else if (fg.feeMode === 'per_product') {
+                        try {
+                            fee_map = await GT.fee.ensureFeeData();
+                        } catch (err) {
+                            console.error('[regenerateDerivedGroupQuiet] ensureFeeData failed:', err);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
         var resp = await GT.api.createDerivedGroup({
             submission_id: context.submission_id,
             group_index: def.baseGroup,
             product_names: def.productNames,
             name: def.name,
             use_closetoday: GT.fee ? GT.fee.useCloseToday() : false,
-            fee: feePayload.fee,
-            fee_map: feePayload.fee_map
+            fee: fee,
+            fee_map: fee_map
         });
         if (generation !== _derivedGeneration) return; // 已被更新的批次废弃
         if (!resp || !resp.success) return;
@@ -3010,16 +3049,28 @@
             return;
         }
 
-        var feePayload;
-        try {
-            feePayload = await buildFeePayload();
-        } catch (err) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ ' + err.message; statusSpan.style.color = '#d40000'; }
-            if (runBtn) runBtn.disabled = false;
-            return;
+        // ── 批量费率聚合：遍历所有 base group ──
+        var fee = 0;
+        var fee_map = {};
+        var hasPerProduct = false;
+        if (GT.datamodel && GT.datamodel.groups) {
+            var allFeeGroups = GT.datamodel.groups.getAll() || [];
+            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
+                var fg = allFeeGroups[fgi];
+                if (fg.isDerived) continue;
+                if (fg.feeMode === 'per_product') hasPerProduct = true;
+                if (fg.feeMode === 'uniform' && fee === 0) {
+                    fee = fg.feeRate != null ? fg.feeRate : 0.0025;
+                }
+            }
         }
-        var fee = feePayload.fee;
-        var fee_map = feePayload.fee_map;
+        if (hasPerProduct && GT.fee) {
+            try {
+                fee_map = await GT.fee.ensureFeeData();
+            } catch (err) {
+                console.error('[runBatch] ensureFeeData failed:', err);
+            }
+        }
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
         var return_freqs = getSelectedReturnFreqs();
 
@@ -3703,14 +3754,6 @@
     GT.ui.recalcWithFee = function(val) {
         recalcWithFee(val);
     };
-
-    // 使用 GT.fee.buildFeePayload（fee.js 模块）
-    async function buildFeePayload() {
-        if (GT.fee && typeof GT.fee.buildFeePayload === 'function') {
-            return GT.fee.buildFeePayload();
-        }
-        return { fee: 0.0, fee_map: {} };
-    }
 
 
     // ---------- 初始化 ----------
