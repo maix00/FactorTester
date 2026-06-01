@@ -1116,6 +1116,64 @@
         return names;
     }
 
+    function productNamesForTester(testerId) {
+        var subs = window.submissions || [];
+        for (var i = 0; i < subs.length; i++) {
+            if (String(subs[i].id) !== String(testerId)) continue;
+            return (subs[i].products || []).map(function(product) {
+                return typeof product === 'string' ? product : (product && (product.name || product.desc)) || '';
+            }).filter(Boolean);
+        }
+        return [];
+    }
+
+    function effectiveDerivedProductNames(node, seen) {
+        if (!node) return [];
+        seen = seen || {};
+        if (seen[node.id]) return [];
+        seen[node.id] = true;
+
+        var mask = node.productMask || {};
+        var selected = Object.keys(mask).filter(function(name) { return mask[name]; });
+        if (selected.length) return selected;
+
+        if (node.parentId && GT.datamodel && GT.datamodel.groups) {
+            return effectiveDerivedProductNames(GT.datamodel.groups.get(node.parentId), seen);
+        }
+
+        if (node.baseGroupId && GT.datamodel && GT.datamodel.groups) {
+            var base = GT.datamodel.groups.get(node.baseGroupId);
+            if (base && Array.isArray(base.products) && base.products.length) return base.products.slice();
+            if (base && base.testerId) return productNamesForTester(base.testerId);
+        }
+        return [];
+    }
+
+    function collectDerivedPayloadForBatch(batch) {
+        if (!batch || !GT.datamodel || !GT.datamodel.groups) return [];
+        var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
+        var baseById = {};
+        (batch.groups || []).forEach(function(group) {
+            if (group && group.id) baseById[group.id] = group;
+        });
+
+        var payload = [];
+        all.forEach(function(group) {
+            if (!group || !group.isDerived || !group.baseGroupId) return;
+            var base = baseById[group.baseGroupId];
+            if (!base) return;
+            var products = effectiveDerivedProductNames(group);
+            if (!products.length) return;
+            payload.push({
+                id: group.id,
+                name: group.name || '派生组',
+                baseGroup: (base.groupIndex || 1) - 1,
+                productNames: products
+            });
+        });
+        return payload;
+    }
+
     function defineDerivedGroup(groupIndex) {
         var productNames = collectSelectedDerivedProducts();
         if (!productNames.length) {
@@ -2860,12 +2918,14 @@
                     groupNames[(g.groupIndex || (gi + 1)) - 1] = g.shortAlias;
                 }
             }
+            var derivedPayload = collectDerivedPayloadForBatch(batch);
             batchPayloads.push({
                 submission_id: batch.testerId,
                 factor_alias: batch.factorAlias,
                 n_groups: batch.groupCount,
                 group_names: Object.keys(groupNames).length > 0 ? groupNames : null,
-                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
+                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null,
+                derived_groups: derivedPayload.length > 0 ? derivedPayload : null
             });
         }
 
@@ -2907,8 +2967,7 @@
             start_date: start_date,
             end_date: end_date,
             return_freqs: return_freqs.length > 0 ? return_freqs : null,
-            rebalance_mode: rebalance_mode,
-            derived_groups: null
+            rebalance_mode: rebalance_mode
         };
 
         try {

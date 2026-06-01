@@ -782,6 +782,9 @@ def run_group_test_batch():
         n_groups = batch.get('n_groups', 5)
         group_names = batch.get('group_names')
         group_names = _normalize_group_names(group_names)
+        batch_derived_groups = batch.get('derived_groups')
+        if not isinstance(batch_derived_groups, list):
+            batch_derived_groups = derived_groups
         raw_ls = batch.get('ls_configs')
         ls_configs = None
         if isinstance(raw_ls, list) and raw_ls:
@@ -803,7 +806,7 @@ def run_group_test_batch():
             start_date=start_date,
             end_date=end_date,
             return_freqs=return_freqs,
-            derived_groups=derived_groups,
+            derived_groups=batch_derived_groups,
             ls_configs=ls_configs,
             group_names=group_names,
         )
