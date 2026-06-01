@@ -1012,9 +1012,9 @@
             + '<div class="derived-group-toolbar">'
             + '<b>派生组</b>'
             + '<input id="derived-group-name-input" placeholder="派生组名称，默认 ' + escapeHtml(defaultName) + '">'
-            + '<button type="button" class="btn btn-sm btn-outline-primary" id="derived-group-define-btn">保存定义</button>'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" id="derived-group-define-btn">用统一入口新建</button>'
             + '<button type="button" class="btn btn-sm btn-primary" id="derived-group-generate-all-btn">生成全部派生组</button>'
-            + '<span class="group-detail-muted">先勾选下方品种；生成后才追加曲线和统计数字。</span>'
+            + '<span class="group-detail-muted">先勾选下方品种；新建会跳转到统一的派生组创建面板。</span>'
             + '</div>';
         defs.forEach(function(def) {
             html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(def.id) + '">'
@@ -1040,7 +1040,7 @@
             });
         }
         var defineBtn = document.getElementById('derived-group-define-btn');
-        if (defineBtn) defineBtn.addEventListener('click', function() { defineDerivedGroup(groupIndex); });
+        if (defineBtn) defineBtn.addEventListener('click', function() { openAddDerivedFromDetail(groupIndex); });
         var generateAllBtn = document.getElementById('derived-group-generate-all-btn');
         if (generateAllBtn) {
             generateAllBtn.addEventListener('click', async function() {
@@ -1134,6 +1134,56 @@
             generated: false
         });
         renderDerivedGroupsPanel(groupIndex);
+    }
+
+    function findBaseGroupIdForResultGroup(groupIndex) {
+        if (!GT.datamodel || !GT.datamodel.groups) return null;
+        var context = getCurrentContext();
+        var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
+        var expectedIndex = Number(groupIndex) + 1;
+        var matches = all.filter(function(group) {
+            if (!group || group.isDerived) return false;
+            if (Number(group.groupIndex) !== expectedIndex) return false;
+            if (context && context.submission_id && String(group.testerId) !== String(context.submission_id)) return false;
+            if (context && context.factor_alias && String(group.factorAlias || '') !== String(context.factor_alias || '')) return false;
+            return true;
+        });
+        if (matches.length === 1) return matches[0].id;
+        if (matches.length > 1 && _lastGrossData && _lastGrossData[groupIndex]) {
+            var resultKey = _lastGrossData[groupIndex].key;
+            var byAlias = matches.filter(function(group) { return group.shortAlias === resultKey; });
+            if (byAlias.length === 1) return byAlias[0].id;
+        }
+        return matches.length ? matches[0].id : null;
+    }
+
+    function openAddDerivedFromDetail(groupIndex) {
+        var productNames = collectSelectedDerivedProducts();
+        if (!productNames.length) {
+            alert('请先勾选至少一个入组产品。');
+            return;
+        }
+        var baseGroupId = findBaseGroupIdForResultGroup(groupIndex);
+        if (!baseGroupId) {
+            alert('无法匹配当前结果对应的基础组，请从分组列表中选择基础组后新建派生组。');
+            return;
+        }
+        var input = document.getElementById('derived-group-name-input');
+        var defaultName = '第' + (groupIndex + 1) + '组精选';
+        var name = (input && input.value ? input.value.trim() : '') || defaultName;
+        _panelMode = 'add';
+        _addDraft = {
+            addFlow: 'derived',
+            preselectedBaseGroupId: baseGroupId,
+            preselectedProducts: productNames,
+            name: name,
+            defaultName: name,
+        };
+        if (GT.state && GT.state.setActiveDerivedNodeId) GT.state.setActiveDerivedNodeId(null);
+        mountTab('add-derived');
+        _renderTabActions();
+        var overlay = document.getElementById('group-detail-overlay');
+        if (overlay) overlay.classList.remove('open');
     }
 
     function makeUniqueGroupKey(name, ownId) {
@@ -1897,9 +1947,11 @@
     function findGeneratedPortfolio(key) {
         if (!_lastGrossData) return null;
         return _lastGrossData.find(function(group) {
-            if (!group || (!group.is_derived && !group.is_ls)) return false;
+            if (!group) return false;
             if (group.key === key) return true;
+            if (group.name === key) return true;
             if (group.derived && group.derived.key === key) return true;
+            if (group.derived && group.derived.id === key) return true;
             return false;
         });
     }
@@ -3680,7 +3732,7 @@
                 }
 
                 var config = {
-                    name: '派生组',
+                    name: _addDraft.name || _addDraft.defaultName || '派生组',
                     isDerived: true,
                     baseGroupId: baseGroupId,
                     productMask: productMask,

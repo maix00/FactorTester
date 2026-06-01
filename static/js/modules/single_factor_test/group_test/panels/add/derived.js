@@ -216,7 +216,7 @@
         if (selectAll) {
             selectAll.addEventListener('click', function() {
                 for (var j = 0; j < allProducts.length; j++) {
-                    _selectedProducts[allProducts[j]] = true;
+                    _selectedProducts[allProducts[j].name] = true;
                 }
                 _renderAddMode(container);
             });
@@ -244,6 +244,15 @@
         if (label) {
             label.style.background = cb.checked ? '#e8f0fe' : '#fff';
             label.style.borderColor = cb.checked ? '#80bdff' : '#e5e7eb';
+        }
+    }
+
+    function _applyPreselectedProductsFromDraft() {
+        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var products = draft && Array.isArray(draft.preselectedProducts) ? draft.preselectedProducts : [];
+        _selectedProducts = {};
+        for (var i = 0; i < products.length; i++) {
+            if (products[i]) _selectedProducts[products[i]] = true;
         }
     }
 
@@ -317,7 +326,7 @@
         _mounted = true;
         _activeId = GT.state.getActiveDerivedNodeId();
         // Reset product selection on mount for fresh add-mode state
-        _selectedProducts = {};
+        _applyPreselectedProductsFromDraft();
         GT.state.on('activeDerivedNodeChanged', _onDerivedNodeChanged);
         GT.state.on('derivedGraphChanged', _onDerivedGraphChanged);
         render();

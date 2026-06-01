@@ -38,17 +38,25 @@
 
     function $(id) { return document.getElementById(id); }
 
+    function registry() {
+        REG = window.GT_CONFIG_REGISTRY || REG;
+        return REG;
+    }
+
     function render() {
         var container = $(_containerId);
         if (!container) { return; }
 
-        var group = REG.getReferenceGroup();
+        var reg = registry();
+        if (!reg) { return; }
+
+        var group = reg.getReferenceGroup();
         if (!group) {
             container.innerHTML = '<div class="group-test-empty-state" style="padding:24px;text-align:center;color:#888;font-size:13px;">请先在基础组列表中选择一个基础组</div>';
             return;
         }
 
-        var currentMode = REG.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
+        var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -79,21 +87,24 @@
                 if (descEl) {
                     descEl.textContent = MODE_DESCRIPTIONS[newMode] || '';
                 }
-                REG.setDirty('rebalanceMode', newMode);
+                registry().setDirty('rebalanceMode', newMode);
                 render();
             });
         }
     }
 
     function _onBaseGroupsChanged() {
-        if (_mounted) { REG.rollbackDirty(); render(); }
+        var reg = registry();
+        if (_mounted && reg && !reg.hasDirty()) { render(); }
     }
 
     function _onActiveBaseGroupChanged() {
-        if (_mounted) { REG.rollbackDirty(); render(); }
+        var reg = registry();
+        if (_mounted && reg) { reg.rollbackDirty(); render(); }
     }
 
     function mount() {
+        registry();
         _mounted = true;
         var container = $(_containerId);
         if (!container) {
