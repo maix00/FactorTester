@@ -1213,7 +1213,12 @@
                 key: group.shortAlias || groupDisplayKey(group, all),
                 name: group.name || '派生组',
                 baseGroup: (base.groupIndex || 1) - 1,
-                productNames: products
+                productNames: products,
+                feeMode: group.feeMode || 'none',
+                feeRate: group.feeRate != null ? group.feeRate : null,
+                feeMap: group.feeMap != null ? group.feeMap : null,
+                useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
+                rebalanceMode: group.rebalanceMode || 'each_period'
             });
         });
         return payload;
@@ -1332,7 +1337,7 @@
                 group_index: def.baseGroup,
                 product_names: def.productNames,
                 name: def.name,
-                use_closetoday: GT.fee ? GT.fee.useCloseToday() : false,
+                use_closetoday: def.useCloseToday !== undefined ? !!def.useCloseToday : false,
                 fee: feePayload.fee,
                 fee_map: feePayload.fee_map
             });
@@ -2529,6 +2534,36 @@
                 productNames: d.productNames
             };
         });
+
+        // ── 构造 group_fee_maps：每个 base group 的独立品种费率覆盖 ──
+        var group_fee_maps = null;
+        if (GT.datamodel && GT.datamodel.groups) {
+            var allGroups = GT.datamodel.groups.getAll() || [];
+            var gfmObj = {};
+            for (var gi = 0; gi < allGroups.length; gi++) {
+                var grp = allGroups[gi];
+                if (grp.isDerived) continue;
+                if (grp.feeMode === 'per_product' && grp.feeMap && typeof grp.feeMap === 'object') {
+                    var gIdx = Number(grp.groupIndex || 1) - 1; // 1-based → 0-based
+                    var gfm = {};
+                    Object.keys(grp.feeMap).forEach(function(code) {
+                        var ov = grp.feeMap[code];
+                        if (ov && typeof ov === 'object') {
+                            gfm[code.toLowerCase()] = {
+                                open: ov.open_ratio != null ? ov.open_ratio : null,
+                                close: ov.close_ratio != null ? ov.close_ratio : null,
+                                close_today: ov.closetoday_ratio != null ? ov.closetoday_ratio : null
+                            };
+                        }
+                    });
+                    if (Object.keys(gfm).length > 0) {
+                        gfmObj[gIdx] = gfm;
+                    }
+                }
+            }
+            if (Object.keys(gfmObj).length > 0) group_fee_maps = gfmObj;
+        }
+
         return {
             payload: {
                 submission_id: currentSubmissionId,
@@ -2544,6 +2579,7 @@
                 ls_config: collectLongShortConfig(n_groups),
                 ls_configs: collectLongShortConfigs(n_groups),
                 derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
+                group_fee_maps: group_fee_maps,
                 structure_key: buildGroupStructureKey(currentSubmissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
             },
             statusEl: statusSpan,
@@ -3045,11 +3081,39 @@
             });
         }
 
+        // ── 构造 group_fee_maps：每个 base group 的独立品种费率覆盖 ──
+        var group_fee_maps = {};
+        for (var bi2 = 0; bi2 < batches.length; bi2++) {
+            var b2 = batches[bi2];
+            for (var gi2 = 0; gi2 < b2.groups.length; gi2++) {
+                var g2 = b2.groups[gi2];
+                if (g2.feeMode === 'per_product' && g2.feeMap && typeof g2.feeMap === 'object') {
+                    var gIdx = Number(g2.groupIndex || (gi2 + 1)) - 1; // 1-based → 0-based
+                    var gfm = {};
+                    Object.keys(g2.feeMap).forEach(function(code) {
+                        var ov = g2.feeMap[code];
+                        if (ov && typeof ov === 'object') {
+                            gfm[code.toLowerCase()] = {
+                                open: ov.open_ratio != null ? ov.open_ratio : null,
+                                close: ov.close_ratio != null ? ov.close_ratio : null,
+                                close_today: ov.closetoday_ratio != null ? ov.closetoday_ratio : null
+                            };
+                        }
+                    });
+                    if (Object.keys(gfm).length > 0) {
+                        group_fee_maps[gIdx] = gfm;
+                    }
+                }
+            }
+        }
+        if (Object.keys(group_fee_maps).length === 0) group_fee_maps = null;
+
         var bulkPayload = {
             batches: batchPayloads,
             cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
             fee: fee,
             fee_map: fee_map,
+            group_fee_maps: group_fee_maps,
             use_closetoday: use_closetoday,
             start_date: start_date,
             end_date: end_date,
@@ -4560,17 +4624,11 @@
                             parentId: parentId,
                             baseGroupId: dg.baseGroup,
                             productMask: dg.productMask,
-                            feeOverride: (dg.feeMode && dg.feeMode !== 'none') ? {
-                                mode: dg.feeMode,
-                                rate: dg.feeRate,
-                                map: dg.feeMap,
-                                sensitivity: dg.feeSensitivity
-                            } : null,
-                            closeTodayOverride: dg.useCloseToday !== undefined ? !!dg.useCloseToday : null,
-                            rebalanceOverride: dg.rebalanceMode ? {
-                                mode: dg.rebalanceMode,
-                                period: dg.rebalancePeriod
-                            } : null
+                            feeMode: dg.feeMode || 'none',
+                            feeRate: dg.feeRate != null ? dg.feeRate : null,
+                            feeMap: dg.feeMap != null ? dg.feeMap : null,
+                            useCloseToday: dg.useCloseToday !== undefined ? !!dg.useCloseToday : false,
+                            rebalanceMode: dg.rebalanceMode || 'each_period'
                         });
                     } catch (e) {
                         console.warn('[app.js syncDatamodel] skip derived group:', dg.id, e.message);

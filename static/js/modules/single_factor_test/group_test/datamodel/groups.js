@@ -2,20 +2,39 @@
  * groups.js — Unified group CRUD data model
  *
  * Pure logic module. Zero DOM dependencies.
- * Part of Phase 1 datamodel layer for Issue #85.
  *
- * Data shape (base group / derived group):
- *   { id, name, testerId, factorAlias, groupCount, groupIndex, isAllGroups,
- *     feeMode, feeRate, feeMap, useCloseToday, rebalanceMode, needsRegenerate,
- *     startDate, endDate,
- *     // Derived-only fields:
- *     isDerived, parentId, baseGroupId, productMask, feeOverride,
- *     closeTodayOverride, rebalanceOverride, metadata,
- *     // Runtime:
- *     shortAlias, _expanded }
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * FIELD_SCHEMA — single source of truth for ALL group fields
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * All groups (base & derived) share the exact same set of fields.
+ * isDerived is just a boolean flag; base groups have isDerived=false,
+ * parentId=null, baseGroupId=null, overrides=null — no special shape.
+ *
+ * When adding a new config tab / panel that introduces a new field:
+ *   → Add ONE entry to FIELD_SCHEMA below.
+ *   → add(), validate(), update() all pick it up automatically.
+ *   → No need to touch any other code path.
+ *
+ * FIELD_SCHEMA entry shape:
+ *   key       : property name on the group object
+ *   type      : 'string' | 'number' | 'boolean' | 'object' | 'any'
+ *                - 'object' fields are deep-copied in add/update
+ *   default   : default value — same for all groups
+ *   validate  : optional function(value, fullConfig) → null | errorString
+ *   patchable : if false, the field is immutable after add
+ *
+ * Data shape (all fields — same for base & derived):
+ *   { id, name, isDerived,
+ *     parentId, baseGroupId,
+ *     testerId, factorAlias, groupCount, groupIndex, isAllGroups,
+ *     feeMode, feeRate, feeMap, useCloseToday, rebalanceMode,
+ *     needsRegenerate, startDate, endDate, shortAlias,
+ *     productMask, overrides,
+ *     _expanded }
  *
  * Tree helpers (getTree, getDescendants, toggleExpanded, getChildren, getRoots)
- * work on ALL groups — just filter by isDerived / parentId.
+ * work on ALL groups — isDerived / parentId control tree nesting for list display.
  */
 
 (function() {
@@ -61,180 +80,108 @@
     // =========================================================================
     //
     // Each field entry:
-    //   key            : property name on the group object
-    //   type           : 'string' | 'number' | 'boolean' | 'object' | 'any'
-    //                     - 'object' fields are deep-copied in add/update
-    //   requiredFor    : 'both' | 'base' | 'derived' | 'none'
-    //   defaultBase    : default value when building a base group
-    //   defaultDerived : default value when building a derived group
-    //   validate       : optional function(value, fullConfig) → null | errorString
-    //   allowPatch     : if false, the field is immutable after add (not in patchableKeys)
+    //   key       : property name on the group object
+    //   type      : 'string' | 'number' | 'boolean' | 'object' | 'any'
+    //                - 'object' fields are deep-copied in add/update
+    //   default   : default value when building a group (base or derived — same for all)
+    //   validate  : optional function(value, fullConfig) → null | errorString
+    //   patchable : if false, the field is immutable after add (default: true)
     //
-    // To add a new config tab field or a new derived-only override:
-    //   → add ONE entry here. add(), update(), validate() all pick it up automatically.
+    // To add a new config tab / panel with a new field:
+    //   → Add ONE entry here.
+    //   → add(), validate(), update() all pick it up automatically.
+    //   → No other code changes needed.
     // =========================================================================
 
     var FIELD_SCHEMA = [
         // ── Identity ──
-        { key: 'id',          type: 'string',  requiredFor: 'none',    defaultBase: '',    defaultDerived: '',    allowPatch: false },
-        { key: 'name',        type: 'string',  requiredFor: 'base',    defaultBase: '',    defaultDerived: '',    validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
-        { key: 'isDerived',   type: 'boolean', requiredFor: 'none',    defaultBase: false, defaultDerived: true,  allowPatch: false },
+        { key: 'id',          type: 'string',  default: '',    patchable: false },
+        { key: 'name',        type: 'string',  default: '',
+          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
+        { key: 'isDerived',   type: 'boolean', default: false, patchable: false },
 
-        // ── Tree / lineage (meaningful for derived; null for base) ──
-        { key: 'parentId',     type: 'string',  requiredFor: 'none', defaultBase: null, defaultDerived: null },
-        { key: 'baseGroupId',  type: 'string',  requiredFor: 'none', defaultBase: null, defaultDerived: null,
+        // ── Tree / lineage ──
+        { key: 'parentId',     type: 'string',  default: null },
+        { key: 'baseGroupId',  type: 'string',  default: null,
           validate: function(v, config) {
-              if (!config.isDerived) return null;
+              if (!config || !config.isDerived) return null;
               if (!v || typeof v !== 'string') return 'baseGroupId is required for derived groups';
-              if (v === '__batch__') return null; // batch-creation sentinel, resolved by caller
-              if (!_getRaw(v)) return 'baseGroupId references a non-existent group: ' + v;
+              if (v !== '__batch__' && !_getRaw(v)) return 'baseGroupId references a non-existent group: ' + v;
               return null;
           } },
 
-        // ── Tester / factor scoping (base only) ──
-        { key: 'testerId',    type: 'string',  requiredFor: 'base',   defaultBase: '',    defaultDerived: '' },
-        { key: 'factorAlias', type: 'string',  requiredFor: 'base',   defaultBase: '',    defaultDerived: '' },
-        { key: 'groupCount',  type: 'number',  requiredFor: 'base',   defaultBase: 5,     defaultDerived: 1,
+        // ── Tester / factor scoping ──
+        { key: 'testerId',    type: 'string',  default: '',
+          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string') ? 'testerId is required' : null; } },
+        { key: 'factorAlias', type: 'string',  default: '',
+          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string') ? 'factorAlias is required' : null; } },
+        { key: 'groupCount',  type: 'number',  default: 5,
           validate: function(v, config) {
-              if (config.isDerived) return null;
+              if (config && config.isDerived) return null;
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
               return null;
           } },
-        { key: 'groupIndex',  type: 'number',  requiredFor: 'none',   defaultBase: 1,     defaultDerived: 1,
+        { key: 'groupIndex',  type: 'number',  default: 1,
           validate: function(v) {
               if (v === undefined || v === null) return null;
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupIndex must be a positive integer (≥ 1)';
               return null;
           } },
-        { key: 'isAllGroups', type: 'boolean', requiredFor: 'none',   defaultBase: false, defaultDerived: false },
+        { key: 'isAllGroups', type: 'boolean', default: false },
 
-        // ── Fee config (shared, base owns; derived inherits + may override) ──
-        { key: 'feeMode',     type: 'string',  requiredFor: 'none', defaultBase: 'none', defaultDerived: 'none',
+        // ── Fee config ──
+        { key: 'feeMode',     type: 'string',  default: 'none',
           validate: function(v) {
               if (v !== undefined && VALID_FEE_MODES.indexOf(v) === -1) return 'feeMode must be one of: ' + VALID_FEE_MODES.join(', ');
               return null;
           } },
-        { key: 'feeRate',     type: 'any',     requiredFor: 'none', defaultBase: null,   defaultDerived: null,
+        { key: 'feeRate',     type: 'any',     default: null,
           validate: function(v) {
               if (v !== undefined && v !== null && (typeof v !== 'number' || v < 0)) return 'feeRate must be a non-negative number or null';
               return null;
           } },
-        { key: 'feeMap',      type: 'object',  requiredFor: 'none', defaultBase: null,   defaultDerived: null },
+        { key: 'feeMap',      type: 'object',  default: null },
 
-        // ── Close-today / rebalance (shared) ──
-        { key: 'useCloseToday',   type: 'boolean', requiredFor: 'none', defaultBase: false,          defaultDerived: false },
-        { key: 'rebalanceMode',   type: 'string',  requiredFor: 'none', defaultBase: 'each_period',  defaultDerived: 'each_period',
+        // ── Close-today / rebalance ──
+        { key: 'useCloseToday',   type: 'boolean', default: false },
+        { key: 'rebalanceMode',   type: 'string',  default: 'each_period',
           validate: function(v) {
               if (v !== undefined && VALID_REBALANCE_MODES.indexOf(v) === -1) return 'rebalanceMode must be one of: ' + VALID_REBALANCE_MODES.join(', ');
               return null;
           } },
 
-        // ── State flags ──
-        { key: 'needsRegenerate', type: 'boolean', requiredFor: 'none', defaultBase: true,  defaultDerived: false, allowPatch: false },
+        // ── State ──
+        { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
 
         // ── Time range ──
-        { key: 'startDate', type: 'string',  requiredFor: 'none', defaultBase: null, defaultDerived: null },
-        { key: 'endDate',   type: 'string',  requiredFor: 'none', defaultBase: null, defaultDerived: null },
+        { key: 'startDate', type: 'string',  default: null },
+        { key: 'endDate',   type: 'string',  default: null },
 
         // ── Display ──
-        { key: 'shortAlias', type: 'string', requiredFor: 'none', defaultBase: '', defaultDerived: '' },
+        { key: 'shortAlias', type: 'string', default: '' },
 
-        // ═══════════════════════════════════════════════════════════════════
-        // Derived-only overrides — add new override fields HERE
-        // ═══════════════════════════════════════════════════════════════════
-        { key: 'productMask',         type: 'object',  requiredFor: 'none', defaultBase: {},     defaultDerived: {} },
-        { key: 'feeOverride',         type: 'any',     requiredFor: 'none', defaultBase: null,   defaultDerived: null },
-        { key: 'closeTodayOverride',  type: 'any',     requiredFor: 'none', defaultBase: null,   defaultDerived: null },
-        { key: 'rebalanceOverride',   type: 'any',     requiredFor: 'none', defaultBase: null,   defaultDerived: null },
-
-        // ── Derived tree metadata ──
-        { key: 'metadata',        type: 'object',  requiredFor: 'none', defaultBase: {},     defaultDerived: {} },
+        // ── Derived lineage / overrides ──
+        { key: 'productMask',  type: 'object',  default: {} },
+        { key: 'overrides',    type: 'object',  default: null },
+        // overrides: null or array of field keys that differ from baseGroup (e.g. ['rebalanceMode', 'feeMode'])
 
         // ── Runtime (never persisted) ──
-        { key: '_expanded', type: 'boolean', requiredFor: 'none', defaultBase: false, defaultDerived: false, allowPatch: false },
+        { key: '_expanded', type: 'boolean', default: false, patchable: false },
     ];
 
     // Derived indexes from FIELD_SCHEMA (computed once at load)
     var FIELD_BY_KEY = {};
     var PATCHABLE_KEYS = [];
-    var REQUIRED_BASE = [];
-    var REQUIRED_DERIVED = [];
     var DEEP_COPY_KEYS = [];
 
     (function _buildSchemaIndexes() {
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             FIELD_BY_KEY[f.key] = f;
-            if (f.allowPatch !== false) { PATCHABLE_KEYS.push(f.key); }
-            if (f.requiredFor === 'base' || f.requiredFor === 'both') { REQUIRED_BASE.push(f.key); }
-            if (f.requiredFor === 'derived' || f.requiredFor === 'both') { REQUIRED_DERIVED.push(f.key); }
+            if (f.patchable !== false) { PATCHABLE_KEYS.push(f.key); }
             if (f.type === 'object') { DEEP_COPY_KEYS.push(f.key); }
         }
     })();
-
-    /**
-     * Build a new item from config using FIELD_SCHEMA defaults.
-     * @param {object} config - raw input config
-     * @returns {object} item ready to push into _items
-     */
-    function _buildItem(config) {
-        var isDerived = !!(config.isDerived);
-        var item = { id: (typeof config.id === 'string' && config.id.trim()) ? config.id : _uuid() };
-        for (var i = 0; i < FIELD_SCHEMA.length; i++) {
-            var f = FIELD_SCHEMA[i];
-            if (f.key === 'id') continue; // already set
-            if (f.key === 'isDerived') continue; // set below
-            var defVal = isDerived ? f.defaultDerived : f.defaultBase;
-            if (config.hasOwnProperty(f.key)) {
-                item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
-            } else {
-                item[f.key] = (f.type === 'object') ? _deepCopy(defVal) : defVal;
-            }
-        }
-        // These two must reflect the actual config, not defaults
-        item.isDerived = isDerived;
-        item.name = (config.name || '').trim();
-        return item;
-    }
-
-    /**
-     * Validate config using FIELD_SCHEMA validators + required checks.
-     * @returns {{valid: boolean, errors: string[]}}
-     */
-    function _validateBySchema(config) {
-        var errors = [];
-        if (!config || typeof config !== 'object') {
-            return { valid: false, errors: ['config must be an object'] };
-        }
-        var isDerived = !!(config.isDerived);
-
-        // Required fields
-        var requiredKeys = isDerived ? REQUIRED_DERIVED : REQUIRED_BASE;
-        for (var r = 0; r < requiredKeys.length; r++) {
-            var rk = requiredKeys[r];
-            var rv = config[rk];
-            if (rv === undefined || rv === null || (typeof rv === 'string' && !rv.trim())) {
-                errors.push(rk + ' is required');
-            }
-        }
-
-        // Per-field validators
-        for (var i = 0; i < FIELD_SCHEMA.length; i++) {
-            var f = FIELD_SCHEMA[i];
-            if (!f.validate) continue;
-            var val = config[f.key];
-            var err = f.validate(val, config);
-            if (err) errors.push(err);
-        }
-
-        // parentId cycle check (done in add/update, not here)
-        // groupIndex <= groupCount check
-        if (config.groupIndex != null && config.groupCount != null && config.groupIndex > config.groupCount) {
-            errors.push('groupIndex must not exceed groupCount');
-        }
-
-        return { valid: errors.length === 0, errors: errors };
-    }
 
     // ---------------------------------------------------------------------------
     // Shared utilities — single source of truth for batch/combo/alias logic
@@ -266,13 +213,85 @@
     var VALID_REBALANCE_MODES = ['each_period', 'buy_and_hold', 'recycle'];
 
     /**
-     * Validate a group config using FIELD_SCHEMA.
+     * Validate a group config.
      * When isDerived, testerId/factorAlias/groupCount are optional (inherited from baseGroupId).
      * @param {object} config - raw config to validate
      * @returns {{valid: boolean, errors: string[]}}
      */
     function validate(config) {
-        return _validateBySchema(config);
+        var errors = [];
+        var isDerived = !!(config.isDerived);
+
+        if (!config || typeof config !== 'object') {
+            return { valid: false, errors: ['config must be an object'] };
+        }
+
+        // Required: name (always)
+        if (!config.name || typeof config.name !== 'string' || !config.name.trim()) {
+            errors.push('name is required (non-empty string)');
+        }
+
+        if (isDerived) {
+            // Derived group: baseGroupId required
+            if (!config.baseGroupId || typeof config.baseGroupId !== 'string') {
+                errors.push('baseGroupId is required for derived groups');
+            } else if (config.baseGroupId !== '__batch__') {
+                var bg = _getRaw(config.baseGroupId);
+                if (!bg) {
+                    errors.push('baseGroupId references a non-existent group: ' + config.baseGroupId);
+                }
+            }
+            // parentId: if provided, must be an existing node (cycle check in add/update)
+            if (config.parentId !== undefined && config.parentId !== null) {
+                var parentIdx = _findIndex(config.parentId);
+                if (parentIdx === -1) {
+                    errors.push('parentId references a non-existent group: ' + config.parentId);
+                }
+            }
+        } else {
+            // Base group: testerId, factorAlias, groupCount required
+            if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
+                errors.push('testerId is required (non-empty string)');
+            }
+            if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
+                errors.push('factorAlias is required (non-empty string)');
+            }
+            if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
+                errors.push('groupCount must be a positive integer (≥ 1)');
+            }
+        }
+
+        // groupIndex (1-based index)
+        if (config.groupIndex !== undefined && config.groupIndex !== null) {
+            if (typeof config.groupIndex !== 'number' || config.groupIndex < 1 || Math.floor(config.groupIndex) !== config.groupIndex) {
+                errors.push('groupIndex must be a positive integer (≥ 1)');
+            }
+            if (config.groupCount && config.groupIndex > config.groupCount) {
+                errors.push('groupIndex must not exceed groupCount');
+            }
+        }
+
+        // feeMode
+        if (config.feeMode !== undefined && VALID_FEE_MODES.indexOf(config.feeMode) === -1) {
+            errors.push('feeMode must be one of: ' + VALID_FEE_MODES.join(', '));
+        }
+
+        // feeRate
+        if (config.feeRate !== undefined && config.feeRate !== null && (typeof config.feeRate !== 'number' || config.feeRate < 0)) {
+            errors.push('feeRate must be a non-negative number or null');
+        }
+
+        // rebalanceMode
+        if (config.rebalanceMode !== undefined && VALID_REBALANCE_MODES.indexOf(config.rebalanceMode) === -1) {
+            errors.push('rebalanceMode must be one of: ' + VALID_REBALANCE_MODES.join(', '));
+        }
+
+        // useCloseToday (boolean)
+        if (config.useCloseToday !== undefined && typeof config.useCloseToday !== 'boolean') {
+            errors.push('useCloseToday must be a boolean');
+        }
+
+        return { valid: errors.length === 0, errors: errors };
     }
 
     // ---------------------------------------------------------------------------
@@ -280,10 +299,15 @@
     // ---------------------------------------------------------------------------
 
     /**
-     * Add a new group (base or derived) using FIELD_SCHEMA.
+     * Add a new group (base or derived).
      * @param {object} config
+     * @param {boolean} [config.isDerived] - true for derived groups
+     * @param {string} [config.parentId] - parent derived group id
+     * @param {string} [config.baseGroupId] - referenced base group id (derived only)
+     * @param {object} [config.productMask] - product mask
+     * @param {string[]} [config.overrides] - field keys that differ from baseGroup (derived only, computed)
      * @returns {string} new id
-     * @throws {Error} if validation fails or parentId cycle detected
+     * @throws {Error} if validation fails
      */
     function add(config) {
         var result = validate(config);
@@ -291,17 +315,21 @@
             throw new Error('Validation failed: ' + result.errors.join('; '));
         }
 
-        // Cycle detection for parentId on derived groups (schema validates existence, we check cycles)
-        if (config.parentId) {
-            if (_wouldCycle(null, config.parentId)) {
-                throw new Error('parentId would create a cycle');
+        // Build item from FIELD_SCHEMA — same shape for base and derived
+        var isDerived = !!(config.isDerived);
+        var item = { id: _uuid(), name: config.name.trim(), isDerived: isDerived };
+        for (var i = 0; i < FIELD_SCHEMA.length; i++) {
+            var f = FIELD_SCHEMA[i];
+            if (f.key === 'id' || f.key === 'name' || f.key === 'isDerived') continue;
+            if (config.hasOwnProperty(f.key)) {
+                item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
+            } else {
+                item[f.key] = (f.type === 'object') ? _deepCopy(f.default) : f.default;
             }
         }
 
-        var item = _buildItem(config);
-
         _items.push(item);
-        _emit('groupsChanged', { action: 'add', id: item.id, isDerived: item.isDerived });
+        _emit('groupsChanged', { action: 'add', id: item.id, isDerived: isDerived });
         return item.id;
     }
 
@@ -364,7 +392,8 @@
         }
 
         Object.keys(patch).forEach(function(key) {
-            if (DEEP_COPY_KEYS.indexOf(key) !== -1) {
+            var entry = FIELD_BY_KEY[key];
+            if (entry && entry.type === 'object') {
                 _items[idx][key] = _deepCopy(patch[key]);
             } else {
                 _items[idx][key] = patch[key];
@@ -475,13 +504,9 @@
 
     function _collectDescendantIds(id) {
         var result = [id];
-        var target = _getRaw(id);
         for (var i = 0; i < _items.length; i++) {
-            var child = _items[i];
-            if (child.id === id) continue;
-            // Direct parent-child link, OR derived group whose baseGroupId points to a deleted base group
-            if (child.parentId === id || (target && !target.isDerived && child.isDerived && child.baseGroupId === id)) {
-                result = result.concat(_collectDescendantIds(child.id));
+            if (_items[i].parentId === id) {
+                result = result.concat(_collectDescendantIds(_items[i].id));
             }
         }
         return result;

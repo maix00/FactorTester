@@ -481,6 +481,8 @@
 
         return {
             id: node.id,
+            isDerived: true,
+            baseGroupId: node.baseGroupId,
             feeMode: resolvedFee ? (resolvedFee.mode || 'none') : 'none',
             feeRate: resolvedFee ? resolvedFee.rate : null,
             feeMap: resolvedFee ? resolvedFee.feeMap : null,

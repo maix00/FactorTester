@@ -272,16 +272,53 @@
             return GT.datamodel.groups.get(ids[0]);
         }
 
-        // list mode
-        var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+        // list mode — get the active group (base or derived, unified)
+        var id = _getActiveGroupId();
         if (!id) return null;
         if (!GT.datamodel || !GT.datamodel.groups) return null;
-        return GT.datamodel.groups.get(id);
+        var g = GT.datamodel.groups.get(id);
+        if (!g) return null;
+        // For derived groups, return a synthetic object with resolved config
+        // so config panels see feeMode/feeMap/useCloseToday etc as flat keys.
+        if (g.isDerived) return _synthDerivedForConfig(g);
+        return g;
+    }
+
+    /**
+     * Build a synthetic group object for a derived node, resolving config via
+     * fee_strategy resolution chain → flat keys.
+     * Mirrors _synthGroupForDerivedNode in list/index.js.
+     */
+    function _synthDerivedForConfig(node) {
+        var bg = GT.datamodel.groups && node.baseGroupId ? GT.datamodel.groups.get(node.baseGroupId) : null;
+
+        var resolvedFee, resolvedCloseToday, resolvedRebalance;
+        if (GT.datamodel.fee_strategy) {
+            try { resolvedFee = GT.datamodel.fee_strategy.resolveFee(node.id); } catch (e) { resolvedFee = null; }
+            try { resolvedCloseToday = GT.datamodel.fee_strategy.resolveCloseToday(node.id); } catch (e) { resolvedCloseToday = undefined; }
+            try { resolvedRebalance = GT.datamodel.fee_strategy.resolveRebalance(node.id); } catch (e) { resolvedRebalance = undefined; }
+        }
+
+        return {
+            id: node.id,
+            isDerived: true,
+            baseGroupId: node.baseGroupId,
+            feeMode: resolvedFee ? (resolvedFee.mode || 'none') : 'none',
+            feeRate: resolvedFee ? resolvedFee.rate : null,
+            feeMap: resolvedFee ? resolvedFee.feeMap : null,
+            feeSensitivity: bg ? bg.feeSensitivity : 1,
+            useCloseToday: resolvedCloseToday !== undefined ? !!resolvedCloseToday : (bg ? !!bg.useCloseToday : false),
+            rebalanceMode: resolvedRebalance !== undefined ? resolvedRebalance : (bg ? (bg.rebalanceMode || 'buy_and_hold') : 'buy_and_hold')
+        };
     }
 
     /**
      * Apply a patch to all selected groups in edit mode, or to the active group in list mode.
      * In add mode, saves to the add draft.
+     *
+     * Works uniformly for base and derived groups — fee/config keys are mapped
+     * to top-level fields that resolveFee/resolveCloseToday/resolveRebalance
+     * handle for both base and derived groups.
      *
      * @param {object} patch — key/value pairs to save
      */
@@ -307,14 +344,24 @@
             return;
         }
 
-        // list mode
-        var id = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
+        // list mode — get the active group (base or derived, unified)
+        var id = _getActiveGroupId();
         if (!id) return;
         try {
             GT.datamodel.groups.update(id, patch);
         } catch (err) {
             alert('保存失败: ' + err.message);
         }
+    }
+
+    /**
+     * Get the active group ID — derived node takes priority, falls back to base group.
+     */
+    function _getActiveGroupId() {
+        var GT = window.GroupTest;
+        var derivedId = GT.state && GT.state.getActiveDerivedNodeId ? GT.state.getActiveDerivedNodeId() : null;
+        if (derivedId) return derivedId;
+        return GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
     }
 
     // ---------------------------------------------------------------------------

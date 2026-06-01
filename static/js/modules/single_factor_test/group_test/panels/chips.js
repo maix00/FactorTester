@@ -67,16 +67,6 @@
     function getAllChips(group, categories) {
         if (!group) return [];
 
-        // Resolve config group: for derived groups, use base group for config chips
-        var configGroup = group;
-        if (group.isDerived && group.baseGroupId) {
-            var GT2 = window.GroupTest;
-            if (GT2 && GT2.datamodel && GT2.datamodel.groups) {
-                var bg = GT2.datamodel.groups.get(group.baseGroupId);
-                if (bg) configGroup = bg;
-            }
-        }
-
         // Normalize categories filter
         var filterSet = null;
         if (categories) {
@@ -92,7 +82,18 @@
             var prov = _chipProviders[i];
             if (filterSet && !filterSet[prov.category]) continue;
 
-            var g = (prov.category === CHIP_CATEGORY.CONFIG) ? configGroup : group;
+            // INFO chips inherit from base group for derived groups,
+            // but CONFIG and DERIVED chips always use the group itself.
+            // DERIVED chips need the derived group's own productMask etc.
+            // CONFIG chips need the derived group's own fee config (resolved via synth).
+            var g = group;
+            if (prov.category === CHIP_CATEGORY.INFO && group.isDerived && group.baseGroupId) {
+                var GT2 = window.GroupTest;
+                if (GT2 && GT2.datamodel && GT2.datamodel.groups) {
+                    var bg = GT2.datamodel.groups.get(group.baseGroupId);
+                    if (bg) g = bg;
+                }
+            }
             var provChips = prov.getChips(g);
             if (provChips && provChips.length) {
                 for (var j = 0; j < provChips.length; j++) {

@@ -29,7 +29,7 @@
     function snapshot() {
         var snap = {};
 
-        // All groups (base + derived) are unified in base_groups.
+        // All groups (base + derived) are unified in GT.datamodel.groups.
         // Separately filter for backward-compatible snapshop format.
         if (GT.datamodel.groups) {
             var allGroups = GT.datamodel.groups.getAll();

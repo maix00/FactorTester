@@ -238,7 +238,8 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
                                   fee_uniform: float = 0.0,
                                   open_fv: np.ndarray | None = None,
                                   close_fv: np.ndarray | None = None,
-                                  close_today_fv: np.ndarray | None = None) -> tuple[dict, dict]:
+                                  close_today_fv: np.ndarray | None = None,
+                                  fee_override: dict | None = None) -> tuple[dict, dict]:
     from tools.products.product_utils import product_display_name
     from tools.factors.tests.single_factor_test.group.core import simulate_derived_group
 
@@ -258,6 +259,15 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
         if _open_fv is None or _close_fv is None or _close_today_fv is None:
             raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
         open_fv, close_fv, close_today_fv = _open_fv, _close_fv, _close_today_fv
+
+    # Apply fee_override: uniform override per fee type for this derived group
+    fo = fee_override or {}
+    if fo.get('open') is not None:
+        open_fv = np.full_like(open_fv, float(fo['open']))
+    if fo.get('close') is not None:
+        close_fv = np.full_like(close_fv, float(fo['close']))
+    if fo.get('close_today') is not None:
+        close_today_fv = np.full_like(close_today_fv, float(fo['close_today']))
 
     assert close_fv is not None and close_today_fv is not None
     sim = simulate_derived_group(
@@ -321,6 +331,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
         gi = entry.get('group_index')
         pn = entry.get('product_names') or []
         nm = str(entry.get('name') or '').strip()
+        feo = entry.get('fee_override')
         if gi is None:
             continue
         if not nm:
@@ -333,6 +344,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
             'group_index': int(gi),
             'name': nm,
             'selected_idx': selected_idx,
+            'fee_override': feo if isinstance(feo, dict) else None,
         })
 
     # 结果数组，按原始顺序填充
@@ -345,14 +357,26 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
         if len(items) == 1:
             # 只有 1 个派生组 → 回退到逐个 API
             item = items[0]
+            # Apply per-entry fee_override
+            item_open_fv = open_fv.copy()
+            item_close_fv = close_fv.copy()
+            item_ct_fv = close_today_fv.copy()
+            feo = item.get('fee_override')
+            if feo:
+                if feo.get('open') is not None:
+                    item_open_fv[:] = float(feo['open'])
+                if feo.get('close') is not None:
+                    item_close_fv[:] = float(feo['close'])
+                if feo.get('close_today') is not None:
+                    item_ct_fv[:] = float(feo['close_today'])
             try:
                 sim = simulate_derived_group(
                     group_index=gi,
                     selected_idx=item['selected_idx'],
                     group_result=group_result,
-                    open_fee_vec=open_fv,
-                    close_fee_vec=close_fv,
-                    close_today_fee_vec=close_today_fv,
+                    open_fee_vec=item_open_fv,
+                    close_fee_vec=item_close_fv,
+                    close_today_fee_vec=item_ct_fv,
                     rebalance_mode=rebalance_mode,
                     use_closetoday=use_closetoday,
                 )
@@ -379,9 +403,17 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                 results[item['orig_index']] = {'index': item['orig_index'], 'success': False, 'error': str(e)}
         else:
             # 多个派生组共享同一基础组 → 批量一次 simulate_groups
+            # Apply each entry's fee_override
+            derivations = []
+            for item in items:
+                dd = {'selected_idx': item['selected_idx'], 'name': item['name']}
+                feo = item.get('fee_override')
+                if feo:
+                    dd['fee_override'] = feo
+                derivations.append(dd)
             sims = simulate_derived_groups_batch(
                 group_index=gi,
-                derivations=[{'selected_idx': item['selected_idx'], 'name': item['name']} for item in items],
+                derivations=derivations,
                 group_result=group_result,
                 open_fee_vec=open_fv,
                 close_fee_vec=close_fv,
@@ -514,7 +546,8 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                       fee_uniform, fee_map, use_closetoday,
                       rebalance_mode, start_date, end_date,
                       return_freqs=None, derived_groups=None,
-                      ls_configs=None, group_names=None) -> dict:
+                      ls_configs=None, group_names=None,
+                      group_fee_maps=None) -> dict:
     """执行单个 batch 的分组测试，返回结果 dict（不含 Flask Response 包装）。
     
     此函数设计为线程安全：每个调用独立获取 tester、快照 products、计算后恢复。
@@ -578,6 +611,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     use_closetoday=use_closetoday,
                     rebalance_mode=rebalance_mode,
                     derived_groups=derived_groups,
+                    group_fee_maps=group_fee_maps,
                 )
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
                 group_result = tester._get_result(factor).group_result
@@ -618,6 +652,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             use_closetoday=use_closetoday,
             rebalance_mode=rebalance_mode,
             derived_groups=derived_groups,
+            group_fee_maps=group_fee_maps,
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -762,6 +797,10 @@ def run_group_test_batch():
     end_date = data.get('end_date')
     return_freqs = data.get('return_freqs', None)
     derived_groups = data.get('derived_groups', None)
+    group_fee_maps = data.get('group_fee_maps', None)
+    # group_fee_maps: {group_index: {variety_code: {open, close, close_today, ...}}} 或 null
+    if group_fee_maps is not None and isinstance(group_fee_maps, dict):
+        group_fee_maps = {int(k): v for k, v in group_fee_maps.items()}
 
     # 费率从第一个 batch 的 tester 解析
     first_batch = batches_raw[0]
@@ -810,6 +849,7 @@ def run_group_test_batch():
             derived_groups=batch_derived_groups,
             ls_configs=ls_configs,
             group_names=group_names,
+            group_fee_maps=group_fee_maps,
         )
         result['batch_submission_id'] = submission_id
         result['batch_factor_alias'] = factor_alias
@@ -1091,6 +1131,7 @@ def run_group_test():
                     use_closetoday=use_closetoday,
                     rebalance_mode=rebalance_mode,
                     derived_groups=data.get('derived_groups'),
+                    group_fee_maps=data.get('group_fee_maps'),
                 )
                 # ... (computation logic unchanged) ...
                 timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -1136,6 +1177,7 @@ def run_group_test():
             use_closetoday=use_closetoday,
             rebalance_mode=rebalance_mode,
             derived_groups=data.get('derived_groups'),
+            group_fee_maps=data.get('group_fee_maps'),
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -1449,6 +1491,7 @@ def create_derived_group():
     product_names = data.get('product_names') or []
     name = str(data.get('name') or '').strip()
     use_closetoday = bool(data.get('use_closetoday', False))
+    fee_override = data.get('fee_override')
     if submission_id is None or group_index is None:
         return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
     try:
@@ -1466,6 +1509,7 @@ def create_derived_group():
             use_closetoday=use_closetoday,
             fee_map=fee_map,
             fee_uniform=fee_uniform,
+            fee_override=fee_override,
         )
         return jsonify({'success': True, 'group': group, 'metric': metric})
     except Exception as e:

@@ -2,16 +2,17 @@
  * panels/config/fee/strategy.js — Fee/CloseToday/Rebalance resolution strategy
  *
  * Pure logic module. Zero DOM dependencies.
- * Part of Phase 1 datamodel layer for Issue #85.
  *
- * Resolution chain (4 levels):
- *   1. Node's own override (if set)
- *   2. Inherit from parent derived group (recursive)
- *   3. Fall back to base group
- *   4. Global default
+ * Resolution chain (3 levels):
+ *   1. Group's own top-level field (feeMode/rebalanceMode/useCloseToday — same for base & derived)
+ *   2. Fall back to baseGroup (for derived groups via baseGroupId)
+ *   3. Global default
+ *
+ * Derived groups use the exact same fields as base groups (feeMode, feeRate, feeMap,
+ * useCloseToday, rebalanceMode). The only difference is that derived groups have an
+ * `overrides` array tracking which fields differ from their baseGroup.
  *
  * Dependencies:
- *   - GT.datamodel.groups (get)
  *   - GT.datamodel.groups (get)
  */
 
@@ -43,94 +44,76 @@
     }
 
     // ---------------------------------------------------------------------------
-    // Field names
+    // Config field names that derive can differ on (compared to base group)
     // ---------------------------------------------------------------------------
 
-    var FIELDS = {
-        feeOverride:     { parentChain: true, baseField: null,      defaultValue: function() { return { mode: 'none', rate: null, feeMap: null }; } },
-        closeTodayOverride: { parentChain: true, baseField: 'useCloseToday', defaultValue: false },
-        rebalanceOverride:  { parentChain: true, baseField: 'rebalanceMode',  defaultValue: 'each_period' },
-    };
+    var DIFFABLE_KEYS = ['feeMode', 'feeRate', 'feeMap', 'useCloseToday', 'rebalanceMode'];
 
     // ---------------------------------------------------------------------------
     // Core resolution
     // ---------------------------------------------------------------------------
 
     /**
-     * Resolve a parameter for a derived group node by walking the chain.
+     * Resolve a config value for a derived node by walking the chain.
      *
      * Chain:
-     *   1. Check node's own override field (e.g., feeOverride)
-     *   2. If not set, recurse to parent (if any)
-     *   3. If no parent, fall back to base group
-     *   4. If base group also not defined, use default
+     *   1. Check node's own field — if it differs from default, use it
+     *   2. Recurse to parent derived group (if any)
+     *   3. Fall back to base group
+     *   4. Default value
      *
-     * @param {string} nodeId      - derived group id
-     * @param {string} overrideField - e.g. 'feeOverride', 'closeTodayOverride', 'rebalanceOverride'
+     * @param {string} nodeId    - derived group id
+     * @param {string} fieldKey  - e.g. 'useCloseToday', 'rebalanceMode'
+     * @param {*}      defaultValue
      * @returns {*} resolved value
      */
-    function resolveParam(nodeId, overrideField) {
-        var fieldInfo = FIELDS[overrideField];
-        if (!fieldInfo) {
-            throw new Error('Unknown param field: ' + overrideField);
-        }
-
+    function resolveParam(nodeId, fieldKey, defaultValue) {
         var node = _getDG(nodeId);
-        if (!node) {
-            throw new Error('Derived group not found: ' + nodeId);
-        }
+        if (!node) throw new Error('Derived group not found: ' + nodeId);
 
-        // Level 1: Check node's own override
-        if (node[overrideField] !== null && node[overrideField] !== undefined) {
-            return _deepCopy(node[overrideField]);
+        // Level 1: Check node's own field (truthy or explicitly set)
+        var val = node[fieldKey];
+        if (val !== undefined && val !== null) {
+            return _deepCopy(val);
         }
 
         // Level 2: Recurse to parent (skip batch organisational nodes)
-        if (fieldInfo.parentChain && node.parentId) {
+        if (node.parentId) {
             var parentNode = _getDG(node.parentId);
-            // Batch nodes (__batch__) are organisational, not fee-bearing.
-            // Skip them: fall through to baseGroup instead of inheriting from them.
             if (!parentNode || parentNode.baseGroupId !== '__batch__') {
-                return resolveParam(node.parentId, overrideField);
+                return resolveParam(node.parentId, fieldKey, defaultValue);
             }
         }
 
         // Level 3: Fall back to base group
-        if (node.baseGroupId && fieldInfo.baseField) {
+        if (node.baseGroupId && node.baseGroupId !== '__batch__') {
             var bg = _getBG(node.baseGroupId);
-            if (bg && bg[fieldInfo.baseField] !== undefined && bg[fieldInfo.baseField] !== null) {
-                return _deepCopy(bg[fieldInfo.baseField]);
+            if (bg && bg[fieldKey] !== undefined && bg[fieldKey] !== null) {
+                return _deepCopy(bg[fieldKey]);
             }
         }
 
         // Level 4: Default
-        var defVal = fieldInfo.defaultValue;
-        if (typeof defVal === 'function') {
-            return defVal();
-        }
-        return defVal;
+        return defaultValue;
     }
 
     /**
      * Resolve the full fee configuration for a derived group.
-     *
-     * Returns { mode, rate, feeMap }:
-     *   - If baseGroup is uniform mode: mode='uniform', rate=baseGroup.feeRate
-     *   - If baseGroup is per_product: mode='per_product', feeMap=baseGroup.feeMap
-     *   - If baseGroup is custom: mode='custom', feeMap=baseGroup.feeMap
-     *   - If baseGroup is none: mode='none'
-     *   - If the node has feeOverride set, it overrides the mode/rate/feeMap
-     *
+     * Derived groups store feeMode/feeRate/feeMap directly — same as base groups.
      * @param {string} nodeId
      * @returns {{mode: string, rate: number|null, feeMap: object|null}}
      */
     function resolveFee(nodeId) {
-        // First check if there's a feeOverride
         var node = _getDG(nodeId);
         if (!node) throw new Error('Derived group not found: ' + nodeId);
 
-        if (node.feeOverride !== null && node.feeOverride !== undefined) {
-            return _deepCopy(node.feeOverride);
+        // Node's own fee config takes priority (if set to something other than 'none')
+        if (node.feeMode && node.feeMode !== 'none') {
+            return {
+                mode: node.feeMode,
+                rate: node.feeRate !== undefined ? node.feeRate : null,
+                feeMap: node.feeMap !== undefined ? _deepCopy(node.feeMap) : null,
+            };
         }
 
         // Recurse parent (skip batch organisational nodes)
@@ -141,24 +124,20 @@
             }
         }
 
-        // Fall back to base group (skip batch sentinel nodes)
+        // Fall back to base group
         if (node.baseGroupId && node.baseGroupId !== '__batch__') {
             var bg = _getBG(node.baseGroupId);
             if (bg) {
-                return _buildFeeFromBaseGroup(bg);
+                return {
+                    mode: bg.feeMode || 'none',
+                    rate: bg.feeRate !== undefined ? bg.feeRate : null,
+                    feeMap: bg.feeMap !== undefined ? _deepCopy(bg.feeMap) : null,
+                };
             }
         }
 
         // Default
         return { mode: 'none', rate: null, feeMap: null };
-    }
-
-    function _buildFeeFromBaseGroup(bg) {
-        return {
-            mode: bg.feeMode || 'none',
-            rate: bg.feeRate !== undefined ? bg.feeRate : null,
-            feeMap: bg.feeMap !== undefined ? _deepCopy(bg.feeMap) : null,
-        };
     }
 
     /**
@@ -167,7 +146,7 @@
      * @returns {boolean}
      */
     function resolveCloseToday(nodeId) {
-        return resolveParam(nodeId, 'closeTodayOverride');
+        return resolveParam(nodeId, 'useCloseToday', false);
     }
 
     /**
@@ -176,7 +155,7 @@
      * @returns {string}
      */
     function resolveRebalance(nodeId) {
-        return resolveParam(nodeId, 'rebalanceOverride');
+        return resolveParam(nodeId, 'rebalanceMode', 'each_period');
     }
 
     // ---------------------------------------------------------------------------
@@ -233,36 +212,27 @@
 
     function _collectModsForNode(nodeId, mods) {
         var node = _getDG(nodeId);
-        if (!node) return;
+        if (!node || !node.isDerived) return;
 
-        // Check feeOverride
-        if (node.feeOverride !== null && node.feeOverride !== undefined) {
-            mods.push({
-                nodeId: node.id,
-                field: 'feeOverride',
-                value: _deepCopy(node.feeOverride),
-            });
+        // Compare node's config fields against base group; collect differing keys
+        if (node.baseGroupId && node.baseGroupId !== '__batch__') {
+            var bg = _getBG(node.baseGroupId);
+            if (bg) {
+                DIFFABLE_KEYS.forEach(function(key) {
+                    var nodeVal = node[key];
+                    var bgVal = bg[key];
+                    if (JSON.stringify(nodeVal) !== JSON.stringify(bgVal)) {
+                        mods.push({
+                            nodeId: node.id,
+                            field: key,
+                            value: nodeVal !== undefined ? _deepCopy(nodeVal) : undefined,
+                        });
+                    }
+                });
+            }
         }
 
-        // Check closeTodayOverride
-        if (node.closeTodayOverride !== null && node.closeTodayOverride !== undefined) {
-            mods.push({
-                nodeId: node.id,
-                field: 'closeTodayOverride',
-                value: node.closeTodayOverride,
-            });
-        }
-
-        // Check rebalanceOverride
-        if (node.rebalanceOverride !== null && node.rebalanceOverride !== undefined) {
-            mods.push({
-                nodeId: node.id,
-                field: 'rebalanceOverride',
-                value: node.rebalanceOverride,
-            });
-        }
-
-        // Recurse to children that might have overrides
+        // Recurse to children
         var descendants = GT.datamodel.groups.getDescendants ?
             GT.datamodel.groups.getDescendants(node.id).slice(1) : [];
 
