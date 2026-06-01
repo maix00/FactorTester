@@ -1294,7 +1294,9 @@
             fee_rate: group.feeRate != null ? group.feeRate : null,
             fee_map: (mode === 'per_product' || mode === 'custom') ? serializeGroupFeeMap(group.feeMap) : null,
             use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || 'buy_and_hold'
+            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
+            liquidity_mode: group.liquidityMode || 'infinite',
+            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
         };
     }
 
@@ -1325,7 +1327,11 @@
                 fee_map: serializeGroupFeeMap(group.feeMap),
                 useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
                 rebalanceMode: group.rebalanceMode || 'each_period',
-                rebalance_mode: group.rebalanceMode || 'each_period'
+                rebalance_mode: group.rebalanceMode || 'each_period',
+                liquidityMode: group.liquidityMode || 'infinite',
+                liquidity_mode: group.liquidityMode || 'infinite',
+                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100,
+                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
             });
         });
         return payload;
@@ -3493,6 +3499,9 @@
         if (P.config && P.config.rebalance) {
             GT_PANEL_REGISTRY.push({ name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.rebalance });
         }
+        if (P.config && P.config.liquidity) {
+            GT_PANEL_REGISTRY.push({ name: 'liquidity', label: '💧 流动性', containerId: 'config-liquidity', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.liquidity });
+        }
 
         _panelsRegistered = true;
     }
@@ -3934,7 +3943,9 @@
                     feeMap: resolvedFee ? resolvedFee.feeMap : (group && group.feeMap != null ? group.feeMap : (base ? base.feeMap : null)),
                     feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : (group && group.feeSensitivity != null ? group.feeSensitivity : (base && base.feeSensitivity != null ? base.feeSensitivity : 1)),
                     useCloseToday: group && group.useCloseToday != null ? !!group.useCloseToday : !!(base && base.useCloseToday),
-                    rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period')
+                    rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period'),
+                    liquidityMode: group && group.liquidityMode != null ? group.liquidityMode : (base && base.liquidityMode ? base.liquidityMode : 'infinite'),
+                    liquidityPercent: group && group.liquidityPercent != null ? group.liquidityPercent : (base && base.liquidityPercent != null ? base.liquidityPercent : 100)
                 };
             }
 
@@ -3961,7 +3972,7 @@
                 var cfg = _resolvedConfigForDraft(selected);
                 Object.assign(draft, cfg);
                 draft._inheritedConfigKeys = {};
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
                     draft._inheritedConfigKeys[key] = true;
                 });
                 return draft;
@@ -4067,6 +4078,8 @@
                     _addDraft.selectedFactors = [];
                     _addDraft.feeMode = 'none';
                     _addDraft.rebalanceMode = 'each_period';
+                    _addDraft.liquidityMode = 'infinite';
+                    _addDraft.liquidityPercent = 100;
                     _renderTabActions();
                     mountTab('add-base');
                 } else if (addFlow === 'derived') {
@@ -4080,7 +4093,7 @@
                                 _addDraft.preselectedBaseGroupId = activeDerived.baseGroupId;
                                 _addDraft.preselectedProducts = effectiveDerivedProductNames(activeDerived);
                                 Object.assign(_addDraft, _resolvedConfigForDraft(activeDerived));
-                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true, liquidityMode: true, liquidityPercent: true };
                             }
                         } else {
                             var activeBaseId = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
@@ -4088,7 +4101,7 @@
                             var activeBase = GT.datamodel.groups && GT.datamodel.groups.get(activeBaseId);
                             if (activeBase) {
                                 Object.assign(_addDraft, _resolvedConfigForDraft(activeBase));
-                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true, liquidityMode: true, liquidityPercent: true };
                             }
                         }
                     }
@@ -4115,6 +4128,10 @@
                 if (factors.length === 0) { alert('请至少选择一个因子'); return; }
 
                 try {
+                    var REG = window.GT_CONFIG_REGISTRY;
+                    if (REG && typeof REG.commitDirty === 'function') {
+                        REG.commitDirty();
+                    }
                     var addPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'add-base'; });
                     if (addPanel && addPanel.panel && typeof addPanel.panel.submitAddBatches === 'function') {
                         var result = addPanel.panel.submitAddBatches(_addDraft);
@@ -4180,7 +4197,7 @@
                     baseGroupId: baseGroupId,
                     productMask: productMask,
                 };
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
                     var inherited = _addDraft._inheritedConfigKeys && _addDraft._inheritedConfigKeys[key];
                     if (!inherited && _addDraft[key] !== undefined) config[key] = _addDraft[key];
                 });
@@ -4454,7 +4471,9 @@
                 // In add mode, only show ADD tabs matching the current addFlow
                 if (_panelMode === 'add' && _addDraft && _addDraft.addFlow) {
                     visibleList = visibleList.filter(function(p) {
-                        return p.category !== A || p.addFlow === _addDraft.addFlow;
+                        if (p.category === A) return p.addFlow === _addDraft.addFlow;
+                        if (p.category === C && p.name === 'config-derived') return _addDraft.addFlow === 'derived';
+                        return true;
                     });
                 } else if (_panelMode === 'edit') {
                     // In edit mode, show LIST + CONFIG only (no ADD panels).

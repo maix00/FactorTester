@@ -399,6 +399,8 @@
             var feeRate = (REG && REG.hasDirty()) ? REG.getDirty('feeRate', draft.feeRate) : draft.feeRate;
             var feeSensitivity = (REG && REG.hasDirty()) ? REG.getDirty('feeSensitivity', draft.feeSensitivity) : draft.feeSensitivity;
             var useCloseToday = (REG && REG.hasDirty()) ? REG.getDirty('useCloseToday', draft.useCloseToday) : draft.useCloseToday;
+            var liquidityMode = (REG && REG.hasDirty()) ? REG.getDirty('liquidityMode', draft.liquidityMode || 'infinite') : (draft.liquidityMode || 'infinite');
+            var liquidityPercent = (REG && REG.hasDirty()) ? REG.getDirty('liquidityPercent', draft.liquidityPercent != null ? draft.liquidityPercent : 100) : (draft.liquidityPercent != null ? draft.liquidityPercent : 100);
             if (allGroups) {
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
@@ -417,6 +419,8 @@
                             feeSensitivity: feeSensitivity,
                             useCloseToday: useCloseToday,
                             rebalanceMode: draft.rebalanceMode || 'each_period',
+                            liquidityMode: liquidityMode,
+                            liquidityPercent: liquidityPercent,
                         });
                         added++;
                     } catch (err) { /* skip dup */ }
@@ -438,6 +442,8 @@
                         feeSensitivity: feeSensitivity,
                         useCloseToday: useCloseToday,
                         rebalanceMode: draft.rebalanceMode || 'each_period',
+                        liquidityMode: liquidityMode,
+                        liquidityPercent: liquidityPercent,
                     });
                     added++;
                 } catch (err) { /* skip dup */ }

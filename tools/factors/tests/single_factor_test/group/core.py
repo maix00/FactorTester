@@ -1210,6 +1210,8 @@ def test_by_group_single_factor(
                 'fee_map': dd.get('fee_map', dd.get('feeMap')),
                 'use_close_today': dd.get('use_close_today', dd.get('useCloseToday')),
                 'rebalance_mode': dd.get('rebalance_mode', dd.get('rebalanceMode')),
+                'liquidity_mode': dd.get('liquidity_mode', dd.get('liquidityMode')),
+                'liquidity_percent': dd.get('liquidity_percent', dd.get('liquidityPercent')),
             })
 
         if derived_slices:
@@ -1347,6 +1349,8 @@ def test_by_group_single_factor(
                     'fee_map': di.get('fee_map'),
                     'use_close_today': di.get('use_close_today'),
                     'rebalance_mode': di.get('rebalance_mode'),
+                    'liquidity_mode': di.get('liquidity_mode'),
+                    'liquidity_percent': di.get('liquidity_percent'),
                 }]
     if _variants:
         M_total = sum(len(_variants.get(g, [])) for g in range(n_groups))

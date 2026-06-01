@@ -198,6 +198,8 @@ def _parse_group_variants(group_names) -> tuple[dict[int, str], dict[int, list[d
                         'fee_rate': item.get('fee_rate', item.get('feeRate')),
                         'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
                         'rebalance_mode': item.get('rebalance_mode') or item.get('rebalanceMode') or None,
+                        'liquidity_mode': item.get('liquidity_mode') or item.get('liquidityMode') or None,
+                        'liquidity_percent': item.get('liquidity_percent', item.get('liquidityPercent')),
                     })
             group_variants[g] = var_list
             # Use first variant's name as group-level display name

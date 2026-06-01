@@ -29,6 +29,7 @@
  *     parentId, baseGroupId,
  *     testerId, factorAlias, groupCount, groupIndex, isAllGroups,
  *     feeMode, feeRate, feeMap, useCloseToday, rebalanceMode,
+ *     liquidityMode, liquidityPercent,
  *     needsRegenerate, startDate, endDate, shortAlias,
  *     productMask, overrides,
  *     _expanded }
@@ -155,6 +156,18 @@
               return null;
           } },
 
+        // ── Liquidity config ──
+        { key: 'liquidityMode',   type: 'string',  default: 'infinite',
+          validate: function(v) {
+              if (v !== undefined && VALID_LIQUIDITY_MODES.indexOf(v) === -1) return 'liquidityMode must be one of: ' + VALID_LIQUIDITY_MODES.join(', ');
+              return null;
+          } },
+        { key: 'liquidityPercent', type: 'number', default: 100,
+          validate: function(v) {
+              if (v !== undefined && v !== null && (typeof v !== 'number' || v < 0 || v > 100)) return 'liquidityPercent must be a number between 0 and 100';
+              return null;
+          } },
+
         // ── State ──
         { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
 
@@ -216,6 +229,7 @@
 
     var VALID_FEE_MODES = ['none', 'uniform', 'per_product', 'custom'];
     var VALID_REBALANCE_MODES = ['each_period', 'buy_and_hold', 'recycle'];
+    var VALID_LIQUIDITY_MODES = ['infinite', 'percent'];
 
     /**
      * Validate a group config.
@@ -297,6 +311,14 @@
             errors.push('rebalanceMode must be one of: ' + VALID_REBALANCE_MODES.join(', '));
         }
 
+        // liquidityMode / liquidityPercent
+        if (config.liquidityMode !== undefined && config.liquidityMode !== null && VALID_LIQUIDITY_MODES.indexOf(config.liquidityMode) === -1) {
+            errors.push('liquidityMode must be one of: ' + VALID_LIQUIDITY_MODES.join(', '));
+        }
+        if (config.liquidityPercent !== undefined && config.liquidityPercent !== null && (typeof config.liquidityPercent !== 'number' || config.liquidityPercent < 0 || config.liquidityPercent > 100)) {
+            errors.push('liquidityPercent must be a number between 0 and 100');
+        }
+
         // useCloseToday (boolean)
         if (config.useCloseToday !== undefined && config.useCloseToday !== null && typeof config.useCloseToday !== 'boolean') {
             errors.push('useCloseToday must be a boolean');
@@ -343,7 +365,7 @@
             }
         }
         if (isDerived) {
-            ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+            ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
                 if (!config.hasOwnProperty(key)) item[key] = null;
             });
         }
