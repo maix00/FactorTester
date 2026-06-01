@@ -10,6 +10,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from Settings import factor_info_path
+from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
@@ -135,6 +136,75 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
     return factor.evaluate(tester.products)
 
 
+def _build_normalized_liquidity_capacity(
+    products: list,
+    signal_index: list,
+    freq: DataFreq,
+    start_date: Any,
+    end_date: Any,
+) -> np.ndarray | None:
+    """Return (T, P) capacity shares from turnover, fallbacking to volume*price*multiplier.
+
+    The simulator uses normalized wealth (initial capital = 1), so raw market
+    notional is converted into per-period cross-sectional shares.  A 20%
+    liquidity setting therefore means "this strategy may trade up to 20% of
+    the current period's cross-sectional tradable notional, allocated by
+    product liquidity".
+    """
+    if not products or not signal_index:
+        return None
+    signal_ts = pd.DatetimeIndex(pd.to_datetime(signal_index))
+    T = len(signal_ts)
+    P = len(products)
+    raw = np.zeros((T, P), dtype=float)
+
+    for pi, product in enumerate(products):
+        try:
+            dm = getattr(product, freq.name)
+            cols = [DataColumn.TURNOVER.name, DataColumn.VOLUME.name, DataColumn.CLOSE_ADJUSTED.name]
+            data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_date)
+            if data.empty:
+                continue
+            idx = pd.DatetimeIndex(_extract_signal_index(data.index))
+            frame = data.copy(deep=False)
+            frame.index = idx
+            if end_date is not None:
+                _ed = _align_ts_to_index(end_date, frame.index)
+                frame = frame[frame.index <= _ed]
+            if frame.empty:
+                continue
+            if DataColumn.TURNOVER.name in frame.columns and frame[DataColumn.TURNOVER.name].notna().any():
+                amount = pd.to_numeric(frame[DataColumn.TURNOVER.name], errors="coerce").fillna(0.0)
+            elif DataColumn.VOLUME.name in frame.columns and DataColumn.CLOSE_ADJUSTED.name in frame.columns:
+                multiplier = float(getattr(product, "point_value", None) or 1.0)
+                amount = (
+                    pd.to_numeric(frame[DataColumn.VOLUME.name], errors="coerce").fillna(0.0)
+                    * pd.to_numeric(frame[DataColumn.CLOSE_ADJUSTED.name], errors="coerce").fillna(0.0)
+                    * multiplier
+                )
+            else:
+                continue
+            amount = amount.sort_index()
+            values = amount.to_numpy(dtype=float)
+            times = pd.DatetimeIndex(amount.index)
+            cum = np.concatenate([[0.0], np.cumsum(np.where(np.isfinite(values) & (values > 0), values, 0.0))])
+            right = np.searchsorted(times, signal_ts, side="right")
+            left = np.concatenate([[0], right[:-1]])
+            raw[:, pi] = cum[right] - cum[left]
+        except Exception:
+            continue
+
+    row_sum = raw.sum(axis=1)
+    if not np.any(row_sum > 0):
+        return None
+    return np.divide(
+        raw,
+        row_sum[:, np.newaxis],
+        out=np.zeros_like(raw, dtype=float),
+        where=row_sum[:, np.newaxis] > 0,
+    )
+
+
 def build_target_amounts(
     curr_mask_all: np.ndarray,
     prev_end_amounts: np.ndarray,
@@ -142,6 +212,7 @@ def build_target_amounts(
     rebalance_mode: str,
     close_fee_vec: np.ndarray | None = None,
     close_fee_already_paid: bool = False,
+    allocation_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build next-period target holdings for all groups with vectorized operations.
 
@@ -162,6 +233,30 @@ def build_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float) if close_fee_vec is not None else None
     if close_fees is not None and close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast to (n_groups, P)
+    weights = np.asarray(allocation_weights, dtype=float) if allocation_weights is not None else None
+    if weights is not None:
+        if weights.ndim == 1:
+            weights = weights[np.newaxis, :]
+        weights = np.where(np.isfinite(weights) & (weights > 0), weights, 0.0)
+
+    def _weighted_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
+        if weights is None:
+            counts_local = mask.sum(axis=1).astype(float)
+            out = np.zeros_like(prev_amounts, dtype=float)
+            rows = counts_local > 0
+            if rows.any():
+                out[rows] = (
+                    mask[rows].astype(float)
+                    * (capital[rows] / counts_local[rows])[:, np.newaxis]
+                )
+            return out
+        w = np.where(mask, np.broadcast_to(weights, prev_amounts.shape), 0.0)
+        denom = w.sum(axis=1)
+        out = np.zeros_like(prev_amounts, dtype=float)
+        rows = denom > 0
+        if rows.any():
+            out[rows] = w[rows] * (capital[rows] / denom[rows])[:, np.newaxis]
+        return out
 
     counts = curr_mask.sum(axis=1).astype(float)
     targets = np.zeros_like(prev_amounts, dtype=float)
@@ -173,14 +268,8 @@ def build_target_amounts(
         if close_fees is not None and not close_fee_already_paid:
             return _build_each_period_targets_with_sell_fee(
                 curr_mask, prev_amounts, wealth, np.broadcast_to(close_fees, prev_amounts.shape)
-            )
-        else:
-            available = wealth
-        targets[non_empty] = (
-            curr_mask[non_empty].astype(float)
-            * (available[non_empty] / counts[non_empty])[:, np.newaxis]
-        )
-        return targets
+            ) if weights is None else _weighted_alloc(curr_mask, wealth)
+        return _weighted_alloc(curr_mask, wealth)
 
     prev_mask = prev_amounts > 0
     staying = curr_mask & prev_mask
@@ -201,28 +290,19 @@ def build_target_amounts(
     targets = prev_amounts * staying.astype(float)
     rows_with_released = (n_entering > 0) & (released > 0)
     if rows_with_released.any():
-        targets[rows_with_released] += (
-            entering[rows_with_released].astype(float)
-            * (released[rows_with_released] / n_entering[rows_with_released])[:, np.newaxis]
-        )
+        targets[rows_with_released] += _weighted_alloc(entering, released)[rows_with_released]
 
     fallback_rows = non_empty & (n_entering > 0) & (~rows_with_released)
     if rebalance_mode == "buy_and_hold":
         # If membership expands without any released capital, equal-weight once to fund entrants.
         if fallback_rows.any():
-            targets[fallback_rows] = (
-                curr_mask[fallback_rows].astype(float)
-                * (wealth[fallback_rows] / counts[fallback_rows])[:, np.newaxis]
-            )
+            targets[fallback_rows] = _weighted_alloc(curr_mask, wealth)[fallback_rows]
     elif rebalance_mode == "recycle":
         # Keep staying holdings; only released exit capital can fund entrants.
         # If no capital was released, do not inject external cash into new members.
         initial_rows = fallback_rows & (~prev_mask.any(axis=1))
         if initial_rows.any():
-            targets[initial_rows] = (
-                curr_mask[initial_rows].astype(float)
-                * (wealth[initial_rows] / counts[initial_rows])[:, np.newaxis]
-            )
+            targets[initial_rows] = _weighted_alloc(curr_mask, wealth)[initial_rows]
     else:
         raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
 
@@ -247,6 +327,7 @@ def build_multi_session_target_amounts(
     wealth_before_trade: np.ndarray,
     has_bar: np.ndarray,
     close_fee_vec: np.ndarray,
+    allocation_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build multi-session target holdings for all groups in one matrix pass.
 
@@ -259,6 +340,27 @@ def build_multi_session_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float)
     if close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast
+    weights = np.asarray(allocation_weights, dtype=float) if allocation_weights is not None else None
+    if weights is not None:
+        if weights.ndim == 1:
+            weights = weights[np.newaxis, :]
+        weights = np.where(np.isfinite(weights) & (weights > 0), weights, 0.0)
+
+    def _weighted_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
+        if weights is None:
+            counts_local = mask.sum(axis=1).astype(float)
+            out = np.zeros_like(prev_amounts, dtype=float)
+            rows = counts_local > 0
+            if rows.any():
+                out[rows] = mask[rows].astype(float) * (capital[rows] / counts_local[rows])[:, np.newaxis]
+            return out
+        w = np.where(mask, np.broadcast_to(weights, prev_amounts.shape), 0.0)
+        denom = w.sum(axis=1)
+        out = np.zeros_like(prev_amounts, dtype=float)
+        rows = denom > 0
+        if rows.any():
+            out[rows] = w[rows] * (capital[rows] / denom[rows])[:, np.newaxis]
+        return out
 
     non_empty = curr_mask.any(axis=1)
     targets = np.zeros_like(prev_amounts, dtype=float)
@@ -283,20 +385,72 @@ def build_multi_session_target_amounts(
     targets = prev_amounts * (staying | exiting_without_bar)
     funded = non_empty & (entering_counts > 0) & (recycled > 0)
     if funded.any():
-        targets[funded] += (
-            entering_with_bar[funded].astype(float)
-            * (recycled[funded] / entering_counts[funded])[:, np.newaxis]
-        )
+        targets[funded] += _weighted_alloc(entering_with_bar, recycled)[funded]
 
     initial_funding = non_empty & (~prev_mask.any(axis=1)) & (entering_counts > 0)
     if initial_funding.any():
-        targets[initial_funding] = (
-            entering_with_bar[initial_funding].astype(float)
-            * (wealth[initial_funding] / entering_counts[initial_funding])[:, np.newaxis]
-        )
+        targets[initial_funding] = _weighted_alloc(entering_with_bar, wealth)[initial_funding]
 
     # multi-session 已扣 close fee，不 rescale 回 wealth（targets.sum < wealth 是正确的）
     return targets
+
+
+def apply_liquidity_execution(
+    prev_end_amounts: np.ndarray,
+    ideal_target_amounts: np.ndarray,
+    wealth_before_trade: np.ndarray,
+    capacity_amounts: np.ndarray,
+    open_fee_mat: np.ndarray,
+    close_fee_mat: np.ndarray,
+) -> np.ndarray:
+    """Convert ideal targets to executable targets under per-product notional caps.
+
+    Capacity is expressed in the same normalized notional unit as wealth
+    (initial wealth = 1).  Sells are capped first; remaining cash funds buys
+    by executable capacity weights, so unfilled cash stays idle.
+    """
+    prev = np.asarray(prev_end_amounts, dtype=float)
+    ideal = np.asarray(ideal_target_amounts, dtype=float)
+    wealth = np.asarray(wealth_before_trade, dtype=float)
+    caps = np.asarray(capacity_amounts, dtype=float)
+    if caps.ndim == 1:
+        caps = caps[np.newaxis, :]
+    caps = np.where(np.isfinite(caps) & (caps >= 0), caps, np.inf)
+
+    delta = ideal - prev
+    desired_sell = np.clip(-delta, 0.0, None)
+    desired_buy = np.clip(delta, 0.0, None)
+
+    sell_exec = np.minimum(desired_sell, caps)
+    after_sell = prev - sell_exec
+    sell_fee = (sell_exec * close_fee_mat).sum(axis=1)
+    cash_before = np.maximum(0.0, wealth - prev.sum(axis=1))
+    cash_after_sell = np.maximum(0.0, cash_before + sell_exec.sum(axis=1) - sell_fee)
+
+    buy_capacity = np.minimum(desired_buy, caps)
+    buy_capacity = np.where(np.isfinite(buy_capacity) & (buy_capacity > 0), buy_capacity, 0.0)
+    buy_capacity_sum = buy_capacity.sum(axis=1)
+    buy_budget = np.minimum(cash_after_sell, buy_capacity_sum)
+
+    buy_exec = np.zeros_like(prev, dtype=float)
+    rows = buy_capacity_sum > 0
+    if rows.any():
+        buy_exec[rows] = buy_capacity[rows] * (buy_budget[rows] / buy_capacity_sum[rows])[:, np.newaxis]
+
+    # Do not allow open fees to push total wealth negative.  If fees are large,
+    # scale the buy leg down once more using the effective cash requirement.
+    buy_cash_need = (buy_exec * (1.0 + open_fee_mat)).sum(axis=1)
+    over = buy_cash_need > np.maximum(cash_after_sell, 0.0) + 1e-12
+    if over.any():
+        scale = np.divide(
+            cash_after_sell[over],
+            buy_cash_need[over],
+            out=np.zeros_like(cash_after_sell[over]),
+            where=buy_cash_need[over] > 0,
+        )
+        buy_exec[over] *= scale[:, np.newaxis]
+
+    return after_sell + buy_exec
 
 
 def simulate_groups(
@@ -310,6 +464,9 @@ def simulate_groups(
     data_has_bar: np.ndarray | None = None,
     group_to_variant: np.ndarray | None = None,
     rebalance_modes: np.ndarray | list[str] | None = None,
+    liquidity_capacity_np: np.ndarray | None = None,
+    liquidity_modes: np.ndarray | list[str] | None = None,
+    liquidity_percents: np.ndarray | list[float] | None = None,
 ) -> dict:
     """Matrix simulation of group returns over T periods for n_groups groups.
 
@@ -344,6 +501,12 @@ def simulate_groups(
     rebalance_modes_arr = None
     if rebalance_modes is not None:
         rebalance_modes_arr = np.asarray(rebalance_modes, dtype=object)
+    liquidity_modes_arr = None
+    if liquidity_modes is not None:
+        liquidity_modes_arr = np.asarray(liquidity_modes, dtype=object)
+    liquidity_percents_arr = None
+    if liquidity_percents is not None:
+        liquidity_percents_arr = np.asarray(liquidity_percents, dtype=float)
 
     # ── 建立 group→variant 映射，扩展 membership ──
     if group_to_variant is not None:
@@ -364,6 +527,10 @@ def simulate_groups(
         membership_np = membership_np[:, _variant_to_group, :]
         if rebalance_modes_arr is not None and rebalance_modes_arr.shape[0] == n_groups:
             rebalance_modes_arr = rebalance_modes_arr[_variant_to_group]
+        if liquidity_modes_arr is not None and liquidity_modes_arr.shape[0] == n_groups:
+            liquidity_modes_arr = liquidity_modes_arr[_variant_to_group]
+        if liquidity_percents_arr is not None and liquidity_percents_arr.shape[0] == n_groups:
+            liquidity_percents_arr = liquidity_percents_arr[_variant_to_group]
     else:
         M = n_groups
         _variant_to_group = np.arange(M, dtype=int)
@@ -373,6 +540,25 @@ def simulate_groups(
         raise ValueError(
             f"rebalance_modes length={rebalance_modes_arr.shape[0]} != expanded groups={M}"
         )
+    if liquidity_modes_arr is None:
+        liquidity_modes_arr = np.full(M, "infinite", dtype=object)
+    elif liquidity_modes_arr.shape[0] != M:
+        raise ValueError(
+            f"liquidity_modes length={liquidity_modes_arr.shape[0]} != expanded groups={M}"
+        )
+    if liquidity_percents_arr is None:
+        liquidity_percents_arr = np.full(M, 100.0, dtype=float)
+    elif liquidity_percents_arr.shape[0] != M:
+        raise ValueError(
+            f"liquidity_percents length={liquidity_percents_arr.shape[0]} != expanded groups={M}"
+        )
+    liquidity_capacity_arr = None
+    if liquidity_capacity_np is not None:
+        liquidity_capacity_arr = np.asarray(liquidity_capacity_np, dtype=float)
+        if liquidity_capacity_arr.shape != (T, P):
+            raise ValueError(
+                f"liquidity_capacity_np shape={liquidity_capacity_arr.shape} != {(T, P)}"
+            )
     effective_close_fee_mat = close_today_fee_mat  # None means use close_fee_mat
     multi_session_active = data_has_bar is not None
     multi_session_triggered = 0
@@ -462,6 +648,21 @@ def simulate_groups(
         if is_mixed_t:
             multi_session_triggered += 1
         unique_modes = list(dict.fromkeys(str(m or rebalance_mode) for m in rebalance_modes_arr))
+        liquidity_active_t = liquidity_capacity_arr is not None and np.any(liquidity_modes_arr == "percent")
+        allocation_weights_t = None
+        executable_capacity_t = None
+        if liquidity_active_t:
+            base_capacity = np.where(
+                np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
+                liquidity_capacity_arr[t],
+                0.0,
+            )
+            percent_scale = np.clip(liquidity_percents_arr, 0.0, 100.0) / 100.0
+            percent_rows = liquidity_modes_arr == "percent"
+            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
+            executable_capacity_t[percent_rows] = base_capacity[np.newaxis, :] * percent_scale[percent_rows, np.newaxis]
+            allocation_weights_t = np.ones((M, P), dtype=float)
+            allocation_weights_t[percent_rows] = base_capacity[np.newaxis, :]
 
         def _build_targets_for_wealth(
             wealth_for_target: np.ndarray,
@@ -472,12 +673,14 @@ def simulate_groups(
                 return build_multi_session_target_amounts(
                     curr_mask_all, prev_end_amounts, wealth_for_target,
                     has_bar_t, target_close_fee_mat,
+                    allocation_weights=allocation_weights_t,
                 )
             if len(unique_modes) == 1:
                 return build_target_amounts(
                     curr_mask_all, prev_end_amounts, wealth_for_target,
                     unique_modes[0], close_fee_vec=target_close_fee_mat,
                     close_fee_already_paid=close_fee_already_paid,
+                    allocation_weights=allocation_weights_t,
                 )
             next_targets = np.zeros_like(prev_end_amounts, dtype=float)
             for mode in unique_modes:
@@ -491,6 +694,7 @@ def simulate_groups(
                     mode,
                     close_fee_vec=target_close_fee_mat[mode_mask],
                     close_fee_already_paid=close_fee_already_paid,
+                    allocation_weights=allocation_weights_t[mode_mask] if allocation_weights_t is not None else None,
                 )
             return next_targets
 
@@ -529,6 +733,21 @@ def simulate_groups(
                     ne_prev, ne_target, ne_close_fee,
                     close_today_fee_mat=ne_close_today,
                 )
+
+        if executable_capacity_t is not None:
+            target_amounts[ne_idx] = apply_liquidity_execution(
+                prev_end_amounts[ne_idx],
+                target_amounts[ne_idx],
+                ne_wb,
+                executable_capacity_t[ne_idx],
+                ne_open_fee,
+                ne_close_today if ne_close_today is not None else ne_close_fee,
+            )
+            ne_target = target_amounts[ne_idx]
+            sell, sell_fee_candidate = _compute_sell_fee_per_group(
+                ne_prev, ne_target, ne_close_fee,
+                close_today_fee_mat=ne_close_today,
+            )
 
         # Step 2: final sell fee (per-group fee vectors)
         sell_fee = sell_fee_candidate
@@ -1169,6 +1388,8 @@ def test_by_group_single_factor(
     bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
     returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
 
+    liquidity_capacity_np: np.ndarray | None = None
+
     # ── 派生组（精选组）：拼入 membership_np 作为额外组，统一计算 ──
     derived_defs = derived_groups or []
     derived_info: list[dict] = []  # [{base_group, name, product_names, id, ...}]
@@ -1225,6 +1446,28 @@ def test_by_group_single_factor(
     # 扩展组名映射（派生组用 derived_info 中的 name）
     for d_idx, di in enumerate(derived_info):
         n_names[n_base + d_idx] = di['name']
+
+    def _liquidity_mode_from_spec(spec: dict | None) -> str:
+        if not isinstance(spec, dict):
+            return "infinite"
+        mode = str(spec.get("liquidity_mode") or spec.get("liquidityMode") or "infinite").strip()
+        return mode if mode == "percent" else "infinite"
+
+    def _liquidity_percent_from_spec(spec: dict | None) -> float:
+        if not isinstance(spec, dict):
+            return 100.0
+        raw = spec.get("liquidity_percent", spec.get("liquidityPercent", 100.0))
+        try:
+            return min(100.0, max(0.0, float(raw)))
+        except (TypeError, ValueError):
+            return 100.0
+
+    liquidity_modes_list = ["infinite"] * n_groups
+    liquidity_percents_list = [100.0] * n_groups
+    for d_idx, di in enumerate(derived_info):
+        g = n_base + d_idx
+        liquidity_modes_list[g] = _liquidity_mode_from_spec(di)
+        liquidity_percents_list[g] = _liquidity_percent_from_spec(di)
 
     def _variety(col) -> str:
         nm = getattr(col, "name", str(col))
@@ -1367,6 +1610,8 @@ def test_by_group_single_factor(
         vi = 0
         base_variant_count = 0
         variant_rebalance_modes: list[str] = []
+        variant_liquidity_modes: list[str] = []
+        variant_liquidity_percents: list[float] = []
         for g in range(n_groups):
             var_list = _variants.get(g, []) or []
             for vd in var_list:
@@ -1382,6 +1627,8 @@ def test_by_group_single_factor(
                 if variant_name:
                     _new_names[vi] = str(variant_name)
                 variant_rebalance_modes.append(str(spec.get('rebalance_mode') or spec.get('rebalanceMode') or rebalance_mode))
+                variant_liquidity_modes.append(_liquidity_mode_from_spec(spec))
+                variant_liquidity_percents.append(_liquidity_percent_from_spec(spec))
                 _new_open_mat[vi] = row_open
                 _new_close_mat[vi] = row_close
                 _new_ct_mat[vi] = row_ct
@@ -1412,6 +1659,17 @@ def test_by_group_single_factor(
         n_groups = M_total  # 后续代码中的 n_groups 现在指 M
     else:
         variant_rebalance_modes = []
+        variant_liquidity_modes = liquidity_modes_list
+        variant_liquidity_percents = liquidity_percents_list
+
+    if any(str(mode) == "percent" for mode in variant_liquidity_modes):
+        liquidity_capacity_np = _build_normalized_liquidity_capacity(
+            valid_cols,
+            index_list,
+            factor._source_freq if getattr(factor, "_source_freq", None) is not None else DataFreq.MIN1,
+            start_date,
+            end_date,
+        )
 
     products_dict = {
         g: {index_list[t]: [valid_cols[i]
@@ -1444,6 +1702,9 @@ def test_by_group_single_factor(
         data_has_bar=data_has_bar,
         rebalance_mode=rebalance_mode,
         rebalance_modes=variant_rebalance_modes if variant_rebalance_modes else None,
+        liquidity_capacity_np=liquidity_capacity_np,
+        liquidity_modes=variant_liquidity_modes if variant_liquidity_modes else None,
+        liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
     )
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']

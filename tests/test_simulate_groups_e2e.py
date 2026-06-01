@@ -127,6 +127,61 @@ def test_simulate_each_period_equal_weight_zero_fee():
     np.testing.assert_allclose(net, expected, atol=1e-12)
 
 
+def test_simulate_each_period_percent_liquidity_volume_weighted_and_cash_idle():
+    """Percent liquidity weights allocation by capacity and leaves unfilled cash idle."""
+    T, N, P = 1, 1, 2
+    membership = np.ones((T, N, P), dtype=bool)
+    returns = np.array([[0.10, 0.00]], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='each_period',
+        liquidity_capacity_np=np.array([[0.2, 0.8]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([50.0], dtype=float),
+    )
+
+    # Capacity is [0.1, 0.4] after 50%; only half the wealth can be deployed.
+    # Allocation follows liquidity weights, not equal weights.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.5, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10 + 0.4 * 0.00, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
+
+
+def test_simulate_liquidity_caps_sells_before_buying_and_preserves_cash():
+    """A capped exit cannot fully fund the entrant; unsold holding remains invested."""
+    T, N, P = 2, 1, 2
+    membership = np.zeros((T, N, P), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, 1] = True
+    returns = np.array([
+        [0.00, 0.00],
+        [0.10, 0.00],
+    ], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='recycle',
+        liquidity_capacity_np=np.array([[1.0, 1.0], [0.25, 0.25]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([100.0], dtype=float),
+    )
+
+    # t=1 can sell only 0.25 of P0 and buy only 0.25 of P1.
+    # Remaining P0=0.75 stays exposed to P0 return; no leverage is created.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][1, 0], 0.5, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][1, 0], 0.75 * 0.10, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], 0.075, atol=1e-12)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # buy_and_hold with membership change, zero fee
 # ═══════════════════════════════════════════════════════════════════
