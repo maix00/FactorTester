@@ -733,6 +733,37 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                 })
                 metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
 
+        # ── 过滤：group_names 非空时，只返回前端实际存在的组 ──
+        if group_names:
+            # 确定要保留的 base group index（包括未在 group_names 中显式列出但实际存在的）
+            # group_names values 是显示名，keys 是 0-based 组索引
+            kept_base_indices = set(group_names.keys())
+            kept_base_indices.discard(-1)  # 移除 sentinel
+            # 过滤 groups_data
+            filtered_groups = []
+            kept_group_keys = set()
+            for entry in groups_data:
+                gi = entry.get('group_index')
+                is_derived = entry.get('is_derived')
+                is_ls = entry.get('is_ls')
+                if is_ls:
+                    # LS 组总是保留
+                    filtered_groups.append(entry)
+                    kept_group_keys.add(entry['key'])
+                    continue
+                if is_derived:
+                    base_group = entry.get('derived', {}).get('base_group')
+                    if base_group is not None and base_group in kept_base_indices:
+                        filtered_groups.append(entry)
+                        kept_group_keys.add(entry['key'])
+                else:
+                    if gi is not None and gi in kept_base_indices:
+                        filtered_groups.append(entry)
+                        kept_group_keys.add(entry['key'])
+            groups_data = filtered_groups
+            # 过滤 metrics
+            metrics = {k: v for k, v in metrics.items() if k in kept_group_keys}
+
         return {
             'success': True,
             'groups': groups_data, 'metrics': metrics,
