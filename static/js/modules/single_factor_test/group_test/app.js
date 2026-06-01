@@ -328,14 +328,36 @@
     // ---------- 绘制分组累计收益曲线 ----------
     var _groupChart = null;  // 当前图表引用
 
+    /**
+     * 构建连续等间隔时间轴。
+     * 自动检测日内/日间，生成自适应格式的标签，并计算合理的标签步长。
+     * 返回 { labels, labelAt, stepMs, labelEvery }。
+     */
     function buildContinuousTimeAxis(rows, timestampGetter) {
-        var labels = (rows || []).map(function(row) {
-            return formatCompactTime(timestampGetter(row));
-        });
+        var timestamps = (rows || []).map(function(row) { return timestampGetter(row); });
+        var n = timestamps.length;
+
+        // 检测日内/日间：计算相邻时间戳的最小非零间距
+        var stepMs = null;
+        for (var i = 1; i < n; i++) {
+            var d = timestamps[i] - timestamps[i - 1];
+            if (d > 0 && (stepMs === null || d < stepMs)) {
+                stepMs = d;
+            }
+        }
+
+        var labels = timestamps.map(function(ts) { return formatAdaptiveTime(ts, stepMs); });
+
+        // 计算标签步长：目标 ~8-12 个标签
+        var labelEvery = Math.max(1, Math.floor(n / 10));
+
         return {
             labels: labels,
+            labelEvery: labelEvery,
+            stepMs: stepMs,
             labelAt: function(value) {
-                return labels[Math.round(value)] || '';
+                var idx = Math.round(value);
+                return (idx >= 0 && idx < labels.length) ? labels[idx] : '';
             },
         };
     }
@@ -1609,7 +1631,7 @@
     function renderGroupDetailReturnChart(series) {
         var el = document.getElementById('group-detail-return-chart');
         if (!el || typeof Highcharts === 'undefined') return;
-        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        var axis = buildContinuousTimeAxis(series || [], function(row) { return row.timestamp; });
         var returns = (series || []).map(function(row) { return Number(row.return); });
         var bounds = getRobustAxisBounds(returns);
         var outlierPoints = [];
@@ -1629,9 +1651,10 @@
             xAxis: {
                 ordinal: false,
                 labels: {
+                    step: axis.labelEvery,
                     formatter: function() {
                         var idx = Math.round(this.value);
-                        return categories[idx] || '';
+                        return axis.labelAt(idx);
                     },
                 },
             },
@@ -1649,7 +1672,7 @@
                 formatter: function() {
                     var idx = this.points && this.points.length ? this.points[0].point.x : this.point.x;
                     var row = series[idx];
-                    return '<b>' + categories[idx] + '</b><br/>'
+                    return '<b>' + axis.labelAt(idx) + '</b><br/>'
                         + '单期收益: ' + fmtPct(row.return) + '<br/>'
                         + '累计净值: ' + Number(row.cumulative_return).toFixed(4);
                 },
@@ -1683,7 +1706,7 @@
                     labels: {
                         formatter: function() {
                             var idx = Math.round(this.value);
-                            return categories[idx] || '';
+                            return axis.labelAt(idx);
                         },
                     },
                 },
@@ -1716,10 +1739,30 @@
         };
     }
 
-    function formatCompactTime(timestamp) {
+    /**
+     * 自适应时间格式化：自动检测日内/日间，选择合适的格式。
+     * - 日内数据：YYYY-MM-DD HH:MM
+     * - 日间数据：YYYY-MM-DD
+     * - 如果提供了相邻时间戳的间距，以此判断；否则从 timestamps 数组推断
+     */
+    function formatAdaptiveTime(timestamp, stepMs) {
         var d = new Date(timestamp);
-        if (isNaN(d.getTime())) return timestamp;
-        return d.toLocaleString();
+        if (isNaN(d.getTime())) return String(timestamp);
+        var y = d.getFullYear();
+        var mo = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        var h = String(d.getHours()).padStart(2, '0');
+        var mi = String(d.getMinutes()).padStart(2, '0');
+        // stepMs < 86400000 (1天) 视为日内
+        if (stepMs != null && stepMs < 86400000) {
+            return y + '-' + mo + '-' + day + ' ' + h + ':' + mi;
+        }
+        return y + '-' + mo + '-' + day;
+    }
+
+    function formatCompactTime(timestamp) {
+        // 保留旧函数作为兜底，内部委托给自适应格式
+        return formatAdaptiveTime(timestamp, null);
     }
 
     function renderGroupDetail(detail, options) {
@@ -2030,6 +2073,7 @@
             title: { text: null },
             xAxis: {
                 labels: {
+                    step: axis.labelEvery,
                     formatter: function() { return axis.labelAt(this.value); },
                 },
             },
@@ -2222,6 +2266,7 @@
             title: { text: null },
             xAxis: {
                 labels: {
+                    step: axis.labelEvery,
                     formatter: function() { return axis.labelAt(this.value); },
                 },
             },
@@ -2262,13 +2307,15 @@
     function renderGroupRankingMonotonicChart(series) {
         var el = document.getElementById('group-ranking-monotonic-chart');
         if (!el || typeof Highcharts === 'undefined') return;
-        var categories = (series || []).map(function(row) { return formatCompactTime(row.timestamp); });
+        var axis = buildContinuousTimeAxis(series || [], function(row) { return row.timestamp; });
         Highcharts.chart(el, {
             chart: { type: 'column', backgroundColor: 'transparent' },
             title: { text: null },
             xAxis: {
-                categories: categories,
-                labels: { step: Math.max(1, Math.ceil(categories.length / 8)) },
+                labels: {
+                    step: axis.labelEvery,
+                    formatter: function() { return axis.labelAt(this.value); },
+                },
             },
             yAxis: {
                 min: 0,
@@ -2282,15 +2329,17 @@
             legend: { enabled: false },
             tooltip: {
                 formatter: function() {
-                    var row = series[this.point.index];
+                    var idx = Math.round(this.x);
+                    var row = series[idx];
                     var state = row.is_descending ? '严格降序' : (row.is_monotonic ? '严格升序' : '非单调');
-                    return '<b>' + categories[this.point.index] + '</b><br/>' + state;
+                    return '<b>' + axis.labelAt(idx) + '</b><br/>' + state;
                 },
             },
             series: [{
                 name: '单调性',
-                data: (series || []).map(function(row) {
+                data: (series || []).map(function(row, idx) {
                     return {
+                        x: idx,
                         y: row.is_monotonic ? 1 : 0,
                         color: row.is_descending ? '#2f855a' : (row.is_monotonic ? '#7c9fe6' : '#d0d5dd'),
                     };
@@ -3078,18 +3127,7 @@
         var start_date = firstGroup ? (firstGroup.startDate || null) : null;
         var end_date = firstGroup ? (firstGroup.endDate || null) : null;
 
-        // 读取时间范围 fallback
-        if (!start_date || !end_date) {
-            var ctx = getCurrentContext();
-            var sub = ctx ? ctx.submission : null;
-            if (!sub && window.submissions) {
-                var firstTesterId = batches[0] && batches[0].testerId;
-                sub = window.submissions.find(function(s) { return String(s.id) === String(firstTesterId); });
-            }
-            if (!start_date) start_date = sub ? sub.start_date : null;
-            if (!end_date) end_date = sub ? sub.end_date : null;
-        }
-        // More fallbacks from DOM
+        // 读取时间范围 fallback — 先读分组时间 DOM（用户显式设置），再 fallback 到 submission（主时间模块）
         if (!start_date || !end_date) {
             var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
             var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
@@ -3099,6 +3137,16 @@
             var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
             var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
             if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
+        }
+        if (!start_date || !end_date) {
+            var ctx = getCurrentContext();
+            var sub = ctx ? ctx.submission : null;
+            if (!sub && window.submissions) {
+                var firstTesterId = batches[0] && batches[0].testerId;
+                sub = window.submissions.find(function(s) { return String(s.id) === String(firstTesterId); });
+            }
+            if (!start_date) start_date = sub ? sub.start_date : null;
+            if (!end_date) end_date = sub ? sub.end_date : null;
         }
 
         if (!start_date || !end_date) {
@@ -3406,7 +3454,7 @@
             GT_PANEL_REGISTRY.push({ name: 'add-base', label: '新建基础组', containerId: 'add-base', category: GT_TAB_CATEGORY.ADD, panel: P.add.base, addFlow: 'base' });
         }
         if (P.add && P.add.derived) {
-            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '新建派生组', containerId: 'add-derived', category: GT_TAB_CATEGORY.ADD, panel: P.add.derived, addFlow: 'derived' });
+            GT_PANEL_REGISTRY.push({ name: 'add-derived', label: '派生组定义 - 品种筛选', containerId: 'add-derived', category: GT_TAB_CATEGORY.ADD, panel: P.add.derived, addFlow: 'derived' });
         }
         if (P.add && P.add.ls) {
             GT_PANEL_REGISTRY.push({ name: 'add-ls', label: '新建 LS 组', containerId: 'add-ls', category: GT_TAB_CATEGORY.ADD, panel: P.add.ls, addFlow: 'ls' });
@@ -3873,7 +3921,13 @@
                 if (selected.isDerived) {
                     draft.preselectedParentDerivedId = selected.id;
                     draft.preselectedBaseGroupId = selected.baseGroupId;
-                    draft.preselectedProducts = effectiveDerivedProductNames(selected);
+                    // Only preselect products if the parent has its own productMask (override);
+                    // otherwise leave empty so the child inherits from the parent chain.
+                    var parentMask = selected.productMask || {};
+                    var hasOwnMask = Object.keys(parentMask).length > 0;
+                    if (hasOwnMask) {
+                        draft.preselectedProducts = Object.keys(parentMask).filter(function(k) { return parentMask[k]; });
+                    }
                 } else {
                     draft.preselectedBaseGroupId = selected.id;
                 }
@@ -4104,6 +4158,13 @@
                 } catch (err) {
                     alert('创建派生组失败: ' + (err && err.message || err));
                     return;
+                }
+                // Auto-expand parent derived node so the new child is visible
+                if (parentDerivedId && GT.datamodel.groups) {
+                    var parentNode = GT.datamodel.groups.get(parentDerivedId);
+                    if (parentNode && parentNode._expanded === false) {
+                        GT.datamodel.groups.toggleExpanded(parentDerivedId);
+                    }
                 }
                 _exitAddMode();
             }

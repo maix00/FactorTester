@@ -113,6 +113,7 @@
                 mode: node.feeMode,
                 rate: node.feeRate !== undefined ? node.feeRate : null,
                 feeMap: node.feeMap !== undefined ? _deepCopy(node.feeMap) : null,
+                sensitivity: node.feeSensitivity !== undefined ? node.feeSensitivity : 1,
             };
         }
 
