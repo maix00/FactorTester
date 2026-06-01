@@ -975,19 +975,38 @@
     function renderGroupFrequency(rows, selectable) {
         if (!rows || !rows.length) return '<div class="group-detail-muted">暂无数据</div>';
         selectable = selectable !== false;
+        var hasHighlight = false;
         var feeLabel = isRealFee(rows[0]) ? ' (原始费率)' : '';
-        var html = '<table class="group-detail-table"><thead><tr>'
+        var html = '';
+        // 绿色行快捷新建按钮 — 在表格上方
+        rows.forEach(function(row) {
+            var meanRet = row.mean_return;
+            var fee = (row.product && row.product.fee) || {};
+            var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
+            if (meanRet != null && isFinite(meanRet) && meanRet > totalFee) hasHighlight = true;
+        });
+        if (selectable && hasHighlight) {
+            html += '<div style="margin-bottom:6px;">'
+                + '<button type="button" class="btn btn-sm btn-outline-success" id="derived-group-quick-define-btn"'
+                + ' style="font-size:12px;padding:3px 10px;border-color:#86efac;color:#16a34a;">'
+                + '新建收益率大于费率的派生组</button>'
+                + '<span style="font-size:11px;color:#888;margin-left:8px;">自动勾选绿色行（均值收益 > 费率）并创建派生组</span>'
+                + '</div>';
+        }
+        html += '<table class="group-detail-table"><thead><tr>'
             + (selectable ? '<th style="width:34px;"><input type="checkbox" id="derived-select-all-products" title="全选当前显示品种"></th>' : '')
             + '<th>产品</th><th>产品描述</th><th>均值收益</th><th>开仓费率' + feeLabel + '</th><th>平今费率' + feeLabel + '</th><th>平昨费率' + feeLabel + '</th><th>入组次数</th><th>频率</th></tr></thead><tbody>';
         rows.forEach(function(row) {
             var meanRet = row.mean_return;
             var fee = (row.product && row.product.fee) || {};
             var totalFee = (fee.total != null && isFinite(fee.total)) ? fee.total : 0;
-            var highlight = (meanRet != null && isFinite(meanRet) && meanRet > totalFee) ? ' style="background:rgba(144,238,144,0.25)"' : '';
+            var isHighlight = (meanRet != null && isFinite(meanRet) && meanRet > totalFee);
+            var highlight = isHighlight ? ' style="background:rgba(144,238,144,0.25)"' : '';
+            var dataHighlight = isHighlight ? ' data-highlight="1"' : '';
             var prod = row.product;
             var name = (prod && prod.name) || '—';
             var desc = (prod && prod.desc && prod.desc !== name) ? prod.desc : '—';
-            html += '<tr' + highlight + '>'
+            html += '<tr' + highlight + dataHighlight + '>'
                 + (selectable ? '<td><input type="checkbox" class="derived-product-checkbox" data-product-name="' + escapeHtml(name) + '"></td>' : '')
                 + '<td>' + escapeHtml(name) + '</td><td style="max-width:120px;white-space:normal;word-break:break-all">' + escapeHtml(desc) + '</td>'
                 + '<td>' + fmtFeeRate(meanRet) + '</td>'
@@ -996,7 +1015,8 @@
                 + '<td>' + fmtFeeRate(fee.close_yesterday != null ? fee.close_yesterday : fee.close) + '</td>'
                 + '<td>' + (row.count == null ? '—' : row.count) + '</td><td>' + (row.frequency == null ? '—' : (row.frequency * 100).toFixed(1) + '%') + '</td></tr>';
         });
-        return html + '</tbody></table>';
+        html += '</tbody></table>';
+        return html;
     }
 
     function getDerivedGroupsForCurrentBase(groupIndex) {
@@ -1006,25 +1026,60 @@
     function renderDerivedGroupsPanel(groupIndex) {
         var el = document.getElementById('group-derived-groups-panel');
         if (!el) return;
-        var defs = getDerivedGroupsForCurrentBase(groupIndex);
-        var defaultName = '第' + (groupIndex + 1) + '组精选' + (_derivedGroupSeq || 1);
-        var html = '<div class="derived-group-panel">'
-            + '<div class="derived-group-toolbar">'
-            + '<b>派生组</b>'
-            + '<input id="derived-group-name-input" placeholder="派生组名称，默认 ' + escapeHtml(defaultName) + '">'
-            + '<button type="button" class="btn btn-sm btn-outline-primary" id="derived-group-define-btn">用统一入口新建</button>'
-            + '<button type="button" class="btn btn-sm btn-primary" id="derived-group-generate-all-btn">生成全部派生组</button>'
-            + '<span class="group-detail-muted">先勾选下方品种；新建会跳转到统一的派生组创建面板。</span>'
+
+        var baseGroupId = findBaseGroupIdForResultGroup(groupIndex);
+        // 直接从 datamodel 读取当前 base group 下所有派生节点
+        var derivedNodes = [];
+        if (baseGroupId && GT.datamodel && GT.datamodel.groups) {
+            var allNodes = GT.datamodel.groups.getAll();
+            for (var i = 0; i < allNodes.length; i++) {
+                if (allNodes[i].isDerived && allNodes[i].baseGroupId === baseGroupId) {
+                    derivedNodes.push(allNodes[i]);
+                }
+            }
+        }
+
+        var html = '<div class="derived-group-panel" style="border:1px solid #c7d2fe;border-radius:8px;background:#f8faff;padding:8px;">'
+            + '<div class="derived-group-toolbar" style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid #e2e8f0;">'
+            + '<b style="font-size:13px;color:#1e293b;">派生组</b>'
+            + '<span style="flex:1;"></span>'
+            + '<button type="button" class="btn btn-sm btn-outline-primary" id="derived-group-define-btn" style="font-size:12px;padding:3px 10px;">新建</button>'
             + '</div>';
-        defs.forEach(function(def) {
-            html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(def.id) + '">'
-                + '<span><b>' + escapeHtml(def.name) + '</b> · 第' + (def.baseGroup + 1) + '组 · ' + def.productNames.length + '个品种'
-                + (def.generated ? ' · 已生成' : ' · 未生成') + '</span>'
-                + '<span class="derived-group-actions">'
-                + '<button type="button" class="btn btn-sm btn-outline-primary derived-group-generate-btn" data-derived-id="' + escapeHtml(def.id) + '">生成曲线/统计</button>'
-                + '<button type="button" class="btn btn-sm btn-outline-danger derived-group-delete-btn" data-derived-id="' + escapeHtml(def.id) + '">删除</button>'
-                + '</span></div>';
-        });
+
+        if (!derivedNodes.length) {
+            html += '<div style="padding:8px;text-align:center;color:#888;font-size:12px;">暂无派生组 · 勾选下方品种后点击「新建」</div>';
+        } else {
+            for (var d = 0; d < derivedNodes.length; d++) {
+                var node = derivedNodes[d];
+                var alias = groupDisplayKey(node);
+                var products = effectiveDerivedProductNames(node);
+                var generated = _derivedGroups.some(function(dg) { return dg.id === node.id && dg.generated; });
+
+                html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(node.id) + '"'
+                    + ' style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;">'
+                    + '<span style="width:6px;height:6px;border-radius:50%;background:#6366f1;flex-shrink:0;margin-right:8px;"></span>'
+                    + '<span style="width:20px;margin-right:2px;flex-shrink:0;"></span>'
+                    + '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + escapeHtml(alias) + '</span>'
+                    + '<span style="flex:1;"></span>'
+                    + '<span class="overlay-dg-product-chip" data-overlay-dg-id="' + escapeHtml(node.id) + '"'
+                    + ' style="display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;">'
+                    + '📋 ' + products.length + '品种 ▸</span>'
+                    + (generated ? '<span style="color:#16a34a;font-size:11px;margin-right:8px;">已生成</span>' : '<span style="color:#f59e0b;font-size:11px;margin-right:8px;">未生成</span>')
+                    + '<button type="button" class="btn btn-sm btn-outline-primary derived-group-generate-btn" data-derived-id="' + escapeHtml(node.id) + '" style="font-size:11px;padding:2px 8px;">生成曲线/统计</button>'
+                    + '<button type="button" class="btn btn-sm btn-outline-danger derived-group-delete-btn" data-derived-id="' + escapeHtml(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>'
+                    + '</div>';
+
+                // 可展开产品列表
+                if (products.length > 0) {
+                    html += '<div class="overlay-dg-product-list" data-overlay-dg-id="' + escapeHtml(node.id) + '"'
+                        + ' style="display:none;margin-left:34px;padding:4px 8px;border-left:2px solid #c7d2fe;font-size:11px;">';
+                    for (var pi = 0; pi < products.length; pi++) {
+                        html += '<div style="padding:2px 0;"><span style="color:#0078d4;font-weight:600;margin-right:8px;">' + escapeHtml(products[pi]) + '</span></div>';
+                    }
+                    html += '</div>';
+                }
+            }
+        }
         html += '</div>';
         el.innerHTML = html;
         bindDerivedGroupPanelEvents(groupIndex);
@@ -1040,65 +1095,35 @@
             });
         }
         var defineBtn = document.getElementById('derived-group-define-btn');
-        if (defineBtn) defineBtn.addEventListener('click', function() { openAddDerivedFromDetail(groupIndex); });
-        var generateAllBtn = document.getElementById('derived-group-generate-all-btn');
-        if (generateAllBtn) {
-            generateAllBtn.addEventListener('click', async function() {
-                var defs = getDerivedGroupsForCurrentBase(groupIndex).filter(function(d) { return !d.generated; });
-                if (!defs.length) return;
-                if (!_lastGrossData || !_lastMetrics) {
-                    alert('请先运行分组测试，再生成派生组曲线。');
-                    return;
-                }
-                var context = getCurrentContext();
-                if (!context || !context.submission_id) return;
-                var feePayload;
-                try {
-                    feePayload = await buildFeePayload();
-                } catch (err) {
-                    alert('获取费率失败: ' + err.message);
-                    return;
-                }
-                // 批量接口：后端一次调用，计算全部派生组
-                var entries = defs.map(function(def) {
-                    return { group_index: def.baseGroup, product_names: def.productNames, name: def.name };
-                });
-                var resp = await GT.api.createDerivedGroupsBatch({
-                    submission_id: context.submission_id,
-                    entries: entries,
-                    use_closetoday: GT.fee ? GT.fee.useCloseToday() : false,
-                    fee: feePayload.fee,
-                    fee_map: feePayload.fee_map
-                });
-                if (!resp || !resp.success) {
-                    alert('批量生成派生组失败: ' + ((resp && resp.error) || '未知错误'));
-                    return;
-                }
-                // 批量应用结果
-                var errors = [];
-                (resp.results || []).forEach(function(result, i) {
-                    if (result && result.success) {
-                        var def = defs[i];
-                        removeGeneratedDerivedArtifacts(def.id);
-                        def.key = makeUniqueGroupKey(def.name, def.id);
-                        def.generated = true;
-                        var group = result.group || {};
-                        group.name = def.name;
-                        group.is_derived = true;
-                        group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
-                        _lastGrossData.push(group);
-                        _lastMetrics[def.key] = result.metric || {};
-                    } else if (result) {
-                        errors.push((defs[i] && defs[i].name) || '?');
+        if (defineBtn) defineBtn.addEventListener('click', function() { defineDerivedGroup(groupIndex); });
+
+        // 绿色行快捷新建：自动勾选「收益率 > 费率」产品并创建派生组
+        var quickBtn = document.getElementById('derived-group-quick-define-btn');
+        if (quickBtn) {
+            quickBtn.addEventListener('click', function() {
+                document.querySelectorAll('.derived-product-checkbox').forEach(function(cb) {
+                    var row = cb.closest('tr');
+                    if (row && row.hasAttribute('data-highlight')) {
+                        cb.checked = true;
                     }
                 });
-                // 统一刷新一次
-                _refreshGroupView(groupIndex);
-                if (errors.length) {
-                    alert('以下派生组生成失败: ' + errors.join(', '));
-                }
+                defineDerivedGroup(groupIndex);
             });
         }
+
+        // product chip 展开/折叠产品列表
+        document.querySelectorAll('.overlay-dg-product-chip').forEach(function(chip) {
+            chip.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var dgId = this.getAttribute('data-overlay-dg-id');
+                var list = document.querySelector('.overlay-dg-product-list[data-overlay-dg-id="' + dgId + '"]');
+                if (!list) return;
+                var isHidden = list.style.display === 'none';
+                list.style.display = isHidden ? 'block' : 'none';
+                this.innerHTML = '📋 ' + (list.querySelectorAll('div').length) + '品种 ' + (isHidden ? '▾' : '▸');
+            });
+        });
+
         document.querySelectorAll('.derived-group-generate-btn').forEach(function(btn) {
             btn.addEventListener('click', function() { generateDerivedGroup(btn.getAttribute('data-derived-id')); });
         });
@@ -1200,17 +1225,26 @@
             alert('请先勾选至少一个入组产品。');
             return;
         }
-        var input = document.getElementById('derived-group-name-input');
-        var name = (input && input.value ? input.value.trim() : '') || ('第' + (groupIndex + 1) + '组精选' + _derivedGroupSeq);
-        var id = 'D' + _derivedGroupSeq++;
-        _derivedGroups.push({
-            id: id,
-            key: name,
-            name: name,
-            baseGroup: groupIndex,
-            productNames: productNames,
-            generated: false
-        });
+        var baseGroupId = findBaseGroupIdForResultGroup(groupIndex);
+        if (!baseGroupId) {
+            alert('未找到对应基础组，请先在左侧面板创建分组组合。');
+            return;
+        }
+        var productMask = {};
+        productNames.forEach(function(pn) { productMask[pn] = true; });
+        var newId;
+        try {
+            newId = GT.datamodel.groups.add({
+                name: '',
+                isDerived: true,
+                baseGroupId: baseGroupId,
+                parentId: null,
+                productMask: productMask
+            });
+        } catch (e) {
+            alert('创建派生组失败: ' + (e.message || e));
+            return;
+        }
         renderDerivedGroupsPanel(groupIndex);
     }
 
@@ -1277,14 +1311,14 @@
     }
 
     function removeGeneratedDerivedArtifacts(id) {
-        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+        var key = node ? groupDisplayKey(node) : null;
         if (_lastGrossData) {
             _lastGrossData = _lastGrossData.filter(function(group) {
                 return !(group && group.is_derived && group.derived && group.derived.id === id);
             });
         }
-        if (def && _lastMetrics && def.key) delete _lastMetrics[def.key];
-        if (def) def.generated = false;
+        if (key && _lastMetrics) delete _lastMetrics[key];
     }
 
     /** 为单个派生组发请求，不画图；返回 {success, def, group, metric} 或 null。 */
@@ -1333,10 +1367,11 @@
 
     /** 单个派生组生成：发 1 次请求，更新数据，刷新 1 次。 */
     async function generateDerivedGroup(id) {
-        var def = _derivedGroups.find(function(item) { return item.id === id; });
-        if (!def) return;
-        if (def.baseGroup == null) {
-            alert('派生组缺少 baseGroup，请重新定义。');
+        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+        if (!node || !node.isDerived) return;
+        var products = effectiveDerivedProductNames(node);
+        if (!products.length) {
+            alert('该派生组没有选中任何品种。');
             return;
         }
         if (!_lastGrossData || !_lastMetrics) {
@@ -1350,23 +1385,49 @@
             alert('获取费率失败: ' + err.message);
             return;
         }
+        // 找到 baseGroupIndex（0-based，从 _lastGrossData 匹配 key）
+        var baseGroupIndex = _currentGroupDetailIndex;
+        if (baseGroupIndex == null) {
+            var baseNode = GT.datamodel.groups.get(node.baseGroupId);
+            if (baseNode) {
+                baseGroupIndex = (baseNode.groupIndex || 1) - 1;
+            }
+        }
+        var def = {
+            id: node.id,
+            name: groupDisplayKey(node),
+            key: groupDisplayKey(node),
+            baseGroup: baseGroupIndex,
+            productNames: products,
+            productMask: node.productMask || {}
+        };
         var result = await _generateDerivedGroupOnce(def, feePayload);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;
         }
         _applyDerivedGroupResult(result);
-        _refreshGroupView(_currentGroupDetailIndex == null ? def.baseGroup : _currentGroupDetailIndex);
+        _refreshGroupView(baseGroupIndex);
     }
 
     function deleteDerivedGroup(id) {
-        var def = _derivedGroups.find(function(item) { return item.id === id; });
+        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+        var baseGroupIndex = _currentGroupDetailIndex;
+        if (baseGroupIndex == null && node && node.baseGroupId) {
+            var baseNode = GT.datamodel.groups.get(node.baseGroupId);
+            if (baseNode) baseGroupIndex = (baseNode.groupIndex || 1) - 1;
+        }
         removeGeneratedDerivedArtifacts(id);
-        _derivedGroups = _derivedGroups.filter(function(item) { return item.id !== id; });
+        try {
+            if (GT.datamodel && GT.datamodel.groups) GT.datamodel.groups.remove(id);
+            if (GT.state && GT.state.emit) GT.state.emit('groupsChanged');
+        } catch (e) {
+            console.warn('[deleteDerivedGroup] datamodel remove failed:', e);
+        }
         if (_lastGrossData) drawGroupChart(_lastGrossData);
         if (_lastMetrics) renderMetricsTable(_lastMetrics);
         updateActiveGroupCache();
-        renderDerivedGroupsPanel(_currentGroupDetailIndex == null ? (def ? def.baseGroup : 0) : _currentGroupDetailIndex);
+        renderDerivedGroupsPanel(baseGroupIndex != null ? baseGroupIndex : 0);
     }
 
     function renderPositiveRuns(rows) {
