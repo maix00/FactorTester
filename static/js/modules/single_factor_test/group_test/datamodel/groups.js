@@ -243,6 +243,101 @@
         return baseAlias + ':' + suffix;
     }
 
+    function serializeFeeMap(feeMap) {
+        if (!feeMap || typeof feeMap !== 'object') return null;
+        var serialized = {};
+        Object.keys(feeMap).forEach(function(code) {
+            var override = feeMap[code];
+            if (override && typeof override === 'object') {
+                serialized[String(code).toLowerCase()] = {
+                    open: override.open_ratio != null ? override.open_ratio : null,
+                    close: override.close_ratio != null ? override.close_ratio : null,
+                    close_today: override.closetoday_ratio != null ? override.closetoday_ratio : (override.close_today_ratio != null ? override.close_today_ratio : null)
+                };
+            }
+        });
+        return Object.keys(serialized).length > 0 ? serialized : null;
+    }
+
+    function serializeVariant(group, fallbackName) {
+        if (!group) return null;
+        var mode = group.feeMode || 'none';
+        var displayName = group.shortAlias || group.name || fallbackName || group.id || '';
+        return {
+            name: displayName,
+            key: displayName,
+            fee_mode: mode,
+            fee_rate: group.feeRate != null ? group.feeRate : null,
+            fee_map: (mode === 'per_product' || mode === 'custom') ? serializeFeeMap(group.feeMap) : null,
+            use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
+            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
+            liquidity_mode: group.liquidityMode || 'infinite',
+            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
+        };
+    }
+
+    function effectiveProductNames(node, options, seen) {
+        if (!node) return [];
+        options = options || {};
+        seen = seen || {};
+        if (seen[node.id]) return [];
+        seen[node.id] = true;
+
+        var mask = node.productMask || {};
+        var selected = Object.keys(mask).filter(function(name) { return mask[name]; });
+        if (selected.length) return selected;
+
+        if (node.parentId) {
+            return effectiveProductNames(get(node.parentId), options, seen);
+        }
+
+        if (node.baseGroupId) {
+            var base = get(node.baseGroupId);
+            if (base && Array.isArray(base.products) && base.products.length) return base.products.slice();
+            if (base && base.testerId && typeof options.getProductsForTester === 'function') {
+                return options.getProductsForTester(base.testerId) || [];
+            }
+        }
+        return [];
+    }
+
+    function collectDerivedPayloadForBatch(batch, options) {
+        if (!batch) return [];
+        var all = getAll();
+        var baseById = {};
+        (batch.groups || []).forEach(function(group) {
+            if (group && group.id) baseById[group.id] = group;
+        });
+
+        var payload = [];
+        all.forEach(function(group) {
+            if (!group || !group.isDerived || !group.baseGroupId) return;
+            var base = baseById[group.baseGroupId];
+            if (!base) return;
+            var products = effectiveProductNames(group, options);
+            if (!products.length) return;
+            var name = group.shortAlias || displayKey(group, all) || group.name || '派生组';
+            payload.push({
+                id: group.id,
+                key: name,
+                name: name,
+                baseGroup: (base.groupIndex || 1) - 1,
+                productNames: products,
+                fee_mode: group.feeMode || 'none',
+                fee_rate: group.feeRate != null ? group.feeRate : null,
+                fee_map: serializeFeeMap(group.feeMap),
+                useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
+                rebalanceMode: group.rebalanceMode || 'each_period',
+                rebalance_mode: group.rebalanceMode || 'each_period',
+                liquidityMode: group.liquidityMode || 'infinite',
+                liquidity_mode: group.liquidityMode || 'infinite',
+                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100,
+                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
+            });
+        });
+        return payload;
+    }
+
     // ---------------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------------
@@ -667,6 +762,10 @@
         batchKey: batchKey,
         extractLetter: extractLetter,
         displayKey: displayKey,
+        serializeFeeMap: serializeFeeMap,
+        serializeVariant: serializeVariant,
+        effectiveProductNames: effectiveProductNames,
+        collectDerivedPayloadForBatch: collectDerivedPayloadForBatch,
         // Tree methods (for derived hierarchy)
         getTree: getTree,
         getDescendants: getDescendants,

@@ -749,23 +749,10 @@
     }
 
     function effectiveDerivedProductNames(node, seen) {
-        if (!node) return [];
-        seen = seen || {};
-        if (seen[node.id]) return [];
-        seen[node.id] = true;
-
-        var mask = node.productMask || {};
-        var selected = Object.keys(mask).filter(function(name) { return mask[name]; });
-        if (selected.length) return selected;
-
-        if (node.parentId && GT.datamodel && GT.datamodel.groups) {
-            return effectiveDerivedProductNames(GT.datamodel.groups.get(node.parentId), seen);
-        }
-
-        if (node.baseGroupId && GT.datamodel && GT.datamodel.groups) {
-            var base = GT.datamodel.groups.get(node.baseGroupId);
-            if (base && Array.isArray(base.products) && base.products.length) return base.products.slice();
-            if (base && base.testerId) return productNamesForTester(base.testerId);
+        if (GT.datamodel && GT.datamodel.groups && typeof GT.datamodel.groups.effectiveProductNames === 'function') {
+            return GT.datamodel.groups.effectiveProductNames(node, {
+                getProductsForTester: productNamesForTester
+            }, seen);
         }
         return [];
     }
@@ -786,73 +773,18 @@
     }
 
     function serializeGroupFeeMap(feeMap) {
-        if (!feeMap || typeof feeMap !== 'object') return null;
-        var serialized = {};
-        Object.keys(feeMap).forEach(function(code) {
-            var ov = feeMap[code];
-            if (ov && typeof ov === 'object') {
-                serialized[String(code).toLowerCase()] = {
-                    open: ov.open_ratio != null ? ov.open_ratio : null,
-                    close: ov.close_ratio != null ? ov.close_ratio : null,
-                    close_today: ov.closetoday_ratio != null ? ov.closetoday_ratio : (ov.close_today_ratio != null ? ov.close_today_ratio : null)
-                };
-            }
-        });
-        return Object.keys(serialized).length > 0 ? serialized : null;
+        return GT.datamodel.groups.serializeFeeMap(feeMap);
     }
 
     function serializeGroupVariant(group, fallbackName) {
-        if (!group) return null;
-        var mode = group.feeMode || 'none';
-        var displayName = group.shortAlias || group.name || fallbackName || group.id || '';
-        return {
-            name: displayName,
-            key: displayName,
-            fee_mode: mode,
-            fee_rate: group.feeRate != null ? group.feeRate : null,
-            fee_map: (mode === 'per_product' || mode === 'custom') ? serializeGroupFeeMap(group.feeMap) : null,
-            use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
-            liquidity_mode: group.liquidityMode || 'infinite',
-            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
-        };
+        return GT.datamodel.groups.serializeVariant(group, fallbackName);
     }
 
     function collectDerivedPayloadForBatch(batch) {
-        if (!batch || !GT.datamodel || !GT.datamodel.groups) return [];
-        var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
-        var baseById = {};
-        (batch.groups || []).forEach(function(group) {
-            if (group && group.id) baseById[group.id] = group;
+        if (!GT.datamodel || !GT.datamodel.groups || typeof GT.datamodel.groups.collectDerivedPayloadForBatch !== 'function') return [];
+        return GT.datamodel.groups.collectDerivedPayloadForBatch(batch, {
+            getProductsForTester: productNamesForTester
         });
-
-        var payload = [];
-        all.forEach(function(group) {
-            if (!group || !group.isDerived || !group.baseGroupId) return;
-            var base = baseById[group.baseGroupId];
-            if (!base) return;
-            var products = effectiveDerivedProductNames(group);
-            if (!products.length) return;
-            var displayName = group.shortAlias || groupDisplayKey(group, all) || group.name || '派生组';
-            payload.push({
-                id: group.id,
-                key: displayName,
-                name: displayName,
-                baseGroup: (base.groupIndex || 1) - 1,
-                productNames: products,
-                fee_mode: group.feeMode || 'none',
-                fee_rate: group.feeRate != null ? group.feeRate : null,
-                fee_map: serializeGroupFeeMap(group.feeMap),
-                useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
-                rebalanceMode: group.rebalanceMode || 'each_period',
-                rebalance_mode: group.rebalanceMode || 'each_period',
-                liquidityMode: group.liquidityMode || 'infinite',
-                liquidity_mode: group.liquidityMode || 'infinite',
-                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100,
-                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
-            });
-        });
-        return payload;
     }
 
     function defineDerivedGroup(groupIndex) {
