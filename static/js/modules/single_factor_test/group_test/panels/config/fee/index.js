@@ -137,26 +137,8 @@
         });
     }
 
-    /**
-     * Bind legacy DOM fee controls (bridge from app.js).
-     * Handles slider, radio buttons, close-today toggle that still exist in the DOM.
-     */
     function bindFeeControls() {
-        // Sensitivity slider (legacy)
-        var slider = document.getElementById('fee_sensitivity_slider');
-        if (slider && !slider._feeBound) {
-            slider._feeBound = true;
-            slider.addEventListener('input', function() {
-                var lbl = document.getElementById('fee_sensitivity_label');
-                if (lbl) lbl.textContent = parseFloat(this.value).toFixed(3) + '%';
-            });
-            slider.addEventListener('change', function() {
-                var val = parseFloat(this.value);
-                if (GT.ui && typeof GT.ui.recalcWithFee === 'function') {
-                    GT.ui.recalcWithFee(val);
-                }
-            });
-        }
+        // Legacy hook kept for app.js init compatibility.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

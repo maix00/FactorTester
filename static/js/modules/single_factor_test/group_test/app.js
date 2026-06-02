@@ -2139,9 +2139,6 @@
         // 画图 + 指标表
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
-
-        var slider = document.getElementById('fee_sensitivity_slider');
-        if (slider) { slider.value = 0; updateSensitivityLabel(0); }
     }
 
     /** 批量重新生成全部精选组 + LS 组，所有请求完成后统一刷新图表一次。
@@ -2855,135 +2852,6 @@
         _panelsRegistered = true;
     }
 
-    /** 更新敏感性滑条标签 */
-    function updateSensitivityLabel(val) {
-        var lbl = document.getElementById('fee_sensitivity_label');
-        if (lbl) lbl.textContent = parseFloat(val).toFixed(3) + '%';
-    }
-
-    /** 根据新费率重算累积净值（统一费率模式） */
-    function recalcWithFee(newFeePct) {
-        if (!_lastGrossData || _lastGrossData.length === 0) return;
-        var feeRatio = parseFloat(newFeePct) / 100.0;  // 双边费率：% → 小数
-
-        var nGroups = _lastNgroups;
-        var recalcGroups = [];
-
-        // 前 n_groups 组：做多组
-        for (var g = 0; g < nGroups; g++) {
-            var src = _lastGrossData[g];
-            if (!src || !src.gross_returns) {
-                recalcGroups.push(src);
-                continue;
-            }
-            var cumVals = [];
-            var wealth = 1.0;
-            var gross = src.gross_returns;
-            var tradeNotional = src.trade_notional_ratios || [];
-            for (var i = 0; i < gross.length; i++) {
-                var gRet = gross[i];
-                // 后台统一费率会拆成开/平各一半；只有实际买卖的名义金额才扣费。
-                // trade_notional=2 表示全卖再全买一次，刚好扣完整双边费率。
-                var periodFee = feeRatio * ((tradeNotional[i] || 0.0) / 2.0);
-                var net = (1.0 - periodFee) * (1.0 + gRet) - 1.0;
-                if (isNaN(net) || !isFinite(net)) net = 0.0;
-                wealth *= (1.0 + net);
-                cumVals.push(roundVal(wealth));
-            }
-            recalcGroups.push({
-                name: src.name,
-                timestamps: src.timestamps,
-                cumulative_returns: cumVals,
-                gross_returns: src.gross_returns,
-                fee_costs: src.fee_costs,
-                trade_notional_ratios: src.trade_notional_ratios,
-                is_ls: false
-            });
-        }
-
-        // Long-Short 组
-        var lsSrc = _lastGrossData[nGroups];
-        if (lsSrc && lsSrc.is_ls) {
-            var topGross = _lastGrossData[0] ? _lastGrossData[0].gross_returns || [] : [];
-            var botGross = _lastGrossData[nGroups - 1] ? _lastGrossData[nGroups - 1].gross_returns || [] : [];
-            var topTrade = _lastGrossData[0] ? _lastGrossData[0].trade_notional_ratios || [] : [];
-            var botTrade = _lastGrossData[nGroups - 1] ? _lastGrossData[nGroups - 1].trade_notional_ratios || [] : [];
-            var longCap = 0.5, shortCap = 0.5, totalCap = 1.0;
-            var lsCum = [];
-            for (var i = 0; i < Math.min(topGross.length, botGross.length); i++) {
-                var longGross = topGross[i];
-                var shortGross = -botGross[i];
-                var longFee = feeRatio * ((topTrade[i] || 0.0) / 2.0);
-                var shortFee = feeRatio * ((botTrade[i] || 0.0) / 2.0);
-                var longNet = (1.0 - longFee) * (1.0 + longGross) - 1.0;
-                var shortNet = (1.0 - shortFee) * (1.0 + shortGross) - 1.0;
-                if (isNaN(longNet) || !isFinite(longNet)) longNet = 0.0;
-                if (isNaN(shortNet) || !isFinite(shortNet)) shortNet = 0.0;
-                longCap *= (1.0 + longNet);
-                shortCap *= (1.0 + shortNet);
-                totalCap = longCap + shortCap;
-                lsCum.push(roundVal(totalCap));
-            }
-            recalcGroups.push({
-                name: 'Long-Short',
-                timestamps: _lastTimestamps,
-                cumulative_returns: lsCum,
-                is_ls: true
-            });
-        }
-
-        drawGroupChart(recalcGroups);
-
-        // 重算指标表
-        calcAndRenderMetricsFromGroups(recalcGroups, nGroups);
-    }
-
-    // roundVal / calcMetricsFromReturns / inferPeriodsPerYearFromTimestamps
-    // 已迁移到 GT.core.metricsCalc
-    var roundVal = GT.core.metricsCalc ? GT.core.metricsCalc.roundVal : function(v) { return v; };
-    var calcMetricsFromReturns = GT.core.metricsCalc ? GT.core.metricsCalc.calcMetricsFromReturns : function() { return {}; };
-    var inferPeriodsPerYearFromTimestamps = GT.core.metricsCalc ? GT.core.metricsCalc.inferPeriodsPerYearFromTimestamps : function() { return 252; };
-
-    /** 从重算后的 groups 计算各组指标（简化版，只更新费率敏感的指标） */
-    function calcAndRenderMetricsFromGroups(recalcGroups, nGroups) {
-        if (!_lastMetrics) return;
-        // 用重算的累积净值反推每期净收益，再算指标
-        var newMetrics = {};
-        var t = _lastTimestamps;
-
-        for (var g = 0; g < nGroups; g++) {
-            var cumVals = recalcGroups[g].cumulative_returns;
-            var returns = [];
-            for (var i = 1; i < cumVals.length; i++) {
-                returns.push(cumVals[i] / cumVals[i-1] - 1.0);
-            }
-            newMetrics[String(g)] = calcMetricsFromReturns(returns, t.slice(1));
-        }
-
-        // LS
-        var lsCum = recalcGroups[nGroups] ? recalcGroups[nGroups].cumulative_returns : null;
-        if (lsCum) {
-            var lsReturns = [];
-            for (var i = 1; i < lsCum.length; i++) {
-                lsReturns.push(lsCum[i] / lsCum[i-1] - 1.0);
-            }
-            newMetrics['LS'] = calcMetricsFromReturns(lsReturns, t.slice(1));
-        }
-
-        // 保留 Avg Turnover（不受费率影响）
-        if (_lastMetrics) {
-            for (var k in _lastMetrics) {
-                if (_lastMetrics.hasOwnProperty(k) && newMetrics[k] && _lastMetrics[k]['Avg Turnover'] !== undefined) {
-                    newMetrics[k]['Avg Turnover'] = _lastMetrics[k]['Avg Turnover'];
-                }
-            }
-        }
-
-        renderMetricsTable(newMetrics);
-    }
-
-    // calcAndRenderMetricsFromGroups 留在 app.js（依赖共享状态 _lastMetrics, _lastTimestamps, renderMetricsTable）
-
     // ---------- 手续费表：已迁移到 fee.js（GT.fee.*），此处仅保留桥接 ----------
 
     // 桥接：fee.js 中 close-today 变更回调
@@ -2993,12 +2861,6 @@
             refreshAllDerivedGroups(_derivedGeneration);
         }
     };
-
-    // 桥接：fee.js 中灵敏度滑条触发重算
-    GT.ui.recalcWithFee = function(val) {
-        recalcWithFee(val);
-    };
-
 
     function bindICModuleEvents() {
         // 分组测试结果按 submission + factor 缓存，切换选项卡时不主动清空。
