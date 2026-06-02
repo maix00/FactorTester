@@ -308,25 +308,6 @@
     }
 
     function _fillGroupFromConfig(item, config, isDerived) {
-        // Normalize snake_case aliases from legacy serialization (e.g. _groupsSerializeVariant)
-        // into camelCase keys that FIELD_SCHEMA expects.
-        var SNAKE_TO_CAMEL = {
-            'fee_mode': 'feeMode',
-            'fee_rate': 'feeRate',
-            'fee_map': 'feeMap',
-            'use_close_today': 'useCloseToday',
-            'rebalance_mode': 'rebalanceMode',
-            'liquidity_mode': 'liquidityMode',
-            'liquidity_percent': 'liquidityPercent'
-        };
-        var snakeKeys = Object.keys(SNAKE_TO_CAMEL);
-        for (var sk = 0; sk < snakeKeys.length; sk++) {
-            var snakeKey = snakeKeys[sk];
-            if (config.hasOwnProperty(snakeKey) && !config.hasOwnProperty(SNAKE_TO_CAMEL[snakeKey])) {
-                config[SNAKE_TO_CAMEL[snakeKey]] = config[snakeKey];
-            }
-        }
-
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id' || f.key === 'name' || f.key === 'isDerived') continue;
