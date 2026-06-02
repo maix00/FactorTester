@@ -574,17 +574,6 @@
             icon: base.icon,
             collect: base.collect,
             apply: function(gs, ctx) {
-                // -- DEBUG rebalanceMode trace --
-                if (gs && gs.groups && gs.groups.length) {
-                    var s = gs.groups.slice(0, 2);
-                    for (var di = 0; di < s.length; di++) {
-                        console.log('[DEBUG group_settings.apply wrapper] BEFORE normalize/clone gs.groups[' + di + '] id=' + s[di].id + ' name=' + s[di].name + ' rebalanceMode=' + s[di].rebalanceMode + ' hasOwn=' + s[di].hasOwnProperty('rebalanceMode'));
-                    }
-                } else {
-                    console.log('[DEBUG group_settings.apply wrapper] gs has no groups or empty');
-                }
-                // -- end DEBUG --
-
                 var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
                 var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
                 if (working && working.groups) {
@@ -640,17 +629,6 @@
     // tplId: 因子家族设置模板 ID
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
-
-        // -- DEBUG rebalanceMode trace --
-        (function() {
-            if (snapshot.group_settings && snapshot.group_settings.groups) {
-                var g = snapshot.group_settings.groups[0];
-                console.log('[DEBUG applySnapshot] snapshot.group_settings.groups[0] rebalanceMode=' + g.rebalanceMode + ' hasOwn=' + g.hasOwnProperty('rebalanceMode') + ' keys=' + Object.keys(g).join(','));
-            } else {
-                console.log('[DEBUG applySnapshot] snapshot has no group_settings.groups');
-            }
-        })();
-        // -- end DEBUG --
 
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId };
@@ -971,19 +949,6 @@
                 statusEl.style.color = '#d40000';
                 return;
             }
-
-            // -- DEBUG rebalanceMode trace --
-            (function() {
-                var snap = data.template && data.template.snapshot;
-                if (snap && snap.group_settings && snap.group_settings.groups) {
-                    var gs = snap.group_settings;
-                    var g = gs.groups[0];
-                    console.log('[DEBUG loadTemplate] data.template.snapshot.group_settings.groups[0] rebalanceMode=' + g.rebalanceMode + ' hasOwn=' + g.hasOwnProperty('rebalanceMode') + ' keys=' + Object.keys(g).join(','));
-                } else {
-                    console.log('[DEBUG loadTemplate] snapshot has no group_settings.groups');
-                }
-            })();
-            // -- end DEBUG --
 
             await applySnapshot(data.template.snapshot, tplId);
             statusEl.textContent = '✓ 已加载: ' + data.template.name;

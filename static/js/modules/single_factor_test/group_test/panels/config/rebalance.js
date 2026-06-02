@@ -58,10 +58,6 @@
 
         var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
 
-        // -- DEBUG rebalanceMode trace --
-        console.log('[DEBUG rebalance.render] group id=' + (group && group.id) + ' name=' + (group && group.name) + ' group.rebalanceMode=' + (group && group.rebalanceMode) + ' dirty=' + reg.getDirty('rebalanceMode') + ' => currentMode=' + currentMode);
-        // -- end DEBUG --
-
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -153,10 +149,6 @@
     function getChips(group) {
         if (!group) return [];
         var mode = group.rebalanceMode || 'buy_and_hold';
-
-        // -- DEBUG rebalanceMode trace --
-        console.log('[DEBUG rebalance.getChips] group id=' + (group && group.id) + ' name=' + (group && group.name) + ' rebalanceMode=' + (group && group.rebalanceMode) + ' => mode=' + mode);
-        // -- end DEBUG --
 
         var label = MODE_LABELS[mode];
         if (!label) return [];
