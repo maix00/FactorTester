@@ -212,7 +212,6 @@ def build_target_amounts(
     rebalance_mode: str,
     close_fee_vec: np.ndarray | None = None,
     close_fee_already_paid: bool = False,
-    allocation_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build next-period target holdings for all groups with vectorized operations.
 
@@ -233,29 +232,16 @@ def build_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float) if close_fee_vec is not None else None
     if close_fees is not None and close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast to (n_groups, P)
-    weights = np.asarray(allocation_weights, dtype=float) if allocation_weights is not None else None
-    if weights is not None:
-        if weights.ndim == 1:
-            weights = weights[np.newaxis, :]
-        weights = np.where(np.isfinite(weights) & (weights > 0), weights, 0.0)
 
-    def _weighted_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
-        if weights is None:
-            counts_local = mask.sum(axis=1).astype(float)
-            out = np.zeros_like(prev_amounts, dtype=float)
-            rows = counts_local > 0
-            if rows.any():
-                out[rows] = (
-                    mask[rows].astype(float)
-                    * (capital[rows] / counts_local[rows])[:, np.newaxis]
-                )
-            return out
-        w = np.where(mask, np.broadcast_to(weights, prev_amounts.shape), 0.0)
-        denom = w.sum(axis=1)
+    def _equal_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
+        counts_local = mask.sum(axis=1).astype(float)
         out = np.zeros_like(prev_amounts, dtype=float)
-        rows = denom > 0
+        rows = counts_local > 0
         if rows.any():
-            out[rows] = w[rows] * (capital[rows] / denom[rows])[:, np.newaxis]
+            out[rows] = (
+                mask[rows].astype(float)
+                * (capital[rows] / counts_local[rows])[:, np.newaxis]
+            )
         return out
 
     counts = curr_mask.sum(axis=1).astype(float)
@@ -268,8 +254,8 @@ def build_target_amounts(
         if close_fees is not None and not close_fee_already_paid:
             return _build_each_period_targets_with_sell_fee(
                 curr_mask, prev_amounts, wealth, np.broadcast_to(close_fees, prev_amounts.shape)
-            ) if weights is None else _weighted_alloc(curr_mask, wealth)
-        return _weighted_alloc(curr_mask, wealth)
+            )
+        return _equal_alloc(curr_mask, wealth)
 
     prev_mask = prev_amounts > 0
     staying = curr_mask & prev_mask
@@ -290,19 +276,19 @@ def build_target_amounts(
     targets = prev_amounts * staying.astype(float)
     rows_with_released = (n_entering > 0) & (released > 0)
     if rows_with_released.any():
-        targets[rows_with_released] += _weighted_alloc(entering, released)[rows_with_released]
+        targets[rows_with_released] += _equal_alloc(entering, released)[rows_with_released]
 
     fallback_rows = non_empty & (n_entering > 0) & (~rows_with_released)
     if rebalance_mode == "buy_and_hold":
         # If membership expands without any released capital, equal-weight once to fund entrants.
         if fallback_rows.any():
-            targets[fallback_rows] = _weighted_alloc(curr_mask, wealth)[fallback_rows]
+            targets[fallback_rows] = _equal_alloc(curr_mask, wealth)[fallback_rows]
     elif rebalance_mode == "recycle":
         # Keep staying holdings; only released exit capital can fund entrants.
         # If no capital was released, do not inject external cash into new members.
         initial_rows = fallback_rows & (~prev_mask.any(axis=1))
         if initial_rows.any():
-            targets[initial_rows] = _weighted_alloc(curr_mask, wealth)[initial_rows]
+            targets[initial_rows] = _equal_alloc(curr_mask, wealth)[initial_rows]
     else:
         raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
 
@@ -327,7 +313,6 @@ def build_multi_session_target_amounts(
     wealth_before_trade: np.ndarray,
     has_bar: np.ndarray,
     close_fee_vec: np.ndarray,
-    allocation_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build multi-session target holdings for all groups in one matrix pass.
 
@@ -340,26 +325,13 @@ def build_multi_session_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float)
     if close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast
-    weights = np.asarray(allocation_weights, dtype=float) if allocation_weights is not None else None
-    if weights is not None:
-        if weights.ndim == 1:
-            weights = weights[np.newaxis, :]
-        weights = np.where(np.isfinite(weights) & (weights > 0), weights, 0.0)
 
-    def _weighted_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
-        if weights is None:
-            counts_local = mask.sum(axis=1).astype(float)
-            out = np.zeros_like(prev_amounts, dtype=float)
-            rows = counts_local > 0
-            if rows.any():
-                out[rows] = mask[rows].astype(float) * (capital[rows] / counts_local[rows])[:, np.newaxis]
-            return out
-        w = np.where(mask, np.broadcast_to(weights, prev_amounts.shape), 0.0)
-        denom = w.sum(axis=1)
+    def _equal_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
+        counts_local = mask.sum(axis=1).astype(float)
         out = np.zeros_like(prev_amounts, dtype=float)
-        rows = denom > 0
+        rows = counts_local > 0
         if rows.any():
-            out[rows] = w[rows] * (capital[rows] / denom[rows])[:, np.newaxis]
+            out[rows] = mask[rows].astype(float) * (capital[rows] / counts_local[rows])[:, np.newaxis]
         return out
 
     non_empty = curr_mask.any(axis=1)
@@ -385,11 +357,11 @@ def build_multi_session_target_amounts(
     targets = prev_amounts * (staying | exiting_without_bar)
     funded = non_empty & (entering_counts > 0) & (recycled > 0)
     if funded.any():
-        targets[funded] += _weighted_alloc(entering_with_bar, recycled)[funded]
+        targets[funded] += _equal_alloc(entering_with_bar, recycled)[funded]
 
     initial_funding = non_empty & (~prev_mask.any(axis=1)) & (entering_counts > 0)
     if initial_funding.any():
-        targets[initial_funding] = _weighted_alloc(entering_with_bar, wealth)[initial_funding]
+        targets[initial_funding] = _equal_alloc(entering_with_bar, wealth)[initial_funding]
 
     # multi-session 已扣 close fee，不 rescale 回 wealth（targets.sum < wealth 是正确的）
     return targets
@@ -649,7 +621,6 @@ def simulate_groups(
             multi_session_triggered += 1
         unique_modes = list(dict.fromkeys(str(m or rebalance_mode) for m in rebalance_modes_arr))
         liquidity_active_t = liquidity_capacity_arr is not None and np.any(liquidity_modes_arr == "percent")
-        allocation_weights_t = None
         executable_capacity_t = None
         if liquidity_active_t:
             _liq_cap = cast(np.ndarray, liquidity_capacity_arr)  # type-narrow: guarded by liquidity_active_t
@@ -662,8 +633,6 @@ def simulate_groups(
             percent_rows = liquidity_modes_arr == "percent"
             executable_capacity_t = np.full((M, P), np.inf, dtype=float)
             executable_capacity_t[percent_rows] = base_capacity[np.newaxis, :] * percent_scale[percent_rows, np.newaxis]
-            allocation_weights_t = np.ones((M, P), dtype=float)
-            allocation_weights_t[percent_rows] = base_capacity[np.newaxis, :]
 
         def _build_targets_for_wealth(
             wealth_for_target: np.ndarray,
@@ -674,14 +643,12 @@ def simulate_groups(
                 return build_multi_session_target_amounts(
                     curr_mask_all, prev_end_amounts, wealth_for_target,
                     has_bar_t, target_close_fee_mat,
-                    allocation_weights=allocation_weights_t,
                 )
             if len(unique_modes) == 1:
                 return build_target_amounts(
                     curr_mask_all, prev_end_amounts, wealth_for_target,
                     unique_modes[0], close_fee_vec=target_close_fee_mat,
                     close_fee_already_paid=close_fee_already_paid,
-                    allocation_weights=allocation_weights_t,
                 )
             next_targets = np.zeros_like(prev_end_amounts, dtype=float)
             for mode in unique_modes:
@@ -695,7 +662,6 @@ def simulate_groups(
                     mode,
                     close_fee_vec=target_close_fee_mat[mode_mask],
                     close_fee_already_paid=close_fee_already_paid,
-                    allocation_weights=allocation_weights_t[mode_mask] if allocation_weights_t is not None else None,
                 )
             return next_targets
 

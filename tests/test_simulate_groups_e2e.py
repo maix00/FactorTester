@@ -127,8 +127,8 @@ def test_simulate_each_period_equal_weight_zero_fee():
     np.testing.assert_allclose(net, expected, atol=1e-12)
 
 
-def test_simulate_each_period_percent_liquidity_volume_weighted_and_cash_idle():
-    """Percent liquidity weights allocation by capacity and leaves unfilled cash idle."""
+def test_simulate_each_period_percent_liquidity_caps_execution_only():
+    """Percent liquidity caps execution after the normal equal-weight target."""
     T, N, P = 1, 1, 2
     membership = np.ones((T, N, P), dtype=bool)
     returns = np.array([[0.10, 0.00]], dtype=float)
@@ -145,10 +145,35 @@ def test_simulate_each_period_percent_liquidity_volume_weighted_and_cash_idle():
         liquidity_percents=np.array([50.0], dtype=float),
     )
 
-    # Capacity is [0.1, 0.4] after 50%; only half the wealth can be deployed.
-    # Allocation follows liquidity weights, not equal weights.
+    # Ideal target is still [0.5, 0.5]. Capacity is [0.1, 0.4],
+    # so the execution layer fills [0.1, 0.4] and leaves 0.5 cash idle.
     np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.5, atol=1e-12)
     np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10 + 0.4 * 0.00, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
+
+
+def test_simulate_liquidity_does_not_reweight_rebalance_target():
+    """High-liquidity products do not receive extra target if their ideal target is already filled."""
+    T, N, P = 1, 1, 2
+    membership = np.ones((T, N, P), dtype=bool)
+    returns = np.array([[0.00, 0.10]], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='each_period',
+        liquidity_capacity_np=np.array([[0.8, 0.1]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([100.0], dtype=float),
+    )
+
+    # Ideal target is [0.5, 0.5]. P0 can fill its 0.5 target, while P1 is capped at 0.1.
+    # The remaining 0.4 stays as cash instead of being reallocated to liquid P0.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.6, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10, atol=1e-12)
     np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
 
 
