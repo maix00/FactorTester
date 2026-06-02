@@ -74,13 +74,16 @@ git status -sb
 # 期望看到：## fix/issue-N-<slug>
 ```
 
-### 3. Agent 实现与提交（只做本 Issue，避免踩踏）
+### 3. Agent 实现与提交（增量提交 + 只做本 Issue）
+
+> **修改一步觉得没问题了就先提交**，多个小提交后做完任务，再统一 merge 回 feat。
+> 这样每步都可倒退，避免大改出问题难以定位。
 
 1. 修改前后都要看：
    ```bash
    git status && git diff
    ```
-2. 每个 Issue 尽量 **1 个 commit**（必要时可多个，但要有清晰分层）
+2. **增量提交**：每做完一个自包含的小改动就提交一次（可多个 commit）
 3. 提交前必须输出摘要：
    ```bash
    git diff --stat
@@ -122,10 +125,7 @@ git worktree remove .workspace/fix/issue-N-<slug>
 rm -rf .workspace/fix/issue-N-<slug>
 ```
 
-#### B) 合入 `master` + push（由人类执行；避免网络/凭据/破坏性操作）
-
-> 由于 `master` 被 `~/Codes-master-server/` worktree 占用，并且 Codex 环境可能遇到网络/DNS 限制，
-> **合入 master + push origin master 一律由人类在本机终端执行**。
+#### B) 合入 `master` + push
 
 ```bash
 cd ~/Codes-master-server
@@ -195,36 +195,30 @@ master ────────────────────────�
 
 ### 更新 AGENTS.md 自身（同步到所有分支和远程）
 
-AGENTS.md 是全仓共用的 Agent 配置文件。更新它时，由人类调度（同一时间只让一个 agent 改），**只提交 AGENTS.md 而不带入其他变更**，并推送到远程：
+AGENTS.md 是全仓共用的 Agent 配置文件。更新它时，由人类调度（同一时间只让一个 agent 改），**在 master 上修改并在 master 提交，然后 merge 回 feat**，最后推送到远程：
 
 ```bash
-# 0. 确认当前在 feat 分支
-cd ~/Codes
-git checkout feat
+# 0. 确认当前在 master worktree
+cd ~/Codes-master-server
+git checkout master
 
-# 1. 将 AGENTS.md（及 .gitignore 等纯配置）单独 staged
-git add AGENTS.md .gitignore   # 只加配置文件
-# 暂存其他未提交的变更（包括 untracked）
-git stash --include-untracked --keep-index
+# 1. 编辑 AGENTS.md 后单独 staged
+git add AGENTS.md
 
-# 2. 提交并展示 diff 摘要
+# 2. 提交
 git diff --cached --stat
 git commit -m "docs: <描述>"
 
-# 3. 恢复其他文件的变更
-git stash pop
-
-# 4. 同步到 master（因为 master 被 Codes-master-server worktree 占用，需在该目录操作）
-cd ~/Codes-master-server
-git merge feat --no-ff -m "docs: <描述>"
+# 3. push 到远程 master
 git push origin master
 
-# 5. 切回 feat
+# 4. 切到 feat 并 merge master
 cd ~/Codes
 git checkout feat
+git merge master --no-ff -m "merge: master to feat (<描述>)"
 ```
 
-> 注意：`master` 在远程且被 `Codes-master-server` worktree 占用，不能直接在 `~/Codes/` 里 checkout master。必须在 `~/Codes-master-server/` 目录中执行 merge 和 push。
+> 注意：AGENTS.md 的修改在 master 上直接提交，不从 feat merge 到 master。feat 通过 merge master 接收更新。
 
 ### Flask 服务器隔离（git worktree）
 
