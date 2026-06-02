@@ -84,14 +84,14 @@ test('validate: rejects missing name', function () {
     assert.ok(r.errors.some(function (e) { return e.indexOf('name') !== -1; }));
 });
 
-test('validate: rejects groupCount < 2', function () {
+test('validate: accepts single group', function () {
     var r = bg.validate({ name: 'n', testerId: 't1', factorAlias: 'f1', groupCount: 1 });
-    assert.strictEqual(r.valid, false);
+    assert.strictEqual(r.valid, true, r.errors.join('; '));
 });
 
-test('validate: rejects groupCount > 10', function () {
+test('validate: accepts large groupCount', function () {
     var r = bg.validate({ name: 'n', testerId: 't1', factorAlias: 'f1', groupCount: 11 });
-    assert.strictEqual(r.valid, false);
+    assert.strictEqual(r.valid, true, r.errors.join('; '));
 });
 
 test('validate: rejects non-integer groupCount', function () {
@@ -106,6 +106,16 @@ test('validate: rejects invalid feeMode', function () {
 
 test('validate: rejects invalid rebalanceMode', function () {
     var r = bg.validate({ name: 'n', testerId: 't1', factorAlias: 'f1', groupCount: 3, rebalanceMode: 'bogus' });
+    assert.strictEqual(r.valid, false);
+});
+
+test('validate: rejects invalid liquidityMode', function () {
+    var r = bg.validate({ name: 'n', testerId: 't1', factorAlias: 'f1', groupCount: 3, liquidityMode: 'bogus' });
+    assert.strictEqual(r.valid, false);
+});
+
+test('validate: rejects liquidityPercent outside 0-100', function () {
+    var r = bg.validate({ name: 'n', testerId: 't1', factorAlias: 'f1', groupCount: 3, liquidityMode: 'percent', liquidityPercent: 120 });
     assert.strictEqual(r.valid, false);
 });
 
@@ -147,10 +157,12 @@ test('add: creates base group with defaults', function () {
     assert.strictEqual(g.testerId, 't1');
     assert.strictEqual(g.factorAlias, 'f1');
     assert.strictEqual(g.groupCount, 3);
-    assert.strictEqual(g.groupIndex, 0); // default
+    assert.strictEqual(g.groupIndex, 1); // default
     assert.strictEqual(g.feeMode, 'none'); // default
     assert.strictEqual(g.feeRate, null); // default
     assert.strictEqual(g.rebalanceMode, 'each_period'); // default
+    assert.strictEqual(g.liquidityMode, 'infinite'); // default
+    assert.strictEqual(g.liquidityPercent, 100); // default
     assert.strictEqual(g.useCloseToday, false); // default
     assert.strictEqual(g.isAllGroups, false); // default
     assert.strictEqual(g.needsRegenerate, true); // new = needs regen
@@ -167,6 +179,8 @@ test('add: stores custom values', function () {
         feeRate: 0.002,
         useCloseToday: true,
         rebalanceMode: 'buy_and_hold',
+        liquidityMode: 'percent',
+        liquidityPercent: 25,
         isAllGroups: true,
     });
     var g = bg.get(id);
@@ -176,6 +190,8 @@ test('add: stores custom values', function () {
     assert.strictEqual(g.feeRate, 0.002);
     assert.strictEqual(g.useCloseToday, true);
     assert.strictEqual(g.rebalanceMode, 'buy_and_hold');
+    assert.strictEqual(g.liquidityMode, 'percent');
+    assert.strictEqual(g.liquidityPercent, 25);
     assert.strictEqual(g.isAllGroups, true);
 });
 
@@ -262,10 +278,10 @@ test('update: emits groupsChanged', function () {
     assert.strictEqual(global.__events[global.__events.length - 1].event, 'groupsChanged');
 });
 
-test('update: throws on invalid patch', function () {
+test('update: throws on invalid groupCount patch', function () {
     var id = bg.add({ name: 'G1', testerId: 't1', factorAlias: 'f1', groupCount: 3 });
     assertThrows(function () {
-        bg.update(id, { groupCount: 100 });
+        bg.update(id, { groupCount: 0 });
     }, 'Validation failed');
 });
 

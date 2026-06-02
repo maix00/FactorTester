@@ -83,6 +83,47 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     }
 
+    function readGroupTimeRangeInput() {
+        var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
+        var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
+        var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
+        var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
+        var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
+        var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
+        return {
+            startDate: (sy && sm && sd) ? buildValidDate(sy, sm, sd) : null,
+            endDate: (ey && em && ed) ? buildValidDate(ey, em, ed) : null,
+        };
+    }
+
+    function persistGroupTimeRangeToDatamodel(startDate, endDate) {
+        if (!GT.datamodel || !GT.datamodel.groups || (!startDate && !endDate)) return;
+        var allGroups = GT.datamodel.groups.getAll() || [];
+        allGroups.forEach(function(group) {
+            try {
+                var patch = {};
+                if (startDate) patch.startDate = startDate;
+                if (endDate) patch.endDate = endDate;
+                GT.datamodel.groups.update(group.id, patch);
+            } catch (e) { /* skip invalid/stale group */ }
+        });
+    }
+
+    function resolveGroupRunTimeRange(savedStartDate, savedEndDate) {
+        var explicit = readGroupTimeRangeInput();
+        var startDate = explicit.startDate || savedStartDate || null;
+        var endDate = explicit.endDate || savedEndDate || null;
+        return {
+            startDate: startDate,
+            endDate: endDate,
+            explicitStartDate: explicit.startDate,
+            explicitEndDate: explicit.endDate,
+        };
+    }
+
+    GT.ui._readGroupTimeRangeInput = readGroupTimeRangeInput;
+    GT.ui._resolveGroupRunTimeRange = resolveGroupRunTimeRange;
+
     function getCurrentContext() {
         var ctx = window.SingleFactorSubmissionContext;
         var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
@@ -1253,7 +1294,9 @@
             fee_rate: group.feeRate != null ? group.feeRate : null,
             fee_map: (mode === 'per_product' || mode === 'custom') ? serializeGroupFeeMap(group.feeMap) : null,
             use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || 'buy_and_hold'
+            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
+            liquidity_mode: group.liquidityMode || 'infinite',
+            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
         };
     }
 
@@ -1284,7 +1327,11 @@
                 fee_map: serializeGroupFeeMap(group.feeMap),
                 useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
                 rebalanceMode: group.rebalanceMode || 'each_period',
-                rebalance_mode: group.rebalanceMode || 'each_period'
+                rebalance_mode: group.rebalanceMode || 'each_period',
+                liquidityMode: group.liquidityMode || 'infinite',
+                liquidity_mode: group.liquidityMode || 'infinite',
+                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100,
+                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
             });
         });
         return payload;
@@ -2599,19 +2646,11 @@
             }
         }
 
-        // Read time range from layer-1 inputs or fallback
-        if (!start_date) {
-            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
-            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
-            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
-            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
-        }
-        if (!end_date) {
-            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
-            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
-            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
-            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
-        }
+        // Explicit group time inputs win over saved group datamodel values.
+        var groupTimeRange = resolveGroupRunTimeRange(start_date, end_date);
+        start_date = groupTimeRange.startDate;
+        end_date = groupTimeRange.endDate;
+        persistGroupTimeRangeToDatamodel(groupTimeRange.explicitStartDate, groupTimeRange.explicitEndDate);
 
         // Fallback: read from time module
         if (!start_date) {
@@ -3124,20 +3163,13 @@
         // 从第一个 batch 取 param 值（fee、时间等）
         var firstGroup = batches[0] && batches[0].groups[0];
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
-        var start_date = firstGroup ? (firstGroup.startDate || null) : null;
-        var end_date = firstGroup ? (firstGroup.endDate || null) : null;
-
-        // 读取时间范围 fallback — 先读分组时间 DOM（用户显式设置），再 fallback 到 submission（主时间模块）
-        if (!start_date || !end_date) {
-            var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
-            var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
-            var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
-            if (sy && sm && sd) start_date = buildValidDate(sy, sm, sd);
-            var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
-            var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
-            var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
-            if (ey && em && ed) end_date = buildValidDate(ey, em, ed);
-        }
+        var resolvedRange = resolveGroupRunTimeRange(
+            firstGroup ? (firstGroup.startDate || null) : null,
+            firstGroup ? (firstGroup.endDate || null) : null
+        );
+        var start_date = resolvedRange.startDate;
+        var end_date = resolvedRange.endDate;
+        persistGroupTimeRangeToDatamodel(resolvedRange.explicitStartDate, resolvedRange.explicitEndDate);
         if (!start_date || !end_date) {
             var ctx = getCurrentContext();
             var sub = ctx ? ctx.submission : null;
@@ -3466,6 +3498,9 @@
         }
         if (P.config && P.config.rebalance) {
             GT_PANEL_REGISTRY.push({ name: 'rebalance', label: '⚖️ 再平衡', containerId: 'config-rebalance', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.rebalance });
+        }
+        if (P.config && P.config.liquidity) {
+            GT_PANEL_REGISTRY.push({ name: 'liquidity', label: '💧 流动性', containerId: 'config-liquidity', category: GT_TAB_CATEGORY.CONFIG, panel: P.config.liquidity });
         }
 
         _panelsRegistered = true;
@@ -3908,7 +3943,9 @@
                     feeMap: resolvedFee ? resolvedFee.feeMap : (group && group.feeMap != null ? group.feeMap : (base ? base.feeMap : null)),
                     feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : (group && group.feeSensitivity != null ? group.feeSensitivity : (base && base.feeSensitivity != null ? base.feeSensitivity : 1)),
                     useCloseToday: group && group.useCloseToday != null ? !!group.useCloseToday : !!(base && base.useCloseToday),
-                    rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period')
+                    rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period'),
+                    liquidityMode: group && group.liquidityMode != null ? group.liquidityMode : (base && base.liquidityMode ? base.liquidityMode : 'infinite'),
+                    liquidityPercent: group && group.liquidityPercent != null ? group.liquidityPercent : (base && base.liquidityPercent != null ? base.liquidityPercent : 100)
                 };
             }
 
@@ -3935,7 +3972,7 @@
                 var cfg = _resolvedConfigForDraft(selected);
                 Object.assign(draft, cfg);
                 draft._inheritedConfigKeys = {};
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
                     draft._inheritedConfigKeys[key] = true;
                 });
                 return draft;
@@ -4041,6 +4078,8 @@
                     _addDraft.selectedFactors = [];
                     _addDraft.feeMode = 'none';
                     _addDraft.rebalanceMode = 'each_period';
+                    _addDraft.liquidityMode = 'infinite';
+                    _addDraft.liquidityPercent = 100;
                     _renderTabActions();
                     mountTab('add-base');
                 } else if (addFlow === 'derived') {
@@ -4054,7 +4093,7 @@
                                 _addDraft.preselectedBaseGroupId = activeDerived.baseGroupId;
                                 _addDraft.preselectedProducts = effectiveDerivedProductNames(activeDerived);
                                 Object.assign(_addDraft, _resolvedConfigForDraft(activeDerived));
-                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true, liquidityMode: true, liquidityPercent: true };
                             }
                         } else {
                             var activeBaseId = GT.state && GT.state.getActiveBaseGroupId ? GT.state.getActiveBaseGroupId() : null;
@@ -4062,7 +4101,7 @@
                             var activeBase = GT.datamodel.groups && GT.datamodel.groups.get(activeBaseId);
                             if (activeBase) {
                                 Object.assign(_addDraft, _resolvedConfigForDraft(activeBase));
-                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true };
+                                _addDraft._inheritedConfigKeys = { feeMode: true, feeRate: true, feeMap: true, feeSensitivity: true, useCloseToday: true, rebalanceMode: true, liquidityMode: true, liquidityPercent: true };
                             }
                         }
                     }
@@ -4089,6 +4128,10 @@
                 if (factors.length === 0) { alert('请至少选择一个因子'); return; }
 
                 try {
+                    var REG = window.GT_CONFIG_REGISTRY;
+                    if (REG && typeof REG.commitDirty === 'function') {
+                        REG.commitDirty();
+                    }
                     var addPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'add-base'; });
                     if (addPanel && addPanel.panel && typeof addPanel.panel.submitAddBatches === 'function') {
                         var result = addPanel.panel.submitAddBatches(_addDraft);
@@ -4154,7 +4197,7 @@
                     baseGroupId: baseGroupId,
                     productMask: productMask,
                 };
-                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'].forEach(function(key) {
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
                     var inherited = _addDraft._inheritedConfigKeys && _addDraft._inheritedConfigKeys[key];
                     if (!inherited && _addDraft[key] !== undefined) config[key] = _addDraft[key];
                 });
@@ -4428,7 +4471,9 @@
                 // In add mode, only show ADD tabs matching the current addFlow
                 if (_panelMode === 'add' && _addDraft && _addDraft.addFlow) {
                     visibleList = visibleList.filter(function(p) {
-                        return p.category !== A || p.addFlow === _addDraft.addFlow;
+                        if (p.category === A) return p.addFlow === _addDraft.addFlow;
+                        if (p.category === C && p.name === 'config-derived') return _addDraft.addFlow === 'derived';
+                        return true;
                     });
                 } else if (_panelMode === 'edit') {
                     // In edit mode, show LIST + CONFIG only (no ADD panels).

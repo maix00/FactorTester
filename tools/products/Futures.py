@@ -27,7 +27,7 @@ class FuturesTermStructureStore(TermStructureStore):
 class FuturesContract(AdjustableContractMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
-        super().__init__(name, point_value, currency, *args, **kwargs)
+        super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
 
 
 class Futures(AdjustableProductMixin, Product):
@@ -51,7 +51,7 @@ class Futures(AdjustableProductMixin, Product):
                  term_structure_path: Optional[str] = None,
                  contract_class: type = FuturesContract, *args, **kwargs):
         if not hasattr(self, '_initialized'):
-            super().__init__(name, point_value, currency, *args, **kwargs)
+            super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
             self.roller_info_path = roller_info_path
             self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None

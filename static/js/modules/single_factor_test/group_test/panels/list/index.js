@@ -474,10 +474,12 @@
         var bg = GT.datamodel.groups && GT.datamodel.groups.get(node.baseGroupId);
         if (!bg) return null;
 
-        var resolvedFee, resolvedCloseToday, resolvedRebalance;
+        var resolvedFee, resolvedCloseToday, resolvedRebalance, resolvedLiquidityMode, resolvedLiquidityPercent;
         try { resolvedFee = GT.datamodel.fee_strategy.resolveFee(node.id); } catch (e) { resolvedFee = null; }
         try { resolvedCloseToday = GT.datamodel.fee_strategy.resolveCloseToday(node.id); } catch (e) { resolvedCloseToday = undefined; }
         try { resolvedRebalance = GT.datamodel.fee_strategy.resolveRebalance(node.id); } catch (e) { resolvedRebalance = undefined; }
+        try { resolvedLiquidityMode = GT.datamodel.fee_strategy.resolveParam(node.id, 'liquidityMode', 'infinite'); } catch (e) { resolvedLiquidityMode = undefined; }
+        try { resolvedLiquidityPercent = GT.datamodel.fee_strategy.resolveParam(node.id, 'liquidityPercent', 100); } catch (e) { resolvedLiquidityPercent = undefined; }
 
         return {
             id: node.id,
@@ -488,7 +490,9 @@
             feeMap: resolvedFee ? resolvedFee.feeMap : null,
             feeSensitivity: resolvedFee && resolvedFee.sensitivity !== undefined ? resolvedFee.sensitivity : (bg.feeSensitivity || 1),
             useCloseToday: resolvedCloseToday !== undefined ? !!resolvedCloseToday : !!bg.useCloseToday,
-            rebalanceMode: resolvedRebalance !== undefined ? resolvedRebalance : (bg.rebalanceMode || 'buy_and_hold')
+            rebalanceMode: resolvedRebalance !== undefined ? resolvedRebalance : (bg.rebalanceMode || 'buy_and_hold'),
+            liquidityMode: resolvedLiquidityMode !== undefined ? resolvedLiquidityMode : (bg.liquidityMode || 'infinite'),
+            liquidityPercent: resolvedLiquidityPercent !== undefined ? resolvedLiquidityPercent : (bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : 100)
         };
     }
 
@@ -511,7 +515,9 @@
             feeMap: bg.feeMap,
             feeSensitivity: bg.feeSensitivity,
             useCloseToday: !!bg.useCloseToday,
-            rebalanceMode: bg.rebalanceMode || 'buy_and_hold'
+            rebalanceMode: bg.rebalanceMode || 'buy_and_hold',
+            liquidityMode: bg.liquidityMode || 'infinite',
+            liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : 100
         };
 
         var baseChips = REG.getChips(baseSynth);

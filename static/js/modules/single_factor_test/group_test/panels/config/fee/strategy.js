@@ -47,7 +47,7 @@
     // Config field names that derive can differ on (compared to base group)
     // ---------------------------------------------------------------------------
 
-    var DIFFABLE_KEYS = ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode'];
+    var DIFFABLE_KEYS = ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'rebalanceMode', 'liquidityMode', 'liquidityPercent'];
 
     // ---------------------------------------------------------------------------
     // Core resolution

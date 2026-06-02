@@ -127,6 +127,86 @@ def test_simulate_each_period_equal_weight_zero_fee():
     np.testing.assert_allclose(net, expected, atol=1e-12)
 
 
+def test_simulate_each_period_percent_liquidity_caps_execution_only():
+    """Percent liquidity caps execution after the normal equal-weight target."""
+    T, N, P = 1, 1, 2
+    membership = np.ones((T, N, P), dtype=bool)
+    returns = np.array([[0.10, 0.00]], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='each_period',
+        liquidity_capacity_np=np.array([[0.2, 0.8]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([50.0], dtype=float),
+    )
+
+    # Ideal target is still [0.5, 0.5]. Capacity is [0.1, 0.4],
+    # so the execution layer fills [0.1, 0.4] and leaves 0.5 cash idle.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.5, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10 + 0.4 * 0.00, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
+
+
+def test_simulate_liquidity_does_not_reweight_rebalance_target():
+    """High-liquidity products do not receive extra target if their ideal target is already filled."""
+    T, N, P = 1, 1, 2
+    membership = np.ones((T, N, P), dtype=bool)
+    returns = np.array([[0.00, 0.10]], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='each_period',
+        liquidity_capacity_np=np.array([[0.8, 0.1]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([100.0], dtype=float),
+    )
+
+    # Ideal target is [0.5, 0.5]. P0 can fill its 0.5 target, while P1 is capped at 0.1.
+    # The remaining 0.4 stays as cash instead of being reallocated to liquid P0.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.6, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
+
+
+def test_simulate_liquidity_caps_sells_before_buying_and_preserves_cash():
+    """A capped exit cannot fully fund the entrant; unsold holding remains invested."""
+    T, N, P = 2, 1, 2
+    membership = np.zeros((T, N, P), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, 1] = True
+    returns = np.array([
+        [0.00, 0.00],
+        [0.10, 0.00],
+    ], dtype=float)
+    fee = np.zeros((N, P), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='recycle',
+        liquidity_capacity_np=np.array([[1.0, 1.0], [0.25, 0.25]], dtype=float),
+        liquidity_modes=np.array(['percent'], dtype=object),
+        liquidity_percents=np.array([100.0], dtype=float),
+    )
+
+    # t=1 can sell only 0.25 of P0 and buy only 0.25 of P1.
+    # Remaining P0=0.75 stays exposed to P0 return; no leverage is created.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][1, 0], 0.5, atol=1e-12)
+    np.testing.assert_allclose(result['gross_returns_np'][1, 0], 0.75 * 0.10, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], 0.075, atol=1e-12)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # buy_and_hold with membership change, zero fee
 # ═══════════════════════════════════════════════════════════════════
@@ -264,14 +344,48 @@ def test_simulate_close_fee_on_exit():
     np.testing.assert_allclose(cum, 1.10 * (1.0 + net[1]), atol=1e-12)
 
 
+def test_each_period_close_fee_is_paid_before_rebuilding_target():
+    """each_period should sell first, pay close fee, then equal-weight remaining wealth."""
+    T, N, P = 2, 1, 2
+    membership = np.zeros((T, N, P), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, :] = True
+
+    returns = np.zeros((T, P), dtype=float)
+    open_fee = np.zeros((N, P), dtype=float)
+    close_fee = np.full((N, P), 0.10, dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=open_fee,
+        close_fee_mat=close_fee,
+        rebalance_mode='each_period',
+    )
+
+    # At t=1: target x solves x = (1 - 0.10 * (1 - x)) / 2.
+    target_each = (1.0 - 0.10) / (2.0 - 0.10)
+    expected_sell_fee_ratio = (1.0 - target_each) * 0.10
+    np.testing.assert_allclose(
+        result['fee_costs_np'][1, 0],
+        expected_sell_fee_ratio,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        result['net_returns_np'][1, 0],
+        -expected_sell_fee_ratio,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════
 # recycle mode
 # ═══════════════════════════════════════════════════════════════════
 
 def test_simulate_recycle_vs_buy_and_hold_expanding():
-    """recycle: when membership expands with no exiting capital,
-    new entrants are funded by equal-weight top-up (not full rebalance).
-    """
+    """recycle should not create leverage when membership expands with no exit capital."""
     T, N, P = 2, 1, 2
     membership = np.zeros((T, N, P), dtype=bool)
     membership[0, 0, 0] = True   # only P0
@@ -299,11 +413,33 @@ def test_simulate_recycle_vs_buy_and_hold_expanding():
     np.testing.assert_allclose(net_r[0], net_b[0])
     np.testing.assert_allclose(net_r[0], 0.10, atol=1e-12)
 
-    # t=1: recycle adds P1 as equal-weight top-up
-    #       buy_and_hold does equal-weight rebalance of whole group
-    # They should differ because recycle keeps P0's position and
-    # only allocates newly injected capital to P1.
+    # t=1: recycle keeps P0 only; buy_and_hold equal-weights the whole group.
+    # They differ because recycle can only fund entrants with released capital.
     assert not np.isclose(net_r[1], net_b[1])
+    np.testing.assert_allclose(net_r[1], 0.02, atol=1e-12)
+
+
+def test_recycle_expansion_does_not_compound_unfunded_new_member_returns():
+    membership = np.ones((5, 1, 2), dtype=bool)
+    membership[0, 0, 1] = False
+    returns = np.array([
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+    ], dtype=float)
+    fee = np.zeros((1, 2), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        rebalance_mode='recycle',
+    )
+
+    np.testing.assert_allclose(result['net_returns_np'][:, 0], 0.0, atol=1e-12)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -336,3 +472,40 @@ def test_simulate_close_today_overrides_close_fee():
     np.testing.assert_allclose(net[0], 0.0, atol=1e-12)
     # t=1: exit 1.0, close_today fee = 0.025 * 1.0 = 0.025
     np.testing.assert_allclose(net[1], -0.025, atol=1e-12)
+
+
+def test_empty_group_keeps_untradable_holding_in_multi_session():
+    """An empty current group should not liquidate holdings whose product has no bar."""
+    membership = np.zeros((2, 1, 1), dtype=bool)
+    membership[0, 0, 0] = True
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=np.zeros((2, 1), dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.full((1, 1), 0.10, dtype=float),
+        rebalance_mode='buy_and_hold',
+        data_has_bar=np.array([[True], [False]], dtype=bool),
+    )
+
+    np.testing.assert_allclose(result['fee_costs_np'][1, 0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], 0.0, atol=1e-12)
+
+
+def test_empty_group_sells_only_tradable_holdings_in_mixed_session():
+    """For mixed sessions, empty groups should keep no-bar holdings and sell tradable holdings."""
+    membership = np.zeros((2, 1, 2), dtype=bool)
+    membership[0, 0, :] = True
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=np.zeros((2, 2), dtype=float),
+        open_fee_mat=np.zeros((1, 2), dtype=float),
+        close_fee_mat=np.full((1, 2), 0.10, dtype=float),
+        rebalance_mode='buy_and_hold',
+        data_has_bar=np.array([[True, True], [False, True]], dtype=bool),
+    )
+
+    # t=0 holds 0.5/0.5; t=1 can only sell P1, so fee = 0.5 * 10%.
+    np.testing.assert_allclose(result['fee_costs_np'][1, 0], 0.05, atol=1e-12)
+    np.testing.assert_allclose(result['net_returns_np'][1, 0], -0.05, atol=1e-12)
