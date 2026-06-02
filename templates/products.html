@@ -29,21 +29,26 @@
             display: flex; flex-direction: column; min-height: 0; box-sizing: border-box;
         }
         .pv-sidebar h3 { font-size: 14px; color: #1a1a1a; margin: 0 0 8px; }
-        .pv-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+        .pv-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
         .pv-chart-card {
             background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
             padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             display: flex; flex-direction: column; flex: 1 1 auto;
             min-height: 0; overflow-y: auto; overflow-x: hidden;
+            align-items: stretch;
         }
+        .pv-chart-card > * { flex-shrink: 0; }
         .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .pv-chart-header .title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
         .pv-chart-header .info { font-size: 12px; color: #888; }
         .pv-product-fields { display:none; margin: 4px 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; font-size: 12px; overflow: hidden; }
         .pv-product-fields summary { padding: 9px 12px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; }
-        .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: max(600px, 65vh); overflow-y: auto; }
+        .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: 450px; overflow-y: auto; }
         /* 价格图表折叠区域 */
         .pv-price-section { margin-top: 6px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; overflow: hidden; }
+        .pv-price-section[open] { display: flex; flex-direction: column; max-height: 70vh; }
+        .pv-price-section[open] .pv-controls { flex-shrink: 0; }
+        .pv-price-section[open] .pv-chart-container { flex-shrink: 0; }
         .pv-price-section summary { padding: 10px 14px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; font-size: 13px; }
         .pv-price-section summary:hover { background: #f1f5f9; }
         .pv-price-section .pv-controls { margin: 0; padding: 8px 14px; border-top: 1px solid #e5e7eb; background: #fff; }
@@ -60,12 +65,12 @@
         }
         .method-btn:hover { border-color: #4a90d9; }
         .method-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 600; }
-        .pv-chart-container { width: 100%; min-height: 420px; height: 55vh; flex: 0 0 auto; overflow: hidden; }
+        .pv-chart-container { width: 100%; min-height: 300px; max-height: 55vh; overflow-y: auto; overflow-x: hidden; }
         .pv-empty { text-align: center; padding: 80px 20px; color: #888; }
         .pv-empty .icon { font-size: 48px; margin-bottom: 16px; }
         .pv-loading { text-align: center; padding: 40px; color: #888; }
         /* 合约表格 */
-        #pv-contract-table-container { flex: 0 1 auto; max-height: min(240px, 26vh); overflow: auto; border: 1px solid #e1e4e8; border-radius: 6px; background: #fff; margin-top: 10px; }
+        #pv-contract-table-container { max-height: 35vh; overflow: auto; border: 1px solid #e1e4e8; border-radius: 6px; background: #fff; margin-top: 10px; display: none; }
         #pv-contract-table { width: 100%; border-collapse: collapse; font-size: 12px; }
         #pv-contract-table th { position: sticky; top: 0; background: #f6f8fa; z-index: 1; }
         #pv-contract-table td, #pv-contract-table th { padding: 6px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
