@@ -288,8 +288,8 @@
             var resp = await fetch('/api/get_contracts?product=' + encodeURIComponent(productName));
             var data = await resp.json();
             if (data.success && data.contracts && data.contracts.length > 0) {
-                currentContracts = data.contracts;
-                for (var i = 0; i < data.contracts.length; i++) {
+                currentContracts = data.contracts.slice().reverse();
+                for (var i = 0; i < currentContracts.length; i++) {
                     var c = data.contracts[i];
                     var tr = document.createElement('tr');
                     tr.setAttribute('data-idx', i);
