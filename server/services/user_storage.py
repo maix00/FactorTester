@@ -76,8 +76,8 @@ def load_user_templates(
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as file:
                 data = json.load(file)
-            if isinstance(data, list):
-                return data
+            if isinstance(data, dict) and isinstance(data.get('templates'), list):
+                return data['templates']
     except Exception:
         pass
     return []
@@ -92,8 +92,14 @@ def save_user_templates(
 ) -> None:
     path = user_template_path(username, kind, ff_alias, scope_key=scope_key)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Use new format with metadata wrapper
+    wrapper_ff_alias = ff_alias or (scope_key if scope_key else 'unknown')
+    data = {
+        'ff_alias': wrapper_ff_alias,
+        'templates': templates,
+    }
     with open(path, 'w', encoding='utf-8') as file:
-        json.dump(templates, file, ensure_ascii=False, indent=2)
+        json.dump(data, file, ensure_ascii=False, indent=2)
 
 
 _last_template_ts = 0

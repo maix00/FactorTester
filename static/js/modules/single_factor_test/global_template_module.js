@@ -574,6 +574,17 @@
             icon: base.icon,
             collect: base.collect,
             apply: function(gs, ctx) {
+                // -- DEBUG rebalanceMode trace --
+                if (gs && gs.groups && gs.groups.length) {
+                    var s = gs.groups.slice(0, 2);
+                    for (var di = 0; di < s.length; di++) {
+                        console.log('[DEBUG group_settings.apply wrapper] BEFORE normalize/clone gs.groups[' + di + '] id=' + s[di].id + ' name=' + s[di].name + ' rebalanceMode=' + s[di].rebalanceMode + ' hasOwn=' + s[di].hasOwnProperty('rebalanceMode'));
+                    }
+                } else {
+                    console.log('[DEBUG group_settings.apply wrapper] gs has no groups or empty');
+                }
+                // -- end DEBUG --
+
                 var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
                 var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
                 if (working && working.groups) {
