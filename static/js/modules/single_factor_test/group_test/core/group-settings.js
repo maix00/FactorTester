@@ -324,6 +324,10 @@
                 if (!config.hasOwnProperty(df.key)) item[df.key] = null;
             }
         }
+
+        // -- DEBUG rebalanceMode trace --
+        console.log('[DEBUG _fillGroupFromConfig] result: id=' + item.id + ' name=' + item.name + ' isDerived=' + isDerived + ' rebalanceMode=' + item.rebalanceMode + ' (config had rebalanceMode=' + config.hasOwnProperty('rebalanceMode') + ' val=' + config.rebalanceMode + ' isDerived=' + isDerived + ')');
+        // -- end DEBUG --
     }
 
     function _groupsGet(id) {
@@ -583,6 +587,11 @@
             var products = _groupsEffectiveProductNames(group, options);
             if (!products.length) return;
             var name = group.shortAlias || _groupsDisplayKey(group, all) || group.name || '派生组';
+
+            // -- DEBUG rebalanceMode trace --
+            console.log('[DEBUG _groupsCollectDerivedPayloadForBatch] group id=' + group.id + ' name=' + group.name + ' group.rebalanceMode=' + group.rebalanceMode);
+            // -- end DEBUG --
+
             payload.push({
                 id: group.id,
                 key: name,
@@ -877,6 +886,17 @@
     function _settingsApply(snap) {
         var result = { applied: { groups: 0, lsConfigs: 0 }, errors: [] };
         snap = _settingsNormalizeSnapshot(snap || {});
+
+        // -- DEBUG rebalanceMode trace --
+        if (snap.groups && snap.groups.length) {
+            var sample = snap.groups.slice(0, 3);
+            for (var di = 0; di < sample.length; di++) {
+                console.log('[DEBUG _settingsApply] group[' + di + '] id=' + sample[di].id + ' name=' + sample[di].name + ' isDerived=' + sample[di].isDerived + ' rebalanceMode=' + sample[di].rebalanceMode + ' rebalance_mode=' + sample[di].rebalance_mode);
+            }
+        } else {
+            console.log('[DEBUG _settingsApply] snap.groups is empty or missing');
+        }
+        // -- end DEBUG --
 
         _groupsReset();
         _lsConfigsReset();
