@@ -30,137 +30,6 @@
     var getActiveFactorAlias = GT.utils.dates ? GT.utils.dates.getActiveFactorAlias : function() { return null; };
     var pageHasICModule = GT.utils.dates ? GT.utils.dates.pageHasICModule : function() { return false; };
 
-    // ---------- 多周期收益率频率复选框 ----------
-    var RETURN_FREQ_OPTIONS = ['1d', '2d', '3d', '5d', '10d', '20d'];
-    function renderReturnFreqCheckboxes() {
-        var container = document.getElementById('return_freqs_checkboxes');
-        if (!container) return;
-        var html = '';
-        RETURN_FREQ_OPTIONS.forEach(function(rf) {
-            html += '<label style="display:flex;align-items:center;gap:3px;margin-bottom:0;cursor:pointer;font-weight:normal;font-size:12px;white-space:nowrap;">' +
-                '<input type="checkbox" class="return-freq-cb" value="' + rf + '"> ' + rf +
-                '</label>';
-        });
-        container.innerHTML = html;
-    }
-
-    function getSelectedReturnFreqs() {
-        var cbs = document.querySelectorAll('#return_freqs_checkboxes .return-freq-cb:checked');
-        var freqs = [];
-        cbs.forEach(function(cb) { freqs.push(cb.value); });
-        return freqs;
-    }
-
-    /** 渲染多周期对比结果表格 */
-    function renderMultiHorizonTable(results, n_groups) {
-        var container = document.getElementById('multi_horizon_container');
-        if (!container) return;
-        if (!results || !results.length) {
-            container.style.display = 'none';
-            return;
-        }
-        container.style.display = 'block';
-
-        // 收集所有指标名
-        var allMetricNames = [];
-        results.forEach(function(r) {
-            if (r.ls_metrics) {
-                Object.keys(r.ls_metrics).forEach(function(k) {
-                    if (allMetricNames.indexOf(k) < 0) allMetricNames.push(k);
-                });
-            }
-        });
-
-        var metricNamesCN = {
-            'Total Return': '总收益率', 'Annual Return': '年化收益率', 'Volatility': '年化波动率',
-            'Sharpe Ratio': '夏普比率', 'Max Drawdown': '最大回撤', 'Calmar Ratio': 'Calmar比率',
-            'Win Rate': '胜率', 'Mean Return': '均值收益率', 'Skewness': '偏度', 'Kurtosis': '峰度',
-            'Avg Turnover': '平均换手率'
-        };
-
-        // 表头：指标名 | 频率1 | 频率2 | ...
-        var headHtml = '<tr><th>指标 (LS)</th>';
-        results.forEach(function(r) {
-            headHtml += '<th>' + (r.return_freq || '?') + '</th>';
-        });
-        headHtml += '</tr>';
-        document.getElementById('multi_horizon_head').innerHTML = headHtml;
-
-        // 表体：每行一个指标
-        var MH_METRIC_DIR = {
-            'Total Return': 1, 'Annual Return': 1, 'Sharpe Ratio': 1, 'Calmar Ratio': 1,
-            'Win Rate': 1, 'Mean Return': 1, 'Skewness': 1,
-            'Volatility': -1, 'Max Drawdown': -1, 'Kurtosis': -1,
-            'Avg Turnover': -1, 'Avg Turnover Accel': -1, 'Avg Position Changes': -1, 'Up Ratio': 1
-        };
-        function mhBestColIdx(vals, metricName) {
-            var dir = MH_METRIC_DIR[metricName];
-            var best = -1, bestVal = null;
-            for (var i = 0; i < vals.length; i++) {
-                if (vals[i] === null || vals[i] === undefined) continue;
-                if (best === -1 || (dir >= 0 ? vals[i] > bestVal : vals[i] < bestVal)) {
-                    best = i; bestVal = vals[i];
-                }
-            }
-            return best;
-        }
-        var bodyHtml = '';
-
-        function isFiniteNumber(v) {
-            return typeof v === 'number' && isFinite(v) && !isNaN(v);
-        }
-
-        // pct is already in percent units (e.g. 0.12 means 0.12%).
-        function formatPercentAdaptive(pct, metricName) {
-            if (!isFiniteNumber(pct)) return '—';
-            var abs = Math.abs(pct);
-
-            // Mean Return is often tiny; show basis points when small to avoid all zeros.
-            if (metricName === 'Mean Return' && abs < 0.1) {
-                var bp = pct * 100; // 1% = 100 bp
-                var decBp = Math.abs(bp) >= 1 ? 2 : 3;
-                return bp.toFixed(decBp) + ' bp';
-            }
-
-            var dec;
-            if (abs >= 10) dec = 2;
-            else if (abs >= 1) dec = 3;
-            else if (abs >= 0.1) dec = 4;
-            else if (abs >= 0.01) dec = 5;
-            else dec = 6;
-            return pct.toFixed(dec) + '%';
-        }
-
-        allMetricNames.forEach(function(name) {
-            var cnName = metricNamesCN[name] || name;
-            // 收集原始数值找最佳
-            var rawVals = results.map(function(r) { return (r.ls_metrics && r.ls_metrics[name] !== undefined) ? r.ls_metrics[name] : null; });
-            var best = mhBestColIdx(rawVals, name);
-            bodyHtml += '<tr><td style="font-weight:600;">' + cnName + '</td>';
-            results.forEach(function(r, ri) {
-                var val = (r.ls_metrics && r.ls_metrics[name] !== undefined) ? r.ls_metrics[name] : null;
-                var display;
-                if (val === null || val === undefined) {
-                    display = '—';
-                } else if (name === 'Avg Turnover' || name === 'Avg Turnover Accel' || name === 'Up Ratio') {
-                    display = (val * 100).toFixed(1) + '%';
-                } else if (name === 'Avg Position Changes') {
-                    display = val.toFixed(1);
-                } else if (name.includes('Rate') || name.includes('Return') || name.includes('Drawdown')) {
-                    display = formatPercentAdaptive(val, name);
-                } else if (name.includes('Ratio') || name === 'Skewness' || name === 'Kurtosis') {
-                    display = val.toFixed(4);
-                } else {
-                    display = val.toFixed(4);
-                }
-                var cellClass = (ri === best) ? ' class="group-best-cell"' : '';
-                bodyHtml += '<td' + cellClass + '>' + display + '</td>';
-            });
-            bodyHtml += '</tr>';
-        });
-        document.getElementById('multi_horizon_body').innerHTML = bodyHtml;
-    }
-
     // ---------- 多时段品种策略提示面板 ----------
     function updateStrategyPanel(multiSessionActive, usedMode) {
         var panel = document.getElementById('strategy_info_panel');
@@ -213,10 +82,8 @@
         options = options || {};
         var chartContainer = document.getElementById('group_chart_container');
         var metricsContainer = document.getElementById('group_metrics_container');
-        var multiHorizonContainer = document.getElementById('multi_horizon_container');
         if (chartContainer) chartContainer.style.display = 'none';
         if (metricsContainer) metricsContainer.style.display = 'none';
-        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
         closeSnapshotDrawer();
         if (options.clearStatus) {
             var status = document.getElementById('group_test_status');
@@ -2132,14 +1999,13 @@
         });
     }
 
-    function buildGroupStructureKey(submissionId, factorAlias, nGroups, startDate, endDate, returnFreqs) {
+    function buildGroupStructureKey(submissionId, factorAlias, nGroups, startDate, endDate) {
         return [
             String(submissionId || ''),
             String(factorAlias || ''),
             String(nGroups || ''),
             String(startDate || ''),
-            String(endDate || ''),
-            (returnFreqs || []).join(',')
+            String(endDate || '')
         ].join('|');
     }
 
@@ -2278,7 +2144,6 @@
         if (!start_date || !end_date) return { error: '请设置时间范围' };
         if (start_date > end_date) return { error: '起始日期不能晚于终止日期' };
 
-        var return_freqs = getSelectedReturnFreqs();
         var derivedPayload = _derivedGroups.map(function(d) {
             return {
                 id: d.id,
@@ -2327,13 +2192,12 @@
                 use_closetoday: use_closetoday,
                 start_date: start_date,
                 end_date: end_date,
-                return_freqs: return_freqs.length > 0 ? return_freqs : null,
                 rebalance_mode: rebalance_mode,
                 ls_config: collectLongShortConfig(n_groups),
                 ls_configs: collectLongShortConfigs(n_groups),
                 derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
                 group_fee_maps: group_fee_maps,
-                structure_key: buildGroupStructureKey(submissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
+                structure_key: buildGroupStructureKey(submissionId, factorAlias, n_groups, start_date, end_date)
             },
             statusEl: statusSpan,
         };
@@ -2347,24 +2211,7 @@
             tester_alias: data.tester_alias,
             tester_product_count: data.tester_product_count,
             n_groups: data.n_groups,
-            multi_horizon: data.multi_horizon,
         });
-
-        if (data.multi_horizon) {
-            updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
-            var chartContainer = document.getElementById('group_chart_container');
-            var metricsContainer = document.getElementById('group_metrics_container');
-            if (chartContainer) chartContainer.style.display = 'none';
-            if (metricsContainer) metricsContainer.style.display = 'none';
-            closeSnapshotDrawer();
-            _lastGrossData = null;
-            _lastMetrics = null;
-            _derivedGroups = [];
-            _derivedGroupSeq = 1;
-            _lastGroupStructureKey = data.structure_key || null;
-            renderMultiHorizonTable(data.results, data.n_groups);
-            return;
-        }
 
         updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
         _lastGrossData = data.groups;
@@ -2755,9 +2602,6 @@
         // ── 3. 构建批量 payload，单次 POST ──
         if (runBtn) runBtn.disabled = true;
 
-        var multiHorizonContainer = document.getElementById('multi_horizon_container');
-        if (multiHorizonContainer) multiHorizonContainer.style.display = 'none';
-
         var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
 
         // 从第一个 batch 取 param 值（fee、时间等）
@@ -2813,8 +2657,6 @@
             }
         }
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
-        var return_freqs = getSelectedReturnFreqs();
-
         if (statusSpan) {
             statusSpan.innerHTML = '分组测试运行中...（共 ' + totalBatches + ' 批次）';
             statusSpan.style.color = '#0078d4';
@@ -2886,7 +2728,6 @@
             use_closetoday: use_closetoday,
             start_date: start_date,
             end_date: end_date,
-            return_freqs: return_freqs.length > 0 ? return_freqs : null,
             rebalance_mode: rebalance_mode
         };
 
@@ -3270,7 +3111,6 @@
 
     // ---------- 初始化 ----------
     function init() {
-        renderReturnFreqCheckboxes();
         bindDateValidation();
         bindUseTimeRange();
         bindICModuleEvents();
@@ -4165,7 +4005,7 @@
             applyGroupTestResult(result);
             var statusSpan = document.getElementById('group_test_status');
             if (statusSpan) {
-                statusSpan.innerHTML = result.multi_horizon ? ('✓ 多周期对比完成（' + result.results.length + ' 个频率）') : '✓ 分组测试完成';
+                statusSpan.innerHTML = '✓ 分组测试完成';
                 statusSpan.style.color = '#28a745';
             }
         } else if (result && !result.success) {
