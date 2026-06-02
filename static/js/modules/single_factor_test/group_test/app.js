@@ -178,7 +178,6 @@
                     console.warn('[GT] loadDefaultGroups not available');
                 }
             });
-            });
             defaultBtn.style.display = '';
         }
         var rebalanceSelect = document.getElementById('rebalance_mode');
