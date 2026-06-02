@@ -46,7 +46,7 @@
         .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: 450px; overflow-y: auto; }
         /* 价格图表折叠区域 */
         .pv-price-section { margin-top: 6px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; overflow: hidden; }
-        .pv-price-section[open] { display: flex; flex-direction: column; max-height: 70vh; }
+        .pv-price-section[open] { display: flex; flex-direction: column; overflow-y: auto; }
         .pv-price-section[open] .pv-controls { flex-shrink: 0; }
         .pv-price-section[open] .pv-chart-container { flex-shrink: 0; }
         .pv-price-section summary { padding: 10px 14px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; font-size: 13px; }
@@ -65,7 +65,7 @@
         }
         .method-btn:hover { border-color: #4a90d9; }
         .method-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 600; }
-        .pv-chart-container { width: 100%; min-height: 300px; max-height: 55vh; overflow-y: auto; overflow-x: hidden; }
+        .pv-chart-container { width: 100%; height: 550px; overflow-y: auto; overflow-x: hidden; }
         .pv-empty { text-align: center; padding: 80px 20px; color: #888; }
         .pv-empty .icon { font-size: 48px; margin-bottom: 16px; }
         .pv-loading { text-align: center; padding: 40px; color: #888; }
