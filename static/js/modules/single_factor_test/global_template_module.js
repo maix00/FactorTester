@@ -641,6 +641,17 @@
     async function applySnapshot(snapshot, tplId) {
         if (!snapshot) return;
 
+        // -- DEBUG rebalanceMode trace --
+        (function() {
+            if (snapshot.group_settings && snapshot.group_settings.groups) {
+                var g = snapshot.group_settings.groups[0];
+                console.log('[DEBUG applySnapshot] snapshot.group_settings.groups[0] rebalanceMode=' + g.rebalanceMode + ' hasOwn=' + g.hasOwnProperty('rebalanceMode') + ' keys=' + Object.keys(g).join(','));
+            } else {
+                console.log('[DEBUG applySnapshot] snapshot has no group_settings.groups');
+            }
+        })();
+        // -- end DEBUG --
+
         // 构建 ctx：供注册项间传递数据（如 testerId 重映射）
         var ctx = { tplId: tplId };
 
@@ -960,6 +971,20 @@
                 statusEl.style.color = '#d40000';
                 return;
             }
+
+            // -- DEBUG rebalanceMode trace --
+            (function() {
+                var snap = data.template && data.template.snapshot;
+                if (snap && snap.group_settings && snap.group_settings.groups) {
+                    var gs = snap.group_settings;
+                    var g = gs.groups[0];
+                    console.log('[DEBUG loadTemplate] data.template.snapshot.group_settings.groups[0] rebalanceMode=' + g.rebalanceMode + ' hasOwn=' + g.hasOwnProperty('rebalanceMode') + ' keys=' + Object.keys(g).join(','));
+                } else {
+                    console.log('[DEBUG loadTemplate] snapshot has no group_settings.groups');
+                }
+            })();
+            // -- end DEBUG --
+
             await applySnapshot(data.template.snapshot, tplId);
             statusEl.textContent = '✓ 已加载: ' + data.template.name;
             statusEl.style.color = '#28a745';
