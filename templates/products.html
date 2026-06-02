@@ -41,7 +41,12 @@
         .pv-chart-header .info { font-size: 12px; color: #888; }
         .pv-product-fields { display:none; margin: 4px 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; font-size: 12px; overflow: hidden; }
         .pv-product-fields summary { padding: 9px 12px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; }
-        .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: max(360px, 50vh); overflow-y: auto; }
+        .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: max(600px, 65vh); overflow-y: auto; }
+        /* 价格图表折叠区域 */
+        .pv-price-section { margin-top: 6px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; overflow: hidden; }
+        .pv-price-section summary { padding: 10px 14px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; font-size: 13px; }
+        .pv-price-section summary:hover { background: #f1f5f9; }
+        .pv-price-section .pv-controls { margin: 0; padding: 8px 14px; border-top: 1px solid #e5e7eb; background: #fff; }
         .pv-product-field { display: grid; grid-template-columns: minmax(140px, 0.35fr) minmax(0, 0.65fr); gap: 12px; min-width: 0; padding: 6px 12px; border-bottom: 1px solid #f1f5f9; }
         .pv-product-field:last-child { border-bottom: 0; }
         .pv-product-field-key { color: #64748b; overflow-wrap: anywhere; }
@@ -147,33 +152,36 @@
                     <span class="info" id="pv-chart-info"></span>
                 </div>
                 <details id="pv-product-fields" class="pv-product-fields"></details>
-                <div class="pv-controls">
-                    <label>数据源：</label>
-                    <select id="pv-data-source" onchange="document.getElementById('pv-freq').value=''; loadPriceData()">
-                        <option value="">自动</option>
-                    </select>
-                    <label>频率：</label>
-                    <select id="pv-freq" onchange="document.getElementById('pv-data-source').value=''; loadPriceData()">
-                        <option value="">自动</option>
-                    </select>
-                    <span id="pv-price-type-wrap">
-                    <label style="margin-left:12px;">价格类型：</label>
-                    <select id="pv-price-type" onchange="setAdjusted(this.value === 'adjusted')">
-                        <option value="raw">原始</option>
-                        <option value="adjusted">复权</option>
-                    </select>
-                    </span>
-                    <label style="margin-left:12px;">开始：</label>
-                    <input type="date" id="pv-start-date" value="2024-01-01" onchange="loadPriceData()">
-                    <label>结束：</label>
-                    <input type="date" id="pv-end-date" value="" onchange="loadPriceData()">
-                </div>
-                <div id="pv-chart-container" class="pv-chart-container">
-                    <div class="pv-empty">
-                        <div class="icon">📊</div>
-                        <div>从左侧列表选择品种查看序列</div>
+                <details id="pv-price-section" class="pv-price-section">
+                    <summary>📈 价格序列 <span id="pv-price-summary-hint" style="font-weight:400;color:#888;font-size:12px;">— 点击展开加载</span></summary>
+                    <div class="pv-controls">
+                        <label>数据源：</label>
+                        <select id="pv-data-source" onchange="document.getElementById('pv-freq').value=''; loadPriceData()">
+                            <option value="">自动</option>
+                        </select>
+                        <label>频率：</label>
+                        <select id="pv-freq" onchange="document.getElementById('pv-data-source').value=''; loadPriceData()">
+                            <option value="">自动</option>
+                        </select>
+                        <span id="pv-price-type-wrap">
+                        <label style="margin-left:12px;">价格类型：</label>
+                        <select id="pv-price-type" onchange="setAdjusted(this.value === 'adjusted')">
+                            <option value="raw">原始</option>
+                            <option value="adjusted">复权</option>
+                        </select>
+                        </span>
+                        <label style="margin-left:12px;">开始：</label>
+                        <input type="date" id="pv-start-date" value="2024-01-01" onchange="loadPriceData()">
+                        <label>结束：</label>
+                        <input type="date" id="pv-end-date" value="" onchange="loadPriceData()">
                     </div>
-                </div>
+                    <div id="pv-chart-container" class="pv-chart-container">
+                        <div class="pv-empty">
+                            <div class="icon">📊</div>
+                            <div>点击展开查看价格序列</div>
+                        </div>
+                    </div>
+                </details>
                 <!-- 合约列表表格（仅 Futures 类品种显示） -->
                 <div id="pv-contract-table-container" style="display:none;">
                     <table id="pv-contract-table">
@@ -383,6 +391,19 @@
             console.error('加载品种列表失败', e);
         }
 
+        // 价格序列折叠区域：展开时懒加载
+        var priceSection = document.getElementById('pv-price-section');
+        if (priceSection) {
+            priceSection.addEventListener('toggle', function() {
+                if (priceSection.open && !priceSection._priceLoaded && currentProduct) {
+                    priceSection._priceLoaded = true;
+                    var hint = document.getElementById('pv-price-summary-hint');
+                    if (hint) hint.textContent = '';
+                    loadPriceData();
+                }
+            });
+        }
+
         // 初始化 Fancytree 产品树
         initFancytree();
         const params = new URLSearchParams(window.location.search);
@@ -536,21 +557,43 @@
             }
         }
 
-        // 切换品种：重置合约表格、数据源下拉框（避免跨品种粒度泄露）
-        document.querySelector('#pv-contract-table tbody').innerHTML = '';
-        document.getElementById('pv-contract-table-container').style.display = 'none';
+        // 切换品种：释放旧图表内存、重置所有状态
+        if (currentChart) { currentChart.destroy(); currentChart = null; }
         currentContracts = [];
         highlightedRow = null;
-        // 重置数据源为"自动"，避免合约粒度的源泄露到品种请求
+        currentAdjusted = false;
+
+        // 重置合约表格
+        document.querySelector('#pv-contract-table tbody').innerHTML = '';
+        document.getElementById('pv-contract-table-container').style.display = 'none';
+
+        // 重置数据源/频率下拉框，释放旧选项引用
         var dsSelect = document.getElementById('pv-data-source');
-        if (dsSelect) dsSelect.value = '';
+        if (dsSelect) { dsSelect.innerHTML = '<option value="">自动</option>'; dsSelect.value = ''; }
+        var freqSelect = document.getElementById('pv-freq');
+        if (freqSelect) { freqSelect.innerHTML = '<option value="">自动</option>'; freqSelect.value = ''; }
+        var priceType = document.getElementById('pv-price-type');
+        if (priceType) priceType.value = 'raw';
+
+        // 折叠价格序列区域，等待用户手动展开
+        var priceSection = document.getElementById('pv-price-section');
+        if (priceSection) {
+            priceSection.open = false;
+            priceSection._priceLoaded = false;
+        }
+        var hint = document.getElementById('pv-price-summary-hint');
+        if (hint) hint.textContent = '— 点击展开加载';
+        // 清空图表容器 DOM（释放 Highcharts 可能残留的引用）
+        var chartContainer = document.getElementById('pv-chart-container');
+        if (chartContainer) {
+            chartContainer.innerHTML = '<div class="pv-empty"><div class="icon">📊</div><div>点击展开查看价格序列</div></div>';
+        }
+        document.getElementById('pv-chart-info').textContent = '';
 
         var isContract = info.product_type === 'contract' || info.contract_uid;
         if (isContract) updatePriceTypeControl(false, false);
-        var contractsPromise = isContract ? Promise.resolve() : loadContractsForProduct(info.name || name);
-        contractsPromise.then(function() {
-            loadPriceData();
-        });
+        // 合约列表仍然自动加载（轻量），价格序列等用户展开
+        if (!isContract) loadContractsForProduct(info.name || name);
     }
 
     window.setAdjusted = function(adjusted) {
@@ -562,6 +605,12 @@
 
     async function loadPriceData(freqOverride) {
         if (!currentProduct) return;
+
+        // 自动展开价格折叠区域
+        var priceSection = document.getElementById('pv-price-section');
+        if (priceSection && !priceSection.open) {
+            priceSection.open = true;
+        }
 
         const container = document.getElementById('pv-chart-container');
         container.innerHTML = '<div class="pv-loading">加载中...</div>';
