@@ -145,13 +145,19 @@
         setTimeout(function() { call(dates().syncFromTimeModule, function(){})(); }, 0);
 
         var runBtn = document.getElementById('run_group_test_btn');
-        if (runBtn) runBtn.addEventListener('click', function() {
-            if (GT.core && GT.core.runTest) GT.core.runTest.runGroupTest();
-        });
+        if (runBtn) {
+            runBtn.addEventListener('click', function() {
+                if (GT.core && GT.core.runTest) GT.core.runTest.runGroupTest();
+            });
+            runBtn.style.display = '';
+        }
         var defaultBtn = document.getElementById('load_default_groups_btn');
-        if (defaultBtn) defaultBtn.addEventListener('click', function() {
-            if (GT.core && GT.core.runTest) GT.core.runTest.loadDefaultGroups();
-        });
+        if (defaultBtn) {
+            defaultBtn.addEventListener('click', function() {
+                if (GT.core && GT.core.runTest) GT.core.runTest.loadDefaultGroups();
+            });
+            defaultBtn.style.display = '';
+        }
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', function() {
             if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
