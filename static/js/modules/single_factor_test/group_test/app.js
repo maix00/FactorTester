@@ -3569,6 +3569,10 @@
     };
 
 
+    function bindICModuleEvents() {
+        // 分组测试结果按 submission + factor 缓存，切换选项卡时不主动清空。
+    }
+
     // ---------- 初始化 ----------
     function init() {
         renderReturnFreqCheckboxes();
