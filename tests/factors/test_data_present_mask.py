@@ -9,6 +9,7 @@ from tools.data.DataFreq import DataFreq
 from tools.factors.FactorExpr import ColumnRef, EvaluateContext
 from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
+from tests._repo import repo_root
 
 
 def _product(alias: str) -> Product:
@@ -65,11 +66,7 @@ def test_column_ref_records_raw_product_presence_once():
 
 
 def test_ic_merge_publishes_intermediate_source_mask_for_group_use(monkeypatch):
-    repo_root = next(
-        path for path in Path(__file__).resolve().parents
-        if (path.parent / "data" / "sectors.csv").exists()
-    )
-    monkeypatch.chdir(repo_root)
+    monkeypatch.chdir(repo_root(Path(__file__)))
     from server.modules.single_factor_test.ic import _ICComputeResult, _merge_ic_result
 
     product = _product("MASK_IC_FE")

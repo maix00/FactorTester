@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from tests._repo import repo_root
 from tools.parameters import TypeParam
 
 
 def _load_param_config_module():
-    module_path = Path(__file__).parents[1] / "server/modules/shared/param_config.py"
+    module_path = repo_root(Path(__file__)) / "server/modules/shared/param_config.py"
     spec = importlib.util.spec_from_file_location("_param_config_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

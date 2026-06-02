@@ -4,8 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
+from tests._repo import repo_root
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = repo_root(Path(__file__))
 
 
 def test_sectioned_group_metrics_keep_backend_percent_units():

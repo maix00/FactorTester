@@ -3,9 +3,11 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+from tests._repo import repo_root
+
 
 def _refresh_template_product_group_paths(template, groups):
-    module_path = Path(__file__).parents[1] / "server/modules/templates/snapshot_product_groups.py"
+    module_path = repo_root(Path(__file__)) / "server/modules/templates/snapshot_product_groups.py"
     spec = importlib.util.spec_from_file_location("_snapshot_product_groups_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
