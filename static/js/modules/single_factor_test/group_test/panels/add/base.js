@@ -19,7 +19,7 @@
 
     // ── Delegated utilities ──
 
-    var _batchKey = GT.datamodel.groups.batchKey;
+    var _batchKey = GT.groupSettings.groups.batchKey;
 
     /** Column-letter name: 1→A, 2→B, ... 26→Z, 27→AA, 28→AB, ... */
     function _colLetter(n) {
@@ -34,7 +34,7 @@
 
     function _preComputeComboLetters(testerId, factorAliases, groupCount) {
         var comboMap = {};
-        var existing = GT.datamodel.groups.getAll();
+        var existing = GT.groupSettings.groups.getAll();
         var subs = window.submissions || [];
 
         for (var i = 0; i < factorAliases.length; i++) {
@@ -98,7 +98,7 @@
         var fullName = testerLabel + '_' + factorAlias + '_' + groupCount + '组_' + '第' + groupIndex + '组';
         var shortAlias = letter + groupIndex;
 
-        var allGroups = GT.datamodel.groups.getAll();
+        var allGroups = GT.groupSettings.groups.getAll();
         var comboKey = String(testerId) + '|' + factorAlias + '|' + groupCount;
         var sameIndexCount = 0;
         var usedSuffixes = {};
@@ -405,7 +405,7 @@
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
                     try {
-                        GT.datamodel.groups.add({
+                        GT.groupSettings.groups.add({
                             name: names.name,
                             shortAlias: names.shortAlias,
                             testerId: testerId,
@@ -428,7 +428,7 @@
             } else {
                 var names2 = _makeNames(testerId, alias, groupCount, groupIndex, letter);
                 try {
-                    GT.datamodel.groups.add({
+                    GT.groupSettings.groups.add({
                         name: names2.name,
                         shortAlias: names2.shortAlias,
                         testerId: testerId,
@@ -486,6 +486,34 @@
         render: render,
         submitAddBatches: submitAddBatches,
     };
+
+    // ── Register add flow to GT.modes ──
+    if (GT.modes) {
+        GT.modes.registerAddFlow({
+            flow: 'base',
+            priority: 0,  // 最低优先级，作为 fallback
+            condition: function() { return true; },
+            buildDraft: function() {
+                return {
+                    addFlow: 'base',
+                    testerId: null,
+                    groupCount: 5,
+                    allGroups: true,
+                    groupIndex: 1,
+                    selectedFactors: [],
+                    feeMode: 'none',
+                    rebalanceMode: 'each_period',
+                    liquidityMode: 'infinite',
+                    liquidityPercent: 100
+                };
+            },
+            onSubmit: function(draft, helpers) {
+                submitAddBatches(draft);
+                helpers.exitAdd();
+            },
+            defaultTab: 'add-base'
+        });
+    }
 
     GT.log('panels.base.add loaded');
 })();

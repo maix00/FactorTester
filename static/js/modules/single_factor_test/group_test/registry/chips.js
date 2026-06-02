@@ -1,5 +1,5 @@
 /**
- * panels/chips.js — Unified Chip System
+ * registry/chips.js — Unified Chip System
  *
  * Chips are small badge-like elements that display group metadata.
  * Three categories:
@@ -7,7 +7,7 @@
  *   'config'  — fee, rebalance, etc. (from registered config panels, bridged in registry.js)
  *   'derived' — product masks, overrides (for derived groups)
  *
- * This module is loaded AFTER panels/config/registry.js and attaches to GT_CONFIG_REGISTRY.
+ * This module is loaded AFTER registry/group-settings.js and attaches to GT_CONFIG_REGISTRY.
  * registry.js calls initChipSystem() to auto-register the built-in info provider and bridge helpers.
  *
  * Usage:
@@ -22,7 +22,7 @@
 
     // Ensure GT_CONFIG_REGISTRY exists (registry.js must be loaded first)
     var REG = window.GT_CONFIG_REGISTRY;
-    if (!REG) throw new Error('GT_CONFIG_REGISTRY not loaded — load panels/config/registry.js first');
+    if (!REG) throw new Error('GT_CONFIG_REGISTRY not loaded — load registry/group-settings.js first');
 
     // ── Chip providers ──
     var _chipProviders = []; // [{ category, name, getChips }]
@@ -60,7 +60,7 @@
      * Get all chips for a group, optionally filtered by category.
      * For derived groups: automatically resolves config from base group.
      *
-     * @param {object} group — group object from datamodel
+     * @param {object} group — group settings object
      * @param {string|string[]} [categories] — optional filter: 'info', 'config', 'derived', or array thereof
      * @returns {{label, html, style, onClick, category}[]}
      */
@@ -89,8 +89,8 @@
             var g = group;
             if (prov.category === CHIP_CATEGORY.INFO && group.isDerived && group.baseGroupId) {
                 var GT2 = window.GroupTest;
-                if (GT2 && GT2.datamodel && GT2.datamodel.groups) {
-                    var bg = GT2.datamodel.groups.get(group.baseGroupId);
+                if (GT2 && GT2.groupSettings && GT2.groupSettings.groups) {
+                    var bg = GT2.groupSettings.groups.get(group.baseGroupId);
                     if (bg) g = bg;
                 }
             }
@@ -138,8 +138,8 @@
                 var bg = null;
                 if (g.isDerived && g.baseGroupId) {
                     var GT3 = window.GroupTest;
-                    if (GT3 && GT3.datamodel && GT3.datamodel.groups) {
-                        bg = GT3.datamodel.groups.get(g.baseGroupId);
+                    if (GT3 && GT3.groupSettings && GT3.groupSettings.groups) {
+                        bg = GT3.groupSettings.groups.get(g.baseGroupId);
                     }
                 }
 
@@ -189,7 +189,7 @@
         if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
 
         var GT4 = window.GroupTest;
-        var groups = GT4 && GT4.datamodel && GT4.datamodel.groups;
+        var groups = GT4 && GT4.groupSettings && GT4.groupSettings.groups;
         if (!groups) return [];
 
         var bg = groups.get(node.baseGroupId);
@@ -334,5 +334,5 @@
     // Register the built-in derived product provider
     _registerBuiltinDerivedProvider();
 
-    GT.log('panels/chips loaded');
+    GT.log('registry/chips loaded');
 })();

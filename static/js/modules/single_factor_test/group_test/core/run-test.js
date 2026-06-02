@@ -1,5 +1,5 @@
 /**
- * core/actions/runner.js — 分组测试执行器
+ * core/run-test.js — 分组测试执行器
  *
  * 负责：
  *   - 运行分组测试（单次/批量/全因子）
@@ -7,24 +7,20 @@
  *   - 派生组生成/删除
  *   - 工具函数：postGroupTest, postBatchGroupTest, clearResults
  *
- * 挂载到 GT.core.actions.runner。
+ * 挂载到 GT.core.runTest。
  */
 (function(){
     var GT = window.GroupTest;
     if (!GT) { console.warn('[runner] GroupTest bootstrap missing'); return; }
 
     GT.core = GT.core || {};
-    GT.core.actions = GT.core.actions || {};
-    if (GT.core.actions.runner) { console.warn('[runner] already loaded'); return; }
+    if (GT.core.runTest) { console.warn('[run-test] already loaded'); return; }
 
-    var runner = {};
+    var runTest = {};
 
     // ── 本地桥接引用 ──
-    var getActiveSubmissionId = GT.utils.dates ? GT.utils.dates.getActiveSubmissionId : function() { return null; };
-    var getActiveFactorAlias  = GT.utils.dates ? GT.utils.dates.getActiveFactorAlias  : function() { return null; };
-    var pageHasICModule = GT.utils.dates ? GT.utils.dates.pageHasICModule : function() { return false; };
-    var resolveGroupRunTimeRange = GT.utils.dates ? GT.utils.dates.resolveGroupRunTimeRange : function() { return {startDate:null,endDate:null}; };
-    var persistGroupTimeRangeToDatamodel = GT.utils.dates ? GT.utils.dates.persistGroupTimeRangeToDatamodel : function(){};
+    var resolveGroupRunTimeRange = GT.core.dates ? GT.core.dates.resolveGroupRunTimeRange : function() { return {startDate:null,endDate:null}; };
+    var persistGroupTimeRangeToDatamodel = GT.core.dates ? GT.core.dates.persistGroupTimeRangeToDatamodel : function(){};
 
     var _getLSDefinitions = function() { return GT.core.cache ? GT.core.cache.getLongShortDefinitions() : []; };
 
@@ -35,7 +31,7 @@
     /**
      * 清空测试结果
      */
-    runner.clearResults = function(options) {
+    runTest.clearResults = function(options) {
         options = options || {};
         var chartContainer = document.getElementById('group_chart_container');
         var metricsContainer = document.getElementById('group_metrics_container');
@@ -59,7 +55,7 @@
     /**
      * 单次分组测试 POST
      */
-    runner.postGroupTest = function(payload) {
+    runTest.postGroupTest = function(payload) {
         return fetch('/run_group_test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -70,7 +66,7 @@
     /**
      * 批量分组测试 POST（单次请求，后端并行计算）
      */
-    runner.postBatchGroupTest = function(payload) {
+    runTest.postBatchGroupTest = function(payload) {
         return fetch('/run_group_test_batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -82,7 +78,7 @@
     //  加载默认分组
     // ════════════════════════════════════════════════════════════════
 
-    runner.loadDefaultGroups = async function() {
+    runTest.loadDefaultGroups = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
         var defaultBtn = document.getElementById('load_default_groups_btn');
@@ -99,13 +95,13 @@
             return;
         }
 
-        if (!GT.datamodel || !GT.datamodel.groups || !GT.datamodel.ls_configs) {
+        if (!GT.groupSettings.groups || !GT.groupSettings.lsConfigs) {
             alert('数据模型未就绪，请刷新页面');
             return;
         }
 
-        var groups = GT.datamodel.groups;
-        var lsConfigs = GT.datamodel.ls_configs;
+        var groups = GT.groupSettings.groups;
+        var lsConfigs = GT.groupSettings.lsConfigs;
 
         var existingBase = (groups.getAll() || []).filter(function(g) { return !g.isDerived; });
         var existingLS = lsConfigs.getAll() || [];
@@ -139,7 +135,7 @@
                     var factor = factorList[fi];
                     var factorAlias = factor.alias || factor.name || '';
 
-                    var bk = GT.datamodel.groups.batchKey(testerId, factorAlias, GROUPS_PER_FACTOR);
+                    var bk = GT.groupSettings.groups.batchKey(testerId, factorAlias, GROUPS_PER_FACTOR);
                     var letter = batchLetterMap[bk];
                     if (!letter) {
                         letter = String.fromCharCode(nextLetterCode);
@@ -215,7 +211,7 @@
     //  运行分组测试（批量）
     // ════════════════════════════════════════════════════════════════
 
-    runner.runGroupTest = async function() {
+    runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
         var defaultBtn = document.getElementById('load_default_groups_btn');
@@ -226,15 +222,15 @@
         }
 
         // ── 0. 没有分组则自动加载默认分组 ──
-        var allBase = (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll()) || [];
+        var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
         var nonDerived = allBase.filter(function(g) { return !g.isDerived; });
         if (nonDerived.length === 0) {
             if (statusSpan) {
                 statusSpan.innerHTML = '⏳ 无现有分组，正在加载默认分组...';
                 statusSpan.style.color = '#0078d4';
             }
-            await runner.loadDefaultGroups();
-            allBase = (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll()) || [];
+            await runTest.loadDefaultGroups();
+            allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
             nonDerived = allBase.filter(function(g) { return !g.isDerived; });
             if (nonDerived.length === 0) {
                 if (statusSpan) {
@@ -246,7 +242,7 @@
         }
 
         // ── 1. 按 batchKey 分组 ──
-        var batchKeyFn = GT.datamodel.groups.batchKey;
+        var batchKeyFn = GT.groupSettings.groups.batchKey;
         var batchMap = {};
         for (var i = 0; i < nonDerived.length; i++) {
             var g = nonDerived[i];
@@ -274,7 +270,7 @@
         for (var k = 0; k < bkKeys.length; k++) { batches.push(batchMap[bkKeys[k]]); }
 
         // ── 2. 收集 LS configs ──
-        var allLS = (GT.datamodel && GT.datamodel.ls_configs && GT.datamodel.ls_configs.getAll()) || [];
+        var allLS = (GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.getAll()) || [];
         for (var bi = 0; bi < batches.length; bi++) {
             var b = batches[bi];
             b.groupIdToIndex = {};
@@ -292,7 +288,7 @@
                     expandedIndex += 1;
                 }
             }
-            b.derivedPayload = GT.core.actions.collect.collectDerivedPayloadForBatch(b);
+            b.derivedPayload = runTest.buildDerivedPayloadForBatch(b);
             for (var di = 0; di < b.derivedPayload.length; di++) {
                 if (b.derivedPayload[di].id) {
                     b.groupIdToIndex[b.derivedPayload[di].id] = expandedIndex;
@@ -338,8 +334,8 @@
         var firstTesterId = batches[0] && batches[0].testerId;
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
         var fallbackTesterId = firstTesterId || (firstGroup ? firstGroup.testerId : null);
-        var resolvedRange = GT.utils.dates && GT.utils.dates.resolveGroupRunTimeRangeWithFallback
-            ? GT.utils.dates.resolveGroupRunTimeRangeWithFallback(
+        var resolvedRange = GT.core.dates && GT.core.dates.resolveGroupRunTimeRangeWithFallback
+            ? GT.core.dates.resolveGroupRunTimeRangeWithFallback(
                 firstGroup ? (firstGroup.startDate || null) : null,
                 firstGroup ? (firstGroup.endDate || null) : null,
                 fallbackTesterId
@@ -367,8 +363,8 @@
         var fee = 0;
         var fee_map = {};
         var hasPerProduct = false;
-        if (GT.datamodel && GT.datamodel.groups) {
-            var allFeeGroups = GT.datamodel.groups.getAll() || [];
+        if (GT.groupSettings.groups) {
+            var allFeeGroups = GT.groupSettings.groups.getAll() || [];
             for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
                 var fg = allFeeGroups[fgi];
                 if (fg.isDerived) continue;
@@ -400,7 +396,7 @@
                 var g = batch.groups[gi];
                 var groupIdx = (g.groupIndex || (gi + 1)) - 1;
                 var variant = GT.panels.actions ? GT.panels.actions.serializeGroupVariant(g, 'Group ' + (groupIdx + 1))
-                    : (GT.datamodel.groups.serializeVariant ? GT.datamodel.groups.serializeVariant(g, 'Group ' + (groupIdx + 1)) : null);
+                    : (GT.groupSettings.groups.serializeVariant ? GT.groupSettings.groups.serializeVariant(g, 'Group ' + (groupIdx + 1)) : null);
                 if (!variant) continue;
                 if (!groupNames[groupIdx]) groupNames[groupIdx] = [];
                 groupNames[groupIdx].push(variant);
@@ -475,9 +471,9 @@
                 insertParent.insertBefore(progressBar, insertBefore);
             }
 
-            var data = await runner.postBatchGroupTest(bulkPayload);
+            var data = await runTest.postBatchGroupTest(bulkPayload);
             if (!data.success) {
-                var errorText = data.needs_ic_test && pageHasICModule()
+                var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
                     ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
                     : data.error;
                 if (statusSpan) {
@@ -525,86 +521,13 @@
         }
     };
 
-    // ════════════════════════════════════════════════════════════════
-    //  全因子运行
-    // ════════════════════════════════════════════════════════════════
-
-    runner.runAllGroupTestsForCurrentSubmission = async function() {
-        var submissionId = getActiveSubmissionId();
-        if (!submissionId) {
-            alert('请先选择一个 FactorTester 选项卡');
-            return;
-        }
-        var factors = Array.isArray(window.factorList) ? window.factorList : [];
-        if (!factors.length) {
-            alert('暂无可运行因子');
-            return;
-        }
-        var statusSpan = document.getElementById('group_test_status');
-        var runBtn = document.getElementById('run_group_test_btn');
-        var runAllBtn = document.getElementById('run_all_btn');
-        if (runBtn) runBtn.disabled = true;
-        if (GT.panels && GT.panels.ui) GT.panels.ui.clearGroupFactorStatuses(submissionId);
-        runner.clearResults({ clearStatus: true });
-        try {
-            for (var i = 0; i < factors.length; i++) {
-                var factor = factors[i];
-                var factorAlias = factor.alias || factor.name;
-                var built = await GT.core.actions.collect.buildGroupRunPayload(submissionId, factorAlias);
-                if (built.error) {
-                    if (statusSpan) {
-                        statusSpan.innerHTML = '✗ ' + built.error;
-                        statusSpan.style.color = '#d40000';
-                    }
-                    return;
-                }
-                if (statusSpan) {
-                    statusSpan.innerHTML = '分组测试运行中... ' + (i + 1) + '/' + factors.length + ' · ' + factorAlias;
-                    statusSpan.style.color = '#0078d4';
-                }
-                if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, '');
-                try {
-                    var data = await runner.postGroupTest(built.payload);
-                    if (!data.success) {
-                        if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
-                        if (statusSpan) {
-                            var errorText = data.needs_ic_test && pageHasICModule()
-                                ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
-                                : (data.error || '未知错误');
-                            statusSpan.innerHTML = '✗ ' + factorAlias + ' 分组测试失败: ' + errorText;
-                            statusSpan.style.color = '#d40000';
-                        }
-                        return;
-                    }
-                    if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'done');
-                } catch (err) {
-                    if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
-                    if (statusSpan) {
-                        statusSpan.innerHTML = '✗ ' + factorAlias + ' 请求失败: ' + err.message;
-                        statusSpan.style.color = '#d40000';
-                    }
-                    return;
-                }
-            }
-            // 渲染第一个因子的结果
-            GT.results.renderer.applyGroupTestResult(data);
-            if (statusSpan) {
-                statusSpan.innerHTML = '✓ 已完成当前测试器全部 ' + factors.length + ' 个因子的分组测试';
-                statusSpan.style.color = '#28a745';
-            }
-        } finally {
-            if (runBtn) runBtn.disabled = false;
-            if (runAllBtn) runAllBtn.disabled = false;
-        }
-    };
 
     // ════════════════════════════════════════════════════════════════
     //  派生组：生成 / 删除 / 刷新
     // ════════════════════════════════════════════════════════════════
 
     /** 为单个派生组发请求，不画图 */
-    runner._generateDerivedGroupOnce = async function(def, fee, fee_map) {
-        var submissionId = getActiveSubmissionId();
+    runTest._generateDerivedGroupOnce = async function(def, fee, fee_map, submissionId) {
         if (!def || !submissionId) return null;
         if (def.baseGroup == null) return null;
         try {
@@ -625,7 +548,7 @@
     };
 
     /** 将 _generateDerivedGroupOnce 的结果应用到内存数据 */
-    runner._applyDerivedGroupResult = function(result) {
+    runTest._applyDerivedGroupResult = function(result) {
         var def = result.def;
         if (GT.panels.actions && GT.panels.actions.removeGeneratedDerivedArtifacts) {
             GT.panels.actions.removeGeneratedDerivedArtifacts(def.id);
@@ -649,7 +572,7 @@
     };
 
     /** 统一刷新：图表 + 指标表 + 派生组面板 */
-    runner._refreshGroupView = function(baseGroupIndex) {
+    runTest._refreshGroupView = function(baseGroupIndex) {
         if (GT.results && GT.results.renderer) {
             GT.results.renderer.drawGroupChart(GT.core.cache ? GT.core.cache.getLastGrossData() : null);
             GT.results.renderer.renderMetricsTable(GT.core.cache ? GT.core.cache.getLastMetrics() : null);
@@ -660,8 +583,8 @@
     };
 
     /** 单个派生组生成：发 1 次请求，更新数据，刷新 1 次 */
-    runner.generateDerivedGroup = async function(id) {
-        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+    runTest.generateDerivedGroup = async function(id) {
+        var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
         if (!node || !node.isDerived) return;
         var products = GT.panels.actions ? GT.panels.actions.effectiveDerivedProductNames(node) : [];
         if (!products.length) {
@@ -675,7 +598,7 @@
             return;
         }
 
-        var baseNode = GT.datamodel.groups.get(node.baseGroupId);
+        var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
         var baseGroupIndex = GT.core.cache ? GT.core.cache.getCurrentGroupDetailIndex() : null;
         if (baseGroupIndex == null && baseNode) {
             baseGroupIndex = (baseNode.groupIndex || 1) - 1;
@@ -704,21 +627,21 @@
             productMask: node.productMask || {}
         };
 
-        var result = await runner._generateDerivedGroupOnce(def, fee, fee_map);
+        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_map, baseNode ? baseNode.testerId : null);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;
         }
-        runner._applyDerivedGroupResult(result);
-        runner._refreshGroupView(baseGroupIndex);
+        runTest._applyDerivedGroupResult(result);
+        runTest._refreshGroupView(baseGroupIndex);
     };
 
     /** 删除派生组 */
-    runner.deleteDerivedGroup = function(id) {
-        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+    runTest.deleteDerivedGroup = function(id) {
+        var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
         var baseGroupIndex = GT.core.cache ? GT.core.cache.getCurrentGroupDetailIndex() : null;
         if (baseGroupIndex == null && node && node.baseGroupId) {
-            var baseNode = GT.datamodel.groups.get(node.baseGroupId);
+            var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
             if (baseNode) baseGroupIndex = (baseNode.groupIndex || 1) - 1;
         }
 
@@ -726,10 +649,10 @@
             GT.panels.actions.removeGeneratedDerivedArtifacts(id);
         }
         try {
-            if (GT.datamodel && GT.datamodel.groups) GT.datamodel.groups.remove(id);
+            if (GT.groupSettings.groups) GT.groupSettings.groups.remove(id);
             if (GT.state && GT.state.emit) GT.state.emit('groupsChanged');
         } catch (e) {
-            console.warn('[deleteDerivedGroup] datamodel remove failed:', e);
+            console.warn('[deleteDerivedGroup] group remove failed:', e);
         }
 
         var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
@@ -745,84 +668,5 @@
         }
     };
 
-    /** 静默重新生成一个精选组（不发网络请求，只更新数据） */
-    runner.regenerateDerivedGroupQuiet = async function(def, generation) {
-        var submissionId = getActiveSubmissionId();
-        if (!def || !submissionId) return;
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
-        var metrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
-        if (!grossData || !metrics) return;
-        if (def.baseGroup == null) return;
-
-        var fee = 0;
-        var fee_map = {};
-        if (GT.datamodel && GT.datamodel.groups) {
-            var allFeeGroups = GT.datamodel.groups.getAll() || [];
-            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
-                var fg = allFeeGroups[fgi];
-                if (fg.isDerived) continue;
-                var gIdx = Number(fg.groupIndex || 1) - 1;
-                if (gIdx === def.baseGroup) {
-                    if (fg.feeMode === 'uniform') {
-                        fee = fg.feeRate != null ? fg.feeRate : 0.0025;
-                    } else if (fg.feeMode === 'per_product') {
-                        try {
-                            fee_map = await GT.fee.ensureFeeData();
-                        } catch (err) {
-                            console.error('[regenerateDerivedGroupQuiet] ensureFeeData failed:', err);
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
-        var resp = await GT.api.createDerivedGroup({
-            submission_id: submissionId,
-            group_index: def.baseGroup,
-            product_names: def.productNames,
-            name: def.name,
-            use_closetoday: GT.fee ? GT.fee.useCloseToday() : false,
-            fee: fee,
-            fee_map: fee_map
-        });
-        if (!resp || !resp.success) return;
-
-        if (GT.panels.actions && GT.panels.actions.removeGeneratedDerivedArtifacts) {
-            GT.panels.actions.removeGeneratedDerivedArtifacts(def.id);
-        }
-        def.key = GT.panels.actions ? GT.panels.actions.makeUniqueGroupKey(def.name, def.id) : (def.name || def.id || '派生组');
-        def.generated = true;
-        var group = resp.group || {};
-        group.name = def.name;
-        group.is_derived = true;
-        group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
-        grossData.push(group);
-        metrics[def.key] = resp.metric || {};
-        GT.core.cache.setLastGrossData(grossData);
-        GT.core.cache.setLastMetrics(metrics);
-    };
-
-    /** 批量重新生成全部派生组 + LS 组 */
-    runner.refreshAllDerivedGroups = async function(generation) {
-        var derivedGroups = GT.datamodel && GT.datamodel.groups
-            ? GT.datamodel.groups.getAll().filter(function(g) { return g.isDerived; })
-            : [];
-        var tasks = derivedGroups.map(function(def) {
-            if (!def.id) return Promise.resolve();
-            return runner.regenerateDerivedGroupQuiet(def, generation);
-        });
-        if (typeof window.buildLongShortGroups === 'function') {
-            tasks.push(Promise.resolve().then(function() {
-                try { window.buildLongShortGroups(); } catch(e) {}
-            }));
-        }
-        await Promise.all(tasks);
-        if (GT.results && GT.results.renderer) {
-            GT.results.renderer.drawGroupChart(GT.core.cache ? GT.core.cache.getLastGrossData() : null);
-            GT.results.renderer.renderMetricsTable(GT.core.cache ? GT.core.cache.getLastMetrics() : null);
-        }
-    };
-
-    GT.core.actions.runner = runner;
+    GT.core.runTest = runTest;
 })();

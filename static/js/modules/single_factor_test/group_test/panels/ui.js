@@ -88,7 +88,7 @@
             String(d.getSeconds()).padStart(2, '0');
     };
 
-    // ── DOM 状态标记（原在 core/cache.js） ──
+    // ── DOM 状态标记 ──
 
     /**
      * 标记因子运行状态徽章

@@ -106,7 +106,7 @@
                     var val = entry.summarize(data);
                     if (!val && val !== 0) continue;
                     if (Array.isArray(val) && val.length === 0) continue;
-                    html += _buildSummaryRow(entry.label, val, entry.icon);
+                    html += _buildSummaryRow(entry.label, entry.key, val, entry.icon);
                 } catch (e) {
                     console.error('[SnapshotRegistry] summarize failed for:', entry.key, e);
                 }
@@ -139,11 +139,25 @@
     }
 
     /** 构建一条摘要行 HTML */
-    function _buildSummaryRow(label, value, icon) {
+    function _buildSummaryRow(label, key, value, icon) {
+        var chipKeys = { group_settings: 1 };
+        var useChips = chipKeys.hasOwnProperty(key);
         var valStr = '';
         if (Array.isArray(value)) {
             valStr = value.map(function(v) {
-                return '<div style="font-size:11px;color:#555;padding:1px 0;">' + escapeHtml(String(v)) + '</div>';
+                var safeVal = escapeHtml(String(v));
+                if (useChips) {
+                    // Split 'key=val, key2=val2' into individual chips
+                    var chips = safeVal.split(', ');
+                    return '<div style="display:flex;flex-wrap:wrap;gap:3px;padding:1px 0;">'
+                        + chips.map(function(c) {
+                            return '<span style="display:inline-block;padding:1px 6px;font-size:10px;line-height:1.6;'
+                                + 'background:#eef2ff;color:#4338ca;border-radius:999px;white-space:nowrap;">'
+                                + c + '</span>';
+                        }).join('')
+                        + '</div>';
+                }
+                return '<div style="font-size:11px;color:#555;padding:1px 0;">' + safeVal + '</div>';
             }).join('');
         } else {
             valStr = '<span style="font-size:11px;color:#555;">' + escapeHtml(String(value)) + '</span>';
@@ -256,11 +270,8 @@
 
     function _hasGroupSettingsSnapshot(gs) {
         if (!gs) return false;
-        return (_asArray(gs.baseGroups).length > 0) ||
-            (_asArray(gs.derivedGraph).length > 0) ||
-            (_asArray(gs.lsConfigs).length > 0) ||
-            (_asArray(gs.registrations).length > 0) ||
-            !!(gs.group_count || gs.fee_mode || gs._legacy);
+        return (_asArray(gs.groups).length > 0) ||
+            (_asArray(gs.lsConfigs).length > 0);
     }
 
     // 暴露注册表
@@ -547,158 +558,39 @@
     });
 
     // ── 5. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
-    SnapshotRegistry.register({
-        key: 'group_settings',
-        order: 50,
-        label: '分组测试',
-        icon: '🧪',
-        collect: function() {
-            var hasNewDatamodel = !!(window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings);
-            var snapFromDatamodel = null;
-            var datamodelHasData = false;
-            if (hasNewDatamodel) {
-                snapFromDatamodel = window.GroupTest.datamodel.settings.snapshot();
-                datamodelHasData = snapFromDatamodel && (
-                    (Array.isArray(snapFromDatamodel.baseGroups) && snapFromDatamodel.baseGroups.length > 0) ||
-                    (Array.isArray(snapFromDatamodel.derivedGraph) && snapFromDatamodel.derivedGraph.length > 0) ||
-                    (Array.isArray(snapFromDatamodel.lsConfigs) && snapFromDatamodel.lsConfigs.length > 0) ||
-                    (Array.isArray(snapFromDatamodel.registrations) && snapFromDatamodel.registrations.length > 0)
-                );
-            }
-            if (hasNewDatamodel && datamodelHasData) {
-                var result = snapFromDatamodel;
-                result._legacy = {
-                    group_count: document.getElementById('group_count')?.value || '5',
-                    fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
-                    fee_rate: document.getElementById('fee_rate')?.value || '0.03',
-                    use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
-                    group_start_year: document.getElementById('group_start_year')?.value || '',
-                    group_start_month: document.getElementById('group_start_month')?.value || '',
-                    group_start_day: document.getElementById('group_start_day')?.value || '',
-                    group_end_year: document.getElementById('group_end_year')?.value || '',
-                    group_end_month: document.getElementById('group_end_month')?.value || '',
-                    group_end_day: document.getElementById('group_end_day')?.value || ''
-                };
-                return result;
-            }
-            return {
-                group_count: document.getElementById('group_count')?.value || '5',
-                fee_mode: document.querySelector('input[name="fee_mode"]:checked')?.value || 'none',
-                fee_rate: document.getElementById('fee_rate')?.value || '0.03',
-                use_closetoday: document.getElementById('use_closetoday_btn')?.textContent?.includes('平今') || false,
-                group_start_year: document.getElementById('group_start_year')?.value || '',
-                group_start_month: document.getElementById('group_start_month')?.value || '',
-                group_start_day: document.getElementById('group_start_day')?.value || '',
-                group_end_year: document.getElementById('group_end_year')?.value || '',
-                group_end_month: document.getElementById('group_end_month')?.value || '',
-                group_end_day: document.getElementById('group_end_day')?.value || ''
-            };
-        },
-        apply: function(gs, ctx) {
-            var working = _deepClone(gs) || {};
-            // testerId 重映射（依赖 ctx.oldToNewTesterId，由 applyAll 在调用 submissions.apply 后设置）
-            var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
-            if (working && working.baseGroups) {
-                // 兜底：当只有一个当前 submission 时，用它覆盖所有未映射的 testerId
-                var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
-                var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
-
-                working.baseGroups.forEach(function(bg) {
-                    if (bg.testerId && oldToNew.hasOwnProperty(String(bg.testerId))) {
-                        bg.testerId = oldToNew[String(bg.testerId)];
-                    } else if (bg.testerId && fallbackNewId) {
-                        // 旧 testerId 映射不到 + 当前只有一个 tester → 兜底替换
-                        console.warn('[global_template] testerId remap fallback: ' + bg.testerId + ' → ' + fallbackNewId);
-                        bg.testerId = fallbackNewId;
-                    }
-                });
-                if (working.registrations) {
-                    working.registrations.forEach(function(reg) {
-                        if (reg.testerId && oldToNew.hasOwnProperty(String(reg.testerId))) {
-                            reg.testerId = oldToNew[String(reg.testerId)];
-                        } else if (reg.testerId && fallbackNewId) {
-                            reg.testerId = fallbackNewId;
+    (function() {
+        var base = GT.groupSettings.settings;
+        SnapshotRegistry.register({
+            key: base.key,
+            order: base.order,
+            label: base.label,
+            icon: base.icon,
+            collect: base.collect,
+            apply: function(gs, ctx) {
+                var working = _deepClone(gs) || {};
+                var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
+                if (working && working.groups) {
+                    var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);
+                    var fallbackNewId = (curSubs.length === 1 && curSubs[0].id) ? String(curSubs[0].id) : null;
+                    working.groups.forEach(function(g) {
+                        if (g.testerId && oldToNew.hasOwnProperty(String(g.testerId))) {
+                            g.testerId = oldToNew[String(g.testerId)];
+                        } else if (g.testerId && fallbackNewId) {
+                            g.testerId = fallbackNewId;
                         }
                     });
                 }
-            }
-            // Apply via datamodel
-            if (window.GroupTest && window.GroupTest.datamodel && window.GroupTest.datamodel.settings &&
-                (working.baseGroups || working.derivedGraph || working.lsConfigs || working.registrations)) {
-                var applyResult = window.GroupTest.datamodel.settings.apply(working);
+                var applyResult = base.apply(working);
                 if (applyResult.errors && applyResult.errors.length > 0) {
                     console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                 }
-                if (window.GroupTest && window.GroupTest.ui && typeof window.GroupTest.ui.mountTab === 'function') {
-                    window.GroupTest.ui.mountTab('list');
+                if (GT.ui && typeof GT.ui.mountTab === 'function') {
+                    GT.ui.mountTab('list');
                 }
-            }
-            // Legacy DOM fields
-            var legacy = working._legacy || working;
-            if (legacy.group_count) { var gc = document.getElementById('group_count'); if (gc) gc.value = legacy.group_count; }
-            if (legacy.fee_mode) {
-                var radio = document.querySelector('input[name="fee_mode"][value="' + legacy.fee_mode + '"]');
-                if (radio) radio.checked = true;
-                document.querySelectorAll('input[name="fee_mode"]').forEach(function(r) { r.dispatchEvent(new Event('change', { bubbles: true })); });
-            }
-            if (legacy.fee_rate) { var fr = document.getElementById('fee_rate'); if (fr) fr.value = legacy.fee_rate; }
-            ['group_start_year','group_start_month','group_start_day','group_end_year','group_end_month','group_end_day'].forEach(function(id) {
-                if (legacy[id]) { var el = document.getElementById(id); if (el) el.value = legacy[id]; }
-            });
-        },
-        summarize: function(gs) {
-            var parts = [];
-            var baseGroups = _asArray(gs.baseGroups);
-            var derivedGroups = _asArray(gs.derivedGraph);
-            var lsConfigs = _asArray(gs.lsConfigs);
-            var regs = _asArray(gs.registrations);
-            var legacy = gs._legacy || gs;
-            if (baseGroups.length || derivedGroups.length || lsConfigs.length || regs.length) {
-                parts.push('基础组 ' + baseGroups.length + ' 个 · 派生组 ' + derivedGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个');
-            }
-            if (baseGroups.length) {
-                var feeModes = { none: '无费率', uniform: '统一费率', per_product: '分品种费率', custom: '自定义费率' };
-                var rebalanceModes = { each_period: '每期等权再平衡', buy_and_hold: '组内持仓不动', recycle: '退出资金优先补新仓' };
-                var feeLines = baseGroups.slice(0, 8).map(function(bg) {
-                    var label = bg.shortAlias || bg.name || [bg.testerId, bg.factorAlias, bg.groupCount, bg.groupIndex].filter(Boolean).join('/');
-                    var groupText = (bg.groupIndex !== undefined && bg.groupCount !== undefined) ? ('第' + bg.groupIndex + '/' + bg.groupCount + '组') : '分组未设置';
-                    var factorText = bg.factorAlias ? ('因子 ' + bg.factorAlias) : '因子未设置';
-                    var mode = bg.feeMode || 'none';
-                    var feeLabel = feeModes[mode] || mode;
-                    var feeMapSize = bg.feeMap && typeof bg.feeMap === 'object' ? Object.keys(bg.feeMap).length : 0;
-                    if ((mode === 'per_product' || mode === 'custom') && feeMapSize) {
-                        feeLabel += '(' + feeMapSize + ' 个品种)';
-                    }
-                    var rbMode = bg.rebalanceMode || (bg.rebalanceConfig && bg.rebalanceConfig.mode);
-                    var rebalance = rbMode ? (rebalanceModes[rbMode] || rbMode) : '默认调仓';
-                    return label + ' · ' + groupText + ' · ' + factorText + ' · ' + feeLabel + ' · ' + rebalance;
-                });
-                if (baseGroups.length > 8) feeLines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
-                parts = parts.concat(feeLines);
-            }
-            if (derivedGroups.length) {
-                parts = parts.concat(derivedGroups.slice(0, 4).map(function(dg) {
-                    return '派生组 ' + (dg.shortAlias || dg.name || dg.id) + ' · 来源 ' + (dg.baseGroupId || '未设置');
-                }));
-                if (derivedGroups.length > 4) parts.push('…另 ' + (derivedGroups.length - 4) + ' 个派生组');
-            }
-            if (lsConfigs.length) {
-                parts = parts.concat(lsConfigs.slice(0, 4).map(function(ls) {
-                    return 'Long-Short ' + (ls.shortAlias || ls.name || ls.id) + ' · Long ' + (ls.longGroupId || '未设置') + ' · Short ' + (ls.shortGroupId || '未设置');
-                }));
-                if (lsConfigs.length > 4) parts.push('…另 ' + (lsConfigs.length - 4) + ' 个 Long-Short');
-            }
-            if (!parts.length && legacy) {
-                var feeModesLegacy = { none: '无费率', uniform: '统一费率', per_product: '分品种费率', custom: '自定义费率' };
-                parts.push('分组数 ' + (legacy.group_count || '5') + ' · ' + (feeModesLegacy[legacy.fee_mode] || legacy.fee_mode || '无费率') + ' · 费率 ' + (legacy.fee_rate || '0.03'));
-                if (legacy.group_start_year || legacy.group_end_year) {
-                    parts.push('分组区间 ' + [legacy.group_start_year, legacy.group_start_month, legacy.group_start_day].filter(Boolean).join('-') + ' ~ ' + [legacy.group_end_year, legacy.group_end_month, legacy.group_end_day].filter(Boolean).join('-'));
-                }
-            }
-            if (!parts.length) parts.push('未设置');
-            return parts;
-        }
-    });
+            },
+            summarize: base.summarize,
+        });
+    })();
 
     // ── 6. fee_modifications (order=60, 最后) ──
     SnapshotRegistry.register({
@@ -833,16 +725,13 @@
     /** 清空分组测试数据（分组组合列表和 LS 组表），用于模板无 group_settings 时重置。 */
     function _clearGroupTestData() {
         try {
-            var gt = window.GroupTest || window.GT;
-            if (gt && gt.datamodel) {
-                if (gt.datamodel.groups && typeof gt.datamodel.groups._reset === 'function') {
-                    gt.datamodel.groups._reset();
+            var gs = window.GroupTest && window.GroupTest.groupSettings;
+            if (gs) {
+                if (gs.groups && typeof gs.groups._reset === 'function') {
+                    gs.groups._reset();
                 }
-                if (gt.datamodel.ls_configs && typeof gt.datamodel.ls_configs._reset === 'function') {
-                    gt.datamodel.ls_configs._reset();
-                }
-                if (gt.datamodel.registrations && typeof gt.datamodel.registrations._reset === 'function') {
-                    gt.datamodel.registrations._reset();
+                if (gs.lsConfigs && typeof gs.lsConfigs._reset === 'function') {
+                    gs.lsConfigs._reset();
                 }
             }
         } catch (e) {

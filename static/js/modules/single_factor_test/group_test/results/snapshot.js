@@ -23,9 +23,22 @@
     var _snapshotTimestamps = [];  // 所有可用时间点（epoch ms）
     var _snapshotCurrentMs = null; // 当前显示的时间点
 
+    function _selection() {
+        return GT.panels && GT.panels.list && GT.panels.list.selection;
+    }
+
+    function _activeSubmissionId() {
+        var sel = _selection();
+        return sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
+    }
+
+    function _escape(value) {
+        return GT.escapeHTML ? GT.escapeHTML(value) : String(value == null ? '' : value);
+    }
+
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
-        var submissionId = GT.utils.dates ? GT.utils.dates.getActiveSubmissionId() : null;
+        var submissionId = _activeSubmissionId();
         if (!submissionId) return;
 
         timestampMs = Math.round(timestampMs);
@@ -199,12 +212,12 @@
     /** 渲染单个产品标签（带费率和描述） */
     function _renderProduct(p) {
         if (!p) return '';
-        if (typeof p === 'string') return GT.utils.escapeHtml ? GT.utils.escapeHtml(p) : p;
-        var name = GT.utils.escapeHtml ? GT.utils.escapeHtml(p.name) : p.name;
+        if (typeof p === 'string') return _escape(p);
+        var name = _escape(p.name);
         var desc = '';
         if (p.desc && p.desc !== p.name) {
             desc = ' <span class="snapshot-product-desc">' +
-                (GT.utils.escapeHtml ? GT.utils.escapeHtml(p.desc) : p.desc) + '</span>';
+                _escape(p.desc) + '</span>';
         }
         var feeHtml = '';
         if (p.fee) {
@@ -246,7 +259,7 @@
         // —— 表头 —
         var headHtml = '<thead><tr><th style="min-width:80px;">产品</th>';
         groups.forEach(function(g) {
-            headHtml += '<th>' + (GT.utils.escapeHtml ? GT.utils.escapeHtml(g.name) : g.name)
+            headHtml += '<th>' + _escape(g.name)
                 + ' <span style="font-weight:normal;color:#888;font-size:11px;">(' + g.count + ')</span></th>';
         });
         headHtml += '</tr></thead>';
@@ -255,7 +268,7 @@
         var bodyHtml = '<tbody>';
         allProducts.forEach(function(prodName) {
             bodyHtml += '<tr>';
-            bodyHtml += '<td class="snapshot-prod-name-cell">' + (GT.utils.escapeHtml ? GT.utils.escapeHtml(prodName) : prodName) + '</td>';
+            bodyHtml += '<td class="snapshot-prod-name-cell">' + _escape(prodName) + '</td>';
             groups.forEach(function(g) {
                 var status = _productStatusInGroup(prodName, g);
                 var cellContent;

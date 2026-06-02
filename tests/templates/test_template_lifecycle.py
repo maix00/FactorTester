@@ -78,7 +78,7 @@ def _make_submission_item(sid: str, label: str = "", paths: list | None = None):
 
 def _make_base_group(tester_id: str, name: str = "G1", factor_alias: str = "Return",
                      group_count: int = 5, group_index: int = 0):
-    """构造一个 baseGroup（模拟 GT.datamodel.base_groups.snapshot 输出）。"""
+    """构造一个 baseGroup（模拟 groupSettings snapshot 输出）。"""
     return {
         "id": f"bg-{tester_id}-{name}",
         "name": name,

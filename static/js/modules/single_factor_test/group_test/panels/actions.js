@@ -126,8 +126,8 @@
     };
 
     actions.effectiveDerivedProductNames = function(node, seen) {
-        if (GT.datamodel && GT.datamodel.groups && typeof GT.datamodel.groups.effectiveProductNames === 'function') {
-            return GT.datamodel.groups.effectiveProductNames(node, {
+        if (GT.groupSettings.groups && typeof GT.groupSettings.groups.effectiveProductNames === 'function') {
+            return GT.groupSettings.groups.effectiveProductNames(node, {
                 getProductsForTester: actions.productNamesForTester
             }, seen);
         }
@@ -135,26 +135,26 @@
     };
 
     actions.groupDisplayKey = function(group, allGroups) {
-        if (GT.datamodel && GT.datamodel.groups && typeof GT.datamodel.groups.displayKey === 'function') {
-            return GT.datamodel.groups.displayKey(group, allGroups);
+        if (GT.groupSettings.groups && typeof GT.groupSettings.groups.displayKey === 'function') {
+            return GT.groupSettings.groups.displayKey(group, allGroups);
         }
         if (!group) return '';
         return group.shortAlias || group.key || group.name || group.id || '';
     };
 
     actions.lsDisplayName = function(ls) {
-        if (GT.datamodel && GT.datamodel.ls_configs && typeof GT.datamodel.ls_configs.displayName === 'function') {
-            return GT.datamodel.ls_configs.displayName(ls);
+        if (GT.groupSettings.lsConfigs && typeof GT.groupSettings.lsConfigs.displayName === 'function') {
+            return GT.groupSettings.lsConfigs.displayName(ls);
         }
         return (ls && (ls.shortAlias || ls.name)) || 'Long-Short';
     };
 
     actions.serializeGroupFeeMap = function(feeMap) {
-        return GT.datamodel.groups.serializeFeeMap(feeMap);
+        return GT.groupSettings.groups.serializeFeeMap(feeMap);
     };
 
     actions.serializeGroupVariant = function(group, fallbackName) {
-        return GT.datamodel.groups.serializeVariant(group, fallbackName);
+        return GT.groupSettings.groups.serializeVariant(group, fallbackName);
     };
 
     actions.collectSelectedDerivedProducts = function() {
@@ -168,12 +168,11 @@
 
 
     actions.findBaseGroupIdForResultGroup = function(groupIndex) {
-        if (!GT.datamodel || !GT.datamodel.groups) return null;
-        var getActiveSubmissionId = GT.utils.dates ? GT.utils.dates.getActiveSubmissionId : function() { return null; };
-        var getActiveFactorAlias = GT.utils.dates ? GT.utils.dates.getActiveFactorAlias : function() { return null; };
-        var submissionId = getActiveSubmissionId();
-        var factorAlias = getActiveFactorAlias();
-        var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
+        if (!GT.groupSettings.groups) return null;
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        var submissionId = sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
+        var factorAlias = sel && typeof sel.getFirstFactorAlias === 'function' ? sel.getFirstFactorAlias() : '';
+        var all = GT.groupSettings.groups.getAll ? (GT.groupSettings.groups.getAll() || []) : [];
         var lastGrossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
         var resultGroup = lastGrossData && lastGrossData[groupIndex] ? lastGrossData[groupIndex] : null;
         var baseGroupIndex = resultGroup && resultGroup.derived && resultGroup.derived.base_group != null
@@ -210,7 +209,7 @@
     actions.removeGeneratedDerivedArtifacts = function(id) {
         var lastGrossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
         var lastMetrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
-        var node = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(id) : null;
+        var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
         var key = node ? actions.groupDisplayKey(node) : null;
         if (lastGrossData) {
             lastGrossData = lastGrossData.filter(function(group) {
@@ -239,7 +238,7 @@
         productNames.forEach(function(pn) { productMask[pn] = true; });
         var newId;
         try {
-            newId = GT.datamodel.groups.add({
+            newId = GT.groupSettings.groups.add({
                 name: '',
                 isDerived: true,
                 baseGroupId: baseGroupId,
@@ -259,8 +258,8 @@
 
         var baseGroupId = actions.findBaseGroupIdForResultGroup(groupIndex);
         var derivedNodes = [];
-        if (baseGroupId && GT.datamodel && GT.datamodel.groups) {
-            var allNodes = GT.datamodel.groups.getAll();
+        if (baseGroupId && GT.groupSettings.groups) {
+            var allNodes = GT.groupSettings.groups.getAll();
             for (var i = 0; i < allNodes.length; i++) {
                 if (allNodes[i].isDerived && allNodes[i].baseGroupId === baseGroupId) {
                     derivedNodes.push(allNodes[i]);
@@ -354,15 +353,15 @@
 
         document.querySelectorAll('.derived-group-generate-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                if (GT.core.actions && GT.core.actions.runner && typeof GT.core.actions.runner.generateDerivedGroup === 'function') {
-                    GT.core.actions.runner.generateDerivedGroup(btn.getAttribute('data-derived-id'));
+                if (GT.core.runTest && typeof GT.core.runTest.generateDerivedGroup === 'function') {
+                    GT.core.runTest.generateDerivedGroup(btn.getAttribute('data-derived-id'));
                 }
             });
         });
         document.querySelectorAll('.derived-group-delete-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                if (GT.core.actions && GT.core.actions.runner && typeof GT.core.actions.runner.deleteDerivedGroup === 'function') {
-                    GT.core.actions.runner.deleteDerivedGroup(btn.getAttribute('data-derived-id'));
+                if (GT.core.runTest && typeof GT.core.runTest.deleteDerivedGroup === 'function') {
+                    GT.core.runTest.deleteDerivedGroup(btn.getAttribute('data-derived-id'));
                 }
             });
         });
@@ -392,7 +391,6 @@
             name: name,
             defaultName: name,
         };
-        if (GT.state && GT.state.setActiveDerivedNodeId) GT.state.setActiveDerivedNodeId(null);
         if (GT.ui && typeof GT.ui.mountTab === 'function') {
             GT.ui.mountTab('config-derived');
         }
@@ -411,7 +409,7 @@
         var el = document.getElementById('long-short-summary');
         if (!el) return;
         var definitions = GT.core.cache ? GT.core.cache.getLongShortDefinitions() : [];
-        if (!definitions.length) definitions = [GT.datamodel && GT.datamodel.ls_configs ? GT.datamodel.ls_configs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
+        if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
         el.textContent = definitions.map(function(def) {
             return (def.name || 'Long-Short') + ': L(' + (def.longGroups || '1') + ') / S(' + (def.shortGroups || '末组') + ')';
         }).join('；');
@@ -421,7 +419,7 @@
         var el = document.getElementById('long-short-config-list');
         if (!el) return;
         var definitions = GT.core.cache ? GT.core.cache.getLongShortDefinitions() : [];
-        if (!definitions.length) definitions = [GT.datamodel && GT.datamodel.ls_configs ? GT.datamodel.ls_configs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
+        if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
         var html = '';
         definitions.forEach(function(def) {
             html += '<div class="long-short-config-row" data-ls-id="' + escapeHtml(def.id) + '">'
@@ -454,7 +452,7 @@
                 var cache = GT.core.cache;
                 var definitions = cache ? cache.getLongShortDefinitions() : [];
                 definitions = definitions.filter(function(item) { return item.id !== lsId; });
-                if (!definitions.length) definitions = [GT.datamodel && GT.datamodel.ls_configs ? GT.datamodel.ls_configs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
+                if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
                 cache && cache.setLongShortDefinitions(definitions);
                 actions.renderLongShortConfigList();
                 actions.updateLongShortSummary();

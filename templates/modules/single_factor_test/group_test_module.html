@@ -926,19 +926,18 @@
 <!-- GroupTest modular scripts (load order matters) -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/state.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/utils/dates.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/cache.js') }}"></script>
-<!-- Datamodel layer (Issue #85 Phase 1) — pure logic, zero DOM -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/groups.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/ls_configs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/registrations.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/settings_snapshot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/dates.js') }}"></script>
+<!-- Datamodel layer — unified in core/group-settings.js -->
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
 <!-- Panel layer — UI components by category -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/registry.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/chips.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/strategy.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/base.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}"></script>
@@ -946,7 +945,8 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/derived.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/registry.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/derived-addon.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/meta.js') }}"></script>
@@ -955,13 +955,12 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/chart/groups.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/actions/collect.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/prerun-collect.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/actions/runner.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}"></script>

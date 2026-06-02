@@ -114,16 +114,16 @@
         registry();
         _mounted = true;
         GT.state.on('groupsChanged', _onGroupsChanged);
-        GT.state.on('activeBaseGroupChanged', _onActiveGroupChanged);
-        if (GT.state.on) GT.state.on('activeDerivedNodeChanged', _onActiveGroupChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onActiveGroupChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
         GT.state.off('groupsChanged', _onGroupsChanged);
-        GT.state.off('activeBaseGroupChanged', _onActiveGroupChanged);
-        if (GT.state.off) GT.state.off('activeDerivedNodeChanged', _onActiveGroupChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onActiveGroupChanged);
     }
 
     function refresh() {
@@ -167,6 +167,7 @@
             name: 'liquidity',
             label: '流动性',
             panel: GT.panels.config.liquidity,
+            fields: ['liquidityMode', 'liquidityPercent'],
         }, 'config-liquidity');
     }
 

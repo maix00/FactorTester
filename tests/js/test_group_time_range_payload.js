@@ -1,68 +1,47 @@
-var assert = require('assert');
-var root = require('path').join(__dirname, '../..');
+const { assert, resetGroupTest, registerConfigFields, load } = require('./group_test_harness');
 
-function makeElement(value) {
-    return {
-        value: value || '',
-        addEventListener: function() {},
-        closest: function() { return null; },
-    };
-}
+const GT = resetGroupTest();
+load('panels/list/selection-state.js');
+load('core/dates.js');
+load('core/group-settings.js');
+registerConfigFields(GT);
+load('core/prerun-collect.js');
 
-var elements = {
-    group_start_year: makeElement('2026'),
-    group_start_month: makeElement('02'),
-    group_start_day: makeElement('03'),
-    group_end_year: makeElement('2026'),
-    group_end_month: makeElement('04'),
-    group_end_day: makeElement('05'),
-};
+document.registerElement('group_start_year').value = '2026';
+document.registerElement('group_start_month').value = '02';
+document.registerElement('group_start_day').value = '03';
+document.registerElement('group_end_year').value = '2026';
+document.registerElement('group_end_month').value = '02';
+document.registerElement('group_end_day').value = '31';
 
-global.window = global;
-global.document = {
-    readyState: 'loading',
-    getElementById: function(id) { return elements[id] || null; },
-    querySelector: function() { return null; },
-    querySelectorAll: function() { return []; },
-    addEventListener: function() {},
-    createElement: function() { return { style: {}, appendChild: function() {} }; },
-};
-global.setTimeout = function() {};
-global.GroupTest = {
-    datamodel: {},
-    state: { emit: function() {}, on: function() {}, off: function() {} },
-    log: function() {},
-    ui: {},
-};
+assert.deepStrictEqual(GT.core.dates.readGroupTimeRangeInput(), {
+  startDate: '2026-02-03',
+  endDate: '2026-02-28',
+});
 
-global.window.DateUtils = {
-    getMaxDay: function(y, m) { return new Date(y, m, 0).getDate(); },
-    pad: function(n) { return n < 10 ? '0' + n : String(n); },
-};
+GT.groupSettings.groups.add({
+  id: 'base-time',
+  name: 'Time',
+  testerId: 'tester-time',
+  factorAlias: 'FactorTime',
+  groupCount: 4,
+  groupIndex: 1,
+  startDate: '2026-02-03',
+  endDate: '2026-02-28',
+  feeMode: 'uniform',
+  feeRate: 0.0001,
+  rebalanceMode: 'recycle',
+});
 
-require(root + '/static/js/modules/single_factor_test/group_test/app.js');
-
-var resolved = GroupTest.ui._resolveGroupRunTimeRange(
-    '2025-01-01',
-    '2025-12-31',
-    { start_date: '2024-01-01', end_date: '2024-12-31' }
-);
-assert.strictEqual(resolved.startDate, '2026-02-03');
-assert.strictEqual(resolved.endDate, '2026-04-05');
-assert.strictEqual(resolved.explicitStartDate, '2026-02-03');
-assert.strictEqual(resolved.explicitEndDate, '2026-04-05');
-
-elements.group_start_year.value = '';
-elements.group_start_month.value = '';
-elements.group_start_day.value = '';
-elements.group_end_year.value = '';
-elements.group_end_month.value = '';
-elements.group_end_day.value = '';
-resolved = GroupTest.ui._resolveGroupRunTimeRange(
-    '2025-01-01',
-    '2025-12-31'
-);
-assert.strictEqual(resolved.startDate, '2025-01-01');
-assert.strictEqual(resolved.endDate, '2025-12-31');
-
-console.log('group time range payload OK');
+(async () => {
+  const result = await GT.core.collect.buildGroupRunPayload('tester-time', 'FactorTime');
+  assert.ifError(result.error);
+  assert.strictEqual(result.payload.start_date, '2026-02-03');
+  assert.strictEqual(result.payload.end_date, '2026-02-28');
+  assert.strictEqual(result.payload.fee, 0.0001);
+  assert.strictEqual(result.payload.rebalance_mode, 'recycle');
+  console.log('PASS: group run payload uses groupSettings time and config fields');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

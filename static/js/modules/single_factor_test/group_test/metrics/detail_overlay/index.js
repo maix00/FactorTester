@@ -4,9 +4,8 @@
  * Provides openResultGroupDetail, openGroupRankingDetail,
  * loadBaseGroupDetail, findResultGroup, and buildPortfolioDetail.
  *
- * Reads IIFE state (_lastGrossData, _lastMetrics, _currentGroupDetailIndex)
- * and external module GT.utils.dates.getActiveSubmissionId from the
- * host app via GT.results.detailOverlay.hostRefs.
+ * Reads rendered result cache through hostRefs and derives submission context
+ * from the currently selected group.
  */
 (function() {
     var GT = window.GroupTest;
@@ -89,8 +88,16 @@
 
     /* ───── Data loading ───── */
 
+    function _getActiveSubmissionId() {
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && typeof sel.getFirstSubmissionId === 'function') {
+            return sel.getFirstSubmissionId();
+        }
+        return null;
+    }
+
     async function loadBaseGroupDetail(groupIndex) {
-        var submissionId = GT.utils.dates.getActiveSubmissionId();
+        var submissionId = _getActiveSubmissionId();
         if (!submissionId) return;
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
@@ -160,7 +167,7 @@
     /* ───── openGroupRankingDetail ───── */
 
     async function openGroupRankingDetail() {
-        var submissionId = GT.utils.dates.getActiveSubmissionId();
+        var submissionId = _getActiveSubmissionId();
         if (!submissionId) return;
         var overlay = document.getElementById('group-ranking-overlay');
         var loading = document.getElementById('group-ranking-loading');

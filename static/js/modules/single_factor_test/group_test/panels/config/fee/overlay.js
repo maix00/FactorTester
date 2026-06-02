@@ -444,7 +444,7 @@
     /**
      * Open the config fee overlay.
      *
-     * @param {object}  group            — base group from datamodel
+     * @param {object}  group            — base group settings object
      * @param {string}  mode             — 'edit' or 'view'
      * @param {function} [onClose]       — called after overlay closes (e.g. to re-render chips)
      */

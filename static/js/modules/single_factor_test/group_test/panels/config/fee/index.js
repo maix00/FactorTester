@@ -427,7 +427,8 @@
         REG = window.GT_CONFIG_REGISTRY;
 
         GT.state.on('groupsChanged', _onDataChanged);
-        GT.state.on('activeBaseGroupChanged', _onDataChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onDataChanged);
 
         render();
     }
@@ -435,7 +436,8 @@
     function unmount() {
         _mounted = false;
         GT.state.off('groupsChanged', _onDataChanged);
-        GT.state.off('activeBaseGroupChanged', _onDataChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onDataChanged);
     }
 
     function refresh() {
@@ -460,6 +462,7 @@
             name: 'fee',
             label: '费率',
             panel: GT.panels.config.fee,
+            fields: ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday'],
         }, 'config-fee');
     }
 

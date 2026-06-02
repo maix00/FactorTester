@@ -2,13 +2,13 @@
  * panels/config/rebalance.js — Rebalance mode panel (category-3)
  *
  * Phase 3 UI panel. Renders a dropdown for the selected base group's
- * rebalanceMode field with mode description. All data access through datamodel + state.
+ * rebalanceMode field with mode description. All data access through groupSettings + state.
  *
- * Contract (provided by P3-1 & datamodel):
- *   GT.state.getActiveBaseGroupId() → id|null
- *   GT.state.on('activeBaseGroupChanged', cb)
- *   GT.datamodel.groups.get(id) → {...}|null
- *   GT.datamodel.groups.update(id, patch)
+ * Contract:
+ *   GT.panels.list.selection.getFirst() → id|null
+ *   GT.panels.list.selection.on('selectionChanged', cb)
+ *   GT.groupSettings.groups.get(id) → {...}|null
+ *   GT.groupSettings.groups.update(id, patch)
  *
  * Valid modes: each_period | buy_and_hold | recycle
  */
@@ -98,7 +98,7 @@
         if (_mounted && reg && !reg.hasDirty()) { render(); }
     }
 
-    function _onActiveBaseGroupChanged() {
+    function _onSelectionChanged() {
         var reg = registry();
         if (_mounted && reg) { reg.rollbackDirty(); render(); }
     }
@@ -112,14 +112,16 @@
             return;
         }
         GT.state.on('groupsChanged', _onBaseGroupsChanged);
-        GT.state.on('activeBaseGroupChanged', _onActiveBaseGroupChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onSelectionChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
         GT.state.off('groupsChanged', _onBaseGroupsChanged);
-        GT.state.off('activeBaseGroupChanged', _onActiveBaseGroupChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onSelectionChanged);
     }
 
     function refresh() {
@@ -172,6 +174,7 @@
             name: 'rebalance',
             label: '再平衡',
             panel: GT.panels.config.rebalance,
+            fields: ['rebalanceMode'],
         }, 'config-rebalance');
     }
 

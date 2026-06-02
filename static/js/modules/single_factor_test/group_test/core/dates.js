@@ -1,14 +1,14 @@
 /**
- * utils/dates.js — 分组测试日期工具函数
- * 
+ * core/dates.js — 分组测试日期工具函数
+ *
  * 从 app.js 解耦提取。无外部依赖（仅依赖 window.DateUtils 和 DOM）。
- * 挂载到 GT.utils.dates 命名空间。
+ * 挂载到 GT.core.dates 命名空间。
  */
 (function(){
     var GT = window.GroupTest;
-    if (!GT) { console.warn('[GT utils/dates] bootstrap missing'); return; }
-    GT.utils = GT.utils || {};
-    if (GT.utils.dates) { console.warn('[GT utils/dates] already loaded'); return; }
+    if (!GT) { console.warn('[GT core/dates] bootstrap missing'); return; }
+    GT.core = GT.core || {};
+    if (GT.core.dates) { console.warn('[GT core/dates] already loaded'); return; }
 
     var dates = {};
 
@@ -136,16 +136,16 @@
         };
     };
 
-    // ---------- 持久化时间范围到 datamodel ----------
+    // ---------- 持久化时间范围到 group settings ----------
     dates.persistGroupTimeRangeToDatamodel = function(startDate, endDate) {
-        if (!GT.datamodel || !GT.datamodel.groups || (!startDate && !endDate)) return;
-        var allGroups = GT.datamodel.groups.getAll() || [];
+        if (!GT.groupSettings.groups || (!startDate && !endDate)) return;
+        var allGroups = GT.groupSettings.groups.getAll() || [];
         allGroups.forEach(function(group) {
             try {
                 var patch = {};
                 if (startDate) patch.startDate = startDate;
                 if (endDate) patch.endDate = endDate;
-                GT.datamodel.groups.update(group.id, patch);
+                GT.groupSettings.groups.update(group.id, patch);
             } catch (e) { /* skip invalid/stale group */ }
         });
     };
@@ -195,14 +195,14 @@
                 }
             }
 
-            if (GT.datamodel && GT.datamodel.groups && (startDate || endDate)) {
-                var allBase = GT.datamodel.groups.getAll();
+            if (GT.groupSettings.groups && (startDate || endDate)) {
+                var allBase = GT.groupSettings.groups.getAll();
                 allBase.forEach(function(bg) {
                     try {
                         var patch = {};
                         if (startDate) patch.startDate = startDate;
                         if (endDate) patch.endDate = endDate;
-                        GT.datamodel.groups.update(bg.id, patch);
+                        GT.groupSettings.groups.update(bg.id, patch);
                     } catch (e) { /* skip */ }
                 });
             }
@@ -230,14 +230,14 @@
         var startDate = (sy && sm && sd) ? dates.buildValidDate(sy.value, sm.value, sd.value) : null;
         var endDate = (ey && em && ed) ? dates.buildValidDate(ey.value, em.value, ed.value) : null;
 
-        if (GT.datamodel && GT.datamodel.groups && (startDate || endDate)) {
-            var allBase = GT.datamodel.groups.getAll();
+        if (GT.groupSettings.groups && (startDate || endDate)) {
+            var allBase = GT.groupSettings.groups.getAll();
             allBase.forEach(function(bg) {
                 try {
                     var patch = {};
                     if (startDate) patch.startDate = startDate;
                     if (endDate) patch.endDate = endDate;
-                    GT.datamodel.groups.update(bg.id, patch);
+                    GT.groupSettings.groups.update(bg.id, patch);
                 } catch (e) {
                     // Silently skip if update fails (e.g. validation)
                 }
@@ -251,42 +251,6 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', dates.syncFromTimeModule);
         });
-    };
-
-    // ---------- 从 GroupTest 分组面板获取当前激活的 submission ID ----------
-    // 优先：.group-submission-nav-btn.active → data-submission-id
-    // 回退：SingleFactorSubmissionContext + #groupTab .nav-link.active
-    dates.getActiveSubmissionId = function() {
-        var activeBtn = document.querySelector('.group-submission-nav-btn.active');
-        if (activeBtn) return activeBtn.getAttribute('data-submission-id');
-        var ctx = window.SingleFactorSubmissionContext;
-        var activeTab = document.querySelector('#groupTab .nav-link.active');
-        if (!ctx || !activeTab) return null;
-        return ctx.getSubmissionIdFromTab(activeTab, 'group-panel');
-    };
-
-    // ---------- 从 GroupTest 因子导航获取当前激活的 factor alias ----------
-    // 优先：.group-factor-nav-btn.active → data-factor-alias
-    // 回退：SingleFactorSubmissionContext.getActiveFactorContext()
-    dates.getActiveFactorAlias = function() {
-        var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
-        if (activeFactorBtn) return activeFactorBtn.getAttribute('data-factor-alias');
-        var ctx = window.SingleFactorSubmissionContext;
-        if (!ctx) return null;
-        var factorCtx = ctx.getActiveFactorContext({
-            tabSelector: '#groupTab .nav-link.active',
-            panelPrefix: 'group-panel',
-            factorTabSelector: '.group-factor-nav-btn.active',
-        }) || ctx.getActiveFactorContext({
-            tabSelector: '#icTab .nav-link.active',
-            panelPrefix: 'ic-panel',
-        });
-        return factorCtx ? factorCtx.factor_alias : null;
-    };
-
-    // ---------- 页面是否包含 IC 测试模块 ----------
-    dates.pageHasICModule = function() {
-        return !!document.getElementById('ic_test_module');
     };
 
     // ---------- 解析运行时间范围（含 submission 日期 fallback） ----------
@@ -306,5 +270,5 @@
         return resolved;
     };
 
-    GT.utils.dates = dates;
+    GT.core.dates = dates;
 })();
