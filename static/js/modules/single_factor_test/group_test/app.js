@@ -147,14 +147,37 @@
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) {
             runBtn.addEventListener('click', function() {
-                if (GT.core && GT.core.runTest) GT.core.runTest.runGroupTest();
+                console.log('[GT] run_group_test_btn clicked');
+                if (GT.core && GT.core.runTest && typeof GT.core.runTest.runGroupTest === 'function') {
+                    try {
+                        GT.core.runTest.runGroupTest();
+                    } catch(e) {
+                        console.error('[GT] runGroupTest error:', e);
+                    }
+                } else {
+                    console.warn('[GT] GT.core.runTest.runGroupTest not available', {
+                        core: !!GT.core,
+                        runTest: !!(GT.core && GT.core.runTest),
+                        runGroupTest: typeof (GT.core && GT.core.runTest && GT.core.runTest.runGroupTest)
+                    });
+                }
             });
             runBtn.style.display = '';
         }
         var defaultBtn = document.getElementById('load_default_groups_btn');
         if (defaultBtn) {
             defaultBtn.addEventListener('click', function() {
-                if (GT.core && GT.core.runTest) GT.core.runTest.loadDefaultGroups();
+                console.log('[GT] load_default_groups_btn clicked');
+                if (GT.core && GT.core.runTest && typeof GT.core.runTest.loadDefaultGroups === 'function') {
+                    try {
+                        GT.core.runTest.loadDefaultGroups();
+                    } catch(e) {
+                        console.error('[GT] loadDefaultGroups error:', e);
+                    }
+                } else {
+                    console.warn('[GT] loadDefaultGroups not available');
+                }
+            });
             });
             defaultBtn.style.display = '';
         }
