@@ -62,7 +62,7 @@
         .then(function(data) {
             if (!data.success) {
                 document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
-                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">' + data.error + '</div>';
+                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">' + (data.error || '未知错误') + '</div>';
                 document.getElementById('snapshot_flow_stats').innerHTML = '';
                 _updateSnapshotNavButtons(null);
                 openSnapshotDrawer();
@@ -70,8 +70,16 @@
             }
             _snapshotTimestamps = data.all_timestamps_ms || [];
             _snapshotCurrentMs = data.timestamp_ms;
-            renderGroupSnapshot(data, data.timestamp_ms);
-            _updateSnapshotNavButtons(data);
+            try {
+                renderGroupSnapshot(data, data.timestamp_ms);
+                _updateSnapshotNavButtons(data);
+            } catch (e) {
+                console.error('[snapshot] renderGroupSnapshot error:', e);
+                document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 渲染失败';
+                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">渲染快照时出错: ' + (e.message || e) + '</div>';
+                document.getElementById('snapshot_flow_stats').innerHTML = '';
+                _updateSnapshotNavButtons(null);
+            }
             openSnapshotDrawer();
         })
         .catch(function(err) {
