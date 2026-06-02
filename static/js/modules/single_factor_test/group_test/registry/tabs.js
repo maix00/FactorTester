@@ -97,6 +97,12 @@
 
     // ── action buttons（泛型） ──
 
+    /** mousedown 触发前先让当前聚焦元素 blur，确保输入值已写入 dirty workspace */
+    function _flushFocusedInput() {
+        var ae = document.activeElement;
+        if (ae && ae !== document.body && ae.blur) { ae.blur(); }
+    }
+
     function _bindActionButtons() {
         // 清除旧绑定
         var bar = document.getElementById('gt-tab-actions');
@@ -110,18 +116,26 @@
         var addLSBtn = document.getElementById('gt-action-add-ls');
         if (addLSBtn) addLSBtn.addEventListener('click', function() { _enterAddMode('ls'); });
 
-        // add/edit 模式提交/取消 — 用 mousedown 避免输入框 blur 先于 click 导致事件丢失
+        // 取消按钮 — mousedown 后直接退出，无需等 blur 刷新
         var cancelBtn = document.getElementById('gt-action-cancel');
         if (cancelBtn) cancelBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitAddMode(); });
-
-        var submitBtn = document.getElementById('gt-action-submit');
-        if (submitBtn) submitBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _submitAddDraft(); });
-
-        var saveBtn = document.getElementById('gt-action-save');
-        if (saveBtn) saveBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _saveEditChanges(); });
-
         var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
         if (cancelEditBtn) cancelEditBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitEditMode(); });
+
+        // 提交/保存 — mousedown 先 blur 聚焦输入框，等 blur 回调执行后再提交
+        var submitBtn = document.getElementById('gt-action-submit');
+        if (submitBtn) submitBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            _flushFocusedInput();
+            setTimeout(_submitAddDraft, 0);
+        });
+
+        var saveBtn = document.getElementById('gt-action-save');
+        if (saveBtn) saveBtn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            _flushFocusedInput();
+            setTimeout(_saveEditChanges, 0);
+        });
 
         // edit actions（动态注册的）
         var actions = M.getMatchingEditActions();
