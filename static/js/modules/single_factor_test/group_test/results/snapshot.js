@@ -209,7 +209,7 @@
         return productName;
     }
 
-    /** 渲染单个产品标签（带费率和描述） */
+    /** 渲染单个产品标签（带费率、描述和持仓金额） */
     function _renderProduct(p) {
         if (!p) return '';
         if (typeof p === 'string') return _escape(p);
@@ -227,7 +227,13 @@
             if (fee.close_ratio !== undefined) parts.push('平' + (fee.close_ratio * 100).toFixed(3) + '%');
             if (parts.length) feeHtml = ' <span class="snapshot-product-fee">[' + parts.join(' ') + ']</span>';
         }
-        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>';
+        // 持仓金额 (refs #100)
+        var amtHtml = '';
+        if (p.amount !== null && p.amount !== undefined) {
+            var amtStr = p.amount >= 1 ? p.amount.toFixed(2) : p.amount.toFixed(6);
+            amtHtml = ' <span class="snapshot-product-amount" title="持仓金额">' + amtStr + '</span>';
+        }
+        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>' + amtHtml;
     }
 
     /**
