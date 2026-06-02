@@ -1,14 +1,14 @@
 /**
- * core/metrics-calc.js — 指标计算纯函数
+ * metrics/calc.js — 指标计算纯函数
  * 
  * 从 app.js 解耦提取。纯计算函数，无 DOM 依赖。
- * 挂载到 GT.core.metricsCalc 命名空间。
+ * 挂载到 GT.metrics.calc 命名空间。
  */
 (function(){
     var GT = window.GroupTest;
-    if (!GT) { console.warn('[GT core/metrics-calc] bootstrap missing'); return; }
-    GT.core = GT.core || {};
-    if (GT.core.metricsCalc) { console.warn('[GT core/metrics-calc] already loaded'); return; }
+    if (!GT) { console.warn('[GT metrics/calc] bootstrap missing'); return; }
+    GT.metrics = GT.metrics || {};
+    if (GT.metrics.calc) { console.warn('[GT metrics/calc] already loaded'); return; }
 
     var mc = {};
 
@@ -103,5 +103,5 @@
         };
     };
 
-    GT.core.metricsCalc = mc;
+    GT.metrics.calc = mc;
 })();

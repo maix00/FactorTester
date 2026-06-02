@@ -11,23 +11,6 @@
 
     GT.metrics = GT.metrics || {};
 
-    var metricNamesCN = {
-        'Total Return': '总收益率',
-        'Annual Return': '年化收益率',
-        'Mean Return': '均值收益率',
-        'Win Rate': '胜率',
-        'Volatility': '年化波动率',
-        'Max Drawdown': '最大回撤',
-        'Sharpe Ratio': '夏普比率',
-        'Calmar Ratio': 'Calmar比率',
-        'Skewness': '偏度',
-        'Kurtosis': '峰度',
-        'Avg Turnover': '平均换手率',
-        'Avg Turnover Accel': '换手加速度',
-        'Avg Position Changes': '平均持仓变化数',
-        'Up Ratio': '上涨占比',
-    };
-
     function isFiniteNumber(v) {
         return typeof v === 'number' && isFinite(v) && !isNaN(v);
     }
@@ -91,6 +74,11 @@
         }
         if (metricName.indexOf('Ratio') >= 0) return fmtNumber(v, 4);
         return fmtNumber(v, 4);
+    }
+
+    function metricLabel(metricName) {
+        var meta = (GT.metrics && GT.metrics.meta) || {};
+        return (meta.cn && meta.cn[metricName]) || metricName;
     }
 
     function escapeAttr(value) {
@@ -221,7 +209,7 @@
                 var bestIdx = getBestIdx(rawVals, metricName);
                 bodyHtml += '<tr>';
                 bodyHtml += '<td class="metric-name-cell" data-metric="' + metricName.replace(/"/g, '&quot;') + '" style="font-weight:600;">'
-                    + (metricNamesCN[metricName] || metricName) + '</td>';
+                    + metricLabel(metricName) + '</td>';
                 labels.forEach(function(g, gi) {
                     var v = (metricsByGroup[g] || {})[metricName];
                     var cls = (bestIdx !== null && gi === bestIdx) ? ' class="group-best-cell"' : '';
@@ -269,7 +257,7 @@
         build: build,
         render: render,
         bindHeaderActions: bindHeaderActions,
-        metricNamesCN: metricNamesCN,
+        metricLabel: metricLabel,
         metricDisplay: metricDisplay,
     };
 })();
