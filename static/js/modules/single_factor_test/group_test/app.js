@@ -534,8 +534,7 @@
         container.style.display = 'block';
         if (GT.metrics && GT.metrics.table && typeof GT.metrics.table.render === 'function') {
             GT.metrics.table.render(metrics, _lastGrossData, {
-                openGroupDetail: openGroupDetail,
-                openPortfolioDetail: openPortfolioDetail,
+                openResultGroupDetail: openResultGroupDetail,
                 openGroupRankingDetail: openGroupRankingDetail,
             });
         }
@@ -1620,37 +1619,24 @@
         return value == null ? '—' : (value * 100).toFixed(3) + '%';
     }
 
-    async function openGroupDetail(groupIndex) {
+    async function loadBaseGroupDetail(groupIndex) {
         var submissionId = getActiveSubmissionId();
         if (!submissionId) return;
-        _currentGroupDetailIndex = groupIndex;
-        var overlay = document.getElementById('group-detail-overlay');
-        var loading = document.getElementById('group-detail-loading');
-        var content = document.getElementById('group-detail-content');
-        document.getElementById('group-detail-title').textContent = '第' + (groupIndex + 1) + '组详情';
-        overlay.classList.add('open');
-        loading.style.display = '';
-        content.style.display = 'none';
-        try {
-            var resp = await fetch('/get_group_detail', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ submission_id: submissionId, group_index: groupIndex }),
-            });
-            var data = await resp.json();
-            if (!data.success) throw new Error(data.error || '加载失败');
-            renderGroupDetail(data.detail || {});
-            loading.style.display = 'none';
-            content.style.display = '';
-        } catch (err) {
-            loading.textContent = '加载失败: ' + (err.message || err);
-        }
+        var resp = await fetch('/get_group_detail', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ submission_id: submissionId, group_index: groupIndex }),
+        });
+        var data = await resp.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        return data.detail || {};
     }
 
-    function findGeneratedPortfolio(key) {
+    function findResultGroup(key) {
         if (!_lastGrossData) return null;
         return _lastGrossData.find(function(group) {
             if (!group) return false;
+            if (String(group.group_index) === String(key)) return true;
             if (group.key === key) return true;
             if (group.name === key) return true;
             if (group.derived && group.derived.key === key) return true;
@@ -1659,22 +1645,39 @@
         });
     }
 
-    function openPortfolioDetail(key) {
-        var group = findGeneratedPortfolio(key);
+    async function openResultGroupDetail(key, groupIndexHint) {
+        var group = findResultGroup(key);
         if (!group) {
-            alert('未找到该派生组/Long-Short 的已生成结果。');
+            alert('未找到该组的已生成结果。');
             return;
         }
+        var groupIndex = group.group_index != null
+            ? Number(group.group_index)
+            : (groupIndexHint !== '' && groupIndexHint != null ? Number(groupIndexHint) : NaN);
+        _currentGroupDetailIndex = isFinite(groupIndex) ? groupIndex : null;
         var overlay = document.getElementById('group-detail-overlay');
         var loading = document.getElementById('group-detail-loading');
         var content = document.getElementById('group-detail-content');
-        document.getElementById('group-detail-title').textContent = (group.name || key || '派生组') + '详情';
+        var title = group.name || group.key || key || '分组';
+        document.getElementById('group-detail-title').textContent = title + '详情';
         overlay.classList.add('open');
-        loading.style.display = 'none';
-        content.style.display = '';
-        renderGroupDetail(buildPortfolioDetail(group, (_lastMetrics || {})[key] || {}), { showDerivedPanel: false });
-        var summary = document.getElementById('group-detail-frequency-summary');
-        if (summary) summary.textContent = group.is_ls ? 'Long-Short 组合腿配置' : '派生组所选品种';
+        loading.style.display = '';
+        loading.textContent = '加载中...';
+        content.style.display = 'none';
+        try {
+            var metric = (_lastMetrics || {})[group.key] || (_lastMetrics || {})[key] || {};
+            var isBaseGroup = !group.is_derived && !group.is_ls && isFinite(groupIndex);
+            var detail = isBaseGroup ? await loadBaseGroupDetail(groupIndex) : buildPortfolioDetail(group, metric);
+            renderGroupDetail(detail, { showDerivedPanel: isBaseGroup });
+            if (!isBaseGroup) {
+                var summary = document.getElementById('group-detail-frequency-summary');
+                if (summary) summary.textContent = group.is_ls ? 'Long-Short 组合腿配置' : '派生组所选品种';
+            }
+            loading.style.display = 'none';
+            content.style.display = '';
+        } catch (err) {
+            loading.textContent = '加载失败: ' + (err.message || err);
+        }
     }
 
     function renderGroupRankingAdjacent(rows) {

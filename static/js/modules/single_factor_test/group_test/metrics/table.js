@@ -93,15 +93,12 @@
         return fmtNumber(v, 4);
     }
 
-    /**
-     * Build a map from group key → is_ls for quick lookup.
-     */
-    function buildLsMap(groups) {
-        var map = {};
-        (groups || []).forEach(function(g) {
-            if (g && g.key && g.is_ls) map[g.key] = true;
-        });
-        return map;
+    function escapeAttr(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     function buildGroupIndexMap(groups) {
@@ -194,24 +191,17 @@
         var labels = getGroupLabels(metricsByGroup);
         if (!labels.length) return { headHtml: '', bodyHtml: '' };
 
-        var lsMap = buildLsMap(groups);
         var groupIndexMap = buildGroupIndexMap(groups);
-        function isLsGroup(g) { return lsMap[g] || false; }
-        function groupLabel(g) {
-            return String(g);
-        }
+        function groupLabel(g) { return String(g); }
 
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
             var label = groupLabel(g);
-            if (isLsGroup(g)) {
-                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
-            } else if (groupIndexMap[g] != null || /^\d+$/.test(String(g))) {
-                var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : String(g);
-                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(groupIndex) + '" title="查看该组详情">' + label + '</th>';
-            } else {
-                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
-            }
+            var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : (/^\d+$/.test(String(g)) ? String(g) : '');
+            headHtml += '<th class="group-detail-trigger"'
+                + ' data-group-key="' + escapeAttr(g) + '"'
+                + ' data-group-index="' + escapeAttr(groupIndex) + '"'
+                + ' title="查看该组详情">' + label + '</th>';
         });
         headHtml += '</tr>';
 
@@ -248,15 +238,11 @@
         actions = actions || {};
         document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
             th.addEventListener('click', function() {
-                if (typeof actions.openGroupDetail === 'function') {
+                var groupKey = th.getAttribute('data-group-key');
+                if (typeof actions.openResultGroupDetail === 'function') {
+                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'));
+                } else if (typeof actions.openGroupDetail === 'function') {
                     actions.openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
-                }
-            });
-        });
-        document.querySelectorAll('#metrics_head .portfolio-detail-trigger').forEach(function(th) {
-            th.addEventListener('click', function() {
-                if (typeof actions.openPortfolioDetail === 'function') {
-                    actions.openPortfolioDetail(th.getAttribute('data-group-key'));
                 }
             });
         });
