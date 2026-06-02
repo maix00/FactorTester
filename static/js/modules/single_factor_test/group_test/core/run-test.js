@@ -290,7 +290,9 @@
                     expandedIndex += 1;
                 }
             }
-            b.derivedPayload = runTest.buildDerivedPayloadForBatch(b);
+            b.derivedPayload = (GT.core.actions && GT.core.actions.collect && typeof GT.core.actions.collect.collectDerivedPayloadForBatch === 'function')
+                ? GT.core.actions.collect.collectDerivedPayloadForBatch(b)
+                : [];
             for (var di = 0; di < b.derivedPayload.length; di++) {
                 if (b.derivedPayload[di].id) {
                     b.groupIdToIndex[b.derivedPayload[di].id] = expandedIndex;
