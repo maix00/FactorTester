@@ -102,7 +102,7 @@
 
     async function loadBaseGroupDetail(groupIndex) {
         var submissionId = _getActiveSubmissionId();
-        if (!submissionId) return;
+        if (!submissionId) throw new Error('无法获取当前提交 ID，请先运行分组测试');
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -156,6 +156,9 @@
                 || (lastMetrics || {})[key] || {};
             var isLsGroup = !!group.is_ls;
             var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(groupIndex);
+            if (!detail) {
+                throw new Error('未获取到分组详情数据');
+            }
             Tabs.renderGroupDetail(detail, {
                 groupIndex: isFinite(groupIndex) ? groupIndex : undefined,
                 onRenderDerivedPanel: function(detailGroupIndex) {
