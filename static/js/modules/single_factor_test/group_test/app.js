@@ -25,53 +25,10 @@
     GT.ui._readGroupTimeRangeInput = readGroupTimeRangeInput;
     GT.ui._resolveGroupRunTimeRange = resolveGroupRunTimeRange;
 
-    function getCurrentContext() {
-        var ctx = window.SingleFactorSubmissionContext;
-        var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
-        if (activeFactorBtn) {
-            var submissionId = activeFactorBtn.getAttribute('data-submission-id');
-            var factorAlias = activeFactorBtn.getAttribute('data-factor-alias');
-            var factorList = Array.isArray(window.factorList) ? window.factorList : [];
-            var matchedFactor = factorList.find(function(f) {
-                return f.alias === factorAlias || f.name === factorAlias;
-            }) || null;
-            return {
-                submission_id: submissionId,
-                submission: ctx ? ctx.findSubmissionById(submissionId) : null,
-                factor_alias: factorAlias,
-                factor: matchedFactor,
-            };
-        }
-        if (!ctx) return null;
-        return ctx.getActiveFactorContext({
-            tabSelector: '#groupTab .nav-link.active',
-            panelPrefix: 'group-panel',
-            factorTabSelector: '.group-factor-nav-btn.active',
-        }) || ctx.getActiveFactorContext({
-            tabSelector: '#icTab .nav-link.active',
-            panelPrefix: 'ic-panel',
-        });
-    }
-
-    function getActiveGroupSubmissionId() {
-        var activeBtn = document.querySelector('.group-submission-nav-btn.active');
-        if (activeBtn) return activeBtn.getAttribute('data-submission-id');
-        var ctx = window.SingleFactorSubmissionContext;
-        var activeTab = document.querySelector('#groupTab .nav-link.active');
-        if (!ctx || !activeTab) return null;
-        return ctx.getSubmissionIdFromTab(activeTab, 'group-panel');
-    }
-
-    function pageHasICModule() {
-        return !!document.getElementById('ic_test_module');
-    }
-
-    function getMissingGroupContextMessage() {
-        if (pageHasICModule()) {
-            return '请先选择产品组/测试器和因子；如果因子列表尚未出现，请先在 IC 测试模块运行 IC 测试。';
-        }
-        return '请先选择测试器和因子';
-    }
+    // ---------- 激活状态桥接（已迁移到 GT.utils.dates） ----------
+    var getActiveSubmissionId = GT.utils.dates ? GT.utils.dates.getActiveSubmissionId : function() { return null; };
+    var getActiveFactorAlias = GT.utils.dates ? GT.utils.dates.getActiveFactorAlias : function() { return null; };
+    var pageHasICModule = GT.utils.dates ? GT.utils.dates.pageHasICModule : function() { return false; };
 
     // ---------- 多周期收益率频率复选框 ----------
     var RETURN_FREQ_OPTIONS = ['1d', '2d', '3d', '5d', '10d', '20d'];
@@ -511,8 +468,8 @@
 
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
-        var context = getCurrentContext();
-        if (!context) return;
+        var submissionId = getActiveSubmissionId();
+        if (!submissionId) return;
 
         timestampMs = Math.round(timestampMs);
         _snapshotCurrentMs = timestampMs;
@@ -527,7 +484,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                submission_id: context.submission_id,
+                submission_id: submissionId,
                 timestamp_ms: timestampMs
             })
         })
@@ -1269,14 +1226,15 @@
 
     function findBaseGroupIdForResultGroup(groupIndex) {
         if (!GT.datamodel || !GT.datamodel.groups) return null;
-        var context = getCurrentContext();
+        var submissionId = getActiveSubmissionId();
+        var factorAlias = getActiveFactorAlias();
         var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
         var expectedIndex = Number(groupIndex) + 1;
         var matches = all.filter(function(group) {
             if (!group || group.isDerived) return false;
             if (Number(group.groupIndex) !== expectedIndex) return false;
-            if (context && context.submission_id && String(group.testerId) !== String(context.submission_id)) return false;
-            if (context && context.factor_alias && String(group.factorAlias || '') !== String(context.factor_alias || '')) return false;
+            if (submissionId && String(group.testerId) !== String(submissionId)) return false;
+            if (factorAlias && String(group.factorAlias || '') !== String(factorAlias || '')) return false;
             return true;
         });
         if (matches.length === 1) return matches[0].id;
@@ -1342,12 +1300,12 @@
 
     /** 为单个派生组发请求，不画图；返回 {success, def, group, metric} 或 null。 */
     async function _generateDerivedGroupOnce(def, fee, fee_map) {
-        var context = getCurrentContext();
-        if (!def || !context || !context.submission_id) return null;
+        var submissionId = getActiveSubmissionId();
+        if (!def || !submissionId) return null;
         if (def.baseGroup == null) return null;
         try {
             var resp = await GT.api.createDerivedGroup({
-                submission_id: context.submission_id,
+                submission_id: submissionId,
                 group_index: def.baseGroup,
                 product_names: def.productNames,
                 name: def.name,
@@ -2104,8 +2062,8 @@
     }
 
     async function openGroupDetail(groupIndex) {
-        var context = getCurrentContext();
-        if (!context || !context.submission_id) return;
+        var submissionId = getActiveSubmissionId();
+        if (!submissionId) return;
         _currentGroupDetailIndex = groupIndex;
         var overlay = document.getElementById('group-detail-overlay');
         var loading = document.getElementById('group-detail-loading');
@@ -2118,7 +2076,7 @@
             var resp = await fetch('/get_group_detail', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ submission_id: context.submission_id, group_index: groupIndex }),
+                body: JSON.stringify({ submission_id: submissionId, group_index: groupIndex }),
             });
             var data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');
@@ -2298,8 +2256,8 @@
     }
 
     async function openGroupRankingDetail() {
-        var context = getCurrentContext();
-        if (!context || !context.submission_id) return;
+        var submissionId = getActiveSubmissionId();
+        if (!submissionId) return;
         var overlay = document.getElementById('group-ranking-overlay');
         var loading = document.getElementById('group-ranking-loading');
         var content = document.getElementById('group-ranking-content');
@@ -2311,7 +2269,7 @@
             var resp = await fetch('/get_group_ranking_detail', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ submission_id: context.submission_id }),
+                body: JSON.stringify({ submission_id: submissionId }),
             });
             var data = await resp.json();
             if (!data.success) throw new Error(data.error || '加载失败');
@@ -2488,10 +2446,9 @@
         });
     }
 
-    async function collectGroupRunPayload(context, factorAlias) {
+    async function collectGroupRunPayload(submissionId, factorAlias) {
         var statusSpan = document.getElementById('group_test_status');
-        var currentSubmissionId = context && context.submission_id;
-        if (!currentSubmissionId || !factorAlias) {
+        if (!submissionId || !factorAlias) {
             return { error: '请先选择测试器和因子' };
         }
 
@@ -2569,7 +2526,7 @@
 
         // Fallback: use submission dates
         if (!start_date || !end_date) {
-            var submission = window.submissions ? window.submissions.find(function(s) { return String(s.id) === String(currentSubmissionId); }) : null;
+            var submission = window.submissions ? window.submissions.find(function(s) { return String(s.id) === String(submissionId); }) : null;
             if (submission) {
                 if (!start_date) start_date = submission.start_date;
                 if (!end_date) end_date = submission.end_date;
@@ -2620,7 +2577,7 @@
 
         return {
             payload: {
-                submission_id: currentSubmissionId,
+                submission_id: submissionId,
                 factor_alias: factorAlias,
                 n_groups: n_groups,
                 fee: fee,
@@ -2634,7 +2591,7 @@
                 ls_configs: collectLongShortConfigs(n_groups),
                 derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
                 group_fee_maps: group_fee_maps,
-                structure_key: buildGroupStructureKey(currentSubmissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
+                structure_key: buildGroupStructureKey(submissionId, factorAlias, n_groups, start_date, end_date, return_freqs)
             },
             statusEl: statusSpan,
         };
@@ -2727,8 +2684,8 @@
      *  generation 用于废弃过期请求：如果 await 期间 applyGroupTestResult 被再次触发，
      *  该请求的结果不再 push 到 _lastGrossData。 */
     async function regenerateDerivedGroupQuiet(def, generation) {
-        var context = getCurrentContext();
-        if (!def || !context || !context.submission_id) return;
+        var submissionId = getActiveSubmissionId();
+        if (!def || !submissionId) return;
         if (!_lastGrossData || !_lastMetrics) return;
         if (def.baseGroup == null) return;
 
@@ -2757,7 +2714,7 @@
         }
 
         var resp = await GT.api.createDerivedGroup({
-            submission_id: context.submission_id,
+            submission_id: submissionId,
             group_index: def.baseGroup,
             product_names: def.productNames,
             name: def.name,
@@ -3063,24 +3020,22 @@
 
         // 从第一个 batch 取 param 值（fee、时间等）
         var firstGroup = batches[0] && batches[0].groups[0];
+        var firstTesterId = batches[0] && batches[0].testerId;
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
-        var resolvedRange = resolveGroupRunTimeRange(
-            firstGroup ? (firstGroup.startDate || null) : null,
-            firstGroup ? (firstGroup.endDate || null) : null
-        );
+        var fallbackTesterId = firstTesterId || (firstGroup ? firstGroup.testerId : null);
+        var resolvedRange = GT.utils.dates && GT.utils.dates.resolveGroupRunTimeRangeWithFallback
+            ? GT.utils.dates.resolveGroupRunTimeRangeWithFallback(
+                firstGroup ? (firstGroup.startDate || null) : null,
+                firstGroup ? (firstGroup.endDate || null) : null,
+                fallbackTesterId
+              )
+            : resolveGroupRunTimeRange(
+                firstGroup ? (firstGroup.startDate || null) : null,
+                firstGroup ? (firstGroup.endDate || null) : null
+              );
         var start_date = resolvedRange.startDate;
         var end_date = resolvedRange.endDate;
         persistGroupTimeRangeToDatamodel(resolvedRange.explicitStartDate, resolvedRange.explicitEndDate);
-        if (!start_date || !end_date) {
-            var ctx = getCurrentContext();
-            var sub = ctx ? ctx.submission : null;
-            if (!sub && window.submissions) {
-                var firstTesterId = batches[0] && batches[0].testerId;
-                sub = window.submissions.find(function(s) { return String(s.id) === String(firstTesterId); });
-            }
-            if (!start_date) start_date = sub ? sub.start_date : null;
-            if (!end_date) end_date = sub ? sub.end_date : null;
-        }
 
         if (!start_date || !end_date) {
             if (statusSpan) { statusSpan.innerHTML = '✗ 请设置时间范围'; statusSpan.style.color = '#d40000'; }
@@ -3264,7 +3219,7 @@
     }
 
     async function runAllGroupTestsForCurrentSubmission() {
-        var submissionId = getActiveGroupSubmissionId();
+        var submissionId = getActiveSubmissionId();
         if (!submissionId) {
             alert('请先选择一个 FactorTester 选项卡');
             return;
@@ -3274,9 +3229,6 @@
             alert('暂无可运行因子');
             return;
         }
-        var firstContext = {
-            submission_id: submissionId,
-        };
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) runBtn.disabled = true;
@@ -3287,7 +3239,7 @@
             for (var i = 0; i < factors.length; i++) {
                 var factor = factors[i];
                 var factorAlias = factor.alias || factor.name;
-                var built = await collectGroupRunPayload(firstContext, factorAlias);
+                var built = await collectGroupRunPayload(submissionId, factorAlias);
                 if (built.error) {
                     if (statusSpan) {
                         statusSpan.innerHTML = '✗ ' + built.error;
@@ -3359,9 +3311,10 @@
     function getCachedGroupResult(sid, fa) { return GT.core.cache ? GT.core.cache.getCachedGroupResult(sid, fa) : null; }
     function clearCachedGroupResultsForSubmission(sid) { return GT.core.cache && GT.core.cache.clearCachedGroupResultsForSubmission(sid); }
     function updateActiveGroupCache() {
-        var context = getCurrentContext();
-        if (!context || !context.submission_id || !context.factor_alias) return;
-        var cached = getCachedGroupResult(context.submission_id, context.factor_alias);
+        var submissionId = getActiveSubmissionId();
+        var factorAlias = getActiveFactorAlias();
+        if (!submissionId || !factorAlias) return;
+        var cached = getCachedGroupResult(submissionId, factorAlias);
         if (!cached) return;
         cached.groups = _lastGrossData;
         cached.metrics = _lastMetrics;

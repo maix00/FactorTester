@@ -216,5 +216,58 @@
         });
     };
 
+    // ---------- 从 GroupTest 分组面板获取当前激活的 submission ID ----------
+    // 优先：.group-submission-nav-btn.active → data-submission-id
+    // 回退：SingleFactorSubmissionContext + #groupTab .nav-link.active
+    dates.getActiveSubmissionId = function() {
+        var activeBtn = document.querySelector('.group-submission-nav-btn.active');
+        if (activeBtn) return activeBtn.getAttribute('data-submission-id');
+        var ctx = window.SingleFactorSubmissionContext;
+        var activeTab = document.querySelector('#groupTab .nav-link.active');
+        if (!ctx || !activeTab) return null;
+        return ctx.getSubmissionIdFromTab(activeTab, 'group-panel');
+    };
+
+    // ---------- 从 GroupTest 因子导航获取当前激活的 factor alias ----------
+    // 优先：.group-factor-nav-btn.active → data-factor-alias
+    // 回退：SingleFactorSubmissionContext.getActiveFactorContext()
+    dates.getActiveFactorAlias = function() {
+        var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
+        if (activeFactorBtn) return activeFactorBtn.getAttribute('data-factor-alias');
+        var ctx = window.SingleFactorSubmissionContext;
+        if (!ctx) return null;
+        var factorCtx = ctx.getActiveFactorContext({
+            tabSelector: '#groupTab .nav-link.active',
+            panelPrefix: 'group-panel',
+            factorTabSelector: '.group-factor-nav-btn.active',
+        }) || ctx.getActiveFactorContext({
+            tabSelector: '#icTab .nav-link.active',
+            panelPrefix: 'ic-panel',
+        });
+        return factorCtx ? factorCtx.factor_alias : null;
+    };
+
+    // ---------- 页面是否包含 IC 测试模块 ----------
+    dates.pageHasICModule = function() {
+        return !!document.getElementById('ic_test_module');
+    };
+
+    // ---------- 解析运行时间范围（含 submission 日期 fallback） ----------
+    // savedStartDate/savedEndDate: 分组对象保存的日期
+    // fallbackTesterId: 当以上都没有时，从 window.submissions 按 testerId 查找日期
+    dates.resolveGroupRunTimeRangeWithFallback = function(savedStartDate, savedEndDate, fallbackTesterId) {
+        var resolved = dates.resolveGroupRunTimeRange(savedStartDate, savedEndDate);
+        if (resolved.startDate && resolved.endDate) return resolved;
+        // Fallback: 从全局 submissions 列表中按 testerId 查找
+        if (fallbackTesterId && window.submissions) {
+            var sub = window.submissions.find(function(s) { return String(s.id) === String(fallbackTesterId); });
+            if (sub) {
+                if (!resolved.startDate) resolved.startDate = sub.start_date || null;
+                if (!resolved.endDate) resolved.endDate = sub.end_date || null;
+            }
+        }
+        return resolved;
+    };
+
     GT.utils.dates = dates;
 })();
