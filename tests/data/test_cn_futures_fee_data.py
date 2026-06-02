@@ -50,3 +50,41 @@ def test_main_contract_fee_lookup_uses_futures_roller_row(tmp_path: Path, monkey
     assert row is not None
     assert row['contract_code'] == 'A2605'
     assert row['open_ratio'] == 0.0001
+
+
+def test_contract_fee_snapshot_uses_asof_forward_fill(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
+    monkeypatch.setattr(FeeData, '_CONTRACT_LATEST_PATH', tmp_path / 'fees_contracts_latest.parquet')
+
+    rows = FeeData._parse_contract_rows(_raw_fee_table())
+    old_rows = rows.copy()
+    old_rows['date'] = '20260601'
+    old_rows['open_ratio'] = 0.001
+    old_rows.to_parquet(tmp_path / 'fees_contracts_20260601.parquet', index=False)
+    new_rows = rows.copy()
+    new_rows['date'] = '20260603'
+    new_rows['open_ratio'] = 0.003
+    new_rows.to_parquet(tmp_path / 'fees_contracts_20260603.parquet', index=False)
+
+    loaded = FeeData.load_contract_rows_for_date('2026-06-02')
+
+    assert loaded.attrs['fee_source'] == 'historical_forward_fill'
+    assert loaded.attrs['fee_source_date'] == '20260601'
+    assert loaded.attrs['requested_fee_date'] == '20260602'
+    assert loaded.loc[0, 'open_ratio'] == 0.001
+
+
+def test_contract_fee_snapshot_before_first_uses_latest_inferred(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(FeeData, '_DATA_DIR', tmp_path)
+    latest_path = tmp_path / 'fees_contracts_latest.parquet'
+    monkeypatch.setattr(FeeData, '_CONTRACT_LATEST_PATH', latest_path)
+
+    rows = FeeData._parse_contract_rows(_raw_fee_table())
+    rows['date'] = '20260603'
+    rows.to_parquet(latest_path, index=False)
+
+    loaded = FeeData.load_contract_rows_for_date('2026-06-01')
+
+    assert loaded.attrs['fee_source'] == 'latest_inferred'
+    assert loaded.attrs['fee_source_date'] == '20260603'
+    assert loaded.attrs['requested_fee_date'] == '20260601'

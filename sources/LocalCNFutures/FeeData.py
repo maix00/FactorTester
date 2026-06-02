@@ -118,6 +118,26 @@ def _contract_daily_path(date_str: str) -> Path:
     return _DATA_DIR / f'fees_contracts_{date_str}.parquet'
 
 
+def _available_contract_snapshot_dates() -> list[str]:
+    if not _DATA_DIR.exists():
+        return []
+    dates: list[str] = []
+    for path in _DATA_DIR.glob('fees_contracts_2*.parquet'):
+        match = re.fullmatch(r'fees_contracts_(\d{8})\.parquet', path.name)
+        if match:
+            dates.append(match.group(1))
+    return sorted(dates)
+
+
+def _contract_asof_path(target: str) -> tuple[Path | None, str | None]:
+    dates = _available_contract_snapshot_dates()
+    candidates = [snapshot_date for snapshot_date in dates if snapshot_date <= target]
+    if not candidates:
+        return None, None
+    snapshot_date = candidates[-1]
+    return _contract_daily_path(snapshot_date), snapshot_date
+
+
 def _fetch_raw() -> pd.DataFrame:
     """从 openctp 获取原始表格，返回所有合约行。"""
     tables = pd.read_html(_URL, flavor='html5lib')
@@ -242,27 +262,38 @@ def load_latest() -> pd.DataFrame:
 def load_contract_rows_for_date(
     trading_day: Any | None = None,
     *,
-    allow_latest_fallback: bool = False,
+    allow_latest_fallback: bool = True,
 ) -> pd.DataFrame:
     """读取某日 OpenCTP 合约级费率快照。
 
     ``trading_day`` 对应的是回测交易日。若没有保存该日期的 OpenCTP 快照，
-    默认抛出 ``FileNotFoundError``，避免把最新费率静默用于历史回测。
+    默认使用 ``<= trading_day`` 的最近快照向前填充；若交易日早于所有快照，
+    再静默使用最新快照推测历史费率，并在返回 DataFrame 的 ``attrs`` 中
+    标记 ``fee_source='latest_inferred'``，供接口提示用户。
     """
     target = _date_str(trading_day)
-    daily_path = _contract_daily_path(target)
-    if daily_path.exists():
-        return _with_optional_columns(pd.read_parquet(daily_path))
+    asof_path, source_date = _contract_asof_path(target)
+    if asof_path is not None and source_date is not None:
+        df = _with_optional_columns(pd.read_parquet(asof_path))
+        df.attrs['fee_source'] = 'historical_snapshot' if source_date == target else 'historical_forward_fill'
+        df.attrs['fee_source_date'] = source_date
+        df.attrs['requested_fee_date'] = target
+        return df
     if allow_latest_fallback and _CONTRACT_LATEST_PATH.exists():
-        return _with_optional_columns(pd.read_parquet(_CONTRACT_LATEST_PATH))
-    raise FileNotFoundError(f"未找到 {target} 的合约级费率快照：{daily_path}")
+        df = _with_optional_columns(pd.read_parquet(_CONTRACT_LATEST_PATH))
+        df.attrs['fee_source'] = 'latest_inferred'
+        df.attrs['requested_fee_date'] = target
+        if 'date' in df.columns and not df.empty:
+            df.attrs['fee_source_date'] = str(df['date'].iloc[0])
+        return df
+    raise FileNotFoundError(f"未找到 {target} 或更早的合约级费率快照")
 
 
 def get_contract_fee_row(
     contract_code: Any,
     trading_day: Any | None = None,
     *,
-    allow_latest_fallback: bool = False,
+    allow_latest_fallback: bool = True,
 ) -> Optional[pd.Series]:
     """按具体合约代码读取某日费率行。"""
     contract_key = _normalise_contract_code(contract_code)
@@ -282,7 +313,7 @@ def get_main_contract_fee_row(
     future: Any,
     trading_day: Any,
     *,
-    allow_latest_fallback: bool = False,
+    allow_latest_fallback: bool = True,
 ) -> Optional[pd.Series]:
     """按 Futures 在交易日对应的主力 FuturesContract 查询合约费率。
 
