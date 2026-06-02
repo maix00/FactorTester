@@ -6,7 +6,7 @@
 import os
 
 DATA_DIR = os.environ.get(
-    'GTHT_DATA_DIR',
+    'FT_DATA_DIR',
     os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data')),
 )
 

@@ -36,7 +36,7 @@ factor_info_path = '../data/Factors/'
 
 # data 根目录（基于工作目录的相对路径，或环境变量覆盖）
 import os
-DATA_DIR = os.environ.get('GTHT_DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
+DATA_DIR = os.environ.get('FT_DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
 
 # 默认交易日的开始/结束时间（用于判断场内/场外）
 default_day_start_time = '00:00'

@@ -15,7 +15,7 @@ FactorTester 是一个量化因子研究与回测平台，面向期货及多资�
 - **价格查看器** — 原始 OHLCV / 价格序列可视化
 - **因子引擎** — 40+ 内置因子，表达式树 DSL，自定义因子持久化
 
-开发环境约定见 `docs/development-environment.md`；当前标准环境为 Conda `GTHT`。
+开发环境约定见 `docs/development-environment.md`；当前标准环境为 Conda `ft`。
 
 ---
 

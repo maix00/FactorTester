@@ -16,4 +16,4 @@ git config --unset core.hooksPath
 
 Notes:
 - Hooks are **local** to your clone.
-- Tests run via `scripts/test.sh` and default to conda env `GTHT` (override with `GTHT_ENV_NAME`).
+- Tests run via `scripts/test.sh` and default to conda env `ft` (override with `FT_ENV_NAME`).
