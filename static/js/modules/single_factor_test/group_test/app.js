@@ -1956,47 +1956,25 @@
         }
     }
 
-    function parseCsvNumbers(value) {
-        return String(value || '').split(',')
-            .map(function(x) { return parseFloat(x.trim()); })
-            .filter(function(x) { return !isNaN(x) && isFinite(x); });
-    }
-
-    function buildLsLegs(groupsValue, weightsValue, defaultGroups) {
-        var groups = parseCsvNumbers(groupsValue);
-        if (!groups.length) groups = defaultGroups || [];
-        var weights = parseCsvNumbers(weightsValue);
-        if (!weights.length) weights = groups.map(function() { return 1; });
-        return groups.map(function(groupNo, idx) {
-            return {
-                group: Math.max(0, Math.floor(groupNo) - 1),
-                weight: weights[idx] != null ? weights[idx] : weights[weights.length - 1]
-            };
-        }).filter(function(leg) { return leg.weight > 0; });
-    }
-
     function collectLongShortConfig(nGroups) {
         var def = (_longShortDefinitions && _longShortDefinitions[0]) || defaultLongShortDefinition();
         return buildLongShortPayload(def, nGroups);
     }
 
     function defaultLongShortDefinition() {
+        if (GT.datamodel && GT.datamodel.ls_configs && GT.datamodel.ls_configs.defaultLegacyDefinition) {
+            return GT.datamodel.ls_configs.defaultLegacyDefinition();
+        }
         return { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' };
     }
 
     function buildLongShortPayload(def, nGroups) {
-        return {
-            name: (def.name || '').trim() || 'Long-Short',
-            long: buildLsLegs(def.longGroups || '1', def.longWeights || '1', [1]),
-            short: buildLsLegs(def.shortGroups || '', def.shortWeights || '1', [nGroups])
-        };
+        return GT.datamodel.ls_configs.buildLegacyPayload(def, nGroups);
     }
 
     function collectLongShortConfigs(nGroups) {
         if (!_longShortDefinitions.length) _longShortDefinitions = [defaultLongShortDefinition()];
-        return _longShortDefinitions.map(function(def) {
-            return buildLongShortPayload(def, nGroups);
-        });
+        return GT.datamodel.ls_configs.buildLegacyPayloads(_longShortDefinitions, nGroups);
     }
 
     function buildGroupStructureKey(submissionId, factorAlias, nGroups, startDate, endDate) {

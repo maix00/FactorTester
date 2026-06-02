@@ -297,6 +297,45 @@
         });
     }
 
+    function parseCsvNumbers(value) {
+        return String(value || '').split(',')
+            .map(function(x) { return parseFloat(x.trim()); })
+            .filter(function(x) { return !isNaN(x) && isFinite(x); });
+    }
+
+    function buildLegacyLegs(groupsValue, weightsValue, defaultGroups) {
+        var groups = parseCsvNumbers(groupsValue);
+        if (!groups.length) groups = defaultGroups || [];
+        var weights = parseCsvNumbers(weightsValue);
+        if (!weights.length) weights = groups.map(function() { return 1; });
+        return groups.map(function(groupNo, idx) {
+            return {
+                group: Math.max(0, Math.floor(groupNo) - 1),
+                weight: weights[idx] != null ? weights[idx] : weights[weights.length - 1]
+            };
+        }).filter(function(leg) { return leg.weight > 0; });
+    }
+
+    function defaultLegacyDefinition() {
+        return { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' };
+    }
+
+    function buildLegacyPayload(def, nGroups) {
+        def = def || defaultLegacyDefinition();
+        return {
+            name: (def.name || '').trim() || 'Long-Short',
+            long: buildLegacyLegs(def.longGroups || '1', def.longWeights || '1', [1]),
+            short: buildLegacyLegs(def.shortGroups || '', def.shortWeights || '1', [nGroups])
+        };
+    }
+
+    function buildLegacyPayloads(definitions, nGroups) {
+        var defs = definitions && definitions.length ? definitions : [defaultLegacyDefinition()];
+        return defs.map(function(def) {
+            return buildLegacyPayload(def, nGroups);
+        });
+    }
+
     /**
      * Reset all internal state (for testing).
      */
@@ -328,6 +367,11 @@
         markStale: markStale,
         findByDerivedGroup: findByDerivedGroup,
         list: list,
+        parseCsvNumbers: parseCsvNumbers,
+        buildLegacyLegs: buildLegacyLegs,
+        defaultLegacyDefinition: defaultLegacyDefinition,
+        buildLegacyPayload: buildLegacyPayload,
+        buildLegacyPayloads: buildLegacyPayloads,
         validate: validate,
         _reset: _reset,
     };
