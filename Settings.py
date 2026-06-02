@@ -28,15 +28,15 @@ default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
 default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
-# 日志文件存储目录（相对路径）
-logger_dir_path_default = '../data/factor_tester_log/'
-
-# 因子测试结果缓存目录（相对路径）
-factor_info_path = '../data/Factors/'
-
 # data 根目录（基于工作目录的相对路径，或环境变量覆盖）
 import os
 DATA_DIR = os.environ.get('FT_DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
+
+# 日志文件存储目录
+logger_dir_path_default = os.path.join(DATA_DIR, 'factor_tester_log')
+
+# 因子测试结果缓存目录
+factor_info_path = os.path.join(DATA_DIR, 'Factors')
 
 # 默认交易日的开始/结束时间（用于判断场内/场外）
 default_day_start_time = '00:00'

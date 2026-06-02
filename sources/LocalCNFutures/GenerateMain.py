@@ -10,16 +10,17 @@ from turtle import left
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from Settings import DATA_DIR
 
-CONTRACT_MAPPING_PATH = '../data/wind_mapping.parquet'
-CONTRACT_MAPPING_PATH_TRUNCATED = '../data/wind_mapping_truncated.parquet'
-DAYK_PATH = '../data/data_dayk.parquet'
-MINUTE_DATA_DIR = '../data/data_mink'               # 原始分钟分片数据目录
-MINUTE_DATA_PREPROCESSED_DIR = '../data/data_mink_product' # 预处理后按 uid 存储的分钟数据目录
-MINUTE_INDEX_PATH = '../data/minute_index.parquet'  # 索引文件保存路径
-MAIN_MINK_FOLDER = '../data/main_mink/'             # 输出分钟主力序列文件夹
-ROLLER_INFO_PATH = '../data/roller_info.csv'        # 展期信息输出路径
-MAIN_DAYK_FOLDER = '../data/main_dayk/'             # 日线主力序列输出文件
+CONTRACT_MAPPING_PATH = os.path.join(DATA_DIR, 'wind_mapping.parquet')
+CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(DATA_DIR, 'wind_mapping_truncated.parquet')
+DAYK_PATH = os.path.join(DATA_DIR, 'data_dayk.parquet')
+MINUTE_DATA_DIR = os.path.join(DATA_DIR, 'data_mink')               # 原始分钟分片数据目录
+MINUTE_DATA_PREPROCESSED_DIR = os.path.join(DATA_DIR, 'data_mink_product') # 预处理后按 uid 存储的分钟数据目录
+MINUTE_INDEX_PATH = os.path.join(DATA_DIR, 'minute_index.parquet')  # 索引文件保存路径
+MAIN_MINK_FOLDER = os.path.join(DATA_DIR, 'main_mink') + '/'        # 输出分钟主力序列文件夹
+ROLLER_INFO_PATH = os.path.join(DATA_DIR, 'roller_info.csv')        # 展期信息输出路径
+MAIN_DAYK_FOLDER = os.path.join(DATA_DIR, 'main_dayk') + '/'        # 日线主力序列输出文件
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
 
