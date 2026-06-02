@@ -98,11 +98,11 @@
     // ── action buttons（泛型） ──
 
     function _bindActionButtons() {
-        // 清除旧绑定 — 使用 cloneNode 技巧
+        // 清除旧绑定
         var bar = document.getElementById('gt-tab-actions');
         if (!bar) return;
 
-        // list 模式按钮
+        // list 模式按钮（非交互式 focus 场景，click 即可）
         var addBaseBtn = document.getElementById('gt-action-add-base');
         if (addBaseBtn) addBaseBtn.addEventListener('click', function() { _enterAddMode('base'); });
         var addDerivedBtn = document.getElementById('gt-action-add-derived');
@@ -110,19 +110,18 @@
         var addLSBtn = document.getElementById('gt-action-add-ls');
         if (addLSBtn) addLSBtn.addEventListener('click', function() { _enterAddMode('ls'); });
 
-        // 通用 cancel
+        // add/edit 模式提交/取消 — 用 mousedown 避免输入框 blur 先于 click 导致事件丢失
         var cancelBtn = document.getElementById('gt-action-cancel');
-        if (cancelBtn) cancelBtn.addEventListener('click', function() { _exitAddMode(); });
+        if (cancelBtn) cancelBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitAddMode(); });
 
-        // 通用 submit（泛型 — 委托给 active flow 的 onSubmit）
         var submitBtn = document.getElementById('gt-action-submit');
-        if (submitBtn) submitBtn.addEventListener('click', function() { _submitAddDraft(); });
+        if (submitBtn) submitBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _submitAddDraft(); });
 
-        // edit 通用
         var saveBtn = document.getElementById('gt-action-save');
-        if (saveBtn) saveBtn.addEventListener('click', function() { _saveEditChanges(); });
+        if (saveBtn) saveBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _saveEditChanges(); });
+
         var cancelEditBtn = document.getElementById('gt-action-cancel-edit');
-        if (cancelEditBtn) cancelEditBtn.addEventListener('click', function() { _exitEditMode(); });
+        if (cancelEditBtn) cancelEditBtn.addEventListener('mousedown', function(e) { e.preventDefault(); _exitEditMode(); });
 
         // edit actions（动态注册的）
         var actions = M.getMatchingEditActions();
