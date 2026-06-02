@@ -771,33 +771,18 @@
     }
 
     function groupDisplayKey(group, allGroups) {
-        if (!group) return '';
-        if (!group.isDerived) return group.shortAlias || group.key || group.name || group.id || '';
-        allGroups = allGroups || (GT.datamodel && GT.datamodel.groups && GT.datamodel.groups.getAll ? GT.datamodel.groups.getAll() : []);
-        var base = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(group.baseGroupId) : null;
-        var baseAlias = base ? (base.shortAlias || base.name || base.id) : (group.baseGroupId || '');
-        var siblings = allGroups.filter(function(item) {
-            return item && item.isDerived && item.baseGroupId === group.baseGroupId && item.parentId === group.parentId;
-        });
-        var pos = siblings.findIndex(function(item) { return item.id === group.id; });
-        var suffix = pos >= 0 ? String(pos + 1) : (group.name || group.id || '?');
-        if (group.parentId) {
-            var parent = GT.datamodel && GT.datamodel.groups ? GT.datamodel.groups.get(group.parentId) : null;
-            var parentAlias = parent ? groupDisplayKey(parent, allGroups) : baseAlias;
-            return parentAlias + ':' + suffix;
+        if (GT.datamodel && GT.datamodel.groups && typeof GT.datamodel.groups.displayKey === 'function') {
+            return GT.datamodel.groups.displayKey(group, allGroups);
         }
-        return baseAlias + ':' + suffix;
+        if (!group) return '';
+        return group.shortAlias || group.key || group.name || group.id || '';
     }
 
     function lsDisplayName(ls) {
-        if (!ls) return 'Long-Short';
-        if (ls.shortAlias) return ls.shortAlias;
-        var groups = GT.datamodel && GT.datamodel.groups;
-        var longGroup = groups && groups.get ? groups.get(ls.longGroupId) : null;
-        var shortGroup = groups && groups.get ? groups.get(ls.shortGroupId) : null;
-        var longAlias = groupDisplayKey(longGroup) || 'Long';
-        var shortAlias = groupDisplayKey(shortGroup) || 'Short';
-        return longAlias + '/' + shortAlias;
+        if (GT.datamodel && GT.datamodel.ls_configs && typeof GT.datamodel.ls_configs.displayName === 'function') {
+            return GT.datamodel.ls_configs.displayName(ls);
+        }
+        return (ls && (ls.shortAlias || ls.name)) || 'Long-Short';
     }
 
     function serializeGroupFeeMap(feeMap) {

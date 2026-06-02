@@ -223,6 +223,26 @@
         return m ? m[1] : null;
     }
 
+    function displayKey(group, allGroups) {
+        if (!group) return '';
+        if (!group.isDerived) return group.shortAlias || group.key || group.name || group.id || '';
+
+        allGroups = allGroups || _items;
+        var base = _getRaw(group.baseGroupId);
+        var baseAlias = base ? (base.shortAlias || base.name || base.id) : (group.baseGroupId || '');
+        var siblings = allGroups.filter(function(item) {
+            return item && item.isDerived && item.baseGroupId === group.baseGroupId && item.parentId === group.parentId;
+        });
+        var pos = siblings.findIndex(function(item) { return item.id === group.id; });
+        var suffix = pos >= 0 ? String(pos + 1) : (group.name || group.id || '?');
+        if (group.parentId) {
+            var parent = _getRaw(group.parentId);
+            var parentAlias = parent ? displayKey(parent, allGroups) : baseAlias;
+            return parentAlias + ':' + suffix;
+        }
+        return baseAlias + ':' + suffix;
+    }
+
     // ---------------------------------------------------------------------------
     // Validation
     // ---------------------------------------------------------------------------
@@ -646,6 +666,7 @@
         validate: validate,
         batchKey: batchKey,
         extractLetter: extractLetter,
+        displayKey: displayKey,
         // Tree methods (for derived hierarchy)
         getTree: getTree,
         getDescendants: getDescendants,

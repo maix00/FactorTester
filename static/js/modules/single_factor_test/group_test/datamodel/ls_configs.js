@@ -336,6 +336,17 @@
         });
     }
 
+    function displayName(config) {
+        if (!config) return 'Long-Short';
+        if (config.shortAlias) return config.shortAlias;
+        var groups = GT.datamodel.groups;
+        var longGroup = groups && groups.get ? groups.get(config.longGroupId) : null;
+        var shortGroup = groups && groups.get ? groups.get(config.shortGroupId) : null;
+        var longAlias = groups && groups.displayKey ? groups.displayKey(longGroup) : _groupAlias(longGroup);
+        var shortAlias = groups && groups.displayKey ? groups.displayKey(shortGroup) : _groupAlias(shortGroup);
+        return (longAlias || 'Long') + '/' + (shortAlias || 'Short');
+    }
+
     /**
      * Reset all internal state (for testing).
      */
@@ -372,6 +383,7 @@
         defaultLegacyDefinition: defaultLegacyDefinition,
         buildLegacyPayload: buildLegacyPayload,
         buildLegacyPayloads: buildLegacyPayloads,
+        displayName: displayName,
         validate: validate,
         _reset: _reset,
     };
