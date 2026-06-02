@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>技术文档 — GTHT</title>
+    <title>技术文档</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -84,7 +84,7 @@
                 <div>
                     {% include 'modules/shared/home_back_link.html' %}
                     <h1>📖 技术文档</h1>
-                    <p>GTHT 量化因子工具箱 &mdash; 前后端架构、API 接口、因子库说明</p>
+                    <p>量化因子工具箱 &mdash; 前后端架构、API 接口、因子库说明</p>
                 </div>
                 <div class="user-area" id="user-area"></div>
             </div>
@@ -316,7 +316,7 @@
     <!-- 6. 工具类 -->
     <div class="docs-section" id="tools">
         <h2>6. 工具类</h2>
-        <p>GTHT 的工具类代码分为五大模块，共 18 个 Python 文件，覆盖了从数据加载、参数管理到因子计算与回测的完整链路。</p>
+        <p>工具类代码分为五大模块，共 18 个 Python 文件，覆盖了从数据加载、参数管理到因子计算与回测的完整链路。</p>
 
         <h3>6.1 基础类 — <code>tools/base/</code></h3>
         <table>
@@ -441,7 +441,7 @@
             <tr><th>文件/目录</th><th>说明</th></tr>
             <tr><td><code>sources/LocalCNFutures/</code></td><td>中国期货本地数据源，从 Parquet/CSV 加载主力合约 K 线</td></tr>
             <tr><td><code>sources/LocalCNFutures/GenerateMain.py</code></td><td>生成主力连续合约，处理换月展期及权重复权</td></tr>
-            <tr><td><code>sources/FeeData.py</code></td><td>期货手续费率模块，从 openctp.cn 获取实时费率或加载本地缓存</td></tr>
+            <tr><td><code>sources/LocalCNFutures/FeeData.py</code></td><td>中国期货手续费率模块，从 openctp.cn 获取实时费率或加载本地缓存</td></tr>
         </table>
 
         <h3>7.2 CNFutures 数据文件</h3>
@@ -494,7 +494,7 @@
         <p><code>Settings.py</code> 全局配置：默认测试时间范围 (2025年)、时区 (Asia/Shanghai)、成交量筛选比例 (0.8)、数据/日志路径。</p>
 
         <h3>7.4 环境依赖</h3>
-        <p>Python <strong>3.14.0</strong>，Conda 环境名 <code>GTHT</code>，完整依赖清单如下：</p>
+        <p>Python <strong>3.14.0</strong>，Conda 环境名 <code>ft</code>，完整依赖清单如下：</p>
         <details style="margin:8px 0;">
             <summary style="cursor:pointer;font-size:13px;color:#4a90d9;">展开查看完整 pip 包清单 (76个)</summary>
             <pre style="margin-top:8px;max-height:400px;overflow-y:auto;">akshare==1.18.56
@@ -573,11 +573,11 @@ xlrd==2.0.2
 zope.event==6.1
 zope.interface==8.1</pre>
         </details>
-        <p style="margin-top:8px;">安装方式：<code>conda create -n GTHT python=3.14</code> → <code>conda activate GTHT</code> → <code>pip install -r requirements.txt</code>（以上清单即 requirements.txt 内容）。</p>
+        <p style="margin-top:8px;">安装方式：<code>conda create -n ft python=3.14</code> → <code>conda activate ft</code> → <code>pip install -r requirements.txt</code>（以上清单即 requirements.txt 内容）。</p>
 
         <h3>7.5 启动</h3>
         <pre>cd /path/to/Codes
-conda activate GTHT
+conda activate ft
 python start_server.py --port 54865</pre>
         <p>默认端口 <code>54865</code>。启动后自动打开浏览器。Admin 用户可在首页右上角关闭服务器。</p>
         <p>历史端口：<code>54862</code>、<code>54863</code>、<code>54864</code>。</p>

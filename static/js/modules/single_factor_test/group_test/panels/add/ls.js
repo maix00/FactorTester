@@ -2,12 +2,12 @@
  * panels/add/ls.js — Add-flow panel: "创建 Long-Short 组" (category-2)
  *
  * Simplified display: two cards (long | short) with swap button.
- * Preselected groups from GT.ui.getAddDraft().preselectedBaseGroupIds.
+ * Preselected groups from GT.tabs.getAddDraft().preselectedBaseGroupIds.
  * Tabs-row submit button delegates to panel.handleSave().
  *
  * Contract:
- *   GT.datamodel.ls_configs — CRUD (add)
- *   GT.datamodel.groups     — for reading group config
+ *   GT.groupSettings.lsConfigs — CRUD (add)
+ *   GT.groupSettings.groups     — for reading group config
  *   GT.ui                   — getAddDraft(), exitAddMode()
  */
 
@@ -42,7 +42,7 @@
         if (!node || !node.baseGroupId) return node ? (node.shortAlias || node.name || '?') : '?';
         var bg = _getGroup(node.baseGroupId);
         var bgAlias = bg ? (bg.shortAlias || bg.name || bg.id) : node.baseGroupId;
-        var allNodes = (GT.datamodel.groups && GT.datamodel.groups.getAll) ? GT.datamodel.groups.getAll() : [];
+        var allNodes = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
             if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
@@ -72,7 +72,7 @@
         var container = $(CONTAINER_ID);
         if (!container) return;
 
-        var draft = (GT.ui && typeof GT.ui.getAddDraft === 'function') ? GT.ui.getAddDraft() : null;
+        var draft = (GT.tabs && typeof GT.tabs.getAddDraft === 'function') ? GT.tabs.getAddDraft() : null;
         var preselected = (draft && draft.preselectedBaseGroupIds) ? draft.preselectedBaseGroupIds : [];
 
         _longId  = preselected[0] || null;
@@ -186,7 +186,7 @@
             var saShort = _displayAlias(gShort) || 'S';
             var name = saLong + '/' + saShort;
 
-            GT.datamodel.ls_configs.add({
+            GT.groupSettings.lsConfigs.add({
                 name: name,
                 longGroupId: _longId,
                 shortGroupId: _shortId,
@@ -202,7 +202,7 @@
     // =========================================================================
 
     function _getGroup(id) {
-        return (GT.datamodel.groups && GT.datamodel.groups.get) ? GT.datamodel.groups.get(id) : null;
+        return (GT.groupSettings.groups && GT.groupSettings.groups.get) ? GT.groupSettings.groups.get(id) : null;
     }
 
     // =========================================================================
@@ -221,4 +221,25 @@
         render: render,
         handleSave: handleSave
     };
+
+    // ── Register add flow to GT.modes ──
+    if (GT.modes) {
+        GT.modes.registerAddFlow({
+            flow: 'ls',
+            priority: 0,
+            condition: function() { return true; },
+            buildDraft: function(ctx) {
+                return {
+                    addFlow: 'ls',
+                    preselectedBaseGroupIds: ctx && ctx.ids ? ctx.ids : []
+                };
+            },
+            onSubmit: function(draft, helpers) {
+                var result = handleSave();
+                if (result && result.success) helpers.exitAdd();
+                // 错误由 handleSave 自己处理（alert）
+            },
+            defaultTab: 'add-ls'
+        });
+    }
 })();

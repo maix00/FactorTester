@@ -124,7 +124,7 @@
         </div>
     </div>
 
-    <!-- 旧导航壳子（给旧 JS fallback） -->
+    <!-- 统一分组设置面板挂载点 -->
     <div id="group-tab-container" class="group-test-nav-shell" style="display:none;"></div>
 
     <!-- 图表容器 -->
@@ -420,26 +420,19 @@
         </div>
     </div>
 
-    <!-- 分组快照抽屉：从下方滑出 -->
+    <!-- 分组快照抽屉：从下方滑出 — #98 "图上每个分组的每期每组产品信息" -->
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
             <div style="display:flex;align-items:center;gap:8px;">
-                <button id="snapshot-prev-btn" style="border:1px solid #ccc;background:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:13px;color:#0f4c81;" title="上一个时点">◀ 前一个</button>
-                <button id="snapshot-next-btn" style="border:1px solid #ccc;background:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:13px;color:#0f4c81;" title="下一个时点">后一个 ▶</button>
-                <strong id="snapshot_title" style="font-size:14px;color:#0f4c81;">📋 分组持仓快照</strong>
+                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="上一个时点">◀ 前一个</button>
+                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="下一个时点">后一个 ▶</button>
+                <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
-            <button id="group-snapshot-drawer-close" style="border:none;background:none;font-size:18px;cursor:pointer;color:#888;">✕</button>
+            <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
         </div>
+        <div id="snapshot_flow_stats" class="snapshot-flow-stats"></div>
         <div id="group-snapshot-drawer-body">
-            <div class="drawer-inner-container">
-                <div style="overflow-x:auto;">
-                    <table class="ic-table" style="width:100%;font-size:12px;">
-                        <thead id="snapshot_head"></thead>
-                        <tbody id="snapshot_body"></tbody>
-                    </table>
-                </div>
-                <div id="snapshot_flow_stats" style="margin-top:12px;font-size:13px;color:#555;"></div>
-            </div>
+            <div class="drawer-inner-container" id="snapshot_body"></div>
         </div>
     </div>
 </div>
@@ -824,22 +817,127 @@
     #group_test_module .gt-strategy-row:hover {
         background: #f6f8fb;
     }
+
+    /* ── Snapshot 矩阵表格 ── */
+    #group_test_module .snapshot-matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        table-layout: fixed;
+    }
+    #group_test_module .snapshot-matrix-table th {
+        position: sticky;
+        top: 0;
+        background: #f0f4f8;
+        color: #0f4c81;
+        font-weight: 600;
+        padding: 6px 8px;
+        border-bottom: 2px solid #d0d8e0;
+        text-align: center;
+        white-space: nowrap;
+        z-index: 1;
+    }
+    #group_test_module .snapshot-matrix-table td {
+        padding: 4px 8px;
+        border-bottom: 1px solid #edf0f4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
+    }
+    #group_test_module .snapshot-prod-name-cell {
+        font-weight: 500;
+        color: #333;
+        background: #fafbfc;
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        min-width: 90px;
+    }
+    /* 状态颜色 */
+    #group_test_module .snapshot-cell-holding {
+        color: #1a1a1a;
+        background: #fff;
+    }
+    #group_test_module .snapshot-cell-entering {
+        color: #1a7d36;
+        background: #e6f7ed;
+    }
+    #group_test_module .snapshot-cell-entering .snapshot-product-name {
+        color: #1a7d36;
+        font-weight: 500;
+    }
+    #group_test_module .snapshot-cell-exiting {
+        color: #b91c1c;
+        background: #fef2f2;
+    }
+    #group_test_module .snapshot-cell-absent {
+        color: #c8cdd3;
+        background: #fafbfc;
+        text-align: center;
+    }
+    #group_test_module .snapshot-cell-entering::before {
+        content: '+ ';
+        color: #1a7d36;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-cell-exiting::before {
+        content: '- ';
+        color: #b91c1c;
+        font-weight: 600;
+    }
+    /* 预备卖出：因流动性不足被迫持仓 */
+    #group_test_module .snapshot-cell-pending-exit {
+        color: #b85c00;
+        background: #fff7e6;
+    }
+    #group_test_module .snapshot-cell-pending-exit .snapshot-product-name {
+        color: #b85c00;
+        font-weight: 500;
+    }
+    #group_test_module .snapshot-cell-pending-exit::before {
+        content: '◷ ';
+        color: #b85c00;
+        font-weight: 600;
+    }
+    /* 产品标签 */
+    #group_test_module .snapshot-product-name {
+        color: inherit;
+    }
+    #group_test_module .snapshot-product-desc {
+        color: #888;
+        font-size: 11px;
+    }
+    #group_test_module .snapshot-product-fee {
+        color: #aaa;
+        font-size: 10px;
+    }
+    /* 顶部统计栏 */
+    #group_test_module .snapshot-flow-stats {
+        padding: 8px 12px;
+        font-size: 13px;
+        color: #555;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+    }
 </style>
 
 <script src="{{ url_for('static', filename='js/modules/shared/date_utils.js') }}"></script>
 <!-- GroupTest modular scripts (load order matters) -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/bootstrap.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/api.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/state.js') }}"></script>
-<!-- Datamodel layer (Issue #85 Phase 1) — pure logic, zero DOM -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/groups.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/ls_configs.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/registrations.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/datamodel/settings_snapshot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/selection-state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/dates.js') }}"></script>
+<!-- Datamodel layer — unified in core/group-settings.js -->
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
 <!-- Panel layer — UI components by category -->
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/registry.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/chips.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/strategy.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/ui.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/group-settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/modes.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/chips.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/render.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/events.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/list/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/base.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/index.js') }}"></script>
@@ -847,11 +945,27 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/liquidity.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/derived.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/add/ls.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/registry/tabs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/derived-addon.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/calc.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/sections.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/meta.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/table.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/hover.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/charts/group_returns.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/strategy_panel.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/snapshot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/prerun-collect.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/actions.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/run-test.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/results/renderer.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/shared/overlays/tester_products.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/panels/config/fee/overlay.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/format.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tables.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/intraday.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/tabs.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/ranking.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/metrics/detail_overlay/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/app.js') }}"></script>

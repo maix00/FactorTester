@@ -1,13 +1,15 @@
 from typing import Any, List, Optional, Tuple, cast
 import pandas as pd
 import os
+from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools import DataColumn
+from Settings import DATA_DIR
 
-_data = pd.read_csv('../data/sectors.csv')
-data_dir_min = '../data/main_mink'
-data_path_day = '../data/main_series_adjusted.parquet'
-data_dir_day = '../data/main_dayk'
+_data = pd.read_csv(os.path.join(DATA_DIR, 'sectors.csv'))
+data_dir_min = os.path.join(DATA_DIR, 'main_mink')
+data_path_day = os.path.join(DATA_DIR, 'main_series_adjusted.parquet')
+data_dir_day = os.path.join(DATA_DIR, 'main_dayk')
 data_type = 'parquet'
 
 file_list_min = [
@@ -138,7 +140,7 @@ from tools.products.Product import Product
 def get_all_futures_contract() -> List[Product]:
     """返回合约粒度的所有 CNFuturesContract 列表（基于合约分钟数据目录）。"""
 
-    data_dir_min = '../data/data_mink_product'
+    data_dir_min = os.path.join(DATA_DIR, 'data_mink_product')
 
     from tools import DataSource, DataFreq
     futures_contract_ds_min1 = DataSource(

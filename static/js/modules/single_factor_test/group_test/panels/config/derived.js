@@ -6,11 +6,11 @@
  *   View mode (active node): read-only display of inherited or overridden product mask
  *
  * Contract:
- *   GT.state.getActiveDerivedNodeId() → id|null
- *   GT.state.on('activeDerivedNodeChanged', cb)
- *   GT.state.on('derivedGraphChanged', cb)
- *   GT.datamodel.groups.get(id) → node|null
- *   GT.datamodel.groups.getAll() → base groups (for product sourcing)
+ *   GT.panels.list.selection.getFirst() → id|null
+ *   GT.panels.list.selection.on('selectionChanged', cb)
+ *   GT.events.on('derivedGraphChanged', cb)
+ *   GT.groupSettings.groups.get(id) → node|null
+ *   GT.groupSettings.groups.getAll() → base groups (for product sourcing)
  */
 
 (function() {
@@ -23,17 +23,28 @@
 
     var _mounted = false;
     var _activeId = null;
-    /** Tracks selected product codes */
-    var _selectedProducts = {};
+
+    /** Get the current productMask from dirty workspace (or fallback). */
+    function _dirtyProductMask() {
+        var REG = window.GT_CONFIG_REGISTRY;
+        return (REG && REG.getDirty('productMask')) || {};
+    }
+
+    /** Set productMask into dirty workspace. */
+    function _setDirtyProductMask(mask) {
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (REG) REG.setDirty('productMask', mask);
+    }
 
     function $(id) { return document.getElementById(id); }
 
     function escapeHTML(str) { return GT.escapeHTML(str); }
 
     function _getNode() {
-        var id = GT.state.getActiveDerivedNodeId();
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        var id = sel ? sel.getFirst() : null;
         if (!id) return null;
-        return GT.datamodel.groups.get(id);
+        return GT.groupSettings.groups.get(id);
     }
 
     /**
@@ -43,14 +54,14 @@
      */
     function _allProducts() {
         var map = {}; // keyed by name for dedup
-        var baseGroups = GT.datamodel.groups.getAll();
+        var baseGroups = GT.groupSettings.groups.getAll();
         var seenTesterIds = {};
 
         // Try the active derived node first — use its effective products
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         if (preselectedParentDerivedId) {
-            var pNode = GT.datamodel.groups && GT.datamodel.groups.get(preselectedParentDerivedId);
+            var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentDerivedId);
             if (pNode) {
                 var effProds = _effectiveProducts(pNode);
                 for (var ep = 0; ep < effProds.products.length; ep++) {
@@ -62,7 +73,7 @@
                     }
                 }
                 if (pNode.baseGroupId && pNode.baseGroupId !== '__batch__') {
-                    var bg = GT.datamodel.groups && GT.datamodel.groups.get(pNode.baseGroupId);
+                    var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(pNode.baseGroupId);
                     if (bg && bg.testerId) {
                         _addProductsFromTesterId(map, bg.testerId);
                     }
@@ -82,7 +93,7 @@
         }
         var baseId = (draft && draft.preselectedBaseGroupId) || null;
         if (baseId) {
-            var bg2 = GT.datamodel.groups.get(baseId);
+            var bg2 = GT.groupSettings.groups.get(baseId);
             if (bg2 && bg2.testerId && !seenTesterIds[bg2.testerId]) {
                 seenTesterIds[bg2.testerId] = true;
                 _addProductsFromTesterId(map, bg2.testerId);
@@ -121,10 +132,10 @@
             return { products: Object.keys(node.productMask).sort(), source: 'override' };
         }
         if (node.parentId) {
-            return _effectiveProducts(GT.datamodel.groups.get(node.parentId));
+            return _effectiveProducts(GT.groupSettings.groups.get(node.parentId));
         }
         if (node.baseGroupId) {
-            var bg = GT.datamodel.groups.get(node.baseGroupId);
+            var bg = GT.groupSettings.groups.get(node.baseGroupId);
             if (bg) {
                 return { products: bg.products || [], source: 'baseGroup', name: bg.name || node.baseGroupId };
             }
@@ -132,26 +143,41 @@
         return { products: [], source: 'none' };
     }
 
+    function _initDirtyFromActiveNode() {
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        var id = sel ? sel.getFirst() : null;
+        if (!id) return;
+        var node = GT.groupSettings.groups && GT.groupSettings.groups.get(id);
+        if (!node || !node.isDerived) return;
+        var mask = node.productMask || {};
+        var dirtyMask = {};
+        var keys = Object.keys(mask);
+        for (var i = 0; i < keys.length; i++) {
+            if (mask[keys[i]]) dirtyMask[keys[i]] = true;
+        }
+        _setDirtyProductMask(dirtyMask);
+    }
+
     // ---------------------------------------------------------------------------
-    // Render: Edit mode — product multi-select
+    // Render — product multi-select (unified for all modes)
     // ---------------------------------------------------------------------------
 
-    function _renderEditMode(container) {
+    function _render(container) {
         var allProducts = _allProducts();
 
         // Determine parent info
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         var preselectedBaseGroupId = (draft && draft.preselectedBaseGroupId) || null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         var parentLabel = '';
         var parentType = '';
 
         if (preselectedParentDerivedId) {
-            var pNode = GT.datamodel.groups && GT.datamodel.groups.get(preselectedParentDerivedId);
+            var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentDerivedId);
             parentLabel = pNode ? (pNode.name || pNode.id) : preselectedParentDerivedId;
             parentType = 'derived';
         } else if (preselectedBaseGroupId) {
-            var bg = GT.datamodel.groups.get(preselectedBaseGroupId);
+            var bg = GT.groupSettings.groups.get(preselectedBaseGroupId);
             parentLabel = bg ? (bg.name || bg.id) : preselectedBaseGroupId;
             parentType = 'base';
         }
@@ -181,8 +207,8 @@
                 var p = allProducts[i];
                 var name = p.name;
                 var desc = p.desc || '';
-                var checked = _selectedProducts[name] ? ' checked' : '';
-                var styleBg = _selectedProducts[name] ? 'background:#e8f0fe;border-color:#80bdff;' : 'background:#fff;';
+                var checked = _dirtyProductMask()[name] ? ' checked' : '';
+                var styleBg = _dirtyProductMask()[name] ? 'background:#e8f0fe;border-color:#80bdff;' : 'background:#fff;';
                 html += '<label style="display:inline-flex;align-items:center;margin:3px 8px 3px 0;padding:3px 8px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:12px;' + styleBg + '">';
                 html += '<input type="checkbox" class="derived-product-cb" value="' + escapeHTML(name) + '"' + checked + ' style="margin-right:4px;">';
                 html += '<span style="font-family:monospace;font-weight:600;">' + escapeHTML(name) + '</span>';
@@ -202,7 +228,9 @@
         var cbs = container.querySelectorAll('.derived-product-cb');
         for (var i = 0; i < cbs.length; i++) {
             cbs[i].addEventListener('change', function() {
-                _selectedProducts[this.value] = this.checked;
+                var mask = _dirtyProductMask();
+                mask[this.value] = this.checked;
+                _setDirtyProductMask(mask);
                 _updateCount(container);
                 _highlightLabel(this);
             });
@@ -211,18 +239,20 @@
         var selectAll = container.querySelector('#derived-products-select-all');
         if (selectAll) {
             selectAll.addEventListener('click', function() {
+                var mask = {};
                 for (var j = 0; j < allProducts.length; j++) {
-                    _selectedProducts[allProducts[j].name] = true;
+                    mask[allProducts[j].name] = true;
                 }
-                _renderEditMode(container);
+                _setDirtyProductMask(mask);
+                _render(container);
             });
         }
 
         var deselectAll = container.querySelector('#derived-products-deselect-all');
         if (deselectAll) {
             deselectAll.addEventListener('click', function() {
-                _selectedProducts = {};
-                _renderEditMode(container);
+                _setDirtyProductMask({});
+                _render(container);
             });
         }
     }
@@ -230,7 +260,8 @@
     function _updateCount(container) {
         var countEl = container.querySelector('#derived-products-count');
         if (countEl) {
-            countEl.textContent = Object.keys(_selectedProducts).filter(function(k) { return _selectedProducts[k]; }).length;
+            var mask = _dirtyProductMask();
+            countEl.textContent = Object.keys(mask).filter(function(k) { return mask[k]; }).length;
         }
     }
 
@@ -242,88 +273,51 @@
         }
     }
 
-    /** Load product selection from edit selection (derived group's productMask). */
+    /** Load product selection from edit selection (derived group's productMask) into dirty workspace. */
     function _loadProductMaskFromSelection() {
-        _selectedProducts = {};
-        var ids = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+        var ids = GT.tabs && GT.tabs.getEditSelection ? GT.tabs.getEditSelection() : null;
         if (!ids) return;
         var selIds = Array.isArray(ids) ? ids : (ids.groupIds || Object.keys(ids).filter(function(k) { return ids[k]; }));
         if (selIds.length !== 1) return;
-        var node = GT.datamodel.groups && GT.datamodel.groups.get(selIds[0]);
+        var node = GT.groupSettings.groups && GT.groupSettings.groups.get(selIds[0]);
         if (!node || !node.isDerived) return;
         var mask = node.productMask || {};
+        // Copy truthy entries into dirty (shallow copy; productMask keys have boolean values)
+        var dirtyMask = {};
         var keys = Object.keys(mask);
         for (var i = 0; i < keys.length; i++) {
-            if (mask[keys[i]]) _selectedProducts[keys[i]] = true;
+            if (mask[keys[i]]) dirtyMask[keys[i]] = true;
         }
+        _setDirtyProductMask(dirtyMask);
     }
 
     // ---------------------------------------------------------------------------
-    // Render: View mode (active node) — read-only product display
-    // ---------------------------------------------------------------------------
-
-    function _renderViewMode(container, node) {
-        var isOverridden = _hasOverride(node);
-        var eff = _effectiveProducts(node);
-        var products = eff.products;
-
-        var html = '';
-        html += '<div style="margin-bottom:16px;">';
-        html += '<span style="font-size:14px;font-weight:600;">品种来源: </span>';
-        if (isOverridden) {
-            html += '<span style="color:#d97706;font-size:13px;">当前节点覆盖</span>';
-        } else {
-            var srcLabel = eff.source === 'baseGroup' ? '基础组: ' + (eff.name || '') : '继承自父节点';
-            html += '<span style="color:#0078d4;font-size:13px;">' + srcLabel + '</span>';
-        }
-        html += '</div>';
-
-        if (products.length === 0) {
-            html += '<div style="padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;text-align:center;color:#888;">无品种配置</div>';
-        } else {
-            html += '<div style="padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
-            html += '<div style="font-size:12px;color:#666;margin-bottom:8px;">有效品种 (' + products.length + ' 个)</div>';
-            html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-            for (var i = 0; i < products.length; i++) {
-                html += '<span style="padding:2px 8px;background:#e8f0fe;border-radius:12px;font-size:12px;font-family:monospace;">' + products[i] + '</span>';
-            }
-            html += '</div></div>';
-        }
-
-        container.innerHTML = html;
-    }
-
-    // ---------------------------------------------------------------------------
-    // Render dispatcher
+    // Render dispatcher — single unified render (no edit/view mode split).
+    // All config panels share the same edit model: read from dirty, write to dirty.
+    // Commit is handled centrally by REG.commitDirty().
     // ---------------------------------------------------------------------------
 
     function render() {
         var container = $(CONTAINER_ID);
         if (!container) return;
 
-        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
-        if (mode === 'edit') {
-            // In edit mode, always show the product multi-select
-            _activeId = null;
-            _renderEditMode(container);
-            return;
-        }
-
-        var node = _getNode();
-        if (!node) {
-            _activeId = null;
-            _renderEditMode(container);
-        } else {
-            _activeId = node.id;
-            _renderViewMode(container, node);
-        }
+        // In all modes, show the product multi-select. The data comes from dirty.
+        _render(container);
     }
 
     // ---------------------------------------------------------------------------
     // Event handlers
     // ---------------------------------------------------------------------------
 
-    function _onDerivedNodeChanged() { if (_mounted) render(); }
+    function _onSelectionChanged() {
+        if (_mounted) {
+            var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+            _activeId = sel ? sel.getFirst() : null;
+            // Load productMask from the new active node into dirty, then render
+            _initDirtyFromActiveNode();
+            render();
+        }
+    }
     function _onDerivedGraphChanged() { if (_mounted) render(); }
 
     // ---------------------------------------------------------------------------
@@ -332,35 +326,39 @@
 
     function mount() {
         _mounted = true;
-        _activeId = GT.state.getActiveDerivedNodeId();
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        _activeId = sel ? sel.getFirst() : null;
         // Load from edit selection (derived group's productMask) or add draft (preselected products)
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         if (draft && draft.addFlow === 'derived' && draft.preselectedProducts) {
-            _selectedProducts = {};
+            var mask = {};
             var preselectedProducts = draft.preselectedProducts;
             for (var i = 0; i < preselectedProducts.length; i++) {
-                _selectedProducts[preselectedProducts[i]] = true;
+                mask[preselectedProducts[i]] = true;
             }
+            _setDirtyProductMask(mask);
         } else {
             _loadProductMaskFromSelection();
         }
-        GT.state.on('activeDerivedNodeChanged', _onDerivedNodeChanged);
-        GT.state.on('derivedGraphChanged', _onDerivedGraphChanged);
+        if (sel && sel.on) sel.on('selectionChanged', _onSelectionChanged);
+        if (GT.events && GT.events.on) GT.events.on('derivedGraphChanged', _onDerivedGraphChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
         _activeId = null;
-        _selectedProducts = {};
-        GT.state.off('activeDerivedNodeChanged', _onDerivedNodeChanged);
-        GT.state.off('derivedGraphChanged', _onDerivedGraphChanged);
+        _setDirtyProductMask({});
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onSelectionChanged);
+        if (GT.events && GT.events.off) GT.events.off('derivedGraphChanged', _onDerivedGraphChanged);
     }
 
     function refresh() { if (_mounted) render(); }
 
     function getSelectedProducts() {
-        return Object.keys(_selectedProducts).filter(function(k) { return _selectedProducts[k]; });
+        var mask = _dirtyProductMask();
+        return Object.keys(mask).filter(function(k) { return mask[k]; });
     }
 
     function getAllProducts() {
@@ -379,6 +377,22 @@
         getSelectedProducts: getSelectedProducts,
         getAllProducts: getAllProducts,
     };
+
+    // Register field schema (so _fillGroupFromConfig preserves this field)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'productMask', type: 'object', default: {} });
+    }
+
+    // Register as category-3 config panel with productMask field
+    if (window.GT_CONFIG_REGISTRY) {
+        window.GT_CONFIG_REGISTRY.register({
+            name: 'derived',
+            label: '品种筛选',
+            panel: GT.panels.config.derived,
+            fields: ['productMask'],
+        }, 'config-derived');
+    }
 
     GT.log('panels.config.derived loaded');
 })();

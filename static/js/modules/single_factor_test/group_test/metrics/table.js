@@ -11,23 +11,6 @@
 
     GT.metrics = GT.metrics || {};
 
-    var metricNamesCN = {
-        'Total Return': '总收益率',
-        'Annual Return': '年化收益率',
-        'Mean Return': '均值收益率',
-        'Win Rate': '胜率',
-        'Volatility': '年化波动率',
-        'Max Drawdown': '最大回撤',
-        'Sharpe Ratio': '夏普比率',
-        'Calmar Ratio': 'Calmar比率',
-        'Skewness': '偏度',
-        'Kurtosis': '峰度',
-        'Avg Turnover': '平均换手率',
-        'Avg Turnover Accel': '换手加速度',
-        'Avg Position Changes': '平均持仓变化数',
-        'Up Ratio': '上涨占比',
-    };
-
     function isFiniteNumber(v) {
         return typeof v === 'number' && isFinite(v) && !isNaN(v);
     }
@@ -93,15 +76,17 @@
         return fmtNumber(v, 4);
     }
 
-    /**
-     * Build a map from group key → is_ls for quick lookup.
-     */
-    function buildLsMap(groups) {
-        var map = {};
-        (groups || []).forEach(function(g) {
-            if (g && g.key && g.is_ls) map[g.key] = true;
-        });
-        return map;
+    function metricLabel(metricName) {
+        var meta = (GT.metrics && GT.metrics.meta) || {};
+        return (meta.cn && meta.cn[metricName]) || metricName;
+    }
+
+    function escapeAttr(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     function buildGroupIndexMap(groups) {
@@ -194,24 +179,17 @@
         var labels = getGroupLabels(metricsByGroup);
         if (!labels.length) return { headHtml: '', bodyHtml: '' };
 
-        var lsMap = buildLsMap(groups);
         var groupIndexMap = buildGroupIndexMap(groups);
-        function isLsGroup(g) { return lsMap[g] || false; }
-        function groupLabel(g) {
-            return String(g);
-        }
+        function groupLabel(g) { return String(g); }
 
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
             var label = groupLabel(g);
-            if (isLsGroup(g)) {
-                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f0f0f0;" title="查看组合详情">' + label + '</th>';
-            } else if (groupIndexMap[g] != null || /^\d+$/.test(String(g))) {
-                var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : String(g);
-                headHtml += '<th class="group-detail-trigger" data-group-index="' + String(groupIndex) + '" title="查看该组详情">' + label + '</th>';
-            } else {
-                headHtml += '<th class="portfolio-detail-trigger" data-group-key="' + String(g).replace(/"/g, '&quot;') + '" style="background:#f8fbff;" title="查看组合详情">' + label + '</th>';
-            }
+            var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : (/^\d+$/.test(String(g)) ? String(g) : '');
+            headHtml += '<th class="group-detail-trigger"'
+                + ' data-group-key="' + escapeAttr(g) + '"'
+                + ' data-group-index="' + escapeAttr(groupIndex) + '"'
+                + ' title="查看该组详情">' + label + '</th>';
         });
         headHtml += '</tr>';
 
@@ -231,7 +209,7 @@
                 var bestIdx = getBestIdx(rawVals, metricName);
                 bodyHtml += '<tr>';
                 bodyHtml += '<td class="metric-name-cell" data-metric="' + metricName.replace(/"/g, '&quot;') + '" style="font-weight:600;">'
-                    + (metricNamesCN[metricName] || metricName) + '</td>';
+                    + metricLabel(metricName) + '</td>';
                 labels.forEach(function(g, gi) {
                     var v = (metricsByGroup[g] || {})[metricName];
                     var cls = (bestIdx !== null && gi === bestIdx) ? ' class="group-best-cell"' : '';
@@ -244,9 +222,42 @@
         return { headHtml: headHtml, bodyHtml: bodyHtml };
     }
 
+    function bindHeaderActions(actions) {
+        actions = actions || {};
+        document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                var groupKey = th.getAttribute('data-group-key');
+                if (typeof actions.openResultGroupDetail === 'function') {
+                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'));
+                } else if (typeof actions.openGroupDetail === 'function') {
+                    actions.openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
+                }
+            });
+        });
+        var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
+        if (rankingHead) {
+            rankingHead.addEventListener('click', function() {
+                if (typeof actions.openGroupRankingDetail === 'function') {
+                    actions.openGroupRankingDetail();
+                }
+            });
+        }
+    }
+
+    function render(metricsByGroup, groups, actions) {
+        var out = build(metricsByGroup || {}, groups || []);
+        var head = document.getElementById('metrics_head');
+        var body = document.getElementById('metrics_body');
+        if (head) head.innerHTML = out.headHtml || '';
+        if (body) body.innerHTML = out.bodyHtml || '';
+        bindHeaderActions(actions);
+    }
+
     GT.metrics.table = {
         build: build,
-        metricNamesCN: metricNamesCN,
+        render: render,
+        bindHeaderActions: bindHeaderActions,
+        metricLabel: metricLabel,
         metricDisplay: metricDisplay,
     };
 })();

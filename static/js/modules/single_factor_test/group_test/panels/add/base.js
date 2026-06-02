@@ -19,7 +19,7 @@
 
     // ── Delegated utilities ──
 
-    var _batchKey = GT.datamodel.groups.batchKey;
+    var _batchKey = GT.groupSettings.groups.batchKey;
 
     /** Column-letter name: 1→A, 2→B, ... 26→Z, 27→AA, 28→AB, ... */
     function _colLetter(n) {
@@ -34,7 +34,7 @@
 
     function _preComputeComboLetters(testerId, factorAliases, groupCount) {
         var comboMap = {};
-        var existing = GT.datamodel.groups.getAll();
+        var existing = GT.groupSettings.groups.getAll();
         var subs = window.submissions || [];
 
         for (var i = 0; i < factorAliases.length; i++) {
@@ -98,7 +98,7 @@
         var fullName = testerLabel + '_' + factorAlias + '_' + groupCount + '组_' + '第' + groupIndex + '组';
         var shortAlias = letter + groupIndex;
 
-        var allGroups = GT.datamodel.groups.getAll();
+        var allGroups = GT.groupSettings.groups.getAll();
         var comboKey = String(testerId) + '|' + factorAlias + '|' + groupCount;
         var sameIndexCount = 0;
         var usedSuffixes = {};
@@ -134,7 +134,7 @@
 
         var subs = window.submissions || [];
         var factors = window.factorList || [];
-        var draft = GT.ui.getAddDraft();
+        var draft = GT.tabs.getAddDraft();
         if (!draft) return;
 
         var html = '';
@@ -264,7 +264,7 @@
         for (var tb = 0; tb < testerBtns.length; tb++) {
             testerBtns[tb].addEventListener('click', function() {
                 var tid = this.getAttribute('data-tester-id');
-                GT.ui.updateAddDraft({ testerId: tid });
+                GT.tabs.updateAddDraft({ testerId: tid });
                 render();
             });
         }
@@ -274,11 +274,11 @@
         if (gcInput) {
             gcInput.addEventListener('input', function() {
                 var v = parseInt(this.value, 10);
-                if (v >= 1) GT.ui.updateAddDraft({ groupCount: v });
+                if (v >= 1) GT.tabs.updateAddDraft({ groupCount: v });
             });
             gcInput.addEventListener('blur', function() {
                 var v = parseInt(this.value, 10);
-                if (isNaN(v) || v < 1) { this.value = 2; GT.ui.updateAddDraft({ groupCount: 2 }); }
+                if (isNaN(v) || v < 1) { this.value = 2; GT.tabs.updateAddDraft({ groupCount: 2 }); }
             });
         }
 
@@ -287,7 +287,7 @@
         if (giInput) {
             giInput.addEventListener('input', function() {
                 var v = parseInt(this.value, 10);
-                if (v >= 1) GT.ui.updateAddDraft({ groupIndex: v });
+                if (v >= 1) GT.tabs.updateAddDraft({ groupIndex: v });
             });
         }
 
@@ -295,7 +295,7 @@
         var agCheck = $('add-all-groups');
         if (agCheck) {
             agCheck.addEventListener('change', function() {
-                GT.ui.updateAddDraft({ allGroups: this.checked });
+                GT.tabs.updateAddDraft({ allGroups: this.checked });
                 render();
             });
         }
@@ -328,7 +328,7 @@
                     var a = factors[fa].alias || factors[fa].name || '';
                     if (a) allAliases.push(a);
                 }
-                GT.ui.updateAddDraft({ selectedFactors: allAliases });
+                GT.tabs.updateAddDraft({ selectedFactors: allAliases });
                 render();
             });
         }
@@ -337,7 +337,7 @@
         var deselectAllBtn = $('add-deselect-all');
         if (deselectAllBtn) {
             deselectAllBtn.addEventListener('click', function() {
-                GT.ui.updateAddDraft({ selectedFactors: [] });
+                GT.tabs.updateAddDraft({ selectedFactors: [] });
                 render();
             });
         }
@@ -352,7 +352,7 @@
         } else {
             selected.push(alias);
         }
-        GT.ui.updateAddDraft({ selectedFactors: selected });
+        GT.tabs.updateAddDraft({ selectedFactors: selected });
         render();
     }
 
@@ -405,7 +405,7 @@
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
                     try {
-                        GT.datamodel.groups.add({
+                        GT.groupSettings.groups.add({
                             name: names.name,
                             shortAlias: names.shortAlias,
                             testerId: testerId,
@@ -428,7 +428,7 @@
             } else {
                 var names2 = _makeNames(testerId, alias, groupCount, groupIndex, letter);
                 try {
-                    GT.datamodel.groups.add({
+                    GT.groupSettings.groups.add({
                         name: names2.name,
                         shortAlias: names2.shortAlias,
                         testerId: testerId,
@@ -486,6 +486,34 @@
         render: render,
         submitAddBatches: submitAddBatches,
     };
+
+    // ── Register add flow to GT.modes ──
+    if (GT.modes) {
+        GT.modes.registerAddFlow({
+            flow: 'base',
+            priority: 0,
+            condition: function() { return true; },
+            buildDraft: function() {
+                return {
+                    addFlow: 'base',
+                    testerId: null,
+                    groupCount: 5,
+                    allGroups: true,
+                    groupIndex: 1,
+                    selectedFactors: [],
+                    feeMode: 'none',
+                    rebalanceMode: 'each_period',
+                    liquidityMode: 'infinite',
+                    liquidityPercent: 100
+                };
+            },
+            onSubmit: function(draft, helpers) {
+                submitAddBatches(draft);
+                helpers.exitAdd();
+            },
+            defaultTab: 'add-base'
+        });
+    }
 
     GT.log('panels.base.add loaded');
 })();

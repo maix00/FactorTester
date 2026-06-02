@@ -2,7 +2,7 @@
 <html>
 <head>
 {% from 'docs/_layout.html' import doc_head, doc_header, doc_tabs with context %}
-{{ doc_head('开发者指南', 'GTHT 量化因子平台 — 架构与实现文档') }}
+{{ doc_head('开发者指南', '量化因子平台 — 架构与实现文档') }}
 <style>
     .arch-diagram {
         background: #1a1a2e; border: 1px solid var(--docs-border); border-radius: 10px;
@@ -35,7 +35,7 @@
 <!-- 系统架构总览 -->
 <div class="doc-section">
     <h2>系统架构总览</h2>
-    <p>GTHT 是一个基于 Flask 的量化因子研究平台，采用分层架构设计。</p>
+    <p>基于 Flask 的量化因子研究平台，采用分层架构设计。</p>
 
     <pre class="arch-diagram">
 ┌──────────────────────────────────────────────────────────────┐
@@ -98,7 +98,7 @@
         <tr><td><code>tools/parameters/</code></td><td>参数系统：基类 Parameter、窗口参数 WindowParam、数据列参数 DataColumnParam</td></tr>
         <tr><td><code>tools/base/</code></td><td>基础设施：UniqueObject 单例、IdleResourceManager 缓存回收</td></tr>
         <tr><td><code>Factors/</code></td><td>内置因子族实现（46+ 个因子类）</td></tr>
-        <tr><td><code>sources/</code></td><td>数据源实现（LocalCNFutures、FeeData）</td></tr>
+        <tr><td><code>sources/</code></td><td>数据源实现（LocalCNFutures 等源特定适配）</td></tr>
         <tr><td><code>templates/</code></td><td>Jinja2 模板 + HTML 页面</td></tr>
         <tr><td><code>static/</code></td><td>CSS/JS 静态资源</td></tr>
     </table>

@@ -3,12 +3,7 @@
 
 提供该数据源下的所有数据路径常量及合约信息读取函数。
 """
-import os
-
-DATA_DIR = os.environ.get(
-    'GTHT_DATA_DIR',
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'data')),
-)
+from Settings import DATA_DIR
 
 # ---- 展期/合约信息 ----
 ROLLER_INFO_PATH = DATA_DIR + '/roller_info.parquet'

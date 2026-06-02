@@ -113,17 +113,17 @@
     function mount() {
         registry();
         _mounted = true;
-        GT.state.on('groupsChanged', _onGroupsChanged);
-        GT.state.on('activeBaseGroupChanged', _onActiveGroupChanged);
-        if (GT.state.on) GT.state.on('activeDerivedNodeChanged', _onActiveGroupChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onGroupsChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onActiveGroupChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onGroupsChanged);
-        GT.state.off('activeBaseGroupChanged', _onActiveGroupChanged);
-        if (GT.state.off) GT.state.off('activeDerivedNodeChanged', _onActiveGroupChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onGroupsChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onActiveGroupChanged);
     }
 
     function refresh() {
@@ -162,11 +162,19 @@
         getChips: getChips,
     };
 
+    // Register field schemas (so _fillGroupFromConfig preserves these fields)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'liquidityMode',    type: 'string', default: 'infinite' });
+        GS.registerField({ key: 'liquidityPercent', type: 'number', default: 100 });
+    }
+
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
             name: 'liquidity',
             label: '流动性',
             panel: GT.panels.config.liquidity,
+            fields: ['liquidityMode', 'liquidityPercent'],
         }, 'config-liquidity');
     }
 

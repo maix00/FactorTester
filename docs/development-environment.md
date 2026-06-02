@@ -2,11 +2,11 @@
 
 ## 标准环境
 
-项目以 Conda 环境 `GTHT` 作为当前标准运行环境。
+项目以 Conda 环境 `ft` 作为当前标准运行环境。
 
 ```bash
 conda env create -f environment.yml
-conda activate GTHT
+conda activate ft
 ```
 
 当前基线依赖来自现有可运行环境：
@@ -26,10 +26,10 @@ conda activate GTHT
 
 ## 测试
 
-统一用 `GTHT` 环境执行测试：
+统一用 `ft` 环境执行测试：
 
 ```bash
-conda run -n GTHT python -m pytest -q
+conda run -n ft python -m pytest -q
 ```
 
 不要默认使用 shell 当前激活的 `base` 环境；`base` 环境缺少本项目所需的量化计算依赖。

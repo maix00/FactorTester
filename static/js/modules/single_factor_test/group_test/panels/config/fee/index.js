@@ -27,6 +27,7 @@
     var _feeTableData = [];          // 原始费率数据（从后端获取，不可变）
     var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio, closetoday_ratio}}
     var _useCloseToday = false;       // 平今仓/平昨仓
+    var _feeNotice = null;            // 当前费率表来源提示
 
     // ── Fee data API ───────────────────────────────────────────────────────────
 
@@ -45,6 +46,11 @@
         .then(function(data) {
             if (data && data.success && Array.isArray(data.rows)) {
                 _feeTableData = data.rows;
+                _feeNotice = data.fee_notice ? {
+                    source: data.fee_source || 'current_snapshot',
+                    sourceDate: data.fee_source_date || null,
+                    message: data.fee_notice
+                } : null;
             }
             return _feeTableData;
         })
@@ -84,6 +90,10 @@
         return _feeTableData.length > 0;
     }
 
+    function getFeeNotice() {
+        return _feeNotice ? JSON.parse(JSON.stringify(_feeNotice)) : null;
+    }
+
     /** Get fee modifications snapshot. */
     function getModifications() {
         return JSON.parse(JSON.stringify(_feeModifications));
@@ -92,8 +102,8 @@
     /** Apply fee modifications snapshot. */
     function applyModifications(mods) {
         _feeModifications = mods && typeof mods === 'object' ? JSON.parse(JSON.stringify(mods)) : {};
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('feeDataChanged');
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('feeDataChanged');
         }
     }
 
@@ -110,8 +120,8 @@
     /** Set close-today mode. */
     function setUseCloseToday(v) {
         _useCloseToday = !!v;
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('feeDataChanged');
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('feeDataChanged');
         }
     }
 
@@ -127,26 +137,8 @@
         });
     }
 
-    /**
-     * Bind legacy DOM fee controls (bridge from app.js).
-     * Handles slider, radio buttons, close-today toggle that still exist in the DOM.
-     */
     function bindFeeControls() {
-        // Sensitivity slider (legacy)
-        var slider = document.getElementById('fee_sensitivity_slider');
-        if (slider && !slider._feeBound) {
-            slider._feeBound = true;
-            slider.addEventListener('input', function() {
-                var lbl = document.getElementById('fee_sensitivity_label');
-                if (lbl) lbl.textContent = parseFloat(this.value).toFixed(3) + '%';
-            });
-            slider.addEventListener('change', function() {
-                var val = parseFloat(this.value);
-                if (GT.ui && typeof GT.ui.recalcWithFee === 'function') {
-                    GT.ui.recalcWithFee(val);
-                }
-            });
-        }
+        // Legacy hook kept for app.js init compatibility.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -207,8 +199,17 @@
             html += '</div></div>';
         } else if (mode === 'per_product') {
             // Per-product: single button to open configFeeTable overlay in EDIT mode
+            if (!hasFeeData()) {
+                fetchFeeTable(false).then(function() {
+                    if (_mounted) render();
+                });
+            }
+            var notice = getFeeNotice();
             html += '<div id="' + CONTAINER_ID + '-pp-editor" style="margin-bottom:16px;padding:12px;background:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">';
             html += '<label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px;">分品种费率</label>';
+            if (notice && notice.message) {
+                html += '<div style="margin-bottom:8px;padding:8px 10px;border:1px solid #fbbf24;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;line-height:1.5;">⚠️ ' + escapeHTML(notice.message) + (notice.sourceDate ? ' 当前费率日期：' + escapeHTML(notice.sourceDate) : '') + '</div>';
+            }
             html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
             html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">📋 查看/编辑品种费率表</button>';
             html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，编辑费率表中可设置自定义费率</span>';
@@ -409,6 +410,7 @@
         buildFeeMap: buildFeeMap,
         ensureFeeData: ensureFeeData,
         hasFeeData: hasFeeData,
+        getFeeNotice: getFeeNotice,
         getModifications: getModifications,
         applyModifications: applyModifications,
         useCloseToday: useCloseToday,
@@ -424,16 +426,18 @@
         _mounted = true;
         REG = window.GT_CONFIG_REGISTRY;
 
-        GT.state.on('groupsChanged', _onDataChanged);
-        GT.state.on('activeBaseGroupChanged', _onDataChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onDataChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onDataChanged);
 
         render();
     }
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onDataChanged);
-        GT.state.off('activeBaseGroupChanged', _onDataChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onDataChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onDataChanged);
     }
 
     function refresh() {
@@ -452,12 +456,23 @@
         getChips: getChips,
     };
 
+    // Register field schemas (so _fillGroupFromConfig preserves these fields)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'feeMode',        type: 'string',  default: 'none' });
+        GS.registerField({ key: 'feeRate',        type: 'number',  default: 0.0025 });
+        GS.registerField({ key: 'feeMap',         type: 'object',  default: null });
+        GS.registerField({ key: 'feeSensitivity', type: 'number',  default: 1 });
+        GS.registerField({ key: 'useCloseToday',  type: 'boolean', default: false });
+    }
+
     // Register as category-3 config panel
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
             name: 'fee',
             label: '费率',
             panel: GT.panels.config.fee,
+            fields: ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday'],
         }, 'config-fee');
     }
 

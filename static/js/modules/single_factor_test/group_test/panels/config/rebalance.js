@@ -2,13 +2,13 @@
  * panels/config/rebalance.js — Rebalance mode panel (category-3)
  *
  * Phase 3 UI panel. Renders a dropdown for the selected base group's
- * rebalanceMode field with mode description. All data access through datamodel + state.
+ * rebalanceMode field with mode description. All data access through groupSettings + state.
  *
- * Contract (provided by P3-1 & datamodel):
- *   GT.state.getActiveBaseGroupId() → id|null
- *   GT.state.on('activeBaseGroupChanged', cb)
- *   GT.datamodel.groups.get(id) → {...}|null
- *   GT.datamodel.groups.update(id, patch)
+ * Contract:
+ *   GT.panels.list.selection.getFirst() → id|null
+ *   GT.panels.list.selection.on('selectionChanged', cb)
+ *   GT.groupSettings.groups.get(id) → {...}|null
+ *   GT.groupSettings.groups.update(id, patch)
  *
  * Valid modes: each_period | buy_and_hold | recycle
  */
@@ -98,7 +98,7 @@
         if (_mounted && reg && !reg.hasDirty()) { render(); }
     }
 
-    function _onActiveBaseGroupChanged() {
+    function _onSelectionChanged() {
         var reg = registry();
         if (_mounted && reg) { reg.rollbackDirty(); render(); }
     }
@@ -111,15 +111,17 @@
             GT.log('panels.base.rebalance: container #' + _containerId + ' not found');
             return;
         }
-        GT.state.on('groupsChanged', _onBaseGroupsChanged);
-        GT.state.on('activeBaseGroupChanged', _onActiveBaseGroupChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onBaseGroupsChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.on) sel.on('selectionChanged', _onSelectionChanged);
         render();
     }
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onBaseGroupsChanged);
-        GT.state.off('activeBaseGroupChanged', _onActiveBaseGroupChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onBaseGroupsChanged);
+        var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+        if (sel && sel.off) sel.off('selectionChanged', _onSelectionChanged);
     }
 
     function refresh() {
@@ -166,12 +168,19 @@
         getChips: getChips,
     };
 
+    // Register field schema (so _fillGroupFromConfig preserves this field)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'buy_and_hold' });
+    }
+
     // Register as category-3 config panel
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
             name: 'rebalance',
             label: '再平衡',
             panel: GT.panels.config.rebalance,
+            fields: ['rebalanceMode'],
         }, 'config-rebalance');
     }
 

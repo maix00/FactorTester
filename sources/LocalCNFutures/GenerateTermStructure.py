@@ -10,6 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
+from Settings import DATA_DIR
 from sources.LocalCNFutures import TERM_STRUCTURE_PATH
 from sources.LocalCNFutures.CNFutures import exchange_map
 from tools.products.AdjustableTermStructure import (
@@ -24,9 +25,9 @@ from tools.products.AdjustableTermStructure import (
 )
 
 
-contract_mapping_path = '../data/wind_mapping.parquet'
-dayk_path = '../data/data_dayk.parquet'
-roller_info_path = '../data/roller_info.parquet'
+contract_mapping_path = os.path.join(DATA_DIR, 'wind_mapping.parquet')
+dayk_path = os.path.join(DATA_DIR, 'data_dayk.parquet')
+roller_info_path = os.path.join(DATA_DIR, 'roller_info.parquet')
 
 
 def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
