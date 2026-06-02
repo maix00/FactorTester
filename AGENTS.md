@@ -116,8 +116,8 @@ git status -sb
 cd ~/Codes
 git checkout feat
 
-# 2) 合并分支到 feat
-git merge fix/issue-N-<slug>
+# 2) 合并分支到 feat（用 --no-ff 保留分支拓扑）
+git merge --no-ff fix/issue-N-<slug>
 
 # 3) 删除分支 + worktree（避免占坑影响并行）
 git branch -d fix/issue-N-<slug>
@@ -306,7 +306,7 @@ git commit -m "<type>: <描述> (refs #<N>)"
 # 2. 回到主目录的 feat，合并 fix 分支
 cd ~/Codes
 git checkout feat
-git merge fix/issue-<N>-<描述>
+git merge --no-ff fix/issue-<N>-<描述>   # --no-ff 保留分支拓扑
 git branch -d fix/issue-<N>-<描述>
 
 # 3. 删除 worktree（在主目录执行）
@@ -390,7 +390,7 @@ git commit -m "<type>: <描述> (refs #<号码>)"
 ```bash
 cd ~/Codes
 git checkout feat
-git merge fix/issue-<号码>-<简短描述>
+git merge --no-ff fix/issue-<号码>-<简短描述>   # --no-ff 保留分支拓扑
 git branch -d fix/issue-<号码>-<简短描述>
 
 # 删除 worktree（避免占坑）
