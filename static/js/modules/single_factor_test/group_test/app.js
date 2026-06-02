@@ -681,9 +681,8 @@
             return;
         }
         container.style.display = 'block';
-        GT.renderSectionedMetricsTable(metrics, _lastGrossData);
-        if (GT.metrics && GT.metrics.table && typeof GT.metrics.table.bindHeaderActions === 'function') {
-            GT.metrics.table.bindHeaderActions({
+        if (GT.metrics && GT.metrics.table && typeof GT.metrics.table.render === 'function') {
+            GT.metrics.table.render(metrics, _lastGrossData, {
                 openGroupDetail: openGroupDetail,
                 openPortfolioDetail: openPortfolioDetail,
                 openGroupRankingDetail: openGroupRankingDetail,

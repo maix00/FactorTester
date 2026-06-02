@@ -270,8 +270,18 @@
         }
     }
 
+    function render(metricsByGroup, groups, actions) {
+        var out = build(metricsByGroup || {}, groups || []);
+        var head = document.getElementById('metrics_head');
+        var body = document.getElementById('metrics_body');
+        if (head) head.innerHTML = out.headHtml || '';
+        if (body) body.innerHTML = out.bodyHtml || '';
+        bindHeaderActions(actions);
+    }
+
     GT.metrics.table = {
         build: build,
+        render: render,
         bindHeaderActions: bindHeaderActions,
         metricNamesCN: metricNamesCN,
         metricDisplay: metricDisplay,
