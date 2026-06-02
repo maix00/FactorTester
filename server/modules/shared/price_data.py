@@ -29,6 +29,7 @@ from server.modules.shared.price_services import (
     find_product as _find_product,
     supports_adjusted_price as _supports_adjusted_price,
     supports_term_structure as _supports_term_structure,
+    product_public_fields as _product_public_fields,
 )
 
 
@@ -50,6 +51,7 @@ def list_product_names():
                 'code': code or name.split('.')[0] if '.' in name else name,
                 'exchange': name.split('.')[1] if '.' in name and '@' not in name.split('.')[1] else name.split('.')[1].split('@')[0] if '.' in name else '',
                 'product_type': 'product',
+                'fields': _product_public_fields(p),
             })
         return jsonify({'success': True, 'products': result})
     except Exception as e:
@@ -101,6 +103,7 @@ def get_contract_tree():
                 'product_type': 'contract',
                 'contract_uid': name,
                 'has_data': has_data,
+                'fields': _product_public_fields(c),
             })
         return jsonify(nodes)
     except Exception as e:
@@ -156,6 +159,7 @@ def get_contracts():
             'supports_term_structure': True,
             'has_term_structure': True,
             'contracts': contracts,
+            'fields': _product_public_fields(product),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
@@ -293,6 +297,7 @@ def get_price_data():
                 'available_freqs': available_freqs,
                 'count': len(result_data),
                 'has_oi': has_oi,
+                'fields': _product_public_fields(contract_product) if contract_product is not None else {},
                 'data': result_data,
             })
 
@@ -456,6 +461,7 @@ def get_price_data():
             'count': len(result_data),
             'has_oi': has_oi,
             'contracts': contracts,
+            'fields': _product_public_fields(product),
             'data': result_data,
         })
 

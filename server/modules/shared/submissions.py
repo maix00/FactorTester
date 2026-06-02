@@ -22,6 +22,7 @@ from .submission_helpers import resolve_products_from_paths, submissions_payload
 from .submission_ids import make_submission_id
 from server.services.api_response import api_fail, api_ok, route_guard
 from tools.products.Futures import FuturesContract
+from server.modules.shared.price_services import product_public_fields
 
 
 def _request_page_uuid(data: dict | None = None) -> str | None:
@@ -130,6 +131,7 @@ def get_products():
             'desc':         prod_desc,
             'product_name': prod_name,
             'product_code': prod_code or (prod_name.split('.')[0] if '.' in prod_name else prod_name),
+            'fields':       product_public_fields(prod),
         }
         if is_contract:
             node_data['product_type'] = 'contract'

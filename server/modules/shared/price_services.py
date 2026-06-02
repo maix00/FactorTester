@@ -20,6 +20,7 @@ from sources.LocalCNFutures.CNFutures import (
 )
 from tools.products.AdjustableTermStructure import AdjustableProductMixin
 from tools.products.Futures import (
+    FuturesContract,
     make_contract_category_from_futures_category,
     map_contracts_to_futures,
 )
@@ -172,6 +173,113 @@ def find_contract_product(contract_uid):
         getattr(contract, 'name', None) == contract_uid or
         getattr(contract, 'alias', None) == contract_uid
     )), None)
+
+
+def _contract_variety_code(product: Any) -> str:
+    name = str(getattr(product, 'name', getattr(product, 'alias', product)))
+    if '|' in name:
+        parts = name.split('|')
+        if len(parts) >= 3:
+            return parts[2].upper()
+    match = re.match(r'^([A-Za-z]+)', name)
+    return match.group(1).upper() if match else ''
+
+
+def _future_variety_code(product: Any) -> str:
+    code = str(getattr(product, 'code', '') or '').upper()
+    if code:
+        return code
+    alias = str(getattr(product, 'alias', getattr(product, 'name', '')))
+    return alias.split('.')[0].upper() if alias else ''
+
+
+def _fee_fields_from_row(row: Any, source: str) -> dict[str, Any]:
+    import pandas as pd
+    if row is None:
+        return {}
+
+    def num(key: str, default: float = 0.0) -> float:
+        value = row.get(key, default)
+        return float(value) if pd.notna(value) else default
+
+    return {
+        'trading_spec_source': source,
+        'trading_spec_date': str(row.get('date', '')) if row.get('date', '') is not None else '',
+        'open_fee_ratio': num('open_ratio'),
+        'open_fee_fixed': num('open_fixed'),
+        'close_fee_ratio': num('close_ratio'),
+        'close_fee_fixed': num('close_fixed'),
+        'close_today_fee_ratio': num('closetoday_ratio'),
+        'close_today_fee_fixed': num('closetoday_fixed'),
+        'long_margin_ratio': num('long_margin_ratio'),
+        'long_margin_fixed': num('long_margin_fixed'),
+        'short_margin_ratio': num('short_margin_ratio'),
+        'short_margin_fixed': num('short_margin_fixed'),
+        'min_tick': num('min_tick'),
+        'point_value': num('multiplier', float(getattr(row, 'point_value', 1.0) or 1.0)),
+    }
+
+
+def cn_futures_trading_spec_fields(product: Any) -> dict[str, Any]:
+    """Return current/inferred CN futures trading specs for display.
+
+    Futures uses the current variety-level OpenCTP row. FuturesContract first tries
+    contract-level rows, then falls back to the current variety-level row.
+    """
+    try:
+        from sources.LocalCNFutures.FeeData import get_contract_fee_row, load_latest
+        import pandas as pd
+    except Exception:
+        return {}
+
+    try:
+        if isinstance(product, FuturesContract):
+            contract_row = get_contract_fee_row(getattr(product, 'name', ''), allow_latest_fallback=True)
+            if contract_row is not None:
+                return _fee_fields_from_row(contract_row, 'current_contract_snapshot')
+            variety = _contract_variety_code(product)
+            source = 'current_variety_snapshot_fallback'
+        else:
+            variety = _future_variety_code(product)
+            source = 'current_variety_snapshot'
+        if not variety:
+            return {}
+        df = load_latest()
+        if df.empty or 'variety_code' not in df.columns:
+            return {}
+        match = df[df['variety_code'].astype(str).str.upper() == variety]
+        if match.empty:
+            return {}
+        return _fee_fields_from_row(match.iloc[0], source)
+    except Exception:
+        return {}
+
+
+def _serialize_field_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, 'item'):
+        return value.item()
+    if isinstance(value, tuple):
+        return [_serialize_field_value(v) for v in value]
+    if isinstance(value, list) and len(value) <= 20:
+        return [_serialize_field_value(v) for v in value]
+    if isinstance(value, dict) and len(value) <= 20:
+        return {str(k): _serialize_field_value(v) for k, v in value.items()}
+    if isinstance(value, type):
+        return value.__name__
+    return repr(value)
+
+
+def product_public_fields(product: Any) -> dict[str, Any]:
+    """Reflect current backend product fields without a frontend field registry."""
+    fields: dict[str, Any] = {'class': type(product).__name__}
+    for key, value in vars(product).items():
+        if key.startswith('_'):
+            continue
+        fields[key] = _serialize_field_value(value)
+    fields.update(cn_futures_trading_spec_fields(product))
+    return fields
 
 
 def supports_adjusted_price(product) -> bool:

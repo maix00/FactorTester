@@ -39,6 +39,12 @@
         .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .pv-chart-header .title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
         .pv-chart-header .info { font-size: 12px; color: #888; }
+        .pv-product-fields { display:none; margin: 4px 0 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; font-size: 12px; }
+        .pv-product-fields-title { font-weight: 700; color: #334155; margin-bottom: 8px; }
+        .pv-product-fields-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 12px; }
+        .pv-product-field { display: grid; grid-template-columns: minmax(80px, 0.85fr) minmax(0, 1.15fr); gap: 6px; min-width: 0; }
+        .pv-product-field-key { color: #64748b; overflow-wrap: anywhere; }
+        .pv-product-field-value { color: #0f172a; font-family: "SF Mono", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
         .pv-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; flex-shrink: 0; }
         .pv-controls label { font-size: 12px; color: #555; }
         .pv-controls select, .pv-controls input { font-size: 12px; padding: 4px 8px; border: 1px solid #d0d5dd; border-radius: 4px; }
@@ -139,6 +145,7 @@
                     <span class="title" id="pv-chart-title">— 请选择品种 —</span>
                     <span class="info" id="pv-chart-info"></span>
                 </div>
+                <div id="pv-product-fields" class="pv-product-fields"></div>
                 <div class="pv-controls">
                     <label>数据源：</label>
                     <select id="pv-data-source" onchange="document.getElementById('pv-freq').value=''; loadPriceData()">
@@ -221,6 +228,37 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function formatFieldValue(value) {
+        if (value === null || value === undefined) return '—';
+        if (typeof value === 'object') {
+            try { return JSON.stringify(value); } catch (e) { return String(value); }
+        }
+        return String(value);
+    }
+
+    function renderProductFields(fields) {
+        var box = document.getElementById('pv-product-fields');
+        if (!box) return;
+        var data = fields && typeof fields === 'object' ? fields : {};
+        var keys = Object.keys(data).sort();
+        if (!keys.length) {
+            box.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        var html = '<div class="pv-product-fields-title">后端产品字段</div><div class="pv-product-fields-grid">';
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            html += '<div class="pv-product-field">'
+                + '<span class="pv-product-field-key">' + escHtml(key) + '</span>'
+                + '<span class="pv-product-field-value">' + escHtml(formatFieldValue(data[key])) + '</span>'
+                + '</div>';
+        }
+        html += '</div>';
+        box.innerHTML = html;
+        box.style.display = 'block';
     }
 
     // ── 合约表格 ────────────────────────────────────────
@@ -480,6 +518,7 @@
         if (!info.name) info.name = name;
 
         currentProduct = info;
+        renderProductFields(info.fields || {});
 
         // 更新标题
         var code = info.code || (info.name ? info.name.split('.')[0] : name);
@@ -552,6 +591,8 @@
             });
             const data = await resp.json();
             if (data.success && data.data && data.data.length > 0) {
+                currentProduct.fields = data.fields || currentProduct.fields || {};
+                renderProductFields(currentProduct.fields);
                 document.getElementById('pv-chart-info').textContent =
                     `${data.product} | ${data.adjusted ? '复权' : '原始'} | ${data.freq} | ${data.count} 条`;
                 updatePriceTypeControl(data.supports_adjusted, data.adjusted);
