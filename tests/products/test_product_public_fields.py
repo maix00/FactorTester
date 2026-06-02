@@ -33,13 +33,16 @@ def test_product_public_fields_reflect_backend_attrs_and_futures_specs(monkeypat
 
     fields = price_services.product_public_fields(future)
 
-    assert fields['class'] == 'Futures'
-    assert fields['name'] == 'IF.CFE'
-    assert fields['is_margin_traded'] is True
-    assert fields['open_fee_ratio'] == 0.0001
-    assert fields['long_margin_ratio'] == 0.12
-    assert fields['point_value'] == 300
-    assert fields['trading_spec_source'] == 'current_variety_snapshot'
+    def v(key):
+        return fields[key]['value']
+
+    assert fields['class'] == {'value': 'Futures', 'type': 'str'}
+    assert v('name') == 'IF.CFE'
+    assert v('is_margin_traded') is True
+    assert v('open_fee_ratio') == 0.0001
+    assert v('long_margin_ratio') == 0.12
+    assert v('point_value') == 300
+    assert v('trading_spec_source') == 'current_variety_snapshot'
 
 
 def test_contract_public_fields_fall_back_to_variety_specs(monkeypatch):
@@ -49,8 +52,11 @@ def test_contract_public_fields_fall_back_to_variety_specs(monkeypatch):
 
     fields = price_services.product_public_fields(contract)
 
-    assert fields['class'] == 'FuturesContract'
-    assert fields['is_margin_traded'] is True
-    assert fields['close_today_fee_ratio'] == 0.0003
-    assert fields['short_margin_fixed'] == 13000
-    assert fields['trading_spec_source'] == 'current_variety_snapshot_fallback'
+    def v(key):
+        return fields[key]['value']
+
+    assert fields['class'] == {'value': 'FuturesContract', 'type': 'str'}
+    assert v('is_margin_traded') is True
+    assert v('close_today_fee_ratio') == 0.0003
+    assert v('short_margin_fixed') == 13000
+    assert v('trading_spec_source') == 'current_variety_snapshot_fallback'

@@ -272,13 +272,24 @@ def _serialize_field_value(value: Any) -> Any:
 
 
 def product_public_fields(product: Any) -> dict[str, Any]:
-    """Reflect current backend product fields without a frontend field registry."""
-    fields: dict[str, Any] = {'class': type(product).__name__}
+    """Reflect current backend product fields without a frontend field registry.
+
+    Returns {key: {'value': ..., 'type': 'str'|'int'|'float'|'bool'|'list'|'dict'|...}}
+    so the frontend can display both value and type.
+    """
+    def field_entry(raw_value: Any) -> dict[str, Any]:
+        py_type = type(raw_value).__name__
+        return {'value': _serialize_field_value(raw_value), 'type': py_type}
+
+    fields: dict[str, Any] = {'class': field_entry(type(product).__name__)}
     for key, value in vars(product).items():
         if key.startswith('_'):
             continue
-        fields[key] = _serialize_field_value(value)
-    fields.update(cn_futures_trading_spec_fields(product))
+        fields[key] = field_entry(value)
+    # Merge fee/trading-spec fields (already serialized plain values, wrap them)
+    fee_fields = cn_futures_trading_spec_fields(product)
+    for k, v in fee_fields.items():
+        fields[k] = field_entry(v)
     return fields
 
 
