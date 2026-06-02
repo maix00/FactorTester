@@ -456,6 +456,16 @@
         getChips: getChips,
     };
 
+    // Register field schemas (so _fillGroupFromConfig preserves these fields)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'feeMode',        type: 'string',  default: 'none' });
+        GS.registerField({ key: 'feeRate',        type: 'number',  default: 0.0025 });
+        GS.registerField({ key: 'feeMap',         type: 'object',  default: null });
+        GS.registerField({ key: 'feeSensitivity', type: 'number',  default: 1 });
+        GS.registerField({ key: 'useCloseToday',  type: 'boolean', default: false });
+    }
+
     // Register as category-3 config panel
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({

@@ -378,6 +378,12 @@
         getAllProducts: getAllProducts,
     };
 
+    // Register field schema (so _fillGroupFromConfig preserves this field)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'productMask', type: 'object', default: {} });
+    }
+
     // Register as category-3 config panel with productMask field
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({

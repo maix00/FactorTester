@@ -117,6 +117,16 @@
         call(dates().bindTimeSyncListeners, function(){})();
 
         if (GT.fee && typeof GT.fee.bind === 'function') GT.fee.bind();
+
+        // Bridge: global_template_module.js snapshots use these globals
+        window._getFeeModifications = function() {
+            if (GT.fee && typeof GT.fee.getModifications === 'function') return GT.fee.getModifications();
+            return {};
+        };
+        window._applyFeeModifications = function(mods) {
+            if (GT.fee && typeof GT.fee.applyModifications === 'function') GT.fee.applyModifications(mods);
+        };
+
         if (GT.results.snapshot && typeof GT.results.snapshot.bindSnapshotDrawerEvents === 'function') {
             GT.results.snapshot.bindSnapshotDrawerEvents();
         }

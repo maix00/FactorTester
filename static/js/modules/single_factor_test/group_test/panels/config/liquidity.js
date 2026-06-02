@@ -162,6 +162,13 @@
         getChips: getChips,
     };
 
+    // Register field schemas (so _fillGroupFromConfig preserves these fields)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'liquidityMode',    type: 'string', default: 'infinite' });
+        GS.registerField({ key: 'liquidityPercent', type: 'number', default: 100 });
+    }
+
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
             name: 'liquidity',

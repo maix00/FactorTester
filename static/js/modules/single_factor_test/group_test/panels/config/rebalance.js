@@ -168,6 +168,12 @@
         getChips: getChips,
     };
 
+    // Register field schema (so _fillGroupFromConfig preserves this field)
+    var GS = GT.groupSettings;
+    if (GS && GS.registerField) {
+        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'buy_and_hold' });
+    }
+
     // Register as category-3 config panel
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
