@@ -138,8 +138,10 @@
         }
 
         function openSnapshotAt(idx) {
+            console.log('[snapshot-debug] openSnapshotAt called: idx=', idx, 'timelineLen=', timeline.length, 'hasOnSnapshot=', typeof options.onSnapshot === 'function');
             if (idx < 0 || idx >= timeline.length) return;
             if (typeof options.onSnapshot === 'function') options.onSnapshot(timeline[idx]);
+            else console.warn('[snapshot-debug] options.onSnapshot is not a function!');
         }
 
         _groupChart = Highcharts.stockChart(container, {

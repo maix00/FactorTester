@@ -39,7 +39,12 @@
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
         var submissionId = _activeSubmissionId();
-        if (!submissionId) return;
+        console.log('[snapshot-debug] fetchGroupSnapshot called: timestampMs=', timestampMs, 'submissionId=', submissionId);
+        if (!submissionId) {
+            console.warn('[snapshot-debug] No active submissionId — drawer will not open. Please select a submission first.');
+            alert('请先在提交列表中选中一条提交记录，再点击图表查看持仓快照。');
+            return;
+        }
 
         timestampMs = Math.round(timestampMs);
         _snapshotCurrentMs = timestampMs;
@@ -126,7 +131,9 @@
 
     function openSnapshotDrawer() {
         var overlay = document.getElementById('group-snapshot-drawer');
+        console.log('[snapshot-debug] openSnapshotDrawer called: overlay=', !!overlay, 'hasOpenClass=', overlay ? overlay.classList.contains('open') : null);
         if (overlay) overlay.classList.add('open');
+        if (overlay) console.log('[snapshot-debug] after add: hasOpenClass=', overlay.classList.contains('open'));
     }
 
     function closeSnapshotDrawer() {
@@ -136,10 +143,12 @@
 
     /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击 + 前/后导航） */
     function bindSnapshotDrawerEvents() {
+        console.log('[snapshot-debug] bindSnapshotDrawerEvents called');
         var overlay = document.getElementById('group-snapshot-drawer');
         var closeBtn = document.getElementById('group-snapshot-drawer-close');
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
+        console.log('[snapshot-debug] elements: overlay=', !!overlay, 'closeBtn=', !!closeBtn, 'prevBtn=', !!prevBtn, 'nextBtn=', !!nextBtn);
         if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
         if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
         if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });
