@@ -936,6 +936,7 @@ def run_group_test_batch():
                 errors.append({'index': idx, 'error': str(e)})
                 continue
             if r.get('success'):
+                r['batch_index'] = idx
                 batch_results[idx] = r
             else:
                 errors.append({'index': idx, 'submission_id': batches_raw[idx].get('submission_id'),
@@ -1047,6 +1048,7 @@ def run_group_test_batch():
     merged_groups = []
     merged_metrics = {}
     used_merged_keys: set[str] = set()
+    multi_session_batches = []
     last_n_groups = 0
     last_multi_session = False
     last_rebalance = rebalance_mode
@@ -1088,7 +1090,16 @@ def run_group_test_batch():
             merged_key = _unique_group_key(str(metric_key), used_merged_keys)
             merged_metrics[merged_key] = metric_value
         last_n_groups = br.get('n_groups', last_n_groups)
-        last_multi_session = br.get('multi_session_active', last_multi_session) or last_multi_session
+        batch_multi_session = bool(br.get('multi_session_active', False))
+        if batch_multi_session:
+            multi_session_batches.append({
+                'index': br.get('batch_index'),
+                'submission_id': br.get('batch_submission_id'),
+                'factor_alias': br.get('batch_factor_alias'),
+                'tester_alias': br.get('tester_alias'),
+                'n_groups': br.get('batch_n_groups') or br.get('n_groups'),
+            })
+        last_multi_session = batch_multi_session or last_multi_session
         last_rebalance = br.get('rebalance_mode', last_rebalance) or last_rebalance
 
     # 追加跨 batch LS 组
@@ -1112,6 +1123,7 @@ def run_group_test_batch():
         'metrics': merged_metrics,
         'n_groups': last_n_groups,
         'multi_session_active': last_multi_session,
+        'multi_session_batches': multi_session_batches,
         'rebalance_mode': last_rebalance,
         'submission_id': batches_raw[0].get('submission_id', ''),
         'factor_alias': batches_raw[0].get('factor_alias', ''),

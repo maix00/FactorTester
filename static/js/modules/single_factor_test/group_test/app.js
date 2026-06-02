@@ -31,38 +31,47 @@
     var pageHasICModule = GT.utils.dates ? GT.utils.dates.pageHasICModule : function() { return false; };
 
     // ---------- 多时段品种策略提示面板 ----------
-    function updateStrategyPanel(multiSessionActive, usedMode) {
-        var panel = document.getElementById('strategy_info_panel');
-        var icon = document.getElementById('strategy_icon');
-        var title = document.getElementById('strategy_title');
-        var body = document.getElementById('strategy_body');
-        if (!panel || !icon || !title || !body) return;
+    function updateStrategyPanel(multiSessionActive, usedMode, multiSessionBatches) {
+        var layer = document.getElementById('gt-layer-strategy');
+        var status = document.getElementById('gt-strategy-status');
+        var head = document.getElementById('gt-strategy-head');
+        var body = document.getElementById('gt-strategy-body');
+        if (!layer || !head || !body) return;
 
-        if (multiSessionActive) {
-            panel.style.display = 'block';
-            panel.style.background = '#fff8e6';
-            panel.style.borderLeftColor = '#e6a817';
-            icon.textContent = '⚠️';
-            title.textContent = '检测到含不同交易时段的产品';
-            var modeLabel = {
-                'each_period': '每期等权再平衡',
-                'buy_and_hold': '组内持仓不动',
-                'recycle': '退出资金优先补新仓'
-            }[usedMode] || usedMode;
-            body.innerHTML = '所选再平衡模式 <b>' + modeLabel + '</b> 仅在 <u>所有产品均有信号</u> 的期数中生效。<br>'
-                + '在部分产品无信号（含 NaN）的混合期数中，自动切换为 <b>多时段品种策略</b>：<br>'
-                + '• 保护无信号品种的持仓不动<br>'
-                + '• 仅对有信号的品种进行交易和再平衡<br>'
-                + '• 离场品种的资金回收后重新分配到新入场品种（扣除手续费）<br>'
-                + '• 若某组只有新增、没有可回收资金，则该组当期冻结，不强行开新仓';
-        } else {
-            panel.style.display = 'block';
-            panel.style.background = '#eef7ee';
-            panel.style.borderLeftColor = '#2e7d32';
-            icon.textContent = '✅';
-            title.textContent = '所有产品具有统一的交易时段';
-            body.textContent = '所有产品在所有期数中均有信号，您选择的再平衡模式将在每期中正常生效。';
+        if (!multiSessionActive) {
+            layer.style.display = 'none';
+            if (status) status.textContent = '';
+            head.innerHTML = '';
+            body.innerHTML = '';
+            return;
         }
+
+        var modeLabel = {
+            'each_period': '每期等权再平衡',
+            'buy_and_hold': '组内持仓不动',
+            'recycle': '退出资金优先补新仓'
+        }[usedMode] || usedMode || '当前再平衡模式';
+
+        layer.style.display = '';
+        var batches = Array.isArray(multiSessionBatches) && multiSessionBatches.length > 0
+            ? multiSessionBatches
+            : [{ index: 0, tester_alias: '当前测试器', factor_alias: '当前因子', n_groups: null }];
+        if (status) status.textContent = '检测到 ' + batches.length + ' 个 MultiSession batch';
+        head.innerHTML = '<tr><th>Batch</th><th>当前模式</th><th>处理方式</th></tr>';
+        body.innerHTML = batches.map(function(batch) {
+            var batchIndex = Number.isFinite(Number(batch.index)) ? (Number(batch.index) + 1) : '';
+            var testerAlias = batch.tester_alias || batch.testerAlias || batch.submission_id || '';
+            var factorAlias = batch.factor_alias || batch.factorAlias || '';
+            var groupText = batch.n_groups ? (' / ' + batch.n_groups + '组') : '';
+            var label = (batchIndex ? ('Batch ' + batchIndex + ' · ') : '')
+                + [testerAlias, factorAlias].filter(Boolean).join(' / ')
+                + groupText;
+            return '<tr class="gt-strategy-row">'
+                + '<td class="gt-strategy-cell-running">' + GT.escapeHTML(label || 'MultiSession batch') + '</td>'
+                + '<td>' + GT.escapeHTML(modeLabel) + '</td>'
+                + '<td>该 batch 含不同交易时段的品种；后端按 MultiSession 处理：仅对当期有信号的品种交易和再平衡，无信号品种持仓保持不动。</td>'
+                + '</tr>';
+        }).join('');
     }
 
     function updateRebalanceModeDescription() {
@@ -2066,7 +2075,7 @@
             n_groups: data.n_groups,
         });
 
-        updateStrategyPanel(data.multi_session_active, data.rebalance_mode);
+        updateStrategyPanel(data.multi_session_active, data.rebalance_mode, data.multi_session_batches);
         _lastGrossData = data.groups;
         _lastMetrics = data.metrics;
         _lastNgroups = data.n_groups;
