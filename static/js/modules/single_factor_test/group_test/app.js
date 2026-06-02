@@ -3538,10 +3538,11 @@
         calcAndRenderMetricsFromGroups(recalcGroups, nGroups);
     }
 
-    function roundVal(v) {
-        if (isNaN(v) || !isFinite(v)) return null;
-        return Math.round(v * 1e8) / 1e8;
-    }
+    // roundVal / calcMetricsFromReturns / inferPeriodsPerYearFromTimestamps
+    // 已迁移到 GT.core.metricsCalc
+    var roundVal = GT.core.metricsCalc ? GT.core.metricsCalc.roundVal : function(v) { return v; };
+    var calcMetricsFromReturns = GT.core.metricsCalc ? GT.core.metricsCalc.calcMetricsFromReturns : function() { return {}; };
+    var inferPeriodsPerYearFromTimestamps = GT.core.metricsCalc ? GT.core.metricsCalc.inferPeriodsPerYearFromTimestamps : function() { return 252; };
 
     /** 从重算后的 groups 计算各组指标（简化版，只更新费率敏感的指标） */
     function calcAndRenderMetricsFromGroups(recalcGroups, nGroups) {
@@ -3581,98 +3582,7 @@
         renderMetricsTable(newMetrics);
     }
 
-    function inferPeriodsPerYearFromTimestamps(timestamps) {
-        if (!timestamps || timestamps.length < 2) return 252;
-        var dayCounts = {};
-        timestamps.forEach(function(ts) {
-            var d = new Date(ts);
-            if (isNaN(d.getTime())) return;
-            var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-            dayCounts[key] = (dayCounts[key] || 0) + 1;
-        });
-        var counts = Object.keys(dayCounts).map(function(key) { return dayCounts[key]; }).sort(function(a, b) { return a - b; });
-        if (!counts.length) return 252;
-        var median = counts[Math.floor(counts.length / 2)];
-        if (median > 1) return median * 252;
-        var days = Object.keys(dayCounts).sort();
-        if (days.length < 2) return 252;
-        var start = new Date(days[0] + 'T00:00:00');
-        var end = new Date(days[days.length - 1] + 'T00:00:00');
-        var businessDays = 0;
-        for (var cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
-            var dow = cur.getDay();
-            if (dow !== 0 && dow !== 6) businessDays++;
-        }
-        return businessDays > 0 ? Math.max(1, days.length / businessDays * 252) : 252;
-    }
-
-    /** 从收益率序列计算指标 */
-    function calcMetricsFromReturns(returns, timestamps) {
-        if (!returns || returns.length === 0) return {};
-        var n = returns.length;
-        var cum = 1.0;
-        var cumMax = 1.0;
-        var maxDD = 0.0;
-        var winCount = 0;
-        var sum = 0.0;
-        var sumSq = 0.0;
-
-        for (var i = 0; i < n; i++) {
-            var r = returns[i];
-            if (isNaN(r) || !isFinite(r)) continue;
-            cum *= (1.0 + r);
-            if (cum > cumMax) cumMax = cum;
-            var dd = (cumMax - cum) / cumMax;
-            if (dd > maxDD) maxDD = dd;
-            if (r > 0) winCount++;
-            sum += r;
-            sumSq += r * r;
-        }
-
-        var mean = sum / n;
-        var variance = (sumSq / n) - (mean * mean);
-        var std = Math.sqrt(Math.max(variance, 0));
-        var totalRet = (cum - 1.0) * 100;
-        var annualPeriods = inferPeriodsPerYearFromTimestamps(timestamps);
-        var annualRet = (Math.pow(cum, annualPeriods / n) - 1) * 100;
-        var vol = std * Math.sqrt(annualPeriods) * 100;
-        var sharpe = std > 0 ? (mean * annualPeriods) / (std * Math.sqrt(annualPeriods)) : 0;
-        var calmar = maxDD > 0 ? annualRet / (maxDD * 100) : 0;
-        var winRate = (winCount / n) * 100;
-
-        var skew = 0.0, kurt = 0.0;
-        if (std > 0) {
-            for (var i = 0; i < n; i++) {
-                var z = (returns[i] - mean) / std;
-                skew += z * z * z;
-                kurt += z * z * z * z;
-            }
-            skew /= n;
-            kurt = kurt / n - 3;
-        }
-
-        return {
-            'Total Return': roundVal(totalRet),
-            'Annual Return': roundVal(annualRet),
-            'Volatility': roundVal(vol),
-            'Sharpe Ratio': roundVal(sharpe),
-            'Max Drawdown': roundVal(maxDD * 100),
-            'Calmar Ratio': roundVal(calmar),
-            'Win Rate': roundVal(winRate),
-            'Mean Return': roundVal(mean * 100),
-            'Skewness': roundVal(skew),
-            'Kurtosis': roundVal(kurt),
-        };
-    }
-
-    // bindUseTimeRange 已迁移到 GT.utils.dates.bindUseTimeRange
-    // syncFromTimeModule 已迁移到 GT.utils.dates.syncFromTimeModule
-    // bindTimeSyncListeners 已迁移到 GT.utils.dates.bindTimeSyncListeners
-
-    // ---------- 监听 IC 模块及自身选项卡切换 ----------
-    function bindICModuleEvents() {
-        // 分组测试结果按 submission + factor 缓存，切换选项卡时不主动清空。
-    }
+    // calcAndRenderMetricsFromGroups 留在 app.js（依赖共享状态 _lastMetrics, _lastTimestamps, renderMetricsTable）
 
     // ---------- 手续费表：已迁移到 fee.js（GT.fee.*），此处仅保留桥接 ----------
 
