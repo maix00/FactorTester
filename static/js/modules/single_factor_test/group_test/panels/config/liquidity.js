@@ -50,8 +50,8 @@
             return;
         }
 
-        var mode = reg.getDirty('liquidityMode', group.liquidityMode || 'infinite');
-        var percent = _percentValue(reg.getDirty('liquidityPercent', group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100));
+        var mode = reg.getDirty('liquidityMode', group.liquidityMode || GS.getFieldDefault('liquidityMode'));
+        var percent = _percentValue(reg.getDirty('liquidityPercent', group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : GS.getFieldDefault('liquidityPercent')));
         var showPercent = mode === 'percent';
 
         var html = '<div style="padding:16px 0;">';
@@ -135,7 +135,7 @@
             key: 'liquidity',
             label: '流动性',
             render: function(group) {
-                var mode = group && group.liquidityMode || 'infinite';
+                var mode = group && group.liquidityMode || GS.getFieldDefault('liquidityMode');
                 if (mode === 'percent') return _formatPercent(group.liquidityPercent) + '成交量';
                 return '无限';
             }
@@ -144,7 +144,7 @@
 
     function getChips(group) {
         if (!group) return [];
-        var mode = group.liquidityMode || 'infinite';
+        var mode = group.liquidityMode || GS.getFieldDefault('liquidityMode');
         var html = mode === 'percent' ? ('💧 流动性:' + _formatPercent(group.liquidityPercent)) : '💧 无限流动性';
         return [{
             label: 'liquidity',

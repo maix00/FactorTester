@@ -169,7 +169,7 @@
         var container = $(CONTAINER_ID);
         if (!container) return;
 
-        var mode = REG.getDirty('feeMode', group.feeMode || 'none');
+        var mode = REG.getDirty('feeMode', group.feeMode || GS.getFieldDefault('feeMode'));
         var feeRate = REG.getDirty('feeRate', group.feeRate != null ? group.feeRate : 0.0025);
         var sensitivity = REG.getDirty('feeSensitivity', group.feeSensitivity != null ? group.feeSensitivity : 1);
         var useCT = REG.getDirty('useCloseToday', !!group.useCloseToday);
@@ -346,7 +346,7 @@
      */
     function getChips(group) {
         if (!group) return [];
-        var mode = group.feeMode || 'none';
+        var mode = group.feeMode || GS.getFieldDefault('feeMode');
         if (mode === 'none') return [];
 
         var chips = [];

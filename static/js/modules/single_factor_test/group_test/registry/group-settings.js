@@ -203,13 +203,13 @@
             return {
                 id: '_add_draft',
                 testerId: draft.testerId,
-                feeMode: draft.feeMode || 'none',
+                feeMode: draft.feeMode || GS.getFieldDefault('feeMode'),
                 feeRate: draft.feeRate,
                 feeMap: draft.feeMap,
                 feeSensitivity: draft.feeSensitivity,
                 rebalanceMode: draft.rebalanceMode,
-                liquidityMode: draft.liquidityMode || 'infinite',
-                liquidityPercent: draft.liquidityPercent !== undefined ? draft.liquidityPercent : 100,
+                liquidityMode: draft.liquidityMode || GS.getFieldDefault('liquidityMode'),
+                liquidityPercent: draft.liquidityPercent !== undefined ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent'),
                 useCloseToday: draft.useCloseToday || false,
             };
         }

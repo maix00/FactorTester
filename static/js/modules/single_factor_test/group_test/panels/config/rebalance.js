@@ -56,7 +56,7 @@
             return;
         }
 
-        var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
+        var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || GS.getFieldDefault('rebalanceMode'));
 
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
@@ -148,7 +148,7 @@
 
     function getChips(group) {
         if (!group) return [];
-        var mode = group.rebalanceMode || 'each_period';
+        var mode = group.rebalanceMode || GS.getFieldDefault('rebalanceMode');
 
         var label = MODE_LABELS[mode];
         if (!label) return [];
