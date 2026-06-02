@@ -44,37 +44,6 @@
         _groupResultsBySubmission[submissionId] = {};
     };
 
-    cache.updateActiveGroupCache = function() {
-        // 实际逻辑保留在 app.js 桥接函数中，因为它依赖 getCurrentContext()
-        console.warn('[GT core/cache] updateActiveGroupCache should be called via app.js bridge');
-    };
-
-    // ── DOM 状态标记 ──
-
-    cache.markGroupFactorStatus = function(submissionId, factorAlias, status) {
-        var btn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"][data-factor-alias="' + cssEscape(String(factorAlias)) + '"]');
-        if (!btn) return;
-        btn.setAttribute('data-run-status', status || '');
-        var badge = btn.querySelector('.group-factor-run-status');
-        if (badge) {
-            badge.textContent = status === 'done' ? '✓' : (status === 'error' ? '!' : '');
-            badge.style.color = status === 'error' ? '#d40000' : '#28a745';
-        }
-    };
-
-    cache.clearGroupFactorStatuses = function(submissionId) {
-        document.querySelectorAll('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"]').forEach(function(btn) {
-            btn.setAttribute('data-run-status', '');
-            var badge = btn.querySelector('.group-factor-run-status');
-            if (badge) badge.textContent = '';
-        });
-    };
-
-    function cssEscape(value) {
-        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
-        return value.replace(/["\\]/g, '\\$&');
-    }
-
     // ── 成本敏感性数据 getter/setter ──
 
     cache.getLastGrossData = function() { return _lastGrossData; };

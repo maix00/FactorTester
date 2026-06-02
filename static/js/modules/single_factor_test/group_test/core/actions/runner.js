@@ -495,7 +495,7 @@
             for (var bi = 0; bi < batches.length; bi++) {
                 var btch = batches[bi];
                 GT.core.cache.cacheGroupResult(btch.testerId, btch.factorAlias, data);
-                GT.core.cache.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
+                if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
 
             // 渲染结果
@@ -547,7 +547,7 @@
         var runAllBtn = document.getElementById('run_all_btn');
         if (runBtn) runBtn.disabled = true;
         GT.core.cache.clearCachedGroupResultsForSubmission(submissionId);
-        GT.core.cache.clearGroupFactorStatuses(submissionId);
+        if (GT.panels && GT.panels.ui) GT.panels.ui.clearGroupFactorStatuses(submissionId);
         runner.clearResults({ clearStatus: true });
         try {
             for (var i = 0; i < factors.length; i++) {
@@ -565,11 +565,11 @@
                     statusSpan.innerHTML = '分组测试运行中... ' + (i + 1) + '/' + factors.length + ' · ' + factorAlias;
                     statusSpan.style.color = '#0078d4';
                 }
-                GT.core.cache.markGroupFactorStatus(submissionId, factorAlias, '');
+                if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, '');
                 try {
                     var data = await runner.postGroupTest(built.payload);
                     if (!data.success) {
-                        GT.core.cache.markGroupFactorStatus(submissionId, factorAlias, 'error');
+                        if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
                         GT.core.cache.cacheGroupResult(submissionId, factorAlias, data);
                         if (statusSpan) {
                             var errorText = data.needs_ic_test && pageHasICModule()
@@ -581,9 +581,9 @@
                         return;
                     }
                     GT.core.cache.cacheGroupResult(submissionId, factorAlias, data);
-                    GT.core.cache.markGroupFactorStatus(submissionId, factorAlias, 'done');
+                    if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'done');
                 } catch (err) {
-                    GT.core.cache.markGroupFactorStatus(submissionId, factorAlias, 'error');
+                    if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
                     if (statusSpan) {
                         statusSpan.innerHTML = '✗ ' + factorAlias + ' 请求失败: ' + err.message;
                         statusSpan.style.color = '#d40000';
@@ -670,9 +670,6 @@
             GT.results.renderer.drawGroupChart(GT.core.cache ? GT.core.cache.getLastGrossData() : null);
             GT.results.renderer.renderMetricsTable(GT.core.cache ? GT.core.cache.getLastMetrics() : null);
         }
-        if (GT.core.cache && typeof GT.core.cache.updateActiveGroupCache === 'function') {
-            GT.core.cache.updateActiveGroupCache();
-        }
         if (GT.panels.actions && GT.panels.actions.renderDerivedGroupsPanel) {
             GT.panels.actions.renderDerivedGroupsPanel(baseGroupIndex);
         }
@@ -758,9 +755,6 @@
         }
         if (metrics && GT.results && GT.results.renderer) {
             GT.results.renderer.renderMetricsTable(metrics);
-        }
-        if (GT.core.cache && typeof GT.core.cache.updateActiveGroupCache === 'function') {
-            GT.core.cache.updateActiveGroupCache();
         }
         if (GT.panels.actions && GT.panels.actions.renderDerivedGroupsPanel) {
             GT.panels.actions.renderDerivedGroupsPanel(baseGroupIndex != null ? baseGroupIndex : 0);

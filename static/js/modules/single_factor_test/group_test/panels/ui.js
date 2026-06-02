@@ -88,5 +88,35 @@
             String(d.getSeconds()).padStart(2, '0');
     };
 
+    // ── DOM 状态标记（原在 core/cache.js） ──
+
+    /**
+     * 标记因子运行状态徽章
+     * @param {string} submissionId
+     * @param {string} factorAlias
+     * @param {string} status — '' | 'done' | 'error'
+     */
+    ui.markGroupFactorStatus = function(submissionId, factorAlias, status) {
+        var btn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + ui.cssEscape(String(submissionId)) + '"][data-factor-alias="' + ui.cssEscape(String(factorAlias)) + '"]');
+        if (!btn) return;
+        btn.setAttribute('data-run-status', status || '');
+        var badge = btn.querySelector('.group-factor-run-status');
+        if (badge) {
+            badge.textContent = status === 'done' ? '✓' : (status === 'error' ? '!' : '');
+            badge.style.color = status === 'error' ? '#d40000' : '#28a745';
+        }
+    };
+
+    /**
+     * 清除提交下所有因子运行状态
+     */
+    ui.clearGroupFactorStatuses = function(submissionId) {
+        document.querySelectorAll('.group-factor-nav-btn[data-submission-id="' + ui.cssEscape(String(submissionId)) + '"]').forEach(function(btn) {
+            btn.setAttribute('data-run-status', '');
+            var badge = btn.querySelector('.group-factor-run-status');
+            if (badge) badge.textContent = '';
+        });
+    };
+
     GT.panels.ui = ui;
 })();

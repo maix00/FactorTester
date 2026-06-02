@@ -297,6 +297,11 @@
                 if (!isNaN(num)) _derivedGroupSeq = Math.max(_derivedGroupSeq, num + 1);
             }
         });
+        // 同步更新后的 _derivedGroups / _derivedGroupSeq 到 cache
+        if (GT.core && GT.core.cache) {
+            GT.core.cache.setDerivedGroups(_derivedGroups);
+            GT.core.cache.setDerivedGroupSeq(_derivedGroupSeq);
+        }
 
         // 画图 + 指标表
         drawGroupChart(data.groups);
@@ -339,19 +344,8 @@
     function cacheGroupResult(sid, fa, d) { return GT.core.cache && GT.core.cache.cacheGroupResult(sid, fa, d); }
     function getCachedGroupResult(sid, fa) { return GT.core.cache ? GT.core.cache.getCachedGroupResult(sid, fa) : null; }
     function clearCachedGroupResultsForSubmission(sid) { return GT.core.cache && GT.core.cache.clearCachedGroupResultsForSubmission(sid); }
-    function updateActiveGroupCache() {
-        var submissionId = getActiveSubmissionId();
-        var factorAlias = getActiveFactorAlias();
-        if (!submissionId || !factorAlias) return;
-        var cached = getCachedGroupResult(submissionId, factorAlias);
-        if (!cached) return;
-        cached.groups = _lastGrossData;
-        cached.metrics = _lastMetrics;
-        cached._derivedGroups = _derivedGroups.map(function(item) { return Object.assign({}, item); });
-        cached.structure_key = _lastGroupStructureKey;
-    }
-    function markGroupFactorStatus(sid, fa, s) { return GT.core.cache && GT.core.cache.markGroupFactorStatus(sid, fa, s); }
-    function clearGroupFactorStatuses(sid) { return GT.core.cache && GT.core.cache.clearGroupFactorStatuses(sid); }
+    function markGroupFactorStatus(sid, fa, s) { return GT.panels && GT.panels.ui && GT.panels.ui.markGroupFactorStatus(sid, fa, s); }
+    function clearGroupFactorStatuses(sid) { return GT.panels && GT.panels.ui && GT.panels.ui.clearGroupFactorStatuses(sid); }
 
     // ═══ Panel registry — unified flat tab list ═══
     // Each entry: { name, label, containerId, category, panel, addFlow }
@@ -362,6 +356,7 @@
             var gen = (GT.core.cache ? GT.core.cache.getDerivedGeneration() : 0) + 1;
             if (GT.core.cache) GT.core.cache.setDerivedGeneration(gen);
             _derivedGeneration = gen;
+            if (GT.core && GT.core.cache) GT.core.cache.setDerivedGeneration(_derivedGeneration);
             refreshAllDerivedGroups(gen);
         }
     };
@@ -461,6 +456,7 @@
         if (lsAddBtn) lsAddBtn.addEventListener('click', function() {
             var nextId = 'LS' + (Date.now());
             _longShortDefinitions.push({ id: nextId, name: 'Long-Short ' + _longShortDefinitions.length, longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' });
+            if (GT.core && GT.core.cache) GT.core.cache.setLongShortDefinitions(_longShortDefinitions);
             renderLongShortConfigList();
             updateLongShortSummary();
         });
@@ -509,6 +505,7 @@
             return String(sub.id) === String(_activeGroupSubmissionId);
         }) || submissions[0];
         _activeGroupSubmissionId = activeSubmission ? String(activeSubmission.id) : null;
+        if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
 
         // ── P7: Fill #gt-submission-tabs with horizontal pills ──
         if (subTabsContainer) {
@@ -523,6 +520,7 @@
             subTabsContainer.querySelectorAll('.gt-submission-tab').forEach(function(tab) {
                 tab.addEventListener('click', function() {
                     _activeGroupSubmissionId = tab.getAttribute('data-submission-id');
+                    if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
                     window.renderGroupTabs(submissions);
                 });
             });
@@ -597,6 +595,7 @@
                 });
                 btn.classList.add('active');
                 _activeGroupFactorBySubmission[btn.getAttribute('data-submission-id')] = btn.getAttribute('data-factor-alias');
+                if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
                 restoreActiveGroupResult();
             });
         });
@@ -714,6 +713,10 @@
             }
             if (String(_activeGroupSubmissionId) === removedTesterId) {
                 _activeGroupSubmissionId = null;
+            }
+            // 同步到 cache（其他模块需感知 tester 移除）
+            if (GT.core && GT.core.cache) {
+                GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
             }
         });
 
