@@ -125,7 +125,10 @@ git worktree remove .workspace/fix/issue-N-<slug>
 rm -rf .workspace/fix/issue-N-<slug>
 ```
 
-#### B) 合入 `master` + push
+#### B) 合入 `master` + push（由人类决定）
+
+> 合并顺序由人类统一决定：`fix/* → feat → master`。
+> Agent 只合到 `feat`，**合入 master + push 由人类确认后手动执行**。
 
 ```bash
 cd ~/Codes-master-server
