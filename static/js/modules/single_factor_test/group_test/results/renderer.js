@@ -22,8 +22,7 @@
     var setLastMetrics   = function(v) { GT.core.cache && GT.core.cache.setLastMetrics(v); };
     var getLastGrossData = function() { return GT.core.cache ? GT.core.cache.getLastGrossData() : null; };
     var getLastMetrics   = function() { return GT.core.cache ? GT.core.cache.getLastMetrics() : null; };
-    var setDerivedGroups = function(v) { GT.core.cache && GT.core.cache.setDerivedGroups(v); };
-    var setDerivedGroupSeq = function(v) { GT.core.cache && GT.core.cache.setDerivedGroupSeq(v); };
+
 
     // ════════════════════════════════════════════════════════════════
     //  图表
@@ -91,27 +90,7 @@
         setLastGrossData(data.groups);
         setLastMetrics(data.metrics);
 
-        // 3) 从响应重建 _derivedGroups（后端已统一计算）
-        var derived = [];
-        var seq = 1;
-        (data.groups || []).forEach(function(g) {
-            if (g.is_derived && g.derived && !g.is_ls) {
-                derived.push({
-                    id: g.derived.id || ('D' + seq),
-                    name: g.name,
-                    baseGroup: g.derived.base_group,
-                    productNames: g.derived.product_names || [],
-                    key: g.key,
-                    generated: true,
-                });
-                var num = parseInt(String(g.derived.id || '').replace(/^D/, ''), 10);
-                if (!isNaN(num)) seq = Math.max(seq, num + 1);
-            }
-        });
-        setDerivedGroups(derived);
-        setDerivedGroupSeq(seq);
-
-        // 4) 画图 + 指标表
+        // 3) 画图 + 指标表
         renderer.drawGroupChart(data.groups);
         renderer.renderMetricsTable(data.metrics);
     };

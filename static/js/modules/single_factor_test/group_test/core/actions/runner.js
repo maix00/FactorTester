@@ -27,7 +27,6 @@
     var persistGroupTimeRangeToDatamodel = GT.utils.dates ? GT.utils.dates.persistGroupTimeRangeToDatamodel : function(){};
 
     var _getLSDefinitions = function() { return GT.core.cache ? GT.core.cache.getLongShortDefinitions() : []; };
-    var _getDerivedGroups = function() { return GT.core.cache ? GT.core.cache.getDerivedGroups() : []; };
 
     // ════════════════════════════════════════════════════════════════
     //  工具函数
@@ -494,7 +493,6 @@
             // 标记所有 batch 为 done
             for (var bi = 0; bi < batches.length; bi++) {
                 var btch = batches[bi];
-                GT.core.cache.cacheGroupResult(btch.testerId, btch.factorAlias, data);
                 if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
 
@@ -546,7 +544,6 @@
         var runBtn = document.getElementById('run_group_test_btn');
         var runAllBtn = document.getElementById('run_all_btn');
         if (runBtn) runBtn.disabled = true;
-        GT.core.cache.clearCachedGroupResultsForSubmission(submissionId);
         if (GT.panels && GT.panels.ui) GT.panels.ui.clearGroupFactorStatuses(submissionId);
         runner.clearResults({ clearStatus: true });
         try {
@@ -570,7 +567,6 @@
                     var data = await runner.postGroupTest(built.payload);
                     if (!data.success) {
                         if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
-                        GT.core.cache.cacheGroupResult(submissionId, factorAlias, data);
                         if (statusSpan) {
                             var errorText = data.needs_ic_test && pageHasICModule()
                                 ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
@@ -580,7 +576,6 @@
                         }
                         return;
                     }
-                    GT.core.cache.cacheGroupResult(submissionId, factorAlias, data);
                     if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'done');
                 } catch (err) {
                     if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(submissionId, factorAlias, 'error');
@@ -592,12 +587,7 @@
                 }
             }
             // 渲染第一个因子的结果
-            var activeBtn = document.querySelector('.group-factor-nav-btn[data-submission-id="' + cssEscape(String(submissionId)) + '"].active');
-            var activeAlias = activeBtn ? activeBtn.getAttribute('data-factor-alias') : (factors[0].alias || factors[0].name);
-            var result = GT.core.cache.getCachedGroupResult(submissionId, activeAlias);
-            if (result && result.success && GT.results && GT.results.renderer) {
-                GT.results.renderer.applyGroupTestResult(result);
-            }
+            GT.results.renderer.applyGroupTestResult(data);
             if (statusSpan) {
                 statusSpan.innerHTML = '✓ 已完成当前测试器全部 ' + factors.length + ' 个因子的分组测试';
                 statusSpan.style.color = '#28a745';
@@ -607,12 +597,6 @@
             if (runAllBtn) runAllBtn.disabled = false;
         }
     };
-
-    // ── Helper: cssEscape ──
-    function cssEscape(value) {
-        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
-        return String(value).replace(/["\\]/g, '\\$&');
-    }
 
     // ════════════════════════════════════════════════════════════════
     //  派生组：生成 / 删除 / 刷新
@@ -802,7 +786,6 @@
             fee: fee,
             fee_map: fee_map
         });
-        if (generation !== (GT.core.cache ? GT.core.cache.getDerivedGeneration() : 0)) return;
         if (!resp || !resp.success) return;
 
         if (GT.panels.actions && GT.panels.actions.removeGeneratedDerivedArtifacts) {
@@ -822,7 +805,9 @@
 
     /** 批量重新生成全部派生组 + LS 组 */
     runner.refreshAllDerivedGroups = async function(generation) {
-        var derivedGroups = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
+        var derivedGroups = GT.datamodel && GT.datamodel.groups
+            ? GT.datamodel.groups.getAll().filter(function(g) { return g.isDerived; })
+            : [];
         var tasks = derivedGroups.map(function(def) {
             if (!def.id) return Promise.resolve();
             return runner.regenerateDerivedGroupQuiet(def, generation);
@@ -833,12 +818,9 @@
             }));
         }
         await Promise.all(tasks);
-        if (generation !== (GT.core.cache ? GT.core.cache.getDerivedGeneration() : 0)) return;
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
-        var metrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
         if (GT.results && GT.results.renderer) {
-            GT.results.renderer.drawGroupChart(grossData);
-            GT.results.renderer.renderMetricsTable(metrics);
+            GT.results.renderer.drawGroupChart(GT.core.cache ? GT.core.cache.getLastGrossData() : null);
+            GT.results.renderer.renderMetricsTable(GT.core.cache ? GT.core.cache.getLastMetrics() : null);
         }
     };
 
