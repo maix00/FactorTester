@@ -100,9 +100,7 @@
         return null;
     }
 
-    async function loadBaseGroupDetail(groupIndex) {
-        var submissionId = _getActiveSubmissionId();
-        if (!submissionId) throw new Error('无法获取当前提交 ID，请先运行分组测试');
+    async function loadBaseGroupDetail(submissionId, groupIndex) {
         var resp = await fetch('/get_group_detail', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -130,10 +128,15 @@
 
     /* ───── openResultGroupDetail ───── */
 
-    async function openResultGroupDetail(key, groupIndexHint) {
+    async function openResultGroupDetail(key, groupIndexHint, submissionIdHint) {
         var group = findResultGroup(key);
         if (!group) {
             alert('未找到该组的已生成结果。');
+            return;
+        }
+        var submissionId = submissionIdHint || group.submission_id || _getActiveSubmissionId();
+        if (!submissionId) {
+            alert('无法获取提交 ID，请先运行分组测试。');
             return;
         }
         var groupIndex = group.group_index != null
@@ -155,7 +158,7 @@
             var metric = (lastMetrics || {})[group.key]
                 || (lastMetrics || {})[key] || {};
             var isLsGroup = !!group.is_ls;
-            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(groupIndex);
+            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(submissionId, groupIndex);
             if (!detail) {
                 throw new Error('未获取到分组详情数据');
             }
