@@ -244,8 +244,35 @@
         return { headHtml: headHtml, bodyHtml: bodyHtml };
     }
 
+    function bindHeaderActions(actions) {
+        actions = actions || {};
+        document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                if (typeof actions.openGroupDetail === 'function') {
+                    actions.openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
+                }
+            });
+        });
+        document.querySelectorAll('#metrics_head .portfolio-detail-trigger').forEach(function(th) {
+            th.addEventListener('click', function() {
+                if (typeof actions.openPortfolioDetail === 'function') {
+                    actions.openPortfolioDetail(th.getAttribute('data-group-key'));
+                }
+            });
+        });
+        var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
+        if (rankingHead) {
+            rankingHead.addEventListener('click', function() {
+                if (typeof actions.openGroupRankingDetail === 'function') {
+                    actions.openGroupRankingDetail();
+                }
+            });
+        }
+    }
+
     GT.metrics.table = {
         build: build,
+        bindHeaderActions: bindHeaderActions,
         metricNamesCN: metricNamesCN,
         metricDisplay: metricDisplay,
     };

@@ -682,23 +682,12 @@
         }
         container.style.display = 'block';
         GT.renderSectionedMetricsTable(metrics, _lastGrossData);
-        bindGroupDetailHeaders();
-    }
-
-    function bindGroupDetailHeaders() {
-        document.querySelectorAll('#metrics_head .group-detail-trigger').forEach(function(th) {
-            th.addEventListener('click', function() {
-                openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
+        if (GT.metrics && GT.metrics.table && typeof GT.metrics.table.bindHeaderActions === 'function') {
+            GT.metrics.table.bindHeaderActions({
+                openGroupDetail: openGroupDetail,
+                openPortfolioDetail: openPortfolioDetail,
+                openGroupRankingDetail: openGroupRankingDetail,
             });
-        });
-        document.querySelectorAll('#metrics_head .portfolio-detail-trigger').forEach(function(th) {
-            th.addEventListener('click', function() {
-                openPortfolioDetail(th.getAttribute('data-group-key'));
-            });
-        });
-        var rankingHead = document.querySelector('#metrics_head .group-ranking-trigger');
-        if (rankingHead) {
-            rankingHead.addEventListener('click', openGroupRankingDetail);
         }
     }
 
