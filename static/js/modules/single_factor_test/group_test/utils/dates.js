@@ -85,6 +85,43 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     };
 
+    dates.formatAdaptiveTime = function(timestamp, stepMs) {
+        var d = new Date(timestamp);
+        if (isNaN(d.getTime())) return String(timestamp);
+        var y = d.getFullYear();
+        var mo = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        var h = String(d.getHours()).padStart(2, '0');
+        var mi = String(d.getMinutes()).padStart(2, '0');
+        if (stepMs != null && stepMs < 86400000) {
+            return y + '-' + mo + '-' + day + ' ' + h + ':' + mi;
+        }
+        return y + '-' + mo + '-' + day;
+    };
+
+    dates.buildContinuousTimeAxis = function(rows, timestampGetter) {
+        var timestamps = (rows || []).map(function(row) { return timestampGetter(row); });
+        var n = timestamps.length;
+        var stepMs = null;
+        for (var i = 1; i < n; i++) {
+            var d = timestamps[i] - timestamps[i - 1];
+            if (d > 0 && (stepMs === null || d < stepMs)) {
+                stepMs = d;
+            }
+        }
+        var labels = timestamps.map(function(ts) { return dates.formatAdaptiveTime(ts, stepMs); });
+        var labelEvery = Math.max(1, Math.floor(n / 10));
+        return {
+            labels: labels,
+            labelEvery: labelEvery,
+            stepMs: stepMs,
+            labelAt: function(value) {
+                var idx = Math.round(value);
+                return (idx >= 0 && idx < labels.length) ? labels[idx] : '';
+            },
+        };
+    };
+
     // ---------- 读取分组时间范围输入 ----------
     dates.readGroupTimeRangeInput = function() {
         var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;

@@ -100,32 +100,7 @@
      * 返回 { labels, labelAt, stepMs, labelEvery }。
      */
     function buildContinuousTimeAxis(rows, timestampGetter) {
-        var timestamps = (rows || []).map(function(row) { return timestampGetter(row); });
-        var n = timestamps.length;
-
-        // 检测日内/日间：计算相邻时间戳的最小非零间距
-        var stepMs = null;
-        for (var i = 1; i < n; i++) {
-            var d = timestamps[i] - timestamps[i - 1];
-            if (d > 0 && (stepMs === null || d < stepMs)) {
-                stepMs = d;
-            }
-        }
-
-        var labels = timestamps.map(function(ts) { return formatAdaptiveTime(ts, stepMs); });
-
-        // 计算标签步长：目标 ~8-12 个标签
-        var labelEvery = Math.max(1, Math.floor(n / 10));
-
-        return {
-            labels: labels,
-            labelEvery: labelEvery,
-            stepMs: stepMs,
-            labelAt: function(value) {
-                var idx = Math.round(value);
-                return (idx >= 0 && idx < labels.length) ? labels[idx] : '';
-            },
-        };
+        return GT.utils.dates.buildContinuousTimeAxis(rows, timestampGetter);
     }
 
     function drawGroupChart(groups) {
@@ -1237,25 +1212,8 @@
         };
     }
 
-    /**
-     * 自适应时间格式化：自动检测日内/日间，选择合适的格式。
-     * - 日内数据：YYYY-MM-DD HH:MM
-     * - 日间数据：YYYY-MM-DD
-     * - 如果提供了相邻时间戳的间距，以此判断；否则从 timestamps 数组推断
-     */
     function formatAdaptiveTime(timestamp, stepMs) {
-        var d = new Date(timestamp);
-        if (isNaN(d.getTime())) return String(timestamp);
-        var y = d.getFullYear();
-        var mo = String(d.getMonth() + 1).padStart(2, '0');
-        var day = String(d.getDate()).padStart(2, '0');
-        var h = String(d.getHours()).padStart(2, '0');
-        var mi = String(d.getMinutes()).padStart(2, '0');
-        // stepMs < 86400000 (1天) 视为日内
-        if (stepMs != null && stepMs < 86400000) {
-            return y + '-' + mo + '-' + day + ' ' + h + ':' + mi;
-        }
-        return y + '-' + mo + '-' + day;
+        return GT.utils.dates.formatAdaptiveTime(timestamp, stepMs);
     }
 
     function formatCompactTime(timestamp) {
