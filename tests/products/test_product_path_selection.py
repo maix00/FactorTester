@@ -11,6 +11,13 @@ class _Product:
         self.name = name
 
 
+def _repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "server").is_dir() and (parent / "tools").is_dir():
+            return parent
+    raise RuntimeError("Could not locate repository root")
+
+
 def _load_selection_module(monkeypatch):
     product_tree = types.ModuleType("server.services.product_tree")
 
@@ -33,7 +40,7 @@ def _load_selection_module(monkeypatch):
     product_tree.find_node_by_path = find_node_by_path
     product_tree.get_minimal_paths = get_minimal_paths
     monkeypatch.setitem(sys.modules, "server.services.product_tree", product_tree)
-    module_path = Path(__file__).parents[1] / "server/modules/products/product_path_selection.py"
+    module_path = _repo_root() / "server/modules/products/product_path_selection.py"
     spec = importlib.util.spec_from_file_location("_product_path_selection_under_test", module_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
