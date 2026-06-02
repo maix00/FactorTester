@@ -47,4 +47,31 @@ GT.groupSettings.cache.setCurrentGroupDetailIndex(2);
 assert.deepStrictEqual(GT.groupSettings.cache.getLastGrossData(), [{ key: 'G1' }]);
 assert.strictEqual(GT.groupSettings.cache.getCurrentGroupDetailIndex(), 2);
 
+const snapshot = GT.groupSettings.settings.collect();
+assert.strictEqual(GT.groupSettings.settings.key, 'group_settings');
+assert.strictEqual(snapshot.groups.length, 2);
+assert.deepStrictEqual(snapshot.lsConfigs, []);
+
+GT.groupSettings.settings.apply({
+  baseGroups: [{
+    id: 'legacy-base',
+    name: 'Legacy Base',
+    testerId: 'tester-legacy',
+    factorAlias: 'LegacyFactor',
+    groupCount: 5,
+    groupIndex: 1,
+  }],
+  derivedGraph: [{
+    id: 'legacy-derived',
+    name: 'Legacy Derived',
+    isDerived: true,
+    baseGroupId: 'legacy-base',
+    productMask: { IF: true },
+  }],
+  lsConfigs: [],
+});
+assert.strictEqual(GT.groupSettings.groups.getAll().length, 2);
+assert.strictEqual(GT.groupSettings.groups.get('legacy-derived').isDerived, true);
+assert.ok(GT.groupSettings.settings.summarize(GT.groupSettings.settings.collect())[0].includes('基础组 1 个'));
+
 console.log('PASS: groupSettings core stores group fields directly');

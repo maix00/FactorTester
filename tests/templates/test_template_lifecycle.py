@@ -18,6 +18,7 @@ from server.modules.templates.common import (
     save_template_list,
 )
 from server.services.user_storage import user_template_path
+from server.modules.templates.summary import build_snapshot_summary
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -96,6 +97,35 @@ def _make_base_group(tester_id: str, name: str = "G1", factor_alias: str = "Retu
         "startDate": None,
         "endDate": None,
     }
+
+
+def test_snapshot_summary_reads_new_group_settings_shape():
+    snapshot = _make_minimal_snapshot()
+    snapshot["group_settings"] = {
+        "groups": [
+            _make_base_group("tester-1", "A1", group_index=1),
+            {
+                "id": "derived-1",
+                "name": "A1:1",
+                "isDerived": True,
+                "baseGroupId": "bg-tester-1-A1",
+            },
+        ],
+        "lsConfigs": [
+            {
+                "id": "ls-1",
+                "name": "A1/A5",
+                "longGroupId": "bg-tester-1-A1",
+                "shortGroupId": "bg-tester-1-A5",
+            }
+        ],
+    }
+
+    summary = build_snapshot_summary(snapshot)
+
+    assert "group_test" in summary
+    assert summary["group_test"][0] == "基础组 1 个 · 派生组 1 个 · Long-Short 1 个"
+    assert any("A1" in item for item in summary["group_test"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════

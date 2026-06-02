@@ -271,7 +271,9 @@
     function _hasGroupSettingsSnapshot(gs) {
         if (!gs) return false;
         return (_asArray(gs.groups).length > 0) ||
-            (_asArray(gs.lsConfigs).length > 0);
+            (_asArray(gs.lsConfigs).length > 0) ||
+            (_asArray(gs.baseGroups).length > 0) ||
+            (_asArray(gs.derivedGraph).length > 0);
     }
 
     // 暴露注册表
@@ -559,6 +561,11 @@
 
     // ── 5. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
     (function() {
+        var GT = window.GroupTest;
+        if (!GT || !GT.groupSettings || !GT.groupSettings.settings) {
+            console.warn('[global_template] GroupTest groupSettings snapshot adapter is not available');
+            return;
+        }
         var base = GT.groupSettings.settings;
         SnapshotRegistry.register({
             key: base.key,
@@ -567,7 +574,7 @@
             icon: base.icon,
             collect: base.collect,
             apply: function(gs, ctx) {
-                var working = _deepClone(gs) || {};
+                var working = base.normalize ? base.normalize(_deepClone(gs) || {}) : (_deepClone(gs) || {});
                 var oldToNew = (ctx && ctx.oldToNewTesterId) ? ctx.oldToNewTesterId : {};
                 if (working && working.groups) {
                     var curSubs = (typeof window._getCurrentSubmissions === 'function') ? window._getCurrentSubmissions() : (window.submissions || []);

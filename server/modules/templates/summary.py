@@ -84,8 +84,12 @@ def build_snapshot_summary(snapshot: dict) -> dict:
     group_settings = snapshot.get('group_settings', {})
     if group_settings:
         group_parts = []
-        base_groups = group_settings.get('baseGroups') or []
-        derived_groups = group_settings.get('derivedGraph') or []
+        raw_groups = group_settings.get('groups') or []
+        base_groups = [group for group in raw_groups if not group.get('isDerived')]
+        derived_groups = [group for group in raw_groups if group.get('isDerived')]
+        if not raw_groups:
+            base_groups = group_settings.get('baseGroups') or []
+            derived_groups = group_settings.get('derivedGraph') or []
         ls_configs = group_settings.get('lsConfigs') or []
         if base_groups or derived_groups or ls_configs:
             group_parts.append(

@@ -876,6 +876,7 @@
      */
     function _settingsApply(snap) {
         var result = { applied: { groups: 0, lsConfigs: 0 }, errors: [] };
+        snap = _settingsNormalizeSnapshot(snap || {});
 
         _groupsReset();
         _lsConfigsReset();
@@ -897,7 +898,66 @@
         return result;
     }
 
-    api.settings = _settingsApply;
+    function _settingsNormalizeSnapshot(snap) {
+        snap = snap || {};
+        if (Array.isArray(snap.groups)) {
+            return {
+                groups: snap.groups,
+                lsConfigs: Array.isArray(snap.lsConfigs) ? snap.lsConfigs : [],
+            };
+        }
+        var groups = [];
+        if (Array.isArray(snap.baseGroups)) groups = groups.concat(snap.baseGroups);
+        if (Array.isArray(snap.derivedGraph)) groups = groups.concat(snap.derivedGraph);
+        return {
+            groups: groups,
+            lsConfigs: Array.isArray(snap.lsConfigs) ? snap.lsConfigs : [],
+        };
+    }
+
+    function _settingsSummarize(snap) {
+        snap = _settingsNormalizeSnapshot(snap || {});
+        var groups = snap.groups || [];
+        var lsConfigs = snap.lsConfigs || [];
+        if (!groups.length && !lsConfigs.length) return null;
+        var baseGroups = groups.filter(function(group) { return !group.isDerived; });
+        var derivedGroups = groups.filter(function(group) { return group.isDerived; });
+        var lines = [
+            '基础组 ' + baseGroups.length + ' 个 · 派生组 ' + derivedGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个'
+        ];
+        baseGroups.slice(0, 8).forEach(function(group) {
+            var alias = group.shortAlias || group.name || group.id || '未命名组';
+            var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
+            var countText = group.groupCount != null ? group.groupCount : '未设置';
+            var feeText = group.feeMode || 'none';
+            var rebalanceText = group.rebalanceMode || '默认调仓';
+            lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
+                + ' · 费率 ' + feeText + ' · 再平衡 ' + rebalanceText);
+        });
+        if (baseGroups.length > 8) {
+            lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
+        }
+        derivedGroups.slice(0, 4).forEach(function(group) {
+            lines.push('派生组 ' + (group.shortAlias || group.name || group.id || '未命名派生组')
+                + ' · 来源 ' + (group.baseGroupId || '未设置'));
+        });
+        lsConfigs.slice(0, 4).forEach(function(config) {
+            lines.push('Long-Short ' + (config.shortAlias || config.name || config.id || '未命名 Long-Short')
+                + ' · Long ' + (config.longGroupId || '未设置') + ' · Short ' + (config.shortGroupId || '未设置'));
+        });
+        return lines;
+    }
+
+    api.settings = {
+        key: 'group_settings',
+        order: 50,
+        label: '分组测试',
+        icon: '🧪',
+        collect: _settingsSnapshot,
+        apply: _settingsApply,
+        summarize: _settingsSummarize,
+        normalize: _settingsNormalizeSnapshot,
+    };
 
     GT.groupSettings = api;
     GT.core = GT.core || {};
