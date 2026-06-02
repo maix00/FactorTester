@@ -589,7 +589,7 @@ def _build_product_fee_rates(
     use_real_fee = not user_has_fee
 
     if use_real_fee:
-        from sources.FeeData import load_latest
+        from sources.LocalCNFutures.FeeData import load_latest
         df_fees = load_latest()
         fee_by_code = {}
         if not df_fees.empty:
