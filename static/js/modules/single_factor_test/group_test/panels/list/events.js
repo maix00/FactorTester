@@ -43,9 +43,9 @@
         if (!SEL) return;
         var selCount = SEL.count();
         if (selCount > 0) {
-            if (GT.ui && GT.ui.enterEditMode) GT.ui.enterEditMode(SEL.getAll());
+            if (GT.tabs && GT.tabs.enterEditMode) GT.tabs.enterEditMode(SEL.getAll());
         } else {
-            if (GT.ui && GT.ui.exitEditMode) GT.ui.exitEditMode();
+            if (GT.tabs && GT.tabs.exitEditMode) GT.tabs.exitEditMode();
         }
     }
 

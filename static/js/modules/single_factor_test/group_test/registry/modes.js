@@ -233,8 +233,8 @@
         _editSelection = null;
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel) sel.clear();
-        if (GT.state && GT.state.emit) {
-            GT.state.emit('editModeExited');
+        if (GT.events && GT.events.emit) {
+            GT.events.emit('editModeExited');
         }
     };
 
@@ -254,21 +254,6 @@
     // ═══════════════════════════════════════════════════════════════
 
     GT.modes = api;
-
-    // 兼容旧 GT.ui.* 引用
-    GT.ui = GT.ui || {};
-    GT.ui.getPanelMode = api.getMode;
-    GT.ui.getAddDraft = api.getAddDraft;
-    GT.ui.setAddDraft = api.setAddDraft;
-    GT.ui.updateAddDraft = api.updateAddDraft;
-    GT.ui.getEditSelection = api.getEditSelection;
-    GT.ui.getEditIds = api.getEditIds;
-    GT.ui.isAddFlow = api.isAddFlow;
-    GT.ui.getActiveFlow = api.getActiveFlow;
-    GT.ui.getActiveFlowMeta = api.getActiveFlowMeta;
-    GT.ui.registerEditAction = api.registerEditAction;
-    GT.ui.getMatchingEditActions = api.getMatchingEditActions;
-    GT.ui.resolveConfig = api.resolveConfig;
 
     GT.log('registry/modes loaded');
 })();

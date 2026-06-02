@@ -111,7 +111,7 @@
             GT.log('panels.base.rebalance: container #' + _containerId + ' not found');
             return;
         }
-        GT.state.on('groupsChanged', _onBaseGroupsChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onBaseGroupsChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.on) sel.on('selectionChanged', _onSelectionChanged);
         render();
@@ -119,7 +119,7 @@
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onBaseGroupsChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onBaseGroupsChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.off) sel.off('selectionChanged', _onSelectionChanged);
     }

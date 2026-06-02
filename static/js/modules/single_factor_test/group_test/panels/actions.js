@@ -8,7 +8,7 @@
  *   - 再平衡模式描述（updateRebalanceModeDescription）
  *
  * 挂载到 GT.panels.actions。所有函数通过 GT.panels.actions.* 访问。
- * 部分函数依赖 _lastGrossData / _lastMetrics，通过 GT.core.cache 读取。
+ * 部分函数依赖 _lastGrossData / _lastMetrics，通过 GT.groupSettings.cache 读取。
  */
 (function() {
     var GT = window.GroupTest;
@@ -18,6 +18,10 @@
     if (GT.panels.actions) { console.warn('[panels.actions] already loaded'); return; }
 
     var actions = {};
+
+    function cache() {
+        return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+    }
 
     /* ════════════════════════════════════════════════════════════════
        工具函数
@@ -173,7 +177,8 @@
         var submissionId = sel && typeof sel.getFirstSubmissionId === 'function' ? sel.getFirstSubmissionId() : null;
         var factorAlias = sel && typeof sel.getFirstFactorAlias === 'function' ? sel.getFirstFactorAlias() : '';
         var all = GT.groupSettings.groups.getAll ? (GT.groupSettings.groups.getAll() || []) : [];
-        var lastGrossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
+        var c = cache();
+        var lastGrossData = c ? c.getLastGrossData() : null;
         var resultGroup = lastGrossData && lastGrossData[groupIndex] ? lastGrossData[groupIndex] : null;
         var baseGroupIndex = resultGroup && resultGroup.derived && resultGroup.derived.base_group != null
             ? Number(resultGroup.derived.base_group)
@@ -196,7 +201,8 @@
     };
 
     actions.makeUniqueGroupKey = function(name, ownId) {
-        var lastMetrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
+        var c = cache();
+        var lastMetrics = c ? c.getLastMetrics() : null;
         var base = name || ownId || '派生组';
         var key = base;
         var suffix = 2;
@@ -207,19 +213,20 @@
     };
 
     actions.removeGeneratedDerivedArtifacts = function(id) {
-        var lastGrossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
-        var lastMetrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
+        var c = cache();
+        var lastGrossData = c ? c.getLastGrossData() : null;
+        var lastMetrics = c ? c.getLastMetrics() : null;
         var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
         var key = node ? actions.groupDisplayKey(node) : null;
         if (lastGrossData) {
             lastGrossData = lastGrossData.filter(function(group) {
                 return !(group && group.is_derived && group.derived && group.derived.id === id);
             });
-            GT.core.cache.setLastGrossData(lastGrossData);
+            c.setLastGrossData(lastGrossData);
         }
         if (key && lastMetrics) {
             delete lastMetrics[key];
-            GT.core.cache.setLastMetrics(lastMetrics);
+            c.setLastMetrics(lastMetrics);
         }
     };
 
@@ -267,7 +274,8 @@
             }
         }
 
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : [];
+        var c = cache();
+        var grossData = c ? c.getLastGrossData() : [];
 
         var html = '<div class="derived-group-panel" style="border:1px solid #c7d2fe;border-radius:8px;background:#f8faff;padding:8px;">'
             + '<div class="derived-group-toolbar" style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid #e2e8f0;">'
@@ -381,9 +389,6 @@
         var input = document.getElementById('derived-group-name-input');
         var defaultName = '第' + (groupIndex + 1) + '组精选';
         var name = (input && input.value ? input.value.trim() : '') || defaultName;
-        if (GT.panels && GT.panels.registry && typeof GT.panels.registry.setPanelMode === 'function') {
-            GT.panels.registry.setPanelMode('add');
-        }
         var draft = {
             addFlow: 'derived',
             preselectedBaseGroupId: baseGroupId,
@@ -391,11 +396,11 @@
             name: name,
             defaultName: name,
         };
-        if (GT.ui && typeof GT.ui.mountTab === 'function') {
-            GT.ui.mountTab('config-derived');
-        }
-        if (typeof GT.panels.registry.renderTabActions === 'function') {
-            GT.panels.registry.renderTabActions();
+        if (GT.modes && GT.tabs) {
+            GT.modes.enterAdd('derived');
+            GT.modes.setAddDraft(draft);
+            GT.tabs.mountTab('config-derived');
+            GT.tabs.renderTabActions();
         }
         var overlay = document.getElementById('group-detail-overlay');
         if (overlay) overlay.classList.remove('open');
@@ -408,7 +413,8 @@
     actions.updateLongShortSummary = function() {
         var el = document.getElementById('long-short-summary');
         if (!el) return;
-        var definitions = GT.core.cache ? GT.core.cache.getLongShortDefinitions() : [];
+        var c = cache();
+        var definitions = c ? c.getLongShortDefinitions() : [];
         if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
         el.textContent = definitions.map(function(def) {
             return (def.name || 'Long-Short') + ': L(' + (def.longGroups || '1') + ') / S(' + (def.shortGroups || '末组') + ')';
@@ -418,7 +424,8 @@
     actions.renderLongShortConfigList = function() {
         var el = document.getElementById('long-short-config-list');
         if (!el) return;
-        var definitions = GT.core.cache ? GT.core.cache.getLongShortDefinitions() : [];
+        var c = cache();
+        var definitions = c ? c.getLongShortDefinitions() : [];
         if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
         var html = '';
         definitions.forEach(function(def) {
@@ -436,12 +443,12 @@
             input.addEventListener('input', function() {
                 var row = input.closest('.long-short-config-row');
                 var lsId = row.getAttribute('data-ls-id');
-                var cache = GT.core.cache;
-                var definitions = cache ? cache.getLongShortDefinitions() : [];
+                var c = cache();
+                var definitions = c ? c.getLongShortDefinitions() : [];
                 var def = definitions.find(function(item) { return item.id === lsId; });
                 if (def) {
                     def[input.getAttribute('data-field')] = input.value;
-                    cache && cache.setLongShortDefinitions(definitions);
+                    c && c.setLongShortDefinitions(definitions);
                     actions.updateLongShortSummary();
                 }
             });
@@ -449,11 +456,11 @@
         el.querySelectorAll('.long-short-delete-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var lsId = btn.getAttribute('data-ls-id');
-                var cache = GT.core.cache;
-                var definitions = cache ? cache.getLongShortDefinitions() : [];
+                var c = cache();
+                var definitions = c ? c.getLongShortDefinitions() : [];
                 definitions = definitions.filter(function(item) { return item.id !== lsId; });
                 if (!definitions.length) definitions = [GT.groupSettings.lsConfigs ? GT.groupSettings.lsConfigs.defaultLegacyDefinition() : { id: 'LS1', name: 'Long-Short', longGroups: '1', longWeights: '1', shortGroups: '', shortWeights: '1' }];
-                cache && cache.setLongShortDefinitions(definitions);
+                c && c.setLongShortDefinitions(definitions);
                 actions.renderLongShortConfigList();
                 actions.updateLongShortSummary();
             });

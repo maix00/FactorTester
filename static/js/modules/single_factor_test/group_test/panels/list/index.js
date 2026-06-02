@@ -39,7 +39,7 @@
     }
 
     function stateBus() {
-        return GT.state || {
+        return GT.events || {
             on: function(){},
             off: function(){},
         };

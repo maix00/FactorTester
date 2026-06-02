@@ -2,7 +2,7 @@
  * panels/add/ls.js — Add-flow panel: "创建 Long-Short 组" (category-2)
  *
  * Simplified display: two cards (long | short) with swap button.
- * Preselected groups from GT.ui.getAddDraft().preselectedBaseGroupIds.
+ * Preselected groups from GT.tabs.getAddDraft().preselectedBaseGroupIds.
  * Tabs-row submit button delegates to panel.handleSave().
  *
  * Contract:
@@ -72,7 +72,7 @@
         var container = $(CONTAINER_ID);
         if (!container) return;
 
-        var draft = (GT.ui && typeof GT.ui.getAddDraft === 'function') ? GT.ui.getAddDraft() : null;
+        var draft = (GT.tabs && typeof GT.tabs.getAddDraft === 'function') ? GT.tabs.getAddDraft() : null;
         var preselected = (draft && draft.preselectedBaseGroupIds) ? draft.preselectedBaseGroupIds : [];
 
         _longId  = preselected[0] || null;

@@ -102,8 +102,8 @@
     /** Apply fee modifications snapshot. */
     function applyModifications(mods) {
         _feeModifications = mods && typeof mods === 'object' ? JSON.parse(JSON.stringify(mods)) : {};
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('feeDataChanged');
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('feeDataChanged');
         }
     }
 
@@ -120,8 +120,8 @@
     /** Set close-today mode. */
     function setUseCloseToday(v) {
         _useCloseToday = !!v;
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('feeDataChanged');
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('feeDataChanged');
         }
     }
 
@@ -426,7 +426,7 @@
         _mounted = true;
         REG = window.GT_CONFIG_REGISTRY;
 
-        GT.state.on('groupsChanged', _onDataChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onDataChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.on) sel.on('selectionChanged', _onDataChanged);
 
@@ -435,7 +435,7 @@
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onDataChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onDataChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.off) sel.off('selectionChanged', _onDataChanged);
     }

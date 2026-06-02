@@ -584,8 +584,8 @@
                 if (applyResult.errors && applyResult.errors.length > 0) {
                     console.warn('[global_template] group_settings apply warnings:', applyResult.errors);
                 }
-                if (GT.ui && typeof GT.ui.mountTab === 'function') {
-                    GT.ui.mountTab('list');
+                if (GT.tabs && typeof GT.tabs.mountTab === 'function') {
+                    GT.tabs.mountTab('list');
                 }
             },
             summarize: base.summarize,

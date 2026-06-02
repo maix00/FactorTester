@@ -113,7 +113,7 @@
     function mount() {
         registry();
         _mounted = true;
-        GT.state.on('groupsChanged', _onGroupsChanged);
+        if (GT.events && GT.events.on) GT.events.on('groupsChanged', _onGroupsChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.on) sel.on('selectionChanged', _onActiveGroupChanged);
         render();
@@ -121,7 +121,7 @@
 
     function unmount() {
         _mounted = false;
-        GT.state.off('groupsChanged', _onGroupsChanged);
+        if (GT.events && GT.events.off) GT.events.off('groupsChanged', _onGroupsChanged);
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.off) sel.off('selectionChanged', _onActiveGroupChanged);
     }

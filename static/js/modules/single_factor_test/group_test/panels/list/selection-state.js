@@ -148,12 +148,9 @@
     };
     GT.panels.list.selection = api;
 
-    // 兼容旧事件总线：只保留 emit/on/off，不再保存 active group/submission 状态。
-    if (!GT.state) {
-        GT.state = {
-            emit: emit,
-            on: on,
-            off: off,
-        };
-    }
+    GT.events = {
+        emit: emit,
+        on: on,
+        off: off,
+    };
 })();

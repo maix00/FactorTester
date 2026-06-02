@@ -2,8 +2,6 @@
     var GT = window.GroupTest;
     if (!GT) { console.warn('[GroupTest] bootstrap missing'); return; }
 
-    GT.ui = GT.ui || {};
-
     if (typeof Highcharts !== 'undefined') {
         Highcharts.setOptions({ global: { useUTC: false } });
     }
@@ -13,45 +11,12 @@
     }
 
     function cache() {
-        return GT.core && GT.core.cache ? GT.core.cache : null;
+        return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
     }
 
     function call(fn, fallback) {
         return typeof fn === 'function' ? fn : fallback;
     }
-
-    GT.ui._readGroupTimeRangeInput = function() {
-        return call(dates().readGroupTimeRangeInput, function(){ return { startDate: null, endDate: null }; })();
-    };
-    GT.ui._resolveGroupRunTimeRange = function() {
-        return call(dates().resolveGroupRunTimeRange, function(){ return { startDate: null, endDate: null }; })();
-    };
-
-    GT.results = GT.results || {};
-    GT.results.detailOverlay = GT.results.detailOverlay || {};
-    GT.results.detailOverlay.hostRefs = {
-        get _lastGrossData() {
-            var c = cache();
-            return c ? c.getLastGrossData() : null;
-        },
-        get _lastMetrics() {
-            var c = cache();
-            return c ? c.getLastMetrics() : null;
-        },
-        get _currentGroupDetailIndex() {
-            var c = cache();
-            return c ? c.getCurrentGroupDetailIndex() : null;
-        },
-        set _currentGroupDetailIndex(value) {
-            var c = cache();
-            if (c) c.setCurrentGroupDetailIndex(value);
-        },
-        onRenderDerivedPanel: function(groupIndex) {
-            if (GT.panels && GT.panels.actions && typeof GT.panels.actions.renderDerivedGroupsPanel === 'function') {
-                GT.panels.actions.renderDerivedGroupsPanel(groupIndex);
-            }
-        },
-    };
 
     function bindGroupDetailOverlayChrome() {
         var overlay = document.getElementById('group-detail-overlay');
@@ -140,8 +105,8 @@
         });
 
         bus.on('*', function() {
-            if (window.submissions && window.submissions.length > 0 && GT.ui.mountTab) {
-                GT.ui.mountTab('list');
+            if (window.submissions && window.submissions.length > 0 && GT.tabs && GT.tabs.mountTab) {
+                GT.tabs.mountTab('list');
             }
         });
     }
@@ -184,11 +149,11 @@
             }
         });
 
-        if (GT.panels && GT.panels.registry && typeof GT.panels.registry.init === 'function') {
-            GT.panels.registry.init();
+        if (GT.tabs && typeof GT.tabs.init === 'function') {
+            GT.tabs.init();
         }
-        if (window.submissions && window.submissions.length > 0 && GT.ui.mountTab) {
-            GT.ui.mountTab('list');
+        if (window.submissions && window.submissions.length > 0 && GT.tabs && GT.tabs.mountTab) {
+            GT.tabs.mountTab('list');
         }
 
         var sectionHeader = document.getElementById('gt-section-header');
@@ -208,8 +173,8 @@
         var panelContainer = document.getElementById('gt-panel-container');
         if (panelContainer) {
             panelContainer.addEventListener('click', function(event) {
-                if (event.target === panelContainer && GT.ui.getPanelMode && GT.ui.getPanelMode() === 'edit' && GT.ui.exitEditMode) {
-                    GT.ui.exitEditMode();
+                if (event.target === panelContainer && GT.tabs && GT.tabs.getPanelMode && GT.tabs.getPanelMode() === 'edit' && GT.tabs.exitEditMode) {
+                    GT.tabs.exitEditMode();
                 }
             });
         }
@@ -217,10 +182,7 @@
         bindSubmissionBus();
     }
 
-    GT.ui.init = init;
-    GT.ui.syncLegacyStateToDatamodel = function() {
-        return !!(GT.groupSettings && GT.groupSettings.groups && GT.groupSettings.lsConfigs);
-    };
+    GT.init = init;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

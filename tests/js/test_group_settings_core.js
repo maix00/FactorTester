@@ -6,7 +6,7 @@ load('core/group-settings.js');
 registerConfigFields(GT);
 
 let emitted = 0;
-GT.state.on('groupsChanged', () => { emitted += 1; });
+GT.events.on('groupsChanged', () => { emitted += 1; });
 
 const baseId = GT.groupSettings.groups.add({
   id: 'base-a',
@@ -42,9 +42,9 @@ GT.groupSettings.groups.update(childId, { feeMode: 'per_product', feeMap: { IF: 
 assert.strictEqual(GT.groupSettings.groups.get(childId).feeMode, 'per_product');
 assert.deepStrictEqual(GT.groupSettings.groups.getDescendants(baseId), [baseId]);
 
-GT.core.cache.setLastGrossData([{ key: 'G1' }]);
-GT.core.cache.setCurrentGroupDetailIndex(2);
-assert.deepStrictEqual(GT.core.cache.getLastGrossData(), [{ key: 'G1' }]);
-assert.strictEqual(GT.core.cache.getCurrentGroupDetailIndex(), 2);
+GT.groupSettings.cache.setLastGrossData([{ key: 'G1' }]);
+GT.groupSettings.cache.setCurrentGroupDetailIndex(2);
+assert.deepStrictEqual(GT.groupSettings.cache.getLastGrossData(), [{ key: 'G1' }]);
+assert.strictEqual(GT.groupSettings.cache.getCurrentGroupDetailIndex(), 2);
 
 console.log('PASS: groupSettings core stores group fields directly');

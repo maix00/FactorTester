@@ -4,8 +4,8 @@
  * Provides openResultGroupDetail, openGroupRankingDetail,
  * loadBaseGroupDetail, findResultGroup, and buildPortfolioDetail.
  *
- * Reads rendered result cache through hostRefs and derives submission context
- * from the currently selected group.
+ * Reads rendered result cache and derives submission context from the
+ * currently selected group.
  */
 (function() {
     var GT = window.GroupTest;
@@ -14,6 +14,10 @@
     var Tabs = GT.metrics.detailOverlay.tabs;
     var Rank = GT.metrics.detailOverlay.ranking;
     if (!F || !Tabs || !Rank) throw new Error('detailOverlay sub-modules not fully loaded');
+
+    function cache() {
+        return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+    }
 
     /* ───── buildPortfolioDetail ───── */
 
@@ -110,7 +114,8 @@
     }
 
     function findResultGroup(key) {
-        var grossData = GT.results.detailOverlay.hostRefs._lastGrossData;
+        var c = cache();
+        var grossData = c ? c.getLastGrossData() : null;
         if (!grossData) return null;
         return grossData.find(function(group) {
             if (!group) return false;
@@ -134,7 +139,8 @@
         var groupIndex = group.group_index != null
             ? Number(group.group_index)
             : (groupIndexHint !== '' && groupIndexHint != null ? Number(groupIndexHint) : NaN);
-        GT.results.detailOverlay.hostRefs._currentGroupDetailIndex = isFinite(groupIndex) ? groupIndex : null;
+        var c = cache();
+        if (c) c.setCurrentGroupDetailIndex(isFinite(groupIndex) ? groupIndex : null);
         var overlay = document.getElementById('group-detail-overlay');
         var loading = document.getElementById('group-detail-loading');
         var content = document.getElementById('group-detail-content');
@@ -145,13 +151,18 @@
         loading.textContent = '加载中...';
         content.style.display = 'none';
         try {
-            var metric = (GT.results.detailOverlay.hostRefs._lastMetrics || {})[group.key]
-                || (GT.results.detailOverlay.hostRefs._lastMetrics || {})[key] || {};
+            var lastMetrics = c ? c.getLastMetrics() : null;
+            var metric = (lastMetrics || {})[group.key]
+                || (lastMetrics || {})[key] || {};
             var isLsGroup = !!group.is_ls;
             var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(groupIndex);
             Tabs.renderGroupDetail(detail, {
                 groupIndex: isFinite(groupIndex) ? groupIndex : undefined,
-                onRenderDerivedPanel: GT.results.detailOverlay.hostRefs.onRenderDerivedPanel,
+                onRenderDerivedPanel: function(detailGroupIndex) {
+                    if (GT.panels && GT.panels.actions && typeof GT.panels.actions.renderDerivedGroupsPanel === 'function') {
+                        GT.panels.actions.renderDerivedGroupsPanel(detailGroupIndex);
+                    }
+                },
             });
             if (isLsGroup) {
                 var summary = document.getElementById('group-detail-frequency-summary');

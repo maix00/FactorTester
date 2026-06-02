@@ -3,7 +3,7 @@
  *
  * 负责：
  *   - 接收 group-test 服务器原始响应，编排策略面板/图表/指标表
- *   - 托管 _lastGrossData / _lastMetrics 等状态（通过 GT.core.cache）
+ *   - 托管 _lastGrossData / _lastMetrics 等状态（通过 GT.groupSettings.cache）
  *   - 画图/指标桥接
  *
  * 挂载到 GT.results.renderer。
@@ -18,10 +18,11 @@
     var renderer = {};
 
     // ── 本地桥接 ──
-    var setLastGrossData = function(v) { GT.core.cache && GT.core.cache.setLastGrossData(v); };
-    var setLastMetrics   = function(v) { GT.core.cache && GT.core.cache.setLastMetrics(v); };
-    var getLastGrossData = function() { return GT.core.cache ? GT.core.cache.getLastGrossData() : null; };
-    var getLastMetrics   = function() { return GT.core.cache ? GT.core.cache.getLastMetrics() : null; };
+    function cache() { return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null; }
+    var setLastGrossData = function(v) { var c = cache(); if (c) c.setLastGrossData(v); };
+    var setLastMetrics   = function(v) { var c = cache(); if (c) c.setLastMetrics(v); };
+    var getLastGrossData = function() { var c = cache(); return c ? c.getLastGrossData() : null; };
+    var getLastMetrics   = function() { var c = cache(); return c ? c.getLastMetrics() : null; };
 
 
     // ════════════════════════════════════════════════════════════════

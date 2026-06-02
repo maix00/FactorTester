@@ -17,7 +17,7 @@
  *   - GT.panels.*            — 各面板实现（由各自文件注册面板）
  *   - GT.groupSettings.*     — 分组设置
  *
- * 挂载到 GT.tabs（主挂载），同时保留 GT.panels.registry 兼容
+ * 挂载到 GT.tabs。
  */
 (function(){
     var GT = window.GroupTest;
@@ -226,11 +226,7 @@
         if (typeof onSubmit === 'function') {
             onSubmit(d, { exitAdd: _exitAddMode });
         } else {
-            // fallback：没有注册 onSubmit，试 base panel
-            var addPanel = GT_PANEL_REGISTRY.find(function(p) { return p.name === 'add-base'; });
-            if (addPanel && addPanel.panel && typeof addPanel.panel.submitAddBatches === 'function') {
-                addPanel.panel.submitAddBatches(d);
-            }
+            console.warn('[tabs] active add flow has no onSubmit handler:', M.getActiveFlow());
             _exitAddMode();
         }
     }
@@ -395,23 +391,6 @@
         renderTabActions: _renderTabActions,
         _selectedEditIds: function() { return M.getEditIds(); },
     };
-
-    // 兼容 GT.panels.registry
-    GT.panels = GT.panels || {};
-    GT.panels.registry = GT.tabs;
-
-    // ── GT.ui.* 向后兼容 ──
-    GT.ui = GT.ui || {};
-    GT.ui.mountTab = mountTab;
-    GT.ui.getPanelMode = GT.tabs.getPanelMode;
-    GT.ui.getAddDraft = GT.tabs.getAddDraft;
-    GT.ui.updateAddDraft = GT.tabs.updateAddDraft;
-    GT.ui.getEditSelection = GT.tabs.getEditSelection;
-    GT.ui.enterEditMode = GT.tabs.enterEditMode;
-    GT.ui.exitEditMode = GT.tabs.exitEditMode;
-    GT.ui.enterAddMode = GT.tabs.enterAddMode;
-    GT.ui.exitAddMode = GT.tabs.exitAddMode;
-    GT.ui.renderTabActions = GT.tabs.renderTabActions;
 
     GT.log('registry/tabs loaded');
 })();

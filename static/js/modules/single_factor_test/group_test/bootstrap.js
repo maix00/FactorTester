@@ -12,12 +12,11 @@
         version: '0.1.0',
         // submodules filled by later scripts
         api: null,
-        state: null,
+        events: null,
         fee: null,
         charts: null,
         metrics: null,
         overlays: null,
-        ui: null,
 
         /** lightweight logger for dev */
         log: function() {
@@ -34,4 +33,3 @@
 
     window.GroupTest = GT;
 })();
-

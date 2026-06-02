@@ -8,7 +8,7 @@
  * Contract:
  *   GT.panels.list.selection.getFirst() → id|null
  *   GT.panels.list.selection.on('selectionChanged', cb)
- *   GT.state.on('derivedGraphChanged', cb)
+ *   GT.events.on('derivedGraphChanged', cb)
  *   GT.groupSettings.groups.get(id) → node|null
  *   GT.groupSettings.groups.getAll() → base groups (for product sourcing)
  */
@@ -58,7 +58,7 @@
         var seenTesterIds = {};
 
         // Try the active derived node first — use its effective products
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         if (preselectedParentDerivedId) {
             var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentDerivedId);
@@ -166,7 +166,7 @@
         var allProducts = _allProducts();
 
         // Determine parent info
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         var preselectedBaseGroupId = (draft && draft.preselectedBaseGroupId) || null;
         var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
         var parentLabel = '';
@@ -275,7 +275,7 @@
 
     /** Load product selection from edit selection (derived group's productMask) into dirty workspace. */
     function _loadProductMaskFromSelection() {
-        var ids = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+        var ids = GT.tabs && GT.tabs.getEditSelection ? GT.tabs.getEditSelection() : null;
         if (!ids) return;
         var selIds = Array.isArray(ids) ? ids : (ids.groupIds || Object.keys(ids).filter(function(k) { return ids[k]; }));
         if (selIds.length !== 1) return;
@@ -329,7 +329,7 @@
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         _activeId = sel ? sel.getFirst() : null;
         // Load from edit selection (derived group's productMask) or add draft (preselected products)
-        var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+        var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
         if (draft && draft.addFlow === 'derived' && draft.preselectedProducts) {
             var mask = {};
             var preselectedProducts = draft.preselectedProducts;
@@ -341,7 +341,7 @@
             _loadProductMaskFromSelection();
         }
         if (sel && sel.on) sel.on('selectionChanged', _onSelectionChanged);
-        GT.state.on('derivedGraphChanged', _onDerivedGraphChanged);
+        if (GT.events && GT.events.on) GT.events.on('derivedGraphChanged', _onDerivedGraphChanged);
         render();
     }
 
@@ -351,7 +351,7 @@
         _setDirtyProductMask({});
         var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
         if (sel && sel.off) sel.off('selectionChanged', _onSelectionChanged);
-        GT.state.off('derivedGraphChanged', _onDerivedGraphChanged);
+        if (GT.events && GT.events.off) GT.events.off('derivedGraphChanged', _onDerivedGraphChanged);
     }
 
     function refresh() { if (_mounted) render(); }

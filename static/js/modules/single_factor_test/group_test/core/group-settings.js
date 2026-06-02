@@ -609,8 +609,8 @@
     // ═══════════════════════════════════════════════════════════════
 
     function _emit(event, data) {
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit(event, data);
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit(event, data);
         }
     }
 
@@ -901,7 +901,5 @@
 
     GT.groupSettings = api;
     GT.core = GT.core || {};
-    GT.core.cache = api.cache;
-
     GT.log('core/group-settings loaded');
 })();

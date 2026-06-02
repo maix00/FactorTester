@@ -1,5 +1,5 @@
 /**
- * Main group cumulative-return chart.
+ * results/charts/group_returns.js — Group cumulative-return chart.
  *
  * Owns Highcharts rendering for result groups. Callers only provide result-group
  * rows and a snapshot callback; chart timeline construction stays local here.

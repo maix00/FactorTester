@@ -138,8 +138,8 @@
 
     function setDirty(key, value) {
         GS.setDirty(key, value);
-        if (GT.ui && typeof GT.ui.renderTabActions === 'function') {
-            GT.ui.renderTabActions();
+        if (GT.tabs && typeof GT.tabs.renderTabActions === 'function') {
+            GT.tabs.renderTabActions();
         }
     }
 
@@ -152,8 +152,8 @@
 
     function rollbackDirty() {
         GS.clearDirty();
-        if (GT.ui && typeof GT.ui.renderTabActions === 'function') {
-            GT.ui.renderTabActions();
+        if (GT.tabs && typeof GT.tabs.renderTabActions === 'function') {
+            GT.tabs.renderTabActions();
         }
     }
 
@@ -171,11 +171,11 @@
         if (!hasRegistered) { GS.clearDirty(); return false; }
         savePatch(patch);
         GS.clearDirty();
-        if (GT.ui && typeof GT.ui.renderTabActions === 'function') {
-            GT.ui.renderTabActions();
+        if (GT.tabs && typeof GT.tabs.renderTabActions === 'function') {
+            GT.tabs.renderTabActions();
         }
-        if (GT.state && typeof GT.state.emit === 'function') {
-            GT.state.emit('groupsChanged');
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('groupsChanged');
         }
         return true;
     }
@@ -195,10 +195,10 @@
     }
 
     function getReferenceGroup() {
-        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        var mode = GT.tabs && GT.tabs.getPanelMode ? GT.tabs.getPanelMode() : 'list';
 
         if (mode === 'add') {
-            var draft = GT.ui && GT.ui.getAddDraft ? GT.ui.getAddDraft() : null;
+            var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
             if (!draft) return null;
             return {
                 id: '_add_draft',
@@ -215,7 +215,7 @@
         }
 
         if (mode === 'edit') {
-            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            var sel = GT.tabs && GT.tabs.getEditSelection ? GT.tabs.getEditSelection() : null;
             var ids = getEditGroupIds(sel);
             if (ids.length === 0) return null;
             if (!GS.groups) return null;
@@ -231,13 +231,13 @@
     }
 
     function savePatch(patch) {
-        var mode = GT.ui && GT.ui.getPanelMode ? GT.ui.getPanelMode() : 'list';
+        var mode = GT.tabs && GT.tabs.getPanelMode ? GT.tabs.getPanelMode() : 'list';
         if (mode === 'add') {
-            if (GT.ui && typeof GT.ui.updateAddDraft === 'function') GT.ui.updateAddDraft(patch);
+            if (GT.tabs && typeof GT.tabs.updateAddDraft === 'function') GT.tabs.updateAddDraft(patch);
             return;
         }
         if (mode === 'edit') {
-            var sel = GT.ui && GT.ui.getEditSelection ? GT.ui.getEditSelection() : null;
+            var sel = GT.tabs && GT.tabs.getEditSelection ? GT.tabs.getEditSelection() : null;
             var ids = getEditGroupIds(sel);
             for (var i = 0; i < ids.length; i++) {
                 try { GS.groups.update(ids[i], patch); } catch (err) {}

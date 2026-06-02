@@ -22,7 +22,9 @@
     var resolveGroupRunTimeRange = GT.core.dates ? GT.core.dates.resolveGroupRunTimeRange : function() { return {startDate:null,endDate:null}; };
     var persistGroupTimeRangeToDatamodel = GT.core.dates ? GT.core.dates.persistGroupTimeRangeToDatamodel : function(){};
 
-    var _getLSDefinitions = function() { return GT.core.cache ? GT.core.cache.getLongShortDefinitions() : []; };
+    function cache() {
+        return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+    }
 
     // ════════════════════════════════════════════════════════════════
     //  工具函数
@@ -192,8 +194,8 @@
                 statusSpan.style.color = '#28a745';
             }
 
-            if (GT.ui && GT.ui.mountTab) {
-                GT.ui.mountTab('list');
+            if (GT.tabs && GT.tabs.mountTab) {
+                GT.tabs.mountTab('list');
             }
         } catch (e) {
             console.error('加载默认分组失败:', e);
@@ -559,23 +561,25 @@
         group.name = def.name;
         group.is_derived = true;
         group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
+        var c = cache();
+        var grossData = c ? c.getLastGrossData() : null;
         if (grossData) {
             grossData.push(group);
-            GT.core.cache.setLastGrossData(grossData);
+            c.setLastGrossData(grossData);
         }
-        var metrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
+        var metrics = c ? c.getLastMetrics() : null;
         if (metrics) {
             metrics[def.key] = result.metric;
-            GT.core.cache.setLastMetrics(metrics);
+            c.setLastMetrics(metrics);
         }
     };
 
     /** 统一刷新：图表 + 指标表 + 派生组面板 */
     runTest._refreshGroupView = function(baseGroupIndex) {
         if (GT.results && GT.results.renderer) {
-            GT.results.renderer.drawGroupChart(GT.core.cache ? GT.core.cache.getLastGrossData() : null);
-            GT.results.renderer.renderMetricsTable(GT.core.cache ? GT.core.cache.getLastMetrics() : null);
+            var c = cache();
+            GT.results.renderer.drawGroupChart(c ? c.getLastGrossData() : null);
+            GT.results.renderer.renderMetricsTable(c ? c.getLastMetrics() : null);
         }
         if (GT.panels.actions && GT.panels.actions.renderDerivedGroupsPanel) {
             GT.panels.actions.renderDerivedGroupsPanel(baseGroupIndex);
@@ -591,15 +595,16 @@
             alert('该派生组没有选中任何品种。');
             return;
         }
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
-        var metrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
+        var c = cache();
+        var grossData = c ? c.getLastGrossData() : null;
+        var metrics = c ? c.getLastMetrics() : null;
         if (!grossData || !metrics) {
             alert('请先运行分组测试，再生成派生组曲线。');
             return;
         }
 
         var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
-        var baseGroupIndex = GT.core.cache ? GT.core.cache.getCurrentGroupDetailIndex() : null;
+        var baseGroupIndex = c ? c.getCurrentGroupDetailIndex() : null;
         if (baseGroupIndex == null && baseNode) {
             baseGroupIndex = (baseNode.groupIndex || 1) - 1;
         }
@@ -639,7 +644,8 @@
     /** 删除派生组 */
     runTest.deleteDerivedGroup = function(id) {
         var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
-        var baseGroupIndex = GT.core.cache ? GT.core.cache.getCurrentGroupDetailIndex() : null;
+        var c = cache();
+        var baseGroupIndex = c ? c.getCurrentGroupDetailIndex() : null;
         if (baseGroupIndex == null && node && node.baseGroupId) {
             var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
             if (baseNode) baseGroupIndex = (baseNode.groupIndex || 1) - 1;
@@ -650,13 +656,13 @@
         }
         try {
             if (GT.groupSettings.groups) GT.groupSettings.groups.remove(id);
-            if (GT.state && GT.state.emit) GT.state.emit('groupsChanged');
+            if (GT.events && GT.events.emit) GT.events.emit('groupsChanged');
         } catch (e) {
             console.warn('[deleteDerivedGroup] group remove failed:', e);
         }
 
-        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : null;
-        var metrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
+        var grossData = c ? c.getLastGrossData() : null;
+        var metrics = c ? c.getLastMetrics() : null;
         if (grossData && GT.results && GT.results.renderer) {
             GT.results.renderer.drawGroupChart(grossData);
         }

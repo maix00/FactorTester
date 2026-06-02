@@ -20,7 +20,7 @@ GT.groupSettings.groups.add({
 });
 
 let eventCount = 0;
-GT.state.on('selectionChanged', () => { eventCount += 1; });
+GT.events.on('selectionChanged', () => { eventCount += 1; });
 
 GT.panels.list.selection.add('derived-select');
 assert.strictEqual(GT.panels.list.selection.getFirst(), 'derived-select');
