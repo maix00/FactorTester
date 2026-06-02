@@ -166,10 +166,6 @@
         return names;
     };
 
-    actions.getDerivedGroupsForCurrentBase = function(groupIndex) {
-        var derived = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
-        return derived.filter(function(item) { return item.baseGroup === groupIndex; });
-    };
 
     actions.findBaseGroupIdForResultGroup = function(groupIndex) {
         if (!GT.datamodel || !GT.datamodel.groups) return null;
@@ -202,13 +198,10 @@
 
     actions.makeUniqueGroupKey = function(name, ownId) {
         var lastMetrics = GT.core.cache ? GT.core.cache.getLastMetrics() : null;
-        var derived = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
         var base = name || ownId || '派生组';
         var key = base;
         var suffix = 2;
         while (lastMetrics && lastMetrics[key]) {
-            var owner = derived.find(function(item) { return item.key === key; });
-            if (owner && owner.id === ownId) break;
             key = base + ' #' + suffix++;
         }
         return key;
@@ -275,7 +268,7 @@
             }
         }
 
-        var lastDerived = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
+        var grossData = GT.core.cache ? GT.core.cache.getLastGrossData() : [];
 
         var html = '<div class="derived-group-panel" style="border:1px solid #c7d2fe;border-radius:8px;background:#f8faff;padding:8px;">'
             + '<div class="derived-group-toolbar" style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid #e2e8f0;">'
@@ -291,7 +284,7 @@
                 var node = derivedNodes[d];
                 var alias = actions.groupDisplayKey(node);
                 var products = actions.effectiveDerivedProductNames(node);
-                var generated = lastDerived.some(function(dg) { return dg.id === node.id && dg.generated; });
+                var generated = grossData.some(function(g) { return g && g.is_derived && g.derived && g.derived.id === node.id; });
 
                 html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(node.id) + '"'
                     + ' style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;">'

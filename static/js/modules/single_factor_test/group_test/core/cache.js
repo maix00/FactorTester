@@ -11,38 +11,15 @@
     if (GT.core.cache) { console.warn('[GT core/cache] already loaded'); return; }
 
     // ---------- 成本敏感性：缓存数据（共享状态） ----------
-    var _lastGrossData = null;   // 上次返回的 groups（含 gross_returns / fee_costs）
+    var _lastGrossData = null;
     var _lastMetrics = null;
     var _lastTimestamps = [];
     var _lastNgroups = 0;
-    var _groupResultsBySubmission = {};
-    var _activeGroupSubmissionId = null;
-    var _activeGroupFactorBySubmission = {};
-    var _derivedGroups = [];
-    var _derivedGroupSeq = 1;
-    var _derivedGeneration = 0;      // 每次 run_group_test 递增，废弃旧的 refreshAllDerivedGroups
     var _currentGroupDetailIndex = null;
     var _longShortDefinitions = [];
     var _lastGroupStructureKey = null;
 
     var cache = {};
-
-    // ── 缓存核心操作 ──
-
-    cache.cacheGroupResult = function(submissionId, factorAlias, data) {
-        if (!submissionId || !factorAlias || !data) return;
-        if (!_groupResultsBySubmission[submissionId]) _groupResultsBySubmission[submissionId] = {};
-        _groupResultsBySubmission[submissionId][factorAlias] = data;
-    };
-
-    cache.getCachedGroupResult = function(submissionId, factorAlias) {
-        return _groupResultsBySubmission[submissionId] && _groupResultsBySubmission[submissionId][factorAlias];
-    };
-
-    cache.clearCachedGroupResultsForSubmission = function(submissionId) {
-        if (!submissionId) return;
-        _groupResultsBySubmission[submissionId] = {};
-    };
 
     // ── 成本敏感性数据 getter/setter ──
 
@@ -57,19 +34,6 @@
     cache.getLastGroupStructureKey = function() { return _lastGroupStructureKey; };
     cache.setLastGroupStructureKey = function(v) { _lastGroupStructureKey = v; };
 
-    // ── 活跃提交/因子 ──
-    cache.getActiveGroupSubmissionId = function() { return _activeGroupSubmissionId; };
-    cache.setActiveGroupSubmissionId = function(v) { _activeGroupSubmissionId = v; };
-    cache.getActiveGroupFactorBySubmission = function() { return _activeGroupFactorBySubmission; };
-    cache.getGroupResultsBySubmission = function() { return _groupResultsBySubmission; };
-
-    // ── 派生组 ──
-    cache.getDerivedGroups = function() { return _derivedGroups; };
-    cache.setDerivedGroups = function(v) { _derivedGroups = v; };
-    cache.getDerivedGroupSeq = function() { return _derivedGroupSeq; };
-    cache.setDerivedGroupSeq = function(v) { _derivedGroupSeq = v; };
-    cache.getDerivedGeneration = function() { return _derivedGeneration; };
-    cache.setDerivedGeneration = function(v) { _derivedGeneration = v; };
     cache.getCurrentGroupDetailIndex = function() { return _currentGroupDetailIndex; };
     cache.setCurrentGroupDetailIndex = function(v) { _currentGroupDetailIndex = v; };
 

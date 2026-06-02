@@ -123,14 +123,17 @@
         if (!start_date || !end_date) return { error: '请设置时间范围' };
         if (start_date > end_date) return { error: '起始日期不能晚于终止日期' };
 
-        var derivedPayload = (GT.core.cache ? GT.core.cache.getDerivedGroups() : []).map(function(d) {
-            return {
-                id: d.id,
-                name: d.name || d.label,
-                baseGroup: d.baseGroup,
-                productNames: d.productNames
-            };
-        });
+        var derivedPayload = [];
+        if (GT.datamodel && GT.datamodel.groups) {
+            derivedPayload = GT.datamodel.groups.getAll().filter(function(g) { return g.isDerived; }).map(function(d) {
+                return {
+                    id: d.id,
+                    name: d.name || d.label,
+                    baseGroup: d.baseGroupId,
+                    productNames: d.productNames || []
+                };
+            });
+        }
 
         // ── group_fee_maps ──
         var group_fee_maps = null;

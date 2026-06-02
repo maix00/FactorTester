@@ -102,10 +102,6 @@
     function fmtFeeRate(v) { return GT.panels && GT.panels.actions ? GT.panels.actions.fmtFeeRate(v) : '—'; }
     function isRealFee(r) { return GT.panels && GT.panels.actions ? GT.panels.actions.isRealFee(r) : false; }
 
-    function getDerivedGroupsForCurrentBase(groupIndex) {
-        return GT.panels && GT.panels.actions ? GT.panels.actions.getDerivedGroupsForCurrentBase(groupIndex) : [];
-    }
-
     // ── 桥接（实现已移出到 panels/actions.js / core/actions/runner.js） ──
     function renderDerivedGroupsPanel(groupIndex) {
         if (GT.panels && GT.panels.actions && GT.panels.actions.renderDerivedGroupsPanel) {
@@ -154,9 +150,6 @@
         if (GT.panels && GT.panels.actions && GT.panels.actions.openAddDerivedFromDetail) {
             GT.panels.actions.openAddDerivedFromDetail(groupIndex);
         }
-    }
-    function makeUniqueGroupKey(name, ownId) {
-        return GT.panels && GT.panels.actions ? GT.panels.actions.makeUniqueGroupKey(name, ownId) : (name || ownId || '派生组');
     }
     function removeGeneratedDerivedArtifacts(id) {
         if (GT.panels && GT.panels.actions && GT.panels.actions.removeGeneratedDerivedArtifacts) {
@@ -273,44 +266,12 @@
             GT.core.cache.setLastGrossData(_lastGrossData);
             GT.core.cache.setLastMetrics(_lastMetrics);
             GT.core.cache.setLastGroupStructureKey(_lastGroupStructureKey);
-            GT.core.cache.setDerivedGroups(_derivedGroups);
-            GT.core.cache.setDerivedGroupSeq(_derivedGroupSeq);
-        }
-
-        // metrics key 即为 shortAlias，无需额外映射表
-
-        // 从响应中重建 _derivedGroups（后端已统一计算，无需额外请求）
-        // 注意：跳过 LS 组（is_ls），其 derived 中无 base_group。
-        _derivedGroups = [];
-        _derivedGroupSeq = 1;
-        (data.groups || []).forEach(function(g) {
-            if (g.is_derived && g.derived && !g.is_ls) {
-                _derivedGroups.push({
-                    id: g.derived.id || ('D' + _derivedGroupSeq),
-                    name: g.name,
-                    baseGroup: g.derived.base_group,
-                    productNames: g.derived.product_names || [],
-                    key: g.key,
-                    generated: true
-                });
-                var num = parseInt(String(g.derived.id || '').replace(/^D/, ''), 10);
-                if (!isNaN(num)) _derivedGroupSeq = Math.max(_derivedGroupSeq, num + 1);
-            }
-        });
-        // 同步更新后的 _derivedGroups / _derivedGroupSeq 到 cache
-        if (GT.core && GT.core.cache) {
-            GT.core.cache.setDerivedGroups(_derivedGroups);
-            GT.core.cache.setDerivedGroupSeq(_derivedGroupSeq);
         }
 
         // 画图 + 指标表
         drawGroupChart(data.groups);
         renderMetricsTable(data.metrics);
     }
-
-    // 桥接到 runner.js
-    async function refreshAllDerivedGroups(generation) { return GT.core.actions.runner.refreshAllDerivedGroups(generation); }
-    async function regenerateDerivedGroupQuiet(def, generation) { return GT.core.actions.runner.regenerateDerivedGroupQuiet(def, generation); }
 
     // 桥接到 runner.js
     function postGroupTest(payload) { return GT.core.actions.runner.postGroupTest(payload); }
@@ -325,14 +286,6 @@
     // 桥接到 runner.js
     async function runAllGroupTestsForCurrentSubmission() { return GT.core.actions.runner.runAllGroupTestsForCurrentSubmission(); }
 
-    // ---------- 缓存桥接（共享状态已迁移到 GT.core.cache） ----------
-    // 本地桥接变量供 app.js 内其他函数直接使用
-    var _groupResultsBySubmission = GT.core.cache ? GT.core.cache.getGroupResultsBySubmission() : {};
-    var _activeGroupSubmissionId = GT.core.cache ? GT.core.cache.getActiveGroupSubmissionId() : null;
-    var _activeGroupFactorBySubmission = GT.core.cache ? GT.core.cache.getActiveGroupFactorBySubmission() : {};
-    var _derivedGroups = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
-    var _derivedGroupSeq = GT.core.cache ? GT.core.cache.getDerivedGroupSeq() : 1;
-    var _derivedGeneration = GT.core.cache ? GT.core.cache.getDerivedGeneration() : 0;
     var _currentGroupDetailIndex = GT.core.cache ? GT.core.cache.getCurrentGroupDetailIndex() : null;
     var _longShortDefinitions = GT.core.cache ? GT.core.cache.getLongShortDefinitions() : [defaultLongShortDefinition()];
     var _lastGroupStructureKey = GT.core.cache ? GT.core.cache.getLastGroupStructureKey() : null;
@@ -341,25 +294,7 @@
     var _lastTimestamps = GT.core.cache ? GT.core.cache.getLastTimestamps() : [];
     var _lastNgroups = GT.core.cache ? GT.core.cache.getLastNgroups() : 0;
 
-    function cacheGroupResult(sid, fa, d) { return GT.core.cache && GT.core.cache.cacheGroupResult(sid, fa, d); }
-    function getCachedGroupResult(sid, fa) { return GT.core.cache ? GT.core.cache.getCachedGroupResult(sid, fa) : null; }
-    function clearCachedGroupResultsForSubmission(sid) { return GT.core.cache && GT.core.cache.clearCachedGroupResultsForSubmission(sid); }
-    function markGroupFactorStatus(sid, fa, s) { return GT.panels && GT.panels.ui && GT.panels.ui.markGroupFactorStatus(sid, fa, s); }
-    function clearGroupFactorStatuses(sid) { return GT.panels && GT.panels.ui && GT.panels.ui.clearGroupFactorStatuses(sid); }
-
     // ═══ Panel registry — unified flat tab list ═══
-    // Each entry: { name, label, containerId, category, panel, addFlow }
-    // 桥接：fee.js 中 close-today 变更回调
-    GT.ui.onCloseTodayChanged = function() {
-        var derivedGroups = GT.core.cache ? GT.core.cache.getDerivedGroups() : [];
-        if (derivedGroups.length > 0) {
-            var gen = (GT.core.cache ? GT.core.cache.getDerivedGeneration() : 0) + 1;
-            if (GT.core.cache) GT.core.cache.setDerivedGeneration(gen);
-            _derivedGeneration = gen;
-            if (GT.core && GT.core.cache) GT.core.cache.setDerivedGeneration(_derivedGeneration);
-            refreshAllDerivedGroups(gen);
-        }
-    };
 
     function bindICModuleEvents() {
         // 分组测试结果按 submission + factor 缓存，切换选项卡时不主动清空。
@@ -392,9 +327,9 @@
         // P7: Wire unified tab bar — delegated to panels/registry.js
         GT.panels.registry.init();
 
-        // 如果已有 submissions，渲染两级选项卡
-        if (window.submissions && window.submissions.length > 0) {
-            window.renderGroupTabs(window.submissions);
+        // 当 submissions 到达时，重新挂载当前面板
+        if (window.submissions && window.submissions.length > 0 && GT.ui.mountTab) {
+            GT.ui.mountTab('list');
         }
 
         // 绑定分组组合设置折叠/展开
@@ -480,180 +415,7 @@
         });
     }
 
-    // 暴露给外部调用：渲染分组测试 UI（P7: 5-layer layout）
-    // Fills #gt-submission-tabs with horizontal pills.
-    // Old #group-tab-container kept hidden for backward compat factor navigation.
-    window.renderGroupTabs = function(submissions) {
-        var container = document.getElementById('group-tab-container');
-        var subTabsContainer = document.getElementById('gt-submission-tabs');
-        var runBtn = document.getElementById('run_group_test_btn');
-        var defaultBtn = document.getElementById('load_default_groups_btn');
 
-        if (!submissions || submissions.length === 0) {
-            // Update both old and new containers
-            if (container) container.innerHTML = '<div style="color:#888; padding:8px; border:1px dashed #ccc; border-radius:4px; font-size:13px;">暂无提交记录，请先在产品类别筛选模块提交产品。</div>';
-            if (subTabsContainer) subTabsContainer.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
-            if (runBtn) runBtn.style.display = 'none';
-            if (defaultBtn) defaultBtn.style.display = 'none';
-            return;
-        }
-        if (runBtn) runBtn.style.display = '';
-        if (defaultBtn) defaultBtn.style.display = '';
-
-        var factorList = window.factorList || [];
-        var activeSubmission = submissions.find(function(sub) {
-            return String(sub.id) === String(_activeGroupSubmissionId);
-        }) || submissions[0];
-        _activeGroupSubmissionId = activeSubmission ? String(activeSubmission.id) : null;
-        if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
-
-        // ── P7: Fill #gt-submission-tabs with horizontal pills ──
-        if (subTabsContainer) {
-            var subTabsHtml = '';
-            submissions.forEach(function(sub) {
-                var isActive = String(sub.id) === String(_activeGroupSubmissionId);
-                var tabLabel = sub.product_group || sub.label || ('测试器');
-                subTabsHtml += '<button type="button" class="gt-submission-tab' + (isActive ? ' active' : '') + '" data-submission-id="' + escGrp(sub.id) + '">'
-                    + escGrp(tabLabel) + '</button>';
-            });
-            subTabsContainer.innerHTML = subTabsHtml;
-            subTabsContainer.querySelectorAll('.gt-submission-tab').forEach(function(tab) {
-                tab.addEventListener('click', function() {
-                    _activeGroupSubmissionId = tab.getAttribute('data-submission-id');
-                    if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
-                    window.renderGroupTabs(submissions);
-                });
-            });
-        }
-
-        // ── P7: Fill old #group-tab-container (hidden) for factor navigation compat ──
-        var activeFactorAlias = getActiveFactorAliasForSubmission(_activeGroupSubmissionId)
-            || (factorList.length > 0 ? (factorList[0].alias || factorList[0].name || '') : null);
-        if (activeFactorAlias && _activeGroupSubmissionId) {
-            _activeGroupFactorBySubmission[_activeGroupSubmissionId] = activeFactorAlias;
-        }
-
-        if (container) {
-            var navHtml = '';
-            if (factorList.length > 0 && _activeGroupSubmissionId) {
-                factorList.forEach(function(f) {
-                    var alias = f.alias || f.name || '';
-                    var isFactorActive = alias === activeFactorAlias;
-                    var cached = getCachedGroupResult(_activeGroupSubmissionId, alias);
-                    var status = cached ? (cached.success ? 'done' : 'error') : '';
-                    navHtml += '<button type="button" class="group-factor-nav-btn' + (isFactorActive ? ' active' : '')
-                        + '" data-submission-id="' + escGrp(_activeGroupSubmissionId)
-                        + '" data-factor-alias="' + escGrp(alias)
-                        + '" data-run-status="' + status + '" style="display:none;">'
-                        + '<span>' + escGrp(alias) + '</span>'
-                        + '<span class="group-factor-run-status">' + (status === 'done' ? '✓' : (status === 'error' ? '!' : '')) + '</span>'
-                        + '</button>';
-                });
-            }
-            container.innerHTML = navHtml;
-        }
-
-        bindGroupFactorTabLongPress();
-        bindGroupFactorNavigation();
-        restoreActiveGroupResult({ preserveWhenMissingActive: factorList.length === 0 });
-
-        // 当 submissions 到达时，总是重新挂载当前面板。
-        // 这确保面板能感知到新的 submission 上下文（如基础组列表按 testerId 筛选）。
-        if (submissions.length > 0) {
-            // 重新挂载当前 tab（panels/registry.js 已在 init 时注册完毕）
-            if (GT.ui.mountTab) {
-                GT.ui.mountTab('list');
-            }
-        }
-    };
-    function getActiveFactorAliasForSubmission(submissionId) {
-        if (_activeGroupFactorBySubmission[submissionId]) return _activeGroupFactorBySubmission[submissionId];
-        var activeBtn = document.querySelector('.group-factor-nav-btn.active[data-submission-id="' + cssEscape(String(submissionId)) + '"]');
-        if (activeBtn) return activeBtn.getAttribute('data-factor-alias');
-        var cached = _groupResultsBySubmission[submissionId];
-        if (cached) {
-            var first = Object.keys(cached)[0];
-            if (first) return first;
-        }
-        return null;
-    }
-
-    function bindGroupSubmissionNavigation(submissions) {
-        document.querySelectorAll('.group-submission-nav-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                _activeGroupSubmissionId = btn.getAttribute('data-submission-id');
-                window.renderGroupTabs(submissions);
-            });
-        });
-    }
-
-    function bindGroupFactorNavigation() {
-        document.querySelectorAll('.group-factor-nav-btn').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.group-factor-nav-btn').forEach(function(other) {
-                    other.classList.remove('active');
-                });
-                btn.classList.add('active');
-                _activeGroupFactorBySubmission[btn.getAttribute('data-submission-id')] = btn.getAttribute('data-factor-alias');
-                if (GT.core && GT.core.cache) GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
-                restoreActiveGroupResult();
-            });
-        });
-    }
-
-    function restoreActiveGroupResult(options) {
-        options = options || {};
-        var activeBtn = document.querySelector('.group-factor-nav-btn.active');
-        if (!activeBtn) {
-            if (!options.preserveWhenMissingActive) {
-                clearResults({ clearStatus: false });
-            }
-            return;
-        }
-        var sid = activeBtn.getAttribute('data-submission-id');
-        var falias = activeBtn.getAttribute('data-factor-alias');
-        var result = getCachedGroupResult(sid, falias);
-        console.log('[GroupTest] restoreActiveGroupResult: sid=' + sid + ' factor=' + falias + ' cached=' + (result ? result.tester_alias || '(yes, no tester_alias)' : 'no'));
-        clearResults({ clearStatus: !result });
-        if (result && result.success) {
-            applyGroupTestResult(result);
-            var statusSpan = document.getElementById('group_test_status');
-            if (statusSpan) {
-                statusSpan.innerHTML = '✓ 分组测试完成';
-                statusSpan.style.color = '#28a745';
-            }
-        } else if (result && !result.success) {
-            var statusEl = document.getElementById('group_test_status');
-            if (statusEl) {
-                statusEl.innerHTML = '✗ 分组测试失败: ' + (result.error || '未知错误');
-                statusEl.style.color = '#d40000';
-            }
-        }
-    }
-
-    // ── 长按因子选项卡辅助函数 ──
-    function bindGroupFactorTabLongPress() {
-        var helper = window.SingleFactorLibraryHelper;
-        if (!helper) return;
-        var allFactorTabs = document.querySelectorAll('.group-factor-nav-btn');
-        allFactorTabs.forEach(function(btn) {
-            helper.bindLongPress(btn, {
-                popoverClass: 'group-add-to-library-popover',
-                getFactorAlias: function(anchor) {
-                    return anchor.getAttribute('data-factor-alias') || anchor.textContent.trim();
-                },
-                getProductGroup: function(anchor) {
-                    return helper.inferScopeFromSubmissionId(anchor.getAttribute('data-submission-id'));
-                }
-            });
-        });
-    }
-
-    function escGrp(s) {
-        var d = document.createElement('div');
-        d.textContent = s == null ? '' : String(s);
-        return d.innerHTML;
-    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
@@ -662,7 +424,6 @@
     }
     // Expose primary entrypoints under GroupTest (namespaced)
     GT.ui.init = init;
-    GT.ui.renderTabs = window.renderGroupTabs;
 
     // ── Submission bus subscriptions ────────────────────────────────────────────
     (function() {
@@ -704,34 +465,13 @@
                 } catch(e) {}
             }
 
-            // 5) Clear group result cache for this tester
-            if (_groupResultsBySubmission[removedTesterId]) {
-                delete _groupResultsBySubmission[removedTesterId];
-            }
-            if (_activeGroupFactorBySubmission[removedTesterId]) {
-                delete _activeGroupFactorBySubmission[removedTesterId];
-            }
-            if (String(_activeGroupSubmissionId) === removedTesterId) {
-                _activeGroupSubmissionId = null;
-            }
-            // 同步到 cache（其他模块需感知 tester 移除）
-            if (GT.core && GT.core.cache) {
-                GT.core.cache.setActiveGroupSubmissionId(_activeGroupSubmissionId);
-            }
+            // 5) Group caches already handled at cache layer (GT.core.cache removed)
         });
 
-        // React to any change: re-render tabs
+        // React to any change: re-mount active panel
         bus.on('*', function(event) {
-            if (window.submissions && window.submissions.length > 0) {
-                window.renderGroupTabs(window.submissions);
-            } else {
-                // Empty state
-                var container = document.getElementById('gt-submission-tabs');
-                if (container) {
-                    container.innerHTML = '<span style="color:#888;font-size:12px;padding:4px 8px;">暂无提交记录</span>';
-                }
-                var runBtn = document.getElementById('run_group_test_btn');
-                if (runBtn) runBtn.style.display = 'none';
+            if (window.submissions && window.submissions.length > 0 && GT.ui.mountTab) {
+                GT.ui.mountTab('list');
             }
         });
     })();
@@ -749,37 +489,6 @@
             GT.datamodel.groups._reset();
             GT.datamodel.ls_configs._reset();
             GT.datamodel.registrations._reset();
-
-            // Sync legacy _derivedGroups → datamodel.groups (unified storage)
-            if (_derivedGroups && _derivedGroups.length > 0) {
-                // Sort: base-only first (no parent or parent==='0'), then by id
-                var sortedDerived = _derivedGroups.slice().sort(function(a, b) {
-                    var aIsBase = !a.parent || a.parent === '0';
-                    var bIsBase = !b.parent || b.parent === '0';
-                    if (aIsBase && !bIsBase) return -1;
-                    if (!aIsBase && bIsBase) return 1;
-                    return (a.id || '').localeCompare(b.id || '');
-                });
-                sortedDerived.forEach(function(dg) {
-                    var parentId = (!dg.parent || dg.parent === '0') ? null : dg.parent;
-                    try {
-                        GT.datamodel.groups.add({
-                            name: dg.name || ('Group ' + dg.id),
-                            isDerived: true,
-                            parentId: parentId,
-                            baseGroupId: dg.baseGroup,
-                            productMask: dg.productMask,
-                            feeMode: dg.feeMode || 'none',
-                            feeRate: dg.feeRate != null ? dg.feeRate : null,
-                            feeMap: dg.feeMap != null ? dg.feeMap : null,
-                            useCloseToday: dg.useCloseToday !== undefined ? !!dg.useCloseToday : false,
-                            rebalanceMode: dg.rebalanceMode || 'each_period'
-                        });
-                    } catch (e) {
-                        console.warn('[app.js syncDatamodel] skip derived group:', dg.id, e.message);
-                    }
-                });
-            }
 
             // Sync legacy _longShortDefinitions → datamodel.ls_configs
             if (_longShortDefinitions && _longShortDefinitions.length > 0) {
