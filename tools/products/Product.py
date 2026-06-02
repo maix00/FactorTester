@@ -29,6 +29,7 @@ class Product(UniqueObject):
         point_value (int|None)  : 每手合约价值点乘数
         currency    (str|None)  : 计价货币
         timezone    (str|None)  : 对应时区，与 DataSource 匹配用于判断可用性
+        is_margin_traded (bool) : 是否使用保证金交易
     """
     # 全局类属性标注（实际属性由具体子类提供）
     desc: str
@@ -40,11 +41,14 @@ class Product(UniqueObject):
 
     def __init__(self, name: str,
                  point_value: Optional[int] = None,
-                 currency: Optional[str] = None, *args, **kwargs):
+                 currency: Optional[str] = None,
+                 is_margin_traded: bool = False,
+                 *args, **kwargs):
         if not hasattr(self, '_initialized'):
             super().__init__(name=name, *args, **kwargs)
             self.point_value = point_value
             self.currency = currency
+            self.is_margin_traded = bool(is_margin_traded)
             self.timezone = kwargs.get('timezone', None)
             # 为每个已知频率创建 DataMeta 对象，设为对应属性
             for freq in DataFreq:
