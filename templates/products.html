@@ -34,15 +34,16 @@
             background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
             padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             display: flex; flex-direction: column; flex: 1 1 auto;
-            min-height: 0;
+            min-height: 0; overflow-y: auto; overflow-x: hidden;
         }
         .pv-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .pv-chart-header .title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
         .pv-chart-header .info { font-size: 12px; color: #888; }
-        .pv-product-fields { display:none; margin: 4px 0 10px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; font-size: 12px; }
-        .pv-product-fields-title { font-weight: 700; color: #334155; margin-bottom: 8px; }
-        .pv-product-fields-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 12px; }
-        .pv-product-field { display: grid; grid-template-columns: minmax(80px, 0.85fr) minmax(0, 1.15fr); gap: 6px; min-width: 0; }
+        .pv-product-fields { display:none; margin: 4px 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8fafc; font-size: 12px; overflow: hidden; }
+        .pv-product-fields summary { padding: 9px 12px; cursor: pointer; font-weight: 700; color: #334155; user-select: none; }
+        .pv-product-fields-list { border-top: 1px solid #e5e7eb; background: #fff; max-height: 260px; overflow-y: auto; }
+        .pv-product-field { display: grid; grid-template-columns: minmax(140px, 0.35fr) minmax(0, 0.65fr); gap: 12px; min-width: 0; padding: 6px 12px; border-bottom: 1px solid #f1f5f9; }
+        .pv-product-field:last-child { border-bottom: 0; }
         .pv-product-field-key { color: #64748b; overflow-wrap: anywhere; }
         .pv-product-field-value { color: #0f172a; font-family: "SF Mono", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
         .pv-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; flex-shrink: 0; }
@@ -54,7 +55,7 @@
         }
         .method-btn:hover { border-color: #4a90d9; }
         .method-btn.active { background: #4a90d9; color: #fff; border-color: #4a90d9; font-weight: 600; }
-        .pv-chart-container { width: 100%; min-height: 320px; height: auto; flex: 1 1 0; overflow: hidden; }
+        .pv-chart-container { width: 100%; min-height: 420px; height: 55vh; flex: 0 0 auto; overflow: hidden; }
         .pv-empty { text-align: center; padding: 80px 20px; color: #888; }
         .pv-empty .icon { font-size: 48px; margin-bottom: 16px; }
         .pv-loading { text-align: center; padding: 40px; color: #888; }
@@ -145,7 +146,7 @@
                     <span class="title" id="pv-chart-title">— 请选择品种 —</span>
                     <span class="info" id="pv-chart-info"></span>
                 </div>
-                <div id="pv-product-fields" class="pv-product-fields"></div>
+                <details id="pv-product-fields" class="pv-product-fields"></details>
                 <div class="pv-controls">
                     <label>数据源：</label>
                     <select id="pv-data-source" onchange="document.getElementById('pv-freq').value=''; loadPriceData()">
@@ -248,7 +249,7 @@
             box.innerHTML = '';
             return;
         }
-        var html = '<div class="pv-product-fields-title">后端产品字段</div><div class="pv-product-fields-grid">';
+        var html = '<summary>后端产品字段（' + keys.length + '）</summary><div class="pv-product-fields-list">';
         for (var i = 0; i < keys.length; i++) {
             var key = keys[i];
             html += '<div class="pv-product-field">'
