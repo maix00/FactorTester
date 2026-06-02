@@ -62,7 +62,13 @@
         }).join('');
     }
 
+    // 从 app.js 桥接：由 applyGroupTestResult 调用
+    function updatePanel(multiSessionActive, usedMode, multiSessionBatches) {
+        render(multiSessionActive, usedMode, multiSessionBatches);
+    }
+
     GT.results.strategyPanel = {
         render: render,
+        update: updatePanel,
     };
 })();

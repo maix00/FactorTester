@@ -8,7 +8,8 @@
     var GT = window.GroupTest;
     if (!GT) throw new Error('GroupTest bootstrap not loaded');
 
-    GT.chart = GT.chart || {};
+    GT.results = GT.results || {};
+    GT.results.chart = GT.results.chart || {};
 
     var _groupChart = null;
 
@@ -203,7 +204,7 @@
         });
     }
 
-    GT.chart.groups = {
+    GT.results.chart.groups = {
         draw: draw,
         getChart: function() { return _groupChart; },
     };
