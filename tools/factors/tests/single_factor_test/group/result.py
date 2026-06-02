@@ -35,6 +35,7 @@ class GroupRunResult:
     n_derived: int = 0
     derived_info: Any = None  # [{base_group, name, id, product_names}, ...] | None
     group_names: Any = None  # {expanded_group_index: display_name}
+    hold_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期实际持仓金额 (refs #100)
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:
