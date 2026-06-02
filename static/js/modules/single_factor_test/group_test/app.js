@@ -804,7 +804,11 @@
         var submissionId = getActiveSubmissionId();
         var factorAlias = getActiveFactorAlias();
         var all = GT.datamodel.groups.getAll ? (GT.datamodel.groups.getAll() || []) : [];
-        var expectedIndex = Number(groupIndex) + 1;
+        var resultGroup = _lastGrossData && _lastGrossData[groupIndex] ? _lastGrossData[groupIndex] : null;
+        var baseGroupIndex = resultGroup && resultGroup.derived && resultGroup.derived.base_group != null
+            ? Number(resultGroup.derived.base_group)
+            : Number(groupIndex);
+        var expectedIndex = baseGroupIndex + 1;
         var matches = all.filter(function(group) {
             if (!group || group.isDerived) return false;
             if (Number(group.groupIndex) !== expectedIndex) return false;
@@ -1306,11 +1310,7 @@
             quantiles = { p05: qv(0.05), p25: qv(0.25), p50: qv(0.50), p75: qv(0.75), p95: qv(0.95) };
         }
         var entryFrequency = [];
-        if (group.derived && Array.isArray(group.derived.product_names)) {
-            entryFrequency = group.derived.product_names.map(function(name) {
-                return { product: { name: name, desc: name }, count: null, frequency: 0, mean_return: null };
-            });
-        } else if (group.derived && group.derived.config) {
+        if (group.derived && group.derived.config) {
             var config = group.derived.config;
             (config.long || []).forEach(function(leg) {
                 entryFrequency.push({ product: { name: 'Long 第' + (leg.group + 1) + '组', desc: '权重 ' + leg.weight.toFixed(3) }, count: null, frequency: 0, mean_return: null });
@@ -1666,12 +1666,12 @@
         content.style.display = 'none';
         try {
             var metric = (_lastMetrics || {})[group.key] || (_lastMetrics || {})[key] || {};
-            var isBaseGroup = !group.is_derived && !group.is_ls && isFinite(groupIndex);
-            var detail = isBaseGroup ? await loadBaseGroupDetail(groupIndex) : buildPortfolioDetail(group, metric);
-            renderGroupDetail(detail, { showDerivedPanel: isBaseGroup });
-            if (!isBaseGroup) {
+            var isLsGroup = !!group.is_ls;
+            var detail = isLsGroup ? buildPortfolioDetail(group, metric) : await loadBaseGroupDetail(groupIndex);
+            renderGroupDetail(detail, { showDerivedPanel: !isLsGroup });
+            if (isLsGroup) {
                 var summary = document.getElementById('group-detail-frequency-summary');
-                if (summary) summary.textContent = group.is_ls ? 'Long-Short 组合腿配置' : '派生组所选品种';
+                if (summary) summary.textContent = 'Long-Short 组合腿配置';
             }
             loading.style.display = 'none';
             content.style.display = '';
