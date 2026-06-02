@@ -290,7 +290,7 @@
             if (data.success && data.contracts && data.contracts.length > 0) {
                 currentContracts = data.contracts.slice().reverse();
                 for (var i = 0; i < currentContracts.length; i++) {
-                    var c = data.contracts[i];
+                    var c = currentContracts[i];
                     var tr = document.createElement('tr');
                     tr.setAttribute('data-idx', i);
                     tr.style.cursor = 'pointer';
