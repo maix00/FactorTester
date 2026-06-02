@@ -4,14 +4,14 @@
  * 从 GT.groupSettings 读取分组配置，组装 API payload。
  * 不再读取 DOM/window.submissions 兜底——group-settings 是唯一数据源。
  *
- * 挂载到 GT.core.collect。
+ * 挂载到 GT.core.prerunCollect。
  */
 (function() {
     var GT = window.GroupTest;
     if (!GT) { console.warn('[prerun-collect] GroupTest bootstrap missing'); return; }
 
     GT.core = GT.core || {};
-    if (GT.core.collect) { console.warn('[prerun-collect] already loaded'); return; }
+    if (GT.core.prerunCollect) { console.warn('[prerun-collect] already loaded'); return; }
 
     var collect = {};
 
@@ -197,5 +197,5 @@
         });
     };
 
-    GT.core.collect = collect;
+    GT.core.prerunCollect = collect;
 })();

@@ -290,8 +290,8 @@
                     expandedIndex += 1;
                 }
             }
-            b.derivedPayload = (GT.core.collect && typeof GT.core.collect.collectDerivedPayloadForBatch === 'function')
-                ? GT.core.collect.collectDerivedPayloadForBatch(b)
+            b.derivedPayload = (GT.core.prerunCollect && typeof GT.core.prerunCollect.collectDerivedPayloadForBatch === 'function')
+                ? GT.core.prerunCollect.collectDerivedPayloadForBatch(b)
                 : [];
             for (var di = 0; di < b.derivedPayload.length; di++) {
                 if (b.derivedPayload[di].id) {
