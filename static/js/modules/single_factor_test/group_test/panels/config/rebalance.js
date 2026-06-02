@@ -148,7 +148,7 @@
 
     function getChips(group) {
         if (!group) return [];
-        var mode = group.rebalanceMode || 'buy_and_hold';
+        var mode = group.rebalanceMode || 'each_period';
 
         var label = MODE_LABELS[mode];
         if (!label) return [];
@@ -173,7 +173,7 @@
     // Register field schema (so _fillGroupFromConfig preserves this field)
     var GS = GT.groupSettings;
     if (GS && GS.registerField) {
-        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'buy_and_hold' });
+        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'each_period' });
     }
 
     // Register as category-3 config panel

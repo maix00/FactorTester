@@ -109,7 +109,7 @@
             feeMap: node.feeMap !== undefined ? node.feeMap : null,
             feeSensitivity: node.feeSensitivity !== undefined ? node.feeSensitivity : 1,
             useCloseToday: !!node.useCloseToday,
-            rebalanceMode: node.rebalanceMode || 'buy_and_hold',
+            rebalanceMode: node.rebalanceMode || 'each_period',
             liquidityMode: node.liquidityMode || 'infinite',
             liquidityPercent: node.liquidityPercent !== undefined && node.liquidityPercent !== null ? node.liquidityPercent : 100
         };
@@ -246,7 +246,7 @@
             feeMap: bg.feeMap,
             feeSensitivity: bg.feeSensitivity,
             useCloseToday: !!bg.useCloseToday,
-            rebalanceMode: bg.rebalanceMode || 'buy_and_hold',
+            rebalanceMode: bg.rebalanceMode || 'each_period',
             liquidityMode: bg.liquidityMode || 'infinite',
             liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : 100
         };

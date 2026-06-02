@@ -95,7 +95,7 @@ function registerConfigFields(GT) {
     { key: 'feeMap', type: 'object', default: null },
     { key: 'feeSensitivity', type: 'number', default: 1 },
     { key: 'useCloseToday', type: 'boolean', default: false },
-    { key: 'rebalanceMode', type: 'string', default: 'buy_and_hold' },
+    { key: 'rebalanceMode', type: 'string', default: 'each_period' },
     { key: 'liquidityMode', type: 'string', default: 'infinite' },
     { key: 'liquidityPercent', type: 'number', default: 100 },
     { key: 'productMask', type: 'object', default: null },

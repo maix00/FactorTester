@@ -538,7 +538,7 @@
             fee_rate: group.feeRate != null ? group.feeRate : null,
             fee_map: (mode === 'per_product' || mode === 'custom') ? _groupsSerializeFeeMap(group.feeMap) : null,
             use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
+            rebalance_mode: group.rebalanceMode || 'each_period',
             liquidity_mode: group.liquidityMode || 'infinite',
             liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
         };

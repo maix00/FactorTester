@@ -29,7 +29,7 @@ const childId = GT.groupSettings.groups.add({
   parentId: null,
   productMask: { IF: true },
   feeMode: 'none',
-  rebalanceMode: 'buy_and_hold',
+  rebalanceMode: 'each_period',
 });
 
 assert.strictEqual(GT.groupSettings.groups.get(baseId).feeMode, 'uniform');
