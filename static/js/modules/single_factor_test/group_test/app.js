@@ -24,6 +24,8 @@
 
     GT.ui._readGroupTimeRangeInput = readGroupTimeRangeInput;
     GT.ui._resolveGroupRunTimeRange = resolveGroupRunTimeRange;
+
+    function getCurrentContext() {
         var ctx = window.SingleFactorSubmissionContext;
         var activeFactorBtn = document.querySelector('.group-factor-nav-btn.active');
         if (activeFactorBtn) {
