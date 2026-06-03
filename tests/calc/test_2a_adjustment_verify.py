@@ -40,7 +40,7 @@ from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 
 from tests.calc import TEST_1_DIR, TEST_2A_DIR
 
@@ -58,6 +58,15 @@ HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_typ
 
 def _col_letter(idx: int) -> str:
     return get_column_letter(idx)
+
+
+def _col_idx(ref: str) -> int:
+    """从 Excel 引用如 'A3' 或 'AB10' 提取 1-based 列号"""
+    import re as _re
+    m = _re.match(r'([A-Z]+)', ref)
+    if not m:
+        return 0
+    return column_index_from_string(m.group(1))
 
 
 # test_1 合约 sheet 列布局 (row1=remark, row2=header, row3+=data)
@@ -250,8 +259,8 @@ def process_product(prod_xlsx: Path) -> None:
         1, 1,
         '切换记录 + 复权因子计算\n'
         '辅助列公式全部为 Excel 函数，不硬编码行号\n'
-        '_prev_close: INDEX(前合约!G:G, MATCH(end_date, 前合约!B:B, 0))\n'
-        '_cur_close:  INDEX(本合约!G:G, MATCH(start_date, 本合约!B:B, 0))\n'
+        '_prev_close: INDEX(INDIRECT("\'"&前合约B&"\'!J:J"), MATCH(前合约E, INDIRECT("\'"&前合约B&"\'!A:A"), 0))\n'
+        '_cur_close:  INDEX(INDIRECT("\'"&本合约B&"\'!J:J"), MATCH(本合约D, INDIRECT("\'"&本合约B&"\'!A:A"), 0))\n'
         'adj_mul: IF(第一行,1, _prev_close/_cur_close * _prev_adj)'
     )
 
@@ -278,23 +287,23 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- _prev_close ----
         # =INDEX(INDIRECT("'"&上一行B&"'!J:J"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!E:E"), 0))
         # 不硬编码 sheet 名：通过上一行 instrument_id (B列) 动态获取前合约 sheet 名
-        # close_price = J列 (10), instrument_id = E列 (5), end_date = E列 (5)
+        # trading_day = A列 (1), close_price = J列 (10)
         if i == 0:
             sw_out.cell(row, PREV_CLOSE_COL, '').fill = FORMULA_FILL
         elif i > 0:
             prev_b = f'{_col_letter(2)}{row - 1}'   # B: instrument_id 上一行
             prev_e = f'{_col_letter(5)}{row - 1}'   # E: end_date 上一行
             prev_g_ref = f'INDIRECT("\'"&{prev_b}&"\'!J:J")'
-            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!E:E")'
+            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!A:A")'  # A:A = trading_day
             formula = f'=INDEX({prev_g_ref},MATCH({prev_e},{prev_b_ref},0))'
             sw_out.cell(row, PREV_CLOSE_COL, formula).fill = FORMULA_FILL
 
         # ---- _cur_close ----
-        # =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!E:E"), 0))
+        # =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!A:A"), 0))
         cur_b = f'{_col_letter(2)}{row}'    # B: instrument_id 本行
         cur_d = f'{_col_letter(4)}{row}'    # D: start_date 本行
         cur_g_ref = f'INDIRECT("\'"&{cur_b}&"\'!J:J")'
-        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!E:E")'
+        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!A:A")'  # A:A = trading_day
         formula = f'=INDEX({cur_g_ref},MATCH({cur_d},{cur_b_ref},0))'
         sw_out.cell(row, CUR_CLOSE_COL, formula).fill = FORMULA_FILL
 
@@ -397,26 +406,92 @@ def process_product(prod_xlsx: Path) -> None:
     wb.close()
 
     # ============================================================
-    # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）
+    # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）+ 注入列格式
     #    防止 WPS/Excel 自动插入 @ implicit intersection operator
+    #    列格式从 styles.xml 的 numFmtId 读取，注入到 <cols> 元素
     # ============================================================
     # 计算 ref 范围：23 列 (A-W)，total_rows 数据行从 row 3 开始
     last_row = 2 + total_rows
     ref_range = f'A3:W{last_row}'
-    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3', ref_range)
+    col_numfmts = _read_contract_col_numfmts_from_xml(dst_path)
+    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3', ref_range, col_numfmts=col_numfmts)
 
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
 
 
-def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str,
-                                 ref_range: str | None = None):
+def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
     """
-    在 xlsx 的 XML 层面标记指定单元格为动态数组公式。
+    从已保存的 xlsx 的 XML 层面读取合约 sheet 的列级 numFmtId。
+
+    遍历样式表 styles.xml 的 cellXfs，找到合约数据行 cell 的 s=，
+    映射到 numFmtId。
+    """
+    import zipfile as _zf
+    with _zf.ZipFile(xlsx_path, 'r') as zf:
+        # 解析 styles.xml
+        styles = ET.parse(zf.open('xl/styles.xml'))
+        styles_root = styles.getroot()
+        cellXfs = styles_root.find(f'{{{NS_SHEET}}}cellXfs')
+        if cellXfs is None:
+            return {}
+        xf_list = cellXfs.findall(f'{{{NS_SHEET}}}xf')
+        numFmts = styles_root.find(f'{{{NS_SHEET}}}numFmts')
+
+        # 找到合约 sheet（非 _SWITCHES, 非 MAIN）
+        wb_xml = ET.parse(zf.open('xl/workbook.xml'))
+        for sh in wb_xml.getroot().findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+            sn = sh.get('name')
+            if sn in ('_SWITCHES', 'MAIN'):
+                continue
+            # 找这个 sheet 文件
+            r_id = sh.get(f'{{{NS_R}}}id')
+            rels_xml = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
+            target = None
+            for rel in rels_xml.getroot():
+                if rel.get('Id') == r_id:
+                    target = rel.get('Target').lstrip('/')
+                    break
+            if target is None:
+                continue
+
+            sheet = ET.parse(zf.open(target))
+            s_root = sheet.getroot()
+            # 找 row 3
+            result = {}
+            for row in s_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+                if row.get('r') == '3':
+                    for c in row.findall(f'{{{NS_SHEET}}}c'):
+                        r = c.get('r')
+                        s = c.get('s')
+                        if s is None:
+                            continue
+                        si = int(s)
+                        if si < len(xf_list):
+                            nfi = xf_list[si].get('numFmtId')
+                            if nfi is not None and nfi != '0':
+                                # 找到列号
+                                col_idx = _col_idx(r)
+                                result[col_idx] = int(nfi)
+                    break
+            return result
+    return {}
+
+
+def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str,
+                                 ref_range: str | None = None,
+                                 col_numfmts: dict[int, int] | None = None):
+    """
+    在 xlsx 的 XML 层面标记指定单元格为动态数组公式，并可选注入列格式。
 
     修改 sheet XML 中 <f> 元素加 ca="1" 和 t="array" ref="..." 属性，
     并在 cell 元素加 cm="1" 属性。
     ref_range 如 "A3:M194387"。
+
+    col_numfmts: {col_idx_1based: numFmtId} — 注入 <cols> 元素到 sheet XML，
+    确保动态数组溢出区域有正确的列级格式（日期不显示为序列号）。
+    numFmtId 必须已存在于 styles.xml 的 numFmts 或内置格式表中。
     """
+
     # 1. 读 workbook.xml 找 sheetId → rId → sheet 文件名
     with zipfile.ZipFile(xlsx_path, 'r') as zf:
         wb_xml = ET.parse(zf.open('xl/workbook.xml'))
@@ -443,6 +518,32 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
         # 3. 读 sheet XML
         sheet_xml = ET.parse(zf.open(full_sheet_file))
         sheet_root = sheet_xml.getroot()
+
+        # 3.5 注入 <cols> 元素（列级格式），确保动态数组溢出区域正确显示日期等
+        if col_numfmts:
+            _ns = f'{{{NS_SHEET}}}'
+            # 检查是否已有 <cols>
+            cols = sheet_root.find(f'{_ns}cols')
+            if cols is not None:
+                sheet_root.remove(cols)
+            # 按列号分组连续 numFmtId 相同的列
+            sorted_cols = sorted(col_numfmts.items())
+            groups = []
+            for ci, nfi in sorted_cols:
+                cl = _col_letter(ci)
+                if groups and groups[-1][2] == nfi and groups[-1][1] + 1 == ci:
+                    groups[-1] = (groups[-1][0], ci, nfi, groups[-1][3])
+                else:
+                    groups.append((ci, ci, nfi, cl))
+            cols_el = ET.Element(f'{_ns}cols')
+            for cmin, cmax, nfi, cl in groups:
+                col_el = ET.SubElement(cols_el, f'{_ns}col')
+                col_el.set('min', str(cmin))
+                col_el.set('max', str(cmax))
+                col_el.set('numFmtId', str(nfi))
+                col_el.set('customFormat', '1')
+                col_el.set('width', '13')
+            sheet_root.insert(0, cols_el)
 
         # 4. 找到指定 cell 的 <c> 和 <f>
         match = re.match(r'([A-Z]+)(\d+)', cell_ref)
@@ -507,6 +608,48 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
 def _xml_tostring(root):
     """Serialize XML element to bytes with XML declaration."""
     return ET.tostring(root, xml_declaration=True, encoding='UTF-8')
+
+
+def _inject_col_formats(sheet_root, col_formats: dict[int, str]):
+    """
+    Inject <cols><col numFmtId="..."/></cols> into sheet XML so that dynamic
+    array spill columns display dates/datetimes correctly.
+
+    Uses only standard Excel numFmtId values that are available in every
+    workbook without needing to modify styles.xml:
+      14 = 'dd/mm/yyyy' (or regional date format)
+      22 = 'dd/mm/yyyy h:mm'
+
+    Note: the exact display format varies by locale.  For zh-CN Excel,
+    numFmtId 14 typically displays as 'yyyy/mm/dd' or 'yyyy-mm-dd'.
+    """
+    cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
+    if cols is None:
+        sheet_data = sheet_root.find(f'{{{NS_SHEET}}}sheetData')
+        cols = ET.Element(f'{{{NS_SHEET}}}cols')
+        if sheet_data is not None:
+            sheet_root.insert(list(sheet_root).index(sheet_data), cols)
+        else:
+            sheet_root.insert(0, cols)
+
+    # Remove any existing <col> for our indices
+    our_indices = set(col_formats.keys())
+    for ec in list(cols.findall(f'{{{NS_SHEET}}}col')):
+        ec_min = int(ec.get('min', '0'))
+        ec_max = int(ec.get('max', '0'))
+        if not our_indices.isdisjoint(range(ec_min, ec_max + 1)):
+            cols.remove(ec)
+
+    for col_idx, fmt in sorted(col_formats.items()):
+        col_el = ET.SubElement(cols, f'{{{NS_SHEET}}}col')
+        col_el.set('min', str(col_idx))
+        col_el.set('max', str(col_idx))
+        col_el.set('customFormat', '1')
+        if 'h:mm' in fmt:
+            col_el.set('numFmtId', '22')
+        else:
+            col_el.set('numFmtId', '14')
+
 
 
 def main():
