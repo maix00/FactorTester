@@ -1,5 +1,20 @@
 import os, threading, webbrowser, time, sys, importlib
 from pathlib import Path
+
+# When running under the VS Code debugger (pydevd.settrace with
+# patch_multiprocessing=True), multiprocessing.resource_tracker is
+# started. At process exit, the tracker's cleanup triggers a debugger
+# breakpoint inside <string> bytecode.  Since this Flask app does not
+# use multiprocessing shared resources, neuter the resource tracker
+# early so it never starts.
+try:
+    from multiprocessing import resource_tracker as _rt
+    _rt.register = _rt.unregister = _rt.ensure_running = lambda *a, **kw: None
+    if hasattr(_rt, '_resource_tracker'):
+        _rt._resource_tracker._pid = None
+except Exception:
+    pass
+
 from flask import request, jsonify, session
 from waitress import serve
 from server import create_app
