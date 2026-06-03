@@ -125,10 +125,6 @@ class ManagerState:
         env = os.environ.copy()
         env["FLASK_DEBUG"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
-        # Worktrees derive DATA_DIR from __file__'s parent, which lands inside
-        # .workspace/... instead of the real data directory.  Point FT_DATA_DIR
-        # at the repo-level data dir (same one the master/feat worktrees use).
-        env.setdefault("FT_DATA_DIR", str(self.repo.parent / "data"))
         proc = subprocess.Popen(
             [self.python, "start_server.py", "--port", str(port)],
             cwd=path,
