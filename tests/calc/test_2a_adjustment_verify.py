@@ -1,12 +1,13 @@
 """
 test_2a_adjustment_verify.py
 -----------------------------
-纯 Excel 公式版本 (INDEX/MATCH, 同文件内引用)。
+纯 Excel 公式版本 — REDUCE + VSTACK 动态拼接主力连续序列。
 
 方案：
-1. 从 test_1 复制合约 sheet 数据到 test_2a xlsx（同文件内，避免 INDIRECT #REF!）
-2. _SWITCHES 辅助列用 INDEX/MATCH 动态查找 close（不硬编码行号）
-3. MAIN sheet 直接 =合约sheet!$col$row 引用，VLOOKUP 查 _SWITCHES
+1. 从 test_1 复制合约 sheet 数据到 test_2a xlsx（同文件内）
+2. _SWITCHES 用 INDIRECT 动态引用合约 sheet（不硬编码 sheet 名）
+3. MAIN 用 REDUCE+VSTACK+INDIRECT 数组公式自动拼接所有合约数据行
+   — 不需要 Python for 循环逐行写，不硬编码合约名或行号
 
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
@@ -19,9 +20,10 @@ _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sh
   adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
   adjustment_add: =0
 
-MAIN sheet：
-  直接 =合约sheet!$col$row 引用（同文件内，不需要 INDIRECT）
-  VLOOKUP 从本文件 _SWITCHES 查 adjustment_mul/add
+MAIN sheet（单一 REDUCE+VSTACK 数组公式，A3 溢出）：
+  REDUCE 遍历 _SWITCHES 中的每个合约，INDIRECT 取各合约 sheet A3:K{nrows+2}，
+  HSTACK 加上 adjustment_mul/add，VSTACK 拼接后 DROP 掉初始空行。
+  完全动态：增减合约只需改 _SWITCHES 数据，MAIN 自动适应。
 
 Output: data/test/test_2a/{prod}.xlsx
 """
@@ -55,22 +57,23 @@ CONTRACT_CLOSE_COL = 7      # G: close_price
 CONTRACT_TD_COL = 2          # B: trading_day
 DATA_START_ROW = 3           # 数据从第3行开始 (1=remark, 2=header)
 
-# _SWITCHES 列定义（复制后的）
+# _SWITCHES 列定义
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
 # F=_prev_close, G=_cur_close, H=_prev_adj, I=adjustment_mul, J=adjustment_add
+# K=_nrows（该合约数据行数，纯数值，供 MAIN REDUCE 公式使用）
 SW_ORIG_COLS = 5
 PREV_CLOSE_COL = SW_ORIG_COLS + 1  # F=6
 CUR_CLOSE_COL = SW_ORIG_COLS + 2   # G=7
 PREV_ADJ_COL = SW_ORIG_COLS + 3    # H=8
 ADJ_MUL_COL = SW_ORIG_COLS + 4     # I=9
 ADJ_ADD_COL = SW_ORIG_COLS + 5     # J=10
+SW_NROWS_COL = SW_ORIG_COLS + 6    # K=11: _nrows
 
-# MAIN 列布局
-# A=_contract, B..L=数据, M=adjustment_mul, N=adjustment_add
-MAIN_CONTRACT_COL = 1
-MAIN_DATA_START = 2
-MAIN_MUL_COL = MAIN_DATA_START + len(CONTRACT_COLS)      # M=13
-MAIN_ADD_COL = MAIN_DATA_START + len(CONTRACT_COLS) + 1  # N=14
+# MAIN 列布局 (11 数据列 + 2 adjustment 列 = 13 列, A..M)
+# A..K = 合约数据, L=adjustment_mul, M=adjustment_add
+MAIN_NCOLS = len(CONTRACT_COLS) + 2  # 13
+MAIN_MUL_COL_OFFSET = len(CONTRACT_COLS) + 1  # L=12 (在 13 列中的位置)
+MAIN_ADD_COL_OFFSET = len(CONTRACT_COLS) + 2  # M=13
 
 
 def _check_sheets_match(src_path: Path, dst_path: Path) -> bool:
@@ -223,11 +226,14 @@ def process_product(prod_xlsx: Path) -> None:
 
     # Row 2: header
     headers = ['trading_day', 'instrument_id', 'windcode', 'start_date', 'end_date',
-               '_prev_close', '_cur_close', '_prev_adj', 'adjustment_mul', 'adjustment_add']
+               '_prev_close', '_cur_close', '_prev_adj', 'adjustment_mul', 'adjustment_add',
+               '_nrows']
     for ci, h in enumerate(headers, 1):
         sw_out.cell(2, ci, h).fill = HEADER_FILL
 
     # ---- 写入切换数据 + 公式 ----
+    contracts_in_order = [s[0] for s in switches]
+
     for i, (inst, td, wc, sd, ed) in enumerate(switches):
         row = i + 3  # Excel row (1=remark, 2=header)
 
@@ -284,73 +290,77 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- adjustment_add ----
         sw_out.cell(row, ADJ_ADD_COL, 0).fill = FORMULA_FILL
 
+        # ---- _nrows（纯数值，供 MAIN REDUCE 数组公式使用）----
+        sw_out.cell(row, SW_NROWS_COL, sheet_rows.get(inst, 0))
+
     # ----------------------------------------------------------
-    # Sheet 1: MAIN (主力连续序列)
+    # Sheet 1: MAIN (主力连续序列 — 纯 Excel REDUCE+VSTACK 数组公式)
     # ----------------------------------------------------------
     main_ws = wb.create_sheet('MAIN', 1)
+
+    sw_last_row = 2 + len(switches)
 
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        '主力连续序列（全部 Excel 公式）\n'
-        '数据列: =合约sheet!$col$row（同文件内引用，无硬编码行号）\n'
-        'adjustment_mul/add: VLOOKUP 从 _SWITCHES 查询'
+        '主力连续序列 — REDUCE + VSTACK + INDIRECT 动态拼接\n'
+        '公式：遍历 _SWITCHES，INDIRECT 取各合约 sheet 数据行，VSTACK 拼接\n'
+        'adjustment_mul/add: IFERROR(VLOOKUP from _SWITCHES)'
     )
 
-    # Row 2: header
-    main_ws.cell(2, MAIN_CONTRACT_COL, '_contract').fill = HEADER_FILL
+    # Row 2: header (11 数据列 + 2 adjustment 列)
     for ci, cn in enumerate(CONTRACT_COLS):
-        main_ws.cell(2, MAIN_DATA_START + ci, cn).fill = HEADER_FILL
-    main_ws.cell(2, MAIN_MUL_COL, 'adjustment_mul').fill = HEADER_FILL
-    main_ws.cell(2, MAIN_ADD_COL, 'adjustment_add').fill = HEADER_FILL
+        main_ws.cell(2, ci + 1, cn).fill = HEADER_FILL
+    main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
+    main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # 写入 MAIN 数据行
-    current_row = 3
+    # A3: 单一 REDUCE 数组公式，自动溢出到所有行列
+    # 对每个合约 i:
+    #   1. INDIRECT 取合约 sheet 的所有数据行 (A3:K{nrows+2})
+    #   2. HSTACK 加上 adjustment_mul / adjustment_add（VLOOKUP _SWITCHES）
+    #   3. VSTACK 拼接到结果中（跳过 header）
+    # 最后 VSTACK 拼接所有合约 + 第一行留空给 header
+    #
+    # 公式结构：
+    # =LET(
+    #   ct, _SWITCHES!$B$3:$B${sw_last_row},
+    #   nr, _SWITCHES!$K$3:$K${sw_last_row},
+    #   am, _SWITCHES!$I$3:$I${sw_last_row},
+    #   aa, _SWITCHES!$J$3:$J${sw_last_row},
+    #   n, ROWS(ct),
+    #   DROP(
+    #     REDUCE(
+    #       "",
+    #       SEQUENCE(n),
+    #       LAMBDA(acc, i,
+    #         LET(
+    #           raw, INDIRECT("'"&INDEX(ct,i)&"'!A3:K"&INDEX(nr,i)+2),
+    #           mul, EXPAND(INDEX(am,i), INDEX(nr,i), 1, INDEX(am,i)),
+    #           add, EXPAND(INDEX(aa,i), INDEX(nr,i), 1, INDEX(aa,i)),
+    #           VSTACK(acc, HSTACK(raw, mul, add))
+    #         )
+    #       )
+    #     ), 1
+    #   )
+    # )
+    formula = (
+        f'=LET('
+        f'ct,_SWITCHES!$B$3:$B${sw_last_row},'
+        f'nr,_SWITCHES!$K$3:$K${sw_last_row},'
+        f'am,_SWITCHES!$I$3:$I${sw_last_row},'
+        f'aa,_SWITCHES!$J$3:$J${sw_last_row},'
+        f'n,ROWS(ct),'
+        f'DROP(REDUCE("",SEQUENCE(n),LAMBDA(acc,i,'
+        f'LET(raw,INDIRECT("\'"&INDEX(ct,i)&"\'!A3:K"&INDEX(nr,i)+2),'
+        f'mul,EXPAND(INDEX(am,i),INDEX(nr,i),1,INDEX(am,i)),'
+        f'add,EXPAND(INDEX(aa,i),INDEX(nr,i),1,INDEX(aa,i)),'
+        f'VSTACK(acc,HSTACK(raw,mul,add))'
+        f'))),1)'
+    )
+    main_ws.cell(3, 1, formula).fill = FORMULA_FILL
+
     contracts_in_order = [s[0] for s in switches]
-
-    for contract_name in contracts_in_order:
-        if contract_name not in sheet_rows:
-            continue
-        nrows = sheet_rows[contract_name]
-
-        for i in range(nrows):
-            src_row = DATA_START_ROW + i
-            row = current_row + i
-
-            # _contract 辅助列
-            main_ws.cell(row, MAIN_CONTRACT_COL, contract_name).fill = FORMULA_FILL
-
-            # 数据列：直接引用同文件内的合约 sheet
-            # =合约sheet!$col$row
-            for ci in range(len(CONTRACT_COLS)):
-                src_col = ci + 1
-                col = MAIN_DATA_START + ci
-                ref = f"='{contract_name}'!${_col_letter(src_col)}${src_row}"
-                main_ws.cell(row, col, ref).fill = FORMULA_FILL
-
-            # adjustment_mul: VLOOKUP 从 _SWITCHES
-            # =VLOOKUP(_contract, _SWITCHES!$B$3:$I$x, 8, FALSE)
-            # B=instrument_id, I=adjustment_mul → col_index=8 (I是第9列，B到I共8列)
-            contract_cell = _col_letter(MAIN_CONTRACT_COL) + str(row)
-            sw_last_row = 2 + len(switches)
-            mul_formula = (
-                f'=VLOOKUP({contract_cell},'
-                f'_SWITCHES!$B${DATA_START_ROW}:${_col_letter(ADJ_MUL_COL)}${sw_last_row},'
-                f'{ADJ_MUL_COL - 1},FALSE)'
-            )
-            main_ws.cell(row, MAIN_MUL_COL, mul_formula).fill = FORMULA_FILL
-
-            # adjustment_add: VLOOKUP _SWITCHES
-            add_formula = (
-                f'=VLOOKUP({contract_cell},'
-                f'_SWITCHES!$B${DATA_START_ROW}:${_col_letter(ADJ_ADD_COL)}${sw_last_row},'
-                f'{ADJ_ADD_COL - 1},FALSE)'
-            )
-            main_ws.cell(row, MAIN_ADD_COL, add_formula).fill = FORMULA_FILL
-
-        current_row += nrows
-
-    total_rows = current_row - 3
+    total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
 
     # ============================================================
     # 3. 保存
