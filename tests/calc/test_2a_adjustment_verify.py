@@ -61,7 +61,7 @@ DATA_START_ROW = 3           # 数据从第3行开始 (1=remark, 2=header)
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
 # F=_prev_close, G=_cur_close, H=_prev_adj, I=adjustment_mul, J=adjustment_add
 # K=_nrows（该合约数据行数，纯数值）
-# L=_ref_str（INDIRECT 引用字符串，Excel 公式拼接，如 'a2405'!A3:K14027）
+# L=_ref_str（Python 写入纯文本，如 'a2405'!A3:K14027，供 INDIRECT 直接使用）
 SW_ORIG_COLS = 5
 PREV_CLOSE_COL = SW_ORIG_COLS + 1  # F=6
 CUR_CLOSE_COL = SW_ORIG_COLS + 2   # G=7
@@ -292,16 +292,13 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- adjustment_add ----
         sw_out.cell(row, ADJ_ADD_COL, 0).fill = FORMULA_FILL
 
-        # ---- _nrows（纯数值，供 MAIN REDUCE 数组公式使用）----
+        # ---- _nrows（纯数值，供 MAIN 公式使用）----
         sw_out.cell(row, SW_NROWS_COL, sheet_rows.get(inst, 0))
 
-        # ---- _ref_str（Excel 公式拼接引用字符串，如 'a2405'!A3:K14027）----
-        # ="'"&B{row}&"'!A3:K"&K{row}+2
-        ref_formula = (
-            f'="\'"&{_col_letter(2)}{row}&"\'!A3:K"&'
-            f'{_col_letter(SW_NROWS_COL)}{row}+2'
-        )
-        sw_out.cell(row, SW_REF_STR_COL, ref_formula).fill = FORMULA_FILL
+        # ---- _ref_str（Python 写入的文本字符串，如 'a2405'!A3:K14027）----
+        # 对 INDIRECT 来说，这是纯文本值，不需要先求值公式
+        ref_str = f"'{inst}'!A3:K{sheet_rows.get(inst, 0) + 2}"
+        sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
     # Sheet 1: MAIN (主力连续序列 — REDUCE + INDIRECT 动态拼接)
