@@ -267,6 +267,7 @@
     /**
      * 收集 groupList 中所有 distinct 产品名称，按出现顺序。
      */
+    /** 收集所有组的全部产品（去重），返回 [{name, desc, ...}] */
     function _batchProducts(groupList) {
         var seen = {};
         var prods = [];
@@ -275,7 +276,7 @@
                 var key = (typeof p === 'string') ? p : p.name;
                 if (!seen[key]) {
                     seen[key] = true;
-                    prods.push(key);
+                    prods.push((typeof p === 'string') ? {name: p, desc: p} : p);
                 }
             });
         });
@@ -440,9 +441,10 @@
         });
         html += '</tr></thead><tbody>';
 
-        allProducts.forEach(function(prodName) {
+        allProducts.forEach(function(prodObj) {
+            var prodName = (typeof prodObj === 'string') ? prodObj : prodObj.name;
             html += '<tr>';
-            html += '<td class="snapshot-prod-name-cell">' + _escape(prodName) + '</td>';
+            html += '<td class="snapshot-prod-name-cell">' + _renderProduct(prodObj) + '</td>';
             colGroups.forEach(function(cg) {
                 var status = _productStatusInGroup(prodName, cg.group);
                 var cellContent;
@@ -455,7 +457,7 @@
                     cellContent = _renderProduct(_findProductObj(prodName, cg.group));
                     cellClass += 'pending-exit';
                 } else if (status === 'exiting') {
-                    cellContent = prodName;
+                    cellContent = _renderProduct(prodObj);
                     cellClass += 'exiting';
                 } else if (status === 'holding') {
                     cellContent = _renderProduct(_findProductObj(prodName, cg.group));
@@ -645,9 +647,10 @@
             });
             html += '</tr></thead><tbody>';
 
-            allProds.forEach(function(prodName) {
+            allProds.forEach(function(prodObj) {
+                var prodName = (typeof prodObj === 'string') ? prodObj : prodObj.name;
                 html += '<tr>';
-                html += '<td class="snapshot-prod-name-cell">' + _escape(prodName) + '</td>';
+                html += '<td class="snapshot-prod-name-cell">' + _renderProduct(prodObj) + '</td>';
                 colGroups.forEach(function(cg) {
                     var status = _productStatusInGroup(prodName, cg.group);
                     var cellContent;
@@ -660,7 +663,7 @@
                         cellContent = _renderProduct(_findProductObj(prodName, cg.group));
                         cellClass += 'pending-exit';
                     } else if (status === 'exiting') {
-                        cellContent = prodName;
+                        cellContent = _renderProduct(prodObj);
                         cellClass += 'exiting';
                     } else if (status === 'holding') {
                         cellContent = _renderProduct(_findProductObj(prodName, cg.group));
