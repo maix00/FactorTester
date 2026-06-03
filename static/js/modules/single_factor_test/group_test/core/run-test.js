@@ -18,12 +18,14 @@
 
     var runTest = {};
 
-    // ── 本地桥接引用 ──
-    var resolveGroupRunTimeRange = GT.core.dates ? GT.core.dates.resolveGroupRunTimeRange : function() { return {startDate:null,endDate:null}; };
-    var persistGroupTimeRangeToDatamodel = GT.core.dates ? GT.core.dates.persistGroupTimeRangeToDatamodel : function(){};
-
     function cache() {
         return GT.groupSettings && GT.groupSettings.cache ? GT.groupSettings.cache : null;
+    }
+
+    function prepareLocalRun() {
+        return GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
+            ? GT.localSettings.prepareRun()
+            : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -335,30 +337,10 @@
         var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
 
         var firstGroup = batches[0] && batches[0].groups[0];
-        var firstTesterId = batches[0] && batches[0].testerId;
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode')) : GT.groupSettings.getFieldDefault('rebalanceMode');
-        var fallbackTesterId = firstTesterId || (firstGroup ? firstGroup.testerId : null);
-        var resolvedRange = GT.core.dates && GT.core.dates.resolveGroupRunTimeRangeWithFallback
-            ? GT.core.dates.resolveGroupRunTimeRangeWithFallback(
-                firstGroup ? (firstGroup.startDate || null) : null,
-                firstGroup ? (firstGroup.endDate || null) : null,
-                fallbackTesterId
-              )
-            : resolveGroupRunTimeRange(
-                firstGroup ? (firstGroup.startDate || null) : null,
-                firstGroup ? (firstGroup.endDate || null) : null
-              );
-        var start_date = resolvedRange.startDate;
-        var end_date = resolvedRange.endDate;
-        persistGroupTimeRangeToDatamodel(resolvedRange.explicitStartDate, resolvedRange.explicitEndDate);
-
-        if (!start_date || !end_date) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ 请设置时间范围'; statusSpan.style.color = '#d40000'; }
-            if (runBtn) runBtn.disabled = false;
-            return;
-        }
-        if (start_date > end_date) {
-            if (statusSpan) { statusSpan.innerHTML = '✗ 起始日期不能晚于终止日期'; statusSpan.style.color = '#d40000'; }
+        var localRun = prepareLocalRun();
+        if (localRun.errors && localRun.errors.length) {
+            if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
             if (runBtn) runBtn.disabled = false;
             return;
         }
@@ -454,10 +436,9 @@
             fee_map: fee_map,
             group_fee_maps: null,
             use_closetoday: use_closetoday,
-            start_date: start_date,
-            end_date: end_date,
             rebalance_mode: rebalance_mode
         };
+        Object.assign(bulkPayload, localRun.payload || {});
 
         try {
             // ── 进度条 ──
