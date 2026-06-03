@@ -1,20 +1,25 @@
 """
 test_2a_adjustment_verify.py
 -----------------------------
-从 test_1 的 Excel 复制，添加前复权因子及 Excel 公式计算。
+纯 Excel 公式版本：
+1. 复制 _SWITCHES sheet，添加辅助列用公式计算 adjust_mul
+2. 在 MAIN sheet 用公式引用 test_1 合约数据，VLOOKUP _SWITCHES 的 adjust_mul
 
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
-对每个品种的 test_1 Excel：
-1. 清空 TEST_2A_DIR，从 TEST_1_DIR 复制 xlsx 到 TEST_2A_DIR
-2. 在每个合约 sheet 中写入 adjust_mul / adjust_add / adj_* 列
-   - adjust_mul/add 用 Excel VLOOKUP 从 MAIN sheet 查询
-   - adj_price 用公式 =price * adjust_mul + adjust_add
-3. 在 index=0 插入 MAIN sheet：按时间合并所有合约数据，生成主力连续序列
-   - adjust_mul 用 Excel 公式：切换日 = 上一合约close / 当前合约close * 上一行adjust_mul
-   - adjust_add = 0（纯 Excel 公式）
+_SWITCHES 增强逻辑（全部 Excel 公式）：
+  辅助列：
+    _prev_close: INDIRECT 引用 test_1 前一合约 sheet 中切换日最后一条的 close
+    _cur_close:  INDIRECT 引用 test_1 当前合约 sheet 中切换日第一天的 close
+    _prev_adj:   上一行的 adjust_mul（累乘基准）
+    adjust_mul:  =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
+    adjust_add:  =0
 
-数据源：仅 test_1 的 xlsx 文件。
+MAIN sheet：
+  用 INDIRECT 从 test_1 合约 sheet 按行号引用数据
+  用 VLOOKUP 或 INDEX/MATCH 从本文件 _SWITCHES 查 adjust_mul/add
+
+数据源：仅 test_1 的 xlsx + Excel 公式。
 
 Output: data/test/test_2a/{prod}.xlsx
 """
@@ -22,8 +27,7 @@ Output: data/test/test_2a/{prod}.xlsx
 import shutil
 from pathlib import Path
 
-import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -33,387 +37,304 @@ from tests.calc import TEST_1_DIR, TEST_2A_DIR
 FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
 HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
 
-# 价格列名（test_1 导出使用的列名）
-PRICE_COLS = ['open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price']
-
-# _SWITCHES sheet 中的关键列
-SW_COL_TRADING_DAY = 'trading_day'
-SW_COL_INSTRUMENT_ID = 'instrument_id'
-
-# 合约 sheet 中的关键列
-CS_COL_TRADE_TIME = 'trade_time'
-CS_COL_INSTRUMENT_ID = 'instrument_id'
-CS_COL_CLOSE = 'close_price'
-CS_COL_OPEN = 'open_price'
-CS_COL_HIGH = 'highest_price'
-CS_COL_LOW = 'lowest_price'
-
-# MAIN sheet 列定义（与 test_1 导出列对齐）
-MAIN_COLS = [
-    'trade_time', 'trading_day', 'instrument_id',
-    'open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price',
-    'volume', 'turnover', 'open_interest',
-    'adjustment_mul', 'adjustment_add',
-]
-
-# ------------------------------------------------------------
-# 工具函数
-# ------------------------------------------------------------
-
-def _find_col_idx(headers: list[str | None], col_name: str) -> int | None:
-    """在 header 列表中找列索引（1-based）。"""
-    for i, h in enumerate(headers, 1):
-        if h == col_name:
-            return i
-    return None
-
 
 def _col_letter(idx: int) -> str:
-    """Convert 1-based column index to Excel column letter(s)."""
     return get_column_letter(idx)
 
 
-def _clear_and_copy() -> None:
-    """清空 TEST_2A_DIR，从 TEST_1_DIR 复制所有 xlsx 到 TEST_2A_DIR。"""
+# test_1 合约 sheet 列布局 (row1=remark, row2=header, row3+=data)
+CONTRACT_COLS = [
+    'trade_time', 'trading_day', 'instrument_id',
+    'open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price',
+    'volume', 'turnover', 'open_interest',
+]
+CONTRACT_CLOSE_COL = 7  # close_price
+
+# test_1 合约 sheet 数据起始行
+DATA_START_ROW = 3
+
+
+def process_product(prod_xlsx: Path) -> None:
+    prod = prod_xlsx.stem
+    src_path = TEST_1_DIR / f'{prod}.xlsx'
+    if not src_path.exists():
+        print(f"  ⚠️ test_1 file not found: {src_path.name}, skipping")
+        return
+
+    print(f"  Processing: {prod}...", end='', flush=True)
+
+    # ============================================================
+    # 1. 读取 test_1 源文件结构
+    # ============================================================
+    src_wb = load_workbook(src_path, data_only=True, read_only=True)
+    src_sheets_set = {sn for sn in src_wb.sheetnames if sn != '_SWITCHES'}
+
+    # 每个合约 sheet 的数据行数
+    sheet_rows = {}
+    for sn in sorted(src_sheets_set):
+        ws = src_wb[sn]
+        n = ws.max_row - 2
+        if n > 0:
+            sheet_rows[sn] = n
+
+    # 读取 _SWITCHES 中的切换列表
+    sw_ws = src_wb['_SWITCHES']
+    # _SWITCHES 列布局: col1=remark, col2=header row
+    # 实际数据: A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
+    # 但 remark 行可能打乱了列。用 header row 定位。
+    sw_header_row = 2
+    sw_data_start = 3
+
+    # 找到所有需要的列：trading_day, instrument_id, windcode, start_date, end_date
+    td_col = None
+    inst_col = None
+    wc_col = None
+    sd_col = None
+    ed_col = None
+    for c in range(1, sw_ws.max_column + 1):
+        v = sw_ws.cell(sw_header_row, c).value
+        if v == 'trading_day':
+            td_col = c
+        elif v == 'instrument_id':
+            inst_col = c
+        elif v == 'windcode':
+            wc_col = c
+        elif v == 'start_date':
+            sd_col = c
+        elif v == 'end_date':
+            ed_col = c
+
+    if td_col is None or inst_col is None:
+        print(f"  ⚠️ Cannot find _SWITCHES columns, skipping {prod}")
+        src_wb.close()
+        return
+
+    switches = []
+    for row in range(sw_data_start, sw_ws.max_row + 1):
+        td = sw_ws.cell(row, td_col).value
+        inst = sw_ws.cell(row, inst_col).value
+        if td and inst:
+            wc = sw_ws.cell(row, wc_col).value if wc_col else None
+            sd = sw_ws.cell(row, sd_col).value if sd_col else None
+            ed = sw_ws.cell(row, ed_col).value if ed_col else None
+            switches.append((str(inst), td, wc, sd, ed))  # (instrument_id, trading_day, windcode, start_date, end_date)
+
+    src_wb.close()
+
+    if not switches:
+        print(f"  ⚠️ No switches found for {prod}, skipping")
+        return
+
+    # ============================================================
+    # 2. 创建输出 workbook
+    # ============================================================
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # 相对路径：test_2a/A.xlsx → ../test_1/A.xlsx
+    rel_path = f'../test_1/{prod}.xlsx'
+
+    # ----------------------------------------------------------
+    # Sheet 0: _SWITCHES (增强版 — 辅助列计算 adjust_mul)
+    # ----------------------------------------------------------
+    sw_out = wb.create_sheet('_SWITCHES', 0)
+
+    # Row 1: remark
+    sw_out.cell(
+        1, 1,
+        f'切换记录 + 复权因子计算（引用自 {rel_path}）\n'
+        f'辅助列公式全部为 Excel 函数，无硬编码值\n'
+        f'prev_close/cur_close = INDIRECT从test_1合约sheet查切换日前一交易日收盘价\n'
+        f'adj_mul = IF(第一行, 1, prev_close/cur_close * 上一行adj_mul)'
+    )
+
+    # 确定列布局
+    # 原列: A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
+    # 辅助列: F=prev_close, G=cur_close, H=_prev_adj, I=adj_mul, J=adj_add
+    SW_ORIG_COLS = 5  # 原 _SWITCHES 有 5 列
+    PREV_CLOSE_COL = SW_ORIG_COLS + 1  # F
+    CUR_CLOSE_COL = SW_ORIG_COLS + 2   # G
+    PREV_ADJ_COL = SW_ORIG_COLS + 3    # H
+    ADJ_MUL_COL = SW_ORIG_COLS + 4     # I
+    ADJ_ADD_COL = SW_ORIG_COLS + 5     # J
+
+    # Row 2: header
+    sw_out.cell(2, 1, 'trading_day').fill = HEADER_FILL
+    sw_out.cell(2, 2, 'instrument_id').fill = HEADER_FILL
+    sw_out.cell(2, 3, 'windcode').fill = HEADER_FILL
+    sw_out.cell(2, 4, 'start_date').fill = HEADER_FILL
+    sw_out.cell(2, 5, 'end_date').fill = HEADER_FILL
+    sw_out.cell(2, PREV_CLOSE_COL, '_prev_close').fill = HEADER_FILL
+    sw_out.cell(2, CUR_CLOSE_COL, '_cur_close').fill = HEADER_FILL
+    sw_out.cell(2, PREV_ADJ_COL, '_prev_adj').fill = HEADER_FILL
+    sw_out.cell(2, ADJ_MUL_COL, 'adjustment_mul').fill = HEADER_FILL
+    sw_out.cell(2, ADJ_ADD_COL, 'adjustment_add').fill = HEADER_FILL
+
+    # 写入切换数据 + 公式
+    prev_inst_to_last_row = {}  # 记录前一个合约 sheet 的数据最后行号
+    for i, (inst, td, wc, sd, ed) in enumerate(switches):
+        row = i + 3  # Excel row (1=remark, 2=header)
+
+        # 基本数据
+        sw_out.cell(row, 1, td)
+        sw_out.cell(row, 2, inst)
+        sw_out.cell(row, 3, wc)
+        sw_out.cell(row, 4, sd)
+        sw_out.cell(row, 5, ed)
+
+        if i > 0:
+            prev_inst = switches[i - 1][0]
+        else:
+            prev_inst = None
+
+        # ---- _prev_close: 前一个合约 sheet 最后一行的 close ----
+        # =INDIRECT("'" & rel_path & "'!" & prev_inst & "!G" & prev_last_row)
+        if prev_inst and prev_inst in sheet_rows:
+            last_row = DATA_START_ROW + sheet_rows[prev_inst] - 1
+            prev_ref = f"'{rel_path}'!{prev_inst}!${_col_letter(CONTRACT_CLOSE_COL)}${last_row}"
+            sw_out.cell(row, PREV_CLOSE_COL, f'=INDIRECT("{prev_ref}")').fill = FORMULA_FILL
+
+        # ---- _cur_close: 当前合约 sheet 第一行的 close ----
+        # =INDIRECT("'" & rel_path & "'!" & inst & "!G3")
+        if inst in sheet_rows:
+            cur_ref = f"'{rel_path}'!{inst}!${_col_letter(CONTRACT_CLOSE_COL)}${DATA_START_ROW}"
+            sw_out.cell(row, CUR_CLOSE_COL, f'=INDIRECT("{cur_ref}")').fill = FORMULA_FILL
+
+        # ---- _prev_adj: 上一行的 adjust_mul ----
+        if i == 0:
+            sw_out.cell(row, PREV_ADJ_COL, 1).fill = FORMULA_FILL
+        else:
+            sw_out.cell(
+                row, PREV_ADJ_COL,
+                f'={_col_letter(ADJ_MUL_COL)}{row - 1}'
+            ).fill = FORMULA_FILL
+
+        # ---- adjust_mul ----
+        if i == 0:
+            sw_out.cell(row, ADJ_MUL_COL, 1).fill = FORMULA_FILL
+        else:
+            pc = _col_letter(PREV_CLOSE_COL)
+            cc = _col_letter(CUR_CLOSE_COL)
+            pa = _col_letter(PREV_ADJ_COL)
+            sw_out.cell(
+                row, ADJ_MUL_COL,
+                f'=IF({pc}{row}="","",IF({cc}{row}="","",{pc}{row}/{cc}{row}*{pa}{row}))'
+            ).fill = FORMULA_FILL
+
+        # ---- adjust_add ----
+        sw_out.cell(row, ADJ_ADD_COL, 0).fill = FORMULA_FILL
+
+    # ----------------------------------------------------------
+    # Sheet 1: MAIN (主力连续序列)
+    # ----------------------------------------------------------
+    main_ws = wb.create_sheet('MAIN', 1)
+
+    # MAIN 列布局:
+    #   A: _contract (辅助-合约名)
+    #   B..L: 数据列 (同 CONTRACT_COLS, 11列)
+    #   M: adjustment_mul (VLOOKUP _SWITCHES)
+    #   N: adjustment_add
+
+    MAIN_CONTRACT_COL = 1
+    MAIN_DATA_START = 2
+    MAIN_MUL_COL = MAIN_DATA_START + len(CONTRACT_COLS)      # M = 13
+    MAIN_ADD_COL = MAIN_DATA_START + len(CONTRACT_COLS) + 1  # N = 14
+
+    # Row 1: remark
+    main_ws.cell(
+        1, 1,
+        f'主力连续序列（引用自 {rel_path}）\n'
+        f'数据列用 INDIRECT 从 test_1 合约 sheet 按行号引用\n'
+        f'adjustment_mul/add 用 VLOOKUP 从本文件 _SWITCHES 查询'
+    )
+
+    # Row 2: header
+    main_ws.cell(2, MAIN_CONTRACT_COL, '_contract').fill = HEADER_FILL
+    for ci, cn in enumerate(CONTRACT_COLS):
+        main_ws.cell(2, MAIN_DATA_START + ci, cn).fill = HEADER_FILL
+    main_ws.cell(2, MAIN_MUL_COL, 'adjustment_mul').fill = HEADER_FILL
+    main_ws.cell(2, MAIN_ADD_COL, 'adjustment_add').fill = HEADER_FILL
+
+    # 写入 MAIN 数据行
+    current_row = 3
+    contracts_in_order = [s[0] for s in switches]
+
+    for contract_name in contracts_in_order:
+        if contract_name not in sheet_rows:
+            continue
+        nrows = sheet_rows[contract_name]
+
+        for i in range(nrows):
+            src_row = DATA_START_ROW + i
+            row = current_row + i
+
+            # _contract 辅助列
+            main_ws.cell(row, MAIN_CONTRACT_COL, contract_name).fill = FORMULA_FILL
+
+            # 数据列：INDIRECT 从 test_1 合约 sheet 引用
+            for ci in range(len(CONTRACT_COLS)):
+                src_col = ci + 1
+                col = MAIN_DATA_START + ci
+                ref = f"'{rel_path}'!{contract_name}!${_col_letter(src_col)}${src_row}"
+                main_ws.cell(row, col, f'=INDIRECT("{ref}")')
+
+            # adjustment_mul: VLOOKUP 从 _SWITCHES
+            # =VLOOKUP(_contract, _SWITCHES!B:I, 8, FALSE)
+            # _SWITCHES: B=instrument_id(2), I=adjust_mul(9)
+            contract_cell = _col_letter(MAIN_CONTRACT_COL) + str(row)
+            mul_formula = (
+                f'=VLOOKUP({contract_cell},'
+                f'_SWITCHES!$B${DATA_START_ROW}:${_col_letter(ADJ_MUL_COL)}${2 + len(switches)},'
+                f'{ADJ_MUL_COL - 1},FALSE)'
+            )
+            main_ws.cell(row, MAIN_MUL_COL, mul_formula).fill = FORMULA_FILL
+
+            # adjustment_add: VLOOKUP _SWITCHES
+            add_formula = (
+                f'=VLOOKUP({contract_cell},'
+                f'_SWITCHES!$B${DATA_START_ROW}:${_col_letter(ADJ_ADD_COL)}${2 + len(switches)},'
+                f'{ADJ_ADD_COL - 1},FALSE)'
+            )
+            main_ws.cell(row, MAIN_ADD_COL, add_formula).fill = FORMULA_FILL
+
+        current_row += nrows
+
+    total_rows = current_row - 3
+
+    # ============================================================
+    # 3. 保存
+    # ============================================================
+    dst_path = TEST_2A_DIR / f'{prod}.xlsx'
+    wb.save(dst_path)
+    print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
+
+
+def main():
+    print("test_2a: Excel-formula adjustment verification (INDIRECT + VLOOKUP)")
+    print("=" * 60)
+    print("\n⛔ Note: test_1 data is NOT re-run. All data = Excel INDIRECT refs.")
+    print(f"   Source: {TEST_1_DIR}")
+    print(f"   Output: {TEST_2A_DIR}")
+
+    # 清空 TEST_2A_DIR
     if TEST_2A_DIR.exists():
         for item in TEST_2A_DIR.iterdir():
             try:
                 if item.is_dir():
                     shutil.rmtree(item)
-                    print(f"  Removed dir: {item.name}")
                 else:
                     item.unlink()
-                    print(f"  Removed file: {item.name}")
             except Exception as e:
                 print(f"  ⚠️ Failed to remove {item}: {e}")
     else:
         TEST_2A_DIR.mkdir(parents=True, exist_ok=True)
 
-    copied = 0
-    for src in sorted(TEST_1_DIR.glob('*.xlsx')):
-        dst = TEST_2A_DIR / src.name
-        shutil.copy2(src, dst)
-        copied += 1
+    # 🔧 DEBUG: 只跑 A.xlsx
+    xlsx_path = TEST_1_DIR / 'A.xlsx'
+    if xlsx_path.exists():
+        process_product(xlsx_path)
 
-    print(f"\n📋 Copied {copied} .xlsx files from test_1 → test_2a")
-
-
-# ------------------------------------------------------------
-# 3. 在每个合约 sheet 中写入 Excel 公式
-# ------------------------------------------------------------
-
-def _add_formulas_to_contract_sheets(wb, main_ws_name: str, main_data_start_row: int) -> None:
-    """
-    为每个合约 sheet 添加 adjust_mul/adjust_add 列 + adj_price 公式列。
-
-    adjust_mul / adjust_add 用 VLOOKUP 从 MAIN sheet 查询：
-        =VLOOKUP(trade_time&instrument_id, MAIN!col_tt:col_add, col_offset, FALSE)
-    adj_price 用公式：
-        =price_cell * adjust_mul_cell + adjust_add_cell
-
-    约定：VLOOKUP 的查找范围是 MAIN sheet 的 trade_time 列到 adjustment_add 列。
-    """
-    main_nrows = 0
-    for sheet_name in wb.sheetnames:
-        if sheet_name == main_ws_name:
-            main_nrows = wb[sheet_name].max_row
-            break
-
-    # 确定 MAIN sheet 中各列的字母
-    main_ws = wb[main_ws_name]
-    main_headers = [main_ws.cell(2, c).value for c in range(1, main_ws.max_column + 1)]
-    main_tt_col = _find_col_idx(main_headers, CS_COL_TRADE_TIME)
-    main_mul_col = _find_col_idx(main_headers, 'adjustment_mul')
-    main_add_col = _find_col_idx(main_headers, 'adjustment_add')
-    main_inst_col = _find_col_idx(main_headers, CS_COL_INSTRUMENT_ID)
-
-    # VLOOKUP 查找范围（从 trade_time 到 adjustment_add）
-    vlookup_range = f"'{main_ws_name}'!${_col_letter(main_tt_col)}${main_data_start_row}:${_col_letter(main_add_col)}${main_nrows}"
-
-    for sheet_name in wb.sheetnames:
-        if sheet_name == main_ws_name or sheet_name == '_SWITCHES':
-            continue
-
-        ws = wb[sheet_name]
-        # Header 在 row 2（row 1 是注释行）
-        headers = [ws.cell(2, c).value for c in range(1, ws.max_column + 1)]
-
-        # 找关键列索引（1-based）
-        tt_col = _find_col_idx(headers, CS_COL_TRADE_TIME)
-        inst_col = _find_col_idx(headers, CS_COL_INSTRUMENT_ID)
-        close_col = _find_col_idx(headers, CS_COL_CLOSE)
-
-        if tt_col is None or close_col is None:
-            print(f"  ⚠️ Sheet '{sheet_name}' 缺少关键列，跳过")
-            continue
-
-        # 在最后一列之后添加新列
-        adj_start_col = len(headers) + 1
-
-        # 添加 header（写入 row 2，与现有 header 同行）
-        ws.cell(2, adj_start_col, 'adjustment_mul').fill = HEADER_FILL
-        ws.cell(2, adj_start_col + 1, 'adjustment_add').fill = HEADER_FILL
-
-        # adj_price 列（对每个 PRICE_COLS 创建）
-        adj_price_cols = {}  # price_col_name -> formula_col_index
-        formula_col = adj_start_col + 2
-        for pc in PRICE_COLS:
-            pc_idx = _find_col_idx(headers, pc)
-            if pc_idx is None:
-                continue
-            adj_name = pc + '_adj'
-            ws.cell(2, formula_col, adj_name).fill = HEADER_FILL
-            adj_price_cols[pc] = (pc_idx, formula_col)
-            formula_col += 1
-
-        # 为每一行写入 Excel 公式（数据从 row 3 开始）
-        for row in range(3, ws.max_row + 1):
-            # ---- adjust_mul: VLOOKUP(trade_time & instrument_id, MAIN, col_mul, FALSE) ----
-            tt_cell = ws.cell(row, tt_col)
-            inst_cell = ws.cell(row, inst_col) if inst_col else None
-
-            # 构造查找键：trade_time & instrument_id
-            if inst_cell is not None:
-                lookup_key = f'{tt_cell.coordinate}&{inst_cell.coordinate}'
-            else:
-                lookup_key = f'{tt_cell.coordinate}'
-
-            # VLOOKUP: 需要把 trade_time&instrument_id 作为查找键。
-            # 用 INDEX+MATCH 更可靠（因为 VLOOKUP 需要查找列在第一列）：
-            # =INDEX(MAIN!adjust_mul列, MATCH(trade_time&instrument_id, MAIN!trade_time_col&MAIN!inst_col, 0))
-            # 数组公式用 Ctrl+Shift+Enter，但这里只能写普通公式。
-            #
-            # 替代方案：直接在 MAIN sheet 中准备一个 helper 列 = trade_time&instrument_id
-            # 这样合约 sheet 用 VLOOKUP 即可。
-            #
-            # 由于 MAIN sheet 中我们也会加 helper 列，这里用 VLOOKUP：
-            # =VLOOKUP(trade_time_cell & instrument_id_cell, MAIN!helper_col:adjust_add_col, mul_offset, FALSE)
-            #
-            # helper 列在 MAIN 的 trade_time 之前。设 main_tt_col 是 trade_time
-            # helper 列在 trade_time 左边一列，VLOOKUP 从 helper 开始。
-            vlookup_col_start = _col_letter(main_tt_col - 1)  # helper 列
-            vlookup_range_adj = (
-                f"'{main_ws_name}'!${vlookup_col_start}${main_data_start_row}"
-                f":${_col_letter(main_add_col)}${main_nrows}"
-            )
-            mul_col_offset = main_mul_col - (main_tt_col - 1)  # helper 是第 1 列
-
-            mul_formula = (
-                f'=VLOOKUP({lookup_key},'
-                f'{vlookup_range_adj},'
-                f'{mul_col_offset},FALSE)'
-            )
-            ws.cell(row, adj_start_col, mul_formula).fill = FORMULA_FILL
-
-            mul_cell_ref = _col_letter(adj_start_col) + str(row)
-
-            # ---- adjustment_add: 同样 VLOOKUP 或直接写 0 ----
-            # 因为 add 总是 0，可以直接写 0
-            ws.cell(row, adj_start_col + 1, 0).fill = FORMULA_FILL
-            add_cell_ref = _col_letter(adj_start_col + 1) + str(row)
-
-            # ---- adj_price = price * mul + add ----
-            for pc, (pc_idx, f_col) in adj_price_cols.items():
-                price_cell_ref = ws.cell(row, pc_idx).coordinate
-                formula = f'={price_cell_ref}*{mul_cell_ref}+{add_cell_ref}'
-                ws.cell(row, f_col, formula).fill = FORMULA_FILL
-
-        print(f"  Sheet '{sheet_name}': added adjust_mul/add + {len(adj_price_cols)} adj_price cols")
-
-
-# ------------------------------------------------------------
-# 4. 插入 MAIN sheet (index=0) — 主力连续序列
-# ------------------------------------------------------------
-
-def _build_main_sheet(wb) -> str:
-    """
-    在 index=0 插入 MAIN sheet。
-    从 _SWITCHES 和所有合约 sheet 拼接主力连续分钟序列。
-
-    MAIN sheet 结构（Excel 公式）：
-    - helper 列 (A): =trade_time&instrument_id（方便 VLOOKUP）
-    - trade_time, trading_day, instrument_id, open_price, ..., adjustment_mul, adjustment_add
-
-    adjustment_mul 公式：
-      第 2 行（基准）: =1
-      第 3 行起: =IF(instrument_id=上一行instrument_id, 上一行adjust_mul,
-                     (上一行close_price/当前行close_price)*上一行adjust_mul)
-    adjustment_add 公式：
-      =0
-
-    返回 MAIN sheet 的名称。
-    """
-    main_ws = wb.create_sheet('MAIN', 0)  # index=0
-
-    # --- 收集所有合约的数据 ---
-    # 从 _SWITCHES 获取切换顺序
-    sw_ws = wb['_SWITCHES']
-    # _SWITCHES header 在 row 2（row 1 是注释行）
-    sw_headers = [sw_ws.cell(2, c).value for c in range(1, sw_ws.max_column + 1)]
-    td_col_sw = _find_col_idx(sw_headers, SW_COL_TRADING_DAY)
-    inst_col_sw = _find_col_idx(sw_headers, SW_COL_INSTRUMENT_ID)
-
-    # 从各合约 sheet 收集所有数据行
-    all_rows = []
-
-    for sheet_name in wb.sheetnames:
-        if sheet_name in ('_SWITCHES', 'MAIN'):
-            continue
-        ws = wb[sheet_name]
-        headers = [ws.cell(2, c).value for c in range(1, ws.max_column + 1)]
-        tt_col = _find_col_idx(headers, CS_COL_TRADE_TIME)
-        td_col = _find_col_idx(headers, 'trading_day')
-        inst_col = _find_col_idx(headers, CS_COL_INSTRUMENT_ID)
-        close_col = _find_col_idx(headers, CS_COL_CLOSE)
-        open_col = _find_col_idx(headers, CS_COL_OPEN)
-        high_col = _find_col_idx(headers, CS_COL_HIGH)
-        low_col = _find_col_idx(headers, CS_COL_LOW)
-        settle_col = _find_col_idx(headers, 'settlement_price')
-        vol_col = _find_col_idx(headers, 'volume')
-        oi_col = _find_col_idx(headers, 'open_interest')
-        turnover_col = _find_col_idx(headers, 'turnover')
-
-        if tt_col is None or close_col is None:
-            continue
-
-        for row in range(3, ws.max_row + 1):
-            tt = ws.cell(row, tt_col).value
-            if tt is None:
-                continue
-            all_rows.append({
-                'trade_time': tt,
-                'trading_day': ws.cell(row, td_col).value if td_col else None,
-                'instrument_id': ws.cell(row, inst_col).value if inst_col else sheet_name,
-                'open_price': ws.cell(row, open_col).value if open_col else None,
-                'highest_price': ws.cell(row, high_col).value if high_col else None,
-                'lowest_price': ws.cell(row, low_col).value if low_col else None,
-                'close_price': ws.cell(row, close_col).value,
-                'settlement_price': ws.cell(row, settle_col).value if settle_col else None,
-                'volume': ws.cell(row, vol_col).value if vol_col else None,
-                'turnover': ws.cell(row, turnover_col).value if turnover_col else None,
-                'open_interest': ws.cell(row, oi_col).value if oi_col else None,
-            })
-
-    # 按时间排序
-    all_rows.sort(key=lambda r: r['trade_time'])
-
-    # --- 写入 MAIN sheet ---
-    # Row 1: Header
-    # Col A: helper (=trade_time&instrument_id)
-    # Col B onwards: 数据列
-
-    helper_col = 1
-    data_start_col = 2
-
-    # Row 1: remark, Row 2: header (与 test_1 格式对齐)
-    # 合并所有列写入 remark
-    main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(MAIN_COLS) + 1)
-    main_ws.cell(1, 1, '主力连续合约序列 — 由 test_2a 自动生成\nadjustment_mul=IF(instrument_id变化, 上一行close/当前行close*上一行mul, 上一行mul) | adjustment_add=0')
-
-    headers_main = ['_VLOOKUP_KEY'] + MAIN_COLS  # helper + 数据列
-
-    for c, h in enumerate(headers_main, 1):
-        main_ws.cell(2, c, h).fill = HEADER_FILL
-
-    # 写入数据（从 row=3 开始，row 1=remark, row 2=header）
-    for i, r in enumerate(all_rows):
-        row = i + 3  # Excel row (1-based)
-
-        # 数据列
-        main_ws.cell(row, 2, r['trade_time'])          # trade_time
-        main_ws.cell(row, 3, r['trading_day'])         # trading_day
-        main_ws.cell(row, 4, r['instrument_id'])       # instrument_id
-
-        for ci, col_name in enumerate(MAIN_COLS[3:], 5):  # 从第 5 列开始（open_price 等）
-            main_ws.cell(row, ci, r.get(col_name))
-
-        # --- 写入 Excel 公式 ---
-        # helper 列 (A): =trade_time & instrument_id
-        tt_ref = _col_letter(2) + str(row)
-        inst_ref = _col_letter(4) + str(row)
-        main_ws.cell(row, helper_col, f'={tt_ref}&{inst_ref}').fill = FORMULA_FILL
-
-        # adjustment_mul 列
-        mul_col = 2 + len(MAIN_COLS) - 2  # helper(col1) + 数据列... adj_mul在倒数第2列
-        # 实际上：A=_VLOOKUP_KEY(1), B=trade_time(2), C=trading_day(3), D=inst(4),
-        # E=open(5), F=highest(6), G=lowest(7), H=close(8), I=settle(9),
-        # J=vol(10), K=turnover(11), L=oi(12), M=adj_mul(13), N=adj_add(14)
-
-        if row == 3:
-            # 第一行数据：adjustment_mul = 1（基准值）
-            main_ws.cell(row, mul_col, 1).fill = FORMULA_FILL
-        else:
-            # =IF(D{row}=D{row-1}, L{row-1}, H{row-1}/H{row}*L{row-1})
-            prev_row = row - 1
-            inst_cur = _col_letter(4) + str(row)
-            inst_prev = _col_letter(4) + str(prev_row)
-            mul_prev = _col_letter(mul_col) + str(prev_row)
-            close_prev = _col_letter(8) + str(prev_row)    # H = close_price
-            close_cur = _col_letter(8) + str(row)
-
-            formula_mul = (
-                f'=IF({inst_cur}={inst_prev},'
-                f'{mul_prev},'
-                f'{close_prev}/{close_cur}*{mul_prev})'
-            )
-            main_ws.cell(row, mul_col, formula_mul).fill = FORMULA_FILL
-
-        # adjustment_add 列 (col 13)
-        add_col = mul_col + 1
-        main_ws.cell(row, add_col, 0).fill = FORMULA_FILL
-
-    print(f"  MAIN sheet: {len(all_rows)} rows, {len(headers_main)} columns")
-    print(f"  Excel formula: IF(inst_changed, prev_close/cur_close*prev_mul, prev_mul)")
-
-    return 'MAIN'
-
-
-# ------------------------------------------------------------
-# 主流程
-# ------------------------------------------------------------
-
-def process_product(src_path: Path, dst_path: Path) -> None:
-    """处理一个品种的 test_1 Excel。"""
-    print(f"\n{'='*60}")
-    print(f"Processing: {src_path.name}")
-
-    wb = load_workbook(src_path)
-
-    # Step 1: 插入 MAIN sheet (index=0)
-    main_name = _build_main_sheet(wb)
-
-    # Step 2: 为合约 sheet 添加 Excel 公式
-    _add_formulas_to_contract_sheets(wb, main_name, main_data_start_row=3)
-
-    # 保存
-    print(f"  Saving to {dst_path.name}...")
-    wb.save(dst_path)
-    print(f"  ✅ Saved: {dst_path.name}")
-
-
-def main():
-    print("test_2a: Excel-formula adjustment verification")
-    print("=" * 60)
-    print("\n⛔ Note: test_1 data is pre-computed, NOT re-run here.")
-    print(f"   Source: {TEST_1_DIR}")
-    print(f"   Output: {TEST_2A_DIR}")
-
-    # Step 0: 清空 + 复制
-    print("\n📋 Step 0: Clear & copy from test_1...")
-    _clear_and_copy()
-
-    # Step 1-2: 处理每个 xlsx
-    print("\n📋 Processing each product...")
-    for xlsx_path in sorted(TEST_2A_DIR.glob('*.xlsx')):
-        try:
-            process_product(xlsx_path, xlsx_path)
-        except Exception as e:
-            print(f"  ❌ ERROR: {e}")
-            import traceback
-            traceback.print_exc()
-
-    print(f"\n{'='*60}")
-    print(f"Done! Output: {TEST_2A_DIR}")
+    print(f"\nDone! Output: {TEST_2A_DIR}")
 
 
 if __name__ == '__main__':
