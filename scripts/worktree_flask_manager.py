@@ -32,6 +32,15 @@ def _extract_issue_number(branch: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _strip_debugpy_from_pythonpath(pythonpath: str) -> str:
+    """Remove any debugpy-related entries from PYTHONPATH."""
+    if not pythonpath:
+        return pythonpath
+    parts = pythonpath.split(os.pathsep)
+    cleaned = [p for p in parts if "debugpy" not in p.lower() and "pydevd" not in p.lower()]
+    return os.pathsep.join(cleaned)
+
+
 @dataclass(frozen=True)
 class Worktree:
     path: Path
@@ -124,6 +133,14 @@ class ManagerState:
         env = os.environ.copy()
         env["FLASK_DEBUG"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
+        # Strip debugpy env vars so the child Flask process is NOT attached
+        # to the VS Code debugger.  Without this, stopping a child server via
+        # the manager causes VS Code to break inside a <string> file showing
+        # debugpy bytecode (pydevd.settrace / resource_tracker imports).
+        for _k in list(env):
+            if _k.startswith(("PYDEVD_", "DEBUGPY_")):
+                del env[_k]
+        env["PYTHONPATH"] = _strip_debugpy_from_pythonpath(env.get("PYTHONPATH", ""))
         # Worktrees derive DATA_DIR from __file__'s parent, which lands inside
         # .workspace/... instead of the real data directory.  Point FT_DATA_DIR
         # at the repo-level data dir (same one the master/feat worktrees use).
