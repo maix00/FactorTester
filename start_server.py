@@ -11,7 +11,7 @@ try:
     from multiprocessing import resource_tracker as _rt
     _rt.register = _rt.unregister = _rt.ensure_running = lambda *a, **kw: None
     if hasattr(_rt, '_resource_tracker'):
-        _rt._resource_tracker._pid = None
+        _rt._resource_tracker._pid = None  # type: ignore[reportAttributeAccessIssue]
 except Exception:
     pass
 
