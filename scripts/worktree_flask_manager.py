@@ -199,6 +199,7 @@ def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 
 
 
 def page(state: ManagerState, message: str = "") -> bytes:
+    lan = _lan_ip()
     rows = []
     for wt in state.worktrees():
         if wt.port == 0:
@@ -238,7 +239,6 @@ def page(state: ManagerState, message: str = "") -> bytes:
             """
         )
     msg = f"<div class='message'>{html.escape(message)}</div>" if message else ""
-    lan = _lan_ip()
     return f"""<!doctype html>
 <html>
 <head>
