@@ -182,12 +182,11 @@ def test_simulate_groups_expands_same_group_to_fee_variants():
     close_fee = np.zeros((2, 2), dtype=float)
 
     result = simulate_groups(
-        membership_np=membership,
+        membership_np=np.tile(membership, (1, 2, 1)),  # (1, 2, 2) — pre-expanded
         returns_np=returns,
         open_fee_mat=open_fee,
         close_fee_mat=close_fee,
         rebalance_mode='each_period',
-        group_to_variant=np.array([[True, True]], dtype=bool),
     )
 
     assert result['net_returns_np'].shape == (1, 2)
@@ -208,13 +207,12 @@ def test_simulate_groups_applies_rebalance_per_variant():
     fee = np.zeros((2, 2), dtype=float)
 
     result = simulate_groups(
-        membership_np=membership,
+        membership_np=np.tile(membership, (1, 2, 1)),  # (2, 2, 2) — pre-expanded
         returns_np=returns,
         open_fee_mat=fee,
         close_fee_mat=fee,
         rebalance_mode='buy_and_hold',
         rebalance_modes=['recycle', 'buy_and_hold'],
-        group_to_variant=np.array([[True, True]], dtype=bool),
     )
 
     net = result['net_returns_np']

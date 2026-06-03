@@ -434,7 +434,6 @@ def simulate_groups(
     rebalance_mode: str = "buy_and_hold",
     close_today_fee_mat: np.ndarray | None = None,
     data_has_bar: np.ndarray | None = None,
-    group_to_variant: np.ndarray | None = None,
     rebalance_modes: np.ndarray | list[str] | None = None,
     liquidity_capacity_np: np.ndarray | None = None,
     liquidity_modes: np.ndarray | list[str] | None = None,
@@ -455,12 +454,8 @@ def simulate_groups(
     close_today_fee_mat : (M, P) float | None — when set, overrides close_fee_mat for exiting
     data_has_bar : (T, P) bool | None — when set, enables multi-session strategy
     rebalance_mode : "each_period" | "buy_and_hold" | "recycle"
-    group_to_variant : (n_groups, M) bool | None — maps original groups to fee variants.
-        When None, M == n_groups and identity mapping is used (backward compatible).
-        Each original group g maps to one or more variants; membership for variant
-        v is membership[:, g, :] where group_to_variant[g, v] == True.
-    rebalance_modes : (n_groups,) or (M,) string array | None
-        Optional per-group/per-variant rebalance mode. When omitted, all rows use
+    rebalance_modes : (M,) string array | None
+        Optional per-variant rebalance mode. When omitted, all rows use
         rebalance_mode.
 
     Returns
@@ -484,32 +479,9 @@ def simulate_groups(
     if liquidity_percents is not None:
         liquidity_percents_arr = np.asarray(liquidity_percents, dtype=float)
 
-    # ── 建立 group→variant 映射，扩展 membership ──
-    if group_to_variant is not None:
-        g2v = np.asarray(group_to_variant, dtype=bool)
-        if g2v.shape[0] != n_groups:
-            raise ValueError(
-                f"group_to_variant shape[0]={g2v.shape[0]} != n_groups={n_groups}"
-            )
-        M = g2v.shape[1]
-        # Maps variant index → group index
-        _variant_to_group = np.full(M, -1, dtype=int)
-        for g in range(n_groups):
-            vs = np.where(g2v[g])[0]
-            _variant_to_group[vs] = g
-        if (_variant_to_group < 0).any():
-            raise ValueError("Every variant must map to exactly one group")
-        # Expand membership: (T, n_groups, P) → (T, M, P)
-        membership_np = membership_np[:, _variant_to_group, :]
-        if rebalance_modes_arr is not None and rebalance_modes_arr.shape[0] == n_groups:
-            rebalance_modes_arr = rebalance_modes_arr[_variant_to_group]
-        if liquidity_modes_arr is not None and liquidity_modes_arr.shape[0] == n_groups:
-            liquidity_modes_arr = liquidity_modes_arr[_variant_to_group]
-        if liquidity_percents_arr is not None and liquidity_percents_arr.shape[0] == n_groups:
-            liquidity_percents_arr = liquidity_percents_arr[_variant_to_group]
-    else:
-        M = n_groups
-        _variant_to_group = np.arange(M, dtype=int)
+    # ── M = total variants (membership already expanded by caller) ──
+    M = n_groups
+    _variant_to_group = np.arange(M, dtype=int)
     if rebalance_modes_arr is None:
         rebalance_modes_arr = np.full(M, rebalance_mode, dtype=object)
     elif rebalance_modes_arr.shape[0] != M:
