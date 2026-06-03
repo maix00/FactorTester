@@ -96,6 +96,7 @@
 
     var _groupItems = [];
     var _groupIdCounter = 0;
+    var _groupAddBatchCounter = 0;  // monotonic counter for addBatch (refs #100)
 
     function _groupUuid() {
         _groupIdCounter += 1;
@@ -162,6 +163,9 @@
               return null;
           } },
         { key: 'isAllGroups', type: 'boolean', default: false },
+
+        // ── Grouping batch — 同一批添加的 group/variant/derived 共享 (refs #100) ──
+        { key: 'addBatch',  type: 'number',  default: 0,    patchable: false },
 
         // ── State ──
         { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
@@ -304,6 +308,13 @@
         if (_groupFindIndex(itemId) !== -1) { throw new Error('Duplicate group id: ' + itemId); }
 
         var item = { id: itemId, name: config.name.trim(), isDerived: isDerived };
+
+        // ── addBatch 自动递增 (refs #100) ──
+        // 如果调用方显式传入，使用传入值；否则递增分配新 batch。
+        if (config.addBatch == null || config.addBatch === 0) {
+            _groupAddBatchCounter += 1;
+            config.addBatch = _groupAddBatchCounter;
+        }
 
         // Apply all fields from FIELD_SCHEMA
         _fillGroupFromConfig(item, config, isDerived);
@@ -628,6 +639,7 @@
 
     api.groups = {
         add: _groupsAdd,
+        newAddBatch: function() { _groupAddBatchCounter += 1; return _groupAddBatchCounter; },  // (refs #100)
         get: _groupsGet,
         getAll: _groupsGetAll,
         update: _groupsUpdate,

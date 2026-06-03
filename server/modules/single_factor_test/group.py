@@ -1533,6 +1533,18 @@ def get_group_snapshot():
         closest_ms = min(all_timestamps_ms, key=lambda x: abs(x - int(timestamp_ms)))
         current_index = all_timestamps_ms.index(closest_ms)
 
+        # ── 附加元信息供前端按 shortAlias 分层渲染 (refs #100) ──
+        snapshot_n_base = getattr(group_result, 'n_base', n_groups) or n_groups
+        snapshot_n_derived = getattr(group_result, 'n_derived', 0) or 0
+        snapshot_derived_info = getattr(group_result, 'derived_info', None) or []
+        _raw_group_names = getattr(group_result, 'group_names', None) or {}
+        snapshot_group_names = {}
+        for k, v in _raw_group_names.items():
+            try:
+                snapshot_group_names[int(k)] = str(v)
+            except (TypeError, ValueError):
+                snapshot_group_names[str(k)] = str(v)
+
         return jsonify({
             'success': True,
             'groups': groups_detail,
@@ -1540,6 +1552,10 @@ def get_group_snapshot():
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
+            'n_base': snapshot_n_base,
+            'n_derived': snapshot_n_derived,
+            'derived_info': snapshot_derived_info,
+            'group_names': snapshot_group_names,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
