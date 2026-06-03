@@ -10,6 +10,7 @@
 #   - get_cat_tree()  : 构建品种分类树（板块 × 夜盘时段）
 #   - get_all_products(): 获取全量品种对象列表
 # =============================================================================
+import os
 import pandas as pd
 
 # 按成交量 top-k 筛选时保留的品种比例（0~1）
@@ -28,9 +29,8 @@ default_test_end_date = pd.Timestamp('2025-05-31', tz='Asia/Shanghai')
 default_plot_test_start_date = pd.Timestamp('2025-01-02', tz='Asia/Shanghai')
 default_plot_test_end_date = pd.Timestamp('2025-12-31', tz='Asia/Shanghai')
 
-# data 根目录（基于工作目录的相对路径，或环境变量覆盖）
-import os
-DATA_DIR = os.environ.get('FT_DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
+# data 根目录（统一由 scripts/data_dir.py 解析，支持 worktree 隔离）
+from scripts.data_dir import DATA_DIR
 
 # 日志文件存储目录
 logger_dir_path_default = os.path.join(DATA_DIR, 'factor_tester_log')
