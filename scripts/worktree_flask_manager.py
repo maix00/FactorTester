@@ -166,6 +166,19 @@ class ManagerState:
         self.processes.clear()
 
 
+def _lan_ip() -> str:
+    """Return LAN IP or 'localhost' if unavailable."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.0)
+        s.connect(("8.8.8.8", 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
+
 def safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in value) or "worktree"
 
@@ -213,17 +226,19 @@ def page(state: ManagerState, message: str = "") -> bytes:
             <tr>
               <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
               <td><code>{html.escape(str(wt.path))}</code></td>
-              <td><a href="http://localhost:{wt.port}/" target="_blank">{wt.port}</a></td>
+              <td><a href="http://localhost:{wt.port}/" target="_blank" title="localhost">{wt.port}</a> <span class="muted">|</span> <a href="http://{lan}:{wt.port}/" target="_blank" title="LAN ({lan})" class="lan-link">🌐</a></td>
               <td><span class="pill {status}">{status}</span></td>
               <td>
                 <form method="post" action="/start"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><input type="hidden" name="port" value="{wt.port}"><button {start_disabled}>Start</button></form>
                 <form method="post" action="/stop"><input type="hidden" name="path" value="{html.escape(str(wt.path))}"><button {stop_disabled}>Stop</button></form>
                 <a class="button {open_disabled}" href="http://localhost:{wt.port}/" target="_blank">Open</a>
+                <a class="button {open_disabled}" href="http://{lan}:{wt.port}/" target="_blank" title="LAN 访问">🌐 Open</a>
               </td>
             </tr>
             """
         )
     msg = f"<div class='message'>{html.escape(message)}</div>" if message else ""
+    lan = _lan_ip()
     return f"""<!doctype html>
 <html>
 <head>
@@ -247,11 +262,13 @@ def page(state: ManagerState, message: str = "") -> bytes:
     .orphan {{ background: #fef2f2; }}
     .orphan-pill {{ background: #fee2e2; color: #991b1b; }}
     .message {{ padding: 8px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; margin-bottom: 12px; }}
+    .lan-link {{ text-decoration: none; font-size: 14px; }}
   </style>
 </head>
 <body>
   <h1>FactorTester Worktree Flask Manager</h1>
-  <p class="muted">Use Start/Stop for ordinary parallel servers. For VS Code breakpoints, launch the matching <code>Flask Debug: ...</code> configuration on the same worktree/port while that port is stopped here.</p>
+  <p class="muted" style="margin-bottom:4px">Use Start/Stop for ordinary parallel servers. For VS Code breakpoints, launch the matching <code>Flask Debug: ...</code> configuration on the same worktree/port while that port is stopped here.</p>
+  <p class="muted" style="margin-bottom:12px">🌐 局域网访问本机: <strong>{lan}</strong>（同一热点/网络下的设备使用此 IP + 端口号访问）</p>
   {msg}
   <table>
     <thead><tr><th>Worktree</th><th>Path</th><th>Port</th><th>Status</th><th>Actions</th></tr></thead>
