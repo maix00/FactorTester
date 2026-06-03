@@ -20,10 +20,11 @@ _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sh
   adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
   adjustment_add: =0
 
-MAIN sheet（VSTACK 展平 + INDIRECT，A3 溢出）：
-  每个合约一个 HSTACK 参数 = HSTACK(DROP(INDIRECT(_SWITCHES!L{n}),2), EXPAND(...), EXPAND(...))
-  合约名/行号由 _SWITCHES L 列（_ref_str）动态提供，不硬编码
-  VSTACK 参数数 = 合约数（Python for 循环生成，写入 xlsx）
+MAIN sheet（三列独立 VSTACK，各自溢出）：
+  A3 = VSTACK(INDIRECT(_SWITCHES!L3), ...)  — 合约 11 列数据（不包 HSTACK）
+  L3 = VSTACK(EXPAND(_SWITCHES!I3,...), ...)  — adjustment_mul
+  M3 = VSTACK(EXPAND(_SWITCHES!J3,...), ...)  — adjustment_add
+  关键洞察：VSTACK 参数包 HSTACK 会导致溢出仅第一个值
 
 Output: data/test/test_2a/{prod}.xlsx
 """
@@ -60,8 +61,16 @@ DATA_START_ROW = 3           # 数据从第3行开始 (1=remark, 2=header)
 # _SWITCHES 列定义
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
 # F=_prev_close, G=_cur_close, H=_prev_adj, I=adjustment_mul, J=adjustment_add
-# K=_nrows（该合约数据行数，纯数值）
-# L=_ref_str（Python 写入纯文本，如 'a2405'!A3:K14027，供 INDIRECT 直接使用）
+# K=_nrows, L=_ref_str, M=_cum_offset, N=_ref_str_full
+#
+# _ref_str:      Python 写入纯文本，如 'a2405'!A3:K14027，供 INDIRECT 使用
+# _cum_offset:   该合约在 _SWITCHES 数据块中的起始行（用于独立溢出 adjustment）
+# _ref_str_full: Python 写入纯文本，如 'a2405'!A3:M14027（含 adjustment 列，13列）
+#                但合约 sheet 只有 11 列...不行
+#
+# 实际用 _BLOCKS 辅助 sheet：
+#   每个合约一行，用 INDIRECT 溢出 11 列数据 + 2 列 adjustment（独立溢出区域，互不重叠）
+# MAIN 直接 VSTACK(_BLOCKS!A3#, _BLOCKS!A4#, ...) 或用 INDIRECT 取 _BLOCKS 的溢出区域
 SW_ORIG_COLS = 5
 PREV_CLOSE_COL = SW_ORIG_COLS + 1  # F=6
 CUR_CLOSE_COL = SW_ORIG_COLS + 2   # G=7
@@ -301,8 +310,10 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
-    # Sheet 1: MAIN (主力连续序列 — REDUCE + INDIRECT 动态拼接)
+    # Sheet 2: MAIN (三列独立 VSTACK — 数据与 adjustment 分开拼)
     # ----------------------------------------------------------
+    # 核心洞察：VSTACK 中包 HSTACK 会导致溢出失败
+    # 解法：A3 只 VSTACK 纯 INDIRECT（11列数据），L3/M3 各自 VSTACK 纯 EXPAND
     main_ws = wb.create_sheet('MAIN', 1)
 
     sw_last_row = 2 + len(switches)
@@ -310,10 +321,11 @@ def process_product(prod_xlsx: Path) -> None:
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        '主力连续序列 — VSTACK + INDIRECT 动态拼接\n'
-        '每个合约 = HSTACK(DROP(INDIRECT(_SWITCHES!L{{n}}),2), EXPAND(_SWITCHES!I{{n}},...))\n'
-        '合约名/行号由 _SWITCHES 辅助列动态提供，不硬编码\n'
-        '合约数 = ROWS(_SWITCHES!L3:L{})'.format(sw_last_row)
+        '主力连续序列 — 三列独立 VSTACK\n'
+        'A3 = VSTACK(INDIRECT,...) — 合约 11 列数据\n'
+        'L3 = VSTACK(EXPAND,...) — adjustment_mul\n'
+        'M3 = VSTACK(EXPAND,...) — adjustment_add\n'
+        '合约数 = {}，所有引用通过 _SWITCHES! 动态获取'.format(len(switches))
     )
 
     # Row 2: header (11 数据列 + 2 adjustment 列)
@@ -322,27 +334,30 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # A3: VSTACK 展平 — 每个合约一个 HSTACK 参数，通过 _SWITCHES! 引用
-    # HSTACK(
-    #   DROP(INDIRECT(_SWITCHES!L{n}), 2),
-    #   EXPAND(_SWITCHES!I{n}, _SWITCHES!K{n}, 1, _SWITCHES!I{n}),
-    #   EXPAND(_SWITCHES!J{n}, _SWITCHES!K{n}, 1, _SWITCHES!J{n})
-    # )
-    # 所有 sheet/行号引用都通过 _SWITCHES! 动态获取
-    vstack_parts = []
-    for i in range(len(switches)):
-        row = i + 3
-        part = (
-            f'HSTACK('
-            f'DROP(INDIRECT(_SWITCHES!L{row}),2),'
-            f'EXPAND(_SWITCHES!I{row},_SWITCHES!K{row},1,_SWITCHES!I{row}),'
-            f'EXPAND(_SWITCHES!J{row},_SWITCHES!K{row},1,_SWITCHES!J{row})'
-            f')'
-        )
-        vstack_parts.append(part)
+    # --- A3: VSTACK 纯 INDIRECT，只拼合约 11 列数据 ---
+    # =VSTACK(INDIRECT(_SWITCHES!L3), INDIRECT(_SWITCHES!L4), ...)
+    # 不包 HSTACK，不包 EXPAND
+    a3_parts = [f'INDIRECT(_SWITCHES!L{3 + i})' for i in range(len(switches))]
+    a3_formula = '=VSTACK(' + ','.join(a3_parts) + ')'
+    main_ws.cell(3, 1, a3_formula).fill = FORMULA_FILL
 
-    formula = '=VSTACK(' + ','.join(vstack_parts) + ')'
-    main_ws.cell(3, 1, formula).fill = FORMULA_FILL
+    # --- L3: VSTACK 纯 EXPAND，只拼 adjustment_mul ---
+    # =VSTACK(EXPAND(_SWITCHES!I3, _SWITCHES!K3, 1, _SWITCHES!I3), EXPAND(_SWITCHES!I4, ...), ...)
+    mul_parts = [
+        f'EXPAND(_SWITCHES!I{3 + i},_SWITCHES!K{3 + i},1,_SWITCHES!I{3 + i})'
+        for i in range(len(switches))
+    ]
+    mul_formula = '=VSTACK(' + ','.join(mul_parts) + ')'
+    main_ws.cell(3, MAIN_MUL_COL_OFFSET, mul_formula).fill = FORMULA_FILL
+
+    # --- M3: VSTACK 纯 EXPAND，只拼 adjustment_add ---
+    # =VSTACK(EXPAND(_SWITCHES!J3, _SWITCHES!K3, 1, _SWITCHES!J3), EXPAND(_SWITCHES!J4, ...), ...)
+    add_parts = [
+        f'EXPAND(_SWITCHES!J{3 + i},_SWITCHES!K{3 + i},1,_SWITCHES!J{3 + i})'
+        for i in range(len(switches))
+    ]
+    add_formula = '=VSTACK(' + ','.join(add_parts) + ')'
+    main_ws.cell(3, MAIN_ADD_COL_OFFSET, add_formula).fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
     total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
