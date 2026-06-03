@@ -44,14 +44,11 @@ from openpyxl.utils import get_column_letter
 from tests.calc import TEST_1_DIR, TEST_2A_DIR
 
 # --- XML 命名空间 ---
-NS_CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
 NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-NS_MD = 'http://schemas.openxmlformats.org/spreadsheetml/2006/9/main'
 NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 NS_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 ET.register_namespace('', NS_SHEET)
 ET.register_namespace('r', NS_R)
-ET.register_namespace('x14', NS_MD)
 
 # --- 样式 ---
 FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
@@ -394,18 +391,22 @@ def process_product(prod_xlsx: Path) -> None:
     # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）
     #    防止 WPS/Excel 自动插入 @ implicit intersection operator
     # ============================================================
-    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3')
+    # 计算 ref 范围：13 列 (A-M)，total_rows 数据行从 row 3 开始
+    last_row = 2 + total_rows
+    ref_range = f'A3:M{last_row}'
+    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3', ref_range)
 
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
 
 
-def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str):
+def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str,
+                                 ref_range: str | None = None):
     """
     在 xlsx 的 XML 层面标记指定单元格为动态数组公式。
 
-    修改 sheet XML 中 <f> 元素加 ca="1" 属性，
-    并在 cell 元素加 cm="1" vm="1" 属性。
-    同时创建/更新 metadata.xml 声明 vm="1"。
+    修改 sheet XML 中 <f> 元素加 ca="1" 和 t="array" ref="..." 属性，
+    并在 cell 元素加 cm="1" 属性。
+    ref_range 如 "A3:M194387"。
     """
     # 1. 读 workbook.xml 找 sheetId → rId → sheet 文件名
     with zipfile.ZipFile(xlsx_path, 'r') as zf:
@@ -448,8 +449,20 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
                         f_el = cell.find(f'{{{NS_SHEET}}}f')
                         if f_el is not None:
                             f_el.set('ca', '1')
+                            f_el.set('t', 'array')
+                            # 多一行：ref 给到 M{last_row+1}
+                            if ref_range:
+                                # 解析并扩展最后行号
+                                import re as _re
+                                _m = _re.match(r'([A-Z]+\d+):([A-Z]+)(\d+)', ref_range)
+                                if _m:
+                                    # +1 安全余量：若公式实际溢出超出 ref 会被截断，
+                                    # 多一行产生 #N/A 可一眼发现，少一行会被悄悄截断数据
+                                    safe_ref = f'{_m.group(1)}:{_m.group(2)}{int(_m.group(3))+1}'
+                                    f_el.set('ref', safe_ref)
+                                else:
+                                    f_el.set('ref', ref_range)
                             cell.set('cm', '1')
-                            cell.set('vm', '1')
                             found = True
                         break
                 break
@@ -458,45 +471,15 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
             print(f'  ⚠️ Cell {cell_ref} not found in {sheet_name}, skipping XML patch')
             return
 
-        # 5. 读/建 metadata.xml
-        md_file = 'xl/metadata.xml'
-        try:
-            md_xml = ET.parse(zf.open(md_file))
-            md_root = md_xml.getroot()
-        except KeyError:
-            md_root = ET.Element(f'{{{NS_MD}}}metadata')
-
-        vm_el = md_root.find(f'{{{NS_MD}}}valueMetadata')
-        if vm_el is None:
-            vm_el = ET.SubElement(md_root, f'{{{NS_MD}}}valueMetadata')
-        else:
-            vm_el.clear()
-        ET.SubElement(vm_el, f'{{{NS_MD}}}bk')
-
-        # 6. 读 Content_Types
-        ct_xml = ET.parse(zf.open('[Content_Types].xml'))
-        ct_root = ct_xml.getroot()
-
-        # 确保 metadata.xml 在 Content_Types 中声明
-        part_name = '/xl/metadata.xml'
-        has_md = any(ov.get('PartName') == part_name
-                     for ov in ct_root.findall(f'{{{NS_CT}}}Override'))
-        if not has_md:
-            ET.SubElement(ct_root, f'{{{NS_CT}}}Override',
-                          PartName=part_name,
-                          ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml')
-
-        # 7. 收集所有文件，替换修改过的
+        # 5. 收集所有文件，替换修改过的 sheet
         all_files = {}
         for name in zf.namelist():
-            if name not in (full_sheet_file, md_file, '[Content_Types].xml'):
+            if name != full_sheet_file:
                 all_files[name] = zf.read(name)
 
         all_files[full_sheet_file] = _xml_tostring(sheet_root)
-        all_files[md_file] = _xml_tostring(md_root)
-        all_files['[Content_Types].xml'] = _xml_tostring(ct_root)
 
-    # 8. 重写 xlsx（在 with 外，使用收集好的数据）
+    # 6. 重写 xlsx
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
     os.close(tmp_fd)
     try:
@@ -508,7 +491,8 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
         if Path(tmp_path).exists():
             Path(tmp_path).unlink(missing_ok=True)
 
-    print(f'  🔧 Patched {cell_ref} as dynamic array formula (ca="1")')
+    attrs = f'ca="1" t="array" ref="{ref_range}"' if ref_range else 'ca="1"'
+    print(f'  🔧 Patched {cell_ref} as dynamic array ({attrs})')
 
 
 def _xml_tostring(root):
