@@ -260,6 +260,7 @@
                 h += '</td>';
 
                 h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap;">';
+                h += '<button class="unified-ls-swap-btn" data-ls-id="' + H.escapeHTML(item.id) + '" title="交换多头/空头" style="padding:1px 5px;font-size:13px;border:1px solid #c7d2fe;border-radius:3px;background:#eef2ff;color:#4338ca;cursor:pointer;margin-right:4px;">🔄</button>';
                 h += '<button class="unified-ls-del-btn" data-ls-id="' + H.escapeHTML(item.id) + '" style="padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
                 h += '</td></tr>';
             }
