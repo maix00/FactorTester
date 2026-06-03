@@ -326,31 +326,35 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
     # A3: REDUCE 遍历 _SWITCHES L 列引用字符串，VSTACK 拼接
+    # 所有 INDIRECT/INDEX 引用必须带 _SWITCHES! 前缀（MAIN 是独立 sheet）
+    # 初始值：第一个合约的完整 HSTACK 块
     # =REDUCE(
-    #   HSTACK(DROP(INDIRECT(L3), 2), EXPAND(I3, K3, 1, I3), EXPAND(J3, K3, 1, J3)),
-    #   SEQUENCE(ROWS(L4:L{sw_last_row})),
+    #   HSTACK(DROP(INDIRECT(_SWITCHES!L3), 2),
+    #          EXPAND(_SWITCHES!I3, _SWITCHES!K3, 1, _SWITCHES!I3),
+    #          EXPAND(_SWITCHES!J3, _SWITCHES!K3, 1, _SWITCHES!J3)),
+    #   SEQUENCE(ROWS(_SWITCHES!L4:L{sw_last_row})),
     #   LAMBDA(acc, idx,
     #     LET(
     #       i, idx + 3,
-    #       raw, DROP(INDIRECT(INDEX(L:L, i)), 2),
+    #       raw, DROP(INDIRECT(INDEX(_SWITCHES!L:L, i)), 2),
     #       VSTACK(acc, HSTACK(
     #         raw,
-    #         EXPAND(INDEX(I:I, i), INDEX(K:K, i), 1, INDEX(I:I, i)),
-    #         EXPAND(INDEX(J:J, i), INDEX(K:K, i), 1, INDEX(J:J, i))
+    #         EXPAND(INDEX(_SWITCHES!I:I, i), INDEX(_SWITCHES!K:K, i), 1, INDEX(_SWITCHES!I:I, i)),
+    #         EXPAND(INDEX(_SWITCHES!J:J, i), INDEX(_SWITCHES!K:K, i), 1, INDEX(_SWITCHES!J:J, i))
     #       ))
     #     )
     #   )
     # )
     formula = (
         f'=REDUCE('
-        f'HSTACK(DROP(INDIRECT(L3),2),EXPAND(I3,K3,1,I3),EXPAND(J3,K3,1,J3)),'
-        f'SEQUENCE(ROWS(L4:L{sw_last_row})),'
+        f'HSTACK(DROP(INDIRECT(_SWITCHES!L3),2),EXPAND(_SWITCHES!I3,_SWITCHES!K3,1,_SWITCHES!I3),EXPAND(_SWITCHES!J3,_SWITCHES!K3,1,_SWITCHES!J3)),'
+        f'SEQUENCE(ROWS(_SWITCHES!L4:L{sw_last_row})),'
         f'LAMBDA(acc,idx,'
         f'LET(i,idx+3,'
-        f'raw,DROP(INDIRECT(INDEX(L:L,i)),2),'
+        f'raw,DROP(INDIRECT(INDEX(_SWITCHES!L:L,i)),2),'
         f'VSTACK(acc,HSTACK(raw,'
-        f'EXPAND(INDEX(I:I,i),INDEX(K:K,i),1,INDEX(I:I,i)),'
-        f'EXPAND(INDEX(J:J,i),INDEX(K:K,i),1,INDEX(J:J,i))'
+        f'EXPAND(INDEX(_SWITCHES!I:I,i),INDEX(_SWITCHES!K:K,i),1,INDEX(_SWITCHES!I:I,i)),'
+        f'EXPAND(INDEX(_SWITCHES!J:J,i),INDEX(_SWITCHES!K:K,i),1,INDEX(_SWITCHES!J:J,i))'
         f')))))'
     )
     main_ws.cell(3, 1, formula).fill = FORMULA_FILL
