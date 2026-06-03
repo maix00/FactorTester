@@ -317,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]))
-    parser.add_argument("--port", type=int, default=7999)
+    parser.add_argument("--port", type=int, default=7998)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
