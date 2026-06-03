@@ -26,8 +26,9 @@ import shutil
 import time
 
 
-from Settings import DATA_DIR
-USERS_DIR = os.path.join(DATA_DIR, 'users')
+import os as _os
+_DATA_DIR = _os.environ.get('FT_DATA_DIR', _os.path.join(_os.path.dirname(__file__), '..', '..', '..', 'data'))
+USERS_DIR = _os.path.join(_DATA_DIR, 'users')
 
 
 def user_data_dir(username: str) -> str:
