@@ -354,13 +354,7 @@
                 visible: function() { return M.isAddFlow('base'); }
             });
         }
-        if (P.add && P.add.ls) {
-            registerPanel({
-                name: 'add-ls', label: '新建 LS 组', containerId: 'add-ls',
-                category: TAB_CATEGORY.ADD, panel: P.add.ls,
-                visible: function() { return M.isAddFlow('ls'); }
-            });
-        }
+        // add-ls panel removed — LS creation is now direct via edit action (refs #109)
         if (P.config && P.config.fee) {
             registerPanel({
                 name: 'fee', label: '💰 手续费与平今', containerId: 'config-fee',

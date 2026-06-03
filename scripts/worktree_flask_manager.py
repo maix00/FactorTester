@@ -248,10 +248,15 @@ def page(state: ManagerState, message: str = "") -> bytes:
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #1f2937; }}
     h1 {{ font-size: 22px; margin: 0 0 16px; }}
-    table {{ border-collapse: collapse; width: 100%; }}
+    table {{ border-collapse: collapse; width: 100%; table-layout: fixed; }}
     th, td {{ border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }}
+    th:nth-child(1), td:nth-child(1) {{ width: auto; }}
+    th:nth-child(2), td:nth-child(2) {{ width: auto; }}
+    th:nth-child(3), td:nth-child(3) {{ width: 85px; }}
+    th:nth-child(4), td:nth-child(4) {{ width: 85px; }}
+    th:nth-child(5), td:nth-child(5) {{ width: 280px; white-space: nowrap; }}
     th {{ background: #f9fafb; font-size: 12px; text-transform: uppercase; color: #6b7280; }}
-    code {{ font-size: 12px; color: #374151; }}
+    code {{ font-size: 12px; color: #374151; word-break: break-all; }}
     form {{ display: inline; }}
     button, .button {{ border: 1px solid #cbd5e1; background: #fff; color: #111827; padding: 4px 9px; border-radius: 6px; text-decoration: none; font-size: 13px; cursor: pointer; margin-right: 4px; }}
     button:disabled, .disabled {{ opacity: .45; pointer-events: none; cursor: default; }}

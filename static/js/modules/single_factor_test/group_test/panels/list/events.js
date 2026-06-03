@@ -85,6 +85,23 @@
             });
         });
 
+        // ── LS swap buttons ──
+        container.querySelectorAll('.unified-ls-swap-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var id = this.getAttribute('data-ls-id');
+                var ls = GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.get(id);
+                if (!ls) return;
+                try {
+                    // 只传交换后的 id，update 内部会自动重新派生 shortAlias
+                    GT.groupSettings.lsConfigs.update(id, {
+                        longGroupId: ls.shortGroupId,
+                        shortGroupId: ls.longGroupId
+                    });
+                } catch (err) { alert('交换失败: ' + err.message); }
+            });
+        });
+
         // ── Batch delete buttons ──
         container.querySelectorAll('.unified-batch-del-btn').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
