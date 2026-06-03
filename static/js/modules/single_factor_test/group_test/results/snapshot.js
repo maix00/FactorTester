@@ -236,6 +236,16 @@
             }
         }
 
+        console.log('[snapshot-debug] _buildGroupMetaMap:', {
+            groupNames: groupNames,
+            n_base: snapshotData.n_base,
+            n_derived: snapshotData.n_derived,
+            derived_info: snapshotData.derived_info,
+            frontendAliases: Object.keys(aliasToItem),
+            groupMeta: groupMeta,
+            batchMap: batchMap
+        });
+
         return { batchMap: batchMap, aliasMap: aliasMap, groupMeta: groupMeta };
     }
 
@@ -478,7 +488,7 @@
         var normalIndices = [];   // 非派生、非 LS
         var derivedIndices = [];  // 派生（非 LS）
 
-        for (var i = 0; i < nBase; i++) {
+        for (var i = 0; i < groups.length; i++) {
             var meta = groupMeta[i];
             if (!meta) {
                 normalIndices.push(i);

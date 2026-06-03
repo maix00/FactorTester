@@ -321,12 +321,44 @@
 
         _groupItems.push(item);
 
-        // 派生组自动计算 shortAlias (refs #100)
+        // 派生组自动计算 shortAlias 和 name (refs #100)
         // 必须在 push 之后计算，因为 deriveShortAlias 需要 getAll() 中包含新节点来找 sibling 序号
-        if (isDerived && (!item.shortAlias || !item.shortAlias.trim())) {
-            var h = GT.panels && GT.panels.list && GT.panels.list._helpers;
-            if (h && typeof h.deriveShortAlias === 'function') {
-                item.shortAlias = h.deriveShortAlias(item);
+        if (isDerived) {
+            var needShortAlias = !item.shortAlias || !item.shortAlias.trim();
+            var needName = !item.name || !item.name.trim();
+            if (needShortAlias || needName) {
+                // 找 siblings（同 parentId, 同 baseGroupId）
+                var siblings = [];
+                for (var si = 0; si < _groupItems.length; si++) {
+                    var sg = _groupItems[si];
+                    if (sg.isDerived && sg.baseGroupId === item.baseGroupId && sg.parentId === item.parentId) {
+                        siblings.push(sg);
+                    }
+                }
+                var sibIdx = -1;
+                for (var sj = 0; sj < siblings.length; sj++) {
+                    if (siblings[sj].id === item.id) { sibIdx = sj; break; }
+                }
+                var sibNum = sibIdx >= 0 ? (sibIdx + 1) : siblings.length;
+
+                var h = GT.panels && GT.panels.list && GT.panels.list._helpers;
+                if (needShortAlias && h && typeof h.deriveShortAlias === 'function') {
+                    item.shortAlias = h.deriveShortAlias(item);
+                }
+                if (needName) {
+                    var parentNode = null;
+                    if (item.parentId) {
+                        for (var pi = 0; pi < _groupItems.length; pi++) {
+                            if (_groupItems[pi].id === item.parentId) { parentNode = _groupItems[pi]; break; }
+                        }
+                    } else {
+                        for (var bi = 0; bi < _groupItems.length; bi++) {
+                            if (_groupItems[bi].id === item.baseGroupId) { parentNode = _groupItems[bi]; break; }
+                        }
+                    }
+                    var parentName = parentNode ? (parentNode.name || parentNode.shortAlias || 'Group') : 'Group';
+                    item.name = parentName + '_派生组' + sibNum;
+                }
             }
         }
 
