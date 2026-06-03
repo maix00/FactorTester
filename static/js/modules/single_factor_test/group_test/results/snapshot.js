@@ -250,6 +250,85 @@
             String(d.getSeconds()).padStart(2, '0');
     }
 
+    // ──────────── 辅助渲染函数 ────────────
+
+    /**
+     * 收集 groupList 中所有 distinct 产品名称，按出现顺序。
+     */
+    function _batchProducts(groupList) {
+        var seen = {};
+        var prods = [];
+        groupList.forEach(function(g) {
+            (g.products || []).forEach(function(p) {
+                var key = (typeof p === 'string') ? p : p.name;
+                if (!seen[key]) {
+                    seen[key] = true;
+                    prods.push(key);
+                }
+            });
+        });
+        return prods;
+    }
+
+    /**
+     * 判断产品在组中的状态
+     * @returns {string} 'holding' | 'entering' | 'exiting' | 'pending_exit' | null
+     */
+    function _productStatusInGroup(productName, group) {
+        var inList = (group.products_in || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
+        var outList = (group.products_out || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
+        var holdingList = (group.products || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
+
+        if (inList.indexOf(productName) !== -1) return 'entering';
+
+        var prodObj = _findProductObj(productName, group);
+        if (typeof prodObj === 'object' && prodObj && prodObj.pending_exit) {
+            return 'pending_exit';
+        }
+
+        if (outList.indexOf(productName) !== -1) return 'exiting';
+        if (holdingList.indexOf(productName) !== -1) return 'holding';
+        return null;
+    }
+
+    /**
+     * 查找产品对象（可能为 string 或 {name,desc,fee,amount}）
+     */
+    function _findProductObj(productName, group) {
+        var prods = group.products || [];
+        for (var i = 0; i < prods.length; i++) {
+            var name = (typeof prods[i] === 'string') ? prods[i] : prods[i].name;
+            if (name === productName) return prods[i];
+        }
+        return productName;
+    }
+
+    /** 渲染单个产品标签（带费率、描述和持仓金额） */
+    function _renderProduct(p) {
+        if (!p) return '';
+        if (typeof p === 'string') return _escape(p);
+        var name = _escape(p.name);
+        var desc = '';
+        if (p.desc && p.desc !== p.name) {
+            desc = ' <span class="snapshot-product-desc">' +
+                _escape(p.desc) + '</span>';
+        }
+        var feeHtml = '';
+        if (p.fee) {
+            var fee = p.fee;
+            var parts = [];
+            if (fee.open_ratio !== undefined) parts.push('开' + (fee.open_ratio * 100).toFixed(3) + '%');
+            if (fee.close_ratio !== undefined) parts.push('平' + (fee.close_ratio * 100).toFixed(3) + '%');
+            if (parts.length) feeHtml = ' <span class="snapshot-product-fee">[' + parts.join(' ') + ']</span>';
+        }
+        var amtHtml = '';
+        if (p.amount !== null && p.amount !== undefined) {
+            var amtStr = p.amount >= 1 ? p.amount.toFixed(2) : p.amount.toFixed(6);
+            amtHtml = ' <span class="snapshot-product-amount" title="持仓金额">' + amtStr + '</span>';
+        }
+        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>' + amtHtml;
+    }
+
     // ──────────── 按 addBatch + 派生树 渲染 (refs #100) ────────────
 
     /**
