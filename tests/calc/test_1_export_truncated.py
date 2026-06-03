@@ -7,7 +7,7 @@ test_1_export_truncated.py
 - Sheet _SWITCHES：该品种完整切换表
 - Sheet {instrument_id}：该合约 ±30 天内的分钟数据
 
-Output: data/test/truncated/{prod}/{prod}_{switch_date}.xlsx + _manifest.json
+Output: data/test/test_1/{prod}/{prod}_{switch_date}.xlsx + _manifest.json
 """
 
 import json
@@ -29,7 +29,7 @@ from test_0_discover_products import TOP_PRODUCTS
 DATA_DIR = Path(_ROOT_DATA_DIR)
 MIN_DIR = DATA_DIR / 'data_mink_product'
 DAY_DIR = DATA_DIR / 'main_dayk'
-OUTPUT_BASE = DATA_DIR / 'test' / 'truncated'
+OUTPUT_BASE = DATA_DIR / 'test' / 'test_1'
 WINDOW_DAYS = 30
 MIN_DATE = date(2024, 1, 1)
 
