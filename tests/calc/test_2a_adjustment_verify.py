@@ -294,7 +294,7 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, SW_NROWS_COL, sheet_rows.get(inst, 0))
 
     # ----------------------------------------------------------
-    # Sheet 1: MAIN (主力连续序列 — 纯 Excel REDUCE+VSTACK 数组公式)
+    # Sheet 1: MAIN (主力连续序列 — VSTACK 拼接所有合约)
     # ----------------------------------------------------------
     main_ws = wb.create_sheet('MAIN', 1)
 
@@ -303,9 +303,9 @@ def process_product(prod_xlsx: Path) -> None:
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        '主力连续序列 — REDUCE + VSTACK + INDIRECT 动态拼接\n'
-        '公式：遍历 _SWITCHES，INDIRECT 取各合约 sheet 数据行，VSTACK 拼接\n'
-        'adjustment_mul/add: IFERROR(VLOOKUP from _SWITCHES)'
+        '主力连续序列 — VSTACK + INDIRECT 动态拼接\n'
+        '每个合约一行 VSTACK 参数：INDIRECT 取合约数据 + HSTACK 加 adjustment\n'
+        '不硬编码合约名或行号，全部从 _SWITCHES 动态引用'
     )
 
     # Row 2: header (11 数据列 + 2 adjustment 列)
@@ -314,49 +314,25 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # A3: 单一 REDUCE 数组公式，自动溢出到所有行列
-    # 对每个合约 i:
-    #   1. INDIRECT 取合约 sheet 的所有数据行 (A3:K{nrows+2})
-    #   2. HSTACK 加上 adjustment_mul / adjustment_add（VLOOKUP _SWITCHES）
-    #   3. VSTACK 拼接到结果中（跳过 header）
-    # 最后 VSTACK 拼接所有合约 + 第一行留空给 header
-    #
-    # 公式结构：
-    # =LET(
-    #   ct, _SWITCHES!$B$3:$B${sw_last_row},
-    #   nr, _SWITCHES!$K$3:$K${sw_last_row},
-    #   am, _SWITCHES!$I$3:$I${sw_last_row},
-    #   aa, _SWITCHES!$J$3:$J${sw_last_row},
-    #   n, ROWS(ct),
-    #   DROP(
-    #     REDUCE(
-    #       "",
-    #       SEQUENCE(n),
-    #       LAMBDA(acc, i,
-    #         LET(
-    #           raw, INDIRECT("'"&INDEX(ct,i)&"'!A3:K"&INDEX(nr,i)+2),
-    #           mul, EXPAND(INDEX(am,i), INDEX(nr,i), 1, INDEX(am,i)),
-    #           add, EXPAND(INDEX(aa,i), INDEX(nr,i), 1, INDEX(aa,i)),
-    #           VSTACK(acc, HSTACK(raw, mul, add))
-    #         )
-    #       )
-    #     ), 1
-    #   )
+    # A3: VSTACK 拼接所有合约（展平 REDUCE，避免 LAMBDA 中 INDIRECT 兼容问题）
+    # =VSTACK(
+    #   HSTACK(INDIRECT("'"&_SWITCHES!B3 &"'!A3:K"&_SWITCHES!K3+2), EXPAND(_SWITCHES!I3, _SWITCHES!K3,1,_SWITCHES!I3), EXPAND(_SWITCHES!J3, _SWITCHES!K3,1,_SWITCHES!J3)),
+    #   HSTACK(INDIRECT("'"&_SWITCHES!B4 &"'!A3:K"&_SWITCHES!K4+2), EXPAND(_SWITCHES!I4, _SWITCHES!K4,1,_SWITCHES!I4), EXPAND(_SWITCHES!J4, _SWITCHES!K4,1,_SWITCHES!J4)),
+    #   ...
     # )
-    formula = (
-        f'=LET('
-        f'ct,_SWITCHES!$B$3:$B${sw_last_row},'
-        f'nr,_SWITCHES!$K$3:$K${sw_last_row},'
-        f'am,_SWITCHES!$I$3:$I${sw_last_row},'
-        f'aa,_SWITCHES!$J$3:$J${sw_last_row},'
-        f'n,ROWS(ct),'
-        f'DROP(REDUCE("",SEQUENCE(n),LAMBDA(acc,i,'
-        f'LET(raw,INDIRECT("\'"&INDEX(ct,i)&"\'!A3:K"&INDEX(nr,i)+2),'
-        f'mul,EXPAND(INDEX(am,i),INDEX(nr,i),1,INDEX(am,i)),'
-        f'add,EXPAND(INDEX(aa,i),INDEX(nr,i),1,INDEX(aa,i)),'
-        f'VSTACK(acc,HSTACK(raw,mul,add))'
-        f'))),1)'
-    )
+    vstack_parts = []
+    for i, (inst, td, wc, sd, ed) in enumerate(switches):
+        row = i + 3  # Excel row in _SWITCHES
+        part = (
+            f'HSTACK('
+            f'INDIRECT("\'"&_SWITCHES!B{row}&"\'!A3:K"&_SWITCHES!K{row}+2),'
+            f'EXPAND(_SWITCHES!I{row},_SWITCHES!K{row},1,_SWITCHES!I{row}),'
+            f'EXPAND(_SWITCHES!J{row},_SWITCHES!K{row},1,_SWITCHES!J{row})'
+            f')'
+        )
+        vstack_parts.append(part)
+
+    formula = '=VSTACK(' + ','.join(vstack_parts) + ')'
     main_ws.cell(3, 1, formula).fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
