@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function initSingleFactorShell() {
     initSingleFactorSidebarResizer();
+    initSingleFactorSidebarToggle();
     await loadSingleFactorFamilyList();
 
     const app = document.querySelector('.single-factor-app');
@@ -335,6 +336,63 @@ function initSingleFactorSidebarResizer() {
         dragging = false;
         document.body.style.cursor = '';
     });
+}
+
+/** Sidebar toggle — issue #107 */
+const SIDEBAR_STORAGE_KEY = 'ft:singlefactor:sidebar-expanded';
+
+function initSingleFactorSidebarToggle() {
+    var app = document.querySelector('.single-factor-app');
+    var btn = document.getElementById('sidebar-toggle-btn');
+    var overlay = document.getElementById('sidebar-overlay');
+    if (!app || !btn || !overlay) return;
+
+    var expanded = getSidebarExpanded();
+
+    function applyState(state) {
+        app.classList.remove('sidebar-expanded', 'sidebar-collapsed');
+        if (state) {
+            app.classList.add('sidebar-expanded');
+            btn.classList.remove('sidebar-hidden');
+            btn.textContent = '✕';
+        } else {
+            app.classList.add('sidebar-collapsed');
+            btn.classList.add('sidebar-hidden');
+            btn.textContent = '☰';
+        }
+    }
+
+    function toggle() {
+        expanded = !expanded;
+        setSidebarExpanded(expanded);
+        applyState(expanded);
+    }
+
+    btn.addEventListener('click', toggle);
+    overlay.addEventListener('click', function() {
+        expanded = false;
+        setSidebarExpanded(false);
+        applyState(false);
+    });
+
+    // 初始状态
+    applyState(expanded);
+}
+
+function getSidebarExpanded() {
+    try {
+        var v = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (v === null) return true; // 默认展开
+        return v === '1';
+    } catch(e) {
+        return true;
+    }
+}
+
+function setSidebarExpanded(v) {
+    try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, v ? '1' : '0');
+    } catch(e) {}
 }
 
 function getSingleFactorOwnerSortKey(f) {
