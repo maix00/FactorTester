@@ -37,8 +37,9 @@ import pandas as pd
 
 from scripts.data_dir import DATA_DIR
 
-# 本地存储目录
-_DATA_DIR = Path(DATA_DIR) / 'fees'
+# 本地存储目录（相对于项目根目录，即 Codes/）
+# NOTE: 有效费率版本使用独立目录 fees-effective，避免与旧缓存混淆
+_DATA_DIR = Path(DATA_DIR) / 'fees-effective'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'
