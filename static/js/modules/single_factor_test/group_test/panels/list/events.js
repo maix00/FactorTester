@@ -92,14 +92,13 @@
                 var id = this.getAttribute('data-ls-id');
                 var ls = GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.get(id);
                 if (!ls) return;
-                var tmp = ls.longGroupId;
-                ls.longGroupId = ls.shortGroupId;
-                ls.shortGroupId = tmp;
-                // 更新名称
-                var gLong  = GT.groupSettings.groups && GT.groupSettings.groups.get(ls.longGroupId);
-                var gShort = GT.groupSettings.groups && GT.groupSettings.groups.get(ls.shortGroupId);
-                ls.name = (gLong ? (gLong.shortAlias || gLong.name) : ls.longGroupId) + '/' + (gShort ? (gShort.shortAlias || gShort.name) : ls.shortGroupId);
-                try { GT.groupSettings.lsConfigs.update(id, ls); } catch (err) { alert('交换失败: ' + err.message); }
+                try {
+                    // 只传交换后的 id，update 内部会自动重新派生 shortAlias
+                    GT.groupSettings.lsConfigs.update(id, {
+                        longGroupId: ls.shortGroupId,
+                        shortGroupId: ls.longGroupId
+                    });
+                } catch (err) { alert('交换失败: ' + err.message); }
             });
         });
 
