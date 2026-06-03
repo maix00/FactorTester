@@ -266,7 +266,7 @@ def _export_product(
         for ri, (_, drow) in enumerate(df_win.iterrows(), 3):
             for ci, col_name in enumerate(cols, 1):
                 val = drow[col_name]
-                if hasattr(val, 'date'):
+                if col_name == 'trading_day' and hasattr(val, 'date'):
                     val = val.date()
                 ws.cell(row=ri, column=ci, value=val)
 
