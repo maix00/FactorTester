@@ -32,20 +32,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
-
-DATA_DIR = Path(_ROOT_DATA_DIR)
-WIND_MAPPING_PATH = DATA_DIR / 'wind_mapping.parquet'
-MIN_DIR = DATA_DIR / 'data_mink_product'
-OUTPUT_DIR = DATA_DIR / 'test' / 'test_0'
-
-TOP_N = 8
-
-# wind_mapping 交易所 → 分钟文件 交易所（SHF在分钟文件中可能写成SHFE）
-WIND_EXCH_TO_MIN_EXCH: dict[str, str] = {
-    'SHF': 'SHFE', 'DCE': 'DCE', 'CZC': 'CZC',
-    'INE': 'INE', 'CFE': 'CFE', 'GFE': 'GFE',
-}
+from tests.calc import (
+    WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_DIR, TEST_0_PRODUCTS_XLSX,
+    TOP_N, WIND_EXCH_TO_MIN_EXCH,
+)
 
 # 样式
 COMMENT_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')  # 浅橙注释色
@@ -58,7 +48,7 @@ def _find_min_exch(prod: str, wind_exch: str) -> str | None:
     """查找该品种分钟数据使用的交易所代码"""
     for exch in (WIND_EXCH_TO_MIN_EXCH.get(wind_exch, wind_exch), wind_exch):
         prefix = f'{exch}|F|{prod}|'
-        if list(MIN_DIR.glob(f'{prefix}*.parquet')):
+        if list(MIN_DATA_DIR.glob(f'{prefix}*.parquet')):
             return exch
     return None
 
@@ -66,7 +56,7 @@ def _find_min_exch(prod: str, wind_exch: str) -> str | None:
 def _get_min_data_range(prod: str, min_exch: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     """获取某品种所有分钟文件的 trade_time 最小/最大值"""
     prefix = f'{min_exch}|F|{prod}|'
-    files = list(MIN_DIR.glob(f'{prefix}*.parquet'))
+    files = list(MIN_DATA_DIR.glob(f'{prefix}*.parquet'))
     if not files:
         return None
     t_min, t_max = None, None
@@ -176,8 +166,8 @@ def main():
     # ================================================
     # 写 Excel (openpyxl 直接写，加注释行)
     # ================================================
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = OUTPUT_DIR / '_products.xlsx'
+    TEST_0_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TEST_0_PRODUCTS_XLSX
 
     wb = Workbook()
     wb.remove(wb.active)

@@ -28,16 +28,10 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
-
-# --- 路径配置 ---
-DATA_DIR = Path(_ROOT_DATA_DIR)
-MIN_DIR = DATA_DIR / 'data_mink_product'
-WIND_MAPPING_PATH = DATA_DIR / 'wind_mapping.parquet'
-TEST0_PATH = DATA_DIR / 'test' / 'test_0' / '_products.xlsx'
-OUTPUT_BASE = DATA_DIR / 'test' / 'test_1'
-WINDOW_DAYS = 2  # ±2 天
-TOP_N = 8
+from tests.calc import (
+    WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_PRODUCTS_XLSX, TEST_1_DIR,
+    TOP_N, WINDOW_DAYS, WIND_EXCH_TO_MIN_EXCH,
+)
 
 # --- 样式 ---
 COMMENT_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')
@@ -52,11 +46,11 @@ COMMENT_FONT = Font(italic=True, size=10)
 
 def _load_products_from_test0() -> list[dict]:
     """从 test_0/_products.xlsx 的 _SWITCH_COUNTS sheet 读取 TOP N 品种"""
-    if not TEST0_PATH.exists():
-        raise FileNotFoundError(f"test_0 output not found: {TEST0_PATH}\n"
+    if not TEST_0_PRODUCTS_XLSX.exists():
+        raise FileNotFoundError(f"test_0 output not found: {TEST_0_PRODUCTS_XLSX}\n"
                                 f"Please run test_0_discover_products.py first.")
 
-    df = pd.read_excel(TEST0_PATH, sheet_name='_SWITCH_COUNTS', header=1)
+    df = pd.read_excel(TEST_0_PRODUCTS_XLSX, sheet_name='_SWITCH_COUNTS', header=1)
     # 取 TOP N
     df = df.head(TOP_N)
     products = []
@@ -111,7 +105,7 @@ def _find_min_files(prod: str, min_exch: str) -> dict[str, str]:
     """返回 {instrument_id: filename} 映射"""
     for exch in (min_exch, 'SHFE' if min_exch == 'SHF' else min_exch):
         prefix = f'{exch}|F|{prod}|'
-        files = sorted(MIN_DIR.glob(f'{prefix}*.parquet'))
+        files = sorted(MIN_DATA_DIR.glob(f'{prefix}*.parquet'))
         if files:
             break
     else:
@@ -235,7 +229,7 @@ def _export_product(
         # end 扩展到当天结束
         end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
-        dfm = pd.read_parquet(MIN_DIR / fn)
+        dfm = pd.read_parquet(MIN_DATA_DIR / fn)
         dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
         mask = (dfm['trade_time'] >= start_ts) & (dfm['trade_time'] <= end_ts)
         df_win = dfm.loc[mask].copy()
@@ -258,7 +252,7 @@ def _export_product(
 
         # 注释行
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cols))
-        inst_comment = (f"数据来源: {MIN_DIR / fn}\n"
+        inst_comment = (f"数据来源: {MIN_DATA_DIR / fn}\n"
                         f"合约: {inst} (品种: {prod})\n"
                         f"时间范围: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} "
                         f"(±{WINDOW_DAYS}天 于切换区间 {inst_spans[inst][0].strftime('%Y-%m-%d')} ~ "
@@ -322,7 +316,7 @@ def main():
         inst_to_fname = _find_min_files(prod, min_exch)
         print(f"  Min files: {len(inst_to_fname)}")
 
-        output_dir = OUTPUT_BASE / prod
+        output_dir = TEST_1_DIR / prod
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -360,7 +354,7 @@ def main():
             }
 
     # 写 manifest
-    manifest_path = OUTPUT_BASE / '_manifest.json'
+    manifest_path = TEST_1_DIR / '_manifest.json'
     manifest_path.write_text(json.dumps(manifest, indent=2, default=str, ensure_ascii=False))
     print(f"\n{'='*60}")
     print(f"Manifest: {manifest_path}")

@@ -21,17 +21,18 @@ from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, PatternFill
 
+from tests.calc import (
+    WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_1_DIR, TEST_2A_DIR,
+    TOP_N,
+)
+
+# --- test_2a 专用数据源（不在 calc 白名单中，单独声明） ---
 from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
+MAIN_MINK_DIR = Path(_ROOT_DATA_DIR) / 'main_mink'
 
-# --- 路径配置 ---
-DATA_DIR = Path(_ROOT_DATA_DIR)
-TEST1_DIR = DATA_DIR / 'test' / 'test_1'
-OUTPUT_BASE = DATA_DIR / 'test' / 'test_2a'
-MAIN_DIR = DATA_DIR / 'main_mink'
-
-# test_0 发现的品种
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_0_discover_products import TOP_PRODUCTS
+# test_0 发现的品种 — 从 Excel 读取（与 test_1 相同方式）
+# 注意：test_2a 尚未运行，这里先用占位，后续修复
+TOP_PRODUCTS: dict[str, tuple[str, str]] = {}  # prod -> (day_exch, _)
 
 # 复权公式的颜色标记（浅黄底色，方便识别）
 FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
@@ -45,12 +46,12 @@ def _load_main_adjustments(prod: str, day_exch: str) -> pd.DataFrame:
     """加载主连分钟数据中的 adjustment 信息"""
     exch_normalized = {'SHF': 'SHFE'}.get(day_exch, day_exch)
     for exch in (exch_normalized, 'SHF' if exch_normalized == 'SHFE' else day_exch):
-        f = MAIN_DIR / f'{prod}.{exch}.parquet'
+        f = MAIN_MINK_DIR / f'{prod}.{exch}.parquet'
         if f.exists():
             break
     else:
         # glob fallback
-        for g in sorted(MAIN_DIR.glob(f'{prod}.*.parquet')):
+        for g in sorted(MAIN_MINK_DIR.glob(f'{prod}.*.parquet')):
             f = g
             break
         else:
@@ -86,11 +87,11 @@ def _find_price_col_index(headers: list[str], col_name: str) -> int | None:
 
 def process_product(prod: str, day_exch: str) -> Path:
     """处理一个品种：复制 test_1 Excel，添加复权公式"""
-    input_path = TEST1_DIR / prod / f'{prod}.xlsx'
+    input_path = TEST_1_DIR / prod / f'{prod}.xlsx'
     if not input_path.exists():
         raise FileNotFoundError(f"test_1 Excel not found: {input_path}")
 
-    output_dir = OUTPUT_BASE / prod
+    output_dir = TEST_2A_DIR / prod
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f'{prod}.xlsx'
 
@@ -197,7 +198,7 @@ def process_product(prod: str, day_exch: str) -> Path:
 
 
 def main():
-    output_base = OUTPUT_BASE
+    output_base = TEST_2A_DIR
     output_base.mkdir(parents=True, exist_ok=True)
 
     for prod, (day_exch, _) in TOP_PRODUCTS.items():
