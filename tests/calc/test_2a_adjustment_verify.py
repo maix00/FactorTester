@@ -12,18 +12,19 @@ test_2a_adjustment_verify.py
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
 _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
-  _prev_close: =INDEX(INDIRECT("'"&上一行B&"'!G:G"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!B:B"), 0))
+  _prev_close: =INDEX(INDIRECT("'"&上一行B&"'!J:J"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!E:E"), 0))
       通过上一行 instrument_id (B列) 动态获取前合约 sheet 名，不硬编码
-  _cur_close:  =INDEX(INDIRECT("'"&本行B&"'!G:G"), MATCH(本行D, INDIRECT("'"&本行B&"'!B:B"), 0))
+      合约 sheet 布局: J=close_price, E=instrument_id, E=trading_day
+  _cur_close:  =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!E:E"), 0))
       通过本行 instrument_id (B列) 动态获取本合约 sheet 名，不硬编码
   _prev_adj:   上一行的 adjustment_mul
   adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
   adjustment_add: =0
 
 MAIN sheet（三列独立 VSTACK，各自溢出）：
-  A3 = VSTACK(INDIRECT(_SWITCHES!L3), ...)  — 合约 11 列数据（不包 HSTACK）
-  L3 = VSTACK(EXPAND(_SWITCHES!I3,...), ...)  — adjustment_mul
-  M3 = VSTACK(EXPAND(_SWITCHES!J3,...), ...)  — adjustment_add
+  A3 = VSTACK(INDIRECT(_SWITCHES!L3), ...)  — 合约 21 列数据（不包 HSTACK）
+  V3 = VSTACK(EXPAND(_SWITCHES!I3,...), ...)  — adjustment_mul
+  W3 = VSTACK(EXPAND(_SWITCHES!J3,...), ...)  — adjustment_add
   关键洞察：VSTACK 参数包 HSTACK 会导致溢出仅第一个值
 
 Output: data/test/test_2a/{prod}.xlsx
@@ -60,16 +61,22 @@ def _col_letter(idx: int) -> str:
 
 
 # test_1 合约 sheet 列布局 (row1=remark, row2=header, row3+=data)
-# A=trade_time, B=trading_day, C=instrument_id, D=open_price, E=highest_price,
-# F=lowest_price, G=close_price, H=settlement_price, I=volume, J=turnover, K=open_interest
+# 21 列全量: A=trading_day, B=trade_time, C=trade_timestamp, D=exchange_id,
+# E=instrument_id, F=unique_instrument_id, G=open_price, H=highest_price,
+# I=lowest_price, J=close_price, K=settlement_price, L=upper_limit_price,
+# M=lower_limit_price, N=pre_settlement_price, O=volume, P=turnover,
+# Q=open_interest, R=insert_time, S=product_id, T=twap, U=vwap
 CONTRACT_COLS = [
-    'trade_time', 'trading_day', 'instrument_id',
-    'open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price',
-    'volume', 'turnover', 'open_interest',
+    'trading_day', 'trade_time', 'trade_timestamp', 'exchange_id',
+    'instrument_id', 'unique_instrument_id', 'open_price', 'highest_price',
+    'lowest_price', 'close_price', 'settlement_price', 'upper_limit_price',
+    'lower_limit_price', 'pre_settlement_price', 'volume', 'turnover',
+    'open_interest', 'insert_time', 'product_id', 'twap', 'vwap',
 ]
-CONTRACT_CLOSE_COL = 7      # G: close_price
-CONTRACT_TD_COL = 2          # B: trading_day
-DATA_START_ROW = 3           # 数据从第3行开始 (1=remark, 2=header)
+CONTRACT_CLOSE_COL = 10      # J: close_price (21列布局)
+CONTRACT_TD_COL = 1           # A: trading_day
+CONTRACT_INST_COL = 5          # E: instrument_id
+DATA_START_ROW = 3             # 数据从第3行开始 (1=remark, 2=header)
 
 # _SWITCHES 列定义
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
@@ -93,11 +100,11 @@ ADJ_ADD_COL = SW_ORIG_COLS + 5     # J=10
 SW_NROWS_COL = SW_ORIG_COLS + 6    # K=11: _nrows
 SW_REF_STR_COL = SW_ORIG_COLS + 7  # L=12: _ref_str
 
-# MAIN 列布局 (11 数据列 + 2 adjustment 列 = 13 列, A..M)
-# A..K = 合约数据, L=adjustment_mul, M=adjustment_add
-MAIN_NCOLS = len(CONTRACT_COLS) + 2  # 13
-MAIN_MUL_COL_OFFSET = len(CONTRACT_COLS) + 1  # L=12 (在 13 列中的位置)
-MAIN_ADD_COL_OFFSET = len(CONTRACT_COLS) + 2  # M=13
+# MAIN 列布局 (21 数据列 + 2 adjustment 列 = 23 列, A..W)
+# A..U = 合约数据, V=adjustment_mul, W=adjustment_add
+MAIN_NCOLS = len(CONTRACT_COLS) + 2  # 23
+MAIN_MUL_COL_OFFSET = len(CONTRACT_COLS) + 1  # V=22
+MAIN_ADD_COL_OFFSET = len(CONTRACT_COLS) + 2  # W=23
 
 
 def _check_sheets_match(src_path: Path, dst_path: Path) -> bool:
@@ -269,24 +276,25 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, 5, ed)
 
         # ---- _prev_close ----
-        # =INDEX(INDIRECT("'"&上一行B&"'!G:G"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!B:B"), 0))
+        # =INDEX(INDIRECT("'"&上一行B&"'!J:J"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!E:E"), 0))
         # 不硬编码 sheet 名：通过上一行 instrument_id (B列) 动态获取前合约 sheet 名
+        # close_price = J列 (10), instrument_id = E列 (5), end_date = E列 (5)
         if i == 0:
             sw_out.cell(row, PREV_CLOSE_COL, '').fill = FORMULA_FILL
         elif i > 0:
             prev_b = f'{_col_letter(2)}{row - 1}'   # B: instrument_id 上一行
             prev_e = f'{_col_letter(5)}{row - 1}'   # E: end_date 上一行
-            prev_g_ref = f'INDIRECT("\'"&{prev_b}&"\'!G:G")'
-            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!B:B")'
+            prev_g_ref = f'INDIRECT("\'"&{prev_b}&"\'!J:J")'
+            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!E:E")'
             formula = f'=INDEX({prev_g_ref},MATCH({prev_e},{prev_b_ref},0))'
             sw_out.cell(row, PREV_CLOSE_COL, formula).fill = FORMULA_FILL
 
         # ---- _cur_close ----
-        # =INDEX(INDIRECT("'"&本行B&"'!G:G"), MATCH(本行D, INDIRECT("'"&本行B&"'!B:B"), 0))
+        # =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!E:E"), 0))
         cur_b = f'{_col_letter(2)}{row}'    # B: instrument_id 本行
         cur_d = f'{_col_letter(4)}{row}'    # D: start_date 本行
-        cur_g_ref = f'INDIRECT("\'"&{cur_b}&"\'!G:G")'
-        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!B:B")'
+        cur_g_ref = f'INDIRECT("\'"&{cur_b}&"\'!J:J")'
+        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!E:E")'
         formula = f'=INDEX({cur_g_ref},MATCH({cur_d},{cur_b_ref},0))'
         sw_out.cell(row, CUR_CLOSE_COL, formula).fill = FORMULA_FILL
 
@@ -317,9 +325,9 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- _nrows（纯数值，供 MAIN 公式使用）----
         sw_out.cell(row, SW_NROWS_COL, sheet_rows.get(inst, 0))
 
-        # ---- _ref_str（Python 写入的文本字符串，如 'a2405'!A3:K14027）----
+        # ---- _ref_str（Python 写入的文本字符串，如 'a2405'!A3:U14027）----
         # 对 INDIRECT 来说，这是纯文本值，不需要先求值公式
-        ref_str = f"'{inst}'!A3:K{sheet_rows.get(inst, 0) + 2}"
+        ref_str = f"'{inst}'!A3:U{sheet_rows.get(inst, 0) + 2}"
         sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
@@ -338,18 +346,19 @@ def process_product(prod_xlsx: Path) -> None:
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (13列含复权因子)\n'
+        f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (23列含复权因子)\n'
         f'合约数 = {len(switches)}，公式不硬编码合约数量\n'
         f'A3 = DROP(REDUCE(0, _SWITCHES!L3:L{sw_last_row}, LAMBDA(acc,ref, ...)), 1)'
     )
 
-    # Row 2: header (11 数据列 + 2 adjustment 列)
+    # Row 2: header (21 数据列 + 2 adjustment 列)
     for ci, cn in enumerate(CONTRACT_COLS):
         main_ws.cell(2, ci + 1, cn).fill = HEADER_FILL
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
     # --- A3: 单公式 — REDUCE 遍历 ref_str，HSTACK(data, mul, add)，VSTACK 累积 ---
+    # 21 列合约数据 (A..U) + 2 列复权因子 (V..W) = 23 列
     # =DROP(
     #   REDUCE(0, _SWITCHES!L3:L{N},
     #     LAMBDA(acc, ref,
@@ -391,9 +400,9 @@ def process_product(prod_xlsx: Path) -> None:
     # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）
     #    防止 WPS/Excel 自动插入 @ implicit intersection operator
     # ============================================================
-    # 计算 ref 范围：13 列 (A-M)，total_rows 数据行从 row 3 开始
+    # 计算 ref 范围：23 列 (A-W)，total_rows 数据行从 row 3 开始
     last_row = 2 + total_rows
-    ref_range = f'A3:M{last_row}'
+    ref_range = f'A3:W{last_row}'
     _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3', ref_range)
 
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
