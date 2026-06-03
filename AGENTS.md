@@ -247,13 +247,35 @@ git worktree add ../Codes-master-server master
 
 当多个 agent 同时操作不同 Issue 时，每个 agent 在 `.workspace/` 下拥有独立 worktree，互不干扰。
 
+---
+
+## 🚫🛑 MERGE 权限（最高优先级 — 覆盖所有其他规则）
+
+> # ⛔ 以下规则凌驾于所有其他规则之上。违反即严重事故。
+
+| 操作 | Agent 权限 | 规则 |
+|------|-----------|------|
+| `fix/* → feat` merge | ❌ **禁止** | 必须人类明确说"合并"、"merge"或同意后才能执行 |
+| `feat → master` merge | ❌ **禁止** | 必须人类明确说"合并"、"merge"或同意后才能执行 |
+| `git push origin master` | ❌ **禁止** | 必须人类明确说"push"或同意后才能执行 |
+| worktree 内的 commit | ✅ 允许 | 在自己的 `fix/issue-N-*` worktree 内自由提交 |
+
+**Agent 在任何情况下都不得自行判断合并时机。** 即使认为任务已完成、测试已通过、代码已就绪，也必须：
+1. 在 Issue 下留 `Done-by:` comment，附上 `git diff --stat` 摘要
+2. **等待人类明确指示** "合并到 feat" 或 "merge to feat/master"
+
+> 人类说的 "好的"、"可以"、"合并吧"、"merge"、"push" 等即为同意。
+> 人类说的 "你自己看着办"、"你决定" **不等于** 同意 merge —— merge 必须**显式**同意。
+
+---
+
 #### ⚠️ 并发控制（强制）
 
 > 🛑🛑🛑 **以下规则必须严格遵守，违规可能导致并发冲突、数据丢失。** 🛑🛑🛑
 
 **权限分层（Agent 启动时自我判定）**：
-- **VS Code Agent（低权限）**：可以正常执行命令和提交代码。merge feat → master + push 前输出提示语句，不暂停等待。
-- **Codex Agent（高权限）**：可以执行任务所需的常规写操作（创建/修改文件、commit、merge 本地分支等）。写操作前输出提示语句说明意图；高风险或破坏性操作（如 `rm -rf`、`git reset --hard`、force push、删除远程分支、直接推送远程）仍需人类明确确认。
+- **VS Code Agent（低权限）**：可以正常执行命令和提交代码。**所有 merge 和 push 必须经人类同意（见上方 🚫🛑 MERGE 权限）。**
+- **Codex Agent（高权限）**：可以执行任务所需的常规写操作（创建/修改文件、commit 等）。写操作前输出提示语句说明意图；高风险或破坏性操作（如 `rm -rf`、`git reset --hard`、force push、删除远程分支、直接推送远程）以及**所有 merge 和 push** 仍需人类明确确认。
 
 **人类调度（唯一并发控制）**：
 - 人类负责分配 Issue 给 agent，不给同一个 Issue 分配给多个 agent。
@@ -295,7 +317,7 @@ Codes/
    ```
    > 此时你有两个目录：`~/Codes/` 在 `feat` 分支，`.workspace/fix/issue-<N>-<描述>/` 在 fix 分支。互不干扰。
 
-#### Agent 完成任务后
+#### Agent 完成任务后（⚠️ 不可自行 merge — 见上方 🚫🛑 MERGE 权限）
 
 ```bash
 # 1. 在 worktree 内 commit
@@ -303,16 +325,21 @@ cd .workspace/fix/issue-<N>-<描述>
 git add .
 git commit -m "<type>: <描述> (refs #<N>)"
 
-# 2. 回到主目录的 feat，合并 fix 分支
-cd ~/Codes
-git checkout feat
-git merge --no-ff fix/issue-<N>-<描述>   # --no-ff 保留分支拓扑
-git branch -d fix/issue-<N>-<描述>
-
-# 3. 删除 worktree（在主目录执行）
-git worktree remove .workspace/fix/issue-<N>-<描述>
-rm -rf .workspace/fix/issue-<N>-<描述>
+# 2. 在 Issue 下留 Done-by comment，等待人类指示 merge
 ```
+
+> ⛔ Agent **不得**自行执行以下操作。必须等待人类明确同意：
+> ```bash
+> # 以下操作需要人类同意后执行：
+> cd ~/Codes
+> git checkout feat
+> git merge --no-ff fix/issue-<N>-<描述>   # --no-ff 保留分支拓扑
+> git branch -d fix/issue-<N>-<描述>
+>
+> # 删除 worktree（在主目录执行）
+> git worktree remove .workspace/fix/issue-<N>-<描述>
+> rm -rf .workspace/fix/issue-<N>-<描述>
+> ```
 
 #### 关键规则
 
@@ -385,7 +412,9 @@ git add .
 git commit -m "<type>: <描述> (refs #<号码>)"
 ```
 
-### 5. 合并回 feat
+### 5. 合并回 feat（⛔ 必须人类同意）
+
+> 参考上方 🚫🛑 MERGE 权限。Agent 不得自行执行。
 
 ```bash
 cd ~/Codes
@@ -398,7 +427,7 @@ git worktree remove .workspace/fix/issue-<号码>-<简短描述>
 rm -rf .workspace/fix/issue-<号码>-<简短描述>
 ```
 
-全部 Issue 完成后，`feat → master`：
+全部 Issue 完成后，`feat → master`（⛔ 必须人类同意）：
 
 ```bash
 git checkout master && git merge feat --no-ff
@@ -411,6 +440,9 @@ git push origin master
 - ❌ 不擅自删除远程分支
 - ❌ 不擅自关闭 Issue
 - ❌ 不提交 secrets / token / 密码 / `.env`
+- ❌ **不自行 merge（fix→feat, feat→master）— 见 🚫🛑 MERGE 权限**
+- ❌ **不自行 push master**
 - ✅ 大改动前先解释计划
 - ✅ 每次 commit 前展示 `git diff` 摘要
 - ✅ 测试失败先修复，修不了说明原因
+- ✅ merge/push 前必须获得人类明确同意
