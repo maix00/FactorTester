@@ -310,23 +310,24 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
-    # Sheet 2: MAIN (REDUCE+VSTACK 动态遍历 _SWITCHES L 列，无硬编码合约数)
+    # Sheet 2: MAIN (单列 REDUCE+VSTACK+HSTACK — 13列数据+mul+add，无硬编码)
     # ----------------------------------------------------------
     # 核心洞察：
-    #   1. REDUCE 初始值为数组 → 溢出失败；初始值为标量(0) → 正常
-    #   2. LAMBDA 内 VSTACK(acc, INDIRECT(ref)) 逐合约叠加
-    #   3. DROP(,1) 去掉第一行标量初始值 0
+    #   1. REDUCE 初始值为标量 0，LAMBDA 内 VSTACK(acc, HSTACK(data, mul, add))
+    #   2. HSTACK 在 VSTACK 的 LAMBDA 内没溢出问题（因为标量 init）
+    #   3. DROP(,1) 去掉初始标量行
     # 公式无需知道合约数量，自动遍历 _SWITCHES!L3:L{N}
     main_ws = wb.create_sheet('MAIN', 1)
 
     sw_last_row = 2 + len(switches)
+    sw_last_col_letter = _col_letter(SW_REF_STR_COL)  # L
 
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        f'主力连续序列 — REDUCE+VSTACK 动态遍历 _SWITCHES!L3:L{sw_last_row}\n'
+        f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (13列含复权因子)\n'
         f'合约数 = {len(switches)}，公式不硬编码合约数量\n'
-        'REDUCE(0, ...) 初始标量 + VSTACK + DROP(,1)'
+        f'A3 = DROP(REDUCE(0, _SWITCHES!L3:L{sw_last_row}, LAMBDA(acc,ref, ...)), 1)'
     )
 
     # Row 2: header (11 数据列 + 2 adjustment 列)
@@ -335,43 +336,33 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # --- A3: REDUCE 遍历 _ref_str，VSTACK 拼接 11 列合约数据 ---
-    # =DROP(REDUCE(0, _SWITCHES!L3:L{N}, LAMBDA(acc, ref, VSTACK(acc, INDIRECT(ref)))), 1)
-    a3_formula = (
+    # --- A3: 单公式 — REDUCE 遍历 ref_str，HSTACK(data, mul, add)，VSTACK 累积 ---
+    # =DROP(
+    #   REDUCE(0, _SWITCHES!L3:L{N},
+    #     LAMBDA(acc, ref,
+    #       LET(
+    #         r, ROW(ref),                    -- _SWITCHES 行号
+    #         data, INDIRECT(ref),            -- 11 列合约数据
+    #         mul, EXPAND(INDEX(_SWITCHES!I:I,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!I:I,r)),
+    #         add, EXPAND(INDEX(_SWITCHES!J:J,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!J:J,r)),
+    #         VSTACK(acc, HSTACK(data, mul, add))
+    #       )
+    #     )
+    #   ), 1
+    # )
+    formula = (
         f'=DROP('
-        f'REDUCE(0,_SWITCHES!L3:L{sw_last_row},'
-        f'LAMBDA(acc,ref,VSTACK(acc,INDIRECT(ref)))),'
+        f'REDUCE(0,_SWITCHES!{sw_last_col_letter}3:{sw_last_col_letter}{sw_last_row},'
+        f'LAMBDA(acc,ref,'
+        f'LET(r,ROW(ref),'
+        f'd,INDIRECT(ref),'
+        f'm,EXPAND(INDEX(_SWITCHES!I:I,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!I:I,r)),'
+        f'a,EXPAND(INDEX(_SWITCHES!J:J,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!J:J,r)),'
+        f'VSTACK(acc,HSTACK(d,m,a))'
+        f'))),'
         f'1)'
     )
-    main_ws.cell(3, 1, a3_formula).fill = FORMULA_FILL
-
-    # --- L3: REDUCE 遍历 adjustment_mul，用 EXPAND 展开 ---
-    # =DROP(REDUCE(0, SEQUENCE(ROWS(_SWITCHES!I3:I{N})), LAMBDA(acc, i,
-    #   LET(r, i+2, VSTACK(acc, EXPAND(INDEX(_SWITCHES!I:I,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!I:I,r)))))), 1)
-    mul_formula = (
-        f'=DROP('
-        f'REDUCE(0,SEQUENCE(ROWS(_SWITCHES!I3:I{sw_last_row})),'
-        f'LAMBDA(acc,i,'
-        f'LET(r,i+2,'
-        f'VSTACK(acc,EXPAND(INDEX(_SWITCHES!I:I,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!I:I,r)))'
-        f')),'
-        f'1)'
-    )
-    main_ws.cell(3, MAIN_MUL_COL_OFFSET, mul_formula).fill = FORMULA_FILL
-
-    # --- M3: REDUCE 遍历 adjustment_add，用 EXPAND 展开 ---
-    # =DROP(REDUCE(0, SEQUENCE(ROWS(_SWITCHES!J3:J{N})), LAMBDA(acc, i,
-    #   LET(r, i+2, VSTACK(acc, EXPAND(INDEX(_SWITCHES!J:J,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!J:J,r)))))), 1)
-    add_formula = (
-        f'=DROP('
-        f'REDUCE(0,SEQUENCE(ROWS(_SWITCHES!J3:J{sw_last_row})),'
-        f'LAMBDA(acc,i,'
-        f'LET(r,i+2,'
-        f'VSTACK(acc,EXPAND(INDEX(_SWITCHES!J:J,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!J:J,r)))'
-        f')),'
-        f'1)'
-    )
-    main_ws.cell(3, MAIN_ADD_COL_OFFSET, add_formula).fill = FORMULA_FILL
+    main_ws.cell(3, 1, formula).fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
     total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
