@@ -20,11 +20,10 @@ _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sh
   adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
   adjustment_add: =0
 
-MAIN sheet（单一 REDUCE 数组公式，A3 溢出）：
-  _SWITCHES L 列用 Excel 公式拼接引用字符串（如 'a2405'!A3:K14027），
-  MAIN 用 REDUCE + SEQUENCE(ROWS(L4:L{n})) 遍历 L4:L{n}，
-  INDIRECT + DROP(raw, 2) 去表头，HSTACK 加 adjustment 列。
-  合约数 = ROWS() 动态获取，增减合约只需改 _SWITCHES 数据。
+MAIN sheet（VSTACK 展平 + INDIRECT，A3 溢出）：
+  每个合约一个 HSTACK 参数 = HSTACK(DROP(INDIRECT(_SWITCHES!L{n}),2), EXPAND(...), EXPAND(...))
+  合约名/行号由 _SWITCHES L 列（_ref_str）动态提供，不硬编码
+  VSTACK 参数数 = 合约数（Python for 循环生成，写入 xlsx）
 
 Output: data/test/test_2a/{prod}.xlsx
 """
@@ -314,9 +313,10 @@ def process_product(prod_xlsx: Path) -> None:
     # Row 1: remark
     main_ws.cell(
         1, 1,
-        '主力连续序列 — REDUCE + INDIRECT 动态拼接\n'
-        '_SWITCHES L 列存引用字符串（Excel公式拼接），MAIN 用 REDUCE 遍历\n'
-        '合约数 = ROWS(_SWITCHES!L3:L{})，完全动态，不硬编码'.format(sw_last_row)
+        '主力连续序列 — VSTACK + INDIRECT 动态拼接\n'
+        '每个合约 = HSTACK(DROP(INDIRECT(_SWITCHES!L{{n}}),2), EXPAND(_SWITCHES!I{{n}},...))\n'
+        '合约名/行号由 _SWITCHES 辅助列动态提供，不硬编码\n'
+        '合约数 = ROWS(_SWITCHES!L3:L{})'.format(sw_last_row)
     )
 
     # Row 2: header (11 数据列 + 2 adjustment 列)
@@ -325,38 +325,26 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # A3: REDUCE 遍历 _SWITCHES L 列引用字符串，VSTACK 拼接
-    # 所有 INDIRECT/INDEX 引用必须带 _SWITCHES! 前缀（MAIN 是独立 sheet）
-    # 初始值：第一个合约的完整 HSTACK 块
-    # =REDUCE(
-    #   HSTACK(DROP(INDIRECT(_SWITCHES!L3), 2),
-    #          EXPAND(_SWITCHES!I3, _SWITCHES!K3, 1, _SWITCHES!I3),
-    #          EXPAND(_SWITCHES!J3, _SWITCHES!K3, 1, _SWITCHES!J3)),
-    #   SEQUENCE(ROWS(_SWITCHES!L4:L{sw_last_row})),
-    #   LAMBDA(acc, idx,
-    #     LET(
-    #       i, idx + 3,
-    #       raw, DROP(INDIRECT(INDEX(_SWITCHES!L:L, i)), 2),
-    #       VSTACK(acc, HSTACK(
-    #         raw,
-    #         EXPAND(INDEX(_SWITCHES!I:I, i), INDEX(_SWITCHES!K:K, i), 1, INDEX(_SWITCHES!I:I, i)),
-    #         EXPAND(INDEX(_SWITCHES!J:J, i), INDEX(_SWITCHES!K:K, i), 1, INDEX(_SWITCHES!J:J, i))
-    #       ))
-    #     )
-    #   )
+    # A3: VSTACK 展平 — 每个合约一个 HSTACK 参数，通过 _SWITCHES! 引用
+    # HSTACK(
+    #   DROP(INDIRECT(_SWITCHES!L{n}), 2),
+    #   EXPAND(_SWITCHES!I{n}, _SWITCHES!K{n}, 1, _SWITCHES!I{n}),
+    #   EXPAND(_SWITCHES!J{n}, _SWITCHES!K{n}, 1, _SWITCHES!J{n})
     # )
-    formula = (
-        f'=REDUCE('
-        f'HSTACK(DROP(INDIRECT(_SWITCHES!L3),2),EXPAND(_SWITCHES!I3,_SWITCHES!K3,1,_SWITCHES!I3),EXPAND(_SWITCHES!J3,_SWITCHES!K3,1,_SWITCHES!J3)),'
-        f'SEQUENCE(ROWS(_SWITCHES!L4:L{sw_last_row})),'
-        f'LAMBDA(acc,idx,'
-        f'LET(i,idx+3,'
-        f'raw,DROP(INDIRECT(INDEX(_SWITCHES!L:L,i)),2),'
-        f'VSTACK(acc,HSTACK(raw,'
-        f'EXPAND(INDEX(_SWITCHES!I:I,i),INDEX(_SWITCHES!K:K,i),1,INDEX(_SWITCHES!I:I,i)),'
-        f'EXPAND(INDEX(_SWITCHES!J:J,i),INDEX(_SWITCHES!K:K,i),1,INDEX(_SWITCHES!J:J,i))'
-        f')))))'
-    )
+    # 所有 sheet/行号引用都通过 _SWITCHES! 动态获取
+    vstack_parts = []
+    for i in range(len(switches)):
+        row = i + 3
+        part = (
+            f'HSTACK('
+            f'DROP(INDIRECT(_SWITCHES!L{row}),2),'
+            f'EXPAND(_SWITCHES!I{row},_SWITCHES!K{row},1,_SWITCHES!I{row}),'
+            f'EXPAND(_SWITCHES!J{row},_SWITCHES!K{row},1,_SWITCHES!J{row})'
+            f')'
+        )
+        vstack_parts.append(part)
+
+    formula = '=VSTACK(' + ','.join(vstack_parts) + ')'
     main_ws.cell(3, 1, formula).fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
