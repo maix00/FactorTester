@@ -466,7 +466,11 @@ def simulate_groups(
     Returns
     -------
     dict with keys: net_returns_np, gross_returns_np, product_gross_contrib_np,
-    product_fee_contrib_np, fee_costs_np, trade_notional_ratio_np, multi_session_triggered
+    product_fee_contrib_np, fee_costs_np, trade_notional_ratio_np, multi_session_triggered,
+    target_amounts_np, prev_end_amounts_np
+
+    target_amounts_np : (T, M, P) float — 每期调仓后目标持仓金额
+    prev_end_amounts_np : (T, M, P) float — 每期结束时实际持仓金额（refs #100）
     """
     T, n_groups, P = membership_np.shape
 
@@ -547,6 +551,10 @@ def simulate_groups(
     wealth = np.ones(M, dtype=float)
     prev_end_amounts = np.zeros((M, P), dtype=float)
 
+    # 记录每期持仓金额 (refs #100)
+    target_amounts_np = np.zeros((T, M, P), dtype=float)
+    prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
+
     for t in range(T):
         curr_mask_all = membership_np[t]           # (M, P)
         curr_count_all = member_counts[t]           # (M,)
@@ -570,6 +578,8 @@ def simulate_groups(
             product_gross_contrib_np[t] = product_gross_contrib
             net_returns_np[t] = gross
             prev_end_amounts = target_amounts * (1.0 + returns_np[t][np.newaxis, :])
+            target_amounts_np[t] = target_amounts
+            prev_end_amounts_np[t] = prev_end_amounts
             continue
 
         # --- Empty groups ---
@@ -607,6 +617,9 @@ def simulate_groups(
             prev_end_amounts[empty_mask] = empty_target * (1.0 + returns_np[t][np.newaxis, :])
 
         if not non_empty_mask.any():
+            # 记录本期持仓金额（全空组，target_amounts 已在上方设为零）(refs #100)
+            target_amounts_np[t] = target_amounts
+            prev_end_amounts_np[t] = prev_end_amounts
             continue
 
         ne_idx = np.where(non_empty_mask)[0]
@@ -763,6 +776,10 @@ def simulate_groups(
         new_prev[ne_cc == 0] = 0.0
         prev_end_amounts[ne_idx] = new_prev
 
+        # 记录本期持仓金额 (refs #100)
+        target_amounts_np[t] = target_amounts
+        prev_end_amounts_np[t] = prev_end_amounts
+
     return {
         'net_returns_np': net_returns_np,
         'gross_returns_np': gross_returns_np,
@@ -771,6 +788,8 @@ def simulate_groups(
         'fee_costs_np': fee_costs_np,
         'trade_notional_ratio_np': trade_notional_ratio_np,
         'multi_session_triggered': multi_session_triggered,
+        'target_amounts_np': target_amounts_np,
+        'prev_end_amounts_np': prev_end_amounts_np,
     }
 
 
@@ -1777,6 +1796,7 @@ def test_by_group_single_factor(
         n_derived=n_derived,
         derived_info=derived_info,
         group_names=n_names,
+        hold_amounts_np=sim_result.get('prev_end_amounts_np'),
     )
     if r is not None:
         r.group_result = group_result

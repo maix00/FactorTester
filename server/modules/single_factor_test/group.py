@@ -749,6 +749,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                 'key': group_key,
                 'name': group_name,
                 'group_index': g,
+                'submission_id': submission_id,
                 'timestamps': timestamps,
                 'cumulative_returns': vals,
                 'gross_returns': gross_vals,
@@ -788,6 +789,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                 groups_data.append({
                     'key': ls_key,
                     'name': ls_name,
+                    'submission_id': submission_id,
                     'timestamps': timestamps,
                     'cumulative_returns': ls_vals,
                     'gross_returns': _serialize_float_series(r_ls, default=0.0),
@@ -1432,12 +1434,62 @@ def get_group_snapshot():
 
         n_groups = len(products_dict)
         fee_rates_by_name = _product_fee_rates_by_name(group_result)
+
+        # ── 持仓金额数据 (refs #100) ──
+        hold_np = getattr(group_result, 'hold_amounts_np', None)
+        t_idx = None
+        if hold_np is not None and group_result.index_list:
+            try:
+                t_idx = group_result.index_list.index(best_idx_entry)
+            except (ValueError, AttributeError):
+                t_idx = None
+
+        # 构建 valid_cols → position 映射（hold_np 的 P 轴与 valid_cols 对齐）
+        valid_cols_list = group_result.valid_cols if group_result.valid_cols else []
+        col_to_pos = {col: i for i, col in enumerate(valid_cols_list)} if valid_cols_list else {}
+
         groups_detail = []
         for g in range(n_groups):
             current_raw = products_dict[g].get(best_idx_entry, [])
             current_display = [_display_product_with_fee(x, fee_rates_by_name) for x in current_raw]
             # 按 name 排序
             current_display.sort(key=lambda d: d['name'])
+
+            # ── 注入持仓金额 (refs #100) ──
+            g_amounts = None
+            if t_idx is not None and hold_np is not None and hold_np.shape[0] > t_idx:
+                # hold_np shape: (T, M, P)；M 可能 > n_groups（variant 扩展）
+                # 当 M > n_groups 时，产品金额可能分布在同一 base group 的多个 variant 中
+                # products_dict 的 key 是 base group index
+                # 简化处理：取 g 对应的 variant 金额；若 M == n_groups，直接用 g
+                if g < hold_np.shape[1]:
+                    g_amounts = hold_np[t_idx, g, :]  # (P,) — 该组每产品持仓金额
+                elif hasattr(group_result, 'n_base') and group_result.n_base is not None:
+                    # 存在 variant 扩展：暂不处理（require further design）
+                    pass
+                else:
+                    # fallback: 取 g 但可能 index error
+                    pass
+
+            total_amount = float(np.sum(g_amounts)) if g_amounts is not None and current_raw else 0.0
+
+            # 注入 amount/weight/pending_exit 到每个产品
+            if g_amounts is not None and col_to_pos and total_amount > 0:
+                for d in current_display:
+                    pname = d.get('name', '')
+                    pos = col_to_pos.get(pname)
+                    if pos is not None and pos < len(g_amounts):
+                        amt = float(g_amounts[pos])
+                        d['amount'] = round(amt, 6)
+                        d['weight'] = round(amt / total_amount, 6) if total_amount > 0 else 0.0
+                        # pending_exit: 在 membership 中但 amount ≈ 0（低于组资产的万分之一）
+                        d['pending_exit'] = amt < total_amount * 0.0001
+            elif current_raw:
+                # 无金额数据时，amount 留空
+                for d in current_display:
+                    d['amount'] = None
+                    d['weight'] = None
+                    d['pending_exit'] = False
 
             if prev_entry is not None:
                 prev_raw = products_dict[g].get(prev_entry, [])

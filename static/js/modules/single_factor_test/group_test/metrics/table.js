@@ -94,7 +94,7 @@
         (groups || []).forEach(function(g, idx) {
             if (!g || g.is_ls || !g.key) return;
             var groupIndex = g.group_index != null ? g.group_index : idx;
-            map[g.key] = groupIndex;
+            map[g.key] = { groupIndex: groupIndex, submissionId: g.submission_id || null };
         });
         return map;
     }
@@ -181,14 +181,24 @@
 
         var groupIndexMap = buildGroupIndexMap(groups);
         function groupLabel(g) { return String(g); }
+        function groupIndexDisplay(g) {
+            var entry = groupIndexMap[g];
+            return (entry && entry.groupIndex != null) ? String(entry.groupIndex) : '';
+        }
+        function groupSubmissionId(g) {
+            var entry = groupIndexMap[g];
+            return entry ? (entry.submissionId || null) : null;
+        }
 
         var headHtml = '<tr><th class="group-ranking-trigger" title="查看整体排序能力">指标</th>';
         labels.forEach(function(g) {
             var label = groupLabel(g);
-            var groupIndex = groupIndexMap[g] != null ? groupIndexMap[g] : (/^\d+$/.test(String(g)) ? String(g) : '');
+            var indexDisplay = groupIndexDisplay(g);
+            var subId = groupSubmissionId(g);
             headHtml += '<th class="group-detail-trigger"'
                 + ' data-group-key="' + escapeAttr(g) + '"'
-                + ' data-group-index="' + escapeAttr(groupIndex) + '"'
+                + ' data-group-index="' + escapeAttr(indexDisplay) + '"'
+                + ' data-submission-id="' + escapeAttr(subId || '') + '"'
                 + ' title="查看该组详情">' + label + '</th>';
         });
         headHtml += '</tr>';
@@ -228,7 +238,7 @@
             th.addEventListener('click', function() {
                 var groupKey = th.getAttribute('data-group-key');
                 if (typeof actions.openResultGroupDetail === 'function') {
-                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'));
+                    actions.openResultGroupDetail(groupKey, th.getAttribute('data-group-index'), th.getAttribute('data-submission-id'));
                 } else if (typeof actions.openGroupDetail === 'function') {
                     actions.openGroupDetail(parseInt(th.getAttribute('data-group-index'), 10));
                 }

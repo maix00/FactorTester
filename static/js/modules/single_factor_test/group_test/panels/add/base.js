@@ -389,7 +389,8 @@
             var letter = comboLetters[comboKey] || 'A';
 
             var REG = window.GT_CONFIG_REGISTRY;
-            var feeMode = (REG && REG.hasDirty()) ? REG.getDirty('feeMode', draft.feeMode || 'none') : (draft.feeMode || 'none');
+            var GS = GT.groupSettings;
+            var feeMode = (REG && REG.hasDirty()) ? REG.getDirty('feeMode', draft.feeMode || GS.getFieldDefault('feeMode')) : (draft.feeMode || GS.getFieldDefault('feeMode'));
             // Read dirty workspace for feeMap (populated by overlay's "写入暂存")
             var dirtyFeeMap = (REG && REG.hasDirty()) ? REG.getDirty('feeMap') : null;
             var feeMap = null;
@@ -399,8 +400,8 @@
             var feeRate = (REG && REG.hasDirty()) ? REG.getDirty('feeRate', draft.feeRate) : draft.feeRate;
             var feeSensitivity = (REG && REG.hasDirty()) ? REG.getDirty('feeSensitivity', draft.feeSensitivity) : draft.feeSensitivity;
             var useCloseToday = (REG && REG.hasDirty()) ? REG.getDirty('useCloseToday', draft.useCloseToday) : draft.useCloseToday;
-            var liquidityMode = (REG && REG.hasDirty()) ? REG.getDirty('liquidityMode', draft.liquidityMode || 'infinite') : (draft.liquidityMode || 'infinite');
-            var liquidityPercent = (REG && REG.hasDirty()) ? REG.getDirty('liquidityPercent', draft.liquidityPercent != null ? draft.liquidityPercent : 100) : (draft.liquidityPercent != null ? draft.liquidityPercent : 100);
+            var liquidityMode = (REG && REG.hasDirty()) ? REG.getDirty('liquidityMode', draft.liquidityMode || GS.getFieldDefault('liquidityMode')) : (draft.liquidityMode || GS.getFieldDefault('liquidityMode'));
+            var liquidityPercent = (REG && REG.hasDirty()) ? REG.getDirty('liquidityPercent', draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent')) : (draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent'));
             if (allGroups) {
                 for (var gi = 1; gi <= groupCount; gi++) {
                     var names = _makeNames(testerId, alias, groupCount, gi, letter);
@@ -418,7 +419,7 @@
                             feeMap: feeMap,
                             feeSensitivity: feeSensitivity,
                             useCloseToday: useCloseToday,
-                            rebalanceMode: draft.rebalanceMode || 'each_period',
+                            rebalanceMode: draft.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
                             liquidityMode: liquidityMode,
                             liquidityPercent: liquidityPercent,
                         });
@@ -441,7 +442,7 @@
                         feeMap: feeMap,
                         feeSensitivity: feeSensitivity,
                         useCloseToday: useCloseToday,
-                        rebalanceMode: draft.rebalanceMode || 'each_period',
+                        rebalanceMode: draft.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
                         liquidityMode: liquidityMode,
                         liquidityPercent: liquidityPercent,
                     });

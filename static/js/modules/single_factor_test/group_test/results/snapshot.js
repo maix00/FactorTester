@@ -39,7 +39,12 @@
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
         var submissionId = _activeSubmissionId();
-        if (!submissionId) return;
+        console.log('[snapshot-debug] fetchGroupSnapshot called: timestampMs=', timestampMs, 'submissionId=', submissionId);
+        if (!submissionId) {
+            console.warn('[snapshot-debug] No active submissionId — drawer will not open. Please select a submission first.');
+            alert('请先在提交列表中选中一条提交记录，再点击图表查看持仓快照。');
+            return;
+        }
 
         timestampMs = Math.round(timestampMs);
         _snapshotCurrentMs = timestampMs;
@@ -62,7 +67,7 @@
         .then(function(data) {
             if (!data.success) {
                 document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
-                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">' + data.error + '</div>';
+                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">' + (data.error || '未知错误') + '</div>';
                 document.getElementById('snapshot_flow_stats').innerHTML = '';
                 _updateSnapshotNavButtons(null);
                 openSnapshotDrawer();
@@ -70,8 +75,16 @@
             }
             _snapshotTimestamps = data.all_timestamps_ms || [];
             _snapshotCurrentMs = data.timestamp_ms;
-            renderGroupSnapshot(data, data.timestamp_ms);
-            _updateSnapshotNavButtons(data);
+            try {
+                renderGroupSnapshot(data, data.timestamp_ms);
+                _updateSnapshotNavButtons(data);
+            } catch (e) {
+                console.error('[snapshot] renderGroupSnapshot error:', e);
+                document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 渲染失败';
+                document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">渲染快照时出错: ' + (e.message || e) + '</div>';
+                document.getElementById('snapshot_flow_stats').innerHTML = '';
+                _updateSnapshotNavButtons(null);
+            }
             openSnapshotDrawer();
         })
         .catch(function(err) {
@@ -118,7 +131,9 @@
 
     function openSnapshotDrawer() {
         var overlay = document.getElementById('group-snapshot-drawer');
+        console.log('[snapshot-debug] openSnapshotDrawer called: overlay=', !!overlay, 'hasOpenClass=', overlay ? overlay.classList.contains('open') : null);
         if (overlay) overlay.classList.add('open');
+        if (overlay) console.log('[snapshot-debug] after add: hasOpenClass=', overlay.classList.contains('open'));
     }
 
     function closeSnapshotDrawer() {
@@ -128,10 +143,12 @@
 
     /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击 + 前/后导航） */
     function bindSnapshotDrawerEvents() {
+        console.log('[snapshot-debug] bindSnapshotDrawerEvents called');
         var overlay = document.getElementById('group-snapshot-drawer');
         var closeBtn = document.getElementById('group-snapshot-drawer-close');
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
+        console.log('[snapshot-debug] elements: overlay=', !!overlay, 'closeBtn=', !!closeBtn, 'prevBtn=', !!prevBtn, 'nextBtn=', !!nextBtn);
         if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
         if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
         if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });
@@ -209,7 +226,7 @@
         return productName;
     }
 
-    /** 渲染单个产品标签（带费率和描述） */
+    /** 渲染单个产品标签（带费率、描述和持仓金额） */
     function _renderProduct(p) {
         if (!p) return '';
         if (typeof p === 'string') return _escape(p);
@@ -227,7 +244,13 @@
             if (fee.close_ratio !== undefined) parts.push('平' + (fee.close_ratio * 100).toFixed(3) + '%');
             if (parts.length) feeHtml = ' <span class="snapshot-product-fee">[' + parts.join(' ') + ']</span>';
         }
-        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>';
+        // 持仓金额 (refs #100)
+        var amtHtml = '';
+        if (p.amount !== null && p.amount !== undefined) {
+            var amtStr = p.amount >= 1 ? p.amount.toFixed(2) : p.amount.toFixed(6);
+            amtHtml = ' <span class="snapshot-product-amount" title="持仓金额">' + amtStr + '</span>';
+        }
+        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>' + amtHtml;
     }
 
     /**

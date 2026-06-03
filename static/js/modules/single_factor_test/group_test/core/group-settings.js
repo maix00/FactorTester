@@ -228,6 +228,12 @@
         _rebuildSchema();
     };
 
+    /** Get the registered default value for a field key, or null if not found. */
+    api.getFieldDefault = function(key) {
+        var f = FIELD_BY_KEY[key];
+        return f ? f.default : null;
+    };
+
     // ═══════════════════════════════════════════════════════════════
     // Group CRUD — unified (base + derived)
     // ═══════════════════════════════════════════════════════════════
@@ -324,6 +330,7 @@
                 if (!config.hasOwnProperty(df.key)) item[df.key] = null;
             }
         }
+
     }
 
     function _groupsGet(id) {
@@ -528,7 +535,7 @@
 
     function _groupsSerializeVariant(group, fallbackName) {
         if (!group) return null;
-        var mode = group.feeMode || 'none';
+        var mode = group.feeMode || api.getFieldDefault('feeMode');
         var displayName = group.shortAlias || group.name || fallbackName || group.id || '';
         return {
             name: displayName,
@@ -537,9 +544,9 @@
             fee_rate: group.feeRate != null ? group.feeRate : null,
             fee_map: (mode === 'per_product' || mode === 'custom') ? _groupsSerializeFeeMap(group.feeMap) : null,
             use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || 'buy_and_hold',
-            liquidity_mode: group.liquidityMode || 'infinite',
-            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
+            rebalance_mode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
+            liquidity_mode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
+            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent')
         };
     }
 
@@ -583,22 +590,23 @@
             var products = _groupsEffectiveProductNames(group, options);
             if (!products.length) return;
             var name = group.shortAlias || _groupsDisplayKey(group, all) || group.name || '派生组';
+
             payload.push({
                 id: group.id,
                 key: name,
                 name: name,
                 baseGroup: (base.groupIndex || 1) - 1,
                 productNames: products,
-                fee_mode: group.feeMode || 'none',
+                fee_mode: group.feeMode || api.getFieldDefault('feeMode'),
                 fee_rate: group.feeRate != null ? group.feeRate : null,
                 fee_map: _groupsSerializeFeeMap(group.feeMap),
                 useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
-                rebalanceMode: group.rebalanceMode || 'each_period',
-                rebalance_mode: group.rebalanceMode || 'each_period',
-                liquidityMode: group.liquidityMode || 'infinite',
-                liquidity_mode: group.liquidityMode || 'infinite',
-                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100,
-                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : 100
+                rebalanceMode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
+                rebalance_mode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
+                liquidityMode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
+                liquidity_mode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
+                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent'),
+                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent')
             });
         });
         return payload;
@@ -929,8 +937,8 @@
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
             var countText = group.groupCount != null ? group.groupCount : '未设置';
-            var feeText = group.feeMode || 'none';
-            var rebalanceText = group.rebalanceMode || '默认调仓';
+            var feeText = group.feeMode || api.getFieldDefault('feeMode');
+            var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')
                 + ' · 费率 ' + feeText + ' · 再平衡 ' + rebalanceText);
         });

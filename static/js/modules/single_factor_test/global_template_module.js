@@ -949,6 +949,7 @@
                 statusEl.style.color = '#d40000';
                 return;
             }
+
             await applySnapshot(data.template.snapshot, tplId);
             statusEl.textContent = '✓ 已加载: ' + data.template.name;
             statusEl.style.color = '#28a745';

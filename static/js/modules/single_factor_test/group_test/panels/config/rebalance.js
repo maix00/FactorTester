@@ -56,7 +56,8 @@
             return;
         }
 
-        var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || 'each_period');
+        var currentMode = reg.getDirty('rebalanceMode', group.rebalanceMode || GS.getFieldDefault('rebalanceMode'));
+
         var desc = MODE_DESCRIPTIONS[currentMode] || '';
 
         var html = '<div style="padding:16px 0;">';
@@ -147,7 +148,8 @@
 
     function getChips(group) {
         if (!group) return [];
-        var mode = group.rebalanceMode || 'buy_and_hold';
+        var mode = group.rebalanceMode || GS.getFieldDefault('rebalanceMode');
+
         var label = MODE_LABELS[mode];
         if (!label) return [];
         var chipPlain = 'display:inline-block;background:#e5e7eb;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#374151;';
@@ -171,7 +173,7 @@
     // Register field schema (so _fillGroupFromConfig preserves this field)
     var GS = GT.groupSettings;
     if (GS && GS.registerField) {
-        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'buy_and_hold' });
+        GS.registerField({ key: 'rebalanceMode', type: 'string', default: 'each_period' });
     }
 
     // Register as category-3 config panel

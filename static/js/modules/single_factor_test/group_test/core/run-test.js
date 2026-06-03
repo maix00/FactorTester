@@ -336,7 +336,7 @@
 
         var firstGroup = batches[0] && batches[0].groups[0];
         var firstTesterId = batches[0] && batches[0].testerId;
-        var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || 'buy_and_hold') : 'buy_and_hold';
+        var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode')) : GT.groupSettings.getFieldDefault('rebalanceMode');
         var fallbackTesterId = firstTesterId || (firstGroup ? firstGroup.testerId : null);
         var resolvedRange = GT.core.dates && GT.core.dates.resolveGroupRunTimeRangeWithFallback
             ? GT.core.dates.resolveGroupRunTimeRangeWithFallback(

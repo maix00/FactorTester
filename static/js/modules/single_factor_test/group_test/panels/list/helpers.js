@@ -100,23 +100,24 @@
      */
     function synthGroupForDerivedNode(node) {
         if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return null;
+        var GS = GT.groupSettings;
         return {
             id: node.id,
             isDerived: true,
             baseGroupId: node.baseGroupId,
-            feeMode: node.feeMode || 'none',
+            feeMode: node.feeMode || GS.getFieldDefault('feeMode'),
             feeRate: node.feeRate !== undefined ? node.feeRate : null,
             feeMap: node.feeMap !== undefined ? node.feeMap : null,
             feeSensitivity: node.feeSensitivity !== undefined ? node.feeSensitivity : 1,
             useCloseToday: !!node.useCloseToday,
-            rebalanceMode: node.rebalanceMode || 'buy_and_hold',
-            liquidityMode: node.liquidityMode || 'infinite',
-            liquidityPercent: node.liquidityPercent !== undefined && node.liquidityPercent !== null ? node.liquidityPercent : 100
+            rebalanceMode: node.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
+            liquidityMode: node.liquidityMode || GS.getFieldDefault('liquidityMode'),
+            liquidityPercent: node.liquidityPercent !== undefined && node.liquidityPercent !== null ? node.liquidityPercent : GS.getFieldDefault('liquidityPercent')
         };
     }
 
     function derivedFeeDisplay(node) {
-        var mode = node.feeMode || 'none';
+        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
         if (mode === 'none' || !mode) return '—';
         if (mode === 'uniform' || mode === 'fixed') return (node.feeRate != null) ? Number(node.feeRate).toFixed(6) : '—';
         if (mode === 'per_product') { var m1 = node.feeMap || {}; return '按品种(' + Object.keys(m1).length + ')'; }
@@ -131,7 +132,7 @@
     }
 
     function derivedCloseTodayLabel(node) {
-        var mode = node.feeMode || 'none';
+        var mode = node.feeMode || GT.groupSettings.getFieldDefault('feeMode');
         if (mode === 'none' || mode === 'fixed') return '—';
         return node.useCloseToday ? '平今' : '平昨';
     }
@@ -240,15 +241,16 @@
         var derivedSynth = synthGroupForDerivedNode(node);
         if (!derivedSynth) return [];
 
+        var GS = GT.groupSettings;
         var baseSynth = {
-            feeMode: bg.feeMode || 'none',
+            feeMode: bg.feeMode || GS.getFieldDefault('feeMode'),
             feeRate: bg.feeRate,
             feeMap: bg.feeMap,
             feeSensitivity: bg.feeSensitivity,
             useCloseToday: !!bg.useCloseToday,
-            rebalanceMode: bg.rebalanceMode || 'buy_and_hold',
-            liquidityMode: bg.liquidityMode || 'infinite',
-            liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : 100
+            rebalanceMode: bg.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
+            liquidityMode: bg.liquidityMode || GS.getFieldDefault('liquidityMode'),
+            liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : GS.getFieldDefault('liquidityPercent')
         };
 
         var baseChips = REG.getChips(baseSynth);

@@ -22,7 +22,7 @@ window.GT_CONFIG_REGISTRY.register({
   fields: ['rebalanceMode'],
   panel: {
     getChips(group) {
-      return [{ label: 'rebalance', html: group.rebalanceMode || 'buy_and_hold' }];
+      return [{ label: 'rebalance', html: group.rebalanceMode || 'each_period' }];
     },
   },
 });
@@ -43,7 +43,7 @@ GT.groupSettings.groups.add({
   isDerived: true,
   baseGroupId: 'base-list',
   productMask: { IF: true },
-  rebalanceMode: 'buy_and_hold',
+  rebalanceMode: 'each_period',
 });
 
 const container = document.registerElement('unified-group-list', new MockElement('unified-group-list'));

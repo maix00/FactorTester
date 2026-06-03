@@ -13,7 +13,7 @@ const id = GT.groupSettings.groups.add({
   factorAlias: 'FactorB',
   groupCount: 3,
   feeMode: 'none',
-  rebalanceMode: 'buy_and_hold',
+  rebalanceMode: 'each_period',
 });
 GT.panels.list.selection.add(id);
 

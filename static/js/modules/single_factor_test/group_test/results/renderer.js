@@ -33,6 +33,7 @@
      * 画分组累计收益图。
      */
     renderer.drawGroupChart = function(groups) {
+        console.log('[snapshot-debug] drawGroupChart called: groupsLen=', groups ? groups.length : 0, 'hasSnapshot=', !!GT.results.snapshot, 'hasFetchGroupSnapshot=', !!(GT.results.snapshot && GT.results.snapshot.fetchGroupSnapshot));
         if (GT.results && GT.results.chart && GT.results.chart.groups && typeof GT.results.chart.groups.draw === 'function') {
             GT.results.chart.groups.draw(groups, {
                 onSnapshot: function(t) {

@@ -39,7 +39,7 @@
 
         var bg = allBase[0];
         var n_groups = bg.groupCount || 5;
-        var rebalance_mode = bg.rebalanceMode || 'buy_and_hold';
+        var rebalance_mode = bg.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode');
         var start_date = bg.startDate || null;
         var end_date = bg.endDate || null;
 

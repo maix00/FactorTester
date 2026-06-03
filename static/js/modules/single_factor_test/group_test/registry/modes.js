@@ -43,15 +43,16 @@
         if (group && group.baseGroupId && GT.groupSettings.groups) {
             base = GT.groupSettings.groups.get(group.baseGroupId);
         }
+        var GS = GT.groupSettings;
         return {
-            feeMode: group && group.feeMode != null ? group.feeMode : (base && base.feeMode != null ? base.feeMode : 'none'),
+            feeMode: group && group.feeMode != null ? group.feeMode : (base && base.feeMode != null ? base.feeMode : GS.getFieldDefault('feeMode')),
             feeRate: group && group.feeRate != null ? group.feeRate : (base ? base.feeRate : null),
             feeMap: group && group.feeMap != null ? group.feeMap : (base ? base.feeMap : null),
             feeSensitivity: group && group.feeSensitivity != null ? group.feeSensitivity : (base && base.feeSensitivity != null ? base.feeSensitivity : 1),
             useCloseToday: group && group.useCloseToday != null ? !!group.useCloseToday : !!(base && base.useCloseToday),
-            rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : 'each_period'),
-            liquidityMode: group && group.liquidityMode != null ? group.liquidityMode : (base && base.liquidityMode ? base.liquidityMode : 'infinite'),
-            liquidityPercent: group && group.liquidityPercent != null ? group.liquidityPercent : (base && base.liquidityPercent != null ? base.liquidityPercent : 100)
+            rebalanceMode: group && group.rebalanceMode != null ? group.rebalanceMode : (base && base.rebalanceMode ? base.rebalanceMode : GS.getFieldDefault('rebalanceMode')),
+            liquidityMode: group && group.liquidityMode != null ? group.liquidityMode : (base && base.liquidityMode ? base.liquidityMode : GS.getFieldDefault('liquidityMode')),
+            liquidityPercent: group && group.liquidityPercent != null ? group.liquidityPercent : (base && base.liquidityPercent != null ? base.liquidityPercent : GS.getFieldDefault('liquidityPercent'))
         };
     }
 
