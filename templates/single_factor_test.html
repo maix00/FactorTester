@@ -21,8 +21,6 @@
         <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
     </div>
 
-    <!-- sidebar 折叠时显示的浮动展开按钮 -->
-    <button id="sidebar-float-btn" class="sidebar-float-btn" title="展开侧栏" style="display:none;">☰</button>
     <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
     <div class="app single-factor-app"
@@ -32,10 +30,10 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
-                <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <div style="display:flex;align-items:center;width:100%;">
                     {% set back_link_class = 'btn-back' %}
                     {% include 'modules/shared/home_back_link.html' %}
-                    <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="折叠侧栏">❮</button>
+                    <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="折叠侧栏" style="margin-left:auto;">❮</button>
                 </div>
             </div>
             <div class="sidebar-actions">
@@ -56,6 +54,7 @@
 
         <div class="editor single-factor-main" id="editor">
             <div class="editor-header">
+                <button id="sidebar-expand-btn" class="sidebar-expand-btn" title="展开侧栏">☰</button>
                 <div class="editor-title" id="editor-title">选择一个因子家族开始测试</div>
             </div>
             <div class="editor-body single-factor-body" id="editor-body">
