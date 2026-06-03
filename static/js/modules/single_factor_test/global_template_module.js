@@ -559,7 +559,7 @@
         }
     });
 
-    // ── 5. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
+    // ── 6. group_settings (order=50, 依赖 submissions 的 testerId 重映射) ──
     (function() {
         var GT = window.GroupTest;
         if (!GT || !GT.groupSettings || !GT.groupSettings.settings) {
@@ -599,25 +599,29 @@
         });
     })();
 
-    // ── 6. fee_modifications (order=60, 最后) ──
-    SnapshotRegistry.register({
-        key: 'fee_modifications',
-        order: 60,
-        label: '费率修改',
-        icon: '💰',
-        collect: function() {
-            if (!window._getFeeModifications) return undefined;
-            var mods = window._getFeeModifications();
-            return mods && Object.keys(mods).length ? mods : undefined;
-        },
-        apply: function(feeMods) {
-            if (feeMods && window._applyFeeModifications) window._applyFeeModifications(feeMods);
-        },
-        summarize: function(fm) {
-            var keys = Object.keys(fm);
-            return keys.length ? keys.length + ' 个品种' : null;
+    // ── 7. local_settings (order=50, GroupTest 本地 UI 状态) ──
+    (function() {
+        var GT = window.GroupTest;
+        var LS = GT && GT.localSettings;
+        if (!LS) {
+            console.warn('[global_template] GroupTest localSettings snapshot adapter is not available');
+            return;
         }
-    });
+        SnapshotRegistry.register({
+            key: LS.key,
+            order: LS.order,
+            label: LS.label,
+            icon: LS.icon,
+            collect: LS.collect,
+            apply: function(localSettings) {
+                var result = LS.apply(_deepClone(localSettings) || {});
+                if (result.errors && result.errors.length > 0) {
+                    console.warn('[global_template] local_settings apply warnings:', result.errors);
+                }
+            },
+            summarize: LS.summarize,
+        });
+    })();
 
     // ── 收集当前所有设置快照（通过注册表） ──────────────────────────────
     async function collectSnapshot() {
