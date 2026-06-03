@@ -96,6 +96,7 @@
 
     var _groupItems = [];
     var _groupIdCounter = 0;
+    var _groupAddBatchCounter = 0;  // monotonic counter for addBatch (refs #100)
 
     function _groupUuid() {
         _groupIdCounter += 1;
@@ -162,6 +163,9 @@
               return null;
           } },
         { key: 'isAllGroups', type: 'boolean', default: false },
+
+        // ── Grouping batch — 同一批添加的 group/variant/derived 共享 (refs #100) ──
+        { key: 'addBatch',  type: 'number',  default: 0,    patchable: false },
 
         // ── State ──
         { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
@@ -305,10 +309,59 @@
 
         var item = { id: itemId, name: config.name.trim(), isDerived: isDerived };
 
+        // ── addBatch 自动递增 (refs #100) ──
+        // 如果调用方显式传入，使用传入值；否则递增分配新 batch。
+        if (config.addBatch == null || config.addBatch === 0) {
+            _groupAddBatchCounter += 1;
+            config.addBatch = _groupAddBatchCounter;
+        }
+
         // Apply all fields from FIELD_SCHEMA
         _fillGroupFromConfig(item, config, isDerived);
 
         _groupItems.push(item);
+
+        // 派生组自动计算 shortAlias 和 name (refs #100)
+        // 必须在 push 之后计算，因为 deriveShortAlias 需要 getAll() 中包含新节点来找 sibling 序号
+        if (isDerived) {
+            var needShortAlias = !item.shortAlias || !item.shortAlias.trim();
+            var needName = !item.name || !item.name.trim();
+            if (needShortAlias || needName) {
+                // 找 siblings（同 parentId, 同 baseGroupId）
+                var siblings = [];
+                for (var si = 0; si < _groupItems.length; si++) {
+                    var sg = _groupItems[si];
+                    if (sg.isDerived && sg.baseGroupId === item.baseGroupId && sg.parentId === item.parentId) {
+                        siblings.push(sg);
+                    }
+                }
+                var sibIdx = -1;
+                for (var sj = 0; sj < siblings.length; sj++) {
+                    if (siblings[sj].id === item.id) { sibIdx = sj; break; }
+                }
+                var sibNum = sibIdx >= 0 ? (sibIdx + 1) : siblings.length;
+
+                var h = GT.panels && GT.panels.list && GT.panels.list._helpers;
+                if (needShortAlias && h && typeof h.deriveShortAlias === 'function') {
+                    item.shortAlias = h.deriveShortAlias(item);
+                }
+                if (needName) {
+                    var parentNode = null;
+                    if (item.parentId) {
+                        for (var pi = 0; pi < _groupItems.length; pi++) {
+                            if (_groupItems[pi].id === item.parentId) { parentNode = _groupItems[pi]; break; }
+                        }
+                    } else {
+                        for (var bi = 0; bi < _groupItems.length; bi++) {
+                            if (_groupItems[bi].id === item.baseGroupId) { parentNode = _groupItems[bi]; break; }
+                        }
+                    }
+                    var parentName = parentNode ? (parentNode.name || parentNode.shortAlias || 'Group') : 'Group';
+                    item.name = parentName + '_派生组' + sibNum;
+                }
+            }
+        }
+
         _emit('groupsChanged', { action: 'add', id: item.id, isDerived: isDerived });
         return item.id;
     }
@@ -628,6 +681,7 @@
 
     api.groups = {
         add: _groupsAdd,
+        newAddBatch: function() { _groupAddBatchCounter += 1; return _groupAddBatchCounter; },  // (refs #100)
         get: _groupsGet,
         getAll: _groupsGetAll,
         update: _groupsUpdate,

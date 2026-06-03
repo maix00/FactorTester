@@ -147,6 +147,9 @@
                         batchLetterMap[bk] = letter;
                     }
 
+                    // 同一 batch 共享 addBatch (refs #100)
+                    var batchAddBatch = GT.groupSettings.groups.newAddBatch();
+
                     var createdIds = [];
                     for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
                         try {
@@ -160,7 +163,8 @@
                                 shortAlias: letter + gi,
                                 feeMode: 'none',
                                 useCloseToday: false,
-                                rebalanceMode: 'each_period'
+                                rebalanceMode: 'each_period',
+                                addBatch: batchAddBatch
                             });
                             createdIds.push({ id: id, index: gi });
                         } catch (e) {

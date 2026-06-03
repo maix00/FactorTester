@@ -431,6 +431,10 @@
             <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
         </div>
         <div id="snapshot_flow_stats" class="snapshot-flow-stats"></div>
+        <div id="snapshot-tabs" class="snapshot-tabs" style="display:none;">
+            <button id="snapshot-tab-basic" class="snapshot-tab active">仓位矩阵</button>
+            <button id="snapshot-tab-ls" class="snapshot-tab">多空(LS)</button>
+        </div>
         <div id="group-snapshot-drawer-body">
             <div class="drawer-inner-container" id="snapshot_body"></div>
         </div>
@@ -911,6 +915,68 @@
     #group_test_module .snapshot-product-fee {
         color: #aaa;
         font-size: 10px;
+    }
+    /* ── Snapshot tabs (refs #100) ── */
+    #group_test_module .snapshot-tabs {
+        display: flex;
+        gap: 0;
+        padding: 6px 12px 0;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    #group_test_module .snapshot-tab {
+        padding: 6px 16px;
+        border: 1px solid #d0d5dd;
+        border-bottom: none;
+        border-radius: 6px 6px 0 0;
+        background: #f0f2f5;
+        cursor: pointer;
+        font-size: 13px;
+        color: #667085;
+        transition: all 0.12s;
+        margin-right: -1px;
+    }
+    #group_test_module .snapshot-tab:hover {
+        background: #e5ebf0;
+        color: #475467;
+    }
+    #group_test_module .snapshot-tab.active {
+        background: #fff;
+        color: #0f4c81;
+        font-weight: 600;
+        border-color: #d0d5dd;
+    }
+    #group_test_module .snapshot-tab.inactive {
+        background: #f0f2f5;
+        color: #667085;
+        font-weight: 400;
+    }
+    #group_test_module .snapshot-batch-section {
+        margin-bottom: 20px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    #group_test_module .snapshot-batch-header {
+        background: #f0f4f8;
+        color: #0f4c81;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 8px 14px;
+        border-bottom: 1px solid #dae2ec;
+    }
+    #group_test_module .snapshot-ls-section {
+        border-color: #c7d2e0;
+    }
+    #group_test_module .snapshot-ls-header {
+        background: #eef2f8;
+        color: #3a5a8c;
+    }
+    #group_test_module .snapshot-empty-tab {
+        padding: 24px;
+        text-align: center;
+        color: #8899aa;
+        font-size: 14px;
     }
     /* 顶部统计栏 */
     #group_test_module .snapshot-flow-stats {
