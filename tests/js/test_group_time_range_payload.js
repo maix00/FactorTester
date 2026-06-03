@@ -2,7 +2,9 @@ const { assert, resetGroupTest, registerConfigFields, load } = require('./group_
 
 const GT = resetGroupTest();
 load('panels/list/selection-state.js');
+load('core/local-settings/index.js');
 load('core/dates.js');
+load('core/local-settings/dates.js');
 load('core/group-settings.js');
 registerConfigFields(GT);
 load('core/prerun-collect.js');
@@ -26,21 +28,21 @@ GT.groupSettings.groups.add({
   factorAlias: 'FactorTime',
   groupCount: 4,
   groupIndex: 1,
-  startDate: '2026-02-03',
-  endDate: '2026-02-28',
+  startDate: '2025-01-01',
+  endDate: '2025-01-02',
   feeMode: 'uniform',
   feeRate: 0.0001,
   rebalanceMode: 'recycle',
 });
 
 (async () => {
-  const result = await GT.core.collect.buildGroupRunPayload('tester-time', 'FactorTime');
+  const result = await GT.core.prerunCollect.buildGroupRunPayload('tester-time', 'FactorTime');
   assert.ifError(result.error);
   assert.strictEqual(result.payload.start_date, '2026-02-03');
   assert.strictEqual(result.payload.end_date, '2026-02-28');
   assert.strictEqual(result.payload.fee, 0.0001);
   assert.strictEqual(result.payload.rebalance_mode, 'recycle');
-  console.log('PASS: group run payload uses groupSettings time and config fields');
+  console.log('PASS: group run payload uses local-settings dates and group config fields');
 })().catch((err) => {
   console.error(err);
   process.exit(1);
