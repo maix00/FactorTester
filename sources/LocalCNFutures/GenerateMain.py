@@ -10,7 +10,7 @@ from turtle import left
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from Settings import DATA_DIR
+from scripts.data_dir import DATA_DIR
 
 CONTRACT_MAPPING_PATH = os.path.join(DATA_DIR, 'wind_mapping.parquet')
 CONTRACT_MAPPING_PATH_TRUNCATED = os.path.join(DATA_DIR, 'wind_mapping_truncated.parquet')

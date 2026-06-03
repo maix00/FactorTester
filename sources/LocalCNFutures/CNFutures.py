@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from tools.products.Futures import Futures, FuturesContract
 from tools import DataColumn
-from Settings import DATA_DIR
+from scripts.data_dir import DATA_DIR
 
 _data = pd.read_csv(os.path.join(DATA_DIR, 'sectors.csv'))
 data_dir_min = os.path.join(DATA_DIR, 'main_mink')
@@ -123,7 +123,7 @@ class CNFutures(Futures):
 
     def get_roller_info_path(self) -> str:
         if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):
-            from Settings import DATA_DIR
+            from scripts.data_dir import DATA_DIR
             self._ROLLER_INFO_PATH_CACHED = os.path.join(DATA_DIR, 'roller_info.parquet')
         return self._ROLLER_INFO_PATH_CACHED
 
