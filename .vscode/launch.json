@@ -9,7 +9,7 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--repo", "${workspaceFolder}", "--port", "7999"]
+            "args": ["--repo", "${workspaceFolder}", "--port", "7998"]
         },
         {
             "name": "Flask Debug: master :8000",
