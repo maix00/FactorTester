@@ -10,11 +10,11 @@ test_2a_adjustment_verify.py
 
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
-_SWITCHES 辅助列（全部 Excel 公式，不硬编码行号）：
-  _prev_close: =INDEX(prev_inst!G:G, MATCH(end_date, prev_inst!B:B, 0))
-      从切换日列表的end_date在前一合约sheet的trading_day列中匹配，取close
-  _cur_close:  =INDEX(cur_inst!G:G, MATCH(start_date, cur_inst!B:B, 0))
-      从切换日列表的start_date在当前合约sheet的trading_day列中匹配，取close
+_SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
+  _prev_close: =INDEX(INDIRECT("'"&上一行B&"'!G:G"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!B:B"), 0))
+      通过上一行 instrument_id (B列) 动态获取前合约 sheet 名，不硬编码
+  _cur_close:  =INDEX(INDIRECT("'"&本行B&"'!G:G"), MATCH(本行D, INDIRECT("'"&本行B&"'!B:B"), 0))
+      通过本行 instrument_id (B列) 动态获取本合约 sheet 名，不硬编码
   _prev_adj:   上一行的 adjustment_mul
   adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
   adjustment_add: =0
@@ -239,29 +239,25 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, 5, ed)
 
         # ---- _prev_close ----
-        # =INDEX(前一合约!G:G, MATCH(本行end_date, 前一合约!B:B, 0))
-        # 注：B=trading_day(2), G=close_price(7)
-        # end_date 在 E{row}
+        # =INDEX(INDIRECT("'"&上一行B&"'!G:G"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!B:B"), 0))
+        # 不硬编码 sheet 名：通过上一行 instrument_id (B列) 动态获取前合约 sheet 名
         if i == 0:
-            # 第一个合约：没有前一合约，留空
             sw_out.cell(row, PREV_CLOSE_COL, '').fill = FORMULA_FILL
         elif i > 0:
-            prev_inst = switches[i - 1][0]
-            # 用 end_date(前一行的 E) 在前一合约 sheet 的 trading_day(B) 列 MATCH
-            end_cell = f'{_col_letter(5)}{row - 1}'  # E: end_date 是前一行的
-            formula = (
-                f'=INDEX(\'{prev_inst}\'!G:G,'
-                f'MATCH({end_cell},\'{prev_inst}\'!B:B,0))'
-            )
+            prev_b = f'{_col_letter(2)}{row - 1}'   # B: instrument_id 上一行
+            prev_e = f'{_col_letter(5)}{row - 1}'   # E: end_date 上一行
+            prev_g_ref = f'INDIRECT("\'"&{prev_b}&"\'!G:G")'
+            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!B:B")'
+            formula = f'=INDEX({prev_g_ref},MATCH({prev_e},{prev_b_ref},0))'
             sw_out.cell(row, PREV_CLOSE_COL, formula).fill = FORMULA_FILL
 
         # ---- _cur_close ----
-        # =INDEX(本合约!G:G, MATCH(本行start_date, 本合约!B:B, 0))
-        sd_cell = f'{_col_letter(4)}{row}'  # D: start_date
-        formula = (
-            f'=INDEX(\'{inst}\'!G:G,'
-            f'MATCH({sd_cell},\'{inst}\'!B:B,0))'
-        )
+        # =INDEX(INDIRECT("'"&本行B&"'!G:G"), MATCH(本行D, INDIRECT("'"&本行B&"'!B:B"), 0))
+        cur_b = f'{_col_letter(2)}{row}'    # B: instrument_id 本行
+        cur_d = f'{_col_letter(4)}{row}'    # D: start_date 本行
+        cur_g_ref = f'INDIRECT("\'"&{cur_b}&"\'!G:G")'
+        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!B:B")'
+        formula = f'=INDEX({cur_g_ref},MATCH({cur_d},{cur_b_ref},0))'
         sw_out.cell(row, CUR_CLOSE_COL, formula).fill = FORMULA_FILL
 
         # ---- _prev_adj: 上一行的 adjustment_mul ----
