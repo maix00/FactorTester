@@ -20,6 +20,36 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
+# ---------------------------------------------------------------------------
+# debugpy monkey-patches _posixsubprocess.fork_exec so that every
+# subprocess.Popen() child inherits the debugger -- even when all
+# PYDEVD_* / DEBUGPY_* / VSCODE_DEBUGPY_* env vars are stripped.
+#
+# The worktree-manager runs under the VS Code debugger but its child
+# Flask servers must NOT be debugged.  Restore the original fork_exec
+# here so subprocess.Popen() behaves normally.
+# ---------------------------------------------------------------------------
+def _unpatch_debugpy_fork_exec() -> None:
+    if sys.platform == "win32":
+        return
+    # _posixsubprocess.fork_exec  <- patched by pydevd
+    # _posixsubprocess.original_fork_exec  <- original saved by pydevd
+    try:
+        import _posixsubprocess
+    except ImportError:
+        return
+    original = getattr(_posixsubprocess, "original_fork_exec", None)
+    if original is not None:
+        _posixsubprocess.fork_exec = original
+    # subprocess._fork_exec may also be patched separately
+    original_sp = getattr(subprocess, "original__fork_exec", None)
+    if original_sp is not None:
+        subprocess._fork_exec = original_sp
+
+_unpatch_debugpy_fork_exec()
+# ---------------------------------------------------------------------------
+
+
 MASTER_PORT = 8000
 FEAT_PORT = 7999
 
