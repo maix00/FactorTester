@@ -133,12 +133,16 @@ class ManagerState:
         env = os.environ.copy()
         env["FLASK_DEBUG"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
-        # Strip debugpy env vars so the child Flask process is NOT attached
-        # to the VS Code debugger.  Without this, stopping a child server via
-        # the manager causes VS Code to break inside a <string> file showing
-        # debugpy bytecode (pydevd.settrace / resource_tracker imports).
+        # Strip all debugpy / VS Code debug env vars so the child Flask
+        # process is NOT attached to the VS Code debugger.  Without this,
+        # stopping a child server causes VS Code to break inside a <string>
+        # file of debugpy bytecode (pydevd.settrace triggered by
+        # multiprocessing.resource_tracker at process exit).
+        _debug_prefixes = (
+            "PYDEVD_", "DEBUGPY", "BUNDLED_DEBUGPY", "VSCODE_DEBUGPY",
+        )
         for _k in list(env):
-            if _k.startswith(("PYDEVD_", "DEBUGPY_")):
+            if _k.startswith(_debug_prefixes):
                 del env[_k]
         env["PYTHONPATH"] = _strip_debugpy_from_pythonpath(env.get("PYTHONPATH", ""))
         # Worktrees derive DATA_DIR from __file__'s parent, which lands inside
