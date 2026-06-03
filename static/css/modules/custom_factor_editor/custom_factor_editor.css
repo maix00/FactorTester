@@ -64,10 +64,10 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f6f8fa; color: #
 .editor { min-width: 0; width: 100%; display: flex; flex-direction: column; background: #fff; overflow: hidden; }
 .editor-header {
     padding: 14px 24px; border-bottom: 1px solid #e2e8f0;
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; gap: 8px;
 }
 .editor-title { font-size: 16px; font-weight: 600; }
-.mode-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 8px; padding: 3px; }
+.mode-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 8px; padding: 3px; margin-left: auto; }
 .mode-tab {
     padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;
     border: none; background: transparent; color: #666;

@@ -344,7 +344,7 @@ const SIDEBAR_STORAGE_KEY = 'ft:singlefactor:sidebar-expanded';
 function initSingleFactorSidebarToggle() {
     var app = document.querySelector('.single-factor-app');
     var collapseBtn = document.getElementById('sidebar-collapse-btn');   // 内嵌 ❮ 按钮
-    var floatBtn = document.getElementById('sidebar-float-btn');         // 浮动 ☰ 按钮
+    var expandBtn = document.getElementById('sidebar-expand-btn');       // 内嵌 ☰ 按钮
     var overlay = document.getElementById('sidebar-overlay');
     if (!app) return;
 
@@ -354,11 +354,9 @@ function initSingleFactorSidebarToggle() {
         if (state) {
             app.classList.remove('sidebar-collapsed');
             app.classList.add('sidebar-expanded');
-            if (floatBtn) floatBtn.style.display = 'none';
         } else {
             app.classList.add('sidebar-collapsed');
             app.classList.remove('sidebar-expanded');
-            if (floatBtn) floatBtn.style.display = '';
         }
     }
 
@@ -367,8 +365,8 @@ function initSingleFactorSidebarToggle() {
 
     // 内嵌折叠按钮（宽屏 sidebar 内的 ❮）
     if (collapseBtn) collapseBtn.addEventListener('click', collapse);
-    // 浮动展开按钮（sidebar 隐藏后出现的 ☰）
-    if (floatBtn) floatBtn.addEventListener('click', expand);
+    // 内嵌展开按钮（sidebar 隐藏后出现在 editor-header 的 ☰）
+    if (expandBtn) expandBtn.addEventListener('click', expand);
     // overlay（手机模式关闭）
     if (overlay) overlay.addEventListener('click', collapse);
 
