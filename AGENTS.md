@@ -258,6 +258,7 @@ git worktree add ../Codes-master-server master
 | `fix/* → feat` merge | ❌ **禁止** | 必须人类明确说"合并"、"merge"或同意后才能执行 |
 | `feat → master` merge | ❌ **禁止** | 必须人类明确说"合并"、"merge"或同意后才能执行 |
 | `git push origin master` | ❌ **禁止** | 必须人类明确说"push"或同意后才能执行 |
+| `git push`（任何远程） | ❌ **禁止** | 同上，包括 push 任何分支到远程 |
 | worktree 内的 commit | ✅ 允许 | 在自己的 `fix/issue-N-*` worktree 内自由提交 |
 
 **Agent 在任何情况下都不得自行判断合并时机。** 即使认为任务已完成、测试已通过、代码已就绪，也必须：
@@ -441,7 +442,7 @@ git push origin master
 - ❌ 不擅自关闭 Issue
 - ❌ 不提交 secrets / token / 密码 / `.env`
 - ❌ **不自行 merge（fix→feat, feat→master）— 见 🚫🛑 MERGE 权限**
-- ❌ **不自行 push master**
+- ❌ **不自行 push 任何分支到远程（包括 master 和其他）— 见 🚫🛑 MERGE 权限**
 - ✅ 大改动前先解释计划
 - ✅ 每次 commit 前展示 `git diff` 摘要
 - ✅ 测试失败先修复，修不了说明原因
