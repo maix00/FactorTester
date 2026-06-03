@@ -310,7 +310,7 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
-    # Sheet 2: MAIN (单列 REDUCE+VSTACK+HSTACK — 13列数据+mul+add，无硬编码)
+    # Sheet 2: MAIN (单公式 REDUCE+HSTACK+VSTACK — 13列数据+mul+add，无硬编码)
     # ----------------------------------------------------------
     # 核心洞察：
     #   1. REDUCE 初始值为标量 0，LAMBDA 内 VSTACK(acc, HSTACK(data, mul, add))
