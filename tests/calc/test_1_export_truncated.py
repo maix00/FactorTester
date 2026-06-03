@@ -232,13 +232,9 @@ def _export_product(
             print(f"  [SKIP] {inst} has 0 rows in merged span")
             continue
 
-        cols = ['trade_time', 'trading_day', 'instrument_id',
-                'open_price', 'highest_price', 'lowest_price', 'close_price',
-                'settlement_price', 'volume', 'turnover', 'open_interest',
-                'pre_settlement_price', 'twap', 'vwap',
-                'upper_limit_price', 'lower_limit_price']
-        cols = [c for c in cols if c in df_win.columns]
-        df_win = df_win[cols]
+        # 全量导出 data_mink_product 的所有列
+        cols = list(df_win.columns)
+
 
         sheet_name = str(inst)
         ws = wb.create_sheet(sheet_name)
