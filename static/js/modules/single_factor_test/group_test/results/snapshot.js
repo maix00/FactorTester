@@ -563,7 +563,9 @@
                     // anchorIndex 是基础组的 idx
                     if (tree.anchorIndex === idx && !seenAnchor[idx]) {
                         seenAnchor[idx] = true;
-                        var treeCols = tree.indices.map(idxToCol);
+                        // 矩阵列：基础组 + 所有派生组
+                        var allColIndices = [idx].concat(tree.indices);
+                        var treeCols = allColIndices.map(idxToCol);
                         var treeProds = _batchProducts(treeCols.map(function(cg) { return cg.group; }));
                         var treeLabel = '↳ ' + _sectionLabel(treeCols) + ' (派生)';
                         html += _renderMatrixTable(treeCols, treeProds, treeLabel);
@@ -585,7 +587,8 @@
         });
         if (orphanTrees.length > 0) {
             orphanTrees.forEach(function(tree) {
-                var treeCols = tree.indices.map(idxToCol);
+                var allColIndices = tree.anchorIndex != null ? [tree.anchorIndex].concat(tree.indices) : tree.indices;
+                var treeCols = allColIndices.map(idxToCol);
                 var treeProds = _batchProducts(treeCols.map(function(cg) { return cg.group; }));
                 var treeLabel = _sectionLabel(treeCols) + ' (派生)';
                 html += _renderMatrixTable(treeCols, treeProds, treeLabel);
