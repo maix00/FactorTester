@@ -107,11 +107,14 @@ def _export_product(
     inst_to_fname: dict[str, str],
     output_dir: Path,
 ) -> Path:
-    """为一个品种导出 Excel：Sheet1=切换表，Sheet2/3/...=最近切换的合约±30天数据"""
+    """为一个品种导出 Excel：Sheet1=切换表，Sheet2/3/...=各合约去重合并后的±30天数据
+    
+    同一合约可能出现在多个切换日，取该合约的最大跨度（min_start ~ max_end），
+    再各扩展 WINDOW_DAYS，合并为一个 sheet。
+    """
     output_path = output_dir / f'{prod}.xlsx'
 
     wb = Workbook()
-    # 移除默认 sheet
     wb.remove(wb.active)
 
     # Sheet 1: _SWITCHES（完整切换表）
@@ -119,36 +122,55 @@ def _export_product(
     for r in dataframe_to_rows(switches, index=False, header=True):
         ws_sw.append(r)
 
-    # 从最近一次切换开始，向前取切换合约，每个合约导出前后 WINDOW_DAYS 数据
-    exported_count = 0
-    max_sheets = min(len(switches), 5)  # 最多导最近 5 次切换
-
-    # switches 按 trading_day 降序排列（最近在前）
-    switches_desc = switches.sort_values('trading_day', ascending=False)
-
-    for _, sw in switches_desc.iterrows():
-        if exported_count >= max_sheets:
-            break
-
+    # 对每个 instrument_id 取最大时间跨度
+    inst_spans: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
+    for _, sw in switches.iterrows():
         inst = sw['instrument_id']
         switch_date = sw['trading_day']
+        start = pd.Timestamp(switch_date - timedelta(days=WINDOW_DAYS))
+        end = pd.Timestamp(switch_date + timedelta(days=WINDOW_DAYS))
+        if inst not in inst_spans:
+            inst_spans[inst] = (start, end)
+        else:
+            prev_start, prev_end = inst_spans[inst]
+            inst_spans[inst] = (min(prev_start, start), max(prev_end, end))
+
+    # 找出每个合约最近一次切换日期，用于排序
+    inst_last_switch: dict[str, date] = {}
+    for _, sw in switches.iterrows():
+        inst = sw['instrument_id']
+        sd = sw['trading_day']
+        if inst not in inst_last_switch or sd > inst_last_switch[inst]:
+            inst_last_switch[inst] = sd
+
+    # 按最近切换日期降序排序（最近合约在前）
+    sorted_insts = sorted(inst_spans.keys(), key=lambda x: inst_last_switch[x], reverse=True)
+
+    # 最多导最近 5 个合约
+    max_sheets = min(len(sorted_insts), 5)
+    exported_count = 0
+
+    for inst in sorted_insts:
+        if exported_count >= max_sheets:
+            break
 
         fn = inst_to_fname.get(inst)
         if fn is None:
             print(f"  [WARN] Missing min file for {inst}, skipping")
             continue
 
-        start = switch_date - timedelta(days=WINDOW_DAYS)
-        end = switch_date + timedelta(days=WINDOW_DAYS)
+        start_ts, end_ts = inst_spans[inst]
+        # 把 end 扩展到当天结束
+        end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
         dfm = pd.read_parquet(MIN_DIR / fn)
         dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
-        mask = (dfm['trade_time'] >= pd.Timestamp(start)) & (dfm['trade_time'] <= pd.Timestamp(end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))
+        mask = (dfm['trade_time'] >= start_ts) & (dfm['trade_time'] <= end_ts)
         df_win = dfm.loc[mask].copy()
         df_win = df_win.sort_values('trade_time').reset_index(drop=True)
 
         if len(df_win) == 0:
-            print(f"  [SKIP] {inst} ({switch_date}) has 0 rows")
+            print(f"  [SKIP] {inst} has 0 rows in merged span")
             continue
 
         cols = ['trade_time', 'trading_day', 'instrument_id',
@@ -159,14 +181,15 @@ def _export_product(
         cols = [c for c in cols if c in df_win.columns]
         df_win = df_win[cols]
 
-        # Sheet 名用合约代码 + 切换日期
         sheet_name = f'{inst}'
         ws = wb.create_sheet(sheet_name)
         for r in dataframe_to_rows(df_win, index=False, header=True):
             ws.append(r)
 
         exported_count += 1
-        print(f"  [{exported_count}] {inst} ({switch_date}): {len(df_win)} rows")
+        span_start = start_ts.strftime('%Y-%m-%d')
+        span_end = end_ts.strftime('%Y-%m-%d')
+        print(f"  [{exported_count}] {inst}: {len(df_win)} rows ({span_start} ~ {span_end})")
 
     wb.save(output_path)
     return output_path
@@ -190,17 +213,15 @@ def main():
 
         try:
             out_path = _export_product(prod, switches, inst_to_fname, output_dir)
-            # 收集切换信息
-            switches_desc = switches.sort_values('trading_day', ascending=False)
-            sheet_list = []
-            max_sheets = min(len(switches_desc), 5)
-            for i in range(max_sheets):
-                sw = switches_desc.iloc[i]
-                sheet_list.append({
-                    'switch_date': sw['trading_day'].isoformat(),
-                    'instrument': sw['instrument_id'],
-                    'sheet': sw['instrument_id'],
-                })
+            # 收集 sheet 信息（和 _export_product 中排序一致）
+            inst_last = {}
+            for _, sw in switches.iterrows():
+                inst = sw['instrument_id']
+                sd = sw['trading_day']
+                if inst not in inst_last or sd > inst_last[inst]:
+                    inst_last[inst] = sd
+            sorted_insts = sorted(inst_last.keys(), key=lambda x: inst_last[x], reverse=True)[:5]
+            sheet_list = [{'instrument': inst, 'last_switch': inst_last[inst].isoformat()} for inst in sorted_insts]
             manifest[prod] = {
                 'day_exch': day_exch,
                 'min_exch': min_exch,
