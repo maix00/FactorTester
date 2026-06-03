@@ -40,8 +40,9 @@
         var bg = allBase[0];
         var n_groups = bg.groupCount || 5;
         var rebalance_mode = bg.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode');
-        var start_date = bg.startDate || null;
-        var end_date = bg.endDate || null;
+        var localRun = GT.localSettings && typeof GT.localSettings.prepareRun === 'function'
+            ? GT.localSettings.prepareRun()
+            : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
 
         // ── 费率 ──
         var fee = 0;
@@ -66,12 +67,9 @@
 
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
 
-        // ── 时间范围（从 group 配置读取，空则入参方兜底） ──
-        if (!start_date || !end_date) {
-            return { error: '请设置时间范围' };
-        }
-        if (start_date > end_date) {
-            return { error: '起始日期不能晚于终止日期' };
+        // ── 本地运行设置 ──
+        if (localRun.errors && localRun.errors.length) {
+            return { error: localRun.errors[0] };
         }
 
         // ── 派生组 ──
@@ -111,24 +109,22 @@
         }
         if (Object.keys(gfmObj).length > 0) group_fee_maps = gfmObj;
 
-        return {
-            payload: {
-                submission_id: submissionId,
-                factor_alias: factorAlias,
-                n_groups: n_groups,
-                fee: fee,
-                fee_map: fee_map,
-                use_closetoday: use_closetoday,
-                start_date: start_date,
-                end_date: end_date,
-                rebalance_mode: rebalance_mode,
-                ls_config: collect.collectLongShortConfig(n_groups),
-                ls_configs: collect.collectLongShortConfigs(n_groups),
-                derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
-                group_fee_maps: group_fee_maps,
-                structure_key: collect.buildGroupStructureKey(submissionId, factorAlias, n_groups, start_date, end_date)
-            }
+        var payload = {
+            submission_id: submissionId,
+            factor_alias: factorAlias,
+            n_groups: n_groups,
+            fee: fee,
+            fee_map: fee_map,
+            use_closetoday: use_closetoday,
+            rebalance_mode: rebalance_mode,
+            ls_config: collect.collectLongShortConfig(n_groups),
+            ls_configs: collect.collectLongShortConfigs(n_groups),
+            derived_groups: derivedPayload.length > 0 ? derivedPayload : null,
+            group_fee_maps: group_fee_maps,
+            structure_key: collect.buildGroupStructureKey(submissionId, factorAlias, n_groups, localRun.structureKeyParts)
         };
+        Object.assign(payload, localRun.payload || {});
+        return { payload: payload };
     };
 
     // ════════════════════════════════════════════════════════════════
@@ -169,14 +165,12 @@
     //  缓存 & 批量
     // ════════════════════════════════════════════════════════════════
 
-    collect.buildGroupStructureKey = function(submissionId, factorAlias, nGroups, startDate, endDate) {
+    collect.buildGroupStructureKey = function(submissionId, factorAlias, nGroups, localKeyParts) {
         return [
             String(submissionId || ''),
             String(factorAlias || ''),
             String(nGroups || ''),
-            String(startDate || ''),
-            String(endDate || '')
-        ].join('|');
+        ].concat(localKeyParts || []).join('|');
     };
 
     collect.collectDerivedPayloadForBatch = function(batch) {

@@ -136,20 +136,6 @@
         };
     };
 
-    // ---------- 持久化时间范围到 group settings ----------
-    dates.persistGroupTimeRangeToDatamodel = function(startDate, endDate) {
-        if (!GT.groupSettings.groups || (!startDate && !endDate)) return;
-        var allGroups = GT.groupSettings.groups.getAll() || [];
-        allGroups.forEach(function(group) {
-            try {
-                var patch = {};
-                if (startDate) patch.startDate = startDate;
-                if (endDate) patch.endDate = endDate;
-                GT.groupSettings.groups.update(group.id, patch);
-            } catch (e) { /* skip invalid/stale group */ }
-        });
-    };
-
     // ---------- 解析分组运行时间范围 ----------
     dates.resolveGroupRunTimeRange = function(savedStartDate, savedEndDate) {
         var explicit = dates.readGroupTimeRangeInput();
@@ -194,18 +180,6 @@
                     document.getElementById('group_end_day').value = parseInt(parts[2], 10);
                 }
             }
-
-            if (GT.groupSettings.groups && (startDate || endDate)) {
-                var allBase = GT.groupSettings.groups.getAll();
-                allBase.forEach(function(bg) {
-                    try {
-                        var patch = {};
-                        if (startDate) patch.startDate = startDate;
-                        if (endDate) patch.endDate = endDate;
-                        GT.groupSettings.groups.update(bg.id, patch);
-                    } catch (e) { /* skip */ }
-                });
-            }
         });
     };
 
@@ -221,28 +195,6 @@
             if (src && dst && src.value) dst.value = src.value;
         });
 
-        var sy = document.getElementById('group_start_year');
-        var sm = document.getElementById('group_start_month');
-        var sd = document.getElementById('group_start_day');
-        var ey = document.getElementById('group_end_year');
-        var em = document.getElementById('group_end_month');
-        var ed = document.getElementById('group_end_day');
-        var startDate = (sy && sm && sd) ? dates.buildValidDate(sy.value, sm.value, sd.value) : null;
-        var endDate = (ey && em && ed) ? dates.buildValidDate(ey.value, em.value, ed.value) : null;
-
-        if (GT.groupSettings.groups && (startDate || endDate)) {
-            var allBase = GT.groupSettings.groups.getAll();
-            allBase.forEach(function(bg) {
-                try {
-                    var patch = {};
-                    if (startDate) patch.startDate = startDate;
-                    if (endDate) patch.endDate = endDate;
-                    GT.groupSettings.groups.update(bg.id, patch);
-                } catch (e) {
-                    // Silently skip if update fails (e.g. validation)
-                }
-            });
-        }
     };
 
     // ---------- 绑定时间同步监听器 ----------

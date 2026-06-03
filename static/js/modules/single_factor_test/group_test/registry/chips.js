@@ -185,40 +185,54 @@
     /**
      * Resolve the effective product list for a derived group node.
      */
-    function _getDerivedProducts(node) {
+    function _normalizeProduct(raw) {
+        if (typeof raw === 'string') return { name: raw, desc: '' };
+        if (raw && raw.name) return { name: raw.name, desc: raw.desc || '' };
+        return null;
+    }
+
+    function _productsFromTester(testerId) {
+        var subs = window.submissions || [];
+        for (var si = 0; si < subs.length; si++) {
+            if (String(subs[si].id) !== String(testerId)) continue;
+            var raw = (Array.isArray(subs[si].products) && subs[si].products.length)
+                ? subs[si].products
+                : (subs[si].product_groups || []);
+            var out = [];
+            for (var pi = 0; pi < raw.length; pi++) {
+                var item = _normalizeProduct(raw[pi]);
+                if (item && item.name) out.push(item);
+            }
+            return out;
+        }
+        return [];
+    }
+
+    function _filterProducts(products, mask) {
+        if (!mask || Object.keys(mask).length === 0) return products;
+        return products.filter(function(p) { return p && mask[p.name]; });
+    }
+
+    function _getDerivedProducts(node, seen) {
         if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
+        seen = seen || {};
+        if (seen[node.id]) return [];
+        seen[node.id] = true;
 
         var GT4 = window.GroupTest;
         var groups = GT4 && GT4.groupSettings && GT4.groupSettings.groups;
         if (!groups) return [];
 
-        var bg = groups.get(node.baseGroupId);
-        if (!bg || !bg.testerId) return [];
-
-        // Resolve tester's products
-        var subs = window.submissions || [];
-        var allProds = [];
-        for (var si = 0; si < subs.length; si++) {
-            if (String(subs[si].id) === String(bg.testerId)) {
-                var pgs = subs[si].product_groups || [];
-                for (var pgi = 0; pgi < pgs.length; pgi++) {
-                    var pg = pgs[pgi];
-                    if (pg && pg.name) {
-                        allProds.push({ name: pg.name, desc: pg.desc || '' });
-                    }
-                }
-                break;
-            }
+        var inherited = [];
+        if (node.parentId) {
+            inherited = _getDerivedProducts(groups.get(node.parentId), seen);
+        } else {
+            var bg = groups.get(node.baseGroupId);
+            if (!bg || !bg.testerId) return [];
+            inherited = _productsFromTester(bg.testerId);
         }
 
-        if (node.productMask && Object.keys(node.productMask).length > 0) {
-            var filtered = [];
-            for (var fi = 0; fi < allProds.length; fi++) {
-                if (node.productMask[allProds[fi].name]) filtered.push(allProds[fi]);
-            }
-            return filtered;
-        }
-        return allProds;
+        return _filterProducts(inherited, node.productMask);
     }
 
     /**
