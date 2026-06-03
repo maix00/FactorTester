@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import html
 import json
 import os
@@ -130,27 +129,14 @@ class ManagerState:
         # .workspace/... instead of the real data directory.  Point FT_DATA_DIR
         # at the repo-level data dir (same one the master/feat worktrees use).
         env.setdefault("FT_DATA_DIR", str(self.repo.parent / "data"))
-        # When running under the VS Code debugger, debugpy monkey-patches
-        # _posixsubprocess.fork_exec to inject itself into every subprocess.
-        # Use pydevd.skip_subprocess_arg_patch() to prevent the manager's
-        # child Flask servers from inheriting the debugger.  This keeps
-        # the user's own F5-debugged worktrees unaffected (their breakpoints
-        # still work) while preventing the debugger from breaking inside
-        # <string> bytecode when a child process exits.
-        try:
-            import pydevd  # type: ignore[import-untyped]
-            _skip_patch = pydevd.skip_subprocess_arg_patch()
-        except ImportError:
-            _skip_patch = contextlib.nullcontext()
-        with _skip_patch:
-            proc = subprocess.Popen(
-                [self.python, "start_server.py", "--port", str(port)],
-                cwd=path,
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+        proc = subprocess.Popen(
+            [self.python, "start_server.py", "--port", str(port)],
+            cwd=path,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
         self.processes[self.key(path)] = proc
         return f"started pid {proc.pid}"
 
