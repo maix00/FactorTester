@@ -29,13 +29,29 @@ MAIN sheet（三列独立 VSTACK，各自溢出）：
 Output: data/test/test_2a/{prod}.xlsx
 """
 
+import os
+import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
 from tests.calc import TEST_1_DIR, TEST_2A_DIR
+
+# --- XML 命名空间 ---
+NS_CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
+NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+NS_MD = 'http://schemas.openxmlformats.org/spreadsheetml/2006/9/main'
+NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+NS_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+ET.register_namespace('', NS_SHEET)
+ET.register_namespace('r', NS_R)
+ET.register_namespace('x14', NS_MD)
 
 # --- 样式 ---
 FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
@@ -372,7 +388,132 @@ def process_product(prod_xlsx: Path) -> None:
     # ============================================================
     dst_path = TEST_2A_DIR / f'{prod}.xlsx'
     wb.save(dst_path)
+    wb.close()
+
+    # ============================================================
+    # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）
+    #    防止 WPS/Excel 自动插入 @ implicit intersection operator
+    # ============================================================
+    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3')
+
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
+
+
+def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str):
+    """
+    在 xlsx 的 XML 层面标记指定单元格为动态数组公式。
+
+    修改 sheet XML 中 <f> 元素加 ca="1" 属性，
+    并在 cell 元素加 cm="1" vm="1" 属性。
+    同时创建/更新 metadata.xml 声明 vm="1"。
+    """
+    # 1. 读 workbook.xml 找 sheetId → rId → sheet 文件名
+    with zipfile.ZipFile(xlsx_path, 'r') as zf:
+        wb_xml = ET.parse(zf.open('xl/workbook.xml'))
+        wb_root = wb_xml.getroot()
+        rel_target = None
+        for sh in wb_root.findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+            if sh.get('name') == sheet_name:
+                r_id = sh.get(f'{{{NS_R}}}id')
+                # 2. 读 workbook.xml.rels 找文件名 (target 相对于 xl/)
+                rels_xml = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
+                for rel in rels_xml.getroot():
+                    if rel.get('Id') == r_id:
+                        rel_target = rel.get('Target').lstrip('/')
+                        break
+                break
+
+        if rel_target is None:
+            print(f'  ⚠️ Sheet "{sheet_name}" not found, skipping XML patch')
+            return
+
+        # rel_target 已是完整的 zip 内路径如 "xl/worksheets/sheet2.xml"
+        full_sheet_file = rel_target
+
+        # 3. 读 sheet XML
+        sheet_xml = ET.parse(zf.open(full_sheet_file))
+        sheet_root = sheet_xml.getroot()
+
+        # 4. 找到指定 cell 的 <c> 和 <f>
+        match = re.match(r'([A-Z]+)(\d+)', cell_ref)
+        if not match:
+            print(f'  ⚠️ Invalid cell_ref "{cell_ref}"')
+            return
+        col_letter, row_num = match.groups()
+        found = False
+        for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+            if row.get('r') == row_num:
+                for cell in row.findall(f'{{{NS_SHEET}}}c'):
+                    if cell.get('r') == cell_ref:
+                        f_el = cell.find(f'{{{NS_SHEET}}}f')
+                        if f_el is not None:
+                            f_el.set('ca', '1')
+                            cell.set('cm', '1')
+                            cell.set('vm', '1')
+                            found = True
+                        break
+                break
+
+        if not found:
+            print(f'  ⚠️ Cell {cell_ref} not found in {sheet_name}, skipping XML patch')
+            return
+
+        # 5. 读/建 metadata.xml
+        md_file = 'xl/metadata.xml'
+        try:
+            md_xml = ET.parse(zf.open(md_file))
+            md_root = md_xml.getroot()
+        except KeyError:
+            md_root = ET.Element(f'{{{NS_MD}}}metadata')
+
+        vm_el = md_root.find(f'{{{NS_MD}}}valueMetadata')
+        if vm_el is None:
+            vm_el = ET.SubElement(md_root, f'{{{NS_MD}}}valueMetadata')
+        else:
+            vm_el.clear()
+        ET.SubElement(vm_el, f'{{{NS_MD}}}bk')
+
+        # 6. 读 Content_Types
+        ct_xml = ET.parse(zf.open('[Content_Types].xml'))
+        ct_root = ct_xml.getroot()
+
+        # 确保 metadata.xml 在 Content_Types 中声明
+        part_name = '/xl/metadata.xml'
+        has_md = any(ov.get('PartName') == part_name
+                     for ov in ct_root.findall(f'{{{NS_CT}}}Override'))
+        if not has_md:
+            ET.SubElement(ct_root, f'{{{NS_CT}}}Override',
+                          PartName=part_name,
+                          ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml')
+
+        # 7. 收集所有文件，替换修改过的
+        all_files = {}
+        for name in zf.namelist():
+            if name not in (full_sheet_file, md_file, '[Content_Types].xml'):
+                all_files[name] = zf.read(name)
+
+        all_files[full_sheet_file] = _xml_tostring(sheet_root)
+        all_files[md_file] = _xml_tostring(md_root)
+        all_files['[Content_Types].xml'] = _xml_tostring(ct_root)
+
+    # 8. 重写 xlsx（在 with 外，使用收集好的数据）
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
+    os.close(tmp_fd)
+    try:
+        with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zf_out:
+            for name, data in all_files.items():
+                zf_out.writestr(name, data)
+        shutil.move(tmp_path, str(xlsx_path))
+    finally:
+        if Path(tmp_path).exists():
+            Path(tmp_path).unlink(missing_ok=True)
+
+    print(f'  🔧 Patched {cell_ref} as dynamic array formula (ca="1")')
+
+
+def _xml_tostring(root):
+    """Serialize XML element to bytes with XML declaration."""
+    return ET.tostring(root, xml_declaration=True, encoding='UTF-8')
 
 
 def main():
