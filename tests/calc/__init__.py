@@ -83,8 +83,8 @@ _DATA_SOURCES_DOC = f"""
 WIND_EXCH_TO_MIN_EXCH: dict[str, str] = {
     'SHF': 'SHFE',
     'DCE': 'DCE',
-    'CZC': 'CZC',
+    'CZC': 'CZCE',
     'INE': 'INE',
-    'CFE': 'CFE',
-    'GFE': 'GFE',
+    'CFE': 'CFFEX',
+    'GFE': 'GFEX',
 }
