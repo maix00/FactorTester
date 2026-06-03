@@ -11,7 +11,7 @@
     <!-- Highcharts Stock -->
     <script src="https://code.highcharts.com/stock/highstock.js"></script>
     <script src="https://code.highcharts.com/highcharts-more.js"></script>
-    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <script src="https://code.highcharts.com/modules/boost.js"></script>
     <script src="{{ url_for('static', filename='js/modules/shared/price_display.js') }}"></script>
     <style>
         html, body { height: 100%; margin: 0; overflow: hidden; }
@@ -194,6 +194,16 @@
     // Highcharts 时区配置：后端返回 UTC epoch，useUTC=false 使得 dateFormat/formatter 按浏览器本地时区显示
     if (typeof Highcharts !== 'undefined') {
         Highcharts.setOptions({ global: { useUTC: false } });
+        Highcharts.setOptions({
+            boost: {
+                enabled: true,
+                useGPUTranslations: true,
+                usePreallocated: true
+            },
+            plotOptions: {
+                series: { boostThreshold: 1 }
+            }
+        });
     }
 
     let currentProduct = null;
