@@ -3,7 +3,7 @@
 <head>
     <title>单因子(家族)测试</title>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/custom_factor_editor/custom_factor_editor.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/shared/param_drawer.css') }}">
@@ -21,6 +21,8 @@
         <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
     </div>
 
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
     <div class="app single-factor-app"
          data-initial-factor="{{ initial_factor }}"
          data-initial-factor-type="{{ initial_factor_type }}"
@@ -28,8 +30,11 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
-                {% set back_link_class = 'btn-back' %}
-                {% include 'modules/shared/home_back_link.html' %}
+                <div style="display:flex;align-items:center;width:100%;">
+                    {% set back_link_class = 'btn-back' %}
+                    {% include 'modules/shared/home_back_link.html' %}
+                    <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="折叠侧栏" style="margin-left:auto;">❮</button>
+                </div>
             </div>
             <div class="sidebar-actions">
                 <div class="sidebar-filter" style="margin-top:0;">
@@ -49,6 +54,7 @@
 
         <div class="editor single-factor-main" id="editor">
             <div class="editor-header">
+                <button id="sidebar-expand-btn" class="sidebar-expand-btn" title="展开侧栏">☰</button>
                 <div class="editor-title" id="editor-title">选择一个因子家族开始测试</div>
             </div>
             <div class="editor-body single-factor-body" id="editor-body">

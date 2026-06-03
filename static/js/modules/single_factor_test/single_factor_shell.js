@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function initSingleFactorShell() {
     initSingleFactorSidebarResizer();
+    initSingleFactorSidebarToggle();
     await loadSingleFactorFamilyList();
 
     const app = document.querySelector('.single-factor-app');
@@ -335,6 +336,58 @@ function initSingleFactorSidebarResizer() {
         dragging = false;
         document.body.style.cursor = '';
     });
+}
+
+/** Sidebar 折叠/展开 — issue #107 */
+const SIDEBAR_STORAGE_KEY = 'ft:singlefactor:sidebar-expanded';
+
+function initSingleFactorSidebarToggle() {
+    var app = document.querySelector('.single-factor-app');
+    var collapseBtn = document.getElementById('sidebar-collapse-btn');   // 内嵌 ❮ 按钮
+    var expandBtn = document.getElementById('sidebar-expand-btn');       // 内嵌 ☰ 按钮
+    var overlay = document.getElementById('sidebar-overlay');
+    if (!app) return;
+
+    var expanded = getSidebarExpanded();
+
+    function applyState(state) {
+        if (state) {
+            app.classList.remove('sidebar-collapsed');
+            app.classList.add('sidebar-expanded');
+        } else {
+            app.classList.add('sidebar-collapsed');
+            app.classList.remove('sidebar-expanded');
+        }
+    }
+
+    function collapse() { expanded = false; setSidebarExpanded(false); applyState(false); }
+    function expand()   { expanded = true;  setSidebarExpanded(true);  applyState(true); }
+
+    // 内嵌折叠按钮（宽屏 sidebar 内的 ❮）
+    if (collapseBtn) collapseBtn.addEventListener('click', collapse);
+    // 内嵌展开按钮（sidebar 隐藏后出现在 editor-header 的 ☰）
+    if (expandBtn) expandBtn.addEventListener('click', expand);
+    // overlay（手机模式关闭）
+    if (overlay) overlay.addEventListener('click', collapse);
+
+    // 初始状态
+    applyState(expanded);
+}
+
+function getSidebarExpanded() {
+    try {
+        var v = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (v === null) return true; // 默认展开
+        return v === '1';
+    } catch(e) {
+        return true;
+    }
+}
+
+function setSidebarExpanded(v) {
+    try {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, v ? '1' : '0');
+    } catch(e) {}
 }
 
 function getSingleFactorOwnerSortKey(f) {

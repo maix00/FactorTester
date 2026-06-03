@@ -300,7 +300,7 @@
 
             var testerLabel = H.testerLabel(batch.testerId);
             var batchAllSelected = batch.items.every(function(bg) { return SEL && SEL.isSelected(bg.id); });
-            var batchHeaderStyle = 'display:flex;align-items:center;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
+            var batchHeaderStyle = 'display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:6px 8px;margin-top:4px;border-radius:6px;cursor:pointer;font-size:13px;';
             if (batchAllSelected && batch.items.length > 0) {
                 batchHeaderStyle += 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;';
             } else {
@@ -329,23 +329,24 @@
                     var bg = batch.items[ri];
                     var bgSelected = SEL && SEL.isSelected(bg.id);
 
-                    h += '<div class="unified-bg-row" data-bg-id="' + H.escapeHTML(bg.id) + '" style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgSelected ? 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;' : '') + '">';
+                    h += '<div class="unified-bg-row" data-bg-id="' + H.escapeHTML(bg.id) + '" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;' + (bgSelected ? 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;' : '') + '">';
                     h += '<span style="width:6px;height:6px;border-radius:50%;background:#6366f1;margin-right:8px;flex-shrink:0;"></span>';
                     if (bg.shortAlias) {
                         h += '<span style="font-weight:600;color:#4338ca;min-width:32px;font-size:13px;margin-right:8px;">' + H.escapeHTML(bg.shortAlias) + '</span>';
                     }
                     var allChips = (REG && typeof REG.getAllChips === 'function') ? REG.getAllChips(bg) : [];
+                    h += '<span style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;flex:1;min-width:0;">';
                     for (var ci = 0; ci < allChips.length; ci++) {
                         var chip = allChips[ci];
                         var s = chip.style || H.CHIP_STYLE_PLAIN;
                         if (chip.category === 'config') continue;
                         if (chip.label === 'tester') {
-                            h += '<span class="unified-tester-chip" data-tester-id="' + H.escapeHTML(bg.testerId) + '" style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
+                            h += '<span class="unified-tester-chip" data-tester-id="' + H.escapeHTML(bg.testerId) + '" style="' + s + ';">' + chip.html + '</span>';
                         } else {
-                            h += '<span style="' + s + ';margin-right:8px;">' + chip.html + '</span>';
+                            h += '<span style="' + s + ';">' + chip.html + '</span>';
                         }
                     }
-                    h += '<span style="flex:1;"></span>';
+                    h += '</span>';
                     h += '<span style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">';
                     for (ci = 0; ci < allChips.length; ci++) {
                         chip = allChips[ci];
@@ -428,7 +429,7 @@
         var hasKids = node.children && node.children.length > 0;
 
         var nodeSelected = SEL && SEL.isSelected(node.id);
-        var rowStyle = 'display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;';
+        var rowStyle = 'display:flex;align-items:center;flex-wrap:wrap;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;gap:2px 6px;';
         if (nodeSelected) { rowStyle += 'background:#eef2ff;box-shadow:inset 3px 0 0 #6366f1;'; }
 
         var h = '';
@@ -456,7 +457,7 @@
             h += '</span>';
         }
         var tri = prodExpanded ? '▾' : '▸';
-        h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-block;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;">📋 ' + products.length + '品种 ' + tri + '</span>';
+        h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
         h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
         h += '</div>';
 

@@ -228,19 +228,37 @@ th {
 @media (max-width: 768px) {
     .container {
         flex-direction: column;
-        margin: 20px;
-        padding: 20px;
+        margin: 10px;
+        padding: 12px;
     }
     .sidebar {
         width: 100%;
         border-right: none;
         border-bottom: 1px solid #eee;
         padding-right: 0;
-        padding-bottom: 20px;
-        margin-bottom: 20px;
+        padding-bottom: 16px;
+        margin-bottom: 16px;
+        max-height: 45vh;
+        overflow-y: auto;
     }
     .main {
         padding-left: 0;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .container {
+        margin: 4px;
+        padding: 8px;
+    }
+    .sidebar {
+        max-height: 40vh;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }
+    .sidebar h2 {
+        font-size: 15px;
     }
 }
 
