@@ -197,11 +197,10 @@
         Highcharts.setOptions({
             boost: {
                 enabled: true,
-                useGPUTranslations: true,
                 usePreallocated: true
             },
             plotOptions: {
-                series: { boostThreshold: 1 }
+                series: { boostThreshold: 500 }
             }
         });
     }
