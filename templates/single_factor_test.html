@@ -21,7 +21,8 @@
         <button id="user-logout-btn" onclick="doLogout()" style="padding:3px 10px;border:1px solid #d0d5dd;border-radius:14px;background:#fff;cursor:pointer;font-size:13px;color:#555;">退出</button>
     </div>
 
-    <button id="sidebar-toggle-btn" class="sidebar-toggle-btn" title="切换侧栏">☰</button>
+    <!-- sidebar 折叠时显示的浮动展开按钮 -->
+    <button id="sidebar-float-btn" class="sidebar-float-btn" title="展开侧栏" style="display:none;">☰</button>
     <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
     <div class="app single-factor-app"
@@ -31,8 +32,11 @@
         <div class="sidebar">
             <div class="sidebar-header">
                 <h2>单因子(家族)测试</h2>
-                {% set back_link_class = 'btn-back' %}
-                {% include 'modules/shared/home_back_link.html' %}
+                <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                    {% set back_link_class = 'btn-back' %}
+                    {% include 'modules/shared/home_back_link.html' %}
+                    <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="折叠侧栏">❮</button>
+                </div>
             </div>
             <div class="sidebar-actions">
                 <div class="sidebar-filter" style="margin-top:0;">

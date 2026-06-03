@@ -338,42 +338,39 @@ function initSingleFactorSidebarResizer() {
     });
 }
 
-/** Sidebar toggle — issue #107 */
+/** Sidebar 折叠/展开 — issue #107 */
 const SIDEBAR_STORAGE_KEY = 'ft:singlefactor:sidebar-expanded';
 
 function initSingleFactorSidebarToggle() {
     var app = document.querySelector('.single-factor-app');
-    var btn = document.getElementById('sidebar-toggle-btn');
+    var collapseBtn = document.getElementById('sidebar-collapse-btn');   // 内嵌 ❮ 按钮
+    var floatBtn = document.getElementById('sidebar-float-btn');         // 浮动 ☰ 按钮
     var overlay = document.getElementById('sidebar-overlay');
-    if (!app || !btn || !overlay) return;
+    if (!app) return;
 
     var expanded = getSidebarExpanded();
 
     function applyState(state) {
-        app.classList.remove('sidebar-expanded', 'sidebar-collapsed');
         if (state) {
+            app.classList.remove('sidebar-collapsed');
             app.classList.add('sidebar-expanded');
-            btn.classList.remove('sidebar-hidden');
-            btn.textContent = '✕';
+            if (floatBtn) floatBtn.style.display = 'none';
         } else {
             app.classList.add('sidebar-collapsed');
-            btn.classList.add('sidebar-hidden');
-            btn.textContent = '☰';
+            app.classList.remove('sidebar-expanded');
+            if (floatBtn) floatBtn.style.display = '';
         }
     }
 
-    function toggle() {
-        expanded = !expanded;
-        setSidebarExpanded(expanded);
-        applyState(expanded);
-    }
+    function collapse() { expanded = false; setSidebarExpanded(false); applyState(false); }
+    function expand()   { expanded = true;  setSidebarExpanded(true);  applyState(true); }
 
-    btn.addEventListener('click', toggle);
-    overlay.addEventListener('click', function() {
-        expanded = false;
-        setSidebarExpanded(false);
-        applyState(false);
-    });
+    // 内嵌折叠按钮（宽屏 sidebar 内的 ❮）
+    if (collapseBtn) collapseBtn.addEventListener('click', collapse);
+    // 浮动展开按钮（sidebar 隐藏后出现的 ☰）
+    if (floatBtn) floatBtn.addEventListener('click', expand);
+    // overlay（手机模式关闭）
+    if (overlay) overlay.addEventListener('click', collapse);
 
     // 初始状态
     applyState(expanded);
