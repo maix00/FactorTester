@@ -326,6 +326,12 @@ def main() -> int:
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
+    try:
+        lan_ip = socket.gethostbyname(socket.gethostname())
+        if lan_ip and not lan_ip.startswith("127."):
+            print(f"  局域网访问: http://{lan_ip}:{args.port}/")
+    except Exception:
+        pass
     if not args.no_browser:
         webbrowser.open(url)
     try:

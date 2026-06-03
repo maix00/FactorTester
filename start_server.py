@@ -120,10 +120,28 @@ def shutdown():
     return '', 200
 
 
+def _get_lan_ip() -> str | None:
+    """获取本机局域网 IP（优先取非回环、非 link-local 的第一个 inet 地址）。"""
+    import socket
+    try:
+        # 用 UDP 小技巧获取对外出口 IP（不产生实际流量）
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.0)
+        s.connect(('8.8.8.8', 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+
 def run_flask_server(port=8000, directory='.'):
     os.chdir(directory)
     url = f"http://localhost:{port}/"
+    lan_ip = _get_lan_ip()
     print(f"Serving Flask on {url} from {os.path.abspath(directory)}")
+    if lan_ip:
+        print(f"  局域网访问: http://{lan_ip}:{port}/")
 
     # 启动全局空闲资源清理守护线程（idle 10s 后释放）
     IdleResourceManager.get_instance().start(idle_timeout=10, scan_interval=5)
