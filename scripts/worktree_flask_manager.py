@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
 import json
 import os
@@ -20,35 +21,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-# ---------------------------------------------------------------------------
-# debugpy monkey-patches _posixsubprocess.fork_exec so that every
-# subprocess.Popen() child inherits the debugger -- even when all
-# PYDEVD_* / DEBUGPY_* / VSCODE_DEBUGPY_* env vars are stripped.
-#
-# The worktree-manager runs under the VS Code debugger but its child
-# Flask servers must NOT be debugged.  Restore the original fork_exec
-# here so subprocess.Popen() behaves normally.
-# ---------------------------------------------------------------------------
-def _unpatch_debugpy_fork_exec() -> None:
-    if sys.platform == "win32":
-        return
-    # _posixsubprocess.fork_exec  <- patched by pydevd
-    # _posixsubprocess.original_fork_exec  <- original saved by pydevd
-    try:
-        import _posixsubprocess
-    except ImportError:
-        return
-    original = getattr(_posixsubprocess, "original_fork_exec", None)
-    if original is not None:
-        _posixsubprocess.fork_exec = original
-    # subprocess._fork_exec may also be patched separately
-    original_sp = getattr(subprocess, "original__fork_exec", None)
-    if original_sp is not None:
-        subprocess._fork_exec = original_sp
-
-_unpatch_debugpy_fork_exec()
-# ---------------------------------------------------------------------------
-
 
 MASTER_PORT = 8000
 FEAT_PORT = 7999
@@ -60,15 +32,6 @@ _ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
 def _extract_issue_number(branch: str) -> int | None:
     m = _ISSUE_BRANCH_RE.match(branch)
     return int(m.group(1)) if m else None
-
-
-def _strip_debugpy_from_pythonpath(pythonpath: str) -> str:
-    """Remove any debugpy-related entries from PYTHONPATH."""
-    if not pythonpath:
-        return pythonpath
-    parts = pythonpath.split(os.pathsep)
-    cleaned = [p for p in parts if "debugpy" not in p.lower() and "pydevd" not in p.lower()]
-    return os.pathsep.join(cleaned)
 
 
 @dataclass(frozen=True)
@@ -163,30 +126,31 @@ class ManagerState:
         env = os.environ.copy()
         env["FLASK_DEBUG"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
-        # Strip all debugpy / VS Code debug env vars so the child Flask
-        # process is NOT attached to the VS Code debugger.  Without this,
-        # stopping a child server causes VS Code to break inside a <string>
-        # file of debugpy bytecode (pydevd.settrace triggered by
-        # multiprocessing.resource_tracker at process exit).
-        _debug_prefixes = (
-            "PYDEVD_", "DEBUGPY", "BUNDLED_DEBUGPY", "VSCODE_DEBUGPY",
-        )
-        for _k in list(env):
-            if _k.startswith(_debug_prefixes):
-                del env[_k]
-        env["PYTHONPATH"] = _strip_debugpy_from_pythonpath(env.get("PYTHONPATH", ""))
         # Worktrees derive DATA_DIR from __file__'s parent, which lands inside
         # .workspace/... instead of the real data directory.  Point FT_DATA_DIR
         # at the repo-level data dir (same one the master/feat worktrees use).
         env.setdefault("FT_DATA_DIR", str(self.repo.parent / "data"))
-        proc = subprocess.Popen(
-            [self.python, "start_server.py", "--port", str(port)],
-            cwd=path,
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        # When running under the VS Code debugger, debugpy monkey-patches
+        # _posixsubprocess.fork_exec to inject itself into every subprocess.
+        # Use pydevd.skip_subprocess_arg_patch() to prevent the manager's
+        # child Flask servers from inheriting the debugger.  This keeps
+        # the user's own F5-debugged worktrees unaffected (their breakpoints
+        # still work) while preventing the debugger from breaking inside
+        # <string> bytecode when a child process exits.
+        try:
+            import pydevd  # type: ignore[import-untyped]
+            _skip_patch = pydevd.skip_subprocess_arg_patch()
+        except ImportError:
+            _skip_patch = contextlib.nullcontext()
+        with _skip_patch:
+            proc = subprocess.Popen(
+                [self.python, "start_server.py", "--port", str(port)],
+                cwd=path,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
         self.processes[self.key(path)] = proc
         return f"started pid {proc.pid}"
 
