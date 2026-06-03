@@ -222,27 +222,8 @@
         handleSave: handleSave
     };
 
-    // ── Register add flow to GT.modes ──
+    // ── Register edit action：「⚡ 创建 LS 组合」（选中 2 组时直接创建，无 tab 面板）(refs #109)
     if (GT.modes) {
-        GT.modes.registerAddFlow({
-            flow: 'ls',
-            priority: 0,
-            condition: function() { return true; },
-            buildDraft: function(ctx) {
-                return {
-                    addFlow: 'ls',
-                    preselectedBaseGroupIds: ctx && ctx.ids ? ctx.ids : []
-                };
-            },
-            onSubmit: function(draft, helpers) {
-                var result = handleSave();
-                if (result && result.success) helpers.exitAdd();
-                // 错误由 handleSave 自己处理（alert）
-            },
-            defaultTab: 'add-ls'
-        });
-
-        // ── Register edit action：「⚡ 创建 LS 组合」（选中 2 组时显示）(refs #109)
         GT.modes.registerEditAction({
             name: 'create-ls',
             label: '⚡ 创建 LS 组合',
@@ -252,14 +233,22 @@
             },
             action: function(ctx, helpers) {
                 if (!ctx || ctx.ids.length !== 2) { alert('请选择 2 个组来创建 LS 组合'); return; }
-                helpers.exitEdit();
-                GT.modes.enterAdd('ls');
-                GT.modes.setAddDraft({
-                    addFlow: 'ls',
-                    preselectedBaseGroupIds: ctx.ids
-                });
-                helpers.mountTab('add-ls');
-                helpers.renderActions();
+                var gLong  = _getGroup(ctx.ids[0]);
+                var gShort = _getGroup(ctx.ids[1]);
+                var saLong  = _displayAlias(gLong) || 'L';
+                var saShort = _displayAlias(gShort) || 'S';
+                var name = saLong + '/' + saShort;
+
+                try {
+                    GT.groupSettings.lsConfigs.add({
+                        name: name,
+                        longGroupId: ctx.ids[0],
+                        shortGroupId: ctx.ids[1],
+                    });
+                    helpers.exitEdit();
+                } catch (err) {
+                    alert('创建失败: ' + ((err && err.message) || String(err)));
+                }
             },
             standalone: false
         });

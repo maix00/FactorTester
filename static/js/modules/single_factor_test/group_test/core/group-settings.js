@@ -813,6 +813,10 @@
         if (!result.valid) { throw new Error('Validation failed: ' + result.errors.join('; ')); }
         Object.keys(patch).forEach(function(key) { _lsItems[idx][key] = patch[key]; });
         if ('longGroupId' in patch || 'shortGroupId' in patch || 'shortAlias' in patch) {
+            if (!('shortAlias' in patch)) {
+                // 清除旧 shortAlias，让 _lsDeriveShortAlias 根据新的 longGroupId/shortGroupId 重新派生
+                delete _lsItems[idx].shortAlias;
+            }
             _lsItems[idx].shortAlias = _lsDeriveShortAlias(_lsItems[idx]);
         }
         _emit('lsConfigsChanged', { action: 'update', id: id });
