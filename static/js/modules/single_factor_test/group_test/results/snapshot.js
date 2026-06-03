@@ -222,6 +222,7 @@
                     addBatch: item.addBatch,
                     shortAlias: item.shortAlias || alias,
                     parentId: item.parentId || null,
+                    baseGroupId: item.baseGroupId || null,
                     isDerived: !!item.isDerived,
                     id: item.id || null
                 };
@@ -230,6 +231,7 @@
                     addBatch: undefined,
                     shortAlias: alias,
                     parentId: null,
+                    baseGroupId: null,
                     isDerived: false,
                     id: null
                 };
@@ -348,14 +350,16 @@
      * 返回：{ trees: [{root: idx, indices: [idx,...]}], nodeToRoot: {idx: rootIdx} }
      */
     function _buildDerivedForest(derivedIndices, groupMeta) {
-        // 构建 idx → {id, parentId}
+        // 构建 idx → {id, parentId, baseGroupId}
         var idxToId = {};
         var idxToParentId = {};
+        var idxToBaseGroupId = {};
         derivedIndices.forEach(function(idx) {
             var meta = groupMeta[idx];
             if (meta) {
                 idxToId[idx] = meta.id || null;
                 idxToParentId[idx] = meta.parentId || null;
+                idxToBaseGroupId[idx] = meta.baseGroupId || null;
             }
         });
 
@@ -385,7 +389,17 @@
             }
         });
 
-        // BFS 收集每棵树
+        // 构建 baseGroupId → 基础组 idx 的映射
+        var baseGroupIdToIdx = {};
+        for (var key in groupMeta) {
+            if (!groupMeta.hasOwnProperty(key)) continue;
+            var kmeta = groupMeta[key];
+            if (!kmeta.isDerived && kmeta.id) {
+                baseGroupIdToIdx[kmeta.id] = parseInt(key, 10);
+            }
+        }
+
+        // BFS 收集每棵树，计算 anchorIndex
         var nodeToRoot = {};
         var trees = [];
         roots.forEach(function(root) {
@@ -398,7 +412,13 @@
                 var kids = children[idxToId[node]] || [];
                 kids.forEach(function(k) { queue.push(k); });
             }
-            trees.push({ root: root, indices: tree });
+            // anchorIndex: 该树挂载到的基础组 index
+            var anchorIndex = null;
+            var rootBaseGroupId = idxToBaseGroupId[root];
+            if (rootBaseGroupId && baseGroupIdToIdx.hasOwnProperty(rootBaseGroupId)) {
+                anchorIndex = baseGroupIdToIdx[rootBaseGroupId];
+            }
+            trees.push({ root: root, indices: tree, anchorIndex: anchorIndex });
         });
 
         return { trees: trees, nodeToRoot: nodeToRoot };
@@ -536,14 +556,13 @@
             var label = _sectionLabel(colGroups);
             html += _renderMatrixTable(colGroups, allProds, label);
 
-            // 2. 该 addBatch 的派生树矩阵（挂在根组所在的 addBatch 下）
-            //    找出根组在此 batch 中的派生树
-            var seenRoots = {};
+            // 2. 该 addBatch 的派生树矩阵（挂在根组对应的基础组所在的 addBatch 下）
+            var seenAnchor = {};
             batchIndices.forEach(function(idx) {
-                // 查找是否有以 idx 为根的派生树
                 forest.trees.forEach(function(tree) {
-                    if (tree.root === idx && !seenRoots[idx]) {
-                        seenRoots[idx] = true;
+                    // anchorIndex 是基础组的 idx
+                    if (tree.anchorIndex === idx && !seenAnchor[idx]) {
+                        seenAnchor[idx] = true;
                         var treeCols = tree.indices.map(idxToCol);
                         var treeProds = _batchProducts(treeCols.map(function(cg) { return cg.group; }));
                         var treeLabel = '↳ ' + _sectionLabel(treeCols) + ' (派生)';
@@ -553,19 +572,18 @@
             });
         });
 
-        // 3. 没有挂在任何 batch 下的派生树（root 不在 batchIndices 中的任一 batch 中）
-        //    统计所有 batch 中出现的 idx
+        // 3. 没有挂在任何 batch 下的派生树（anchorIndex 不在任何 batch 中）
         var allBatchIndices = {};
         batchOrder.forEach(function(b) {
             (batchBuckets[b] || []).forEach(function(idx) { allBatchIndices[idx] = true; });
         });
         var orphanTrees = [];
         forest.trees.forEach(function(tree) {
-            if (!allBatchIndices[tree.root]) {
+            if (tree.anchorIndex == null || !allBatchIndices[tree.anchorIndex]) {
                 orphanTrees.push(tree);
             }
         });
-        if (orphanTrees.length > 0 && batchOrder.length === 0) {
+        if (orphanTrees.length > 0) {
             orphanTrees.forEach(function(tree) {
                 var treeCols = tree.indices.map(idxToCol);
                 var treeProds = _batchProducts(treeCols.map(function(cg) { return cg.group; }));
