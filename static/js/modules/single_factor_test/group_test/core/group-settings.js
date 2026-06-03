@@ -320,6 +320,16 @@
         _fillGroupFromConfig(item, config, isDerived);
 
         _groupItems.push(item);
+
+        // 派生组自动计算 shortAlias (refs #100)
+        // 必须在 push 之后计算，因为 deriveShortAlias 需要 getAll() 中包含新节点来找 sibling 序号
+        if (isDerived && (!item.shortAlias || !item.shortAlias.trim())) {
+            var h = GT.panels && GT.panels.list && GT.panels.list._helpers;
+            if (h && typeof h.deriveShortAlias === 'function') {
+                item.shortAlias = h.deriveShortAlias(item);
+            }
+        }
+
         _emit('groupsChanged', { action: 'add', id: item.id, isDerived: isDerived });
         return item.id;
     }
