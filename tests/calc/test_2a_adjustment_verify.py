@@ -34,7 +34,7 @@ FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_ty
 HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
 
 # 价格列名（test_1 导出使用的列名）
-PRICE_COLS = ['open_price', 'high_price', 'low_price', 'close_price']
+PRICE_COLS = ['open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price']
 
 # _SWITCHES sheet 中的关键列
 SW_COL_TRADING_DAY = 'trading_day'
@@ -45,12 +45,14 @@ CS_COL_TRADE_TIME = 'trade_time'
 CS_COL_INSTRUMENT_ID = 'instrument_id'
 CS_COL_CLOSE = 'close_price'
 CS_COL_OPEN = 'open_price'
+CS_COL_HIGH = 'highest_price'
+CS_COL_LOW = 'lowest_price'
 
-# MAIN sheet 列定义
+# MAIN sheet 列定义（与 test_1 导出列对齐）
 MAIN_COLS = [
     'trade_time', 'trading_day', 'instrument_id',
-    'open_price', 'high_price', 'low_price', 'close_price',
-    'volume', 'open_interest', 'amount',
+    'open_price', 'highest_price', 'lowest_price', 'close_price', 'settlement_price',
+    'volume', 'turnover', 'open_interest',
     'adjustment_mul', 'adjustment_add',
 ]
 
@@ -119,7 +121,7 @@ def _add_formulas_to_contract_sheets(wb, main_ws_name: str, main_data_start_row:
 
     # 确定 MAIN sheet 中各列的字母
     main_ws = wb[main_ws_name]
-    main_headers = [main_ws.cell(1, c).value for c in range(1, main_ws.max_column + 1)]
+    main_headers = [main_ws.cell(2, c).value for c in range(1, main_ws.max_column + 1)]
     main_tt_col = _find_col_idx(main_headers, CS_COL_TRADE_TIME)
     main_mul_col = _find_col_idx(main_headers, 'adjustment_mul')
     main_add_col = _find_col_idx(main_headers, 'adjustment_add')
@@ -133,7 +135,8 @@ def _add_formulas_to_contract_sheets(wb, main_ws_name: str, main_data_start_row:
             continue
 
         ws = wb[sheet_name]
-        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        # Header 在 row 2（row 1 是注释行）
+        headers = [ws.cell(2, c).value for c in range(1, ws.max_column + 1)]
 
         # 找关键列索引（1-based）
         tt_col = _find_col_idx(headers, CS_COL_TRADE_TIME)
@@ -147,9 +150,9 @@ def _add_formulas_to_contract_sheets(wb, main_ws_name: str, main_data_start_row:
         # 在最后一列之后添加新列
         adj_start_col = len(headers) + 1
 
-        # 添加 header
-        ws.cell(1, adj_start_col, 'adjustment_mul').fill = HEADER_FILL
-        ws.cell(1, adj_start_col + 1, 'adjustment_add').fill = HEADER_FILL
+        # 添加 header（写入 row 2，与现有 header 同行）
+        ws.cell(2, adj_start_col, 'adjustment_mul').fill = HEADER_FILL
+        ws.cell(2, adj_start_col + 1, 'adjustment_add').fill = HEADER_FILL
 
         # adj_price 列（对每个 PRICE_COLS 创建）
         adj_price_cols = {}  # price_col_name -> formula_col_index
@@ -159,12 +162,12 @@ def _add_formulas_to_contract_sheets(wb, main_ws_name: str, main_data_start_row:
             if pc_idx is None:
                 continue
             adj_name = pc + '_adj'
-            ws.cell(1, formula_col, adj_name).fill = HEADER_FILL
+            ws.cell(2, formula_col, adj_name).fill = HEADER_FILL
             adj_price_cols[pc] = (pc_idx, formula_col)
             formula_col += 1
 
-        # 为每一行写入 Excel 公式
-        for row in range(2, ws.max_row + 1):
+        # 为每一行写入 Excel 公式（数据从 row 3 开始）
+        for row in range(3, ws.max_row + 1):
             # ---- adjust_mul: VLOOKUP(trade_time & instrument_id, MAIN, col_mul, FALSE) ----
             tt_cell = ws.cell(row, tt_col)
             inst_cell = ws.cell(row, inst_col) if inst_col else None
@@ -245,48 +248,35 @@ def _build_main_sheet(wb) -> str:
     # --- 收集所有合约的数据 ---
     # 从 _SWITCHES 获取切换顺序
     sw_ws = wb['_SWITCHES']
-    sw_headers = [sw_ws.cell(1, c).value for c in range(1, sw_ws.max_column + 1)]
+    # _SWITCHES header 在 row 2（row 1 是注释行）
+    sw_headers = [sw_ws.cell(2, c).value for c in range(1, sw_ws.max_column + 1)]
     td_col_sw = _find_col_idx(sw_headers, SW_COL_TRADING_DAY)
     inst_col_sw = _find_col_idx(sw_headers, SW_COL_INSTRUMENT_ID)
 
-    # 收集所有切换合约
-    switch_contracts = []
-    for row in range(2, sw_ws.max_row + 1):
-        inst = sw_ws.cell(row, inst_col_sw).value
-        td = sw_ws.cell(row, td_col_sw).value
-        if inst and td:
-            switch_contracts.append((inst, td))
-
     # 从各合约 sheet 收集所有数据行
     all_rows = []
-    sheet_last_row = {}  # instrument_id -> (sheet_name, last_row_num, close_col_letter)
 
     for sheet_name in wb.sheetnames:
         if sheet_name in ('_SWITCHES', 'MAIN'):
             continue
         ws = wb[sheet_name]
-        headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+        headers = [ws.cell(2, c).value for c in range(1, ws.max_column + 1)]
         tt_col = _find_col_idx(headers, CS_COL_TRADE_TIME)
         td_col = _find_col_idx(headers, 'trading_day')
         inst_col = _find_col_idx(headers, CS_COL_INSTRUMENT_ID)
         close_col = _find_col_idx(headers, CS_COL_CLOSE)
         open_col = _find_col_idx(headers, CS_COL_OPEN)
-        high_col = _find_col_idx(headers, 'high_price')
-        low_col = _find_col_idx(headers, 'low_price')
+        high_col = _find_col_idx(headers, CS_COL_HIGH)
+        low_col = _find_col_idx(headers, CS_COL_LOW)
+        settle_col = _find_col_idx(headers, 'settlement_price')
         vol_col = _find_col_idx(headers, 'volume')
         oi_col = _find_col_idx(headers, 'open_interest')
-        amt_col = _find_col_idx(headers, 'amount')
+        turnover_col = _find_col_idx(headers, 'turnover')
 
         if tt_col is None or close_col is None:
             continue
 
-        # 记录每个合约最后一行的信息（用于后续切换日公式计算）
-        last_data_row = ws.max_row
-        if last_data_row >= 2:
-            inst_val = ws.cell(2, inst_col).value if inst_col else sheet_name
-            sheet_last_row[str(inst_val)] = (sheet_name, last_data_row, close_col)
-
-        for row in range(2, ws.max_row + 1):
+        for row in range(3, ws.max_row + 1):
             tt = ws.cell(row, tt_col).value
             if tt is None:
                 continue
@@ -295,12 +285,13 @@ def _build_main_sheet(wb) -> str:
                 'trading_day': ws.cell(row, td_col).value if td_col else None,
                 'instrument_id': ws.cell(row, inst_col).value if inst_col else sheet_name,
                 'open_price': ws.cell(row, open_col).value if open_col else None,
-                'high_price': ws.cell(row, high_col).value if high_col else None,
-                'low_price': ws.cell(row, low_col).value if low_col else None,
+                'highest_price': ws.cell(row, high_col).value if high_col else None,
+                'lowest_price': ws.cell(row, low_col).value if low_col else None,
                 'close_price': ws.cell(row, close_col).value,
+                'settlement_price': ws.cell(row, settle_col).value if settle_col else None,
                 'volume': ws.cell(row, vol_col).value if vol_col else None,
+                'turnover': ws.cell(row, turnover_col).value if turnover_col else None,
                 'open_interest': ws.cell(row, oi_col).value if oi_col else None,
-                'amount': ws.cell(row, amt_col).value if amt_col else None,
             })
 
     # 按时间排序
@@ -314,14 +305,19 @@ def _build_main_sheet(wb) -> str:
     helper_col = 1
     data_start_col = 2
 
+    # Row 1: remark, Row 2: header (与 test_1 格式对齐)
+    # 合并所有列写入 remark
+    main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(MAIN_COLS) + 1)
+    main_ws.cell(1, 1, '主力连续合约序列 — 由 test_2a 自动生成\nadjustment_mul=IF(instrument_id变化, 上一行close/当前行close*上一行mul, 上一行mul) | adjustment_add=0')
+
     headers_main = ['_VLOOKUP_KEY'] + MAIN_COLS  # helper + 数据列
 
     for c, h in enumerate(headers_main, 1):
-        main_ws.cell(1, c, h).fill = HEADER_FILL
+        main_ws.cell(2, c, h).fill = HEADER_FILL
 
-    # 写入数据（从 row=2 开始）
+    # 写入数据（从 row=3 开始，row 1=remark, row 2=header）
     for i, r in enumerate(all_rows):
-        row = i + 2  # Excel row (1-based, row 1 = header)
+        row = i + 3  # Excel row (1-based)
 
         # 数据列
         main_ws.cell(row, 2, r['trade_time'])          # trade_time
@@ -338,13 +334,13 @@ def _build_main_sheet(wb) -> str:
         main_ws.cell(row, helper_col, f'={tt_ref}&{inst_ref}').fill = FORMULA_FILL
 
         # adjustment_mul 列
-        mul_col = data_start_col + len(MAIN_COLS) - 2  # = 12 (B..M, mul 是第 12 列)
-        # 实际上：B=trade_time(2), C=trading_day(3), D=inst(4), E=open(5), F=high(6),
-        # G=low(7), H=close(8), I=vol(9), J=oi(10), K=amt(11), L=adj_mul(12), M=adj_add(13)
-        # mul_col = 12
+        mul_col = 2 + len(MAIN_COLS) - 2  # helper(col1) + 数据列... adj_mul在倒数第2列
+        # 实际上：A=_VLOOKUP_KEY(1), B=trade_time(2), C=trading_day(3), D=inst(4),
+        # E=open(5), F=highest(6), G=lowest(7), H=close(8), I=settle(9),
+        # J=vol(10), K=turnover(11), L=oi(12), M=adj_mul(13), N=adj_add(14)
 
-        if row == 2:
-            # 第一行：adjustment_mul = 1（基准值）
+        if row == 3:
+            # 第一行数据：adjustment_mul = 1（基准值）
             main_ws.cell(row, mul_col, 1).fill = FORMULA_FILL
         else:
             # =IF(D{row}=D{row-1}, L{row-1}, H{row-1}/H{row}*L{row-1})
@@ -352,7 +348,7 @@ def _build_main_sheet(wb) -> str:
             inst_cur = _col_letter(4) + str(row)
             inst_prev = _col_letter(4) + str(prev_row)
             mul_prev = _col_letter(mul_col) + str(prev_row)
-            close_prev = _col_letter(8) + str(prev_row)
+            close_prev = _col_letter(8) + str(prev_row)    # H = close_price
             close_cur = _col_letter(8) + str(row)
 
             formula_mul = (
@@ -387,9 +383,10 @@ def process_product(src_path: Path, dst_path: Path) -> None:
     main_name = _build_main_sheet(wb)
 
     # Step 2: 为合约 sheet 添加 Excel 公式
-    _add_formulas_to_contract_sheets(wb, main_name, main_data_start_row=2)
+    _add_formulas_to_contract_sheets(wb, main_name, main_data_start_row=3)
 
     # 保存
+    print(f"  Saving to {dst_path.name}...")
     wb.save(dst_path)
     print(f"  ✅ Saved: {dst_path.name}")
 
