@@ -241,5 +241,27 @@
             },
             defaultTab: 'add-ls'
         });
+
+        // ── Register edit action：「⚡ 创建 LS 组合」（选中 2 组时显示）(refs #109)
+        GT.modes.registerEditAction({
+            name: 'create-ls',
+            label: '⚡ 创建 LS 组合',
+            priority: 20,
+            condition: function(ctx) {
+                return ctx && ctx.count === 2;
+            },
+            action: function(ctx, helpers) {
+                if (!ctx || ctx.ids.length !== 2) { alert('请选择 2 个组来创建 LS 组合'); return; }
+                helpers.exitEdit();
+                GT.modes.enterAdd('ls');
+                GT.modes.setAddDraft({
+                    addFlow: 'ls',
+                    preselectedBaseGroupIds: ctx.ids
+                });
+                helpers.mountTab('add-ls');
+                helpers.renderActions();
+            },
+            standalone: false
+        });
     }
 })();
