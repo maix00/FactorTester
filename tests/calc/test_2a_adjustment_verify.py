@@ -11,20 +11,13 @@ test_2a_adjustment_verify.py
 Output: data/test/test_2a/{prod}.xlsx
 """
 
-import re
-import sys
-from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import PatternFill
 
-from tests.calc import (
-    WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_1_DIR, TEST_2A_DIR,
-    TOP_N,
-)
+from tests.calc import TEST_1_DIR, TEST_2A_DIR
 
 # --- test_2a 专用数据源（不在 calc 白名单中，单独声明） ---
 from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR

@@ -19,8 +19,8 @@ Output: data/test/test_1/{prod}/{prod}.xlsx
 """
 
 import json
-from datetime import date, timedelta
-from pathlib import Path
+import shutil
+from datetime import timedelta
 
 import pandas as pd
 from openpyxl import Workbook
@@ -30,7 +30,7 @@ from openpyxl.utils import get_column_letter
 
 from tests.calc import (
     WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_PRODUCTS_XLSX, TEST_1_DIR,
-    TOP_N, WINDOW_DAYS, WIND_EXCH_TO_MIN_EXCH,
+    WINDOW_DAYS, WIND_EXCH_TO_MIN_EXCH,
 )
 
 # --- 样式 ---
@@ -45,14 +45,13 @@ COMMENT_FONT = Font(italic=True, size=10)
 # ================================================
 
 def _load_products_from_test0() -> list[dict]:
-    """从 test_0/_products.xlsx 的 _SWITCH_COUNTS sheet 读取 TOP N 品种"""
+    """从 test_0/_products.xlsx 的 _SWITCH_COUNTS sheet 读取全部品种"""
     if not TEST_0_PRODUCTS_XLSX.exists():
         raise FileNotFoundError(f"test_0 output not found: {TEST_0_PRODUCTS_XLSX}\n"
                                 f"Please run test_0_discover_products.py first.")
 
     df = pd.read_excel(TEST_0_PRODUCTS_XLSX, sheet_name='_SWITCH_COUNTS', header=1)
-    # 取 TOP N
-    df = df.head(TOP_N)
+    # 全部品种（不限 TOP_N）
     products = []
     for _, row in df.iterrows():
         products.append({
@@ -209,17 +208,11 @@ def _export_product(
         if inst not in inst_last_switch or sd > inst_last_switch[inst]:
             inst_last_switch[inst] = sd
 
-    # 按最近切换日期降序
+    # 按最近切换日期降序，导出全部合约
     sorted_insts = sorted(inst_spans.keys(), key=lambda x: inst_last_switch[x], reverse=True)
-
-    # 最多导最近 5 个合约
-    max_sheets = min(len(sorted_insts), 5)
     exported_count = 0
 
     for inst in sorted_insts:
-        if exported_count >= max_sheets:
-            break
-
         fn = inst_to_fname.get(inst)
         if fn is None:
             print(f"  [WARN] Missing min file for {inst}, skipping")
@@ -297,6 +290,16 @@ def main():
         print(f"  {p['prod']} ({p['wind_exch']}): {p['switch_count']} switches "
               f"in {p['data_start'].date()} ~ {p['data_end'].date()} (min={p['min_exch']})")
 
+    # 清空 test_1 目录下所有旧文件（包括旧子目录）
+    if TEST_1_DIR.exists():
+        for item in TEST_1_DIR.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+    TEST_1_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[test_1] Cleaned {TEST_1_DIR}")
+
     manifest = {}
     for pinfo in products:
         prod = pinfo['prod']
@@ -316,7 +319,7 @@ def main():
         inst_to_fname = _find_min_files(prod, min_exch)
         print(f"  Min files: {len(inst_to_fname)}")
 
-        output_dir = TEST_1_DIR / prod
+        output_dir = TEST_1_DIR
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -332,7 +335,7 @@ def main():
                 sd = sw_row['STARTDATE'].date()
                 if inst not in inst_last or sd > inst_last[inst]:
                     inst_last[inst] = sd
-            sorted_insts = sorted(inst_last.keys(), key=lambda x: inst_last[x], reverse=True)[:5]
+            sorted_insts = sorted(inst_last.keys(), key=lambda x: inst_last[x], reverse=True)
             sheet_list = [{'instrument': inst, 'last_switch': inst_last[inst].isoformat()}
                           for inst in sorted_insts]
 

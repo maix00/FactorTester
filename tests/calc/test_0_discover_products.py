@@ -25,8 +25,6 @@ test_1 从 _SWITCH_COUNTS sheet 读取品种列表及参数。
 """
 
 import pandas as pd
-from datetime import date
-from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -34,8 +32,11 @@ from openpyxl.utils import get_column_letter
 
 from tests.calc import (
     WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_DIR, TEST_0_PRODUCTS_XLSX,
-    TOP_N, WIND_EXCH_TO_MIN_EXCH,
+    WIND_EXCH_TO_MIN_EXCH,
 )
+
+# 日志展示用
+_TOP_N_DISPLAY = 8
 
 # 样式
 COMMENT_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')  # 浅橙注释色
@@ -107,7 +108,7 @@ def main():
     # Sheet _SUMMARY: 每个品种的分钟数据覆盖范围
     # ================================================
     summary_rows = []
-    for windcode, grp in wm.groupby('S_INFO_WINDCODE'):
+    for windcode in wm['S_INFO_WINDCODE'].unique():
         parts = windcode.split('.')
         prod, wind_exch = parts[0], parts[1]
         min_exch = _find_min_exch(prod, wind_exch)
@@ -201,7 +202,7 @@ def main():
         f"数据来源: wind_mapping.parquet (限定在 _SUMMARY 中的 data_start ~ data_end 范围内)\n"
         f"统计口径: 对每个品种，筛选 wind_mapping 中 STARTDATE 落在 [data_start, data_end] 区间的记录，"
         f"COUNT 即 switch_count。切换次数越多 → 该品种主力合约更替越频繁 → 更适合做复权验证。\n"
-        f"test_1 将从此 sheet 取 switch_count 最高的几个品种做导出。\n"
+        f"test_1 将从此 sheet 取全部品种做导出。\n"
         f"生成时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}",
         len(switch_cols))
 
@@ -222,8 +223,8 @@ def main():
     # 打印结果
     # ================================================
     print(f"[test_0] Total products with min data: {len(summary_df)}")
-    print(f"\n[test_0] Top {TOP_N} by switch_count:")
-    for i, (_, row) in enumerate(switch_df.head(TOP_N).iterrows()):
+    print(f"\n[test_0] Top {_TOP_N_DISPLAY} by switch_count:")
+    for i, (_, row) in enumerate(switch_df.head(_TOP_N_DISPLAY).iterrows()):
         print(f"  {i+1}. {row['prod']} ({row['wind_exch']}): {row['switch_count']} switches "
               f"in {row['data_start']} ~ {row['data_end']} (min={row['min_exch']})")
 
