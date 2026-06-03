@@ -26,7 +26,7 @@ import shutil
 import time
 
 
-DATA_DIR = os.path.abspath(os.path.join(os.getcwd(), '..', 'data'))
+from Settings import DATA_DIR
 USERS_DIR = os.path.join(DATA_DIR, 'users')
 
 
