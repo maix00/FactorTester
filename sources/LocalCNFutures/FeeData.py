@@ -35,8 +35,10 @@ from typing import Any, Optional
 
 import pandas as pd
 
-# 本地存储目录（相对于项目根目录，即 Codes/）
-_DATA_DIR = Path(__file__).parent.parent.parent.parent / 'data' / 'fees'
+from scripts.data_dir import DATA_DIR
+
+# 本地存储目录
+_DATA_DIR = Path(DATA_DIR) / 'fees'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'

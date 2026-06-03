@@ -10,7 +10,7 @@ from typing import Optional
 
 import pandas as pd
 
-from Settings import DATA_DIR
+from scripts.data_dir import DATA_DIR
 from sources.LocalCNFutures import TERM_STRUCTURE_PATH
 from sources.LocalCNFutures.CNFutures import exchange_map
 from tools.products.AdjustableTermStructure import (
