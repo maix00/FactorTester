@@ -2,7 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Flask: start_server",
+            "name": "Flask: worktree manager",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/worktree_flask_manager.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--repo", "${workspaceFolder}", "--port", "7999"]
+        },
+        {
+            "name": "Flask Debug: master :8000",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/../Codes-master-server/start_server.py",
@@ -15,12 +25,52 @@
             "args": ["--port", "8000"]
         },
         {
+            "name": "Flask Debug: feat :8001",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/start_server.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "FLASK_DEBUG": "1"
+            },
+            "args": ["--port", "8001"]
+        },
+        {
+            "name": "Flask Debug: selected worktree",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${input:debugWorktreePath}/start_server.py",
+            "cwd": "${input:debugWorktreePath}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "FLASK_DEBUG": "1"
+            },
+            "args": ["--port", "${input:debugWorktreePort}"]
+        },
+        {
             "name": "Python Debugger: Current File",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "debugWorktreePath",
+            "type": "promptString",
+            "description": "Absolute path of the worktree to debug",
+            "default": "${workspaceFolder}/.workspace/fix/issue-106-worktree-manager"
+        },
+        {
+            "id": "debugWorktreePort",
+            "type": "promptString",
+            "description": "Flask port for this worktree",
+            "default": "8100"
         }
     ]
 }
