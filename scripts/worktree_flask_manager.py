@@ -323,8 +323,8 @@ def main() -> int:
     args = parser.parse_args()
 
     Handler.state = ManagerState(Path(args.repo), args.python)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    url = f"http://127.0.0.1:{args.port}/"
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    url = f"http://localhost:{args.port}/"
     print(f"Worktree Flask manager running at {url}")
     if not args.no_browser:
         webbrowser.open(url)
