@@ -1,13 +1,15 @@
 """
 test_1_export_truncated.py
 --------------------------
-从 test_0 自动获取 TOP N 品种，导出每个切换日的 ±30 天截断数据到 Excel。
+从 test_0 自动获取 TOP N 品种，导出截断数据到 Excel。
 
-每个切换日 → 一个 Excel 文件：{prod}_{switch_date}.xlsx
+每个品种 → 一个 Excel 文件：data/test/test_1/{prod}.xlsx
 - Sheet _SWITCHES：该品种完整切换表
-- Sheet {instrument_id}：该合约 ±30 天内的分钟数据
+- Sheet {instrument_id}：最近一次切换的合约 ±30 天内的分钟数据
+- Sheet {instrument_id}（第二个）：第二近的切换合约 ±30 天内的分钟数据
+- ... 依次排列，最多最近 N 次切换
 
-Output: data/test/test_1/{prod}/{prod}_{switch_date}.xlsx + _manifest.json
+Output: data/test/test_1/{prod}.xlsx + _manifest.json
 """
 
 import json
@@ -99,45 +101,45 @@ def _get_switches(day_file: Path) -> pd.DataFrame:
     return sw
 
 
-def _export_one_switch(
-    switch_row: pd.Series,
-    prev_inst: str | None,
-    inst_to_fname: dict[str, str],
-    switches_df: pd.DataFrame,
-    output_dir: Path,
+def _export_product(
     prod: str,
+    switches: pd.DataFrame,
+    inst_to_fname: dict[str, str],
+    output_dir: Path,
 ) -> Path:
-    """为一个切换日导出 Excel"""
-    switch_date = switch_row['trading_day']
-    fname = f'{prod}_{switch_date.isoformat()}.xlsx'
-    output_path = output_dir / fname
+    """为一个品种导出 Excel：Sheet1=切换表，Sheet2/3/...=最近切换的合约±30天数据"""
+    output_path = output_dir / f'{prod}.xlsx'
 
     wb = Workbook()
     # 移除默认 sheet
     wb.remove(wb.active)
 
-    # Sheet 0: _SWITCHES（完整切换表）
+    # Sheet 1: _SWITCHES（完整切换表）
     ws_sw = wb.create_sheet('_SWITCHES')
-    for r in dataframe_to_rows(switches_df, index=False, header=True):
+    for r in dataframe_to_rows(switches, index=False, header=True):
         ws_sw.append(r)
 
-    # 写入前置合约（如果存在，且切换不是当前日期）
-    # 当前切换日的合约一定导出
-    instruments_to_export = {switch_row['instrument_id']}
+    # 从最近一次切换开始，向前取切换合约，每个合约导出前后 WINDOW_DAYS 数据
+    exported_count = 0
+    max_sheets = min(len(switches), 5)  # 最多导最近 5 次切换
 
-    # 同时导出下一个切换的合约（如果存在）
-    sw_idx = switches_df[switches_df['trading_day'] == switch_date].index[0]
-    if sw_idx + 1 < len(switches_df):
-        instruments_to_export.add(switches_df.iloc[sw_idx + 1]['instrument_id'])
+    # switches 按 trading_day 降序排列（最近在前）
+    switches_desc = switches.sort_values('trading_day', ascending=False)
 
-    start = switch_date - timedelta(days=WINDOW_DAYS)
-    end = switch_date + timedelta(days=WINDOW_DAYS)
+    for _, sw in switches_desc.iterrows():
+        if exported_count >= max_sheets:
+            break
 
-    for inst in instruments_to_export:
+        inst = sw['instrument_id']
+        switch_date = sw['trading_day']
+
         fn = inst_to_fname.get(inst)
         if fn is None:
             print(f"  [WARN] Missing min file for {inst}, skipping")
             continue
+
+        start = switch_date - timedelta(days=WINDOW_DAYS)
+        end = switch_date + timedelta(days=WINDOW_DAYS)
 
         dfm = pd.read_parquet(MIN_DIR / fn)
         dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
@@ -145,20 +147,26 @@ def _export_one_switch(
         df_win = dfm.loc[mask].copy()
         df_win = df_win.sort_values('trade_time').reset_index(drop=True)
 
-        # 确保列顺序一致
+        if len(df_win) == 0:
+            print(f"  [SKIP] {inst} ({switch_date}) has 0 rows")
+            continue
+
         cols = ['trade_time', 'trading_day', 'instrument_id',
                 'open_price', 'highest_price', 'lowest_price', 'close_price',
                 'settlement_price', 'volume', 'turnover', 'open_interest',
                 'pre_settlement_price', 'twap', 'vwap',
                 'upper_limit_price', 'lower_limit_price']
-
-        # 只保留存在的列
         cols = [c for c in cols if c in df_win.columns]
         df_win = df_win[cols]
 
-        ws = wb.create_sheet(inst)
+        # Sheet 名用合约代码 + 切换日期
+        sheet_name = f'{inst}'
+        ws = wb.create_sheet(sheet_name)
         for r in dataframe_to_rows(df_win, index=False, header=True):
             ws.append(r)
+
+        exported_count += 1
+        print(f"  [{exported_count}] {inst} ({switch_date}): {len(df_win)} rows")
 
     wb.save(output_path)
     return output_path
@@ -180,41 +188,42 @@ def main():
         output_dir = OUTPUT_BASE / prod
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        prod_manifest = []
-        for idx, (_, row) in enumerate(switches.iterrows()):
-            prev_inst = switches.iloc[idx - 1]['instrument_id'] if idx > 0 else None
-            try:
-                out_path = _export_one_switch(
-                    row, prev_inst, inst_to_fname, switches, output_dir, prod
-                )
-                sw_date = row['trading_day'].isoformat()
-                prod_manifest.append({
-                    'switch_date': sw_date,
-                    'instrument': row['instrument_id'],
-                    'file': out_path.name,
+        try:
+            out_path = _export_product(prod, switches, inst_to_fname, output_dir)
+            # 收集切换信息
+            switches_desc = switches.sort_values('trading_day', ascending=False)
+            sheet_list = []
+            max_sheets = min(len(switches_desc), 5)
+            for i in range(max_sheets):
+                sw = switches_desc.iloc[i]
+                sheet_list.append({
+                    'switch_date': sw['trading_day'].isoformat(),
+                    'instrument': sw['instrument_id'],
+                    'sheet': sw['instrument_id'],
                 })
-                print(f"  [{idx+1}/{len(switches)}] {sw_date} -> {out_path.name}")
-            except Exception as e:
-                print(f"  [{idx+1}/{len(switches)}] ERROR: {e}")
-                prod_manifest.append({
-                    'switch_date': row['trading_day'].isoformat(),
-                    'instrument': row['instrument_id'],
-                    'error': str(e),
-                })
-
-        manifest[prod] = {
-            'day_exch': day_exch,
-            'min_exch': min_exch,
-            'switch_count': len(switches),
-            'files': prod_manifest,
-        }
+            manifest[prod] = {
+                'day_exch': day_exch,
+                'min_exch': min_exch,
+                'switch_count': len(switches),
+                'file': out_path.name,
+                'sheets': sheet_list,
+            }
+            print(f"  -> {out_path.name}")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            manifest[prod] = {
+                'day_exch': day_exch,
+                'min_exch': min_exch,
+                'switch_count': len(switches),
+                'error': str(e),
+            }
 
     # 写 manifest
     manifest_path = OUTPUT_BASE / '_manifest.json'
     manifest_path.write_text(json.dumps(manifest, indent=2, default=str, ensure_ascii=False))
     print(f"\n{'='*60}")
     print(f"Manifest: {manifest_path}")
-    total_files = sum(len(m['files']) for m in manifest.values())
+    total_files = sum(1 for m in manifest.values() if 'file' in m)
     print(f"Total files: {total_files}")
 
 
