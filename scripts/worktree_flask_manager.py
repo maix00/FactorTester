@@ -7,6 +7,7 @@ import argparse
 import html
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -20,8 +21,15 @@ from urllib.parse import parse_qs, urlparse
 
 
 MASTER_PORT = 8000
-FEAT_PORT = 8001
-OTHER_BASE_PORT = 8100
+FEAT_PORT = 7999
+
+# Matches branches named fix/issue-<N>-<slug> or fix/issue-<N>
+_ISSUE_BRANCH_RE = re.compile(r'^fix/issue-(\d+)(?:-.*)?$')
+
+
+def _extract_issue_number(branch: str) -> int | None:
+    m = _ISSUE_BRANCH_RE.match(branch)
+    return int(m.group(1)) if m else None
 
 
 @dataclass(frozen=True)
@@ -30,7 +38,7 @@ class Worktree:
     branch: str
     head: str
     label: str
-    port: int
+    port: int  # 0 means no port assigned (should be cleaned up)
 
 
 class ManagerState:
@@ -60,36 +68,33 @@ class ManagerState:
         if cur:
             entries.append(cur)
 
-        records: list[tuple[Path, str, str]] = []
+        result: list[Worktree] = []
         for entry in entries:
             path = Path(entry.get("worktree", "")).resolve()
             if not path:
                 continue
             branch_ref = entry.get("branch", "")
             branch = branch_ref.removeprefix("refs/heads/") if branch_ref else "(detached)"
-            records.append((path, branch, entry.get("HEAD", "")[:8]))
+            head = entry.get("HEAD", "")[:8]
 
-        other_paths = sorted(path for path, branch, _ in records if branch not in {"master", "feat"})
-        other_ports = {path: OTHER_BASE_PORT + idx for idx, path in enumerate(other_paths)}
-
-        result: list[Worktree] = []
-        for path, branch, head in records:
             if branch == "master":
                 port = MASTER_PORT
             elif branch == "feat":
                 port = FEAT_PORT
             else:
-                port = other_ports[path]
-            result.append(Worktree(path=path, branch=branch, head=head, label=self._label(path, branch), port=port))
-        return sorted(result, key=lambda wt: (wt.port, wt.label))
+                issue_num = _extract_issue_number(branch)
+                if issue_num is not None:
+                    port = MASTER_PORT + issue_num
+                else:
+                    port = 0  # no port — should be cleaned up
 
-    def _label(self, path: Path, branch: str) -> str:
-        if branch in {"master", "feat"}:
-            return branch
-        try:
-            return str(path.relative_to(self.repo))
-        except ValueError:
-            return path.name
+            result.append(Worktree(
+                path=path, branch=branch, head=head,
+                label=branch, port=port,
+            ))
+        return sorted(result, key=lambda wt: (
+            -1 if wt.port == 0 else wt.port, wt.label
+        ))  # no-port worktrees at bottom
 
     def key(self, path: Path) -> str:
         return str(path.resolve())
@@ -109,6 +114,8 @@ class ManagerState:
             return "already running"
         if not (path / "start_server.py").exists():
             raise RuntimeError(f"missing start_server.py in {path}")
+        if port == 0:
+            raise RuntimeError(f"worktree has no assigned port (branch name lacks issue number)")
         if port_in_use(port):
             raise RuntimeError(f"port {port} is already in use")
 
@@ -181,8 +188,22 @@ def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 
 def page(state: ManagerState, message: str = "") -> bytes:
     rows = []
     for wt in state.worktrees():
+        if wt.port == 0:
+            # No issue number — show warning, no Start/Stop actions
+            rows.append(
+                f"""
+            <tr class="orphan">
+              <td><strong>{html.escape(wt.label)}</strong><div class="muted">{html.escape(wt.branch)} · {html.escape(wt.head)}</div></td>
+              <td><code>{html.escape(str(wt.path))}</code></td>
+              <td><span class="muted">—</span></td>
+              <td><span class="pill orphan-pill">no-issue</span></td>
+              <td><span class="muted">⚠️ 建议清理：分支名不含 issue 编号</span></td>
+            </tr>
+            """
+            )
+            continue
         running = state.is_running(wt.path)
-        occupied = port_in_use(wt.port)
+        occupied = port_in_use(wt.port) and not running
         status = "running" if running else ("occupied" if occupied else "stopped")
         start_disabled = "disabled" if running or occupied else ""
         stop_disabled = "" if running else "disabled"
@@ -223,6 +244,8 @@ def page(state: ManagerState, message: str = "") -> bytes:
     .running {{ background: #dcfce7; color: #166534; }}
     .stopped {{ background: #f3f4f6; color: #374151; }}
     .occupied {{ background: #fef3c7; color: #92400e; }}
+    .orphan {{ background: #fef2f2; }}
+    .orphan-pill {{ background: #fee2e2; color: #991b1b; }}
     .message {{ padding: 8px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; margin-bottom: 12px; }}
   </style>
 </head>
