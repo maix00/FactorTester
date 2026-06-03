@@ -92,8 +92,8 @@
 }
 
 @media (max-width: 860px) {
-    .single-factor-app {
-        grid-template-columns: 280px 8px minmax(0, 1fr);
+    .app {
+        grid-template-columns: 280px 6px minmax(0, 1fr);
     }
 
     .single-factor-app .sidebar {
@@ -102,5 +102,25 @@
 
     .single-factor-body {
         padding: 14px 12px 28px;
+    }
+}
+
+@media (max-width: 700px) {
+    .single-factor-app .sidebar-header {
+        padding: 10px 12px;
+    }
+    .single-factor-app .sidebar {
+        width: 85vw;
+        max-width: 360px;
+    }
+    .single-factor-app .layout-resizer {
+        display: none;
+    }
+    .single-factor-app .editor-header {
+        min-height: 44px;
+        padding-right: 90px;
+    }
+    .single-factor-body {
+        padding: 8px 6px 20px;
     }
 }

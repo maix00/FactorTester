@@ -277,21 +277,22 @@
         if (!g) return '';
         if (!REG || typeof REG.getAllChips !== 'function') return '';
         var allChips = REG.getAllChips(g);
-        var html = '';
+        var html = '<span style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;">';
         for (var i = 0; i < allChips.length; i++) {
             var chip = allChips[i];
-            var s = chip.style || CHIP_STYLE_PLAIN;
+            var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
             if (chip.onClick) {
                 var attr = g.isDerived
                     ? ('data-dgid="' + escapeHTML(g.id) + '"')
                     : ('data-gid="' + escapeHTML(g.id) + '"');
                 html += '<span class="unified-config-chip" ' + attr
                     + ' data-chip-label="' + escapeHTML(chip.label)
-                    + '" style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                    + '" style="' + s + '">' + chip.html + '</span>';
             } else {
-                html += '<span style="' + s + ';margin-right:4px;">' + chip.html + '</span>';
+                html += '<span style="' + s + '">' + chip.html + '</span>';
             }
         }
+        html += '</span>';
         return html;
     }
 
