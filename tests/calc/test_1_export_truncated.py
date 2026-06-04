@@ -20,7 +20,8 @@ Output: data/test/test_1/{prod}/{prod}.xlsx
 
 import json
 import shutil
-from datetime import timedelta
+from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
@@ -133,7 +134,8 @@ def _export_product(
     output_path = output_dir / f'{prod}.xlsx'
 
     wb = Workbook()
-    wb.remove(wb.active)
+    if wb.active is not None:
+        wb.remove(wb.active)
 
     # ================================================
     # Sheet _SWITCHES: 从 wind_mapping 复制切换记录
