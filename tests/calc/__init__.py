@@ -128,7 +128,7 @@ REMARK_ALIGNMENT = Alignment(wrap_text=True, vertical='top')
 COMMENT_FONT = Font(italic=True, size=10)
 
 # test_1 → 4 行 remark → 60pt；以此基准 15pt/行
-REMARK_ROW_HEIGHT_PER_LINE = 15
+REMARK_ROW_HEIGHT_PER_LINE = 20
 
 
 def remark_height(text: str) -> float:
