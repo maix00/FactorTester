@@ -12,13 +12,13 @@ test_2a_adjustment_verify.py
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
 _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
-  _prev_close: =INDEX(INDIRECT("'"&上一行B&"'!J:J"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!E:E"), 0))
-      通过上一行 instrument_id (B列) 动态获取前合约 sheet 名，不硬编码
-      合约 sheet 布局: J=close_price, E=instrument_id, E=trading_day
-  _cur_close:  =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!E:E"), 0))
-      通过本行 instrument_id (B列) 动态获取本合约 sheet 名，不硬编码
-  _prev_adj:   上一行的 adjustment_mul
-  adjustment_mul: =IF(第一行, 1, _prev_close/_cur_close * _prev_adj)
+  _cur_close:  =INDEX(INDIRECT("'"&本合约B&"'!J:J"), MATCH(本合约D, INDIRECT("'"&本合约B&"'!E:E"), 0))
+      本合约首日 (start_date) 收盘价
+  _next_close: =INDEX(INDIRECT("'"&下一合约B&"'!J:J"), MATCH(下一合约D, INDIRECT("'"&下一合约B&"'!E:E"), 0))
+      下一合约（更新合约）首日 (start_date) 收盘价
+  _next_adj:   下一行的 adjustment_mul（向前引用）
+  adjustment_mul: =IF(最后一行, 1, _cur_close/_next_close * _next_adj)
+      前复权：最新合约=1，历史数据反向累积
   adjustment_add: =0
 
 MAIN sheet（三列独立 VSTACK，各自溢出）：
@@ -94,23 +94,20 @@ DATA_START_ROW = 3             # 数据从第3行开始 (1=remark, 2=header)
 
 # _SWITCHES 列定义
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
-# F=_prev_close, G=_cur_close, H=_prev_adj, I=adjustment_mul, J=adjustment_add
-# K=_nrows, L=_ref_str, M=_cum_offset, N=_ref_str_full
+# F=_cur_close, G=_next_close, H=_next_adj, I=adjustment_mul, J=adjustment_add
+# K=_nrows, L=_ref_str
 #
-# _ref_str:      Python 写入纯文本，如 'a2405'!A3:K14027，供 INDIRECT 使用
-# _cum_offset:   该合约在 _SWITCHES 数据块中的起始行（用于独立溢出 adjustment）
-# _ref_str_full: Python 写入纯文本，如 'a2405'!A3:M14027（含 adjustment 列，13列）
-#                但合约 sheet 只有 11 列...不行
+# 前复权 (forward-adjusted)：最新合约 adj=1，历史数据反向累积
+#   adjustment_mul[i] = _cur_close[i] / _next_close * _next_adj
+#   最后一行=1，向前逐行乘 → 最新价格水平不变，历史数据被压缩
 #
-# 实际用 _BLOCKS 辅助 sheet：
-#   每个合约一行，用 INDIRECT 溢出 11 列数据 + 2 列 adjustment（独立溢出区域，互不重叠）
-# MAIN 直接 VSTACK(_BLOCKS!A3#, _BLOCKS!A4#, ...) 或用 INDIRECT 取 _BLOCKS 的溢出区域
+# _ref_str:      Python 写入纯文本，如 'a2405'!A3:U14027，供 INDIRECT 使用
 SW_ORIG_COLS = 5
-PREV_CLOSE_COL = SW_ORIG_COLS + 1  # F=6
-CUR_CLOSE_COL = SW_ORIG_COLS + 2   # G=7
-PREV_ADJ_COL = SW_ORIG_COLS + 3    # H=8
-ADJ_MUL_COL = SW_ORIG_COLS + 4     # I=9
-ADJ_ADD_COL = SW_ORIG_COLS + 5     # J=10
+CUR_CLOSE_COL = SW_ORIG_COLS + 1   # F=6: _cur_close (本合约首日收盘)
+NEXT_CLOSE_COL = SW_ORIG_COLS + 2  # G=7: _next_close (下一合约首日收盘)
+NEXT_ADJ_COL = SW_ORIG_COLS + 3    # H=8: _next_adj (下一合约的 adj_mul)
+ADJ_MUL_COL = SW_ORIG_COLS + 4     # I=9: adjustment_mul
+ADJ_ADD_COL = SW_ORIG_COLS + 5     # J=10: adjustment_add
 SW_NROWS_COL = SW_ORIG_COLS + 6    # K=11: _nrows
 SW_REF_STR_COL = SW_ORIG_COLS + 7  # L=12: _ref_str
 
@@ -244,7 +241,9 @@ def process_product(prod_xlsx: Path) -> None:
                 sheet_rows[sn] = n
 
         wb = Workbook()
-        wb.remove(wb.active)
+        active_sheet = wb.active
+        if active_sheet is not None:
+            wb.remove(active_sheet)
 
         # 2a. 复制合约 sheet 数据（从 test_1 直接 copy values）
         for sn in sorted(src_sheets_set):
@@ -261,11 +260,11 @@ def process_product(prod_xlsx: Path) -> None:
 
     # Row 1: remark (合并单元格 + 自动换行)
     sw_remark = (
-        '切换记录 + 复权因子计算\n'
+        '切换记录 + 前复权因子计算（最新合约=1，历史数据反向累积）\n'
         '辅助列公式全部为 Excel 函数，不硬编码行号\n'
-        '_prev_close: INDEX(INDIRECT("\'"&前合约B&"\'!J:J"), MATCH(前合约E, INDIRECT("\'"&前合约B&"\'!A:A"), 0))\n'
         '_cur_close:  INDEX(INDIRECT("\'"&本合约B&"\'!J:J"), MATCH(本合约D, INDIRECT("\'"&本合约B&"\'!A:A"), 0))\n'
-        'adj_mul: IF(第一行,1, _prev_close/_cur_close * _prev_adj)'
+        '_next_close: INDEX(INDIRECT("\'"&下一合约B&"\'!J:J"), MATCH(下一合约D, INDIRECT("\'"&下一合约B&"\'!A:A"), 0))\n'
+        'adj_mul: IF(最后一行,1, _cur_close/_next_close * _next_adj)'
     )
     sw_out.cell(1, 1, sw_remark)
     sw_out.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
@@ -277,7 +276,7 @@ def process_product(prod_xlsx: Path) -> None:
 
     # Row 2: header
     headers = ['trading_day', 'instrument_id', 'windcode', 'start_date', 'end_date',
-               '_prev_close', '_cur_close', '_prev_adj', 'adjustment_mul', 'adjustment_add',
+               '_cur_close', '_next_close', '_next_adj', 'adjustment_mul', 'adjustment_add',
                '_nrows', '_ref_str']
     for ci, h in enumerate(headers, 1):
         sw_out.cell(2, ci, h).fill = HEADER_FILL
@@ -295,48 +294,49 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(row, 4, sd)
         sw_out.cell(row, 5, ed)
 
-        # ---- _prev_close ----
-        # =INDEX(INDIRECT("'"&上一行B&"'!J:J"), MATCH(上一行E, INDIRECT("'"&上一行B&"'!E:E"), 0))
-        # 不硬编码 sheet 名：通过上一行 instrument_id (B列) 动态获取前合约 sheet 名
-        # trading_day = A列 (1), close_price = J列 (10)
-        if i == 0:
-            sw_out.cell(row, PREV_CLOSE_COL, '').fill = FORMULA_FILL
-        elif i > 0:
-            prev_b = f'{_col_letter(2)}{row - 1}'   # B: instrument_id 上一行
-            prev_e = f'{_col_letter(5)}{row - 1}'   # E: end_date 上一行
-            prev_g_ref = f'INDIRECT("\'"&{prev_b}&"\'!J:J")'
-            prev_b_ref = f'INDIRECT("\'"&{prev_b}&"\'!A:A")'  # A:A = trading_day
-            formula = f'=INDEX({prev_g_ref},MATCH({prev_e},{prev_b_ref},0))'
-            sw_out.cell(row, PREV_CLOSE_COL, formula).fill = FORMULA_FILL
-
-        # ---- _cur_close ----
+        # ---- _cur_close (F列) ----
         # =INDEX(INDIRECT("'"&本行B&"'!J:J"), MATCH(本行D, INDIRECT("'"&本行B&"'!A:A"), 0))
+        # 本合约首日 (start_date) 的收盘价，用于计算复权比例
         cur_b = f'{_col_letter(2)}{row}'    # B: instrument_id 本行
         cur_d = f'{_col_letter(4)}{row}'    # D: start_date 本行
-        cur_g_ref = f'INDIRECT("\'"&{cur_b}&"\'!J:J")'
-        cur_b_ref = f'INDIRECT("\'"&{cur_b}&"\'!A:A")'  # A:A = trading_day
-        formula = f'=INDEX({cur_g_ref},MATCH({cur_d},{cur_b_ref},0))'
+        cur_close_ref = f'INDIRECT("\'"&{cur_b}&"\'!J:J")'
+        cur_td_ref = f'INDIRECT("\'"&{cur_b}&"\'!A:A")'  # A:A = trading_day
+        formula = f'=INDEX({cur_close_ref},MATCH({cur_d},{cur_td_ref},0))'
         sw_out.cell(row, CUR_CLOSE_COL, formula).fill = FORMULA_FILL
 
-        # ---- _prev_adj: 上一行的 adjustment_mul ----
-        if i == 0:
-            sw_out.cell(row, PREV_ADJ_COL, 1).fill = FORMULA_FILL
+        # ---- _next_close (G列) ----
+        # =INDEX(INDIRECT("'"&下一行B&"'!J:J"), MATCH(下一行D, INDIRECT("'"&下一行B&"'!A:A"), 0))
+        # 下一合约（更新合约）首日 (start_date) 的收盘价
+        if i == len(switches) - 1:
+            sw_out.cell(row, NEXT_CLOSE_COL, '').fill = FORMULA_FILL
+        else:
+            next_b = f'{_col_letter(2)}{row + 1}'
+            next_d = f'{_col_letter(4)}{row + 1}'
+            next_close_ref = f'INDIRECT("\'"&{next_b}&"\'!J:J")'
+            next_td_ref = f'INDIRECT("\'"&{next_b}&"\'!A:A")'
+            formula = f'=INDEX({next_close_ref},MATCH({next_d},{next_td_ref},0))'
+            sw_out.cell(row, NEXT_CLOSE_COL, formula).fill = FORMULA_FILL
+
+        # ---- _next_adj (H列): 下一行的 adjustment_mul ----
+        if i == len(switches) - 1:
+            sw_out.cell(row, NEXT_ADJ_COL, '').fill = FORMULA_FILL
         else:
             sw_out.cell(
-                row, PREV_ADJ_COL,
-                f'={_col_letter(ADJ_MUL_COL)}{row - 1}'
+                row, NEXT_ADJ_COL,
+                f'={_col_letter(ADJ_MUL_COL)}{row + 1}'
             ).fill = FORMULA_FILL
 
-        # ---- adjustment_mul ----
-        if i == 0:
+        # ---- adjustment_mul (I列) ----
+        # 前复权：最后一行=1，向前累积 _cur_close/_next_close * _next_adj
+        if i == len(switches) - 1:
             sw_out.cell(row, ADJ_MUL_COL, 1).fill = FORMULA_FILL
         else:
-            pc = _col_letter(PREV_CLOSE_COL)
             cc = _col_letter(CUR_CLOSE_COL)
-            pa = _col_letter(PREV_ADJ_COL)
+            nc = _col_letter(NEXT_CLOSE_COL)
+            na = _col_letter(NEXT_ADJ_COL)
             sw_out.cell(
                 row, ADJ_MUL_COL,
-                f'=IF({pc}{row}="","",IF({cc}{row}="","",{pc}{row}/{cc}{row}*{pa}{row}))'
+                f'=IF({cc}{row}="","",IF({nc}{row}="","",{cc}{row}/{nc}{row}*{na}{row}))'
             ).fill = FORMULA_FILL
 
         # ---- adjustment_add ----
@@ -480,7 +480,9 @@ def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
             target = None
             for rel in rels_xml.getroot():
                 if rel.get('Id') == r_id:
-                    target = rel.get('Target').lstrip('/')
+                    t = rel.get('Target')
+                    if t is not None:
+                        target = t.lstrip('/')
                     break
             if target is None:
                 continue
@@ -493,6 +495,8 @@ def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
                 if row.get('r') == '3':
                     for c in row.findall(f'{{{NS_SHEET}}}c'):
                         r = c.get('r')
+                        if r is None:
+                            continue
                         s = c.get('s')
                         if s is None:
                             continue
@@ -537,7 +541,9 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                 rels = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
                 for rel in rels.getroot():
                     if rel.get('Id') == r_id:
-                        rel_target = rel.get('Target').lstrip('/')
+                        t = rel.get('Target')
+                        if t is not None:
+                            rel_target = t.lstrip('/')
                         break
                 break
 
@@ -576,6 +582,8 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
             if row.get('r') == '3':
                 for c in row.findall(f'{{{NS_SHEET}}}c'):
                     r = c.get('r')
+                    if r is None:
+                        continue
                     col_idx = _col_idx(r)
                     f_el = c.find(f'{{{NS_SHEET}}}f')
                     if f_el is not None:

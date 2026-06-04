@@ -54,6 +54,27 @@ TEST_0_PRODUCTS_XLSX = TEST_0_DIR / '_products.xlsx'
 TEST_1_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_1'
 
 # test_2a: Excel 公式复权验证
+#   === Excel 动态数组溢出 + 列格式关键技术（test_2a 已验证）===
+#   1. 多列溢出方案：
+#      - 每列独立 CHOOSECOLS(单一 REDUCE+HSTACK, col_N) 动态数组公式
+#      - REDUCE 共享子表达式，23 个 CHOOSECOLS 各取一列
+#      - 优势：每列独立 s=（样式索引），日期列可单独设置日期格式
+#   2. WPS 动态数组溢出格式继承规则：
+#      - <col style="xfId"> → 溢出行继承列样式 ✅
+#      - <col numFmtId="164"> → 溢出行不继承 ❌（WPS 忽略）
+#      - 公式行自身的 s= → 覆盖 <col style>
+#   3. 日期格式方案（两管齐下）：
+#      a) XML 注入 <cols><col style="xfId"/>：溢出行获得日期格式
+#      b) 公式行 cell s=：公式行（row 3）获得日期格式
+#      c) xfId → numFmtId 映射：从 styles.xml 的 cellXfs 中查找
+#   4. openpyxl 限制：
+#      - ColumnDimension.number_format 写入后无 numFmtId（WPS 不认）
+#      - ColumnDimension.style 无 setter，无法直接赋值
+#      - 结论：必须用 XML 后处理（zipfile + ElementTree）
+#   5. 前复权方向（test_2a 使用前复权）：
+#      - 最新合约 adj_mul = 1，向前反向累积
+#      - adjustment_mul[i] = _cur_close[i] / _next_close * _next_adj
+#      - 历史数据被压缩到最新价格水平
 TEST_2A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2a'
 
 # test_2b / test_2c (预留给后续)
