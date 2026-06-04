@@ -366,23 +366,25 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # --- A3: 单公式 — REDUCE 遍历 ref_str，HSTACK(data, mul, add)，VSTACK 累积 ---
-    # 21 列合约数据 (A..U) + 2 列复权因子 (V..W) = 23 列
-    # =DROP(
-    #   REDUCE(0, _SWITCHES!L3:L{N},
-    #     LAMBDA(acc, ref,
-    #       LET(
-    #         r, ROW(ref),                    -- _SWITCHES 行号
-    #         data, INDIRECT(ref),            -- 11 列合约数据
-    #         mul, EXPAND(INDEX(_SWITCHES!I:I,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!I:I,r)),
-    #         add, EXPAND(INDEX(_SWITCHES!J:J,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!J:J,r)),
-    #         VSTACK(acc, HSTACK(data, mul, add))
-    #       )
+    # --- A3..W3: 每列独立动态数组公式 ---
+    # 每个公式只取 REDUCE 结果中的一列，配合正确的 s= 使溢出区域有对的格式
+    # =DROP(REDUCE(0, _SWITCHES!L3:L{N},
+    #   LAMBDA(acc, ref,
+    #     LET(
+    #       r, ROW(ref),
+    #       d, INDIRECT(ref),
+    #       m, EXPAND(INDEX(_SWITCHES!I:I,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!I:I,r)),
+    #       a, EXPAND(INDEX(_SWITCHES!J:J,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!J:J,r)),
+    #       VSTACK(acc, HSTACK(d, m, a))
     #     )
-    #   ), 1
-    # )
-    formula = (
-        f'=DROP('
+    #   )
+    # ), 1)
+    #
+    # 每列用 CHOOSECOLS(..., col) 取对应列
+    # 前 21 列：CHOOSECOLS(data, col)  其中 data=HSTACK(d,m,a)=23 列
+    # 第 22 列=V：取 adjustment_mul   CHOOSECOLS(result, 22)
+    # 第 23 列=W：取 adjustment_add    CHOOSECOLS(result, 23)
+    base_formula = (
         f'REDUCE(0,_SWITCHES!{sw_last_col_letter}3:{sw_last_col_letter}{sw_last_row},'
         f'LAMBDA(acc,ref,'
         f'LET(r,ROW(ref),'
@@ -390,31 +392,64 @@ def process_product(prod_xlsx: Path) -> None:
         f'm,EXPAND(INDEX(_SWITCHES!I:I,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!I:I,r)),'
         f'a,EXPAND(INDEX(_SWITCHES!J:J,r),INDEX(_SWITCHES!K:K,r),1,INDEX(_SWITCHES!J:J,r)),'
         f'VSTACK(acc,HSTACK(d,m,a))'
-        f'))),'
-        f'1)'
+        f')))'
     )
-    main_ws.cell(3, 1, formula).fill = FORMULA_FILL
+
+    # 从合约 sheets 读取每列的 number_format，用于先对整列设格式
+    col_formats = {}  # {col_idx_1based: number_format_string}
+    for inst in contracts_in_order:
+        ct_ws = wb[inst]
+        for col in range(1, 22):
+            fmt = ct_ws.cell(3, col).number_format
+            if fmt and fmt != 'General':
+                col_formats[col] = fmt
+        break  # 只看第一个合约 sheet
+
+    for col_idx in range(1, MAIN_NCOLS + 1):  # 1..23
+        col_letter = _col_letter(col_idx)
+        # CHOOSECOLS(..., N) — 0-based
+        # 第 1-21 列取 contract data, 第 22 列=adjustment_mul, 第 23 列=adjustment_add
+        if col_idx <= len(CONTRACT_COLS):
+            choose_n = col_idx  # 1-based CHOOSECOLS
+        elif col_idx == MAIN_MUL_COL_OFFSET:
+            choose_n = len(CONTRACT_COLS) + 1  # 22 = mul
+        else:
+            choose_n = len(CONTRACT_COLS) + 2  # 23 = add
+
+        col_formula = f'=CHOOSECOLS(DROP({base_formula},1),{choose_n})'
+
+        main_ws.cell(3, col_idx, col_formula).fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
     total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
 
     # ============================================================
-    # 3. 保存
+    # 3. 预写整列格式 — WPS 动态数组溢出不继承公式单元格 s=
+    #    对所有溢出目标单元格预写 number_format
+    #    用 batch 写入优化速度
+    # ============================================================
+    last_row = 2 + total_rows
+    for ci, fmt in col_formats.items():
+        col_letter = _col_letter(ci)
+        # 用 iter_cols 方式批量写入更快
+        for row in range(3, last_row + 1):
+            main_ws.cell(row, ci).number_format = fmt
+
+    # ============================================================
+    # 4. 保存
     # ============================================================
     dst_path = TEST_2A_DIR / f'{prod}.xlsx'
     wb.save(dst_path)
     wb.close()
 
     # ============================================================
-    # 4. XML 后处理：标记 MAIN!A3 为动态数组公式（ca="1"）+ 注入列格式
-    #    防止 WPS/Excel 自动插入 @ implicit intersection operator
-    #    列格式从 styles.xml 的 numFmtId 读取，注入到 <cols> 元素
+    # 5. XML 后处理：标记所有 A3..W3 为动态数组公式 + 设置 s=
+    #    每列独立溢出，配合该列正确的 numFmtId
     # ============================================================
-    # 计算 ref 范围：23 列 (A-W)，total_rows 数据行从 row 3 开始
     last_row = 2 + total_rows
-    ref_range = f'A3:W{last_row}'
     col_numfmts = _read_contract_col_numfmts_from_xml(dst_path)
-    _patch_dynamic_array_formula(dst_path, 'MAIN', 'A3', ref_range, col_numfmts=col_numfmts)
+    # 注入 <cols> + 修改 A3..W3 的 s= + 标记每个为动态数组
+    _patch_multi_col_formulas(dst_path, 'MAIN', col_numfmts, total_rows)
 
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
 
@@ -477,119 +512,96 @@ def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
     return {}
 
 
-def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str,
-                                 ref_range: str | None = None,
-                                 col_numfmts: dict[int, int] | None = None):
+def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
+                              col_numfmts: dict[int, int],
+                              total_data_rows: int):
     """
-    在 xlsx 的 XML 层面标记指定单元格为动态数组公式，并可选注入列格式。
+    XML 后处理：给 MAIN sheet 的 A3..W3 每列标记为独立的动态数组公式，
+    并设置正确的 s= (style index) 从 col_numfmts 映射。
 
-    修改 sheet XML 中 <f> 元素加 ca="1" 和 t="array" ref="..." 属性，
-    并在 cell 元素加 cm="1" 属性。
-    ref_range 如 "A3:M194387"。
-
-    col_numfmts: {col_idx_1based: numFmtId} — 注入 <cols> 元素到 sheet XML，
-    确保动态数组溢出区域有正确的列级格式（日期不显示为序列号）。
-    numFmtId 必须已存在于 styles.xml 的 numFmts 或内置格式表中。
+    每列公式 =CHOOSECOLS(DROP(REDUCE(...), 1), col_N)
+    需要标记 ca="1" t="array" ref="A3:A{last_row+1}" 等。
     """
-
-    # 1. 读 workbook.xml 找 sheetId → rId → sheet 文件名
+    # 1. numFmtId → xfId 映射（从 styles.xml）
     with zipfile.ZipFile(xlsx_path, 'r') as zf:
+        styles = ET.parse(zf.open('xl/styles.xml'))
+        xf_list = styles.getroot().findall(f'{{{NS_SHEET}}}cellXfs/{{{NS_SHEET}}}xf')
+        nfi_to_xf = {}
+        for i, xf in enumerate(xf_list):
+            nfi = xf.get('numFmtId')
+            if nfi is not None:
+                nfi_to_xf[int(nfi)] = i
+
+        # 2. 找 sheet 文件
         wb_xml = ET.parse(zf.open('xl/workbook.xml'))
-        wb_root = wb_xml.getroot()
         rel_target = None
-        for sh in wb_root.findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+        for sh in wb_xml.getroot().findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
             if sh.get('name') == sheet_name:
                 r_id = sh.get(f'{{{NS_R}}}id')
-                # 2. 读 workbook.xml.rels 找文件名 (target 相对于 xl/)
-                rels_xml = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
-                for rel in rels_xml.getroot():
+                rels = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
+                for rel in rels.getroot():
                     if rel.get('Id') == r_id:
                         rel_target = rel.get('Target').lstrip('/')
                         break
                 break
 
         if rel_target is None:
-            print(f'  ⚠️ Sheet "{sheet_name}" not found, skipping XML patch')
+            print(f'  ⚠️ Sheet "{sheet_name}" not found')
             return
 
-        # rel_target 已是完整的 zip 内路径如 "xl/worksheets/sheet2.xml"
-        full_sheet_file = rel_target
+        sheet = ET.parse(zf.open(rel_target))
+        sheet_root = sheet.getroot()
 
-        # 3. 读 sheet XML
-        sheet_xml = ET.parse(zf.open(full_sheet_file))
-        sheet_root = sheet_xml.getroot()
-
-        # 3.5 注入 <cols> 元素（列级格式），确保动态数组溢出区域正确显示日期等
+        # 3. 注入 <cols>（仅 width，不用 numFmtId 避免 openpyxl 兼容性问题）
+        #   s= 才是影响动态数组溢出区域格式的关键
         if col_numfmts:
-            _ns = f'{{{NS_SHEET}}}'
-            # 检查是否已有 <cols>
-            cols = sheet_root.find(f'{_ns}cols')
+            cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
             if cols is not None:
                 sheet_root.remove(cols)
-            # 按列号分组连续 numFmtId 相同的列
-            sorted_cols = sorted(col_numfmts.items())
-            groups = []
-            for ci, nfi in sorted_cols:
+            cols_el = ET.Element(f'{{{NS_SHEET}}}cols')
+            seen = set()
+            for ci in sorted(col_numfmts.keys()):
                 cl = _col_letter(ci)
-                if groups and groups[-1][2] == nfi and groups[-1][1] + 1 == ci:
-                    groups[-1] = (groups[-1][0], ci, nfi, groups[-1][3])
-                else:
-                    groups.append((ci, ci, nfi, cl))
-            cols_el = ET.Element(f'{_ns}cols')
-            for cmin, cmax, nfi, cl in groups:
-                col_el = ET.SubElement(cols_el, f'{_ns}col')
-                col_el.set('min', str(cmin))
-                col_el.set('max', str(cmax))
-                col_el.set('numFmtId', str(nfi))
-                col_el.set('customFormat', '1')
+                if cl in seen:
+                    continue
+                seen.add(cl)
+                col_el = ET.SubElement(cols_el, f'{{{NS_SHEET}}}col')
+                col_el.set('min', str(ci))
+                col_el.set('max', str(ci))
                 col_el.set('width', '13')
             sheet_root.insert(0, cols_el)
 
-        # 4. 找到指定 cell 的 <c> 和 <f>
-        match = re.match(r'([A-Z]+)(\d+)', cell_ref)
-        if not match:
-            print(f'  ⚠️ Invalid cell_ref "{cell_ref}"')
-            return
-        col_letter, row_num = match.groups()
-        found = False
+        # 4. 遍历 row 3 的所有 cell，为每个有公式的 cell 设置 ca="1"/t="array"/ref + s=
+        last_row = 2 + total_data_rows
+        safe_ref_end = last_row + 1
+
         for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
-            if row.get('r') == row_num:
-                for cell in row.findall(f'{{{NS_SHEET}}}c'):
-                    if cell.get('r') == cell_ref:
-                        f_el = cell.find(f'{{{NS_SHEET}}}f')
-                        if f_el is not None:
-                            f_el.set('ca', '1')
-                            f_el.set('t', 'array')
-                            # 多一行：ref 给到 M{last_row+1}
-                            if ref_range:
-                                # 解析并扩展最后行号
-                                import re as _re
-                                _m = _re.match(r'([A-Z]+\d+):([A-Z]+)(\d+)', ref_range)
-                                if _m:
-                                    # +1 安全余量：若公式实际溢出超出 ref 会被截断，
-                                    # 多一行产生 #N/A 可一眼发现，少一行会被悄悄截断数据
-                                    safe_ref = f'{_m.group(1)}:{_m.group(2)}{int(_m.group(3))+1}'
-                                    f_el.set('ref', safe_ref)
-                                else:
-                                    f_el.set('ref', ref_range)
-                            cell.set('cm', '1')
-                            found = True
-                        break
+            if row.get('r') == '3':
+                for c in row.findall(f'{{{NS_SHEET}}}c'):
+                    r = c.get('r')
+                    col_idx = _col_idx(r)
+                    f_el = c.find(f'{{{NS_SHEET}}}f')
+                    if f_el is not None:
+                        # 标记为动态数组
+                        f_el.set('ca', '1')
+                        f_el.set('t', 'array')
+                        ref = f'{r}:{_col_letter(col_idx)}{safe_ref_end}'
+                        f_el.set('ref', ref)
+                        c.set('cm', '1')
+                    # 设置 s= 从 col_numfmts
+                    if col_idx in col_numfmts:
+                        xf_id = nfi_to_xf.get(col_numfmts[col_idx])
+                        if xf_id is not None:
+                            c.set('s', str(xf_id))
                 break
 
-        if not found:
-            print(f'  ⚠️ Cell {cell_ref} not found in {sheet_name}, skipping XML patch')
-            return
-
-        # 5. 收集所有文件，替换修改过的 sheet
+        # 5. 收集并重写
         all_files = {}
         for name in zf.namelist():
-            if name != full_sheet_file:
+            if name != rel_target:
                 all_files[name] = zf.read(name)
+        all_files[rel_target] = ET.tostring(sheet_root, xml_declaration=True, encoding='UTF-8')
 
-        all_files[full_sheet_file] = _xml_tostring(sheet_root)
-
-    # 6. 重写 xlsx
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
     os.close(tmp_fd)
     try:
@@ -601,8 +613,7 @@ def _patch_dynamic_array_formula(xlsx_path: Path, sheet_name: str, cell_ref: str
         if Path(tmp_path).exists():
             Path(tmp_path).unlink(missing_ok=True)
 
-    attrs = f'ca="1" t="array" ref="{ref_range}"' if ref_range else 'ca="1"'
-    print(f'  🔧 Patched {cell_ref} as dynamic array ({attrs})')
+    print(f'  🔧 Patched MAIN!A3..W3: 23 dynamic array formulas + col styles')
 
 
 def _xml_tostring(root):
