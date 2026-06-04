@@ -383,24 +383,11 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
     main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
 
-    # --- A3..W3: 每列独立动态数组公式 ---
-    # 每个公式只取 REDUCE 结果中的一列，配合正确的 s= 使溢出区域有对的格式
-    # =DROP(REDUCE(0, _SWITCHES!L3:L{N},
-    #   LAMBDA(acc, ref,
-    #     LET(
-    #       r, ROW(ref),
-    #       d, INDIRECT(ref),
-    #       m, EXPAND(INDEX(_SWITCHES!I:I,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!I:I,r)),
-    #       a, EXPAND(INDEX(_SWITCHES!J:J,r), INDEX(_SWITCHES!K:K,r), 1, INDEX(_SWITCHES!J:J,r)),
-    #       VSTACK(acc, HSTACK(d, m, a))
-    #     )
-    #   )
-    # ), 1)
-    #
-    # 每列用 CHOOSECOLS(..., col) 取对应列
-    # 前 21 列：CHOOSECOLS(data, col)  其中 data=HSTACK(d,m,a)=23 列
-    # 第 22 列=V：取 adjustment_mul   CHOOSECOLS(result, 22)
-    # 第 23 列=W：取 adjustment_add    CHOOSECOLS(result, 23)
+    # --- A3: 单公式溢出 23 列 (A3:W{lastrow}) ---
+    # REDUCE VSTACK 拼接各合约 HSTACK(数据21列, mul, add)，DROP 去掉初始标量
+    # 一式溢出所有 23 列，日期格式由 XML <col style> 后处理控制
+    #   <col style="xfDate"> → A/B/R 列溢出区域显示日期格式
+    #   A3 的 s= 匹配第一列(A列=trading_day)的日期格式
     base_formula = (
         f'REDUCE(0,_SWITCHES!{sw_last_col_letter}3:{sw_last_col_letter}{sw_last_row},'
         f'LAMBDA(acc,ref,'
@@ -411,21 +398,7 @@ def process_product(prod_xlsx: Path) -> None:
         f'VSTACK(acc,HSTACK(d,m,a))'
         f')))'
     )
-
-    for col_idx in range(1, MAIN_NCOLS + 1):  # 1..23
-        col_letter = _col_letter(col_idx)
-        # CHOOSECOLS(..., N) — 0-based
-        # 第 1-21 列取 contract data, 第 22 列=adjustment_mul, 第 23 列=adjustment_add
-        if col_idx <= len(CONTRACT_COLS):
-            choose_n = col_idx  # 1-based CHOOSECOLS
-        elif col_idx == MAIN_MUL_COL_OFFSET:
-            choose_n = len(CONTRACT_COLS) + 1  # 22 = mul
-        else:
-            choose_n = len(CONTRACT_COLS) + 2  # 23 = add
-
-        col_formula = f'=CHOOSECOLS(DROP({base_formula},1),{choose_n})'
-
-        main_ws.cell(3, col_idx, col_formula).fill = FORMULA_FILL
+    main_ws.cell(3, 1, f'=DROP({base_formula},1)').fill = FORMULA_FILL
 
     contracts_in_order = [s[0] for s in switches]
     total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
@@ -574,30 +547,28 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                     col_el.set('style', str(xf_id))
         sheet_root.insert(0, cols_el)
 
-        # 4. 遍历 row 3 的所有 cell，为每个有公式的 cell 设置 ca="1"/t="array"/ref + s=
+        # 4. A3 单公式溢出 23 列 — 标记动态数组 ref=A3:W{safe_ref_end}
+        #    s= 取自 A 列(trading_day)的日期格式
         last_row = 2 + total_data_rows
         safe_ref_end = last_row + 1
+
+        # A 列日期 xfId（用于 A3 的 s=）
+        a_xf_id = nfi_to_xf.get(col_numfmts.get(1, 0), 0)
 
         for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
             if row.get('r') == '3':
                 for c in row.findall(f'{{{NS_SHEET}}}c'):
                     r = c.get('r')
-                    if r is None:
+                    if r != 'A3':
                         continue
-                    col_idx = _col_idx(r)
                     f_el = c.find(f'{{{NS_SHEET}}}f')
                     if f_el is not None:
-                        # 标记为动态数组
                         f_el.set('ca', '1')
                         f_el.set('t', 'array')
-                        ref = f'{r}:{_col_letter(col_idx)}{safe_ref_end}'
-                        f_el.set('ref', ref)
+                        f_el.set('ref', f'A3:W{safe_ref_end}')
                         c.set('cm', '1')
-                    # 设置 s= 从 col_numfmts
-                    if col_idx in col_numfmts:
-                        xf_id = nfi_to_xf.get(col_numfmts[col_idx])
-                        if xf_id is not None:
-                            c.set('s', str(xf_id))
+                    c.set('s', str(a_xf_id))
+                    break
                 break
 
         # 5. 收集并重写
@@ -618,7 +589,7 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         if Path(tmp_path).exists():
             Path(tmp_path).unlink(missing_ok=True)
 
-    print(f'  🔧 Patched MAIN!A3..W3: 23 dynamic array formulas + col styles')
+    print(f'  🔧 Patched MAIN!A3: single dynamic array A3:W{safe_ref_end} + col styles')
 
 
 def _xml_tostring(root):
