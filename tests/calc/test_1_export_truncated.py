@@ -25,19 +25,14 @@ from datetime import timedelta
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 from tests.calc import (
     WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_PRODUCTS_XLSX, TEST_1_DIR,
     WINDOW_DAYS, WIND_EXCH_TO_MIN_EXCH,
+    HEADER_FILL, REMARK_FILL, REMARK_FONT, COMMENT_FONT,
 )
-
-# --- 样式 ---
-COMMENT_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')
-HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
-HEADER_FONT = Font(bold=True)
-COMMENT_FONT = Font(italic=True, size=10)
 
 
 # ================================================
@@ -161,7 +156,7 @@ def _export_product(
                f"columns: trading_day=切换生效日, instrument_id=主力合约代码, "
                f"windcode=Wind合约代码, start_date/end_date=主力区间")
     cell = ws_sw.cell(row=1, column=1, value=comment)
-    cell.fill = COMMENT_FILL
+    cell.fill = REMARK_FILL
     cell.font = COMMENT_FONT
     cell.alignment = Alignment(wrap_text=True)
     ws_sw.row_dimensions[1].height = 60
@@ -170,7 +165,7 @@ def _export_product(
     for ci, col in enumerate(sw_cols, 1):
         c = ws_sw.cell(row=2, column=ci, value=sw_labels.get(col, col))
         c.fill = HEADER_FILL
-        c.font = HEADER_FONT
+        c.font = REMARK_FONT
 
     # 数据
     for ri, (_, sw_row) in enumerate(switches.iterrows(), 3):
@@ -247,7 +242,7 @@ def _export_product(
                         f"(±{WINDOW_DAYS}天 于切换区间 {inst_spans[inst][0].strftime('%Y-%m-%d')} ~ "
                         f"{(inst_spans[inst][1]).strftime('%Y-%m-%d')})")
         c = ws.cell(row=1, column=1, value=inst_comment)
-        c.fill = COMMENT_FILL
+        c.fill = REMARK_FILL
         c.font = COMMENT_FONT
         c.alignment = Alignment(wrap_text=True)
         ws.row_dimensions[1].height = 45
@@ -256,7 +251,7 @@ def _export_product(
         for ci, col_name in enumerate(cols, 1):
             c = ws.cell(row=2, column=ci, value=col_name)
             c.fill = HEADER_FILL
-            c.font = HEADER_FONT
+            c.font = REMARK_FONT
 
         # 数据
         for ri, (_, drow) in enumerate(df_win.iterrows(), 3):

@@ -30,6 +30,8 @@ test_0 / test_1 / test_2a 等脚本通过 `from tests.calc import ...` 使用。
 
 from pathlib import Path
 
+from openpyxl.styles import Alignment, Font, PatternFill
+
 from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
 
 # ============================================================
@@ -109,3 +111,27 @@ WIND_EXCH_TO_MIN_EXCH: dict[str, str] = {
     'CFE': 'CFFEX',
     'GFE': 'GFEX',
 }
+
+# ============================================================
+# 共享 Excel 样式常量
+# ============================================================
+
+FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
+HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
+
+# Row 1 remark 样式（test_1 / test_2a 共用）
+REMARK_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')
+REMARK_FONT = Font(bold=True)        # 也用于表头
+REMARK_ALIGNMENT = Alignment(wrap_text=True, vertical='top')
+
+# test_1 comment 样式
+COMMENT_FONT = Font(italic=True, size=10)
+
+# test_1 → 4 行 remark → 60pt；以此基准 15pt/行
+REMARK_ROW_HEIGHT_PER_LINE = 15
+
+
+def remark_height(text: str) -> float:
+    """按行数动态计算 row 1 remark 高度，最小 45pt，最大 200pt"""
+    lines = text.count('\n') + 1
+    return max(45, min(200, lines * REMARK_ROW_HEIGHT_PER_LINE))

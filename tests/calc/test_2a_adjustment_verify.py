@@ -39,10 +39,14 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter, column_index_from_string
 
-from tests.calc import TEST_1_DIR, TEST_2A_DIR
+from tests.calc import (
+    TEST_1_DIR, TEST_2A_DIR,
+    FORMULA_FILL, HEADER_FILL,
+    REMARK_FILL, REMARK_FONT, REMARK_ALIGNMENT,
+    remark_height,
+)
 
 # --- XML 命名空间 ---
 NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -50,15 +54,6 @@ NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 NS_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 ET.register_namespace('', NS_SHEET)
 ET.register_namespace('r', NS_R)
-
-# --- 样式 ---
-FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
-HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
-# Row 1 remark 样式（与 test_1 保持一致）
-REMARK_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')
-REMARK_FONT = Font(bold=True)
-REMARK_ALIGNMENT = Alignment(wrap_text=True, vertical='top')
-REMARK_ROW_HEIGHT = 60  # pt
 
 
 def _col_letter(idx: int) -> str:
@@ -268,7 +263,7 @@ def process_product(prod_xlsx: Path) -> None:
     )
     sw_out.cell(1, 1, sw_remark)
     sw_out.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
-    sw_out.row_dimensions[1].height = REMARK_ROW_HEIGHT
+    sw_out.row_dimensions[1].height = remark_height(sw_remark)
     sw_cell1 = sw_out.cell(1, 1)
     sw_cell1.fill = REMARK_FILL
     sw_cell1.font = REMARK_FONT
@@ -371,7 +366,7 @@ def process_product(prod_xlsx: Path) -> None:
     )
     main_ws.cell(1, 1, main_remark)
     main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=MAIN_NCOLS)
-    main_ws.row_dimensions[1].height = REMARK_ROW_HEIGHT
+    main_ws.row_dimensions[1].height = remark_height(main_remark)
     main_cell1 = main_ws.cell(1, 1)
     main_cell1.fill = REMARK_FILL
     main_cell1.font = REMARK_FONT
