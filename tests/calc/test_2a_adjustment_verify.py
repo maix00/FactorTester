@@ -505,23 +505,74 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                               col_numfmts: dict[int, int],
                               total_data_rows: int):
     """
-    XML 后处理：给 MAIN sheet 的 A3..W3 每列标记为独立的动态数组公式，
-    并设置正确的 s= (style index) 从 col_numfmts 映射。
+    XML 后处理：给 MAIN sheet 的 A3 标记为单公式动态数组，
+    设置正确的 <col style> 让溢出行继承日期格式。
 
-    每列公式 =CHOOSECOLS(DROP(REDUCE(...), 1), col_N)
-    需要标记 ca="1" t="array" ref="A3:A{last_row+1}" 等。
+    关键：styles.xml 里注入 yyyy-mm-dd 纯日期 numFmt，
+    A 列 <col style> 指向它（而非 datetime 格式）。
     """
-    # 1. numFmtId → xfId 映射（从 styles.xml）
+    _DATE_FMT = 'yyyy\\-mm\\-dd'
+
+    all_files: dict[str, bytes] = {}
     with zipfile.ZipFile(xlsx_path, 'r') as zf:
-        styles = ET.parse(zf.open('xl/styles.xml'))
-        xf_list = styles.getroot().findall(f'{{{NS_SHEET}}}cellXfs/{{{NS_SHEET}}}xf')
-        nfi_to_xf = {}
+        # --- 1. 解析 styles.xml，注入纯日期 numFmt + cellXfs ---
+        styles_str = zf.read('xl/styles.xml')
+        styles_root = ET.fromstring(styles_str)
+        numFmts = styles_root.find(f'{{{NS_SHEET}}}numFmts')
+        if numFmts is None:
+            numFmts = ET.SubElement(styles_root, f'{{{NS_SHEET}}}numFmts')
+
+        # 找最大 numFmtId
+        max_nfi = 163
+        for nf in numFmts.findall(f'{{{NS_SHEET}}}numFmt'):
+            nfi = int(nf.get('numFmtId', '0'))
+            if nfi > max_nfi:
+                max_nfi = nfi
+
+        # 检查是否已有 yyyy-mm-dd
+        date_nfi = None
+        for nf in numFmts.findall(f'{{{NS_SHEET}}}numFmt'):
+            if nf.get('formatCode') == _DATE_FMT:
+                date_nfi = int(nf.get('numFmtId', '0'))
+                break
+
+        if date_nfi is None:
+            date_nfi = max_nfi + 1
+            date_el = ET.SubElement(numFmts, f'{{{NS_SHEET}}}numFmt')
+            date_el.set('numFmtId', str(date_nfi))
+            date_el.set('formatCode', _DATE_FMT)
+
+            # 注入对应 cellXfs（复制 xf 0，只改 numFmtId）
+            cellXfs = styles_root.find(f'{{{NS_SHEET}}}cellXfs')
+            if cellXfs is not None:
+                xf_list = cellXfs.findall(f'{{{NS_SHEET}}}xf')
+                if xf_list:
+                    # 复制第一个 xf（通常是默认格式）
+                    base_xf = xf_list[0]
+                    new_xf = ET.SubElement(cellXfs, f'{{{NS_SHEET}}}xf')
+                    for ak in ('fontId', 'fillId', 'borderId', 'xfId', 'applyNumberFormat'):
+                        v = base_xf.get(ak)
+                        if v is not None:
+                            new_xf.set(ak, v)
+                    new_xf.set('numFmtId', str(date_nfi))
+                    new_xf.set('applyNumberFormat', '1')
+
+                    # 更新 cellXfs count
+                    old_count = int(cellXfs.get('count', '0'))
+                    cellXfs.set('count', str(old_count + 1))
+
+        # --- 2. 重新解析 styles（含新注入的 xf）--- 
+        styles_root2 = ET.fromstring(ET.tostring(styles_root, encoding='unicode'))
+        xf_list = styles_root2.findall(f'{{{NS_SHEET}}}cellXfs/{{{NS_SHEET}}}xf')
+        nfi_to_xf: dict[int, int] = {}
         for i, xf in enumerate(xf_list):
             nfi = xf.get('numFmtId')
             if nfi is not None:
                 nfi_to_xf[int(nfi)] = i
 
-        # 2. 找 sheet 文件
+        date_xf_id = nfi_to_xf.get(date_nfi, 0)
+
+        # --- 3. 找 sheet 文件 ---
         wb_xml = ET.parse(zf.open('xl/workbook.xml'))
         rel_target = None
         for sh in wb_xml.getroot().findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
@@ -543,9 +594,8 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         sheet = ET.parse(zf.open(rel_target))
         sheet_root = sheet.getroot()
 
-        # 3. 注入 <cols> — 为日期列设 style（引用 cellXfs index）
-        #    WPS 动态数组溢出区域继承 <col style>，但公式单元格自身
-        #    的 s= 会覆盖列级样式，所以公式单元格也设 s=
+        # --- 4. 注入 <cols> ---
+        #    A=trading_day 用纯日期 yyyy-mm-dd；其他日期列保持时间格式
         cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
         if cols is not None:
             sheet_root.remove(cols)
@@ -556,20 +606,17 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
             col_el.set('max', str(ci))
             col_el.set('width', '13')
             col_el.set('customWidth', '1')
-            # 日期列：注入 style 指向日期格式的 cellXfs
-            if ci in col_numfmts:
+            if ci in (1,):  # A=trading_day: 纯日期
+                col_el.set('style', str(date_xf_id))
+            elif ci in col_numfmts:
                 xf_id = nfi_to_xf.get(col_numfmts[ci])
                 if xf_id is not None:
                     col_el.set('style', str(xf_id))
         sheet_root.insert(0, cols_el)
 
-        # 4. A3 单公式溢出 23 列 — 标记动态数组 ref=A3:W{safe_ref_end}
-        #    s= 取自 A 列(trading_day)的日期格式
+        # --- 5. A3 单公式溢出 23 列 ---
         last_row = 2 + total_data_rows
         safe_ref_end = last_row + 1
-
-        # A 列日期 xfId（用于 A3 的 s=）
-        a_xf_id = nfi_to_xf.get(col_numfmts.get(1, 0), 0)
 
         for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
             if row.get('r') == '3':
@@ -583,15 +630,17 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                         f_el.set('t', 'array')
                         f_el.set('ref', f'A3:W{safe_ref_end}')
                         c.set('cm', '1')
-                    c.set('s', str(a_xf_id))
+                    c.set('s', str(date_xf_id))
                     break
                 break
 
-        # 5. 收集并重写
+        # --- 6. 收集并重写（含修改后的 styles.xml）---
         all_files = {}
         for name in zf.namelist():
-            if name != rel_target:
-                all_files[name] = zf.read(name)
+            if name in ('xl/styles.xml', rel_target):
+                continue
+            all_files[name] = zf.read(name)
+        all_files['xl/styles.xml'] = ET.tostring(styles_root2, xml_declaration=True, encoding='UTF-8')
         all_files[rel_target] = ET.tostring(sheet_root, xml_declaration=True, encoding='UTF-8')
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
@@ -605,7 +654,7 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         if Path(tmp_path).exists():
             Path(tmp_path).unlink(missing_ok=True)
 
-    print(f'  🔧 Patched MAIN!A3: single dynamic array A3:W{safe_ref_end} + col styles')
+    print(f'  🔧 Patched MAIN!A3: single dynamic array A3:W{safe_ref_end} + col styles (A=date, rest=datetime)')
 
 
 def _xml_tostring(root):
