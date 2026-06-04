@@ -39,7 +39,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter, column_index_from_string
 
 from tests.calc import TEST_1_DIR, TEST_2A_DIR
@@ -54,6 +54,11 @@ ET.register_namespace('r', NS_R)
 # --- 样式 ---
 FORMULA_FILL = PatternFill(start_color='FFFFF2CC', end_color='FFFFF2CC', fill_type='solid')
 HEADER_FILL = PatternFill(start_color='FFD9E1F2', end_color='FFD9E1F2', fill_type='solid')
+# Row 1 remark 样式（与 test_1 保持一致）
+REMARK_FILL = PatternFill(start_color='FFFCE4D6', end_color='FFFCE4D6', fill_type='solid')
+REMARK_FONT = Font(bold=True)
+REMARK_ALIGNMENT = Alignment(wrap_text=True, vertical='top')
+REMARK_ROW_HEIGHT = 60  # pt
 
 
 def _col_letter(idx: int) -> str:
@@ -254,15 +259,21 @@ def process_product(prod_xlsx: Path) -> None:
     # ----------------------------------------------------------
     sw_out = wb.create_sheet('_SWITCHES', 0)
 
-    # Row 1: remark
-    sw_out.cell(
-        1, 1,
+    # Row 1: remark (合并单元格 + 自动换行)
+    sw_remark = (
         '切换记录 + 复权因子计算\n'
         '辅助列公式全部为 Excel 函数，不硬编码行号\n'
         '_prev_close: INDEX(INDIRECT("\'"&前合约B&"\'!J:J"), MATCH(前合约E, INDIRECT("\'"&前合约B&"\'!A:A"), 0))\n'
         '_cur_close:  INDEX(INDIRECT("\'"&本合约B&"\'!J:J"), MATCH(本合约D, INDIRECT("\'"&本合约B&"\'!A:A"), 0))\n'
         'adj_mul: IF(第一行,1, _prev_close/_cur_close * _prev_adj)'
     )
+    sw_out.cell(1, 1, sw_remark)
+    sw_out.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
+    sw_out.row_dimensions[1].height = REMARK_ROW_HEIGHT
+    sw_cell1 = sw_out.cell(1, 1)
+    sw_cell1.fill = REMARK_FILL
+    sw_cell1.font = REMARK_FONT
+    sw_cell1.alignment = REMARK_ALIGNMENT
 
     # Row 2: header
     headers = ['trading_day', 'instrument_id', 'windcode', 'start_date', 'end_date',
@@ -352,13 +363,19 @@ def process_product(prod_xlsx: Path) -> None:
     sw_last_row = 2 + len(switches)
     sw_last_col_letter = _col_letter(SW_REF_STR_COL)  # L
 
-    # Row 1: remark
-    main_ws.cell(
-        1, 1,
+    # Row 1: remark (合并单元格 + 自动换行)
+    main_remark = (
         f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (23列含复权因子)\n'
         f'合约数 = {len(switches)}，公式不硬编码合约数量\n'
         f'A3 = DROP(REDUCE(0, _SWITCHES!L3:L{sw_last_row}, LAMBDA(acc,ref, ...)), 1)'
     )
+    main_ws.cell(1, 1, main_remark)
+    main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=MAIN_NCOLS)
+    main_ws.row_dimensions[1].height = REMARK_ROW_HEIGHT
+    main_cell1 = main_ws.cell(1, 1)
+    main_cell1.fill = REMARK_FILL
+    main_cell1.font = REMARK_FONT
+    main_cell1.alignment = REMARK_ALIGNMENT
 
     # Row 2: header (21 数据列 + 2 adjustment 列)
     for ci, cn in enumerate(CONTRACT_COLS):
@@ -395,16 +412,6 @@ def process_product(prod_xlsx: Path) -> None:
         f')))'
     )
 
-    # 从合约 sheets 读取每列的 number_format，用于先对整列设格式
-    col_formats = {}  # {col_idx_1based: number_format_string}
-    for inst in contracts_in_order:
-        ct_ws = wb[inst]
-        for col in range(1, 22):
-            fmt = ct_ws.cell(3, col).number_format
-            if fmt and fmt != 'General':
-                col_formats[col] = fmt
-        break  # 只看第一个合约 sheet
-
     for col_idx in range(1, MAIN_NCOLS + 1):  # 1..23
         col_letter = _col_letter(col_idx)
         # CHOOSECOLS(..., N) — 0-based
@@ -424,27 +431,16 @@ def process_product(prod_xlsx: Path) -> None:
     total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
 
     # ============================================================
-    # 3. 预写整列格式 — WPS 动态数组溢出不继承公式单元格 s=
-    #    对所有溢出目标单元格预写 number_format
-    #    用 batch 写入优化速度
-    # ============================================================
-    last_row = 2 + total_rows
-    for ci, fmt in col_formats.items():
-        col_letter = _col_letter(ci)
-        # 用 iter_cols 方式批量写入更快
-        for row in range(3, last_row + 1):
-            main_ws.cell(row, ci).number_format = fmt
-
-    # ============================================================
-    # 4. 保存
+    # 3. 保存（不预写单元格格式——用 XML <col style> 后处理）
     # ============================================================
     dst_path = TEST_2A_DIR / f'{prod}.xlsx'
     wb.save(dst_path)
     wb.close()
 
     # ============================================================
-    # 5. XML 后处理：标记所有 A3..W3 为动态数组公式 + 设置 s=
-    #    每列独立溢出，配合该列正确的 numFmtId
+    # 4. XML 后处理：标记动态数组 + 公式 s= + <col style>
+    #    <col style> 作用于溢出行（WPS 已验证有效）
+    #    公式单元格 s= 作用于公式行（覆盖 <col style>）
     # ============================================================
     last_row = 2 + total_rows
     col_numfmts = _read_contract_col_numfmts_from_xml(dst_path)
@@ -552,24 +548,25 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         sheet = ET.parse(zf.open(rel_target))
         sheet_root = sheet.getroot()
 
-        # 3. 注入 <cols>（仅 width，不用 numFmtId 避免 openpyxl 兼容性问题）
-        #   s= 才是影响动态数组溢出区域格式的关键
-        if col_numfmts:
-            cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
-            if cols is not None:
-                sheet_root.remove(cols)
-            cols_el = ET.Element(f'{{{NS_SHEET}}}cols')
-            seen = set()
-            for ci in sorted(col_numfmts.keys()):
-                cl = _col_letter(ci)
-                if cl in seen:
-                    continue
-                seen.add(cl)
-                col_el = ET.SubElement(cols_el, f'{{{NS_SHEET}}}col')
-                col_el.set('min', str(ci))
-                col_el.set('max', str(ci))
-                col_el.set('width', '13')
-            sheet_root.insert(0, cols_el)
+        # 3. 注入 <cols> — 为日期列设 style（引用 cellXfs index）
+        #    WPS 动态数组溢出区域继承 <col style>，但公式单元格自身
+        #    的 s= 会覆盖列级样式，所以公式单元格也设 s=
+        cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
+        if cols is not None:
+            sheet_root.remove(cols)
+        cols_el = ET.Element(f'{{{NS_SHEET}}}cols')
+        for ci in range(1, MAIN_NCOLS + 1):
+            col_el = ET.SubElement(cols_el, f'{{{NS_SHEET}}}col')
+            col_el.set('min', str(ci))
+            col_el.set('max', str(ci))
+            col_el.set('width', '13')
+            col_el.set('customWidth', '1')
+            # 日期列：注入 style 指向日期格式的 cellXfs
+            if ci in col_numfmts:
+                xf_id = nfi_to_xf.get(col_numfmts[ci])
+                if xf_id is not None:
+                    col_el.set('style', str(xf_id))
+        sheet_root.insert(0, cols_el)
 
         # 4. 遍历 row 3 的所有 cell，为每个有公式的 cell 设置 ca="1"/t="array"/ref + s=
         last_row = 2 + total_data_rows
