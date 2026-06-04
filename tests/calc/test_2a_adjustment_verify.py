@@ -44,7 +44,7 @@ from openpyxl.utils import get_column_letter, column_index_from_string
 from tests.calc import (
     TEST_1_DIR, TEST_2A_DIR,
     FORMULA_FILL, HEADER_FILL,
-    REMARK_FILL, REMARK_FONT, REMARK_ALIGNMENT,
+    REMARK_FILL, REMARK_FONT, COMMENT_FONT, COMMENT_ALIGNMENT,
     remark_height,
 )
 
@@ -240,12 +240,25 @@ def process_product(prod_xlsx: Path) -> None:
         if active_sheet is not None:
             wb.remove(active_sheet)
 
-        # 2a. 复制合约 sheet 数据（从 test_1 直接 copy values）
+        # 2a. 复制合约 sheet 数据（从 test_1 直接 copy values, 再补样式）
         for sn in sorted(src_sheets_set):
             dst_ws = wb.create_sheet(sn)
             src_ct = src_wb[sn]
             for row_data in src_ct.iter_rows(values_only=True):
                 dst_ws.append(list(row_data))
+            # 补样式：row1 remark + row2 header（与 test_1 一致）
+            ncols = dst_ws.max_column
+            dst_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+            r1 = dst_ws.cell(1, 1)
+            r1.fill = REMARK_FILL
+            r1.font = COMMENT_FONT
+            r1.alignment = COMMENT_ALIGNMENT
+            remark_text = str(r1.value) if r1.value is not None else ' '
+            dst_ws.row_dimensions[1].height = remark_height(remark_text)
+            for ci in range(1, ncols + 1):
+                c = dst_ws.cell(2, ci)
+                c.fill = HEADER_FILL
+                c.font = REMARK_FONT
         src_wb.close()
 
     # ----------------------------------------------------------
@@ -266,15 +279,17 @@ def process_product(prod_xlsx: Path) -> None:
     sw_out.row_dimensions[1].height = remark_height(sw_remark)
     sw_cell1 = sw_out.cell(1, 1)
     sw_cell1.fill = REMARK_FILL
-    sw_cell1.font = REMARK_FONT
-    sw_cell1.alignment = REMARK_ALIGNMENT
+    sw_cell1.font = COMMENT_FONT
+    sw_cell1.alignment = COMMENT_ALIGNMENT
 
     # Row 2: header
     headers = ['trading_day', 'instrument_id', 'windcode', 'start_date', 'end_date',
                '_cur_close', '_next_close', '_next_adj', 'adjustment_mul', 'adjustment_add',
                '_nrows', '_ref_str']
     for ci, h in enumerate(headers, 1):
-        sw_out.cell(2, ci, h).fill = HEADER_FILL
+        c = sw_out.cell(2, ci, h)
+        c.fill = HEADER_FILL
+        c.font = REMARK_FONT
 
     # ---- 写入切换数据 + 公式 ----
     contracts_in_order = [s[0] for s in switches]
@@ -369,14 +384,20 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.row_dimensions[1].height = remark_height(main_remark)
     main_cell1 = main_ws.cell(1, 1)
     main_cell1.fill = REMARK_FILL
-    main_cell1.font = REMARK_FONT
-    main_cell1.alignment = REMARK_ALIGNMENT
+    main_cell1.font = COMMENT_FONT
+    main_cell1.alignment = COMMENT_ALIGNMENT
 
     # Row 2: header (21 数据列 + 2 adjustment 列)
     for ci, cn in enumerate(CONTRACT_COLS):
-        main_ws.cell(2, ci + 1, cn).fill = HEADER_FILL
-    main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul').fill = HEADER_FILL
-    main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add').fill = HEADER_FILL
+        c = main_ws.cell(2, ci + 1, cn)
+        c.fill = HEADER_FILL
+        c.font = REMARK_FONT
+    c = main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul')
+    c.fill = HEADER_FILL
+    c.font = REMARK_FONT
+    c = main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add')
+    c.fill = HEADER_FILL
+    c.font = REMARK_FONT
 
     # --- A3: 单公式溢出 23 列 (A3:W{lastrow}) ---
     # REDUCE VSTACK 拼接各合约 HSTACK(数据21列, mul, add)，DROP 去掉初始标量
