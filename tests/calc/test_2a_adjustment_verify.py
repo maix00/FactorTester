@@ -15,6 +15,9 @@ test_2a_adjustment_verify.py
 _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
   _start_row:  当前合约 start_date 对应的第一条分钟行
   _end_row:    当前合约 end_date 对应的最后一条分钟行
+  _data_cols:  合约 sheet row 2 中最后一个非空表头所在列号
+  _data_last_col: 合约数据最后一列列字母，用于拼 ref_str
+  _close_col:  通过 row 2 表头 MATCH("close_price") 得到 close 列号
   _cur_close:  当前合约 _end_row 的收盘价
   _next_close: 下一合约变成主力前一行的收盘价
   _next_adj:   下一行的 adjustment_mul（向前引用）
@@ -24,21 +27,27 @@ _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sh
 
 MAIN!A3 的 VSTACK 语义：
   公式遍历 _SWITCHES!M3:M{last_row} 中的 ref_str。每个 ref_str 形如
-  "'a2405'!A123:U456"，代表某个合约成为主力的那一段 A:U 数据。
+  "'a2405'!A123:<last_col>456"，终止列由 Excel 公式根据合约 sheet row 2 的表头数判断。
   对每一段：
-    d = INDIRECT(ref) 取得 21 列原始分钟数据
+    d = INDIRECT(ref) 取得所有原始分钟数据列
     m = EXPAND(该行 adjustment_mul, 该行 _segment_rows, 1, adjustment_mul)
     a = EXPAND(该行 adjustment_add, 该行 _segment_rows, 1, adjustment_add)
-    HSTACK(d, m, a) 得到 23 列
+    HSTACK(d, m, a) 得到“数据列 + adjustment_mul + adjustment_add”
   REDUCE 从标量 0 开始，把每一段 HSTACK 结果 VSTACK 到 acc 下方，
   最后 DROP(...,1) 去掉初始标量行。这样 MAIN 只有 A3 一个公式，
-  但会向 A:W 溢出完整连续主力数据。
+  但会向右、向下溢出完整连续主力数据。
+
+MAIN!A2 的表头语义：
+  表头不由 Python 固定列表写入。A2 用 HSTACK 公式从第一个合约
+  sheet 的 row 2 动态读取 A 到 _data_last_col 的原始表头，再追加
+  "adjustment_mul" 和 "adjustment_add"。所以合约数据列数变化时，
+  MAIN 的表头和 MAIN!A3 的数据宽度保持同一套 Excel 公式语义。
 
 为什么要 XML 后处理：
   openpyxl 能写公式文本，但不会把它标成 Excel/WPS 认可的动态数组公式。
   WPS 打开普通公式时可能自动给其中的引用加 @，把数组语义退化成单值语义。
-  因此保存后需要直接修改 sheet XML：给 MAIN!A3 的 <f> 加 t="array"、
-  ref="A3:W..."、ca="1" 等属性，明确告诉 WPS 这是动态数组溢出公式。
+  因此保存后需要直接修改 sheet XML：给 MAIN!A2/A3 的 <f> 加 t="array"、
+  ref="A2:..."/ref="A3:..."、ca="1" 等属性，明确告诉 WPS 这是动态数组溢出公式。
 
 为什么要改 <col style>：
   动态数组的溢出单元格不是 openpyxl 逐格写出的，普通单元格 number_format
@@ -98,29 +107,17 @@ def _col_idx(ref: str) -> int:
 # Workbook layout constants
 # ============================================================
 
-# test_1 合约 sheet 列布局 (row1=remark, row2=header, row3+=data)
-# 21 列全量: A=trading_day, B=trade_time, C=trade_timestamp, D=exchange_id,
-# E=instrument_id, F=unique_instrument_id, G=open_price, H=highest_price,
-# I=lowest_price, J=close_price, K=settlement_price, L=upper_limit_price,
-# M=lower_limit_price, N=pre_settlement_price, O=volume, P=turnover,
-# Q=open_interest, R=insert_time, S=product_id, T=twap, U=vwap
-CONTRACT_COLS = [
-    'trading_day', 'trade_time', 'trade_timestamp', 'exchange_id',
-    'instrument_id', 'unique_instrument_id', 'open_price', 'highest_price',
-    'lowest_price', 'close_price', 'settlement_price', 'upper_limit_price',
-    'lower_limit_price', 'pre_settlement_price', 'volume', 'turnover',
-    'open_interest', 'insert_time', 'product_id', 'twap', 'vwap',
-]
-CONTRACT_CLOSE_COL = 10      # J: close_price (21列布局)
-CONTRACT_TD_COL = 1           # A: trading_day
-CONTRACT_INST_COL = 5          # E: instrument_id
-DATA_START_ROW = 3             # 数据从第3行开始 (1=remark, 2=header)
+# test_1 合约 sheet 布局：row1=remark, row2=header, row3+=data。
+# 数据列宽由 Excel 在 _SWITCHES!R:S 判断；这里只保留定位必须固定的行/列。
+CONTRACT_TD_COL = 1  # A: trading_day
+DATA_START_ROW = 3   # 数据从第3行开始 (1=remark, 2=header)
 
 # _SWITCHES 列定义
 # A=trading_day, B=instrument_id, C=windcode, D=start_date, E=end_date
 # F=_cur_close, G=_next_close, H=_next_adj, I=adjustment_mul, J=adjustment_add
 # K=_segment_rows, L=_ref_rows, M=_ref_str, N=_start_row, O=_end_row
-# P=_next_start_row, Q=_next_pre_main_row
+# P=_next_start_row, Q=_next_pre_main_row, R=_data_cols, S=_data_last_col
+# T=_close_col, U=_close_col_letter
 #
 # 前复权 (forward-adjusted)：最新合约 adj=1，历史数据反向累积
 #   adjustment_mul[i] = _cur_close[i] / _next_close * _next_adj
@@ -132,7 +129,11 @@ DATA_START_ROW = 3             # 数据从第3行开始 (1=remark, 2=header)
 # _next_pre_main_row (Q): Excel 公式 — 下一合约 start_row - 1
 # _segment_rows (K):      Excel 公式 =O3-N3+1 — 主力期间分钟行数
 # _ref_rows (L):          Excel 公式 =N3&":"&O3 — 主力期间起止行
-# _ref_str (M):           Excel 公式 ="'"&B3&"'!A"&N3&":U"&O3 — INDIRECT 引用字符串
+# _ref_str (M):           Excel 公式 ="'"&B3&"'!A"&N3&":"&S3&O3 — INDIRECT 引用字符串
+# _data_cols (R):         Excel 公式 — 合约 sheet row 2 最后一个非空表头列号
+# _data_last_col (S):     Excel 公式 — _data_cols 对应的列字母
+# _close_col (T):         Excel 公式 — MATCH("close_price", 合约 sheet row 2)
+# _close_col_letter (U):  Excel 公式 — _close_col 对应的列字母
 SW_ORIG_COLS = 5
 CUR_CLOSE_COL = SW_ORIG_COLS + 1   # F=6: _cur_close (本合约 end_row 收盘)
 NEXT_CLOSE_COL = SW_ORIG_COLS + 2  # G=7: _next_close (下一合约主力前一行收盘)
@@ -146,12 +147,10 @@ SW_START_ROW_COL = SW_ORIG_COLS + 9        # N=14: _start_row (Excel公式)
 SW_END_ROW_COL = SW_ORIG_COLS + 10         # O=15: _end_row (Excel公式)
 SW_NEXT_START_ROW_COL = SW_ORIG_COLS + 11  # P=16: _next_start_row (Excel公式)
 SW_NEXT_PRE_ROW_COL = SW_ORIG_COLS + 12    # Q=17: _next_pre_main_row (Excel公式)
-
-# MAIN 列布局 (21 数据列 + 2 adjustment 列 = 23 列, A..W)
-# A..U = 合约数据, V=adjustment_mul, W=adjustment_add
-MAIN_NCOLS = len(CONTRACT_COLS) + 2  # 23
-MAIN_MUL_COL_OFFSET = len(CONTRACT_COLS) + 1  # V=22
-MAIN_ADD_COL_OFFSET = len(CONTRACT_COLS) + 2  # W=23
+SW_DATA_COLS_COL = SW_ORIG_COLS + 13       # R=18: _data_cols (Excel公式)
+SW_DATA_LAST_COL_COL = SW_ORIG_COLS + 14   # S=19: _data_last_col (Excel公式)
+SW_CLOSE_COL_COL = SW_ORIG_COLS + 15       # T=20: _close_col (Excel公式)
+SW_CLOSE_LETTER_COL = SW_ORIG_COLS + 16    # U=21: _close_col_letter (Excel公式)
 
 
 # ============================================================
@@ -335,6 +334,12 @@ def process_product(prod_xlsx: Path) -> None:
                 c.font = REMARK_FONT
         src_wb.close()
 
+    max_data_cols = max(
+        (wb[sn].max_column for sn in wb.sheetnames if sn not in ('_SWITCHES', 'MAIN')),
+        default=21,
+    )
+    main_ncols = max_data_cols + 2
+
     # ----------------------------------------------------------
     # Sheet 0: _SWITCHES (增强版 — 辅助列计算 adjust_mul)
     # ----------------------------------------------------------
@@ -349,11 +354,12 @@ def process_product(prod_xlsx: Path) -> None:
         '_next_pre_main_row: 下一合约 start_row - 1，即新合约变成主力前一行\n'
         '_cur_close:  INDEX(本合约 close, _end_row)\n'
         '_next_close: INDEX(下一合约 close, _next_pre_main_row)\n'
-        '_segment_rows: =_end_row-_start_row+1；_ref_rows: =_start_row&_end_row；_ref_str: 主力区间 A:U 引用\n'
+        '_data_cols/_data_last_col: 根据合约 sheet row 2 表头自动判断数据列宽\n'
+        '_segment_rows: =_end_row-_start_row+1；_ref_rows: =_start_row&_end_row；_ref_str: 主力区间引用\n'
         'adj_mul: IF(最后一行,1, _cur_close/_next_close * _next_adj)'
     )
     sw_out.cell(1, 1, sw_remark)
-    sw_out.merge_cells(start_row=1, start_column=1, end_row=1, end_column=17)
+    sw_out.merge_cells(start_row=1, start_column=1, end_row=1, end_column=21)
     sw_out.row_dimensions[1].height = remark_height(sw_remark)
     sw_cell1 = sw_out.cell(1, 1)
     sw_cell1.fill = REMARK_FILL
@@ -364,7 +370,8 @@ def process_product(prod_xlsx: Path) -> None:
     headers = ['trading_day', 'instrument_id', 'windcode', 'start_date', 'end_date',
                '_cur_close', '_next_close', '_next_adj', 'adjustment_mul', 'adjustment_add',
                '_segment_rows', '_ref_rows', '_ref_str', '_start_row', '_end_row',
-               '_next_start_row', '_next_pre_main_row']
+               '_next_start_row', '_next_pre_main_row', '_data_cols', '_data_last_col',
+               '_close_col', '_close_col_letter']
     for ci, h in enumerate(headers, 1):
         c = sw_out.cell(2, ci, h)
         c.fill = HEADER_FILL
@@ -388,8 +395,26 @@ def process_product(prod_xlsx: Path) -> None:
         cur_d = f'{_col_letter(4)}{row}'    # D: start_date 本行
         cur_e = f'{_col_letter(5)}{row}'    # E: end_date 本行
         cur_td_ref = f'INDIRECT("\'"&{cur_b}&"\'!A:A")'
-        cur_close_ref = f'INDIRECT("\'"&{cur_b}&"\'!J:J")'
+        cur_header_ref = f'INDIRECT("\'"&{cur_b}&"\'!2:2")'
         last_row_formula = f'ROW()={sw_last_row}'
+
+        # ---- data width / close column helpers（全部 Excel 公式）----
+        sw_out.cell(
+            row, SW_DATA_COLS_COL,
+            f'=LOOKUP(2,1/({cur_header_ref}<>""),COLUMN({cur_header_ref}))'
+        ).fill = FORMULA_FILL
+        sw_out.cell(
+            row, SW_DATA_LAST_COL_COL,
+            f'=SUBSTITUTE(ADDRESS(1,{_col_letter(SW_DATA_COLS_COL)}{row},4),"1","")'
+        ).fill = FORMULA_FILL
+        sw_out.cell(
+            row, SW_CLOSE_COL_COL,
+            f'=MATCH("close_price",{cur_header_ref},0)'
+        ).fill = FORMULA_FILL
+        sw_out.cell(
+            row, SW_CLOSE_LETTER_COL,
+            f'=SUBSTITUTE(ADDRESS(1,{_col_letter(SW_CLOSE_COL_COL)}{row},4),"1","")'
+        ).fill = FORMULA_FILL
 
         # ---- _start_row / _end_row / next helper rows（全部 Excel 公式）----
         # 定位一律使用合约 sheet A 列 trading_day。
@@ -421,6 +446,10 @@ def process_product(prod_xlsx: Path) -> None:
 
         # ---- _cur_close / _next_close ----
         # 当前合约取主力区间终止行 close；下一合约取变成主力前一行 close。
+        cur_close_ref = (
+            f'INDIRECT("\'"&{cur_b}&"\'!"&{_col_letter(SW_CLOSE_LETTER_COL)}{row}'
+            f'&":"&{_col_letter(SW_CLOSE_LETTER_COL)}{row})'
+        )
         sw_out.cell(
             row, CUR_CLOSE_COL,
             f'=INDEX({cur_close_ref},{_col_letter(SW_END_ROW_COL)}{row})'
@@ -429,7 +458,10 @@ def process_product(prod_xlsx: Path) -> None:
             next_close_formula = f'=IF({last_row_formula},"","")'
         else:
             next_b = f'{_col_letter(2)}{row + 1}'
-            next_close_ref = f'INDIRECT("\'"&{next_b}&"\'!J:J")'
+            next_close_ref = (
+                f'INDIRECT("\'"&{next_b}&"\'!"&{_col_letter(SW_CLOSE_LETTER_COL)}{row + 1}'
+                f'&":"&{_col_letter(SW_CLOSE_LETTER_COL)}{row + 1})'
+            )
             next_close_formula = (
                 f'=IF({last_row_formula},"",INDEX({next_close_ref},'
                 f'{_col_letter(SW_NEXT_PRE_ROW_COL)}{row}))'
@@ -463,7 +495,7 @@ def process_product(prod_xlsx: Path) -> None:
         sw_out.cell(
             row, SW_REF_STR_COL,
             f'="\'"&{cur_b}&"\'!A"&{_col_letter(SW_START_ROW_COL)}{row}'
-            f'&":U"&{_col_letter(SW_END_ROW_COL)}{row}'
+            f'&":"&{_col_letter(SW_DATA_LAST_COL_COL)}{row}&{_col_letter(SW_END_ROW_COL)}{row}'
         ).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
@@ -480,33 +512,31 @@ def process_product(prod_xlsx: Path) -> None:
 
     # Row 1: remark (合并单元格 + 自动换行)
     main_remark = (
-        f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (23列含复权因子)\n'
-        f'合约数 = {len(switches)}，公式不硬编码合约数量\n'
+        f'主力连续序列 — REDUCE+HSTACK+VSTACK 单公式 (数据列+2列复权因子)\n'
+        f'合约数 = {len(switches)}，公式不硬编码合约数量或数据列数\n'
         f'A3 = DROP(REDUCE(0, _SWITCHES!M3:M{sw_last_row}, LAMBDA(acc,ref, ...)), 1)'
     )
     main_ws.cell(1, 1, main_remark)
-    main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=MAIN_NCOLS)
+    main_ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=main_ncols)
     main_ws.row_dimensions[1].height = remark_height(main_remark)
     main_cell1 = main_ws.cell(1, 1)
     main_cell1.fill = REMARK_FILL
     main_cell1.font = COMMENT_FONT
     main_cell1.alignment = COMMENT_ALIGNMENT
 
-    # Row 2: header (21 数据列 + 2 adjustment 列)
-    for ci, cn in enumerate(CONTRACT_COLS):
-        c = main_ws.cell(2, ci + 1, cn)
-        c.fill = HEADER_FILL
-        c.font = REMARK_FONT
-    c = main_ws.cell(2, MAIN_MUL_COL_OFFSET, 'adjustment_mul')
-    c.fill = HEADER_FILL
-    c.font = REMARK_FONT
-    c = main_ws.cell(2, MAIN_ADD_COL_OFFSET, 'adjustment_add')
+    # Row 2: header formula (原始数据表头 + adjustment_mul + adjustment_add)
+    header_formula = (
+        '=HSTACK('
+        'INDIRECT("\'"&INDEX(_SWITCHES!B:B,3)&"\'!A2:"&INDEX(_SWITCHES!S:S,3)&"2"),'
+        '"adjustment_mul","adjustment_add")'
+    )
+    c = main_ws.cell(2, 1, header_formula)
     c.fill = HEADER_FILL
     c.font = REMARK_FONT
 
-    # --- A3: 单公式溢出 23 列 (A3:W{lastrow}) ---
-    # REDUCE VSTACK 拼接各合约 HSTACK(数据21列, mul, add)，DROP 去掉初始标量
-    # 一式溢出所有 23 列，日期格式由 XML <col style> 后处理控制
+    # --- A3: 单公式溢出 数据列+2 列 ---
+    # REDUCE VSTACK 拼接各合约 HSTACK(数据列, mul, add)，DROP 去掉初始标量
+    # 一式溢出所有数据列+2列，日期格式由 XML <col style> 后处理控制
     #   <col style="xfDate"> → A/B/R 列溢出区域显示日期格式
     #   A3 的 s= 匹配第一列(A列=trading_day)的日期格式
     base_formula = (
@@ -542,8 +572,8 @@ def process_product(prod_xlsx: Path) -> None:
     # ============================================================
     last_row = 2 + total_rows
     col_numfmts = _read_contract_col_numfmts_from_xml(dst_path)
-    # 注入 <cols> + 修改 A3..W3 的 s= + 标记每个为动态数组
-    _patch_multi_col_formulas(dst_path, 'MAIN', col_numfmts, total_rows)
+    # 注入 <cols> + 修改 MAIN!A2/A3 的 s= + 标记每个为动态数组
+    _patch_multi_col_formulas(dst_path, 'MAIN', col_numfmts, total_rows, main_ncols)
 
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
 
@@ -616,7 +646,8 @@ def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
 
 def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                               col_numfmts: dict[int, int],
-                              total_data_rows: int):
+                              total_data_rows: int,
+                              main_ncols: int):
     """
     XML 后处理：给 MAIN sheet 的 A3 标记为单公式动态数组，
     设置正确的 <col style> 让溢出行继承日期格式。
@@ -713,7 +744,7 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         if cols is not None:
             sheet_root.remove(cols)
         cols_el = ET.Element(f'{{{NS_SHEET}}}cols')
-        for ci in range(1, MAIN_NCOLS + 1):
+        for ci in range(1, main_ncols + 1):
             col_el = ET.SubElement(cols_el, f'{{{NS_SHEET}}}col')
             col_el.set('min', str(ci))
             col_el.set('max', str(ci))
@@ -727,25 +758,31 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                     col_el.set('style', str(xf_id))
         sheet_root.insert(0, cols_el)
 
-        # --- 5. A3 单公式溢出 23 列 ---
+        # --- 5. A2/A3 单公式动态数组 ---
         last_row = 2 + total_data_rows
         safe_ref_end = last_row + 1
+        last_col_letter = _col_letter(main_ncols)
 
         for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
-            if row.get('r') == '3':
-                for c in row.findall(f'{{{NS_SHEET}}}c'):
-                    r = c.get('r')
-                    if r != 'A3':
-                        continue
-                    f_el = c.find(f'{{{NS_SHEET}}}f')
-                    if f_el is not None:
-                        f_el.set('ca', '1')
-                        f_el.set('t', 'array')
-                        f_el.set('ref', f'A3:W{safe_ref_end}')
-                        c.set('cm', '1')
+            row_ref = row.get('r')
+            if row_ref not in ('2', '3'):
+                continue
+            for c in row.findall(f'{{{NS_SHEET}}}c'):
+                cell_ref = c.get('r')
+                if cell_ref not in ('A2', 'A3'):
+                    continue
+                f_el = c.find(f'{{{NS_SHEET}}}f')
+                if f_el is not None:
+                    f_el.set('ca', '1')
+                    f_el.set('t', 'array')
+                    f_el.set(
+                        'ref',
+                        f'A2:{last_col_letter}2' if cell_ref == 'A2'
+                        else f'A3:{last_col_letter}{safe_ref_end}',
+                    )
+                    c.set('cm', '1')
+                if cell_ref == 'A3':
                     c.set('s', str(date_xf_id))
-                    break
-                break
 
         # --- 6. 收集并重写（含修改后的 styles.xml）---
         all_files = {}
@@ -767,7 +804,10 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
         if Path(tmp_path).exists():
             Path(tmp_path).unlink(missing_ok=True)
 
-    print(f'  🔧 Patched MAIN!A3: single dynamic array A3:W{safe_ref_end} + col styles (A=date, rest=datetime)')
+    print(
+        f'  🔧 Patched MAIN!A2/A3: dynamic arrays A2:{last_col_letter}2 '
+        f'and A3:{last_col_letter}{safe_ref_end} + col styles'
+    )
 
 
 # ============================================================
