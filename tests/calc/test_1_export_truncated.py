@@ -2,17 +2,17 @@
 test_1_export_truncated.py
 --------------------------
 从 test_0/_products.xlsx 的 _SWITCH_COUNTS sheet 读取品种列表，
-从 wind_mapping.parquet 获取主力切换记录，从 data_mink_product/ 截取分钟数据。
+从 wind_mapping.parquet 获取主力区间记录，从 data_mink_product/ 截取分钟数据。
 
 每个品种 → 一个 Excel 文件：data/test/test_1/{prod}/{prod}.xlsx
-  Sheet _SWITCHES: 从 wind_mapping 直接复制该品种在时间段内的主力切换记录
+  Sheet _SWITCHES: 复制与分钟数据覆盖范围相交的主力区间，并裁剪到数据覆盖范围内
     含注释行说明数据来源
   Sheet {instrument_id}: 每个涉及的合约，在其主力区间前后各保留 WINDOW_ROWS 行分钟数据
     按最近切换日期降序排列
 
 数据源：
   - test_0/_products.xlsx (_SWITCH_COUNTS sheet): 品种列表 + wind_exch/min_exch
-  - wind_mapping.parquet: 主力切换记录 (_SWITCHES sheet 来源)
+  - wind_mapping.parquet: 主力区间记录 (_SWITCHES sheet 来源)
   - data_mink_product/: 分钟行情数据 (合约 sheet 来源)
 
 Output: data/test/test_1/{prod}/{prod}.xlsx
@@ -112,7 +112,12 @@ def validate_test_1_complete() -> tuple[bool, list[str]]:
 
             ws = wb['_SWITCHES']
             switch_rows = max(ws.max_row - 2, 0)
-            expected_switches = int(pinfo['switch_count'])
+            expected_switches = len(_load_wind_mapping(
+                prod,
+                str(pinfo['wind_exch']),
+                pd.Timestamp(pinfo['data_start']),
+                pd.Timestamp(pinfo['data_end']),
+            ))
             if switch_rows != expected_switches:
                 problems.append(
                     f'{prod}: _SWITCHES rows {switch_rows}, expected {expected_switches}'
@@ -146,7 +151,7 @@ def validate_test_1_complete() -> tuple[bool, list[str]]:
 
 def _load_wind_mapping(prod: str, wind_exch: str,
                        data_start: pd.Timestamp, data_end: pd.Timestamp) -> pd.DataFrame:
-    """从 wind_mapping 读取某品种在时间段内的切换记录"""
+    """读取与分钟数据覆盖范围相交的主力区间，并裁剪到覆盖范围内。"""
     wm = pd.read_parquet(WIND_MAPPING_PATH)
 
     # 排除 _S 后缀
@@ -158,11 +163,17 @@ def _load_wind_mapping(prod: str, wind_exch: str,
     wc = f'{prod}.{wind_exch}'
     prod_wm = wm[wm['S_INFO_WINDCODE'] == wc].copy()
 
-    # 限定在分钟数据范围内
+    data_start = pd.Timestamp(data_start).normalize()
+    data_end = pd.Timestamp(data_end).normalize()
+
+    # 限定在分钟数据范围内：取区间相交，而不是只取 STARTDATE 落在范围内的记录。
+    # 如果数据从某个主力区间中途开始，该最早主力合约仍然必须进入 test_1/test_2a。
     prod_wm = prod_wm[
-        (prod_wm['STARTDATE'] >= data_start) &
+        (prod_wm['ENDDATE'] >= data_start) &
         (prod_wm['STARTDATE'] <= data_end)
     ].copy()
+    prod_wm['STARTDATE'] = prod_wm['STARTDATE'].clip(lower=data_start, upper=data_end)
+    prod_wm['ENDDATE'] = prod_wm['ENDDATE'].clip(lower=data_start, upper=data_end)
 
     # 转换 instrument_id: CU2507.SHF → cu2507
     prod_wm['instrument_id'] = prod_wm['FS_MAPPING_WINDCODE'].str.split('.').str[0].str.lower()
@@ -309,8 +320,9 @@ def _export_product(
     comment = (f"数据来源: wind_mapping.parquet ({WIND_MAPPING_PATH})\n"
                f"品种: {prod}.{wind_exch}\n"
                f"时间范围: {data_start.date()} ~ {data_end.date()} (data_mink_product 覆盖范围)\n"
-               f"columns: trading_day=切换生效日, instrument_id=主力合约代码, "
-               f"windcode=Wind合约代码, start_date/end_date=主力区间")
+               f"口径: 保留与数据覆盖范围相交的主力区间；首尾区间会裁剪到数据实际覆盖范围\n"
+               f"columns: trading_day=裁剪后的区间起始交易日, instrument_id=主力合约代码, "
+               f"windcode=Wind合约代码, start_date/end_date=裁剪后的主力区间")
     cell = ws_sw.cell(row=1, column=1, value=comment)
     cell.fill = REMARK_FILL
     cell.font = COMMENT_FONT
@@ -388,7 +400,8 @@ def _export_product(
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cols))
         inst_comment = (f"数据来源: {parquet_path}\n"
                         f"合约: {inst} (品种: {prod})\n"
-                        f"截取口径: 每个主力区间前后各保留 {WINDOW_ROWS} 行分钟数据\n"
+                        f"截取口径: 每个主力区间前后各保留 {WINDOW_ROWS} 行分钟数据；"
+                        f"若最早区间没有上一行，则从文件首行开始\n"
                         f"主力区间数: {len(inst_intervals[inst])}；选中原始行区间: {selected_ranges}")
         c = ws.cell(row=1, column=1, value=inst_comment)
         c.fill = REMARK_FILL
