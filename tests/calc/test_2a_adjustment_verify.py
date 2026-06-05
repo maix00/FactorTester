@@ -96,7 +96,8 @@ DATA_START_ROW = 3             # 数据从第3行开始 (1=remark, 2=header)
 #   adjustment_mul[i] = _cur_close[i] / _next_close * _next_adj
 #   最后一行=1，向前逐行乘 → 最新价格水平不变，历史数据被压缩
 #
-# _ref_str:      Python 写入纯文本，如 'a2405'!A3:U14027，供 INDIRECT 使用
+# _nrows:   Excel 公式 =ROWS(INDIRECT("'"&B&"'!A:A"))-2，动态获取合约 sheet 数据行数
+# _ref_str: Excel 公式 ="'"&B&"'!A3:U"&K+2，拼接 INDIRECT 引用字符串
 SW_ORIG_COLS = 5
 CUR_CLOSE_COL = SW_ORIG_COLS + 1   # F=6: _cur_close (本合约首日收盘)
 NEXT_CLOSE_COL = SW_ORIG_COLS + 2  # G=7: _next_close (下一合约首日收盘)
@@ -272,6 +273,8 @@ def process_product(prod_xlsx: Path) -> None:
         '辅助列公式全部为 Excel 函数，不硬编码行号\n'
         '_cur_close:  INDEX(INDIRECT("\'"&本合约B&"\'!J:J"), MATCH(本合约D, INDIRECT("\'"&本合约B&"\'!A:A"), 0))\n'
         '_next_close: INDEX(INDIRECT("\'"&下一合约B&"\'!J:J"), MATCH(下一合约D, INDIRECT("\'"&下一合约B&"\'!A:A"), 0))\n'
+        '_nrows:  =ROWS(INDIRECT("\'"&B&"\'!A:A"))-2，动态获取合约 sheet 数据行数\n'
+        '_ref_str:  ="\'"&B&"\'!A3:U"&K+2，Excel 公式拼接 INDIRECT 引用字符串\n'
         'adj_mul: IF(最后一行,1, _cur_close/_next_close * _next_adj)'
     )
     sw_out.cell(1, 1, sw_remark)
@@ -352,13 +355,25 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- adjustment_add ----
         sw_out.cell(row, ADJ_ADD_COL, 0).fill = FORMULA_FILL
 
-        # ---- _nrows（纯数值，供 MAIN 公式使用）----
-        sw_out.cell(row, SW_NROWS_COL, sheet_rows.get(inst, 0))
+        # ---- _nrows（Excel 公式：动态获取合约 sheet 数据行数）----
+        # =ROWS(INDIRECT("'"&B{row}&"'!A:A"))-2
+        # 合约 sheet: row1=remark, row2=header, row3+=data
+        nrows_formula = (
+            f'=ROWS(INDIRECT("\'"&'
+            f'{_col_letter(2)}{row}'
+            f'&"\'!A:A"))-2'
+        )
+        sw_out.cell(row, SW_NROWS_COL, nrows_formula).fill = FORMULA_FILL
 
-        # ---- _ref_str（Python 写入的文本字符串，如 'a2405'!A3:U14027）----
-        # 对 INDIRECT 来说，这是纯文本值，不需要先求值公式
-        ref_str = f"'{inst}'!A3:U{sheet_rows.get(inst, 0) + 2}"
-        sw_out.cell(row, SW_REF_STR_COL, ref_str).fill = FORMULA_FILL
+        # ---- _ref_str（Excel 公式拼接引用字符串，如 'a2405'!A3:U14027）----
+        # ="'"&B{row}&"'!A3:U"&K{row}+2
+        ref_formula = (
+            f'="\'"&'
+            f'{_col_letter(2)}{row}'
+            f'&"\'!A3:U"&'
+            f'{_col_letter(SW_NROWS_COL)}{row}+2'
+        )
+        sw_out.cell(row, SW_REF_STR_COL, ref_formula).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
     # Sheet 2: MAIN (单公式 REDUCE+HSTACK+VSTACK — 13列数据+mul+add，无硬编码)
