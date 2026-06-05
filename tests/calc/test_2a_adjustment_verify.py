@@ -191,7 +191,7 @@ def _date_key(value) -> str:
     return str(value)[:10]
 
 
-def _segment_row_count(ws, start_date, end_date) -> int:
+def _segment_row_count(ws, start_date, end_date, *, is_last_segment: bool = False) -> int:
     start_key = _date_key(start_date)
     end_key = _date_key(end_date)
     start_row = None
@@ -203,7 +203,9 @@ def _segment_row_count(ws, start_date, end_date) -> int:
         key = _date_key(value)
         if start_row is None and key == start_key:
             start_row = row
-        if key == end_key:
+        if is_last_segment:
+            end_row = row
+        elif key == end_key:
             end_row = row
     if start_row is None or end_row is None or end_row < start_row:
         return 0
@@ -351,7 +353,7 @@ def process_product(prod_xlsx: Path) -> None:
         '切换记录 + 前复权因子计算（最新合约=1，历史数据反向累积）\n'
         '辅助列全部为 Excel 公式，不硬编码合约 sheet 行号\n'
         '_start_row: MATCH(start_date)，取主力区间起始交易日第一条分钟行\n'
-        '_end_row: LOOKUP(end_date)，取主力区间终止交易日最后一条分钟行\n'
+        '_end_row: LOOKUP(end_date)，最后一个主力区间取当前合约实际末行\n'
         '_next_pre_main_row: 下一合约 start_row - 1，即新合约变成主力前一行\n'
         '_cur_close:  INDEX(本合约 close, _end_row)\n'
         '_next_close: INDEX(下一合约 close, _next_pre_main_row)\n'
@@ -558,9 +560,11 @@ def process_product(prod_xlsx: Path) -> None:
     main_ws.cell(3, 1, f'=DROP({base_formula},1)').fill = FORMULA_FILL
 
     total_rows = 0
-    for inst, _td, _wc, sd, ed in switches:
+    for i, (inst, _td, _wc, sd, ed) in enumerate(switches):
         if inst in wb.sheetnames:
-            total_rows += _segment_row_count(wb[inst], sd, ed)
+            total_rows += _segment_row_count(
+                wb[inst], sd, ed, is_last_segment=(i == len(switches) - 1)
+            )
     if total_rows == 0:
         total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
 
@@ -766,7 +770,6 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
 
         # --- 5. A2/A3 单公式动态数组 ---
         last_row = 2 + total_data_rows
-        safe_ref_end = last_row + 1
         last_col_letter = _col_letter(main_ncols)
 
         for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
@@ -784,7 +787,7 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
                     f_el.set(
                         'ref',
                         f'A2:{last_col_letter}2' if cell_ref == 'A2'
-                        else f'A3:{last_col_letter}{safe_ref_end}',
+                        else f'A3:{last_col_letter}{last_row}',
                     )
                     c.set('cm', '1')
                 if cell_ref == 'A3':
@@ -812,7 +815,7 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
 
     print(
         f'  🔧 Patched MAIN!A2/A3: dynamic arrays A2:{last_col_letter}2 '
-        f'and A3:{last_col_letter}{safe_ref_end} + col styles'
+        f'and A3:{last_col_letter}{last_row} + col styles'
     )
 
 
