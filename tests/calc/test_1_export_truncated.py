@@ -19,7 +19,9 @@ Output: data/test/test_1/{prod}/{prod}.xlsx
 """
 
 import json
+import os
 import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -34,6 +36,8 @@ from tests.calc import (
     WINDOW_ROWS, WIND_EXCH_TO_MIN_EXCH,
     HEADER_FILL, REMARK_FILL, REMARK_FONT, COMMENT_FONT,
 )
+
+DEFAULT_WORKERS = min(4, os.cpu_count() or 1)
 
 
 # ================================================
@@ -410,6 +414,69 @@ def _export_product(
     return output_path
 
 
+def _manifest_entry_from_switches(
+    wind_exch: str,
+    min_exch: str,
+    switches: pd.DataFrame,
+    out_path: Path | None = None,
+    error: str | None = None,
+) -> dict:
+    if error is not None:
+        return {
+            'wind_exch': wind_exch,
+            'min_exch': min_exch,
+            'switch_count': len(switches) if isinstance(switches, pd.DataFrame) else 0,
+            'error': error,
+        }
+
+    inst_last = {}
+    for _, sw_row in switches.iterrows():
+        inst = sw_row['instrument_id']
+        sd = sw_row['STARTDATE'].date()
+        if inst not in inst_last or sd > inst_last[inst]:
+            inst_last[inst] = sd
+    sorted_insts = sorted(inst_last.keys(), key=lambda x: inst_last[x], reverse=True)
+    sheet_list = [{'instrument': inst, 'last_switch': inst_last[inst].isoformat()}
+                  for inst in sorted_insts]
+
+    return {
+        'wind_exch': wind_exch,
+        'min_exch': min_exch,
+        'switch_count': len(switches),
+        'file': out_path.name if out_path is not None else None,
+        'sheets': sheet_list,
+    }
+
+
+def _process_product_worker(pinfo: dict) -> tuple[str, dict, list[str]]:
+    prod = pinfo['prod']
+    wind_exch = pinfo['wind_exch']
+    min_exch = pinfo['min_exch']
+    data_start = pinfo['data_start']
+    data_end = pinfo['data_end']
+    logs = [f"Processing {prod} ({wind_exch})..."]
+
+    switches = pd.DataFrame()
+    try:
+        switches = _load_wind_mapping(prod, wind_exch, data_start, data_end)
+        logs.append(f"  Switches: {len(switches)}")
+
+        inst_to_fname = _find_min_files(prod, min_exch)
+        logs.append(f"  Min files: {len(inst_to_fname)}")
+
+        out_path = _export_product(
+            prod, wind_exch, min_exch, switches, inst_to_fname,
+            TEST_1_DIR, data_start, data_end,
+        )
+        logs.append(f"  -> {out_path.name}")
+        return prod, _manifest_entry_from_switches(wind_exch, min_exch, switches, out_path), logs
+    except Exception as exc:
+        logs.append(f"  ERROR: {exc}")
+        return prod, _manifest_entry_from_switches(
+            wind_exch, min_exch, switches, error=str(exc)
+        ), logs
+
+
 # ================================================
 # 主流程
 # ================================================
@@ -432,60 +499,27 @@ def main():
     print(f"[test_1] Cleaned {TEST_1_DIR}")
 
     manifest = {}
-    for pinfo in products:
-        prod = pinfo['prod']
-        wind_exch = pinfo['wind_exch']
-        min_exch = pinfo['min_exch']
-        data_start = pinfo['data_start']
-        data_end = pinfo['data_end']
+    workers = int(os.environ.get('TEST_1_WORKERS', DEFAULT_WORKERS))
+    workers = max(1, min(workers, len(products)))
+    print(f"[test_1] Workers: {workers}")
 
-        print(f"\n{'='*60}")
-        print(f"Processing {prod} ({wind_exch})...")
-
-        # 从 wind_mapping 读取切换记录
-        switches = _load_wind_mapping(prod, wind_exch, data_start, data_end)
-        print(f"  Switches: {len(switches)}")
-
-        # 查找分钟文件
-        inst_to_fname = _find_min_files(prod, min_exch)
-        print(f"  Min files: {len(inst_to_fname)}")
-
-        output_dir = TEST_1_DIR
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            out_path = _export_product(
-                prod, wind_exch, min_exch, switches, inst_to_fname,
-                output_dir, data_start, data_end,
-            )
-
-            # 收集 sheet 信息
-            inst_last = {}
-            for _, sw_row in switches.iterrows():
-                inst = sw_row['instrument_id']
-                sd = sw_row['STARTDATE'].date()
-                if inst not in inst_last or sd > inst_last[inst]:
-                    inst_last[inst] = sd
-            sorted_insts = sorted(inst_last.keys(), key=lambda x: inst_last[x], reverse=True)
-            sheet_list = [{'instrument': inst, 'last_switch': inst_last[inst].isoformat()}
-                          for inst in sorted_insts]
-
-            manifest[prod] = {
-                'wind_exch': wind_exch,
-                'min_exch': min_exch,
-                'switch_count': len(switches),
-                'file': out_path.name,
-                'sheets': sheet_list,
-            }
-            print(f"  -> {out_path.name}")
-        except Exception as e:
-            print(f"  ERROR: {e}")
-            manifest[prod] = {
-                'wind_exch': wind_exch,
-                'min_exch': min_exch,
-                'switch_count': len(switches) if isinstance(switches, pd.DataFrame) else 0,
-                'error': str(e),
-            }
+    if workers == 1:
+        for pinfo in products:
+            print(f"\n{'='*60}")
+            prod, entry, logs = _process_product_worker(pinfo)
+            for line in logs:
+                print(line)
+            manifest[prod] = entry
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_process_product_worker, pinfo): pinfo['prod']
+                       for pinfo in products}
+            for fut in as_completed(futures):
+                print(f"\n{'='*60}")
+                prod, entry, logs = fut.result()
+                for line in logs:
+                    print(line)
+                manifest[prod] = entry
 
     # 写 manifest
     manifest_path = TEST_1_DIR / '_manifest.json'
