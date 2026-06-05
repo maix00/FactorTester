@@ -189,6 +189,81 @@ def _find_min_files(prod: str, min_exch: str) -> dict[str, str]:
 
 
 # ================================================
+# 分钟数据截取 helpers
+# ================================================
+
+def _normalize_trading_day(values: pd.Series) -> pd.Series:
+    """Normalize trading_day to midnight timestamps without using trade_time."""
+    if pd.api.types.is_numeric_dtype(values):
+        parsed = pd.to_datetime(values.astype('Int64').astype(str), format='%Y%m%d', errors='coerce')
+    else:
+        parsed = pd.to_datetime(values, errors='coerce')
+    return parsed.dt.normalize()
+
+
+def _read_min_index(parquet_path: Path) -> pd.DataFrame:
+    """Read only the columns needed to locate row windows."""
+    df_idx = pd.read_parquet(parquet_path, columns=['trading_day', 'trade_time'])
+    df_idx['trade_time'] = pd.to_datetime(df_idx['trade_time'])
+    return df_idx.sort_values('trade_time').reset_index(drop=True)
+
+
+def _select_window_rows(
+    df_idx: pd.DataFrame,
+    intervals: list[tuple[pd.Timestamp, pd.Timestamp]],
+) -> tuple[pd.Series, list[tuple[int, int]]]:
+    """Return a boolean mask over df_idx for主力区间前后 WINDOW_ROWS 行."""
+    day_series = _normalize_trading_day(df_idx['trading_day'])
+    mask = pd.Series(False, index=df_idx.index)
+    selected_ranges: list[tuple[int, int]] = []
+
+    for start_dt, end_dt in intervals:
+        start_day = pd.Timestamp(start_dt).normalize()
+        end_day = pd.Timestamp(end_dt).normalize()
+        interval_pos = day_series[(day_series >= start_day) & (day_series <= end_day)].index
+        if len(interval_pos) == 0:
+            print(f"  [WARN] no rows for {start_day.date()} ~ {end_day.date()}")
+            continue
+        start_idx = max(int(interval_pos[0]) - WINDOW_ROWS, 0)
+        end_idx = min(int(interval_pos[-1]) + WINDOW_ROWS, len(df_idx) - 1)
+        mask.iloc[start_idx:end_idx + 1] = True
+        selected_ranges.append((start_idx, end_idx))
+
+    return mask, selected_ranges
+
+
+def _read_selected_min_rows(parquet_path: Path, df_idx: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
+    """Read only selected trading days when possible, then keep exact selected rows."""
+    selected_idx = df_idx.loc[mask, ['trading_day', 'trade_time']]
+    if selected_idx.empty:
+        return pd.DataFrame()
+
+    selected_days = selected_idx['trading_day'].dropna().drop_duplicates().tolist()
+    selected_times = pd.to_datetime(selected_idx['trade_time'])
+
+    try:
+        dfm = pd.read_parquet(parquet_path, filters=[('trading_day', 'in', selected_days)])
+    except Exception:
+        # Some parquet engines/files cannot apply filters for this dtype; keep correctness.
+        dfm = pd.read_parquet(parquet_path)
+
+    dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
+    dfm = dfm[dfm['trade_time'].isin(selected_times)].copy()
+    return dfm.sort_values('trade_time').reset_index(drop=True)
+
+
+def _append_dataframe_rows(ws, df: pd.DataFrame) -> None:
+    """Append DataFrame rows to an openpyxl sheet with minimal per-cell work."""
+    df_out = df.copy()
+    if 'trading_day' in df_out.columns:
+        trading_day = df_out['trading_day']
+        if pd.api.types.is_datetime64_any_dtype(trading_day):
+            df_out['trading_day'] = trading_day.dt.date
+    for row in dataframe_to_rows(df_out, index=False, header=False):
+        ws.append(row)
+
+
+# ================================================
 # 导出单个品种
 # ================================================
 
@@ -281,29 +356,18 @@ def _export_product(
             print(f"  [WARN] Missing min file for {inst}, skipping")
             continue
 
-        dfm = pd.read_parquet(MIN_DATA_DIR / fn)
-        dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
-        dfm = dfm.sort_values('trade_time').reset_index(drop=True)
-        if 'trading_day' not in dfm.columns:
+        parquet_path = MIN_DATA_DIR / fn
+        try:
+            df_idx = _read_min_index(parquet_path)
+        except Exception as exc:
+            print(f"  [WARN] Cannot read index columns for {inst}: {exc}")
+            continue
+        if 'trading_day' not in df_idx.columns:
             print(f"  [WARN] {inst} has no trading_day column, skipping")
             continue
-        day_series = pd.to_datetime(dfm['trading_day']).dt.normalize()
 
-        mask = pd.Series(False, index=dfm.index)
-        selected_ranges: list[tuple[int, int]] = []
-        for start_dt, end_dt in inst_intervals[inst]:
-            start_day = pd.Timestamp(start_dt).normalize()
-            end_day = pd.Timestamp(end_dt).normalize()
-            interval_pos = day_series[(day_series >= start_day) & (day_series <= end_day)].index
-            if len(interval_pos) == 0:
-                print(f"  [WARN] {inst} has no rows for {start_day.date()} ~ {end_day.date()}")
-                continue
-            start_idx = max(int(interval_pos[0]) - WINDOW_ROWS, 0)
-            end_idx = min(int(interval_pos[-1]) + WINDOW_ROWS, len(dfm) - 1)
-            mask.iloc[start_idx:end_idx + 1] = True
-            selected_ranges.append((start_idx, end_idx))
-        df_win = dfm.loc[mask].copy()
-        df_win = df_win.reset_index(drop=True)
+        mask, selected_ranges = _select_window_rows(df_idx, inst_intervals[inst])
+        df_win = _read_selected_min_rows(parquet_path, df_idx, mask)
 
         if len(df_win) == 0:
             print(f"  [SKIP] {inst} has 0 rows in selected row windows")
@@ -318,7 +382,7 @@ def _export_product(
 
         # 注释行
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cols))
-        inst_comment = (f"数据来源: {MIN_DATA_DIR / fn}\n"
+        inst_comment = (f"数据来源: {parquet_path}\n"
                         f"合约: {inst} (品种: {prod})\n"
                         f"截取口径: 每个主力区间前后各保留 {WINDOW_ROWS} 行分钟数据\n"
                         f"主力区间数: {len(inst_intervals[inst])}；选中原始行区间: {selected_ranges}")
@@ -335,12 +399,7 @@ def _export_product(
             c.font = REMARK_FONT
 
         # 数据
-        for ri, (_, drow) in enumerate(df_win.iterrows(), 3):
-            for ci, col_name in enumerate(cols, 1):
-                val = drow[col_name]
-                if col_name == 'trading_day' and hasattr(val, 'date'):
-                    val = val.date()
-                ws.cell(row=ri, column=ci, value=val)
+        _append_dataframe_rows(ws, df_win)
 
         exported_count += 1
         first_ts = df_win['trade_time'].min().strftime('%Y-%m-%d %H:%M:%S')
