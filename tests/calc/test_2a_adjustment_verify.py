@@ -14,7 +14,7 @@ test_2a_adjustment_verify.py
 
 _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
   _start_row:  当前合约 start_date 对应的第一条分钟行
-  _end_row:    当前合约 end_date 对应的最后一条分钟行
+  _end_row:    当前合约 end_date 对应的最后一条分钟行；最后一段取当前合约实际末行
   _data_cols:  合约 sheet row 2 中最后一个非空表头所在列号
   _data_last_col: 合约数据最后一列列字母，用于拼 ref_str
   _close_col:  通过 row 2 表头 MATCH("close_price") 得到 close 列号
@@ -125,7 +125,7 @@ DATA_START_ROW = 3   # 数据从第3行开始 (1=remark, 2=header)
 #
 # 定位一律使用合约 sheet A 列 trading_day；不要用 B 列 trade_time 推导日期。
 # _start_row (N):         Excel 公式 — start_date 在合约 sheet A 列中的第一条分钟行
-# _end_row (O):           Excel 公式 — end_date 在合约 sheet A 列中的最后一条分钟行
+# _end_row (O):           Excel 公式 — end_date 在合约 sheet A 列中的最后一条分钟行，最后一段取合约实际末行
 # _next_pre_main_row (Q): Excel 公式 — 下一合约 start_row - 1
 # _segment_rows (K):      Excel 公式 =O3-N3+1 — 主力期间分钟行数
 # _ref_rows (L):          Excel 公式 =N3&":"&O3 — 主力期间起止行
@@ -419,14 +419,19 @@ def process_product(prod_xlsx: Path) -> None:
 
         # ---- _start_row / _end_row / next helper rows（全部 Excel 公式）----
         # 定位一律使用合约 sheet A 列 trading_day。
-        # start_row = start_date 当天第一条分钟行；end_row = end_date 当天最后一条分钟行。
+        # start_row = start_date 当天第一条分钟行。
+        # end_row = end_date 当天最后一条分钟行；最后一个主力区间没有下一段，取当前合约实际末行。
         sw_out.cell(
             row, SW_START_ROW_COL,
             f'=MATCH({cur_d},{cur_td_ref},0)'
         ).fill = FORMULA_FILL
         sw_out.cell(
             row, SW_END_ROW_COL,
-            f'=LOOKUP(2,1/({cur_td_ref}={cur_e}),ROW({cur_td_ref}))'
+            (
+                f'=IF({last_row_formula},'
+                f'LOOKUP(2,1/({cur_td_ref}<>""),ROW({cur_td_ref})),'
+                f'LOOKUP(2,1/({cur_td_ref}={cur_e}),ROW({cur_td_ref})))'
+            )
         ).fill = FORMULA_FILL
 
         if i == len(switches) - 1:
