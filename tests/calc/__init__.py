@@ -1,31 +1,13 @@
 """
-tests/calc 包初始化 — 统一管理 test 数据路径与数据源。
+tests/calc 包初始化。
 
-================================================================
-🚫 数据源白名单（Agent 和 Human 都必须遵守）
-================================================================
-本包所有脚本只允许使用以下两个数据源路径：
+职责边界：
+1. 集中声明 calc 测试允许读取的数据源路径。
+2. 集中声明 calc 测试输出目录。
+3. 提供跨测试共用的轻量配置与 Excel 样式常量。
 
-  1. WIND_MAPPING_PATH  — Wind 主力合约映射表 (wind_mapping.parquet)
-  2. MIN_DATA_DIR        — 分钟行情数据目录 (data_mink_product/)
-
-❌ 禁止引入任何其他数据源路径，包括但不限于：
-   · main_dayk / main_mink（test_2a 若需主连数据，单独在脚本内声明）
-   · 任何 CSV / Parquet / SQLite 数据目录
-   · 任何通过 scripts/ 间接引入的外部数据
-
-如确需新增数据源，必须：
-  1. 先更新本文件的白名单
-  2. 在 _DATA_SOURCES_DOC 中补充说明
-  3. 提交时在 commit message 中注明新增理由
-
-================================================================
-路径集中管理
-================================================================
-所有 test 脚本的路径配置集中于此，避免各自重复定义。
-test_0 / test_1 / test_2a 等脚本通过 `from tests.calc import ...` 使用。
-
-================================================================
+本文件不记录单个测试脚本的实现细节；例如 test_2a 的动态数组、
+XML patch、WPS 显示兼容等说明，应留在 test_2a 脚本自身。
 """
 
 from pathlib import Path
@@ -38,11 +20,12 @@ from scripts.data_dir import DATA_DIR as _ROOT_DATA_DIR
 # 数据源路径（只读）
 # ============================================================
 
-# Wind 主力合约映射表
+# 核心计算输入：test_0 / test_1 / test_2a 只能从这些源推导结果。
 WIND_MAPPING_PATH = Path(_ROOT_DATA_DIR) / 'wind_mapping.parquet'
-
-# 分钟行情数据目录
 MIN_DATA_DIR = Path(_ROOT_DATA_DIR) / 'data_mink_product'
+
+# 对账输入：只允许 test_2b 用于校验 test_2a 的 MAIN 结果，不允许 test_2a 读取。
+MAIN_MINK_DIR = Path(_ROOT_DATA_DIR) / 'main_mink'
 
 # ============================================================
 # Test 输出路径
@@ -55,28 +38,6 @@ TEST_0_PRODUCTS_XLSX = TEST_0_DIR / '_products.xlsx'
 # test_1: 截断数据导出（每个品种一个 Excel，直接放在此目录下）
 TEST_1_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_1'
 
-# test_2a: Excel 公式复权验证
-#   === Excel 动态数组溢出 + 列格式关键技术（test_2a 已验证）===
-#   1. 多列溢出方案：
-#      - 每列独立 CHOOSECOLS(单一 REDUCE+HSTACK, col_N) 动态数组公式
-#      - REDUCE 共享子表达式，23 个 CHOOSECOLS 各取一列
-#      - 优势：每列独立 s=（样式索引），日期列可单独设置日期格式
-#   2. WPS 动态数组溢出格式继承规则：
-#      - <col style="xfId"> → 溢出行继承列样式 ✅
-#      - <col numFmtId="164"> → 溢出行不继承 ❌（WPS 忽略）
-#      - 公式行自身的 s= → 覆盖 <col style>
-#   3. 日期格式方案（两管齐下）：
-#      a) XML 注入 <cols><col style="xfId"/>：溢出行获得日期格式
-#      b) 公式行 cell s=：公式行（row 3）获得日期格式
-#      c) xfId → numFmtId 映射：从 styles.xml 的 cellXfs 中查找
-#   4. openpyxl 限制：
-#      - ColumnDimension.number_format 写入后无 numFmtId（WPS 不认）
-#      - ColumnDimension.style 无 setter，无法直接赋值
-#      - 结论：必须用 XML 后处理（zipfile + ElementTree）
-#   5. 前复权方向（test_2a 使用前复权）：
-#      - 最新合约 adj_mul = 1，向前反向累积
-#      - adjustment_mul[i] = _cur_close[i] / _next_close * _next_adj
-#      - 历史数据被压缩到最新价格水平
 TEST_2A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2a'
 
 # test_2b / test_2c (预留给后续)
@@ -89,20 +50,23 @@ TEST_2C_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2c'
 
 WINDOW_ROWS = 1  # test_1 合约数据主力区间前后额外保留的分钟行数
 
-# wind_mapping 交易所 → 分钟文件 交易所
 # 数据源文档说明（供 agent 和 human 查阅）
 _DATA_SOURCES_DOC = f"""
 === calc 包数据源白名单 ===
+核心计算输入（test_0 / test_1 / test_2a）:
 1. WIND_MAPPING_PATH = \"{WIND_MAPPING_PATH}\"
    → Wind 主力合约映射表，字段: S_INFO_WINDCODE, FS_MAPPING_WINDCODE, STARTDATE, ENDDATE
 2. MIN_DATA_DIR = \"{MIN_DATA_DIR}\"
    → 分钟行情数据，文件命名: {{交易所}}|F|{{品种}}|{{合约}}.parquet
 
-禁止使用其他数据源（main_dayk, main_mink, 自定义CSV等）。
+对账输入（仅 test_2b）:
+3. MAIN_MINK_DIR = \"{MAIN_MINK_DIR}\"
+   → 已生成的分钟主力连续序列，只允许用于和 test_2a 的 MAIN 做结果对账。
+
+禁止使用其他数据源（main_dayk, 自定义CSV/Parquet/SQLite等）。
 """
 
-# --- 交易所映射 ---
-
+# wind_mapping 交易所 → 分钟文件 交易所
 WIND_EXCH_TO_MIN_EXCH: dict[str, str] = {
     'SHF': 'SHFE',
     'DCE': 'DCE',
