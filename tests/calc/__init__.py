@@ -87,7 +87,7 @@ TEST_2C_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2c'
 # 全局配置
 # ============================================================
 
-WINDOW_DAYS = 2  # test_1 合约数据 ± 天数
+WINDOW_ROWS = 1  # test_1 合约数据主力区间前后额外保留的分钟行数
 
 # wind_mapping 交易所 → 分钟文件 交易所
 # 数据源文档说明（供 agent 和 human 查阅）

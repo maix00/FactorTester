@@ -7,7 +7,7 @@ test_1_export_truncated.py
 每个品种 → 一个 Excel 文件：data/test/test_1/{prod}/{prod}.xlsx
   Sheet _SWITCHES: 从 wind_mapping 直接复制该品种在时间段内的主力切换记录
     含注释行说明数据来源
-  Sheet {instrument_id}: 每个涉及的合约，在其涉及时间范围 ±2 天的分钟数据
+  Sheet {instrument_id}: 每个涉及的合约，在其主力区间前后各保留 WINDOW_ROWS 行分钟数据
     按最近切换日期降序排列
 
 数据源：
@@ -20,18 +20,18 @@ Output: data/test/test_1/{prod}/{prod}.xlsx
 
 import json
 import shutil
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 from tests.calc import (
     WIND_MAPPING_PATH, MIN_DATA_DIR, TEST_0_PRODUCTS_XLSX, TEST_1_DIR,
-    WINDOW_DAYS, WIND_EXCH_TO_MIN_EXCH,
+    WINDOW_ROWS, WIND_EXCH_TO_MIN_EXCH,
     HEADER_FILL, REMARK_FILL, REMARK_FONT, COMMENT_FONT,
 )
 
@@ -59,6 +59,81 @@ def _load_products_from_test0() -> list[dict]:
             'data_end': pd.Timestamp(row['data_end']),
         })
     return products
+
+
+def validate_test_1_complete() -> tuple[bool, list[str]]:
+    """Check that test_1 has exported every product listed by test_0."""
+    problems: list[str] = []
+
+    products = _load_products_from_test0()
+    expected = {str(p['prod']): p for p in products}
+    if not expected:
+        problems.append('test_0/_SWITCH_COUNTS has no products')
+        return False, problems
+
+    manifest_path = TEST_1_DIR / '_manifest.json'
+    if not manifest_path.exists():
+        problems.append(f'test_1 manifest not found: {manifest_path}')
+        return False, problems
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as exc:
+        problems.append(f'test_1 manifest is invalid JSON: {exc}')
+        return False, problems
+
+    missing_manifest = sorted(set(expected) - set(manifest))
+    if missing_manifest:
+        problems.append(f'missing manifest entries: {", ".join(missing_manifest)}')
+
+    for prod, pinfo in expected.items():
+        entry = manifest.get(prod)
+        if not isinstance(entry, dict):
+            continue
+        if 'error' in entry:
+            problems.append(f'{prod}: manifest has error: {entry["error"]}')
+            continue
+        file_name = entry.get('file') or f'{prod}.xlsx'
+        xlsx_path = TEST_1_DIR / file_name
+        if not xlsx_path.exists():
+            problems.append(f'{prod}: xlsx not found: {xlsx_path}')
+            continue
+
+        try:
+            wb = load_workbook(xlsx_path, read_only=True, data_only=True)
+            if '_SWITCHES' not in wb.sheetnames:
+                problems.append(f'{prod}: missing _SWITCHES sheet')
+                wb.close()
+                continue
+
+            ws = wb['_SWITCHES']
+            switch_rows = max(ws.max_row - 2, 0)
+            expected_switches = int(pinfo['switch_count'])
+            if switch_rows != expected_switches:
+                problems.append(
+                    f'{prod}: _SWITCHES rows {switch_rows}, expected {expected_switches}'
+                )
+
+            contract_sheets = {sn for sn in wb.sheetnames if sn != '_SWITCHES'}
+            listed_sheets = {
+                str(s.get('instrument'))
+                for s in entry.get('sheets', [])
+                if isinstance(s, dict) and s.get('instrument')
+            }
+            if listed_sheets and contract_sheets != listed_sheets:
+                missing = sorted(listed_sheets - contract_sheets)
+                extra = sorted(contract_sheets - listed_sheets)
+                if missing:
+                    problems.append(f'{prod}: missing contract sheets: {", ".join(missing)}')
+                if extra:
+                    problems.append(f'{prod}: unexpected contract sheets: {", ".join(extra)}')
+            if not contract_sheets:
+                problems.append(f'{prod}: no contract sheets exported')
+            wb.close()
+        except Exception as exc:
+            problems.append(f'{prod}: cannot inspect workbook: {exc}')
+
+    return not problems, problems
 
 
 # ================================================
@@ -129,7 +204,7 @@ def _export_product(
 ) -> Path:
     """为一个品种导出 Excel：
     Sheet _SWITCHES: wind_mapping 切换记录
-    Sheet {inst}: 每个合约 ±WINDOW_DAYS 的分钟数据
+    Sheet {inst}: 每个合约主力区间前后各保留 WINDOW_ROWS 行分钟数据
     """
     output_path = output_dir / f'{prod}.xlsx'
 
@@ -181,21 +256,12 @@ def _export_product(
         ws_sw.column_dimensions[get_column_letter(ci)].width = 18
 
     # ================================================
-    # 合约 sheets: ±WINDOW_DAYS 的分钟数据
+    # 合约 sheets: 主力区间 ±WINDOW_ROWS 行分钟数据
     # ================================================
-    # 对每个 instrument_id 取最大时间跨度（±WINDOW_DAYS）
-    inst_spans: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
+    inst_intervals: dict[str, list[tuple[pd.Timestamp, pd.Timestamp]]] = {}
     for _, sw_row in switches.iterrows():
         inst = sw_row['instrument_id']
-        start_dt = sw_row['STARTDATE']
-        end_dt = sw_row['ENDDATE']
-        start = start_dt - timedelta(days=WINDOW_DAYS)
-        end = end_dt + timedelta(days=WINDOW_DAYS)
-        if inst not in inst_spans:
-            inst_spans[inst] = (start, end)
-        else:
-            prev_start, prev_end = inst_spans[inst]
-            inst_spans[inst] = (min(prev_start, start), max(prev_end, end))
+        inst_intervals.setdefault(inst, []).append((sw_row['STARTDATE'], sw_row['ENDDATE']))
 
     # 找每个合约最近一次切换日用于排序
     inst_last_switch: dict[str, date] = {}
@@ -206,7 +272,7 @@ def _export_product(
             inst_last_switch[inst] = sd
 
     # 按最近切换日期降序，导出全部合约
-    sorted_insts = sorted(inst_spans.keys(), key=lambda x: inst_last_switch[x], reverse=True)
+    sorted_insts = sorted(inst_intervals.keys(), key=lambda x: inst_last_switch[x], reverse=True)
     exported_count = 0
 
     for inst in sorted_insts:
@@ -215,18 +281,32 @@ def _export_product(
             print(f"  [WARN] Missing min file for {inst}, skipping")
             continue
 
-        start_ts, end_ts = inst_spans[inst]
-        # end 扩展到当天结束
-        end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-
         dfm = pd.read_parquet(MIN_DATA_DIR / fn)
         dfm['trade_time'] = pd.to_datetime(dfm['trade_time'])
-        mask = (dfm['trade_time'] >= start_ts) & (dfm['trade_time'] <= end_ts)
+        dfm = dfm.sort_values('trade_time').reset_index(drop=True)
+        if 'trading_day' not in dfm.columns:
+            print(f"  [WARN] {inst} has no trading_day column, skipping")
+            continue
+        day_series = pd.to_datetime(dfm['trading_day']).dt.normalize()
+
+        mask = pd.Series(False, index=dfm.index)
+        selected_ranges: list[tuple[int, int]] = []
+        for start_dt, end_dt in inst_intervals[inst]:
+            start_day = pd.Timestamp(start_dt).normalize()
+            end_day = pd.Timestamp(end_dt).normalize()
+            interval_pos = day_series[(day_series >= start_day) & (day_series <= end_day)].index
+            if len(interval_pos) == 0:
+                print(f"  [WARN] {inst} has no rows for {start_day.date()} ~ {end_day.date()}")
+                continue
+            start_idx = max(int(interval_pos[0]) - WINDOW_ROWS, 0)
+            end_idx = min(int(interval_pos[-1]) + WINDOW_ROWS, len(dfm) - 1)
+            mask.iloc[start_idx:end_idx + 1] = True
+            selected_ranges.append((start_idx, end_idx))
         df_win = dfm.loc[mask].copy()
-        df_win = df_win.sort_values('trade_time').reset_index(drop=True)
+        df_win = df_win.reset_index(drop=True)
 
         if len(df_win) == 0:
-            print(f"  [SKIP] {inst} has 0 rows in merged span")
+            print(f"  [SKIP] {inst} has 0 rows in selected row windows")
             continue
 
         # 全量导出 data_mink_product 的所有列
@@ -240,9 +320,8 @@ def _export_product(
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cols))
         inst_comment = (f"数据来源: {MIN_DATA_DIR / fn}\n"
                         f"合约: {inst} (品种: {prod})\n"
-                        f"时间范围: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} "
-                        f"(±{WINDOW_DAYS}天 于切换区间 {inst_spans[inst][0].strftime('%Y-%m-%d')} ~ "
-                        f"{(inst_spans[inst][1]).strftime('%Y-%m-%d')})")
+                        f"截取口径: 每个主力区间前后各保留 {WINDOW_ROWS} 行分钟数据\n"
+                        f"主力区间数: {len(inst_intervals[inst])}；选中原始行区间: {selected_ranges}")
         c = ws.cell(row=1, column=1, value=inst_comment)
         c.fill = REMARK_FILL
         c.font = COMMENT_FONT
@@ -264,9 +343,9 @@ def _export_product(
                 ws.cell(row=ri, column=ci, value=val)
 
         exported_count += 1
-        span_start = start_ts.strftime('%Y-%m-%d')
-        span_end = end_ts.strftime('%Y-%m-%d')
-        print(f"  [{exported_count}] {inst}: {len(df_win)} rows ({span_start} ~ {span_end})")
+        first_ts = df_win['trade_time'].min().strftime('%Y-%m-%d %H:%M:%S')
+        last_ts = df_win['trade_time'].max().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"  [{exported_count}] {inst}: {len(df_win)} rows ({first_ts} ~ {last_ts})")
 
     wb.save(output_path)
     return output_path
