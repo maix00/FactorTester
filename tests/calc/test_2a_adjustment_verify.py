@@ -3,11 +3,12 @@ test_2a_adjustment_verify.py
 -----------------------------
 纯 Excel 公式版本 — REDUCE + VSTACK 动态拼接主力连续序列。
 
-方案：
-1. 从 test_1 复制合约 sheet 数据到 test_2a xlsx（同文件内）
-2. _SWITCHES 用 INDIRECT 动态引用合约 sheet（不硬编码 sheet 名）
-3. MAIN 用 REDUCE+VSTACK+INDIRECT 数组公式自动拼接所有合约数据行
-   — 不需要 Python for 循环逐行写，不硬编码合约名或行号
+整体方案：
+1. 从 test_1 复制合约 sheet 数据到 test_2a xlsx（同文件内）。
+2. _SWITCHES 用 Excel 公式定位每个主力区间的起止行、复权用收盘价、引用字符串。
+   Python 只写原始切换记录和公式文本，不把辅助计算结果写成固定值。
+3. MAIN 用一个 REDUCE + VSTACK + HSTACK 动态数组公式拼出完整主力连续序列。
+   不用 Python 逐行拼接，也不硬编码合约名、区间行数或合约数量。
 
 🚫 test_1 已经跑好，此脚本不会重新跑 test_1。
 
@@ -21,17 +22,34 @@ _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sh
       前复权：最新合约=1，历史数据反向累积
   adjustment_add: =0
 
-MAIN sheet（三列独立 VSTACK，各自溢出）：
-  A3 = VSTACK(INDIRECT(_SWITCHES!M3), ...)  — 合约 21 列数据（不包 HSTACK）
-  V3 = VSTACK(EXPAND(_SWITCHES!I3,...), ...)  — adjustment_mul
-  W3 = VSTACK(EXPAND(_SWITCHES!J3,...), ...)  — adjustment_add
-  关键洞察：VSTACK 参数包 HSTACK 会导致溢出仅第一个值
+MAIN!A3 的 VSTACK 语义：
+  公式遍历 _SWITCHES!M3:M{last_row} 中的 ref_str。每个 ref_str 形如
+  "'a2405'!A123:U456"，代表某个合约成为主力的那一段 A:U 数据。
+  对每一段：
+    d = INDIRECT(ref) 取得 21 列原始分钟数据
+    m = EXPAND(该行 adjustment_mul, 该行 _segment_rows, 1, adjustment_mul)
+    a = EXPAND(该行 adjustment_add, 该行 _segment_rows, 1, adjustment_add)
+    HSTACK(d, m, a) 得到 23 列
+  REDUCE 从标量 0 开始，把每一段 HSTACK 结果 VSTACK 到 acc 下方，
+  最后 DROP(...,1) 去掉初始标量行。这样 MAIN 只有 A3 一个公式，
+  但会向 A:W 溢出完整连续主力数据。
+
+为什么要 XML 后处理：
+  openpyxl 能写公式文本，但不会把它标成 Excel/WPS 认可的动态数组公式。
+  WPS 打开普通公式时可能自动给其中的引用加 @，把数组语义退化成单值语义。
+  因此保存后需要直接修改 sheet XML：给 MAIN!A3 的 <f> 加 t="array"、
+  ref="A3:W..."、ca="1" 等属性，明确告诉 WPS 这是动态数组溢出公式。
+
+为什么要改 <col style>：
+  动态数组的溢出单元格不是 openpyxl 逐格写出的，普通单元格 number_format
+  不会自然落到所有溢出行。WPS 对列级 <col style="xfId"> 的继承更稳定，
+  所以 XML 后处理会给 MAIN 的日期/时间列写入列样式；A=trading_day 使用
+  yyyy-mm-dd，其他从合约 sheet 读取到的日期/时间格式按列复用。
 
 Output: data/test/test_2a/{prod}.xlsx
 """
 
 import os
-import re
 import shutil
 import tempfile
 import zipfile
@@ -49,13 +67,19 @@ from tests.calc import (
 )
 from tests.calc.test_1_export_truncated import validate_test_1_complete
 
-# --- XML 命名空间 ---
+# ============================================================
+# XML namespaces
+# ============================================================
+
 NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-NS_RELS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 ET.register_namespace('', NS_SHEET)
 ET.register_namespace('r', NS_R)
 
+
+# ============================================================
+# Excel reference helpers
+# ============================================================
 
 def _col_letter(idx: int) -> str:
     return get_column_letter(idx)
@@ -69,6 +93,10 @@ def _col_idx(ref: str) -> int:
         return 0
     return column_index_from_string(m.group(1))
 
+
+# ============================================================
+# Workbook layout constants
+# ============================================================
 
 # test_1 合约 sheet 列布局 (row1=remark, row2=header, row3+=data)
 # 21 列全量: A=trading_day, B=trade_time, C=trade_timestamp, D=exchange_id,
@@ -126,6 +154,10 @@ MAIN_MUL_COL_OFFSET = len(CONTRACT_COLS) + 1  # V=22
 MAIN_ADD_COL_OFFSET = len(CONTRACT_COLS) + 2  # W=23
 
 
+# ============================================================
+# Input workbook helpers
+# ============================================================
+
 def _check_sheets_match(src_path: Path, dst_path: Path) -> bool:
     """Check if dst has the same contract sheets (name/row count) as src.
     Returns True if sheets match → can do in-place update without re-copying."""
@@ -178,6 +210,10 @@ def _segment_row_count(ws, start_date, end_date) -> int:
         return 0
     return end_row - start_row + 1
 
+
+# ============================================================
+# Product workbook generation
+# ============================================================
 
 def process_product(prod_xlsx: Path) -> None:
     prod = prod_xlsx.stem
@@ -512,6 +548,10 @@ def process_product(prod_xlsx: Path) -> None:
     print(f' ✅ ({total_rows} rows, {len(switches)} contracts, {len(contracts_in_order)} in MAIN)')
 
 
+# ============================================================
+# XML style and dynamic-array patching
+# ============================================================
+
 def _read_contract_col_numfmts_from_xml(xlsx_path: Path) -> dict[int, int]:
     """
     从已保存的 xlsx 的 XML 层面读取合约 sheet 的列级 numFmtId。
@@ -730,52 +770,9 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
     print(f'  🔧 Patched MAIN!A3: single dynamic array A3:W{safe_ref_end} + col styles (A=date, rest=datetime)')
 
 
-def _xml_tostring(root):
-    """Serialize XML element to bytes with XML declaration."""
-    return ET.tostring(root, xml_declaration=True, encoding='UTF-8')
-
-
-def _inject_col_formats(sheet_root, col_formats: dict[int, str]):
-    """
-    Inject <cols><col numFmtId="..."/></cols> into sheet XML so that dynamic
-    array spill columns display dates/datetimes correctly.
-
-    Uses only standard Excel numFmtId values that are available in every
-    workbook without needing to modify styles.xml:
-      14 = 'dd/mm/yyyy' (or regional date format)
-      22 = 'dd/mm/yyyy h:mm'
-
-    Note: the exact display format varies by locale.  For zh-CN Excel,
-    numFmtId 14 typically displays as 'yyyy/mm/dd' or 'yyyy-mm-dd'.
-    """
-    cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
-    if cols is None:
-        sheet_data = sheet_root.find(f'{{{NS_SHEET}}}sheetData')
-        cols = ET.Element(f'{{{NS_SHEET}}}cols')
-        if sheet_data is not None:
-            sheet_root.insert(list(sheet_root).index(sheet_data), cols)
-        else:
-            sheet_root.insert(0, cols)
-
-    # Remove any existing <col> for our indices
-    our_indices = set(col_formats.keys())
-    for ec in list(cols.findall(f'{{{NS_SHEET}}}col')):
-        ec_min = int(ec.get('min', '0'))
-        ec_max = int(ec.get('max', '0'))
-        if not our_indices.isdisjoint(range(ec_min, ec_max + 1)):
-            cols.remove(ec)
-
-    for col_idx, fmt in sorted(col_formats.items()):
-        col_el = ET.SubElement(cols, f'{{{NS_SHEET}}}col')
-        col_el.set('min', str(col_idx))
-        col_el.set('max', str(col_idx))
-        col_el.set('customFormat', '1')
-        if 'h:mm' in fmt:
-            col_el.set('numFmtId', '22')
-        else:
-            col_el.set('numFmtId', '14')
-
-
+# ============================================================
+# Entrypoint
+# ============================================================
 
 def main():
     print("test_2a: Excel-formula adjustment verification (INDEX/MATCH, in-file)")
