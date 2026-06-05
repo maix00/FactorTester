@@ -220,6 +220,7 @@ def process_product(prod_xlsx: Path) -> None:
     if not src_path.exists():
         print(f"  ⚠️ test_1 file not found: {src_path.name}, skipping")
         return
+    TEST_2A_DIR.mkdir(parents=True, exist_ok=True)
 
     dst_path = TEST_2A_DIR / f'{prod}.xlsx'
     inplace = _check_sheets_match(src_path, dst_path)
