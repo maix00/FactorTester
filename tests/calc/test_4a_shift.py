@@ -230,32 +230,26 @@ def _shift_1day_formula(last_row: int) -> str:
     )
 
 
-def _compare_spill_formula(nrows: int) -> str:
+def _compare_spill_formulas(nrows: int) -> list[str]:
     price_last_row = DATA_ROW_OFFSET + nrows
     backend_last_row = BACKEND_DATA_START_ROW + nrows - 1
-    return (
-        f'=LET(rows,SEQUENCE({nrows}),tol,$B$2,'
-        f'time,BACKEND!A{BACKEND_DATA_START_ROW}:A{backend_last_row},'
-        f'rb10,BACKEND!B{BACKEND_DATA_START_ROW}:B{backend_last_row},'
-        f'rx10,PRICE!G3:G{price_last_row},'
-        'b10,IF(LEN(rb10&"")=0,"",rb10),x10,IF(LEN(rx10&"")=0,"",rx10),'
-        'e10b,LEN(b10&"")=0,e10x,LEN(x10&"")=0,'
-        'd10,IF(e10b+e10x,"",ABS(b10-x10)),'
-        'ok10,IF(e10b*e10x,"EMPTY",IF(e10b+e10x,"MISSING",IF(d10<=tol,"PASS","FAIL"))),'
-        f'rb5,BACKEND!C{BACKEND_DATA_START_ROW}:C{backend_last_row},'
-        f'rx5,PRICE!H3:H{price_last_row},'
-        'b5,IF(LEN(rb5&"")=0,"",rb5),x5,IF(LEN(rx5&"")=0,"",rx5),'
-        'e5b,LEN(b5&"")=0,e5x,LEN(x5&"")=0,'
-        'd5,IF(e5b+e5x,"",ABS(b5-x5)),'
-        'ok5,IF(e5b*e5x,"EMPTY",IF(e5b+e5x,"MISSING",IF(d5<=tol,"PASS","FAIL"))),'
-        f'rb1,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},'
-        f'rx1,PRICE!I3:I{price_last_row},'
-        'b1,IF(LEN(rb1&"")=0,"",rb1),x1,IF(LEN(rx1&"")=0,"",rx1),'
-        'e1b,LEN(b1&"")=0,e1x,LEN(x1&"")=0,'
-        'd1,IF(e1b+e1x,"",ABS(b1-x1)),'
-        'ok1,IF(e1b*e1x,"EMPTY",IF(e1b+e1x,"MISSING",IF(d1<=tol,"PASS","FAIL"))),'
-        'HSTACK(rows,time,b10,x10,d10,ok10,b5,x5,d5,ok5,b1,x1,d1,ok1))'
-    )
+    compare_last_row = COMPARE_START_ROW + nrows - 1
+    return [
+        f'=SEQUENCE({nrows})',
+        f'=BACKEND!A{BACKEND_DATA_START_ROW}:A{backend_last_row}',
+        f'=LET(r,BACKEND!B{BACKEND_DATA_START_ROW}:B{backend_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(r,PRICE!G3:G{price_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(b,C{COMPARE_START_ROW}:C{compare_last_row},x,D{COMPARE_START_ROW}:D{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
+        f'=LET(b,C{COMPARE_START_ROW}:C{compare_last_row},x,D{COMPARE_START_ROW}:D{compare_last_row},d,E{COMPARE_START_ROW}:E{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
+        f'=LET(r,BACKEND!C{BACKEND_DATA_START_ROW}:C{backend_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(r,PRICE!H3:H{price_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(b,G{COMPARE_START_ROW}:G{compare_last_row},x,H{COMPARE_START_ROW}:H{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
+        f'=LET(b,G{COMPARE_START_ROW}:G{compare_last_row},x,H{COMPARE_START_ROW}:H{compare_last_row},d,I{COMPARE_START_ROW}:I{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
+        f'=LET(r,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(r,PRICE!I3:I{price_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(b,K{COMPARE_START_ROW}:K{compare_last_row},x,L{COMPARE_START_ROW}:L{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
+        f'=LET(b,K{COMPARE_START_ROW}:K{compare_last_row},x,L{COMPARE_START_ROW}:L{compare_last_row},d,M{COMPARE_START_ROW}:M{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +396,7 @@ def _write_compare_sheet(ws, nrows: int) -> None:
                'backend_1day', 'excel_1day', 'diff_1day', 'ok_1day']
     _write_header(ws, headers)
 
-    ws.append([_compare_spill_formula(nrows)])
+    ws.append(_compare_spill_formulas(nrows))
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +470,10 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
     """Mark spill formulas as dynamic array formulas, following test_2a."""
     last_price_row = DATA_ROW_OFFSET + nrows
     last_compare_row = COMPARE_START_ROW + nrows - 1
+    compare_refs = {
+        f'{col}{COMPARE_START_ROW}': f'{col}{COMPARE_START_ROW}:{col}{last_compare_row}'
+        for col in 'ABCDEFGHIJKLMN'
+    }
     refs_by_sheet = {
         PRICE_SHEET: {
             'C3': f'C3:C{last_price_row}',
@@ -484,9 +482,7 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
             'H3': f'H3:H{last_price_row}',
             'I3': f'I3:I{last_price_row}',
         },
-        COMPARE_SHEET: {
-            f'A{COMPARE_START_ROW}': f'A{COMPARE_START_ROW}:N{last_compare_row}',
-        },
+        COMPARE_SHEET: compare_refs,
     }
 
     with zipfile.ZipFile(path, 'r') as zf:
@@ -588,14 +584,16 @@ def test_shift_workbook_for_a_product():
         assert compare_ws.cell(11, 1).value == 'overall'
         assert compare_ws.cell(11, 2).value == '=IF(SUM(B8:D9)=0,"PASS","FAIL")'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'row'
-        compare_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value)
-        assert compare_formula.startswith('=LET(')
-        assert 'HSTACK' in compare_formula
-        assert 'PRICE!G3:G' in compare_formula
-        assert 'PRICE!G3#' not in compare_formula
-        assert 'b10,IF(LEN(rb10&"")=0,"",rb10)' in compare_formula
-        assert 'IF(e10b*e10x,"EMPTY"' in compare_formula
-        assert '$B$2' in compare_formula
+        assert _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value).startswith('=SEQUENCE(')
+        backend_10min_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 3).value)
+        assert 'BACKEND!B3:B' in backend_10min_formula
+        assert 'IF(LEN(r&"")=0,"",r)' in backend_10min_formula
+        excel_10min_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 4).value)
+        assert 'PRICE!G3:G' in excel_10min_formula
+        assert 'PRICE!G3#' not in excel_10min_formula
+        ok_10min_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 6).value)
+        assert 'IF(eb*ex,"EMPTY"' in ok_10min_formula
+        assert '$B$2' in ok_10min_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
         shift_1day_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 9).value)
@@ -619,7 +617,10 @@ def test_shift_workbook_for_a_product():
         }
         compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
         assert _formula_attrs(out_path, COMPARE_SHEET, f'A{COMPARE_START_ROW}') == {
-            'ca': '1', 't': 'array', 'ref': f'A{COMPARE_START_ROW}:N{compare_last_row}'
+            'ca': '1', 't': 'array', 'ref': f'A{COMPARE_START_ROW}:A{compare_last_row}'
+        }
+        assert _formula_attrs(out_path, COMPARE_SHEET, f'N{COMPARE_START_ROW}') == {
+            'ca': '1', 't': 'array', 'ref': f'N{COMPARE_START_ROW}:N{compare_last_row}'
         }
     finally:
         wb.close()
