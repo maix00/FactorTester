@@ -89,3 +89,45 @@ def test_wps_quit_confirms_closed_from_system_events(monkeypatch):
 
     assert wps_compute.wps_quit(timeout=1) is True
     assert calls
+
+
+def test_process_one_skips_already_done_workbook(monkeypatch, tmp_path):
+    called = {'patch': False, 'open': False}
+    path = tmp_path / 'A.xlsx'
+    path.touch()
+
+    monkeypatch.setattr(wps_compute, 'TEST_2A_DIR', tmp_path)
+    monkeypatch.setattr(wps_compute, 'check_done', lambda _path: True)
+    monkeypatch.setattr(wps_compute, 'read_z2', lambda _path: 42)
+
+    def fake_patch(*args, **kwargs):
+        called['patch'] = True
+
+    def fake_open(*args, **kwargs):
+        called['open'] = True
+
+    monkeypatch.setattr(wps_compute, 'patch_flag', fake_patch)
+    monkeypatch.setattr(wps_compute, 'wps_open', fake_open)
+
+    assert wps_compute.process_one('A') is True
+    assert called == {'patch': False, 'open': False}
+
+
+def test_inspect_workbook_reports_done_status(tmp_path):
+    path = tmp_path / 'A.xlsx'
+    _make_test2a_workbook(path)
+
+    wb = load_workbook(path)
+    sw = wb['_SWITCHES']
+    sw['Z1'] = 'DONE'
+    sw['Z2'] = 9
+    wb.save(path)
+    wb.close()
+
+    status = wps_compute.inspect_workbook(path)
+
+    assert status.product == 'A'
+    assert status.done is True
+    assert status.z1 == 'DONE'
+    assert status.z2 == 9
+    assert wps_compute.status_ok(status)

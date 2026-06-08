@@ -7,6 +7,8 @@ test_2c_wps_compute.py — 自动用 WPS Office 打开 test_2a 的 xlsx，
   python tests/calc/test_2c_wps_compute.py              # 处理全部 88 个品种
   python tests/calc/test_2c_wps_compute.py A B C        # 只处理指定品种
   python tests/calc/test_2c_wps_compute.py --wait-scale 2.0  # 保守模式，等 2 倍时间
+  python tests/calc/test_2c_wps_compute.py --force A    # 即使已 DONE 也重跑
+  python tests/calc/test_2c_wps_compute.py --verify-only # 只检查全部品种是否 DONE
 
 流程:
   1. 用 openpyxl(data_only=True) 读取 _SWITCHES!Z1，若已为 "DONE" 则跳过
@@ -21,10 +23,10 @@ test_2c_wps_compute.py — 自动用 WPS Office 打开 test_2a 的 xlsx，
   - 系统偏好设置 → 隐私与安全性 → 辅助功能 → 已授权终端/VS Code
 """
 
-import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -46,6 +48,16 @@ MAX_RETRIES = 20                # 最多重试 20 次（10+5×20 = 110s ≈ 2 mi
 OPEN_SAVE_DELAY = 2             # 打开后尽快保存，但留一点时间让 WPS 建立窗口
 
 FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+
+
+@dataclass(frozen=True)
+class WorkbookStatus:
+    product: str
+    path: Path
+    done: bool
+    z1: str | None
+    z2: int | None
+    error: str | None = None
 
 # ============================================================
 # 工具函数
@@ -130,6 +142,98 @@ def _read_switches_cell(xlsx_path: Path, row: int, col: int) -> str | None:
 def check_done(xlsx_path: Path) -> bool:
     """读取 _SWITCHES!Z1 是否已变为 'DONE'"""
     return read_z1(xlsx_path) == "DONE"
+
+
+def iter_test2a_files(products: list[str] | None = None) -> list[Path]:
+    """返回要处理/校验的 test_2a workbook 列表。"""
+    if products:
+        return [TEST_2A_DIR / f'{prod}.xlsx' for prod in products]
+    return sorted(
+        path for path in TEST_2A_DIR.glob('*.xlsx')
+        if not path.name.startswith('~$') and not path.name.startswith('.')
+    )
+
+
+def inspect_workbook(path: Path) -> WorkbookStatus:
+    """只读检查一个 workbook 的 test_2c 完成状态。"""
+    product = path.stem
+    if not path.exists():
+        return WorkbookStatus(product, path, False, None, None, 'missing file')
+
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+        sw = wb['_SWITCHES']
+        z1_raw = sw['Z1'].value
+        z2_raw = sw['Z2'].value
+        wb.close()
+    except KeyError:
+        return WorkbookStatus(product, path, False, None, None, 'missing _SWITCHES sheet')
+    except Exception as exc:
+        return WorkbookStatus(product, path, False, None, None, f'cannot read workbook: {exc}')
+
+    z1 = str(z1_raw).strip() if z1_raw is not None else None
+    try:
+        z2 = int(z2_raw) if z2_raw is not None else None
+    except (TypeError, ValueError):
+        z2 = None
+    return WorkbookStatus(product, path, z1 == 'DONE', z1, z2)
+
+
+def status_ok(status: WorkbookStatus, require_save_count: bool = True) -> bool:
+    if status.error:
+        return False
+    if not status.done:
+        return False
+    if require_save_count and status.z2 is None:
+        return False
+    return True
+
+
+def status_reason(status: WorkbookStatus, require_save_count: bool = True) -> str:
+    if status.error:
+        return status.error
+    if not status.done:
+        return f'Z1={status.z1!r}, expected DONE'
+    if require_save_count and status.z2 is None:
+        return 'Z2 save counter missing'
+    return 'OK'
+
+
+def verify_products(products: list[str] | None = None, require_save_count: bool = True) -> int:
+    """校验 test_2c 是否已经对所有目标 workbook 完成计算/保存。"""
+    files = iter_test2a_files(products)
+
+    print('test_2c verify: WPS cached calculation status')
+    print('=' * 60)
+    print(f'  Source directory: {TEST_2A_DIR}')
+    print(f'  Products: {len(files)}')
+    print(f'  Require Z2 save counter: {require_save_count}')
+    print()
+
+    if not files:
+        print('No test_2a workbooks found.')
+        return 1
+
+    statuses = [inspect_workbook(path) for path in files]
+    failures = [s for s in statuses if not status_ok(s, require_save_count)]
+
+    for status in statuses:
+        if status_ok(status, require_save_count):
+            print(f'✅ {status.product}: DONE (Z2={status.z2})')
+        else:
+            print(f'❌ {status.product}: {status_reason(status, require_save_count)}')
+
+    print()
+    print(f'Done! {len(statuses) - len(failures)} OK, {len(failures)} errors, {len(statuses)} total')
+
+    if failures:
+        print()
+        print('Not complete:')
+        for status in failures:
+            print(f'  - {status.product}: {status_reason(status, require_save_count)}')
+        return 1
+
+    return 0
 
 
 def wps_open(xlsx_path: str) -> None:
@@ -264,12 +368,17 @@ def kill_wps() -> None:
 
 
 
-def process_one(prod: str, wait_scale: float = 1.0) -> bool:
+def process_one(prod: str, wait_scale: float = 1.0, force: bool = False) -> bool:
     """处理单个品种：patch_flag → WPS 打开 → 轮询保存+Z1 完成"""
     src = TEST_2A_DIR / f'{prod}.xlsx'
     if not src.exists():
         print(f'  ⚠️ {prod}.xlsx not found, skipping')
         return False
+
+    if not force and check_done(src):
+        z2 = read_z2(src)
+        print(f'  ↩ skip, already DONE (Z2={z2})')
+        return True
 
     save_target = next_save_target(src)
 
@@ -330,22 +439,36 @@ def main():
         '--wait-scale', type=float, default=1.5,
         help='等待时间倍率 (default: 1.5, 保守模式 2.0+)'
     )
+    parser.add_argument(
+        '--force', action='store_true',
+        help='即使 _SWITCHES!Z1 已为 DONE，也重新打开 WPS 计算/保存'
+    )
+    parser.add_argument(
+        '--verify-only', action='store_true',
+        help='只检查 _SWITCHES!Z1/Z2 缓存状态，不打开 WPS'
+    )
+    parser.add_argument(
+        '--allow-missing-save-count',
+        action='store_true',
+        help='verify-only 时只要求 Z1 == DONE，不要求 Z2 保存计数'
+    )
     args = parser.parse_args()
+
+    if args.verify_only:
+        sys.exit(verify_products(
+            args.product_codes or None,
+            require_save_count=not args.allow_missing_save_count,
+        ))
 
     print('test_2c: WPS 自动打开 → 公式计算 → 保存关闭')
     print('=' * 60)
     print(f'  Source directory: {TEST_2A_DIR}')
     print(f'  Wait scale: {args.wait_scale}x')
+    print(f'  Force rerun: {args.force}')
     print()
 
     # 收集品种列表
-    if args.product_codes:
-        prods = args.product_codes
-    else:
-        prods = sorted(
-            p.stem for p in TEST_2A_DIR.glob('*.xlsx')
-            if not p.name.startswith('~$') and not p.name.startswith('.')
-        )
+    prods = [path.stem for path in iter_test2a_files(args.product_codes or None)]
 
     if not prods:
         print('No products found.')
@@ -362,7 +485,7 @@ def main():
         kill_wps()
 
         print(f'[{i+1}/{total}] {prod}', end='')
-        if process_one(prod, args.wait_scale):
+        if process_one(prod, args.wait_scale, force=args.force):
             ok += 1
         else:
             fail += 1
