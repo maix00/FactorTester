@@ -45,8 +45,9 @@ Workbook layout:
   OPEN_TO_OPEN_RF:
     B2 is RF_MINUTES.  A4 contains one dynamic-array Excel formula that spills
     all rows for the selected RF on 1min data frequency ($F=1min):
-      open_adjusted = open_price * adjustment_mul
-      return = next_open_adjusted / current_open_adjusted - 1
+      entry_open_adjusted = next bar open_price * adjustment_mul
+      exit_open_adjusted = RF bars after entry open_price * adjustment_mul
+      return = exit_open_adjusted / entry_open_adjusted - 1
 
 Python copies source values and writes formula text.  It does not hardcode
 Python-calculated return results into Excel.
@@ -82,14 +83,15 @@ RETURN_HEADERS = [
     'trade_time',
     'open_price',
     'adjustment_mul',
-    'open_price_adjusted_formula',
-    'next_trade_time',
-    'next_open_price_adjusted_formula',
+    'entry_open_price_adjusted_formula',
+    'exit_trade_time',
+    'exit_open_price_adjusted_formula',
     'next_open_to_open_adjusted_rf',
 ]
 
 DATE_FORMAT = 'yyyy-mm-dd'
 DATETIME_FORMAT = 'yyyy-mm-dd hh:mm:ss'
+RETURN_NUMBER_FORMAT = '0.0000000000'
 
 
 def _normalise_header(value) -> str:
@@ -165,7 +167,7 @@ def _set_return_layout(ws) -> None:
     ws.column_dimensions['A'].number_format = DATE_FORMAT
     ws.column_dimensions['B'].number_format = DATETIME_FORMAT
     ws.column_dimensions['F'].number_format = DATETIME_FORMAT
-    ws.column_dimensions['H'].number_format = numbers.FORMAT_PERCENTAGE_00
+    ws.column_dimensions['H'].number_format = RETURN_NUMBER_FORMAT
 
 
 def _load_main_open_rows(src_path: Path) -> tuple[list[tuple], int]:
@@ -234,19 +236,20 @@ def _build_return_formula(main_rows: int) -> str:
         f'n,ROWS(MAIN_OPEN!A{source_start}:A{source_end}),'
         'seq,SEQUENCE(n),'
         'cur_row,seq+2,'
-        'next_row,seq+rf+2,'
-        'has_next,seq+rf<=n,'
-        'cur_open,INDEX(MAIN_OPEN!C:C,cur_row)*INDEX(MAIN_OPEN!D:D,cur_row),'
-        'next_open,IF(has_next,INDEX(MAIN_OPEN!C:C,next_row)*INDEX(MAIN_OPEN!D:D,next_row),""),'
+        'entry_row,seq+3,'
+        'exit_row,seq+rf+3,'
+        'has_exit,seq+rf+1<=n,'
+        'entry_open,IF(has_exit,INDEX(MAIN_OPEN!C:C,entry_row)*INDEX(MAIN_OPEN!D:D,entry_row),""),'
+        'exit_open,IF(has_exit,INDEX(MAIN_OPEN!C:C,exit_row)*INDEX(MAIN_OPEN!D:D,exit_row),""),'
         'HSTACK('
         'INDEX(MAIN_OPEN!A:A,cur_row),'
         'INDEX(MAIN_OPEN!B:B,cur_row),'
         'INDEX(MAIN_OPEN!C:C,cur_row),'
         'INDEX(MAIN_OPEN!D:D,cur_row),'
-        'cur_open,'
-        'IF(has_next,INDEX(MAIN_OPEN!B:B,next_row),""),'
-        'next_open,'
-        'IF(has_next,next_open/cur_open-1,"")'
+        'entry_open,'
+        'IF(has_exit,INDEX(MAIN_OPEN!B:B,exit_row),""),'
+        'exit_open,'
+        'IF(has_exit,exit_open/entry_open-1,"")'
         '))'
     )
 
@@ -398,6 +401,7 @@ def test_return_formula_workbook_for_a_product():
         assert str(next(iter(return_ws.merged_cells.ranges))) == 'A1:H1'
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 1).number_format == DATE_FORMAT
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 2).number_format == DATETIME_FORMAT
+        assert return_ws.column_dimensions['H'].number_format == RETURN_NUMBER_FORMAT
 
         assert return_ws.cell(RETURN_CONFIG_ROW, 1).value == 'RF_MINUTES'
         assert return_ws.cell(RETURN_CONFIG_ROW, 2).value == 1
@@ -408,8 +412,10 @@ def test_return_formula_workbook_for_a_product():
         assert formula.startswith('=LET(')
         assert '$B$2' in formula
         assert 'SEQUENCE(n)' in formula
-        assert 'has_next,seq+rf<=n' in formula
-        assert 'IF(has_next,next_open/cur_open-1,"")' in formula
+        assert 'entry_row,seq+3' in formula
+        assert 'exit_row,seq+rf+3' in formula
+        assert 'has_exit,seq+rf+1<=n' in formula
+        assert 'IF(has_exit,exit_open/entry_open-1,"")' in formula
         assert getattr(array_formula, 'ref', None) == f'A4:H{RETURN_FORMULA_ROW + main_rows - 1}'
         assert return_ws.max_row == RETURN_FORMULA_ROW
     finally:
