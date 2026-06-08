@@ -827,7 +827,25 @@ def _patch_multi_col_formulas(xlsx_path: Path, sheet_name: str,
 # Entrypoint
 # ============================================================
 
+DEFAULT_WORKERS = min(4, os.cpu_count() or 1)
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='test_2a: Excel-formula adjustment verification (REDUCE+VSTACK, in-file)',
+    )
+    parser.add_argument(
+        'product_codes', nargs='*', default=[],
+        help='Product codes to process (default: all products from test_1)',
+    )
+    parser.add_argument(
+        '--workers', type=int, default=None,
+        help=f'Number of parallel workers (default: {DEFAULT_WORKERS}, set 1 for serial)',
+    )
+    args = parser.parse_args()
+
     print("test_2a: Excel-formula adjustment verification (INDEX/MATCH, in-file)")
     print("=" * 60)
     print("\n⛔ Note: test_1 data is NOT re-run.")
@@ -842,15 +860,67 @@ def main():
             print(f"   - {problem}")
         return
 
-    # 确保输出目录存在（不清空，支持增量更新）
     TEST_2A_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 🔧 DEBUG: 只跑 A.xlsx
-    xlsx_path = TEST_1_DIR / 'A.xlsx'
-    if xlsx_path.exists():
-        process_product(xlsx_path)
+    # --- 确定要处理的产品列表 ---
+    if args.product_codes:
+        products = []
+        for code in args.product_codes:
+            xlsx_path = TEST_1_DIR / f'{code}.xlsx'
+            if not xlsx_path.exists():
+                print(f"  ⚠️ test_1 file not found: {xlsx_path.name}, skipping")
+            else:
+                products.append(code)
+    else:
+        products = sorted([
+            p.stem for p in TEST_1_DIR.glob('*.xlsx')
+            if p.stem != '_manifest'
+        ])
 
-    print(f"\nDone! Output: {TEST_2A_DIR}")
+    if not products:
+        print("No products to process.")
+        return
+
+    workers = args.workers if args.workers is not None else DEFAULT_WORKERS
+    workers = max(1, min(workers, len(products)))
+
+    # --- 串行（单产品 或 workers=1） ---
+    if workers == 1:
+        total = len(products)
+        for i, prod in enumerate(products, 1):
+            print(f"\n[{i}/{total}] {prod} ...", flush=True)
+            xlsx_path = TEST_1_DIR / f'{prod}.xlsx'
+            process_product(xlsx_path)
+        print(f"\nDone! {total} products → {TEST_2A_DIR}")
+        return
+
+    # --- 并行（多 worker） ---
+    print(f"\nProcessing {len(products)} products with {workers} workers ...")
+    total = len(products)
+    completed = 0
+    errors = 0
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(process_product, TEST_1_DIR / f'{prod}.xlsx'): prod
+            for prod in products
+        }
+        for fut in as_completed(futures):
+            prod = futures[fut]
+            completed += 1
+            try:
+                fut.result()
+                print(f"[{completed}/{total}] {prod} ✅", flush=True)
+            except Exception as exc:
+                errors += 1
+                print(f"[{completed}/{total}] {prod} ❌ {exc}", flush=True)
+
+    print(f"\nDone! {completed - errors}/{total} OK, {errors} errors → {TEST_2A_DIR}")
+
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == '__main__':
