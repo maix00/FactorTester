@@ -28,7 +28,7 @@ from typing import Iterable
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, numbers
 from openpyxl.utils import get_column_letter, range_boundaries
 
 from tests.calc import (
@@ -155,7 +155,12 @@ def _write_test2a_adj(src_path: Path, ws_out) -> int:
             trade_time = row[trade_time_col - 1]
             adj_mul = row[adj_col - 1]
             key_formula = f'=TEXT(A{out_row},"yyyy-mm-dd hh:mm:ss")'
-            ws_out.append([trade_time, adj_mul, key_formula])
+            time_cell = _styled_cell(
+                ws_out, trade_time,
+                alignment=Alignment(horizontal='right'),
+            )
+            time_cell.number_format = 'yyyy-mm-dd hh:mm:ss'
+            ws_out.append([time_cell, adj_mul, key_formula])
             out_row += 1
 
         return out_row - 3
@@ -172,7 +177,12 @@ def _write_main_mink_adj(mink_path: Path, ws_out) -> int:
         df.itertuples(index=False, name=None), start=MINK_DATA_START_ROW
     ):
         key_formula = f'=TEXT(A{out_row},"yyyy-mm-dd hh:mm:ss")'
-        ws_out.append([_normalise_value(trade_time), _normalise_value(adj_mul), key_formula])
+        time_cell = _styled_cell(
+            ws_out, _normalise_value(trade_time),
+            alignment=Alignment(horizontal='right'),
+        )
+        time_cell.number_format = 'yyyy-mm-dd hh:mm:ss'
+        ws_out.append([time_cell, _normalise_value(adj_mul), key_formula])
 
     return len(df)
 
