@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
 from tests.calc import TEST_2A_DIR, TEST_2C_DIR
 
@@ -41,9 +42,11 @@ from tests.calc import TEST_2A_DIR, TEST_2C_DIR
 WPS_APP = '/Applications/wpsoffice.app'
 SECONDS_PER_CONTRACT = 3      # 每个合约约 3 秒计算时间（REDUCE+VSTACK）
 MIN_WAIT = 10                  # 最小等待 10 秒
-MAX_WAIT = 120                 # 最大等待 120 秒
-RETRY_WAIT = 30                # flag 未就绪时再等 30 秒
-MAX_RETRIES = 3                # 最多重试 3 次
+MAX_WAIT = 120                 # 最大等待 120 秒（总体超时保护）
+INITIAL_WAIT = 10               # 初始等待 10 秒让 WPS 开始计算
+SAVE_POLL_INTERVAL = 5          # 保存后每 5 秒检测落盘
+RETRY_WAIT = 5                  # CALC 后等 5 秒再保存
+MAX_RETRIES = 20                # 最多重试 20 次（10+5×20 = 110s ≈ 2 min）
 
 FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
 
@@ -52,19 +55,45 @@ FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='
 # ============================================================
 
 def patch_flag(xlsx_path: Path) -> None:
-    """给 _SWITCHES!Z1 写入 flag 公式（不重新生成文件，只打补丁）
+    """给 _SWITCHES!Z1 写入 flag 公式 + Z2 清零（不重新生成文件，只打补丁）
     
-    公式: =IF(ISNUMBER(MAIN!X3),"DONE","CALC")
-    WPS 计算 REDUCE+VSTACK 动态数组后，MAIN!X3 变为数值，Z1 自动变 "DONE"
+    Z1 = IF(ISNUMBER(MAIN!右下角单元格),"DONE","CALC")
+    右下角 = MAIN row 2 最后一个非空列 × row(2+合约数)
+    WPS 计算 REDUCE+VSTACK 动态数组全部填充后，右下角变为数值，Z1 自动变 "DONE"
     """
     try:
         wb = load_workbook(xlsx_path)
+        
+        # 探测 MAIN sheet 的下角
+        main = wb['MAIN']
+        # row 2 最后一个非空列
+        last_col = main.max_column  # openpyxl 按全 sheet 记，但需要找 row 2 的实际非空
+        # 从右向左扫描 row 2 找到真正的最后一个非空列
+        last_data_col = 1
+        for col in range(main.max_column, 0, -1):
+            if main.cell(2, col).value is not None:
+                last_data_col = col
+                break
+        
+        # 探测 _SWITCHES 合约数
         sw = wb['_SWITCHES']
-        # 只在 Z1 为空、还是旧公式、或还是 CALC 时写入
+        n_contracts = sw.max_row - 2 if sw.max_row else 0
+        
+        # 右下角：最后一个数据行，最后一列
+        bottom_right_row = 2 + n_contracts
+        bottom_right_col_letter = get_column_letter(last_data_col)
+        corner_cell = f'{bottom_right_col_letter}{bottom_right_row}'
+        
+        # Z1 flag = IF(ISNUMBER(MAIN!corner),"DONE","CALC")
         existing = sw.cell(1, 26).value
         if existing is None or str(existing).strip() in ('', 'CALC', '0'):
-            sw.cell(1, 26, '=IF(ISNUMBER(MAIN!X3),"DONE","CALC")').fill = FORMULA_FILL
-            wb.save(xlsx_path)
+            formula = f'=IF(ISNUMBER(MAIN!{corner_cell}),"DONE","CALC")'
+            sw.cell(1, 26, formula).fill = FORMULA_FILL
+        
+        # Z2 清零（保存计数器）
+        sw.cell(2, 26, 0)
+        
+        wb.save(xlsx_path)
         wb.close()
     except Exception as e:
         print(f'  ⚠️ patch_flag failed: {e}', flush=True)
@@ -167,25 +196,19 @@ def wps_save_and_check(xlsx_path: Path, timeout: int = 20) -> tuple[bool, bool]:
     '''
     subprocess.run(['osascript', '-e', script], check=False, timeout=15)
 
-    # 轮询等待 Z2 == target（保存落盘）
+    # 轮询等待 Z2 == target（保存落盘），每 SAVE_POLL_INTERVAL 秒检测一次
     deadline = time.time() + timeout
-    saved = False
-    done = False
     while time.time() < deadline:
-        time.sleep(1)
+        time.sleep(SAVE_POLL_INTERVAL)
         z2_val = read_z2(xlsx_path)
         z1_val = read_z1(xlsx_path)
         if z2_val == target:
-            saved = True
-            done = (z1_val == "DONE")
-            break
+            return (True, z1_val == "DONE")
         elif z2_val is not None and z2_val > target:
-            # WPS 自己也可能写回更大的数？保守处理：也算落盘
-            saved = True
-            done = (z1_val == "DONE")
-            break
+            # 落盘已完成（WPS 可能已内部保存了更新的计数）
+            return (True, z1_val == "DONE")
 
-    return (saved, done)
+    return (False, False)
 
 
 def kill_wps() -> None:
@@ -214,8 +237,7 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
     patch_flag(src)
     reset_save_seq()
 
-    wait = int(estimate_wait(src) * wait_scale)
-    print(f'  📂 {prod} — opening WPS, wait ~{wait}s... ', end='', flush=True)
+    print(f'  📂 {prod} — opening WPS... ', end='', flush=True)
 
     try:
         wps_open(str(src))
@@ -225,27 +247,29 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
         backup.unlink(missing_ok=True)
         return False
 
-    # 3) 初始等待 WPS 计算公式
-    print(f'[wait {wait}s]', end='', flush=True)
-    time.sleep(wait)
+    # 3) 初始等待 WPS 开始计算
+    print(f'[wait {INITIAL_WAIT}s]', end='', flush=True)
+    time.sleep(INITIAL_WAIT)
 
     # 4) 循环保存+轮询，直到 Z1=DONE 或 max_retries
     success = False
     for retry in range(MAX_RETRIES):
-        saved, done = wps_save_and_check(src, timeout=20)
+        saved, done = wps_save_and_check(src, timeout=SAVE_POLL_INTERVAL * 4)
 
-        if not saved:
-            print(f' ⚠️ save not flushed (retry={retry})', end='', flush=True)
-
-        if done:
+        if done and saved:
             print(f' ✅ DONE (retry={retry})')
             success = True
             break
-        elif retry < MAX_RETRIES - 1:
-            print(f'⏳ CALC, retry in {RETRY_WAIT}s...', end='', flush=True)
+        elif saved:
+            # 已落盘但 CALC — 等 RETRY_WAIT 再保存
+            print(f'⏳', end='', flush=True)
             time.sleep(RETRY_WAIT)
         else:
-            print(f' ⚠️ still CALC after {MAX_RETRIES} retries')
+            # 保存未落盘 — 不是本次保存？等待上次落盘
+            print(f'⏳', end='', flush=True)
+            time.sleep(RETRY_WAIT)
+    else:
+        print(f' ⚠️ max retries ({MAX_RETRIES}) reached')
 
     # 5) 关闭 WPS 文档
     script = '''
