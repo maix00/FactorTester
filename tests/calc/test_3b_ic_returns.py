@@ -46,6 +46,7 @@ from tests.calc import (
     MAIN_MINK_DIR,
     REMARK_FILL,
     REMARK_FONT,
+    TEST_3A_DIR,
     TEST_3B_DIR,
     remark_height,
 )
@@ -55,7 +56,7 @@ DEFAULT_WORKERS = max(1, min(4, os.cpu_count() or 1))
 DEFAULT_RF_MINUTES = 2
 TOLERANCE = 1e-10
 
-PRICE_SOURCE_SHEET = 'PRICE_SOURCE'
+TEST_3A_RETURNS_SHEET = 'TEST_3A_RETURNS'
 BACKEND_RE_SHEET = 'BACKEND_RE'
 COMPARE_SHEET = 'COMPARE'
 
@@ -63,7 +64,6 @@ DATE_FORMAT = 'yyyy-mm-dd'
 DATETIME_FORMAT = 'yyyy-mm-dd hh:mm:ss'
 RETURN_NUMBER_FORMAT = '0.0000000000'
 
-PRICE_DATA_START_ROW = 3
 BACKEND_DATA_START_ROW = 3
 COMPARE_START_ROW = 13
 
@@ -151,13 +151,6 @@ def _iter_products(products: Iterable[str] | None = None) -> list[str]:
     return ['A']
 
 
-def _price_source(product: CNFutures) -> pd.Series:
-    df = product.MIN1.get_and_adjust_cols([DataColumn.OPEN_ADJUSTED.name], copy=False)
-    if DataColumn.OPEN_ADJUSTED.name not in df.columns:
-        raise RuntimeError(f'{product.name}: missing OPEN_ADJUSTED source column')
-    return pd.to_numeric(df[DataColumn.OPEN_ADJUSTED.name], errors='coerce')
-
-
 def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
     tester = FactorTester(products=[product], logger_file=False)
     factor = _OpenAdjustedFactor().get_factor(**{'$F': '1min', '$Rev': '0'})
@@ -176,24 +169,77 @@ def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
     return pd.to_numeric(re_table[product], errors='coerce')
 
 
-def _write_price_source(ws, prices: pd.Series) -> int:
-    remark = 'Backend price source for Excel expected-return formulas: OPEN_ADJUSTED at $F=1min.'
-    _write_remark(ws, remark)
-    _write_header(ws, ['trading_day', 'trade_time', 'open_price_adjusted', '_trade_time_key'])
+def _read_test3a_rf(test3a_path: Path) -> int | None:
+    """从 test_3a OPEN_TO_OPEN_RF sheet B2 读取 RF_MINUTES 值。"""
+    if not test3a_path.exists():
+        return None
+    wb = load_workbook(test3a_path, read_only=True, data_only=True)
+    try:
+        if 'OPEN_TO_OPEN_RF' not in wb.sheetnames:
+            return None
+        rf_value = wb['OPEN_TO_OPEN_RF']['B2'].value
+        if rf_value is None:
+            return None
+        return int(rf_value)
+    finally:
+        wb.close()
 
-    for row_idx, (idx, value) in enumerate(prices.items(), start=PRICE_DATA_START_ROW):
-        day_value = idx[0] if isinstance(idx, tuple) else pd.Timestamp(idx).normalize()
-        time_value = idx[-1] if isinstance(idx, tuple) else idx
-        trading_day = _styled_cell(ws, _normalise_timestamp(day_value), number_format=DATE_FORMAT)
+
+def _read_test3a_returns(test3a_path: Path) -> pd.DataFrame | None:
+    """从 test_3a OPEN_TO_OPEN_RF sheet 读取 signal_trade_time 和 next_open_to_open_adjusted_rf。
+    
+    返回 DataFrame，index=signal_trade_time，单列 'test3a_return'。
+    """
+    if not test3a_path.exists():
+        return None
+    wb = load_workbook(test3a_path, read_only=True, data_only=True)
+    try:
+        if 'OPEN_TO_OPEN_RF' not in wb.sheetnames:
+            return None
+        ws = wb['OPEN_TO_OPEN_RF']
+        
+        # 读 header row 3，确认列位置
+        headers = [ws.cell(3, c).value for c in range(1, ws.max_column + 1)]
+        try:
+            time_col = headers.index('signal_trade_time') + 1
+            ret_col = headers.index('next_open_to_open_adjusted_rf') + 1
+        except ValueError:
+            return None
+        
+        # 从 row 4 开始读数据
+        times = []
+        returns = []
+        for row in ws.iter_rows(min_row=4, max_row=ws.max_row, min_col=time_col, max_col=ret_col, values_only=True):
+            t = row[0]
+            r = row[ret_col - time_col]
+            if t is None:
+                continue
+            times.append(_normalise_timestamp(t))
+            returns.append(_normalise_number(r))
+        
+        if not times:
+            return None
+        return pd.DataFrame({'test3a_return': returns}, index=pd.DatetimeIndex(times))
+    finally:
+        wb.close()
+
+
+def _write_test3a_returns(ws, returns: pd.DataFrame) -> int:
+    """将 test_3a 的收益率写入 sheet。"""
+    remark = 'test_3a OPEN_TO_OPEN_RF: next_open_to_open_adjusted_rf extracted from test_3a workbook.'
+    _write_remark(ws, remark)
+    _write_header(ws, ['signal_trade_time', 'test3a_return', '_trade_time_key'])
+
+    for row_idx, (idx, row) in enumerate(returns.iterrows(), start=3):
         trade_time = _styled_cell(
-            ws,
-            _normalise_timestamp(time_value),
+            ws, idx.to_pydatetime(),
             alignment=Alignment(horizontal='right'),
             number_format=DATETIME_FORMAT,
         )
-        key = f'=TEXT(B{row_idx},"yyyy-mm-dd hh:mm:ss")'
-        ws.append([trading_day, trade_time, _normalise_number(value), key])
-    return len(prices)
+        ret_val = _styled_cell(ws, _normalise_number(row['test3a_return']), number_format=RETURN_NUMBER_FORMAT)
+        key = f'=TEXT(A{row_idx},"yyyy-mm-dd hh:mm:ss")'
+        ws.append([trade_time, ret_val, key])
+    return len(returns)
 
 
 def _write_backend_re(ws, returns: pd.Series) -> int:
@@ -215,23 +261,21 @@ def _write_backend_re(ws, returns: pd.Series) -> int:
     return len(returns)
 
 
-def _write_compare(ws, backend_rows: int, price_rows: int, rf_minutes: int) -> None:
+def _write_compare(ws, backend_rows: int, test3a_rows: int, rf_minutes: int) -> None:
     compare_end_row = COMPARE_START_ROW + backend_rows - 1
-    price_last_row = PRICE_DATA_START_ROW + price_rows - 1
-    backend_last_row = BACKEND_DATA_START_ROW + backend_rows - 1
 
     remark = (
-        'Excel formula comparison for backend IC RE.  RF_MINUTES means enter at '
-        'the next 1min open and exit RF minutes after entry.'
+        'Excel formula comparison: test_3a next_open_to_open_adjusted_rf vs backend IC RE.  '
+        'RF read from test_3a OPEN_TO_OPEN_RF!B2.'
     )
     _write_remark(ws, remark)
     ws.append(['RF_MINUTES', rf_minutes])
     ws.append(['tolerance', TOLERANCE])
     ws.append(['backend_re_rows', backend_rows])
-    ws.append(['price_source_rows', price_rows])
-    ws.append(['missing_signal_time', f'=COUNTIF(L{COMPARE_START_ROW}:L{compare_end_row},"MISSING")'])
-    ws.append(['diff_rows', f'=COUNTIF(L{COMPARE_START_ROW}:L{compare_end_row},"FAIL")'])
-    ws.append(['max_abs_diff', f'=MAX(K{COMPARE_START_ROW}:K{compare_end_row})'])
+    ws.append(['test3a_return_rows', test3a_rows])
+    ws.append(['missing_signal_time', f'=COUNTIF(G{COMPARE_START_ROW}:G{compare_end_row},"MISSING")'])
+    ws.append(['diff_rows', f'=COUNTIF(G{COMPARE_START_ROW}:G{compare_end_row},"FAIL")'])
+    ws.append(['max_abs_diff', f'=MAX(F{COMPARE_START_ROW}:F{compare_end_row})'])
     ws.append(['overall', '=IF(AND(B6=0,B7=0),"PASS","FAIL")'])
     ws.append([])
     ws.append([])
@@ -242,13 +286,7 @@ def _write_compare(ws, backend_rows: int, price_rows: int, rf_minutes: int) -> N
             '_backend_row',
             'signal_trade_time',
             'backend_re',
-            '_price_row',
-            'entry_row',
-            'entry_trade_time',
-            'entry_open_adjusted',
-            'exit_row',
-            'exit_trade_time',
-            'expected_re_formula',
+            'test3a_return',
             'abs_diff',
             'status',
         ],
@@ -263,61 +301,31 @@ def _write_compare(ws, backend_rows: int, price_rows: int, rf_minutes: int) -> N
             number_format=DATETIME_FORMAT,
         )
         backend_re = _styled_cell(ws, f'=INDEX(BACKEND_RE!B:B,A{row})', number_format=RETURN_NUMBER_FORMAT)
-        price_row = f'=IFERROR(MATCH(TEXT(B{row},"yyyy-mm-dd hh:mm:ss"),PRICE_SOURCE!$D:$D,0),"")'
-        entry_row = f'=IF(D{row}="","",D{row}+1)'
-        entry_time = _styled_cell(
+        test3a_return = _styled_cell(
             ws,
-            f'=IF(E{row}="","",INDEX(PRICE_SOURCE!$B:$B,E{row}))',
-            alignment=Alignment(horizontal='right'),
-            number_format=DATETIME_FORMAT,
-        )
-        entry_open = _styled_cell(
-            ws,
-            f'=IF(E{row}="","",INDEX(PRICE_SOURCE!$C:$C,E{row}))',
+            f'=IFERROR(INDEX(TEST_3A_RETURNS!B:B,MATCH(TEXT(B{row},"yyyy-mm-dd hh:mm:ss"),TEST_3A_RETURNS!$C:$C,0)),"")',
             number_format=RETURN_NUMBER_FORMAT,
         )
-        exit_row = f'=IF(D{row}="","",D{row}+$B$2+1)'
-        exit_time = _styled_cell(
-            ws,
-            f'=IF(OR(H{row}="",H{row}>{price_last_row}),"",INDEX(PRICE_SOURCE!$B:$B,H{row}))',
-            alignment=Alignment(horizontal='right'),
-            number_format=DATETIME_FORMAT,
-        )
-        expected = _styled_cell(
-            ws,
-            f'=IF(OR(H{row}="",H{row}>{price_last_row}),"",INDEX(PRICE_SOURCE!$C:$C,H{row})/G{row}-1)',
-            number_format=RETURN_NUMBER_FORMAT,
-        )
-        abs_diff = f'=IF(AND(C{row}="",J{row}=""),0,IF(OR(C{row}="",J{row}=""),"",ABS(C{row}-J{row})))'
-        status = f'=IF(D{row}="","MISSING",IF(AND(C{row}="",J{row}=""),"PASS",IF(OR(C{row}="",J{row}=""),"FAIL",IF(K{row}<=$B$3,"PASS","FAIL"))))'
+        abs_diff = f'=IF(AND(C{row}="",D{row}=""),0,IF(OR(C{row}="",D{row}=""),"",ABS(C{row}-D{row})))'
+        status = f'=IF(D{row}="","MISSING",IF(AND(C{row}="",D{row}=""),"PASS",IF(OR(C{row}="",D{row}=""),"FAIL",IF(E{row}<=$B$3,"PASS","FAIL"))))'
         ws.append([
             backend_row,
             signal_time,
             backend_re,
-            price_row,
-            entry_row,
-            entry_time,
-            entry_open,
-            exit_row,
-            exit_time,
-            expected,
+            test3a_return,
             abs_diff,
             status,
         ])
-
-    ws.append([])
-    ws.append(['_backend_last_row', backend_last_row])
 
 
 def _style_workbook(path: Path) -> None:
     wb = load_workbook(path)
     try:
         widths = {
-            PRICE_SOURCE_SHEET: {'A': 14, 'B': 22, 'C': 24, 'D': 22},
+            TEST_3A_RETURNS_SHEET: {'A': 22, 'B': 18, 'C': 22},
             BACKEND_RE_SHEET: {'A': 22, 'B': 18, 'C': 22},
             COMPARE_SHEET: {
-                'A': 12, 'B': 22, 'C': 18, 'D': 12, 'E': 12, 'F': 22,
-                'G': 22, 'H': 12, 'I': 22, 'J': 22, 'K': 16, 'L': 12,
+                'A': 12, 'B': 22, 'C': 18, 'D': 18, 'E': 16, 'F': 12,
             },
         }
         for ws in wb.worksheets:
@@ -329,35 +337,51 @@ def _style_workbook(path: Path) -> None:
         wb.close()
 
 
-def process_product(product_id: str, rf_minutes: int = DEFAULT_RF_MINUTES) -> Path:
+def process_product(product_id: str, rf_minutes: int | None = None) -> Path | None:
     product_name = _product_name(product_id)
     product = CNFutures(product_name)
-    prices = _price_source(product)
-    returns = _backend_re(product, rf_minutes=rf_minutes)
+
+    test3a_path = TEST_3A_DIR / f'{product.code}.xlsx'
+
+    # 优先从 test_3a 读取 RF
+    test3a_rf = _read_test3a_rf(test3a_path)
+    if test3a_rf is not None:
+        rf = test3a_rf
+    elif rf_minutes is not None:
+        rf = rf_minutes
+    else:
+        rf = DEFAULT_RF_MINUTES
+
+    # 读取 test_3a 收益率
+    test3a_returns = _read_test3a_returns(test3a_path)
+    has_test3a = test3a_returns is not None and len(test3a_returns) > 0
+
+    # 后端 RE
+    returns = _backend_re(product, rf_minutes=rf)
 
     TEST_3B_DIR.mkdir(parents=True, exist_ok=True)
     out_path = TEST_3B_DIR / f'{product.code}.xlsx'
 
-    print(f'  Processing: {product.name} RF={rf_minutes}min...', end='', flush=True)
+    print(f'  Processing: {product.name} RF={rf}min (test3a_rf={test3a_rf})...', end='', flush=True)
     wb = Workbook(write_only=True)
-    price_ws = wb.create_sheet(PRICE_SOURCE_SHEET)
+    test3a_ws = wb.create_sheet(TEST_3A_RETURNS_SHEET) if has_test3a else None
     backend_ws = wb.create_sheet(BACKEND_RE_SHEET)
     compare_ws = wb.create_sheet(COMPARE_SHEET)
 
-    price_rows = _write_price_source(price_ws, prices)
+    test3a_rows = _write_test3a_returns(test3a_ws, test3a_returns) if has_test3a else 0
     backend_rows = _write_backend_re(backend_ws, returns)
-    _write_compare(compare_ws, backend_rows=backend_rows, price_rows=price_rows, rf_minutes=rf_minutes)
+    _write_compare(compare_ws, backend_rows=backend_rows, test3a_rows=test3a_rows, rf_minutes=rf)
 
     wb.save(out_path)
     _style_workbook(out_path)
-    print(f' OK ({backend_rows} backend RE rows, {price_rows} price rows)')
+    print(f' OK ({backend_rows} backend RE rows, {test3a_rows} test_3a rows)')
     return out_path
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description='Generate test_3b backend IC RE comparisons.')
     parser.add_argument('products', nargs='*', help='Optional product ids, e.g. A or A.DCE')
-    parser.add_argument('--rf-minutes', type=int, default=DEFAULT_RF_MINUTES)
+    parser.add_argument('--rf-minutes', type=int, default=None, help='Fallback RF if no test_3a exists')
     parser.add_argument(
         '--workers',
         type=int,
