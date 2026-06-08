@@ -149,6 +149,58 @@ def validate_test_1_complete() -> tuple[bool, list[str]]:
 
 
 # ================================================
+# instrument_id 转换（对齐 GenerateMain.py 的 czc_patch_decade）
+# ================================================
+
+def _czc_patch_decade(windcode: str, end_date: pd.Timestamp) -> str | None:
+    """CZC 合约十年补丁：ZC401.CZC → ZC2401.CZC（根据 ENDDATE 推断年份）。
+
+    对齐 sources/LocalCNFutures/GenerateMain.py 的 czc_patch_decade。
+    """
+    if pd.isna(end_date):
+        return None
+    if not windcode.endswith('CZC'):
+        return windcode
+    contract_body = windcode.split('.')[0]
+    contract_digits = ''.join(filter(str.isdigit, contract_body))
+    if len(contract_digits) == 4:
+        return windcode  # 已是完整年月
+    if len(contract_digits) != 3:
+        return None  # 无法处理
+    # contract_digits 格式: YMM，Y=年份最后一位
+    end_str = end_date.strftime('%Y%m%d')
+    year_last_digit = contract_digits[0]       # '4'
+    end_year_last = end_str[3]                 # ENDDATE 年份最后一位
+    if year_last_digit == end_year_last:
+        decade = end_str[2]                    # 十年位
+    else:
+        end_two_plus = str(int(end_str[2:4]) + 1).zfill(2)
+        if year_last_digit == end_two_plus[-1]:
+            decade = end_two_plus[0]
+        else:
+            return None  # 无法确定
+    patched_body = contract_body.replace(contract_digits, decade + contract_digits)
+    return patched_body + '.CZC'
+
+
+def _make_instrument_id(row: pd.Series) -> str:
+    """FS_MAPPING_WINDCODE → instrument_id（对齐 data_mink_product 文件名中的数字部分）。
+
+    非 CZC: CU2507.SHF → cu2507
+    CZC:   ZC401.CZC →（经 _czc_patch_decade 补全）→ zc2401
+    """
+    windcode = str(row['FS_MAPPING_WINDCODE'])
+    # CZC 需要十年补丁
+    if windcode.endswith('CZC'):
+        end_date = row['ENDDATE']
+        patched = _czc_patch_decade(windcode, end_date)
+        if patched is None:
+            return windcode.split('.')[0].lower()
+        return patched.split('.')[0].lower()
+    return windcode.split('.')[0].lower()
+
+
+# ================================================
 # 从 wind_mapping.parquet 读取切换记录
 # ================================================
 
@@ -178,8 +230,11 @@ def _load_wind_mapping(prod: str, wind_exch: str,
     prod_wm['STARTDATE'] = prod_wm['STARTDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
     prod_wm['ENDDATE'] = prod_wm['ENDDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
 
-    # 转换 instrument_id: CU2507.SHF → cu2507
-    prod_wm['instrument_id'] = prod_wm['FS_MAPPING_WINDCODE'].str.split('.').str[0].str.lower()
+    # 转换 instrument_id，对齐 GenerateMain.py 的 czc_patch_decade + patched_to_uid 语义
+    # - 非 CZC 合约: CU2507.SHF → cu2507
+    # - CZC 合约 (三位年份，如 ZC401.CZC): 根据 ENDDATE 补齐四位年份 → zc2401
+    prod_wm['FS_MAPPING_WINDCODE'] = prod_wm['FS_MAPPING_WINDCODE'].astype(str)
+    prod_wm['instrument_id'] = prod_wm.apply(_make_instrument_id, axis=1)
     prod_wm['trading_day'] = prod_wm['STARTDATE'].dt.date
 
     return prod_wm.sort_values('trading_day').reset_index(drop=True)
