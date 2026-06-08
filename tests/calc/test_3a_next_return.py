@@ -40,7 +40,7 @@ Output:
 Workbook layout:
   MAIN_OPEN:
     Full MAIN rows, but only the columns needed for open-to-open return audit:
-    trading_day, trade_time, open_price, adjustment_mul.
+    trading_day, trade_time, open_price, adjustment_mul, open_price_adjusted.
 
   OPEN_TO_OPEN_RF:
     B2 is RF_MINUTES.  A4 contains one dynamic-array Excel formula that spills
@@ -76,14 +76,18 @@ SOURCE_HEADERS = [
     'trade_time',
     'open_price',
     'adjustment_mul',
+    'open_price_adjusted_formula',
 ]
 
 RETURN_HEADERS = [
+    'signal_row',
     'trading_day',
-    'trade_time',
-    'open_price',
-    'adjustment_mul',
+    'signal_trade_time',
+    'signal_open_price_adjusted_formula',
+    'entry_row',
+    'entry_trade_time',
     'entry_open_price_adjusted_formula',
+    'exit_row',
     'exit_trade_time',
     'exit_open_price_adjusted_formula',
     'next_open_to_open_adjusted_rf',
@@ -145,7 +149,7 @@ def _write_remark(ws, text: str, max_col: int) -> None:
 
 def _set_main_open_layout(ws) -> None:
     ws.freeze_panes = 'A3'
-    widths = {'A': 14, 'B': 22, 'C': 14, 'D': 16}
+    widths = {'A': 14, 'B': 22, 'C': 14, 'D': 16, 'E': 28}
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
 
@@ -153,21 +157,25 @@ def _set_main_open_layout(ws) -> None:
 def _set_return_layout(ws) -> None:
     ws.freeze_panes = 'A4'
     widths = {
-        'A': 14,
-        'B': 22,
-        'C': 14,
-        'D': 16,
-        'E': 26,
+        'A': 12,
+        'B': 14,
+        'C': 22,
+        'D': 30,
+        'E': 12,
         'F': 22,
         'G': 30,
-        'H': 28,
+        'H': 12,
+        'I': 22,
+        'J': 30,
+        'K': 28,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
-    ws.column_dimensions['A'].number_format = DATE_FORMAT
-    ws.column_dimensions['B'].number_format = DATETIME_FORMAT
+    ws.column_dimensions['B'].number_format = DATE_FORMAT
+    ws.column_dimensions['C'].number_format = DATETIME_FORMAT
     ws.column_dimensions['F'].number_format = DATETIME_FORMAT
-    ws.column_dimensions['H'].number_format = RETURN_NUMBER_FORMAT
+    ws.column_dimensions['I'].number_format = DATETIME_FORMAT
+    ws.column_dimensions['K'].number_format = RETURN_NUMBER_FORMAT
 
 
 def _load_main_open_rows(src_path: Path) -> tuple[list[tuple], int]:
@@ -187,7 +195,7 @@ def _load_main_open_rows(src_path: Path) -> tuple[list[tuple], int]:
                 'Open test_2a workbook in WPS/Excel, let formulas calculate, save it, then rerun test_3a.'
             )
 
-        source_indexes = [_col_index(headers, name) for name in SOURCE_HEADERS]
+        source_indexes = [_col_index(headers, name) for name in SOURCE_HEADERS[:4]]
         rows: list[tuple] = []
         for row in value_ws.iter_rows(
             min_row=MAIN_DATA_START_ROW,
@@ -221,6 +229,10 @@ def _write_main_open_sheet(wb: Workbook, rows: list[tuple]) -> None:
     for row in rows:
         ws.append(row)
 
+    last_row = MAIN_OPEN_DATA_START_ROW + len(rows) - 1
+    cell = ws.cell(MAIN_OPEN_DATA_START_ROW, 5, f'=C{MAIN_OPEN_DATA_START_ROW}:C{last_row}*D{MAIN_OPEN_DATA_START_ROW}:D{last_row}')
+    cell.fill = FORMULA_FILL
+
     for cell in ws.iter_rows(min_row=MAIN_OPEN_DATA_START_ROW, min_col=1, max_col=1):
         cell[0].number_format = DATE_FORMAT
     for cell in ws.iter_rows(min_row=MAIN_OPEN_DATA_START_ROW, min_col=2, max_col=2):
@@ -239,14 +251,17 @@ def _build_return_formula(main_rows: int) -> str:
         'entry_row,seq+3,'
         'exit_row,seq+rf+3,'
         'has_exit,seq+rf+1<=n,'
-        'entry_open,IF(has_exit,INDEX(MAIN_OPEN!C:C,entry_row)*INDEX(MAIN_OPEN!D:D,entry_row),""),'
-        'exit_open,IF(has_exit,INDEX(MAIN_OPEN!C:C,exit_row)*INDEX(MAIN_OPEN!D:D,exit_row),""),'
+        'entry_open,IF(has_exit,INDEX(MAIN_OPEN!E:E,entry_row),""),'
+        'exit_open,IF(has_exit,INDEX(MAIN_OPEN!E:E,exit_row),""),'
         'HSTACK('
+        'cur_row,'
         'INDEX(MAIN_OPEN!A:A,cur_row),'
         'INDEX(MAIN_OPEN!B:B,cur_row),'
-        'INDEX(MAIN_OPEN!C:C,cur_row),'
-        'INDEX(MAIN_OPEN!D:D,cur_row),'
+        'INDEX(MAIN_OPEN!E:E,cur_row),'
+        'IF(has_exit,entry_row,""),'
+        'IF(has_exit,INDEX(MAIN_OPEN!B:B,entry_row),""),'
         'entry_open,'
+        'IF(has_exit,exit_row,""),'
         'IF(has_exit,INDEX(MAIN_OPEN!B:B,exit_row),""),'
         'exit_open,'
         'IF(has_exit,exit_open/entry_open-1,"")'
@@ -281,19 +296,25 @@ def _write_return_sheet(wb: Workbook, main_rows: int) -> None:
 
 
 def _patch_dynamic_array_formula(xlsx_path: Path, main_rows: int) -> None:
-    max_output_row = RETURN_FORMULA_ROW + main_rows - 1
-    array_ref = f'A{RETURN_FORMULA_ROW}:H{max_output_row}'
+    main_last_row = MAIN_OPEN_DATA_START_ROW + main_rows - 1
+    main_array_ref = f'E{MAIN_OPEN_DATA_START_ROW}:E{main_last_row}'
+    return_last_row = RETURN_FORMULA_ROW + main_rows - 1
+    return_array_ref = f'A{RETURN_FORMULA_ROW}:K{return_last_row}'
+    patches = {
+        'xl/worksheets/sheet1.xml': (f'E{MAIN_OPEN_DATA_START_ROW}', main_array_ref),
+        'xl/worksheets/sheet2.xml': (f'A{RETURN_FORMULA_ROW}', return_array_ref),
+    }
     tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
     os.close(tmp_fd)
     tmp = Path(tmp_path)
     try:
         with zipfile.ZipFile(xlsx_path, 'r') as zin, zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zout:
-            target_sheet = 'xl/worksheets/sheet2.xml'
             for item in zin.infolist():
                 data = zin.read(item.filename)
-                if item.filename == target_sheet:
+                if item.filename in patches:
+                    cell_ref, array_ref = patches[item.filename]
                     root = ET.fromstring(data)
-                    cell = root.find(f".//{{{NS_SHEET}}}c[@r='A{RETURN_FORMULA_ROW}']")
+                    cell = root.find(f".//{{{NS_SHEET}}}c[@r='{cell_ref}']")
                     if cell is not None:
                         formula = cell.find(f'{{{NS_SHEET}}}f')
                         if formula is not None:
@@ -393,19 +414,27 @@ def test_return_formula_workbook_for_a_product():
         main_ws = wb[MAIN_OPEN_SHEET]
         return_ws = wb[RETURN_SHEET]
 
-        headers = [main_ws.cell(MAIN_OPEN_HEADER_ROW, col).value for col in range(1, 5)]
+        headers = [main_ws.cell(MAIN_OPEN_HEADER_ROW, col).value for col in range(1, 6)]
         assert headers == SOURCE_HEADERS
         assert main_rows > 1000
-        assert main_ws.max_column == 4
-        assert str(next(iter(main_ws.merged_cells.ranges))) == 'A1:D1'
-        assert str(next(iter(return_ws.merged_cells.ranges))) == 'A1:H1'
+        assert main_ws.max_column == 5
+        assert str(next(iter(main_ws.merged_cells.ranges))) == 'A1:E1'
+        assert str(next(iter(return_ws.merged_cells.ranges))) == 'A1:K1'
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 1).number_format == DATE_FORMAT
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 2).number_format == DATETIME_FORMAT
-        assert return_ws.column_dimensions['H'].number_format == RETURN_NUMBER_FORMAT
+        main_array_formula = main_ws.cell(MAIN_OPEN_DATA_START_ROW, 5).value
+        main_formula = getattr(main_array_formula, 'text', main_array_formula)
+        main_last_row = MAIN_OPEN_DATA_START_ROW + main_rows - 1
+        assert main_formula == f'=C3:C{main_last_row}*D3:D{main_last_row}'
+        assert getattr(main_array_formula, 'ref', None) == f'E3:E{main_last_row}'
+        assert return_ws.column_dimensions['K'].number_format == RETURN_NUMBER_FORMAT
 
         assert return_ws.cell(RETURN_CONFIG_ROW, 1).value == 'RF_MINUTES'
         assert return_ws.cell(RETURN_CONFIG_ROW, 2).value == 1
-        assert return_ws.cell(RETURN_HEADER_ROW, 8).value == 'next_open_to_open_adjusted_rf'
+        assert return_ws.cell(RETURN_HEADER_ROW, 5).value == 'entry_row'
+        assert return_ws.cell(RETURN_HEADER_ROW, 6).value == 'entry_trade_time'
+        assert return_ws.cell(RETURN_HEADER_ROW, 8).value == 'exit_row'
+        assert return_ws.cell(RETURN_HEADER_ROW, 11).value == 'next_open_to_open_adjusted_rf'
 
         array_formula = return_ws.cell(RETURN_FORMULA_ROW, 1).value
         formula = getattr(array_formula, 'text', array_formula)
@@ -415,8 +444,10 @@ def test_return_formula_workbook_for_a_product():
         assert 'entry_row,seq+3' in formula
         assert 'exit_row,seq+rf+3' in formula
         assert 'has_exit,seq+rf+1<=n' in formula
+        assert 'INDEX(MAIN_OPEN!E:E,entry_row)' in formula
+        assert 'INDEX(MAIN_OPEN!E:E,exit_row)' in formula
         assert 'IF(has_exit,exit_open/entry_open-1,"")' in formula
-        assert getattr(array_formula, 'ref', None) == f'A4:H{RETURN_FORMULA_ROW + main_rows - 1}'
+        assert getattr(array_formula, 'ref', None) == f'A4:K{RETURN_FORMULA_ROW + main_rows - 1}'
         assert return_ws.max_row == RETURN_FORMULA_ROW
     finally:
         wb.close()
