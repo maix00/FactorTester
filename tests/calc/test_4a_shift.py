@@ -78,7 +78,7 @@ COL_ADJ_MUL = 21
 
 DATA_ROW_OFFSET = 2  # row 1 = remark, row 2 = header → 数据从 row 3 开始
 BACKEND_DATA_START_ROW = 3
-COMPARE_START_ROW = 4
+COMPARE_START_ROW = 14
 
 NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -236,18 +236,21 @@ def _compare_spill_formula(nrows: int) -> str:
     return (
         f'=LET(rows,SEQUENCE({nrows}),tol,$B$2,'
         f'time,BACKEND!A{BACKEND_DATA_START_ROW}:A{backend_last_row},'
-        f'b10,BACKEND!B{BACKEND_DATA_START_ROW}:B{backend_last_row},'
-        f'x10,PRICE!G3:G{price_last_row},'
+        f'rb10,BACKEND!B{BACKEND_DATA_START_ROW}:B{backend_last_row},'
+        f'rx10,PRICE!G3:G{price_last_row},'
+        'b10,IF(LEN(rb10&"")=0,"",rb10),x10,IF(LEN(rx10&"")=0,"",rx10),'
         'e10b,LEN(b10&"")=0,e10x,LEN(x10&"")=0,'
         'd10,IF(e10b+e10x,"",ABS(b10-x10)),'
         'ok10,IF(e10b*e10x,"EMPTY",IF(e10b+e10x,"MISSING",IF(d10<=tol,"PASS","FAIL"))),'
-        f'b5,BACKEND!C{BACKEND_DATA_START_ROW}:C{backend_last_row},'
-        f'x5,PRICE!H3:H{price_last_row},'
+        f'rb5,BACKEND!C{BACKEND_DATA_START_ROW}:C{backend_last_row},'
+        f'rx5,PRICE!H3:H{price_last_row},'
+        'b5,IF(LEN(rb5&"")=0,"",rb5),x5,IF(LEN(rx5&"")=0,"",rx5),'
         'e5b,LEN(b5&"")=0,e5x,LEN(x5&"")=0,'
         'd5,IF(e5b+e5x,"",ABS(b5-x5)),'
         'ok5,IF(e5b*e5x,"EMPTY",IF(e5b+e5x,"MISSING",IF(d5<=tol,"PASS","FAIL"))),'
-        f'b1,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},'
-        f'x1,PRICE!I3:I{price_last_row},'
+        f'rb1,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},'
+        f'rx1,PRICE!I3:I{price_last_row},'
+        'b1,IF(LEN(rb1&"")=0,"",rb1),x1,IF(LEN(rx1&"")=0,"",rx1),'
         'e1b,LEN(b1&"")=0,e1x,LEN(x1&"")=0,'
         'd1,IF(e1b+e1x,"",ABS(b1-x1)),'
         'ok1,IF(e1b*e1x,"EMPTY",IF(e1b+e1x,"MISSING",IF(d1<=tol,"PASS","FAIL"))),'
@@ -352,11 +355,46 @@ def _write_compare_sheet(ws, nrows: int) -> None:
     _write_remark(ws, 'Compare PRICE excel-shift vs BACKEND python-shift. '
                        'Status: PASS if abs_diff < TOLERANCE, MISSING if one side empty.')
 
+    compare_end_row = COMPARE_START_ROW + nrows - 1
     ws.append([
         _styled_cell(ws, 'TOLERANCE', fill=HEADER_FILL, font=REMARK_FONT),
         0.0001,
-        *([''] * 12),
     ])
+    ws.append(['backend_rows', nrows])
+    ws.append(['price_rows', nrows])
+    ws.append(['metric', 'SHIFT_10MIN', 'SHIFT_5BAR', 'SHIFT_1DAY'])
+    ws.append([
+        'pass_rows',
+        f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"PASS")',
+        f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"PASS")',
+        f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"PASS")',
+    ])
+    ws.append([
+        'empty_rows',
+        f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"EMPTY")',
+        f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"EMPTY")',
+        f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"EMPTY")',
+    ])
+    ws.append([
+        'missing_rows',
+        f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"MISSING")',
+        f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"MISSING")',
+        f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"MISSING")',
+    ])
+    ws.append([
+        'fail_rows',
+        f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"FAIL")',
+        f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"FAIL")',
+        f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"FAIL")',
+    ])
+    ws.append([
+        'max_abs_diff',
+        f'=IFERROR(MAX(E{COMPARE_START_ROW}:E{compare_end_row}),"")',
+        f'=IFERROR(MAX(I{COMPARE_START_ROW}:I{compare_end_row}),"")',
+        f'=IFERROR(MAX(M{COMPARE_START_ROW}:M{compare_end_row}),"")',
+    ])
+    ws.append(['overall', '=IF(SUM(B8:D9)=0,"PASS","FAIL")'])
+    ws.append([])
 
     headers = ['row', 'time',
                'backend_10min', 'excel_10min', 'diff_10min', 'ok_10min',
@@ -447,7 +485,7 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
             'I3': f'I3:I{last_price_row}',
         },
         COMPARE_SHEET: {
-            'A4': f'A4:N{last_compare_row}',
+            f'A{COMPARE_START_ROW}': f'A{COMPARE_START_ROW}:N{last_compare_row}',
         },
     }
 
@@ -542,12 +580,20 @@ def test_shift_workbook_for_a_product():
         assert backend_ws.cell(2, 2).value == 'SHIFT_10MIN'
         assert compare_ws.cell(2, 1).value == 'TOLERANCE'
         assert compare_ws.cell(2, 2).value == 0.0001
+        assert compare_ws.cell(5, 1).value == 'metric'
+        assert compare_ws.cell(6, 1).value == 'pass_rows'
+        assert compare_ws.cell(7, 1).value == 'empty_rows'
+        assert compare_ws.cell(8, 1).value == 'missing_rows'
+        assert compare_ws.cell(9, 1).value == 'fail_rows'
+        assert compare_ws.cell(11, 1).value == 'overall'
+        assert compare_ws.cell(11, 2).value == '=IF(SUM(B8:D9)=0,"PASS","FAIL")'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'row'
         compare_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value)
         assert compare_formula.startswith('=LET(')
         assert 'HSTACK' in compare_formula
         assert 'PRICE!G3:G' in compare_formula
         assert 'PRICE!G3#' not in compare_formula
+        assert 'b10,IF(LEN(rb10&"")=0,"",rb10)' in compare_formula
         assert 'IF(e10b*e10x,"EMPTY"' in compare_formula
         assert '$B$2' in compare_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
@@ -572,8 +618,8 @@ def test_shift_workbook_for_a_product():
             'ca': '1', 't': 'array', 'ref': f'I3:I{price_last_row}'
         }
         compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
-        assert _formula_attrs(out_path, COMPARE_SHEET, 'A4') == {
-            'ca': '1', 't': 'array', 'ref': f'A4:N{compare_last_row}'
+        assert _formula_attrs(out_path, COMPARE_SHEET, f'A{COMPARE_START_ROW}') == {
+            'ca': '1', 't': 'array', 'ref': f'A{COMPARE_START_ROW}:N{compare_last_row}'
         }
     finally:
         wb.close()
