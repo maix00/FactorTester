@@ -230,7 +230,12 @@ def _write_compare(ws_out, test2a_rows: int, mink_rows: int) -> None:
     mink_adj_col = 'B'
     for row in range(compare_start_row, compare_end_row + 1):
         source_row = f'=ROW()-{compare_start_row - 3}'
-        trade_time = f'=INDEX(TEST_2A_ADJ!A:A,A{row})'
+        trade_time = _styled_cell(
+            ws_out,
+            f'=INDEX(TEST_2A_ADJ!A:A,A{row})',
+            alignment=Alignment(horizontal='right'),
+        )
+        trade_time.number_format = 'yyyy-mm-dd hh:mm:ss'
         test2a_adj = f'=INDEX(TEST_2A_ADJ!B:B,A{row})'
         key = f'TEXT(B{row},"yyyy-mm-dd hh:mm:ss")'
         mink_row = f'MATCH({key},MAIN_MINK_ADJ!${mink_key_col}:${mink_key_col},0)'
