@@ -17,9 +17,13 @@ Sheet 结构：
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -27,6 +31,7 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
@@ -75,6 +80,11 @@ COL_ADJ_MUL = 21
 DATA_ROW_OFFSET = 2  # row 1 = remark, row 2 = header → 数据从 row 3 开始
 BACKEND_DATA_START_ROW = 3
 COMPARE_START_ROW = 4
+
+NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+ET.register_namespace('', NS_SHEET)
+ET.register_namespace('r', NS_R)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +396,7 @@ def process_product(prod_code: str) -> Path:
 
     wb.save(out_path)
     _style_workbook(out_path)
+    _patch_dynamic_arrays(out_path, nrows)
     return out_path
 
 
@@ -405,6 +416,91 @@ def _style_workbook(path: Path) -> None:
     finally:
         wb.save(path)
         wb.close()
+
+
+def _sheet_xml_target(zf: zipfile.ZipFile, sheet_name: str) -> str:
+    wb_xml = ET.parse(zf.open('xl/workbook.xml'))
+    rels_xml = ET.parse(zf.open('xl/_rels/workbook.xml.rels'))
+    rel_targets = {rel.get('Id'): rel.get('Target') for rel in rels_xml.getroot()}
+    for sh in wb_xml.getroot().findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+        if sh.get('name') != sheet_name:
+            continue
+        r_id = sh.get(f'{{{NS_R}}}id')
+        target = rel_targets.get(r_id)
+        if target is not None:
+            return target.lstrip('/')
+    raise RuntimeError(f'Sheet "{sheet_name}" not found in workbook XML')
+
+
+def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
+    """Mark spill formulas as dynamic array formulas, following test_2a."""
+    last_price_row = DATA_ROW_OFFSET + nrows
+    last_compare_row = COMPARE_START_ROW + nrows - 1
+    refs_by_sheet = {
+        PRICE_SHEET: {
+            'C3': f'C3:C{last_price_row}',
+            'F3': f'F3:F{last_price_row}',
+            'G3': f'G3:G{last_price_row}',
+            'H3': f'H3:H{last_price_row}',
+            'I3': f'I3:I{last_price_row}',
+        },
+        COMPARE_SHEET: {
+            'A4': f'A4:{get_column_letter(14)}{last_compare_row}',
+        },
+    }
+
+    with zipfile.ZipFile(path, 'r') as zf:
+        all_files = {name: zf.read(name) for name in zf.namelist()}
+        for sheet_name, formula_refs in refs_by_sheet.items():
+            target = _sheet_xml_target(zf, sheet_name)
+            sheet_root = ET.fromstring(all_files[target])
+            wanted_rows = {
+                ''.join(ch for ch in cell_ref if ch.isdigit())
+                for cell_ref in formula_refs
+            }
+            for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+                if row.get('r') not in wanted_rows:
+                    continue
+                for cell in row.findall(f'{{{NS_SHEET}}}c'):
+                    cell_ref = cell.get('r')
+                    if cell_ref not in formula_refs:
+                        continue
+                    formula = cell.find(f'{{{NS_SHEET}}}f')
+                    if formula is None:
+                        raise RuntimeError(f'{sheet_name}!{cell_ref} formula missing for dynamic-array patch')
+                    formula.set('ca', '1')
+                    formula.set('t', 'array')
+                    formula.set('ref', formula_refs[cell_ref])
+                    cell.set('cm', '1')
+            all_files[target] = ET.tostring(sheet_root, xml_declaration=True, encoding='UTF-8')
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
+    os.close(tmp_fd)
+    try:
+        with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for name, content in all_files.items():
+                zout.writestr(name, content)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _formula_attrs(path: Path, sheet_name: str, cell_ref: str) -> dict[str, str]:
+    with zipfile.ZipFile(path, 'r') as zf:
+        target = _sheet_xml_target(zf, sheet_name)
+        sheet_root = ET.parse(zf.open(target)).getroot()
+        for cell in sheet_root.findall(f'.//{{{NS_SHEET}}}c'):
+            if cell.get('r') != cell_ref:
+                continue
+            formula = cell.find(f'{{{NS_SHEET}}}f')
+            return {} if formula is None else dict(formula.attrib)
+    return {}
+
+
+def _formula_text(value: Any) -> str:
+    text = getattr(value, 'text', value)
+    return text if isinstance(text, str) else ''
 
 
 def main() -> None:
@@ -443,16 +539,34 @@ def test_shift_workbook_for_a_product():
         assert price_ws.cell(2, 9).value == 'SHIFT_1DAY'
         assert backend_ws.cell(2, 2).value == 'SHIFT_10MIN'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'TOLERANCE'
-        compare_formula = compare_ws.cell(COMPARE_START_ROW, 1).value
-        assert isinstance(compare_formula, str)
+        compare_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value)
         assert compare_formula.startswith('=LET(')
         assert 'HSTACK' in compare_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
-        shift_1day_formula = price_ws.cell(BACKEND_DATA_START_ROW, 9).value
-        assert isinstance(shift_1day_formula, str)
+        shift_1day_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 9).value)
         assert 'UNIQUE' in shift_1day_formula
         assert 'XLOOKUP' in shift_1day_formula
+        price_last_row = DATA_ROW_OFFSET + (price_ws.max_row - DATA_ROW_OFFSET)
+        compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
+        assert _formula_attrs(out_path, PRICE_SHEET, 'C3') == {
+            'ca': '1', 't': 'array', 'ref': f'C3:C{price_last_row}'
+        }
+        assert _formula_attrs(out_path, PRICE_SHEET, 'F3') == {
+            'ca': '1', 't': 'array', 'ref': f'F3:F{price_last_row}'
+        }
+        assert _formula_attrs(out_path, PRICE_SHEET, 'G3') == {
+            'ca': '1', 't': 'array', 'ref': f'G3:G{price_last_row}'
+        }
+        assert _formula_attrs(out_path, PRICE_SHEET, 'H3') == {
+            'ca': '1', 't': 'array', 'ref': f'H3:H{price_last_row}'
+        }
+        assert _formula_attrs(out_path, PRICE_SHEET, 'I3') == {
+            'ca': '1', 't': 'array', 'ref': f'I3:I{price_last_row}'
+        }
+        assert _formula_attrs(out_path, COMPARE_SHEET, 'A4') == {
+            'ca': '1', 't': 'array', 'ref': f'A4:N{compare_last_row}'
+        }
     finally:
         wb.close()
 
