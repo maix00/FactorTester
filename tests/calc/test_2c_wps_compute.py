@@ -11,9 +11,9 @@ test_2c_wps_compute.py — 自动用 WPS Office 打开 test_2a 的 xlsx，
 流程:
   1. 用 openpyxl(data_only=True) 读取 _SWITCHES!Z1，若已为 "DONE" 则跳过
   2. open -a WPS Office 打开 xlsx
-  3. 等待估算的计算时间（基于合约数量）
-  4. System Events 发送 Cmd+S 保存（处理可能出现的保存对话框）
-  5. System Events 发送 Cmd+W 关闭
+  3. 立刻触发一次保存，让 WPS 开始计算并落盘公式缓存
+  4. 轮询 _SWITCHES!Z2 保存计数 + _SWITCHES!Z1 DONE
+  5. System Events 发送 Cmd+W 关闭，并确认当前文档窗口消失
   6. 再次用 openpyxl(data_only=True) 验证 _SWITCHES!Z1 == "DONE"
 
 依赖:
@@ -40,13 +40,10 @@ from tests.calc import TEST_2A_DIR
 # ============================================================
 
 WPS_APP = '/Applications/wpsoffice.app'
-SECONDS_PER_CONTRACT = 3      # 每个合约约 3 秒计算时间（REDUCE+VSTACK）
-MIN_WAIT = 10                  # 最小等待 10 秒
-MAX_WAIT = 120                 # 最大等待 120 秒（总体超时保护）
-INITIAL_WAIT = 10               # 初始等待 10 秒让 WPS 开始计算
 SAVE_POLL_INTERVAL = 5          # 保存后每 5 秒检测落盘
 RETRY_WAIT = 5                  # CALC 后等 5 秒再保存
 MAX_RETRIES = 20                # 最多重试 20 次（10+5×20 = 110s ≈ 2 min）
+OPEN_SAVE_DELAY = 2             # 打开后尽快保存，但留一点时间让 WPS 建立窗口
 
 FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
 
@@ -54,10 +51,14 @@ FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='
 # 工具函数
 # ============================================================
 
-def patch_flag(xlsx_path: Path) -> None:
-    """给 _SWITCHES!Z1 写入 flag 公式 + Z2 清零
+def patch_flag(xlsx_path: Path, save_target: int) -> None:
+    """给 _SWITCHES!Z1 写入完成 flag，并给 Z2 写入本轮保存计数公式。
     
     Z1 = IF(ISNUMBER(MAIN!右下角),"DONE","CALC")
+    Z2 = IF(Z1="DONE", save_target, 0)
+
+    Z2 必须在 WPS 打开前写成公式。打开后再用 openpyxl 修改同一个 xlsx，
+    WPS 当前工作簿不会可靠地接收这次修改，还可能触发外部修改冲突。
     在 MAIN row 2 表头中扫描找到 adjustment_mul 列，
     用它作为检测列（REDUCE+VSTACK 全部溢出后一定有值）。
     """
@@ -90,34 +91,15 @@ def patch_flag(xlsx_path: Path) -> None:
         corner_row = 2 + n_contracts
         corner_cell = f'{adj_mul_letter}{corner_row}'
         
-        # Z1 flag
-        existing = sw.cell(1, 26).value
-        if existing is None or str(existing).strip() in ('', 'CALC', '0'):
-            formula = f'=IF(ISNUMBER(MAIN!{corner_cell}),"DONE","CALC")'
-            sw.cell(1, 26, formula).fill = FORMULA_FILL
-        
-        # Z2 清零
-        sw.cell(2, 26, 0)
+        z1_formula = f'=IF(ISNUMBER(MAIN!{corner_cell}),"DONE","CALC")'
+        z2_formula = f'=IF(Z1="DONE",{int(save_target)},0)'
+        sw.cell(1, 26, z1_formula).fill = FORMULA_FILL
+        sw.cell(2, 26, z2_formula).fill = FORMULA_FILL
         
         wb.save(xlsx_path)
         wb.close()
     except Exception as e:
         print(f'  ⚠️ patch_flag failed: {e}', flush=True)
-
-def estimate_wait(xlsx_path: Path) -> int:
-    """根据 _SWITCHES 合约数量估算 WPS 计算等待时间（秒）"""
-    try:
-        wb = load_workbook(xlsx_path, read_only=True, data_only=False)
-        sw = wb['_SWITCHES']
-        # 合约数量 = _SWITCHES 数据行数 (row 3 to max_row)
-        n = sw.max_row - 2 if sw.max_row else 0
-        wb.close()
-        if n <= 0:
-            return MIN_WAIT
-        return min(max(int(n * SECONDS_PER_CONTRACT), MIN_WAIT), MAX_WAIT)
-    except Exception:
-        return MIN_WAIT
-
 
 def read_z1(xlsx_path: Path) -> str | None:
     """读取 _SWITCHES!Z1 计算完成 flag"""
@@ -157,40 +139,25 @@ def wps_open(xlsx_path: str) -> None:
     print('opened', flush=True)
 
 
-# 全局保存计数器（每次 patch_flag 重置）
-_save_seq = 0
+def next_save_target(xlsx_path: Path) -> int:
+    """生成本轮 WPS 保存后应写入缓存的目标计数。
+
+    目标值必须大于当前缓存值，否则上一次 WPS 保存留下的 Z2 可能造成误判。
+    """
+    previous = read_z2(xlsx_path) or 0
+    return max(previous + 1, int(time.time()))
 
 
-def reset_save_seq() -> None:
-    """重置保存计数器（每个产品开始时调用）"""
-    global _save_seq
-    _save_seq = 0
-
-
-def wps_save_and_check(xlsx_path: Path, timeout: int = 20) -> tuple[bool, bool]:
-    """发送 Cmd+S（带递增计数），轮询 Z2 确认落盘，同时读 Z1 状态
+def wps_save_and_check(xlsx_path: Path, save_target: int, timeout: int = 20) -> tuple[bool, bool]:
+    """发送 Cmd+S，轮询 Z2 确认 WPS 已保存，同时读 Z1 状态。
     
     返回 (saved: 保存是否落盘, done: 是否 DONE)
     
     流程：
-      1. 用 openpyxl 在 _SWITCHES!Z2 写入递增计数 → 保存（给 WPS 看）
-      2. WPS Cmd+S 保存
-      3. 轮询 openpyxl data_only=True 读 Z2，等计数出现 = 落盘
-      4. 同时读 Z1 返回 done 状态
+      1. WPS Cmd+S 保存
+      2. 轮询 openpyxl data_only=True 读 Z2，等计数出现 = WPS 已计算并保存缓存
+      3. 同时读 Z1，只有 Z2 达到目标且 Z1 == DONE 才算完成
     """
-    global _save_seq
-    _save_seq += 1
-    target = _save_seq
-
-    # 在 Z2 写入目标计数，让 WPS 下次 Cmd+S 把它写进缓存
-    try:
-        wb = load_workbook(xlsx_path)
-        wb['_SWITCHES'].cell(2, 26, _save_seq)
-        wb.save(xlsx_path)
-        wb.close()
-    except Exception:
-        pass
-
     # 发送 Cmd+S
     script = '''
     tell application "System Events"
@@ -206,17 +173,56 @@ def wps_save_and_check(xlsx_path: Path, timeout: int = 20) -> tuple[bool, bool]:
 
     # 轮询等待 Z2 == target（保存落盘），每 SAVE_POLL_INTERVAL 秒检测一次
     deadline = time.time() + timeout
+    saw_save = False
     while time.time() < deadline:
         time.sleep(SAVE_POLL_INTERVAL)
         z2_val = read_z2(xlsx_path)
         z1_val = read_z1(xlsx_path)
-        if z2_val == target:
-            return (True, z1_val == "DONE")
-        elif z2_val is not None and z2_val > target:
-            # 落盘已完成（WPS 可能已内部保存了更新的计数）
-            return (True, z1_val == "DONE")
+        saw_save = z2_val is not None and z2_val >= save_target
+        if saw_save and z1_val == "DONE":
+            return (True, True)
 
-    return (False, False)
+    return (saw_save, False)
+
+
+def wps_close_document(xlsx_path: Path, timeout: int = 10) -> bool:
+    """关闭当前 WPS 文档，并确认目标文件窗口不再存在。"""
+    doc_name = xlsx_path.name.replace('"', '\\"')
+    script = f'''
+    tell application "System Events"
+        if not (exists process "WPS Office") then return "closed"
+        tell process "WPS Office"
+            set frontmost to true
+            delay 0.5
+            keystroke "w" using command down
+            delay 1
+            if (count of windows) > 0 and exists sheet 1 of window 1 then
+                keystroke return
+                delay 1
+            end if
+            repeat with i from 1 to {max(1, int(timeout))}
+                set stillOpen to false
+                repeat with w in windows
+                    if name of w contains "{doc_name}" then set stillOpen to true
+                end repeat
+                if stillOpen is false then return "closed"
+                delay 1
+            end repeat
+            return "open"
+        end tell
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            check=False,
+            timeout=timeout + 5,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() == 'closed'
+    except Exception:
+        return False
 
 
 def kill_wps() -> None:
@@ -234,9 +240,10 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
         print(f'  ⚠️ {prod}.xlsx not found, skipping')
         return False
 
-    # 打 flag 补丁
-    patch_flag(src)
-    reset_save_seq()
+    save_target = next_save_target(src)
+
+    # 打 flag 补丁：必须在 WPS 打开前完成，Z2 是等待 WPS 保存缓存的握手公式。
+    patch_flag(src, save_target)
 
     print(f'  📂 {prod} — opening WPS... ', end='', flush=True)
 
@@ -246,14 +253,16 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
         print(f'❌ open failed: {e}')
         return False
 
-    # 初始等待 WPS 开始计算
-    print(f'[wait {INITIAL_WAIT}s]', end='', flush=True)
-    time.sleep(INITIAL_WAIT)
+    # 打开后尽快保存一次，后续每轮保存都会推动 WPS 写出公式缓存。
+    open_delay = max(1, int(OPEN_SAVE_DELAY * wait_scale))
+    print(f'[open-save {open_delay}s]', end='', flush=True)
+    time.sleep(open_delay)
 
     # 循环保存+轮询
     success = False
+    poll_timeout = max(SAVE_POLL_INTERVAL, int(SAVE_POLL_INTERVAL * 4 * wait_scale))
     for retry in range(MAX_RETRIES):
-        saved, done = wps_save_and_check(src, timeout=SAVE_POLL_INTERVAL * 4)
+        saved, done = wps_save_and_check(src, save_target, timeout=poll_timeout)
 
         if done and saved:
             print(f' ✅ DONE (retry={retry})')
@@ -268,22 +277,12 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
     else:
         print(f' ⚠️ max retries ({MAX_RETRIES}) reached')
 
-    # 关闭 WPS 文档
-    script = '''
-    tell application "System Events"
-        tell process "WPS Office"
-            set frontmost to true
-            delay 0.5
-            keystroke "w" using command down
-            delay 1
-            keystroke return
-        end tell
-    end tell
-    '''
-    subprocess.run(['osascript', '-e', script], check=False, timeout=15)
-    time.sleep(1)
+    # 关闭 WPS 文档，并把无法确认关闭作为失败信号暴露出来。
+    close_ok = wps_close_document(src)
+    if not close_ok:
+        print(' ⚠️ close not confirmed', end='', flush=True)
 
-    return success
+    return success and close_ok
 
 
 def main():
