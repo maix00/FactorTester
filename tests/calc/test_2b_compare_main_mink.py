@@ -25,6 +25,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell

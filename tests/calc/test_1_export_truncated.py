@@ -21,9 +21,12 @@ Output: data/test/test_1/{prod}/{prod}.xlsx
 import json
 import os
 import shutil
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import pandas as pd
 from openpyxl import Workbook, load_workbook

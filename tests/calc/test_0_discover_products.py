@@ -24,6 +24,10 @@ Output Excel (openpyxl 直接写，含注释):
 test_1 从 _SWITCH_COUNTS sheet 读取品种列表及参数。
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import pandas as pd
 
 from openpyxl import Workbook
