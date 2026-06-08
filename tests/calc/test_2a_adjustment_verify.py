@@ -511,6 +511,15 @@ def process_product(prod_xlsx: Path) -> None:
         ).fill = FORMULA_FILL
 
     # ----------------------------------------------------------
+    # _SWITCHES!Z1: flag — WPS/Excel 计算完成后动态数组溢出，MAIN!X3 变为数值
+    # test_2c 通过检查此单元格判断 WPS 是否计算完毕
+    # ----------------------------------------------------------
+    sw_out.cell(
+        1, 26,
+        f'=IF(ISNUMBER(MAIN!X3),"DONE","CALC")'
+    ).fill = FORMULA_FILL
+
+    # ----------------------------------------------------------
     # Sheet 2: MAIN (单公式 REDUCE+HSTACK+VSTACK — 13列数据+mul+add，无硬编码)
     # ----------------------------------------------------------
     # 核心洞察：
