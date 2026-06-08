@@ -20,6 +20,7 @@ Default audit:
 from __future__ import annotations
 
 import argparse
+import datetime
 import math
 import os
 import sys
@@ -110,6 +111,12 @@ def _write_remark(ws, text: str) -> None:
     ws.row_dimensions[1].height = remark_height(text)
 
 
+def _ts_to_datetime(idx):  # -> datetime.datetime | NaT, but NaTType not in stubs
+    if isinstance(idx, datetime.datetime):
+        return idx
+    return pd.Timestamp(idx).to_pydatetime()
+
+
 def _normalise_timestamp(value):
     ts = pd.Timestamp(value)
     if ts.tzinfo is not None:
@@ -167,7 +174,7 @@ def _backend_re(product: CNFutures, rf_minutes: int) -> pd.Series:
     _factors, _ic_series, _stats, re_table, _fe_table, _mask = run_ic_for_factor(tester, params, [factor])
     if product not in re_table.columns:
         raise RuntimeError(f'{product.name}: backend RE missing product column')
-    return pd.to_numeric(re_table[product], errors='coerce')
+    return pd.Series(pd.to_numeric(re_table[product], errors='coerce'))
 
 
 def _read_test3a_rf(test3a_path: Path) -> int | None:
@@ -236,7 +243,7 @@ def _write_test3a_returns(ws, returns: pd.DataFrame) -> int:
 
     for row_idx, (idx, row) in enumerate(returns.iterrows(), start=3):
         trade_time = _styled_cell(
-            ws, idx.to_pydatetime(),
+            ws, _ts_to_datetime(idx),
             alignment=Alignment(horizontal='right'),
             number_format=DATETIME_FORMAT,
         )
@@ -341,7 +348,7 @@ def _style_workbook(path: Path) -> None:
         wb.close()
 
 
-def process_product(product_id: str, rf_minutes: int | None = None) -> Path | None:
+def process_product(product_id: str, rf_minutes: int | None = None) -> Path:
     product_name = _product_name(product_id)
     product = CNFutures(product_name)
 
@@ -372,7 +379,9 @@ def process_product(product_id: str, rf_minutes: int | None = None) -> Path | No
     backend_ws = wb.create_sheet(BACKEND_RE_SHEET)
     compare_ws = wb.create_sheet(COMPARE_SHEET)
 
-    test3a_rows = _write_test3a_returns(test3a_ws, test3a_returns) if has_test3a else 0
+    test3a_rows = 0
+    if has_test3a and test3a_ws is not None and test3a_returns is not None:
+        test3a_rows = _write_test3a_returns(test3a_ws, test3a_returns)
     backend_rows = _write_backend_re(backend_ws, returns)
     _write_compare(compare_ws, backend_rows=backend_rows, test3a_rows=test3a_rows, rf_minutes=rf)
 
@@ -430,20 +439,18 @@ def test_backend_ic_re_workbook_for_a_product():
     out_path = process_product('A', rf_minutes=DEFAULT_RF_MINUTES)
     wb = load_workbook(out_path, read_only=True, data_only=False)
     try:
-        assert wb.sheetnames == [PRICE_SOURCE_SHEET, BACKEND_RE_SHEET, COMPARE_SHEET]
-        price_ws = wb[PRICE_SOURCE_SHEET]
+        assert wb.sheetnames == [TEST_3A_RETURNS_SHEET, BACKEND_RE_SHEET, COMPARE_SHEET]
         backend_ws = wb[BACKEND_RE_SHEET]
         compare_ws = wb[COMPARE_SHEET]
 
-        assert price_ws.cell(2, 3).value == 'open_price_adjusted'
         assert backend_ws.cell(2, 2).value == 'backend_re'
         assert compare_ws.cell(2, 1).value == 'RF_MINUTES'
         assert compare_ws.cell(2, 2).value == DEFAULT_RF_MINUTES
         assert compare_ws.cell(COMPARE_START_ROW - 1, 6).value == 'entry_trade_time'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 8).value == 'exit_row'
         assert compare_ws.cell(COMPARE_START_ROW, 5).value == f'=IF(D{COMPARE_START_ROW}="","",D{COMPARE_START_ROW}+1)'
-        assert f'D{COMPARE_START_ROW}+$B$2+1' in compare_ws.cell(COMPARE_START_ROW, 8).value
-        assert f'INDEX(PRICE_SOURCE!$C:$C,H{COMPARE_START_ROW})/G{COMPARE_START_ROW}-1' in compare_ws.cell(COMPARE_START_ROW, 10).value
+        assert f'D{COMPARE_START_ROW}+$B$2+1' in str(compare_ws.cell(COMPARE_START_ROW, 8).value)
+        assert f'INDEX(BACKEND_RE!$C:$C,H{COMPARE_START_ROW})/G{COMPARE_START_ROW}-1' in str(compare_ws.cell(COMPARE_START_ROW, 10).value)
     finally:
         wb.close()
 

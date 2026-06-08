@@ -427,7 +427,7 @@ def test_return_formula_workbook_for_a_product():
         assert return_ws.column_dimensions['B'].number_format == DATE_FORMAT
         assert return_ws.column_dimensions['C'].number_format == DATETIME_FORMAT
         main_array_formula = main_ws.cell(MAIN_OPEN_DATA_START_ROW, 5).value
-        main_formula = getattr(main_array_formula, 'text', main_array_formula)
+        main_formula = str(getattr(main_array_formula, 'text', main_array_formula))
         main_last_row = MAIN_OPEN_DATA_START_ROW + main_rows - 1
         assert main_formula == f'=C3:C{main_last_row}*D3:D{main_last_row}'
         assert getattr(main_array_formula, 'ref', None) == f'E3:E{main_last_row}'
@@ -441,7 +441,7 @@ def test_return_formula_workbook_for_a_product():
         assert return_ws.cell(RETURN_HEADER_ROW, 11).value == 'next_open_to_open_adjusted_rf'
 
         array_formula = return_ws.cell(RETURN_FORMULA_ROW, 1).value
-        formula = getattr(array_formula, 'text', array_formula)
+        formula = str(getattr(array_formula, 'text', array_formula))
         assert formula.startswith('=LET(')
         assert '$B$2' in formula
         assert 'SEQUENCE(n)' in formula
