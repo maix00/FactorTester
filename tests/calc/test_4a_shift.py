@@ -70,6 +70,7 @@ SHIFTS = [
     ('SHIFT_10MIN', '10min'),
     ('SHIFT_5BAR', 5),
     ('SHIFT_1DAY', '1day'),
+    ('SHIFT_1DAY_30MIN', '1d30min'),
 ]
 
 # MAIN sheet 列索引（0-based, 来自 test_2a）
@@ -231,12 +232,12 @@ def _shift_1day_trading_day_formula(last_row: int) -> str:
 
 
 def _method_diff_formula(last_row: int) -> str:
-    return f'=LET(b,I3:I{last_row},t,J3:J{last_row},eb,LEN(b&"")=0,et,LEN(t&"")=0,IF(eb+et,"",ABS(b-t)))'
+    return f'=LET(b,J3:J{last_row},t,K3:K{last_row},eb,LEN(b&"")=0,et,LEN(t&"")=0,IF(eb+et,"",ABS(b-t)))'
 
 
 def _method_status_formula(last_row: int) -> str:
     return (
-        f'=LET(b,I3:I{last_row},t,J3:J{last_row},d,K3:K{last_row},'
+        f'=LET(b,J3:J{last_row},t,K3:K{last_row},d,L3:L{last_row},'
         'eb,LEN(b&"")=0,et,LEN(t&"")=0,'
         'IF(eb*et,"EMPTY",IF(eb+et,"MISSING",IF(d<=$B$2,"SAME","DIFF"))))'
     )
@@ -258,9 +259,13 @@ def _compare_spill_formulas(nrows: int) -> list[str]:
         f'=LET(b,G{COMPARE_START_ROW}:G{compare_last_row},x,H{COMPARE_START_ROW}:H{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
         f'=LET(b,G{COMPARE_START_ROW}:G{compare_last_row},x,H{COMPARE_START_ROW}:H{compare_last_row},d,I{COMPARE_START_ROW}:I{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
         f'=LET(r,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},IF(LEN(r&"")=0,"",r))',
-        f'=LET(r,PRICE!I3:I{price_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(r,PRICE!J3:J{price_last_row},IF(LEN(r&"")=0,"",r))',
         f'=LET(b,K{COMPARE_START_ROW}:K{compare_last_row},x,L{COMPARE_START_ROW}:L{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
         f'=LET(b,K{COMPARE_START_ROW}:K{compare_last_row},x,L{COMPARE_START_ROW}:L{compare_last_row},d,M{COMPARE_START_ROW}:M{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
+        f'=LET(r,BACKEND!E{BACKEND_DATA_START_ROW}:E{backend_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(r,PRICE!I3:I{price_last_row},IF(LEN(r&"")=0,"",r))',
+        f'=LET(b,O{COMPARE_START_ROW}:O{compare_last_row},x,P{COMPARE_START_ROW}:P{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb+ex,"",ABS(b-x)))',
+        f'=LET(b,O{COMPARE_START_ROW}:O{compare_last_row},x,P{COMPARE_START_ROW}:P{compare_last_row},d,Q{COMPARE_START_ROW}:Q{compare_last_row},eb,LEN(b&"")=0,ex,LEN(x&"")=0,IF(eb*ex,"EMPTY",IF(eb+ex,"MISSING",IF(d<=$B$2,"PASS","FAIL"))))',
     ]
 
 
@@ -283,6 +288,7 @@ def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: l
         'open_adj',
         'SHIFT_10MIN',
         'SHIFT_5BAR',
+        'SHIFT_1DAY_30MIN_BAR',
         'SHIFT_1DAY_BAR',
         'SHIFT_1DAY_TRADING_DAY',
         'DIFF_1DAY_METHODS',
@@ -341,7 +347,7 @@ def _write_backend_sheet(ws, product: CNFutures, times: list) -> dict[str, int]:
     """写后端三种 shift 结果。返回每种 shift 的列号（供 COMPARE 使用，1-based）。"""
     _write_remark(ws, 'Backend ShiftOp(ColumnRef(OPEN_ADJUSTED), N) results.')
 
-    headers = ['trade_time', 'SHIFT_10MIN', 'SHIFT_5BAR', 'SHIFT_1DAY']
+    headers = ['trade_time', 'SHIFT_10MIN', 'SHIFT_5BAR', 'SHIFT_1DAY', 'SHIFT_1DAY_30MIN']
     _write_header(ws, headers)
 
     shift_series: dict[str, pd.Series] = {}
@@ -366,7 +372,7 @@ def _write_backend_sheet(ws, product: CNFutures, times: list) -> dict[str, int]:
                 row_cells.append('')
         ws.append(row_cells)
 
-    return {'SHIFT_10MIN': 2, 'SHIFT_5BAR': 3, 'SHIFT_1DAY': 4}
+    return {'SHIFT_10MIN': 2, 'SHIFT_5BAR': 3, 'SHIFT_1DAY': 4, 'SHIFT_1DAY_30MIN': 5}
 
 
 # ---------------------------------------------------------------------------
@@ -383,44 +389,50 @@ def _write_compare_sheet(ws, nrows: int) -> None:
     ])
     ws.append(['backend_rows', nrows])
     ws.append(['price_rows', nrows])
-    ws.append(['metric', 'SHIFT_10MIN', 'SHIFT_5BAR', 'SHIFT_1DAY'])
+    ws.append(['metric', 'SHIFT_10MIN', 'SHIFT_5BAR', 'SHIFT_1DAY', 'SHIFT_1DAY_30MIN'])
     ws.append([
         'pass_rows',
         f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"PASS")',
         f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"PASS")',
         f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"PASS")',
+        f'=COUNTIF(R{COMPARE_START_ROW}:R{compare_end_row},"PASS")',
     ])
     ws.append([
         'empty_rows',
         f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"EMPTY")',
         f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"EMPTY")',
         f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"EMPTY")',
+        f'=COUNTIF(R{COMPARE_START_ROW}:R{compare_end_row},"EMPTY")',
     ])
     ws.append([
         'missing_rows',
         f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"MISSING")',
         f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"MISSING")',
         f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"MISSING")',
+        f'=COUNTIF(R{COMPARE_START_ROW}:R{compare_end_row},"MISSING")',
     ])
     ws.append([
         'fail_rows',
         f'=COUNTIF(F{COMPARE_START_ROW}:F{compare_end_row},"FAIL")',
         f'=COUNTIF(J{COMPARE_START_ROW}:J{compare_end_row},"FAIL")',
         f'=COUNTIF(N{COMPARE_START_ROW}:N{compare_end_row},"FAIL")',
+        f'=COUNTIF(R{COMPARE_START_ROW}:R{compare_end_row},"FAIL")',
     ])
     ws.append([
         'max_abs_diff',
         f'=IFERROR(MAX(E{COMPARE_START_ROW}:E{compare_end_row}),"")',
         f'=IFERROR(MAX(I{COMPARE_START_ROW}:I{compare_end_row}),"")',
         f'=IFERROR(MAX(M{COMPARE_START_ROW}:M{compare_end_row}),"")',
+        f'=IFERROR(MAX(Q{COMPARE_START_ROW}:Q{compare_end_row}),"")',
     ])
-    ws.append(['overall', '=IF(SUM(B8:D9)=0,"PASS","FAIL")'])
+    ws.append(['overall', '=IF(SUM(B8:E9)=0,"PASS","FAIL")'])
     ws.append([])
 
     headers = ['row', 'time',
                'backend_10min', 'excel_10min', 'diff_10min', 'ok_10min',
                'backend_5bar', 'excel_5bar', 'diff_5bar', 'ok_5bar',
-               'backend_1day', 'excel_1day', 'diff_1day', 'ok_1day']
+               'backend_1day', 'excel_1day', 'diff_1day', 'ok_1day',
+               'backend_1d30min', 'excel_1d30min', 'diff_1d30min', 'ok_1d30min']
     _write_header(ws, headers)
 
     formulas = _compare_spill_formulas(nrows)
@@ -439,6 +451,10 @@ def _write_compare_sheet(ws, nrows: int) -> None:
         _styled_cell(ws, formulas[11], number_format=NUM_FMT),
         _styled_cell(ws, formulas[12], number_format=NUM_FMT),
         formulas[13],
+        _styled_cell(ws, formulas[14], number_format=NUM_FMT),
+        _styled_cell(ws, formulas[15], number_format=NUM_FMT),
+        _styled_cell(ws, formulas[16], number_format=NUM_FMT),
+        formulas[17],
     ])
 
 
@@ -488,7 +504,7 @@ def _style_workbook(path: Path) -> None:
             remark_cell.font = COMMENT_FONT
             remark_cell.alignment = Alignment(wrap_text=True, vertical='top')
             ws.column_dimensions['A'].width = 22
-            for c in 'BCDEFGHIJKLMN':
+            for c in 'BCDEFGHIJKLMNOPQR':
                 ws.column_dimensions[c].width = 18
         price_ws = wb[PRICE_SHEET]
         price_ws.freeze_panes = 'A3'
@@ -503,6 +519,7 @@ def _style_workbook(path: Path) -> None:
             'I': NUM_FMT,
             'J': NUM_FMT,
             'K': NUM_FMT,
+            'L': NUM_FMT,
         }
         for col, fmt in price_formats.items():
             price_ws.column_dimensions[col].number_format = fmt
@@ -510,7 +527,7 @@ def _style_workbook(path: Path) -> None:
         backend_ws = wb[BACKEND_SHEET]
         backend_ws.freeze_panes = 'A3'
         backend_ws.column_dimensions['A'].number_format = DT_FMT
-        for col in 'BCD':
+        for col in 'BCDE':
             backend_ws.column_dimensions[col].number_format = NUM_FMT
 
         compare_ws = wb[COMPARE_SHEET]
@@ -527,6 +544,9 @@ def _style_workbook(path: Path) -> None:
             'K': NUM_FMT,
             'L': NUM_FMT,
             'M': NUM_FMT,
+            'O': NUM_FMT,
+            'P': NUM_FMT,
+            'Q': NUM_FMT,
         }
         for col, fmt in compare_formats.items():
             compare_ws.column_dimensions[col].number_format = fmt
@@ -555,7 +575,7 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
     last_compare_row = COMPARE_START_ROW + nrows - 1
     compare_refs = {
         f'{col}{COMPARE_START_ROW}': f'{col}{COMPARE_START_ROW}:{col}{last_compare_row}'
-        for col in 'ABCDEFGHIJKLMN'
+        for col in 'ABCDEFGHIJKLMNOPQR'
     }
     refs_by_sheet = {
         PRICE_SHEET: {
@@ -567,6 +587,7 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
             'J3': f'J3:J{last_price_row}',
             'K3': f'K3:K{last_price_row}',
             'L3': f'L3:L{last_price_row}',
+            'M3': f'M3:M{last_price_row}',
         },
         COMPARE_SHEET: compare_refs,
     }
@@ -650,19 +671,21 @@ def test_shift_workbook_for_a_product():
         price_ws = wb[PRICE_SHEET]
         backend_ws = wb[BACKEND_SHEET]
         compare_ws = wb[COMPARE_SHEET]
-        assert [str(r) for r in price_ws.merged_cells.ranges] == ['A1:L1']
-        assert [str(r) for r in backend_ws.merged_cells.ranges] == ['A1:D1']
-        assert [str(r) for r in compare_ws.merged_cells.ranges] == ['A1:N1']
+        assert [str(r) for r in price_ws.merged_cells.ranges] == ['A1:M1']
+        assert [str(r) for r in backend_ws.merged_cells.ranges] == ['A1:E1']
+        assert [str(r) for r in compare_ws.merged_cells.ranges] == ['A1:R1']
         for ws in (price_ws, backend_ws, compare_ws):
             assert ws['A1'].font.italic is True
             assert ws['A1'].font.bold is False
         assert price_ws.cell(2, 1).value == 'trading_day'
         assert price_ws.cell(2, 2).value == 'trade_time'
-        assert price_ws.cell(2, 9).value == 'SHIFT_1DAY_BAR'
-        assert price_ws.cell(2, 10).value == 'SHIFT_1DAY_TRADING_DAY'
-        assert price_ws.cell(2, 11).value == 'DIFF_1DAY_METHODS'
-        assert price_ws.cell(2, 12).value == 'OK_1DAY_METHODS'
+        assert price_ws.cell(2, 9).value == 'SHIFT_1DAY_30MIN_BAR'
+        assert price_ws.cell(2, 10).value == 'SHIFT_1DAY_BAR'
+        assert price_ws.cell(2, 11).value == 'SHIFT_1DAY_TRADING_DAY'
+        assert price_ws.cell(2, 12).value == 'DIFF_1DAY_METHODS'
+        assert price_ws.cell(2, 13).value == 'OK_1DAY_METHODS'
         assert backend_ws.cell(2, 2).value == 'SHIFT_10MIN'
+        assert backend_ws.cell(2, 5).value == 'SHIFT_1DAY_30MIN'
         assert compare_ws.cell(2, 1).value == 'TOLERANCE'
         assert compare_ws.cell(2, 2).value == 0.0001
         assert compare_ws.cell(5, 1).value == 'metric'
@@ -671,7 +694,7 @@ def test_shift_workbook_for_a_product():
         assert compare_ws.cell(8, 1).value == 'missing_rows'
         assert compare_ws.cell(9, 1).value == 'fail_rows'
         assert compare_ws.cell(11, 1).value == 'overall'
-        assert compare_ws.cell(11, 2).value == '=IF(SUM(B8:D9)=0,"PASS","FAIL")'
+        assert compare_ws.cell(11, 2).value == '=IF(SUM(B8:E9)=0,"PASS","FAIL")'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'row'
         assert _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value).startswith('=SEQUENCE(')
         backend_10min_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 3).value)
@@ -685,14 +708,16 @@ def test_shift_workbook_for_a_product():
         assert '$B$2' in ok_10min_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
-        shift_1day_bar_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 9).value)
+        shift_1day_30min_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 9).value)
+        assert 'DROP(x,-' in shift_1day_30min_formula
+        shift_1day_bar_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 10).value)
         assert 'DROP(x,-' in shift_1day_bar_formula
-        shift_1day_trading_day_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 10).value)
+        shift_1day_trading_day_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 11).value)
         assert 'UNIQUE' in shift_1day_trading_day_formula
         assert 'XLOOKUP' in shift_1day_trading_day_formula
-        method_diff_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 11).value)
+        method_diff_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 12).value)
         assert 'ABS(b-t)' in method_diff_formula
-        method_status_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 12).value)
+        method_status_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 13).value)
         assert '"DIFF"' in method_status_formula
         assert price_ws.cell(BACKEND_DATA_START_ROW, 1).number_format == DATE_FMT
         assert price_ws.cell(BACKEND_DATA_START_ROW, 2).number_format == DT_FMT
@@ -724,12 +749,18 @@ def test_shift_workbook_for_a_product():
         assert _formula_attrs(out_path, PRICE_SHEET, 'L3') == {
             'ca': '1', 't': 'array', 'ref': f'L3:L{price_last_row}'
         }
+        assert _formula_attrs(out_path, PRICE_SHEET, 'M3') == {
+            'ca': '1', 't': 'array', 'ref': f'M3:M{price_last_row}'
+        }
         compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
         assert _formula_attrs(out_path, COMPARE_SHEET, f'A{COMPARE_START_ROW}') == {
             'ca': '1', 't': 'array', 'ref': f'A{COMPARE_START_ROW}:A{compare_last_row}'
         }
         assert _formula_attrs(out_path, COMPARE_SHEET, f'N{COMPARE_START_ROW}') == {
             'ca': '1', 't': 'array', 'ref': f'N{COMPARE_START_ROW}:N{compare_last_row}'
+        }
+        assert _formula_attrs(out_path, COMPARE_SHEET, f'R{COMPARE_START_ROW}') == {
+            'ca': '1', 't': 'array', 'ref': f'R{COMPARE_START_ROW}:R{compare_last_row}'
         }
     finally:
         wb.close()
