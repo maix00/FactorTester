@@ -50,6 +50,7 @@ TEST_3B_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_3b'
 
 # test_4: 算子验证
 TEST_4A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_4a' # ShiftOp 验证
+TEST_4B_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_4b' # rolling_mean 验证
 
 # ============================================================
 # 全局配置
