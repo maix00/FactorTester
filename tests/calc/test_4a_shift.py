@@ -41,6 +41,7 @@ from tools.factors.expr.leaf import ConstExpr
 from tests.calc import (
     HEADER_FILL,
     MAIN_MINK_DIR,
+    COMMENT_FONT,
     REMARK_FILL,
     REMARK_FONT,
     TEST_2A_DIR,
@@ -104,7 +105,7 @@ def _styled_cell(ws, value, *, fill=None, font=None, alignment=None, number_form
 
 def _write_remark(ws, text: str) -> None:
     ws.append([
-        _styled_cell(ws, text, fill=REMARK_FILL, font=REMARK_FONT,
+        _styled_cell(ws, text, fill=REMARK_FILL, font=COMMENT_FONT,
                      alignment=Alignment(wrap_text=True, vertical='top'))
     ])
     ws.row_dimensions[1].height = remark_height(text)
@@ -196,13 +197,59 @@ def _read_test2a_main(prod_path: Path) -> tuple[list, list, list, list] | None:
         wb.close()
 
 
+def _price_time_key_formula(last_row: int) -> str:
+    return f'=TEXT(A3:A{last_row},"yyyy-mm-dd")&"|"&TEXT(B3:B{last_row},"hh:mm:ss")'
+
+
+def _open_adjusted_formula(last_row: int) -> str:
+    return f'=D3:D{last_row}*E3:E{last_row}'
+
+
+def _shift_bars_formula(n_bars: int) -> str:
+    return f'=LET(x,F3#,VSTACK(MAKEARRAY({n_bars},1,LAMBDA(r,c,"")),DROP(x,-{n_bars})))'
+
+
+def _shift_1day_formula(last_row: int) -> str:
+    days = f'A3:A{last_row}'
+    times = f'B3:B{last_row}'
+    return (
+        f'=LET(days,{days},t,{times},keys,C3#,vals,F3#,'
+        'ud,UNIQUE(days),pos,XMATCH(days,ud),'
+        'prev,IF(pos>1,INDEX(ud,pos-1),""),'
+        'prevKeys,IF(prev="","",TEXT(prev,"yyyy-mm-dd")&"|"&TEXT(t,"hh:mm:ss")),'
+        'IF(prev="","",IFERROR(XLOOKUP(prevKeys,keys,vals,""),"")))'
+    )
+
+
+def _compare_spill_formula(nrows: int) -> str:
+    last_row = BACKEND_DATA_START_ROW + nrows - 1
+    return (
+        f'=LET(rows,SEQUENCE({nrows}),tol,$B${COMPARE_START_ROW - 1},'
+        f'time,BACKEND!A{BACKEND_DATA_START_ROW}:A{last_row},'
+        f'b10,BACKEND!B{BACKEND_DATA_START_ROW}:B{last_row},x10,PRICE!G3#,'
+        'e10b,LEN(b10&"")=0,e10x,LEN(x10&"")=0,'
+        'd10,IF(e10b+e10x,"",ABS(b10-x10)),'
+        'ok10,IF(e10b*e10x,"EMPTY",IF(e10b+e10x,"MISSING",IF(d10<=tol,"PASS","FAIL"))),'
+        f'b5,BACKEND!C{BACKEND_DATA_START_ROW}:C{last_row},x5,PRICE!H3#,'
+        'e5b,LEN(b5&"")=0,e5x,LEN(x5&"")=0,'
+        'd5,IF(e5b+e5x,"",ABS(b5-x5)),'
+        'ok5,IF(e5b*e5x,"EMPTY",IF(e5b+e5x,"MISSING",IF(d5<=tol,"PASS","FAIL"))),'
+        f'b1,BACKEND!D{BACKEND_DATA_START_ROW}:D{last_row},x1,PRICE!I3#,'
+        'e1b,LEN(b1&"")=0,e1x,LEN(x1&"")=0,'
+        'd1,IF(e1b+e1x,"",ABS(b1-x1)),'
+        'ok1,IF(e1b*e1x,"EMPTY",IF(e1b+e1x,"MISSING",IF(d1<=tol,"PASS","FAIL"))),'
+        'HSTACK(rows,time,b10,x10,d10,ok10,b5,x5,d5,ok5,b1,x1,d1,ok1))'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sheet 1: PRICE
 # ---------------------------------------------------------------------------
 def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: list, nrows: int, shift_bars: dict[str, int]) -> None:
     _write_remark(ws, 'Price data from test_2a MAIN. '
                        'open_adj = open_price * adj_mul (Excel formula). '
-                       'SHIFT_10MIN / SHIFT_5BAR use bar OFFSET; SHIFT_1DAY matches previous trading_day + same clock time.')
+                       'Dynamic-array formulas spill helper and shift columns. '
+                       'SHIFT_1DAY matches previous trading_day + same clock time.')
 
     headers = [
         'trading_day',
@@ -217,33 +264,21 @@ def _write_price_sheet(ws, trading_days: list, times: list, opens: list, adjs: l
     ]
     _write_header(ws, headers)
 
+    last_row = DATA_ROW_OFFSET + nrows
     for i in range(nrows):
-        row_num = i + DATA_ROW_OFFSET + 1
-        # 基础三列
-        row_cells = [
+        row_cells: list[Any] = [
             _styled_cell(ws, trading_days[i], number_format='yyyy-mm-dd'),
             _styled_cell(ws, times[i], number_format=DT_FMT),
-            f'=TEXT(A{row_num},"yyyy-mm-dd")&"|"&TEXT(B{row_num},"hh:mm:ss")',
+            _price_time_key_formula(last_row) if i == 0 else None,
             _styled_cell(ws, opens[i], number_format=NUM_FMT),
             _styled_cell(ws, adjs[i], number_format=NUM_FMT),
-            f'=D{row_num}*E{row_num}',  # open_adj
+            _open_adjusted_formula(last_row) if i == 0 else None,
         ]
-        # 10min / 5bar 使用 bar shift（F 列 = open_adj）。
         for name, _shift_val in SHIFTS:
             if name == 'SHIFT_1DAY':
                 continue
-            n_bars = shift_bars[name]
-            if i >= n_bars:
-                row_cells.append(f'=OFFSET($F${row_num},-{n_bars},0)')
-            else:
-                row_cells.append('')
-        # 1day 使用上一交易日 + 同一时钟时间，不假设每天固定 bar 数或自然日连续。
-        if row_num == DATA_ROW_OFFSET + 1:
-            row_cells.append('')
-        else:
-            prev_trading_day = f'LOOKUP(2,1/($A$3:A{row_num - 1}<A{row_num}),$A$3:A{row_num - 1})'
-            prev_day_key = f'TEXT({prev_trading_day},"yyyy-mm-dd")&"|"&TEXT(B{row_num},"hh:mm:ss")'
-            row_cells.append(f'=IFERROR(XLOOKUP({prev_day_key},$C:$C,$F:$F,""),"")')
+            row_cells.append(_shift_bars_formula(shift_bars[name]) if i == 0 else None)
+        row_cells.append(_shift_1day_formula(last_row) if i == 0 else None)
         ws.append(row_cells)
 
 
@@ -313,38 +348,11 @@ def _write_compare_sheet(ws, nrows: int) -> None:
     # 配置行
     ws.append([
         _styled_cell(ws, 'TOLERANCE', fill=HEADER_FILL, font=REMARK_FONT),
-        0.0001, '', '', '', '',
-        '', '', '', '', '',
-        '', '', '', '',
+        0.0001,
+        *([''] * (len(headers) - 2)),
     ])
 
-    # PRICE excel shift 列映射：G=SHIFT_10MIN, H=SHIFT_5BAR, I=SHIFT_1DAY
-    # BACKEND 列：B=SHIFT_10MIN, C=SHIFT_5BAR, D=SHIFT_1DAY
-    for i in range(nrows):
-        row_num = COMPARE_START_ROW + i
-        row_idx = i + 1  # 1-based row index
-        bk_base = BACKEND_DATA_START_ROW  # 3
-
-        cells: list[Any] = [
-            row_idx,  # simple row number
-            _styled_cell(ws, f'=INDEX(BACKEND!A:A,{bk_base - 1 + row_idx})', number_format=DT_FMT),
-            # 10min
-            f'=IFERROR(INDEX(BACKEND!B:B,{bk_base - 1 + row_idx}),"")',
-            f'=INDEX(PRICE!G:G,{DATA_ROW_OFFSET + row_idx})',
-            f'=IF(OR(C{row_num}="",D{row_num}=""),"",ABS(C{row_num}-D{row_num}))',
-            f'=IF(AND(C{row_num}="",D{row_num}=""),"EMPTY",IF(OR(C{row_num}="",D{row_num}=""),"MISSING",IF(E{row_num}<=$B${COMPARE_START_ROW-1},"PASS","FAIL")))',
-            # 5bar
-            f'=IFERROR(INDEX(BACKEND!C:C,{bk_base - 1 + row_idx}),"")',
-            f'=INDEX(PRICE!H:H,{DATA_ROW_OFFSET + row_idx})',
-            f'=IF(OR(G{row_num}="",H{row_num}=""),"",ABS(G{row_num}-H{row_num}))',
-            f'=IF(AND(G{row_num}="",H{row_num}=""),"EMPTY",IF(OR(G{row_num}="",H{row_num}=""),"MISSING",IF(I{row_num}<=$B${COMPARE_START_ROW-1},"PASS","FAIL")))',
-            # 1day
-            f'=IFERROR(INDEX(BACKEND!D:D,{bk_base - 1 + row_idx}),"")',
-            f'=INDEX(PRICE!I:I,{DATA_ROW_OFFSET + row_idx})',
-            f'=IF(OR(K{row_num}="",L{row_num}=""),"",ABS(K{row_num}-L{row_num}))',
-            f'=IF(AND(K{row_num}="",L{row_num}=""),"EMPTY",IF(OR(K{row_num}="",L{row_num}=""),"MISSING",IF(M{row_num}<=$B${COMPARE_START_ROW-1},"PASS","FAIL")))',
-        ]
-        ws.append(cells)
+    ws.append([_compare_spill_formula(nrows)])
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +393,12 @@ def _style_workbook(path: Path) -> None:
     wb = load_workbook(path)
     try:
         for ws in wb.worksheets:
+            if ws.max_column > 1:
+                ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ws.max_column)
+            remark_cell = ws.cell(1, 1)
+            remark_cell.fill = REMARK_FILL
+            remark_cell.font = COMMENT_FONT
+            remark_cell.alignment = Alignment(wrap_text=True, vertical='top')
             ws.column_dimensions['A'].width = 22
             for c in 'BCDEFGHIJKLMN':
                 ws.column_dimensions[c].width = 18
@@ -412,22 +426,32 @@ def main() -> None:
 
 def test_shift_workbook_for_a_product():
     out_path = process_product('A')
-    wb = load_workbook(out_path, read_only=True, data_only=False)
+    wb = load_workbook(out_path, read_only=False, data_only=False)
     try:
         assert wb.sheetnames == [PRICE_SHEET, BACKEND_SHEET, COMPARE_SHEET]
         price_ws = wb[PRICE_SHEET]
         backend_ws = wb[BACKEND_SHEET]
         compare_ws = wb[COMPARE_SHEET]
+        assert [str(r) for r in price_ws.merged_cells.ranges] == ['A1:I1']
+        assert [str(r) for r in backend_ws.merged_cells.ranges] == ['A1:D1']
+        assert [str(r) for r in compare_ws.merged_cells.ranges] == ['A1:N1']
+        for ws in (price_ws, backend_ws, compare_ws):
+            assert ws['A1'].font.italic is True
+            assert ws['A1'].font.bold is False
         assert price_ws.cell(2, 1).value == 'trading_day'
         assert price_ws.cell(2, 2).value == 'trade_time'
         assert price_ws.cell(2, 9).value == 'SHIFT_1DAY'
         assert backend_ws.cell(2, 2).value == 'SHIFT_10MIN'
         assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'TOLERANCE'
-        assert compare_ws.cell(COMPARE_START_ROW, 4).value == f'=INDEX(PRICE!G:G,{DATA_ROW_OFFSET + 1})'
+        compare_formula = compare_ws.cell(COMPARE_START_ROW, 1).value
+        assert isinstance(compare_formula, str)
+        assert compare_formula.startswith('=LET(')
+        assert 'HSTACK' in compare_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
-        shift_1day_formula = price_ws.cell(BACKEND_DATA_START_ROW + 345, 9).value
+        shift_1day_formula = price_ws.cell(BACKEND_DATA_START_ROW, 9).value
         assert isinstance(shift_1day_formula, str)
+        assert 'UNIQUE' in shift_1day_formula
         assert 'XLOOKUP' in shift_1day_formula
     finally:
         wb.close()
