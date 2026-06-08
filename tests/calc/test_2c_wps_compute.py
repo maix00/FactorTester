@@ -55,43 +55,48 @@ FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='
 # ============================================================
 
 def patch_flag(xlsx_path: Path) -> None:
-    """给 _SWITCHES!Z1 写入 flag 公式 + Z2 清零（不重新生成文件，只打补丁）
+    """给 _SWITCHES!Z1 写入 flag 公式 + Z2 清零
     
-    Z1 = IF(ISNUMBER(MAIN!右下角单元格),"DONE","CALC")
-    右下角 = MAIN row 2 最后一个非空列 × row(2+合约数)
-    WPS 计算 REDUCE+VSTACK 动态数组全部填充后，右下角变为数值，Z1 自动变 "DONE"
+    Z1 = IF(ISNUMBER(MAIN!右下角),"DONE","CALC")
+    在 MAIN row 2 表头中扫描找到 adjustment_mul 列，
+    用它作为检测列（REDUCE+VSTACK 全部溢出后一定有值）。
     """
     try:
         wb = load_workbook(xlsx_path)
-        
-        # 探测 MAIN sheet 的下角
+        sw = wb['_SWITCHES']
         main = wb['MAIN']
-        # row 2 最后一个非空列
-        last_col = main.max_column  # openpyxl 按全 sheet 记，但需要找 row 2 的实际非空
-        # 从右向左扫描 row 2 找到真正的最后一个非空列
-        last_data_col = 1
-        for col in range(main.max_column, 0, -1):
-            if main.cell(2, col).value is not None:
-                last_data_col = col
+        
+        # 在 MAIN row 2 中找 "adjustment_mul" 列
+        adj_mul_col = None
+        for col in range(1, main.max_column + 1):
+            val = main.cell(2, col).value
+            if val and str(val).strip() == 'adjustment_mul':
+                adj_mul_col = col
                 break
         
-        # 探测 _SWITCHES 合约数
-        sw = wb['_SWITCHES']
+        if adj_mul_col is None:
+            # 找不到就回退到最后非空列 - 1
+            for col in range(main.max_column, 0, -1):
+                if main.cell(2, col).value is not None:
+                    adj_mul_col = col - 1
+                    break
+        
+        adj_mul_letter = get_column_letter(adj_mul_col or 1)
+        
+        # 合约数
         n_contracts = sw.max_row - 2 if sw.max_row else 0
         
-        # 右下角：最后一个数据行，倒数第二列（最后一列是 adjustment_add 恒为0）
-        data_col = max(last_data_col - 1, 1)  # 跳过最后一列
-        bottom_right_row = 2 + n_contracts
-        corner_col_letter = get_column_letter(data_col)
-        corner_cell = f'{corner_col_letter}{bottom_right_row}'
+        # 右下角 = adjustment_mul 列 × 最后一行
+        corner_row = 2 + n_contracts
+        corner_cell = f'{adj_mul_letter}{corner_row}'
         
-        # Z1 flag = IF(ISNUMBER(MAIN!corner),"DONE","CALC")
+        # Z1 flag
         existing = sw.cell(1, 26).value
         if existing is None or str(existing).strip() in ('', 'CALC', '0'):
             formula = f'=IF(ISNUMBER(MAIN!{corner_cell}),"DONE","CALC")'
             sw.cell(1, 26, formula).fill = FORMULA_FILL
         
-        # Z2 清零（保存计数器）
+        # Z2 清零
         sw.cell(2, 26, 0)
         
         wb.save(xlsx_path)
