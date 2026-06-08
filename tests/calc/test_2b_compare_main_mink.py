@@ -125,6 +125,8 @@ def _write_test2a_adj(src_path: Path, ws_out) -> int:
         formula_ws = formula_wb[MAIN_SHEET]
         value_ws = value_wb[MAIN_SHEET]
         _min_col, _min_row, max_col, max_row = _excel_ref_bounds(formula_ws, 'A3')
+        if max_col is None:
+            raise RuntimeError(f'{src_path.name} MAIN sheet has no data')
 
         headers = [value_ws.cell(MAIN_HEADER_ROW, c).value for c in range(1, max_col + 1)]
         if not headers or headers[0] is None or value_ws.cell(MAIN_DATA_START_ROW, 1).value is None:
