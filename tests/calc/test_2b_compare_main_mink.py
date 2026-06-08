@@ -59,11 +59,11 @@ ADJ_MUL_COL = 'adjustment_mul'
 KEY_HEADER = '_trade_time_key'
 
 
-def _excel_ref_bounds(ws, cell_ref: str) -> tuple[int, int, int, int]:
+def _excel_ref_bounds(ws, cell_ref: str) -> tuple[int | None, int | None, int | None, int | None]:
     value = ws[cell_ref].value
     ref = getattr(value, 'ref', None)
     if ref:
-        return range_boundaries(ref)
+        return range_boundaries(ref)  # type: ignore[return-value]
     return (ws[cell_ref].column, ws[cell_ref].row, ws.max_column, ws.max_row)
 
 
@@ -106,7 +106,7 @@ def _write_header(ws, headers: list[str]) -> None:
     ])
 
 
-def _col_index(headers: list[object], name: str) -> int:
+def _col_index(headers: list, name: str) -> int:
     try:
         return [str(h) if h is not None else '' for h in headers].index(name) + 1
     except ValueError as exc:
