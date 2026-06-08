@@ -48,6 +48,9 @@ TEST_2C_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2c'
 TEST_3A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_3a'
 TEST_3B_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_3b'
 
+# test_4: 算子验证
+TEST_4A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_4a' # ShiftOp 验证
+
 # ============================================================
 # 全局配置
 # ============================================================
