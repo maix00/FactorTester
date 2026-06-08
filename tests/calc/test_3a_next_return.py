@@ -95,6 +95,7 @@ RETURN_HEADERS = [
 
 DATE_FORMAT = 'yyyy-mm-dd'
 DATETIME_FORMAT = 'yyyy-mm-dd hh:mm:ss'
+ROW_NUMBER_FORMAT = '0'
 RETURN_NUMBER_FORMAT = '0.0000000000'
 
 
@@ -292,7 +293,7 @@ def _write_return_sheet(wb: Workbook, main_rows: int) -> None:
 
     formula_cell = ws.cell(RETURN_FORMULA_ROW, 1, _build_return_formula(main_rows))
     formula_cell.fill = FORMULA_FILL
-    formula_cell.number_format = DATE_FORMAT
+    formula_cell.number_format = ROW_NUMBER_FORMAT
 
 
 def _patch_dynamic_array_formula(xlsx_path: Path, main_rows: int) -> None:
@@ -422,6 +423,9 @@ def test_return_formula_workbook_for_a_product():
         assert str(next(iter(return_ws.merged_cells.ranges))) == 'A1:K1'
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 1).number_format == DATE_FORMAT
         assert main_ws.cell(MAIN_OPEN_DATA_START_ROW, 2).number_format == DATETIME_FORMAT
+        assert return_ws.cell(RETURN_FORMULA_ROW, 1).number_format == ROW_NUMBER_FORMAT
+        assert return_ws.column_dimensions['B'].number_format == DATE_FORMAT
+        assert return_ws.column_dimensions['C'].number_format == DATETIME_FORMAT
         main_array_formula = main_ws.cell(MAIN_OPEN_DATA_START_ROW, 5).value
         main_formula = getattr(main_array_formula, 'text', main_array_formula)
         main_last_row = MAIN_OPEN_DATA_START_ROW + main_rows - 1
