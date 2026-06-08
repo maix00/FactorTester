@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
 """
 test_4a_shift.py
 ----------------
@@ -18,6 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -280,7 +282,7 @@ def _write_backend_sheet(ws, product: CNFutures, times: list) -> dict[str, int]:
 
     for i, t in enumerate(times):
         ts = pd.Timestamp(t)
-        row_cells = [_styled_cell(ws, t, number_format=DT_FMT)]
+        row_cells: list[Any] = [_styled_cell(ws, t, number_format=DT_FMT)]
         for sn, _ in SHIFTS:
             s = shift_series[sn]
             if ts in s.index:
@@ -323,7 +325,7 @@ def _write_compare_sheet(ws, nrows: int) -> None:
         row_idx = i + 1  # 1-based row index
         bk_base = BACKEND_DATA_START_ROW  # 3
 
-        cells = [
+        cells: list[Any] = [
             row_idx,  # simple row number
             _styled_cell(ws, f'=INDEX(BACKEND!A:A,{bk_base - 1 + row_idx})', number_format=DT_FMT),
             # 10min
@@ -424,7 +426,9 @@ def test_shift_workbook_for_a_product():
         assert compare_ws.cell(COMPARE_START_ROW, 4).value == f'=INDEX(PRICE!G:G,{DATA_ROW_OFFSET + 1})'
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
-        assert 'XLOOKUP' in price_ws.cell(BACKEND_DATA_START_ROW + 345, 9).value
+        shift_1day_formula = price_ws.cell(BACKEND_DATA_START_ROW + 345, 9).value
+        assert isinstance(shift_1day_formula, str)
+        assert 'XLOOKUP' in shift_1day_formula
     finally:
         wb.close()
 
