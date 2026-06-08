@@ -79,10 +79,11 @@ def patch_flag(xlsx_path: Path) -> None:
         sw = wb['_SWITCHES']
         n_contracts = sw.max_row - 2 if sw.max_row else 0
         
-        # 右下角：最后一个数据行，最后一列
+        # 右下角：最后一个数据行，倒数第二列（最后一列是 adjustment_add 恒为0）
+        data_col = max(last_data_col - 1, 1)  # 跳过最后一列
         bottom_right_row = 2 + n_contracts
-        bottom_right_col_letter = get_column_letter(last_data_col)
-        corner_cell = f'{bottom_right_col_letter}{bottom_right_row}'
+        corner_col_letter = get_column_letter(data_col)
+        corner_cell = f'{corner_col_letter}{bottom_right_row}'
         
         # Z1 flag = IF(ISNUMBER(MAIN!corner),"DONE","CALC")
         existing = sw.cell(1, 26).value
