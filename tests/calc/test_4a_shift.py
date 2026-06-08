@@ -31,7 +31,6 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
@@ -232,19 +231,23 @@ def _shift_1day_formula(last_row: int) -> str:
 
 
 def _compare_spill_formula(nrows: int) -> str:
-    last_row = BACKEND_DATA_START_ROW + nrows - 1
+    price_last_row = DATA_ROW_OFFSET + nrows
+    backend_last_row = BACKEND_DATA_START_ROW + nrows - 1
     return (
-        f'=LET(rows,SEQUENCE({nrows}),tol,$B${COMPARE_START_ROW - 1},'
-        f'time,BACKEND!A{BACKEND_DATA_START_ROW}:A{last_row},'
-        f'b10,BACKEND!B{BACKEND_DATA_START_ROW}:B{last_row},x10,PRICE!G3#,'
+        f'=LET(rows,SEQUENCE({nrows}),tol,$B$2,'
+        f'time,BACKEND!A{BACKEND_DATA_START_ROW}:A{backend_last_row},'
+        f'b10,BACKEND!B{BACKEND_DATA_START_ROW}:B{backend_last_row},'
+        f'x10,PRICE!G3:G{price_last_row},'
         'e10b,LEN(b10&"")=0,e10x,LEN(x10&"")=0,'
         'd10,IF(e10b+e10x,"",ABS(b10-x10)),'
         'ok10,IF(e10b*e10x,"EMPTY",IF(e10b+e10x,"MISSING",IF(d10<=tol,"PASS","FAIL"))),'
-        f'b5,BACKEND!C{BACKEND_DATA_START_ROW}:C{last_row},x5,PRICE!H3#,'
+        f'b5,BACKEND!C{BACKEND_DATA_START_ROW}:C{backend_last_row},'
+        f'x5,PRICE!H3:H{price_last_row},'
         'e5b,LEN(b5&"")=0,e5x,LEN(x5&"")=0,'
         'd5,IF(e5b+e5x,"",ABS(b5-x5)),'
         'ok5,IF(e5b*e5x,"EMPTY",IF(e5b+e5x,"MISSING",IF(d5<=tol,"PASS","FAIL"))),'
-        f'b1,BACKEND!D{BACKEND_DATA_START_ROW}:D{last_row},x1,PRICE!I3#,'
+        f'b1,BACKEND!D{BACKEND_DATA_START_ROW}:D{backend_last_row},'
+        f'x1,PRICE!I3:I{price_last_row},'
         'e1b,LEN(b1&"")=0,e1x,LEN(x1&"")=0,'
         'd1,IF(e1b+e1x,"",ABS(b1-x1)),'
         'ok1,IF(e1b*e1x,"EMPTY",IF(e1b+e1x,"MISSING",IF(d1<=tol,"PASS","FAIL"))),'
@@ -349,18 +352,17 @@ def _write_compare_sheet(ws, nrows: int) -> None:
     _write_remark(ws, 'Compare PRICE excel-shift vs BACKEND python-shift. '
                        'Status: PASS if abs_diff < TOLERANCE, MISSING if one side empty.')
 
+    ws.append([
+        _styled_cell(ws, 'TOLERANCE', fill=HEADER_FILL, font=REMARK_FONT),
+        0.0001,
+        *([''] * 12),
+    ])
+
     headers = ['row', 'time',
                'backend_10min', 'excel_10min', 'diff_10min', 'ok_10min',
                'backend_5bar', 'excel_5bar', 'diff_5bar', 'ok_5bar',
                'backend_1day', 'excel_1day', 'diff_1day', 'ok_1day']
     _write_header(ws, headers)
-
-    # 配置行
-    ws.append([
-        _styled_cell(ws, 'TOLERANCE', fill=HEADER_FILL, font=REMARK_FONT),
-        0.0001,
-        *([''] * (len(headers) - 2)),
-    ])
 
     ws.append([_compare_spill_formula(nrows)])
 
@@ -445,7 +447,7 @@ def _patch_dynamic_arrays(path: Path, nrows: int) -> None:
             'I3': f'I3:I{last_price_row}',
         },
         COMPARE_SHEET: {
-            'A4': f'A4:{get_column_letter(14)}{last_compare_row}',
+            'A4': f'A4:N{last_compare_row}',
         },
     }
 
@@ -538,17 +540,22 @@ def test_shift_workbook_for_a_product():
         assert price_ws.cell(2, 2).value == 'trade_time'
         assert price_ws.cell(2, 9).value == 'SHIFT_1DAY'
         assert backend_ws.cell(2, 2).value == 'SHIFT_10MIN'
-        assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'TOLERANCE'
+        assert compare_ws.cell(2, 1).value == 'TOLERANCE'
+        assert compare_ws.cell(2, 2).value == 0.0001
+        assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == 'row'
         compare_formula = _formula_text(compare_ws.cell(COMPARE_START_ROW, 1).value)
         assert compare_formula.startswith('=LET(')
         assert 'HSTACK' in compare_formula
+        assert 'PRICE!G3:G' in compare_formula
+        assert 'PRICE!G3#' not in compare_formula
+        assert 'IF(e10b*e10x,"EMPTY"' in compare_formula
+        assert '$B$2' in compare_formula
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 10, 2).value not in ('', None)
         assert backend_ws.cell(BACKEND_DATA_START_ROW + 5, 3).value not in ('', None)
         shift_1day_formula = _formula_text(price_ws.cell(BACKEND_DATA_START_ROW, 9).value)
         assert 'UNIQUE' in shift_1day_formula
         assert 'XLOOKUP' in shift_1day_formula
         price_last_row = DATA_ROW_OFFSET + (price_ws.max_row - DATA_ROW_OFFSET)
-        compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
         assert _formula_attrs(out_path, PRICE_SHEET, 'C3') == {
             'ca': '1', 't': 'array', 'ref': f'C3:C{price_last_row}'
         }
@@ -564,6 +571,7 @@ def test_shift_workbook_for_a_product():
         assert _formula_attrs(out_path, PRICE_SHEET, 'I3') == {
             'ca': '1', 't': 'array', 'ref': f'I3:I{price_last_row}'
         }
+        compare_last_row = COMPARE_START_ROW + (price_ws.max_row - DATA_ROW_OFFSET) - 1
         assert _formula_attrs(out_path, COMPARE_SHEET, 'A4') == {
             'ca': '1', 't': 'array', 'ref': f'A4:N{compare_last_row}'
         }
