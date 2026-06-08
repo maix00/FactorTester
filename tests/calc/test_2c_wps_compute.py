@@ -33,7 +33,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
-from tests.calc import TEST_2A_DIR, TEST_2C_DIR
+from tests.calc import TEST_2A_DIR
 
 # ============================================================
 # 配置
@@ -223,23 +223,16 @@ def kill_wps() -> None:
     time.sleep(2)
 
 
-import shutil
 
 
 def process_one(prod: str, wait_scale: float = 1.0) -> bool:
-    """处理单个品种：备份→patch→WPS→轮询保存+Z1完成→成功删备份/失败恢复"""
+    """处理单个品种：patch_flag → WPS 打开 → 轮询保存+Z1 完成"""
     src = TEST_2A_DIR / f'{prod}.xlsx'
     if not src.exists():
         print(f'  ⚠️ {prod}.xlsx not found, skipping')
         return False
 
-    TEST_2C_DIR.mkdir(parents=True, exist_ok=True)
-    backup = TEST_2C_DIR / f'{prod}.xlsx'
-
-    # 1) 备份原始文件
-    shutil.copy2(src, backup)
-
-    # 2) 在 test_2a 原文件上打 flag 补丁
+    # 打 flag 补丁
     patch_flag(src)
     reset_save_seq()
 
@@ -249,15 +242,13 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
         wps_open(str(src))
     except Exception as e:
         print(f'❌ open failed: {e}')
-        shutil.copy2(backup, src)
-        backup.unlink(missing_ok=True)
         return False
 
-    # 3) 初始等待 WPS 开始计算
+    # 初始等待 WPS 开始计算
     print(f'[wait {INITIAL_WAIT}s]', end='', flush=True)
     time.sleep(INITIAL_WAIT)
 
-    # 4) 循环保存+轮询，直到 Z1=DONE 或 max_retries
+    # 循环保存+轮询
     success = False
     for retry in range(MAX_RETRIES):
         saved, done = wps_save_and_check(src, timeout=SAVE_POLL_INTERVAL * 4)
@@ -267,17 +258,15 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
             success = True
             break
         elif saved:
-            # 已落盘但 CALC — 等 RETRY_WAIT 再保存
             print(f'⏳', end='', flush=True)
             time.sleep(RETRY_WAIT)
         else:
-            # 保存未落盘 — 不是本次保存？等待上次落盘
             print(f'⏳', end='', flush=True)
             time.sleep(RETRY_WAIT)
     else:
         print(f' ⚠️ max retries ({MAX_RETRIES}) reached')
 
-    # 5) 关闭 WPS 文档
+    # 关闭 WPS 文档
     script = '''
     tell application "System Events"
         tell process "WPS Office"
@@ -292,14 +281,7 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
     subprocess.run(['osascript', '-e', script], check=False, timeout=15)
     time.sleep(1)
 
-    if success:
-        backup.unlink(missing_ok=True)
-    else:
-        shutil.copy2(backup, src)
-        backup.unlink(missing_ok=True)
-        return False
-
-    return True
+    return success
 
 
 def main():
