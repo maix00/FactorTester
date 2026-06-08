@@ -172,8 +172,8 @@ def _load_wind_mapping(prod: str, wind_exch: str,
         (prod_wm['ENDDATE'] >= data_start) &
         (prod_wm['STARTDATE'] <= data_end)
     ].copy()
-    prod_wm['STARTDATE'] = prod_wm['STARTDATE'].clip(lower=data_start, upper=data_end)
-    prod_wm['ENDDATE'] = prod_wm['ENDDATE'].clip(lower=data_start, upper=data_end)
+    prod_wm['STARTDATE'] = prod_wm['STARTDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
+    prod_wm['ENDDATE'] = prod_wm['ENDDATE'].clip(lower=data_start, upper=data_end)  # type: ignore[call-overload]
 
     # 转换 instrument_id: CU2507.SHF → cu2507
     prod_wm['instrument_id'] = prod_wm['FS_MAPPING_WINDCODE'].str.split('.').str[0].str.lower()
