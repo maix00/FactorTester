@@ -33,6 +33,7 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, numbers
+from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
 from tools.data.DataColumn import DataColumn
@@ -207,6 +208,8 @@ def _read_test3a_returns(test3a_path: Path) -> pd.DataFrame | None:
             return None
         
         # 从 row 4 开始读数据
+        # 注意：openpyxl data_only 模式下，日期类型存为 float（Excel 序列号），
+        # 需要用 from_excel() 转换
         times = []
         returns = []
         for row in ws.iter_rows(min_row=4, max_row=ws.max_row, min_col=time_col, max_col=ret_col, values_only=True):
@@ -214,6 +217,7 @@ def _read_test3a_returns(test3a_path: Path) -> pd.DataFrame | None:
             r = row[ret_col - time_col]
             if t is None:
                 continue
+            t = from_excel(t) if isinstance(t, (int, float)) else t
             times.append(_normalise_timestamp(t))
             returns.append(_normalise_number(r))
         
