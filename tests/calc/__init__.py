@@ -46,6 +46,7 @@ TEST_2C_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_2c'
 
 # test_3a: 从 test_2a MAIN 全量主力序列验证下一期收益率公式
 TEST_3A_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_3a'
+TEST_3B_DIR = Path(_ROOT_DATA_DIR) / 'test' / 'test_3b'
 
 # ============================================================
 # 全局配置
