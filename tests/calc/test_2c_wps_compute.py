@@ -151,8 +151,10 @@ def check_done(xlsx_path: Path) -> bool:
 
 
 def wps_open(xlsx_path: str) -> None:
-    """用 WPS 打开文件"""
-    subprocess.run(['open', '-a', WPS_APP, xlsx_path], check=True)
+    """用 WPS 后台打开文件（不阻塞）"""
+    subprocess.Popen(['open', '-g', '-a', WPS_APP, xlsx_path], 
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print('opened', flush=True)
 
 
 # 全局保存计数器（每次 patch_flag 重置）
