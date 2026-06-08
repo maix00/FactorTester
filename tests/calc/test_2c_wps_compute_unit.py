@@ -73,3 +73,19 @@ def test_wps_save_and_check_rejects_saved_count_without_done(monkeypatch, tmp_pa
     monkeypatch.setattr(wps_compute.time, 'time', lambda: next(times))
 
     assert wps_compute.wps_save_and_check(path, save_target=3, timeout=1) == (True, False)
+
+
+def test_wps_quit_confirms_closed_from_system_events(monkeypatch):
+    class Result:
+        stdout = 'closed\n'
+
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr(wps_compute.subprocess, 'run', fake_run)
+
+    assert wps_compute.wps_quit(timeout=1) is True
+    assert calls

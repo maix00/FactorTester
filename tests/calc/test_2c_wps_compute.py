@@ -13,7 +13,7 @@ test_2c_wps_compute.py — 自动用 WPS Office 打开 test_2a 的 xlsx，
   2. open -a WPS Office 打开 xlsx
   3. 立刻触发一次保存，让 WPS 开始计算并落盘公式缓存
   4. 轮询 _SWITCHES!Z2 保存计数 + _SWITCHES!Z1 DONE
-  5. System Events 发送 Cmd+W 关闭，并确认当前文档窗口消失
+  5. 用 WPS 的 Quit and Close All Windows 退出，避免下一个品种继承旧 tab
   6. 再次用 openpyxl(data_only=True) 验证 _SWITCHES!Z1 == "DONE"
 
 依赖:
@@ -185,31 +185,58 @@ def wps_save_and_check(xlsx_path: Path, save_target: int, timeout: int = 20) -> 
     return (saw_save, False)
 
 
-def wps_close_document(xlsx_path: Path, timeout: int = 10) -> bool:
-    """关闭当前 WPS 文档，并确认目标文件窗口不再存在。"""
-    doc_name = xlsx_path.name.replace('"', '\\"')
+def wps_is_running() -> bool:
+    """检查 WPS 主进程是否仍在运行。"""
+    script = '''
+    tell application "System Events"
+        return exists process "WPS Office"
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            check=False,
+            timeout=5,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip().lower() == 'true'
+    except Exception:
+        return False
+
+
+def wps_quit(timeout: int = 15) -> bool:
+    """退出 WPS、关闭所有窗口/tab，并确认主进程消失。
+
+    WPS 的普通 Cmd+Q 会在下次启动时恢复旧 tab。应用菜单里的
+    "Quit and Close All Windows" 才会真正清掉多文档窗口状态。
+    """
     script = f'''
     tell application "System Events"
         if not (exists process "WPS Office") then return "closed"
         tell process "WPS Office"
             set frontmost to true
             delay 0.5
-            keystroke "w" using command down
-            delay 1
-            if (count of windows) > 0 and exists sheet 1 of window 1 then
-                keystroke return
-                delay 1
-            end if
-            repeat with i from 1 to {max(1, int(timeout))}
-                set stillOpen to false
-                repeat with w in windows
-                    if name of w contains "{doc_name}" then set stillOpen to true
-                end repeat
-                if stillOpen is false then return "closed"
-                delay 1
-            end repeat
-            return "open"
+            try
+                click menu item "Quit and Close All Windows" of menu 1 of menu bar item "WPS Office" of menu bar 1
+            on error
+                keystroke "q" using {{command down, option down}}
+            end try
         end tell
+        delay 1
+        if exists process "WPS Office" then
+            tell process "WPS Office"
+                if (count of windows) > 0 and exists sheet 1 of window 1 then
+                    keystroke return
+                    delay 1
+                end if
+            end tell
+        end if
+        repeat with i from 1 to {max(1, int(timeout))}
+            if not (exists process "WPS Office") then return "closed"
+            delay 1
+        end repeat
+        return "open"
     end tell
     '''
     try:
@@ -220,15 +247,19 @@ def wps_close_document(xlsx_path: Path, timeout: int = 10) -> bool:
             capture_output=True,
             text=True,
         )
-        return result.stdout.strip() == 'closed'
+        if result.stdout.strip() == 'closed':
+            return True
     except Exception:
-        return False
+        pass
+
+    subprocess.run(['pkill', '-f', 'wpsoffice'], check=False)
+    time.sleep(2)
+    return not wps_is_running()
 
 
 def kill_wps() -> None:
     """强制关闭所有 WPS 进程"""
-    subprocess.run(['pkill', '-f', 'wpsoffice'], check=False)
-    time.sleep(2)
+    wps_quit(timeout=3)
 
 
 
@@ -277,10 +308,10 @@ def process_one(prod: str, wait_scale: float = 1.0) -> bool:
     else:
         print(f' ⚠️ max retries ({MAX_RETRIES}) reached')
 
-    # 关闭 WPS 文档，并把无法确认关闭作为失败信号暴露出来。
-    close_ok = wps_close_document(src)
+    # 每个品种结束后退出 WPS，避免旧工作簿以 tab 形式留到下一个品种。
+    close_ok = wps_quit()
     if not close_ok:
-        print(' ⚠️ close not confirmed', end='', flush=True)
+        print(' ⚠️ WPS quit not confirmed', end='', flush=True)
 
     return success and close_ok
 
