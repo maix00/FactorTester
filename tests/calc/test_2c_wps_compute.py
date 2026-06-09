@@ -477,14 +477,22 @@ def main():
     total = len(prods)
     ok = 0
     fail = 0
+    wps_used = False
 
     t0 = time.time()
 
     for i, prod in enumerate(prods):
-        # 确保 WPS 已关闭（避免多文件同时打开）
-        kill_wps()
-
         print(f'[{i+1}/{total}] {prod}', end='')
+        if not args.force:
+            status = inspect_workbook(TEST_2A_DIR / f'{prod}.xlsx')
+            if status.done:
+                print(f'  ↩ skip, already DONE (Z2={status.z2})')
+                ok += 1
+                continue
+
+        # 只有真正需要打开 WPS 时才关闭旧窗口；连续 skip 不触碰 WPS。
+        kill_wps()
+        wps_used = True
         if process_one(prod, args.wait_scale, force=args.force):
             ok += 1
         else:
@@ -495,8 +503,9 @@ def main():
     print(f'Done! {ok} OK, {fail} errors, {total} total')
     print(f'Elapsed: {elapsed:.0f}s ({elapsed/60:.1f} min)')
 
-    # 最终关闭 WPS
-    kill_wps()
+    # 只有本轮实际使用过 WPS，才做最终清理。
+    if wps_used:
+        kill_wps()
 
     if fail:
         sys.exit(1)
