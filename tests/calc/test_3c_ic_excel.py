@@ -274,12 +274,22 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
         for offset, product in enumerate(products):
             col = fe_start_col + offset
             sheet = sheet_map[product]
-            ws.cell(row_idx, col, f'=IF({sheet}!$D{row_idx - 1},{sheet}!$B{row_idx - 1},"")')
+            product_row = row_idx - 1
+            ws.cell(
+                row_idx, col,
+                f'=IF(AND({sheet}!$D{product_row},ISNUMBER({sheet}!$B{product_row}),ISNUMBER({sheet}!$C{product_row})),'
+                f'{sheet}!$B{product_row},"")'
+            )
             ws.cell(row_idx, col).number_format = NUMBER_FORMAT
         for offset, product in enumerate(products):
             col = re_start_col + offset
             sheet = sheet_map[product]
-            ws.cell(row_idx, col, f'=IF({sheet}!$D{row_idx - 1},{sheet}!$C{row_idx - 1},"")')
+            product_row = row_idx - 1
+            ws.cell(
+                row_idx, col,
+                f'=IF(AND({sheet}!$D{product_row},ISNUMBER({sheet}!$B{product_row}),ISNUMBER({sheet}!$C{product_row})),'
+                f'{sheet}!$C{product_row},"")'
+            )
             ws.cell(row_idx, col).number_format = NUMBER_FORMAT
 
         fe_range = f'{ws.cell(row_idx, fe_start_col).coordinate}:{ws.cell(row_idx, fe_end_col).coordinate}'
@@ -510,6 +520,8 @@ def test_test3c_workbook_smoke():
         assert len(wb.sheetnames) == 5
         assert wb[IC_SHEET].cell(3, 1).value == 'signal_time'
         assert wb[IC_SHEET].cell(3, 2).value == 'backend_ic'
+        assert 'ISNUMBER' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 3).value)
+        assert 'ISNUMBER' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 5).value)
         assert wb[IC_SHEET].cell(3, 7).value == 'FE_RANK_A.DCE'
         rank_formula = str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 7).value)
         assert 'SUMPRODUCT' in rank_formula
