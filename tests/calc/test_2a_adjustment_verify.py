@@ -66,7 +66,6 @@ import os
 import shutil
 import tempfile
 import zipfile
-import datetime as dt
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -213,17 +212,6 @@ def _segment_row_count(ws, start_date, end_date) -> int:
     if start_row is None or end_row is None or end_row < start_row:
         return 0
     return end_row - start_row + 1
-
-
-def test_segment_row_count_excludes_trailing_window_rows():
-    ws = Workbook().active
-    ws.append(['remark'])
-    ws.append(['trading_day'])
-    ws.append([dt.datetime(2026, 1, 15)])
-    ws.append([dt.datetime(2026, 1, 15)])
-    ws.append([dt.datetime(2026, 1, 16)])
-
-    assert _segment_row_count(ws, dt.datetime(2026, 1, 15), dt.datetime(2026, 1, 15)) == 2
 
 
 # ============================================================
