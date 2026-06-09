@@ -235,7 +235,9 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
     products = list(sheet_map)
     fe_start_col = 3
     re_start_col = fe_start_col + len(products)
-    valid_col = re_start_col + len(products)
+    fe_rank_start_col = re_start_col + len(products)
+    re_rank_start_col = fe_rank_start_col + len(products)
+    valid_col = re_rank_start_col + len(products)
     excel_ic_col = valid_col + 1
     max_col = excel_ic_col
 
@@ -247,11 +249,13 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
     ws.cell(2, 1, 'tolerance')
     ws.cell(2, 2, TOLERANCE)
     ws.cell(2, 4, 'formula')
-    ws.cell(2, 5, 'CORREL(RANK.AVG(FE), RANK.AVG(RE)) over valid product columns')
+    ws.cell(2, 5, 'CORREL(FE_RANK, RE_RANK) over valid product columns')
 
     headers = ['signal_time', 'backend_ic']
     headers += [f'FE_{p}' for p in products]
     headers += [f'RE_{p}' for p in products]
+    headers += [f'FE_RANK_{p}' for p in products]
+    headers += [f'RE_RANK_{p}' for p in products]
     headers += ['valid_n', 'excel_ic']
     _write_header(ws, 3, headers)
     ws.freeze_panes = 'C4'
@@ -260,6 +264,8 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
 
     fe_end_col = fe_start_col + len(products) - 1
     re_end_col = re_start_col + len(products) - 1
+    fe_rank_end_col = fe_rank_start_col + len(products) - 1
+    re_rank_end_col = re_rank_start_col + len(products) - 1
 
     for row_idx, row in enumerate(backend_ic.itertuples(index=False), start=IC_DATA_START_ROW):
         ws.cell(row_idx, 1, row.signal_time.to_pydatetime()).number_format = DATE_TIME_FORMAT
@@ -278,13 +284,24 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
 
         fe_range = f'{ws.cell(row_idx, fe_start_col).coordinate}:{ws.cell(row_idx, fe_end_col).coordinate}'
         re_range = f'{ws.cell(row_idx, re_start_col).coordinate}:{ws.cell(row_idx, re_end_col).coordinate}'
+        fe_rank_range = f'{ws.cell(row_idx, fe_rank_start_col).coordinate}:{ws.cell(row_idx, fe_rank_end_col).coordinate}'
+        re_rank_range = f'{ws.cell(row_idx, re_rank_start_col).coordinate}:{ws.cell(row_idx, re_rank_end_col).coordinate}'
+
+        for offset, _product in enumerate(products):
+            col = fe_rank_start_col + offset
+            fe_cell = ws.cell(row_idx, fe_start_col + offset).coordinate
+            re_cell = ws.cell(row_idx, re_start_col + offset).coordinate
+            ws.cell(row_idx, col, f'=IF(AND(ISNUMBER({fe_cell}),ISNUMBER({re_cell})),RANK.AVG({fe_cell},{fe_range},1),"")')
+            ws.cell(row_idx, col).number_format = NUMBER_FORMAT
+        for offset, _product in enumerate(products):
+            col = re_rank_start_col + offset
+            fe_cell = ws.cell(row_idx, fe_start_col + offset).coordinate
+            re_cell = ws.cell(row_idx, re_start_col + offset).coordinate
+            ws.cell(row_idx, col, f'=IF(AND(ISNUMBER({fe_cell}),ISNUMBER({re_cell})),RANK.AVG({re_cell},{re_range},1),"")')
+            ws.cell(row_idx, col).number_format = NUMBER_FORMAT
+
         valid_formula = f'=SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}))'
-        ic_formula = (
-            f'=LET(fe,FILTER({fe_range},ISNUMBER({fe_range})*ISNUMBER({re_range})),'
-            f're,FILTER({re_range},ISNUMBER({fe_range})*ISNUMBER({re_range})),'
-            f'n,COLUMNS(fe),'
-            f'IF(n<=1,"",CORREL(RANK.AVG(fe,fe,1),RANK.AVG(re,re,1))))'
-        )
+        ic_formula = f'=IF({ws.cell(row_idx, valid_col).coordinate}<=1,"",CORREL({fe_rank_range},{re_rank_range}))'
         ws.cell(row_idx, valid_col, valid_formula)
         ws.cell(row_idx, excel_ic_col, ic_formula).number_format = NUMBER_FORMAT
 
@@ -472,7 +489,9 @@ def test_test3c_workbook_smoke():
         assert len(wb.sheetnames) == 5
         assert wb[IC_SHEET].cell(3, 1).value == 'signal_time'
         assert wb[IC_SHEET].cell(3, 2).value == 'backend_ic'
-        assert 'CORREL(RANK.AVG' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 8).value)
+        assert wb[IC_SHEET].cell(3, 7).value == 'FE_RANK_A.DCE'
+        assert 'RANK.AVG' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 7).value)
+        assert 'CORREL' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 12).value)
         assert wb[COMPARE_SHEET].cell(COMPARE_DATA_START_ROW - 1, 6).value == 'status'
         assert wb[STATS_SHEET].cell(8, 1).value == 'mean'
         assert wb[STATS_SHEET].cell(11, 1).value == 't_stat'
