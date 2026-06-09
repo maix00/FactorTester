@@ -156,6 +156,87 @@ def _col_idx(ref: str) -> int:
     return idx
 
 
+def _load_main_sheet_style_context(
+    xlsx_path: Path,
+) -> tuple[dict[int, str], ET.Element, str] | None:
+    """Load MAIN sheet XML plus its styled columns map."""
+    try:
+        zf = zipfile.ZipFile(xlsx_path, 'r')
+    except Exception:
+        return None
+
+    try:
+        workbook = ET.fromstring(zf.read('xl/workbook.xml'))
+        rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
+
+        main_rid = None
+        for sheet in workbook.findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+            if sheet.get('name') == 'MAIN':
+                main_rid = sheet.get(f'{{{NS_R}}}id')
+                break
+        if main_rid is None:
+            return None
+
+        target = None
+        for rel in rels:
+            if rel.get('Id') == main_rid:
+                raw = rel.get('Target')
+                if raw is None:
+                    break
+                target = raw.lstrip('/')
+                if not target.startswith('xl/'):
+                    target = f'xl/{target}'
+                break
+        if target is None:
+            return None
+
+        sheet_root = ET.fromstring(zf.read(target))
+        cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
+        if cols is None:
+            return None
+
+        styled_cols: dict[int, str] = {}
+        for col in cols.findall(f'{{{NS_SHEET}}}col'):
+            style = col.get('style')
+            if style is None:
+                continue
+            cmin = int(col.get('min', '0'))
+            cmax = int(col.get('max', '0'))
+            for ci in range(cmin, cmax + 1):
+                styled_cols[ci] = style
+        if not styled_cols:
+            return None
+
+        return styled_cols, sheet_root, target
+    finally:
+        zf.close()
+
+
+def main_spill_styles_ok(xlsx_path: Path) -> bool:
+    """Return True when cached MAIN spill cells already carry column styles."""
+    loaded = _load_main_sheet_style_context(xlsx_path)
+    if loaded is None:
+        return False
+    styled_cols, sheet_root, _target = loaded
+
+    saw_styled_spill = False
+    for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+        row_ref = row.get('r')
+        if row_ref is None or not row_ref.isdigit() or int(row_ref) < 4:
+            continue
+        for cell in row.findall(f'{{{NS_SHEET}}}c'):
+            ref = cell.get('r')
+            if ref is None:
+                continue
+            style = styled_cols.get(_col_idx(ref))
+            if style is None:
+                continue
+            saw_styled_spill = True
+            if cell.get('s') != style:
+                return False
+    return saw_styled_spill
+
+
 def repair_main_spill_styles(xlsx_path: Path) -> bool:
     """After WPS saves cached spill cells, copy MAIN <col style> onto them.
 
@@ -164,67 +245,29 @@ def repair_main_spill_styles(xlsx_path: Path) -> bool:
     existing MAIN cells in styled columns to point at that style id.
     """
     try:
-        with zipfile.ZipFile(xlsx_path, 'r') as zf:
-            workbook = ET.fromstring(zf.read('xl/workbook.xml'))
-            rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
-
-            main_rid = None
-            for sheet in workbook.findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
-                if sheet.get('name') == 'MAIN':
-                    main_rid = sheet.get(f'{{{NS_R}}}id')
-                    break
-            if main_rid is None:
-                return False
-
-            target = None
-            for rel in rels:
-                if rel.get('Id') == main_rid:
-                    raw = rel.get('Target')
-                    if raw is None:
-                        break
-                    target = raw.lstrip('/')
-                    if not target.startswith('xl/'):
-                        target = f'xl/{target}'
-                    break
-            if target is None:
-                return False
-
-            sheet_root = ET.fromstring(zf.read(target))
-            cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
-            if cols is None:
-                return False
-
-            styled_cols: dict[int, str] = {}
-            for col in cols.findall(f'{{{NS_SHEET}}}col'):
-                style = col.get('style')
+        loaded = _load_main_sheet_style_context(xlsx_path)
+        if loaded is None:
+            return False
+        styled_cols, sheet_root, target = loaded
+        changed = False
+        for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+            row_ref = row.get('r')
+            if row_ref is None or not row_ref.isdigit() or int(row_ref) < 3:
+                continue
+            for cell in row.findall(f'{{{NS_SHEET}}}c'):
+                ref = cell.get('r')
+                if ref is None:
+                    continue
+                style = styled_cols.get(_col_idx(ref))
                 if style is None:
                     continue
-                cmin = int(col.get('min', '0'))
-                cmax = int(col.get('max', '0'))
-                for ci in range(cmin, cmax + 1):
-                    styled_cols[ci] = style
-            if not styled_cols:
-                return False
+                if cell.get('s') != style:
+                    cell.set('s', style)
+                    changed = True
+        if not changed:
+            return True
 
-            changed = False
-            for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
-                row_ref = row.get('r')
-                if row_ref is None or not row_ref.isdigit() or int(row_ref) < 3:
-                    continue
-                for cell in row.findall(f'{{{NS_SHEET}}}c'):
-                    ref = cell.get('r')
-                    if ref is None:
-                        continue
-                    style = styled_cols.get(_col_idx(ref))
-                    if style is None:
-                        continue
-                    if cell.get('s') != style:
-                        cell.set('s', style)
-                        changed = True
-
-            if not changed:
-                return True
-
+        with zipfile.ZipFile(xlsx_path, 'r') as zf:
             all_files: dict[str, bytes] = {}
             for name in zf.namelist():
                 if name == target:
@@ -484,8 +527,15 @@ def process_one(prod: str, wait_scale: float = 1.0, force: bool = False) -> bool
 
     if not force and check_done(src):
         z2 = read_z2(src)
-        print(f'  ↩ skip, already DONE (Z2={z2})')
-        return True
+        if main_spill_styles_ok(src):
+            print(f'  ↩ skip, already DONE (Z2={z2})')
+            return True
+        repaired = repair_main_spill_styles(src)
+        if repaired and main_spill_styles_ok(src):
+            print(f'  ↩ skip, already DONE; styles repaired (Z2={z2})')
+            return True
+        print(f'  ↩ skip, already DONE but style repair failed (Z2={z2})')
+        return False
 
     save_target = next_save_target(src)
 
