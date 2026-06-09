@@ -301,7 +301,7 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
             ws.cell(row_idx, col).number_format = NUMBER_FORMAT
 
         valid_formula = f'=SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}))'
-        ic_formula = f'=IF({ws.cell(row_idx, valid_col).coordinate}<=1,"",CORREL({fe_rank_range},{re_rank_range}))'
+        ic_formula = f'=IF({ws.cell(row_idx, valid_col).coordinate}<=1,"",IFERROR(CORREL({fe_rank_range},{re_rank_range}),""))'
         ws.cell(row_idx, valid_col, valid_formula)
         ws.cell(row_idx, excel_ic_col, ic_formula).number_format = NUMBER_FORMAT
 
@@ -340,9 +340,16 @@ def _write_compare_sheet(ws, backend_ic_rows: int, valid_col: int, excel_ic_col:
         ws.cell(out_row, 1, f'=IC!A{ic_row}').number_format = DATE_TIME_FORMAT
         ws.cell(out_row, 2, f'=IC!B{ic_row}').number_format = NUMBER_FORMAT
         ws.cell(out_row, 3, f'=IC!{excel_ic_letter}{ic_row}').number_format = NUMBER_FORMAT
-        ws.cell(out_row, 4, f'=IF(OR(B{out_row}="",C{out_row}=""),"",ABS(B{out_row}-C{out_row}))').number_format = NUMBER_FORMAT
+        ws.cell(
+            out_row, 4,
+            f'=IF(AND(B{out_row}="",C{out_row}=""),0,IF(OR(B{out_row}="",C{out_row}=""),"",ABS(B{out_row}-C{out_row})))'
+        ).number_format = NUMBER_FORMAT
         ws.cell(out_row, 5, f'=IC!{valid_letter}{ic_row}')
-        ws.cell(out_row, 6, f'=IF(C{out_row}="","MISSING",IF(D{out_row}<=$B$2,"PASS","FAIL"))')
+        ws.cell(
+            out_row, 6,
+            f'=IF(AND(B{out_row}="",C{out_row}=""),"PASS",'
+            f'IF(C{out_row}="","MISSING",IF(B{out_row}="","FAIL",IF(D{out_row}<=$B$2,"PASS","FAIL"))))'
+        )
 
 
 def _write_stats_sheet(ws, backend_ic_rows: int, excel_ic_col: int, backend_stats: pd.Series) -> None:
@@ -370,34 +377,34 @@ def _write_stats_sheet(ws, backend_ic_rows: int, excel_ic_col: int, backend_stat
 
     def ac1_formula(value_range: str) -> str:
         return (
-            f'=LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
+            f'=IFERROR(LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
             'n,ROWS(vals),'
-            'IF(n<=2,"",CORREL(DROP(vals,-1),DROP(vals,1))))'
+            'IF(n<=2,"",IFERROR(CORREL(DROP(vals,-1),DROP(vals,1)),""))),"")'
         )
 
     def half_life_formula(value_range: str) -> str:
         return (
-            f'=LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
+            f'=IFERROR(LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
             'n,ROWS(vals),'
             'IF(n<=2,"",'
             'LET(maxLag,MIN(20,MAX(1,QUOTIENT(n,2)-1)),'
             'lags,SEQUENCE(maxLag),'
-            'acfs,MAP(lags,LAMBDA(k,CORREL(DROP(vals,-k),DROP(vals,k)))),'
-            'pos,IFERROR(XMATCH(TRUE,acfs<0.5),""),'
+            'acfs,MAP(lags,LAMBDA(k,IFERROR(CORREL(DROP(vals,-k),DROP(vals,k)),""))),'
+            'pos,IFERROR(XMATCH(TRUE,IF(ISNUMBER(acfs),acfs<0.5,FALSE)),""),'
             'IF(pos="","inf",'
             'LET(curr,INDEX(acfs,pos),'
             'prev,IF(pos=1,1,INDEX(acfs,pos-1)),'
             'lag,INDEX(lags,pos),'
-            'lag-1+IF(curr=prev,0,(0.5-prev)/(curr-prev)))))))'
+            'lag-1+IF(curr=prev,0,(0.5-prev)/(curr-prev)))))))),"")'
         )
 
     metrics = [
-        ('mean', _normalise_stat_value(backend_stats.get('mean')), f'=AVERAGE({excel_range})'),
-        ('std', _normalise_stat_value(backend_stats.get('std')), f'=STDEV.S({excel_range})'),
-        ('IR', _normalise_stat_value(backend_stats.get('IR')), f'=C8/C9'),
-        ('t_stat', _normalise_stat_value(backend_stats.get('t_stat')), f'=C8/(C9/SQRT(COUNT({excel_range})))'),
-        ('max', _normalise_stat_value(backend_stats.get('max')), f'=MAX({excel_range})'),
-        ('min', _normalise_stat_value(backend_stats.get('min')), f'=MIN({excel_range})'),
+        ('mean', _normalise_stat_value(backend_stats.get('mean')), f'=IFERROR(AVERAGE({excel_range}),"")'),
+        ('std', _normalise_stat_value(backend_stats.get('std')), f'=IFERROR(STDEV.S({excel_range}),"")'),
+        ('IR', _normalise_stat_value(backend_stats.get('IR')), '=IFERROR(IF(C9=0,"",C8/C9),"")'),
+        ('t_stat', _normalise_stat_value(backend_stats.get('t_stat')), f'=IFERROR(IF(OR(C9=0,COUNT({excel_range})<=1),"",C8/(C9/SQRT(COUNT({excel_range})))),"")'),
+        ('max', _normalise_stat_value(backend_stats.get('max')), f'=IF(COUNT({excel_range})=0,"",MAX({excel_range}))'),
+        ('min', _normalise_stat_value(backend_stats.get('min')), f'=IF(COUNT({excel_range})=0,"",MIN({excel_range}))'),
         ('ac1', _normalise_stat_value(backend_stats.get('ac1')), ac1_formula(excel_range)),
         ('half_life', _normalise_stat_value(backend_stats.get('half_life')), half_life_formula(excel_range)),
     ]
@@ -408,12 +415,16 @@ def _write_stats_sheet(ws, backend_ic_rows: int, excel_ic_col: int, backend_stat
         ws.cell(row_idx, 3, excel_formula).number_format = NUMBER_FORMAT
         ws.cell(
             row_idx, 4,
-            f'=IF(OR(B{row_idx}="",C{row_idx}=""),"",'
+            f'=IF(AND(B{row_idx}="",C{row_idx}=""),0,IF(OR(B{row_idx}="",C{row_idx}=""),"",'
             f'IF(OR(ISTEXT(B{row_idx}),ISTEXT(C{row_idx})),'
-            f'IF(B{row_idx}=C{row_idx},0,""),ABS(B{row_idx}-C{row_idx})))'
+            f'IF(B{row_idx}=C{row_idx},0,""),ABS(B{row_idx}-C{row_idx}))))'
         ).number_format = NUMBER_FORMAT
         ws.cell(row_idx, 5, TOLERANCE).number_format = NUMBER_FORMAT
-        ws.cell(row_idx, 6, f'=IF(D{row_idx}="","FAIL",IF(D{row_idx}<=E{row_idx},"PASS","FAIL"))')
+        ws.cell(
+            row_idx, 6,
+            f'=IF(AND(B{row_idx}="",C{row_idx}=""),"PASS",'
+            f'IF(D{row_idx}="","FAIL",IF(D{row_idx}<=E{row_idx},"PASS","FAIL")))'
+        )
 
 
 def build_workbook(
@@ -491,12 +502,15 @@ def test_test3c_workbook_smoke():
         assert wb[IC_SHEET].cell(3, 2).value == 'backend_ic'
         assert wb[IC_SHEET].cell(3, 7).value == 'FE_RANK_A.DCE'
         assert 'RANK.AVG' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 7).value)
-        assert 'CORREL' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 12).value)
+        excel_ic_formula = str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 12).value)
+        assert 'IFERROR(CORREL' in excel_ic_formula
         assert wb[COMPARE_SHEET].cell(COMPARE_DATA_START_ROW - 1, 6).value == 'status'
+        assert 'AND(B10="",C10="")' in str(wb[COMPARE_SHEET].cell(COMPARE_DATA_START_ROW, 6).value)
         assert wb[STATS_SHEET].cell(8, 1).value == 'mean'
         assert wb[STATS_SHEET].cell(11, 1).value == 't_stat'
         assert isinstance(wb[STATS_SHEET].cell(8, 2).value, (int, float))
-        assert str(wb[STATS_SHEET].cell(8, 3).value).startswith('=AVERAGE(IC!$')
+        assert str(wb[STATS_SHEET].cell(8, 3).value).startswith('=IFERROR(AVERAGE(IC!$')
+        assert 'AND(B15="",C15="")' in str(wb[STATS_SHEET].cell(15, 6).value)
     finally:
         wb.close()
 
