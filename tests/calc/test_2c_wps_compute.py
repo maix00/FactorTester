@@ -25,9 +25,11 @@ test_2c_wps_compute.py — 自动用 WPS Office 打开 test_2a 的 xlsx，
 
 import subprocess
 import sys
+import zipfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -48,6 +50,8 @@ MAX_RETRIES = 20                # 最多重试 20 次（10+5×20 = 110s ≈ 2 mi
 OPEN_SAVE_DELAY = 2             # 打开后尽快保存，但留一点时间让 WPS 建立窗口
 
 FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 
 @dataclass(frozen=True)
@@ -137,6 +141,109 @@ def _read_switches_cell(xlsx_path: Path, row: int, col: int) -> str | None:
         return str(val).strip() if val is not None else None
     except Exception:
         return None
+
+
+def _col_idx(ref: str) -> int:
+    letters = []
+    for ch in ref:
+        if 'A' <= ch <= 'Z':
+            letters.append(ch)
+        else:
+            break
+    idx = 0
+    for ch in letters:
+        idx = idx * 26 + (ord(ch) - ord('A') + 1)
+    return idx
+
+
+def repair_main_spill_styles(xlsx_path: Path) -> bool:
+    """After WPS saves cached spill cells, copy MAIN <col style> onto them.
+
+    WPS materializes dynamic-array spill cells as plain <c> nodes without `s=`.
+    The workbook still keeps correct column styles in <cols>, so we patch only
+    existing MAIN cells in styled columns to point at that style id.
+    """
+    try:
+        with zipfile.ZipFile(xlsx_path, 'r') as zf:
+            workbook = ET.fromstring(zf.read('xl/workbook.xml'))
+            rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
+
+            main_rid = None
+            for sheet in workbook.findall(f'{{{NS_SHEET}}}sheets/{{{NS_SHEET}}}sheet'):
+                if sheet.get('name') == 'MAIN':
+                    main_rid = sheet.get(f'{{{NS_R}}}id')
+                    break
+            if main_rid is None:
+                return False
+
+            target = None
+            for rel in rels:
+                if rel.get('Id') == main_rid:
+                    raw = rel.get('Target')
+                    if raw is None:
+                        break
+                    target = raw.lstrip('/')
+                    if not target.startswith('xl/'):
+                        target = f'xl/{target}'
+                    break
+            if target is None:
+                return False
+
+            sheet_root = ET.fromstring(zf.read(target))
+            cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
+            if cols is None:
+                return False
+
+            styled_cols: dict[int, str] = {}
+            for col in cols.findall(f'{{{NS_SHEET}}}col'):
+                style = col.get('style')
+                if style is None:
+                    continue
+                cmin = int(col.get('min', '0'))
+                cmax = int(col.get('max', '0'))
+                for ci in range(cmin, cmax + 1):
+                    styled_cols[ci] = style
+            if not styled_cols:
+                return False
+
+            changed = False
+            for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
+                row_ref = row.get('r')
+                if row_ref is None or not row_ref.isdigit() or int(row_ref) < 3:
+                    continue
+                for cell in row.findall(f'{{{NS_SHEET}}}c'):
+                    ref = cell.get('r')
+                    if ref is None:
+                        continue
+                    style = styled_cols.get(_col_idx(ref))
+                    if style is None:
+                        continue
+                    if cell.get('s') != style:
+                        cell.set('s', style)
+                        changed = True
+
+            if not changed:
+                return True
+
+            all_files: dict[str, bytes] = {}
+            for name in zf.namelist():
+                if name == target:
+                    continue
+                all_files[name] = zf.read(name)
+            all_files[target] = ET.tostring(sheet_root, xml_declaration=True, encoding='UTF-8')
+
+        tmp_path = xlsx_path.with_suffix('.stylefix.tmp.xlsx')
+        try:
+            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zf_out:
+                for name, data in all_files.items():
+                    zf_out.writestr(name, data)
+            tmp_path.replace(xlsx_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
 
 
 def check_done(xlsx_path: Path) -> bool:
@@ -422,7 +529,13 @@ def process_one(prod: str, wait_scale: float = 1.0, force: bool = False) -> bool
     if not close_ok:
         print(' ⚠️ WPS quit not confirmed', end='', flush=True)
 
-    return success and close_ok
+    style_ok = True
+    if success and close_ok:
+        style_ok = repair_main_spill_styles(src)
+        if not style_ok:
+            print(' ⚠️ style repair skipped/failed', end='', flush=True)
+
+    return success and close_ok and style_ok
 
 
 def main():
