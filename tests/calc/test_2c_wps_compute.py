@@ -52,6 +52,13 @@ OPEN_SAVE_DELAY = 2             # 打开后尽快保存，但留一点时间让 
 FORMULA_FILL = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
 NS_SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+MAIN_COL_STYLE_TARGETS = {
+    1: 'date',      # A: trading_day
+    2: 'datetime',  # B: trade_time
+    18: 'datetime', # R: datetime-like source column
+}
+DATE_NUMFMT = 'yyyy\\-mm\\-dd'
+DATETIME_NUMFMT = 'yyyy\\-mm\\-dd\\ h:mm:ss'
 
 
 @dataclass(frozen=True)
@@ -143,29 +150,17 @@ def _read_switches_cell(xlsx_path: Path, row: int, col: int) -> str | None:
         return None
 
 
-def _col_idx(ref: str) -> int:
-    letters = []
-    for ch in ref:
-        if 'A' <= ch <= 'Z':
-            letters.append(ch)
-        else:
-            break
-    idx = 0
-    for ch in letters:
-        idx = idx * 26 + (ord(ch) - ord('A') + 1)
-    return idx
-
-
 def _load_main_sheet_style_context(
     xlsx_path: Path,
-) -> tuple[dict[int, str], ET.Element, str] | None:
-    """Load MAIN sheet XML plus its styled columns map."""
+) -> tuple[dict[int, str], ET.Element, ET.Element, str] | None:
+    """Load styles.xml and MAIN sheet XML plus its styled columns map."""
     try:
         zf = zipfile.ZipFile(xlsx_path, 'r')
     except Exception:
         return None
 
     try:
+        styles_root = ET.fromstring(zf.read('xl/styles.xml'))
         workbook = ET.fromstring(zf.read('xl/workbook.xml'))
         rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
 
@@ -192,87 +187,179 @@ def _load_main_sheet_style_context(
 
         sheet_root = ET.fromstring(zf.read(target))
         cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
-        if cols is None:
-            return None
 
         styled_cols: dict[int, str] = {}
-        for col in cols.findall(f'{{{NS_SHEET}}}col'):
-            style = col.get('style')
-            if style is None:
-                continue
-            cmin = int(col.get('min', '0'))
-            cmax = int(col.get('max', '0'))
-            for ci in range(cmin, cmax + 1):
-                styled_cols[ci] = style
-        if not styled_cols:
-            return None
+        if cols is not None:
+            for col in cols.findall(f'{{{NS_SHEET}}}col'):
+                style = col.get('style')
+                if style is None:
+                    continue
+                cmin = int(col.get('min', '0'))
+                cmax = int(col.get('max', '0'))
+                for ci in range(cmin, cmax + 1):
+                    styled_cols[ci] = style
 
-        return styled_cols, sheet_root, target
+        return styled_cols, styles_root, sheet_root, target
     finally:
         zf.close()
 
 
+def _numfmt_by_xf(styles_root: ET.Element) -> dict[int, str]:
+    custom_numfmts = {
+        int(nf.get('numFmtId', '0')): nf.get('formatCode', '')
+        for nf in styles_root.findall(f'{{{NS_SHEET}}}numFmts/{{{NS_SHEET}}}numFmt')
+    }
+    builtins = {
+        14: 'mm-dd-yy',
+        22: 'm/d/yy h:mm',
+    }
+    formats: dict[int, str] = {}
+    for idx, xf in enumerate(styles_root.findall(f'{{{NS_SHEET}}}cellXfs/{{{NS_SHEET}}}xf')):
+        numfmt_id = int(xf.get('numFmtId', '0'))
+        formats[idx] = custom_numfmts.get(numfmt_id, builtins.get(numfmt_id, 'General'))
+    return formats
+
+
+def _format_kind(format_code: str) -> str | None:
+    fmt = format_code.lower().replace('\\-', '-').replace('\\ ', ' ')
+    has_date = 'y' in fmt and 'm' in fmt and 'd' in fmt
+    has_time = 'h' in fmt and 's' in fmt
+    if has_date and has_time:
+        return 'datetime'
+    if has_date:
+        return 'date'
+    return None
+
+
 def main_spill_styles_ok(xlsx_path: Path) -> bool:
-    """Return True when cached MAIN spill cells already carry column styles."""
+    """Return True when MAIN has the required column styles.
+
+    We intentionally validate <col style>, not every cached spill cell. WPS can
+    preserve column style inheritance even when materialized spill cells omit s=.
+    """
     loaded = _load_main_sheet_style_context(xlsx_path)
     if loaded is None:
         return False
-    styled_cols, sheet_root, _target = loaded
+    styled_cols, styles_root, _sheet_root, _target = loaded
+    xf_formats = _numfmt_by_xf(styles_root)
 
-    saw_styled_spill = False
-    for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
-        row_ref = row.get('r')
-        if row_ref is None or not row_ref.isdigit() or int(row_ref) < 4:
-            continue
-        for cell in row.findall(f'{{{NS_SHEET}}}c'):
-            ref = cell.get('r')
-            if ref is None:
-                continue
-            style = styled_cols.get(_col_idx(ref))
-            if style is None:
-                continue
-            saw_styled_spill = True
-            if cell.get('s') != style:
-                return False
-    return saw_styled_spill
+    for col_idx, expected_kind in MAIN_COL_STYLE_TARGETS.items():
+        style = styled_cols.get(col_idx)
+        if style is None:
+            return False
+        actual_kind = _format_kind(xf_formats.get(int(style), ''))
+        if actual_kind != expected_kind:
+            return False
+    return True
+
+
+def _ensure_numfmt_xf(styles_root: ET.Element, format_code: str) -> int:
+    numFmts = styles_root.find(f'{{{NS_SHEET}}}numFmts')
+    if numFmts is None:
+        numFmts = ET.Element(f'{{{NS_SHEET}}}numFmts')
+        styles_root.insert(0, numFmts)
+
+    for nf in numFmts.findall(f'{{{NS_SHEET}}}numFmt'):
+        if nf.get('formatCode') == format_code:
+            numfmt_id = int(nf.get('numFmtId', '0'))
+            break
+    else:
+        existing_ids = [
+            int(nf.get('numFmtId', '0'))
+            for nf in numFmts.findall(f'{{{NS_SHEET}}}numFmt')
+        ]
+        numfmt_id = max([163, *existing_ids]) + 1
+        nf = ET.SubElement(numFmts, f'{{{NS_SHEET}}}numFmt')
+        nf.set('numFmtId', str(numfmt_id))
+        nf.set('formatCode', format_code)
+        numFmts.set('count', str(len(numFmts.findall(f'{{{NS_SHEET}}}numFmt'))))
+
+    cellXfs = styles_root.find(f'{{{NS_SHEET}}}cellXfs')
+    if cellXfs is None:
+        cellXfs = ET.SubElement(styles_root, f'{{{NS_SHEET}}}cellXfs')
+        cellXfs.set('count', '0')
+
+    for idx, xf in enumerate(cellXfs.findall(f'{{{NS_SHEET}}}xf')):
+        if xf.get('numFmtId') == str(numfmt_id):
+            return idx
+
+    xf_list = cellXfs.findall(f'{{{NS_SHEET}}}xf')
+    base_xf = xf_list[0] if xf_list else None
+    new_xf = ET.SubElement(cellXfs, f'{{{NS_SHEET}}}xf')
+    if base_xf is not None:
+        for attr in ('fontId', 'fillId', 'borderId', 'xfId'):
+            value = base_xf.get(attr)
+            if value is not None:
+                new_xf.set(attr, value)
+    else:
+        new_xf.set('fontId', '0')
+        new_xf.set('fillId', '0')
+        new_xf.set('borderId', '0')
+        new_xf.set('xfId', '0')
+    new_xf.set('numFmtId', str(numfmt_id))
+    new_xf.set('applyNumberFormat', '1')
+    cellXfs.set('count', str(len(cellXfs.findall(f'{{{NS_SHEET}}}xf'))))
+    return len(cellXfs.findall(f'{{{NS_SHEET}}}xf')) - 1
 
 
 def repair_main_spill_styles(xlsx_path: Path) -> bool:
-    """After WPS saves cached spill cells, copy MAIN <col style> onto them.
+    """Ensure MAIN has column styles for date/time spill columns.
 
-    WPS materializes dynamic-array spill cells as plain <c> nodes without `s=`.
-    The workbook still keeps correct column styles in <cols>, so we patch only
-    existing MAIN cells in styled columns to point at that style id.
+    This repairs the column-level style contract only; it deliberately avoids
+    writing s= onto every materialized spill cell.
     """
     try:
         loaded = _load_main_sheet_style_context(xlsx_path)
         if loaded is None:
             return False
-        styled_cols, sheet_root, target = loaded
+        _styled_cols, styles_root, sheet_root, target = loaded
+
+        date_style = _ensure_numfmt_xf(styles_root, DATE_NUMFMT)
+        datetime_style = _ensure_numfmt_xf(styles_root, DATETIME_NUMFMT)
+        expected_styles = {
+            col_idx: str(date_style if kind == 'date' else datetime_style)
+            for col_idx, kind in MAIN_COL_STYLE_TARGETS.items()
+        }
+
+        cols = sheet_root.find(f'{{{NS_SHEET}}}cols')
+        if cols is None:
+            cols = ET.Element(f'{{{NS_SHEET}}}cols')
+            sheet_root.insert(0, cols)
+
         changed = False
-        for row in sheet_root.findall(f'{{{NS_SHEET}}}sheetData/{{{NS_SHEET}}}row'):
-            row_ref = row.get('r')
-            if row_ref is None or not row_ref.isdigit() or int(row_ref) < 3:
-                continue
-            for cell in row.findall(f'{{{NS_SHEET}}}c'):
-                ref = cell.get('r')
-                if ref is None:
-                    continue
-                style = styled_cols.get(_col_idx(ref))
-                if style is None:
-                    continue
-                if cell.get('s') != style:
-                    cell.set('s', style)
-                    changed = True
+        for col_idx, expected_style in expected_styles.items():
+            col_el = None
+            for existing in cols.findall(f'{{{NS_SHEET}}}col'):
+                cmin = int(existing.get('min', '0'))
+                cmax = int(existing.get('max', '0'))
+                if cmin <= col_idx <= cmax:
+                    col_el = existing
+                    break
+            if col_el is None:
+                col_el = ET.SubElement(cols, f'{{{NS_SHEET}}}col')
+                col_el.set('min', str(col_idx))
+                col_el.set('max', str(col_idx))
+                col_el.set('width', '13')
+                col_el.set('customWidth', '1')
+                changed = True
+            if col_el.get('style') != expected_style:
+                col_el.set('style', expected_style)
+                changed = True
+
         if not changed:
             return True
 
         with zipfile.ZipFile(xlsx_path, 'r') as zf:
             all_files: dict[str, bytes] = {}
             for name in zf.namelist():
-                if name == target:
+                if name in ('xl/styles.xml', target):
                     continue
                 all_files[name] = zf.read(name)
+            all_files['xl/styles.xml'] = ET.tostring(
+                styles_root,
+                xml_declaration=True,
+                encoding='UTF-8',
+            )
             all_files[target] = ET.tostring(sheet_root, xml_declaration=True, encoding='UTF-8')
 
         tmp_path = xlsx_path.with_suffix('.stylefix.tmp.xlsx')
