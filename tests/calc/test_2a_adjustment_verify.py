@@ -18,7 +18,7 @@ test_2a_adjustment_verify.py
 
 _SWITCHES 辅助列（全部 Excel 公式，不硬编码行号、不硬编码 sheet 名）：
   _start_row:  当前合约 start_date 对应的第一条分钟行
-  _end_row:    当前合约 end_date 对应的最后一条分钟行；最后一段取当前合约实际末行
+  _end_row:    当前合约 end_date 当天的最后一条分钟行，排除 test_1 保留的区间外窗口行
   _data_cols:  合约 sheet row 2 中最后一个非空表头所在列号
   _data_last_col: 合约数据最后一列列字母，用于拼 ref_str
   _close_col:  通过 row 2 表头 MATCH("close_price") 得到 close 列号
@@ -66,6 +66,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+import datetime as dt
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -195,7 +196,7 @@ def _date_key(value) -> str:
     return str(value)[:10]
 
 
-def _segment_row_count(ws, start_date, end_date, *, is_last_segment: bool = False) -> int:
+def _segment_row_count(ws, start_date, end_date) -> int:
     start_key = _date_key(start_date)
     end_key = _date_key(end_date)
     start_row = None
@@ -207,13 +208,22 @@ def _segment_row_count(ws, start_date, end_date, *, is_last_segment: bool = Fals
         key = _date_key(value)
         if start_row is None and key == start_key:
             start_row = row
-        if is_last_segment:
-            end_row = row
-        elif key == end_key:
+        if key == end_key:
             end_row = row
     if start_row is None or end_row is None or end_row < start_row:
         return 0
     return end_row - start_row + 1
+
+
+def test_segment_row_count_excludes_trailing_window_rows():
+    ws = Workbook().active
+    ws.append(['remark'])
+    ws.append(['trading_day'])
+    ws.append([dt.datetime(2026, 1, 15)])
+    ws.append([dt.datetime(2026, 1, 15)])
+    ws.append([dt.datetime(2026, 1, 16)])
+
+    assert _segment_row_count(ws, dt.datetime(2026, 1, 15), dt.datetime(2026, 1, 15)) == 2
 
 
 # ============================================================
@@ -357,7 +367,7 @@ def process_product(prod_xlsx: Path) -> None:
         '切换记录 + 前复权因子计算（最新合约=1，历史数据反向累积）\n'
         '辅助列全部为 Excel 公式，不硬编码合约 sheet 行号\n'
         '_start_row: MATCH(start_date)，取主力区间起始交易日第一条分钟行\n'
-        '_end_row: LOOKUP(end_date)，最后一个主力区间取当前合约实际末行\n'
+        '_end_row: LOOKUP(end_date)，不因最后一段而取合约 sheet 实际末行\n'
         '_next_pre_main_row: 下一合约 start_row - 1，即新合约变成主力前一行\n'
         '_cur_close:  INDEX(本合约 close, _end_row)\n'
         '_next_close: INDEX(下一合约 close, _next_pre_main_row)\n'
@@ -426,18 +436,16 @@ def process_product(prod_xlsx: Path) -> None:
         # ---- _start_row / _end_row / next helper rows（全部 Excel 公式）----
         # 定位一律使用合约 sheet A 列 trading_day。
         # start_row = start_date 当天第一条分钟行。
-        # end_row = end_date 当天最后一条分钟行；最后一个主力区间没有下一段，取当前合约实际末行。
+        # end_row = end_date 当天最后一条分钟行。
+        # test_1 会为主力区间前后额外保留 WINDOW_ROWS 行；这里必须排除区间后的窗口行，
+        # 否则停牌品种（例如 LR）会把主力区间外的下一条分钟数据拼入 MAIN。
         sw_out.cell(
             row, SW_START_ROW_COL,
             f'=MATCH({cur_d},{cur_td_ref},0)'
         ).fill = FORMULA_FILL
         sw_out.cell(
             row, SW_END_ROW_COL,
-            (
-                f'=IF({last_row_formula},'
-                f'LOOKUP(2,1/({cur_td_ref}<>""),ROW({cur_td_ref})),'
-                f'LOOKUP(2,1/({cur_td_ref}={cur_e}),ROW({cur_td_ref})))'
-            )
+            f'=LOOKUP(2,1/({cur_td_ref}={cur_e}),ROW({cur_td_ref}))'
         ).fill = FORMULA_FILL
 
         if i == len(switches) - 1:
@@ -575,9 +583,7 @@ def process_product(prod_xlsx: Path) -> None:
     total_rows = 0
     for i, (inst, _td, _wc, sd, ed) in enumerate(switches):
         if inst in wb.sheetnames:
-            total_rows += _segment_row_count(
-                wb[inst], sd, ed, is_last_segment=(i == len(switches) - 1)
-            )
+            total_rows += _segment_row_count(wb[inst], sd, ed)
     if total_rows == 0:
         total_rows = sum(sheet_rows.get(c, 0) for c in contracts_in_order)
 
