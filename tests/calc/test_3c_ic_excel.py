@@ -15,6 +15,7 @@ Workbook layout:
   - one sheet per product: signal_time, backend FE, backend RE, data_present
   - IC: Excel formulas calculate cross-sectional Spearman IC row-by-row
   - BACKEND_COMPARE: Excel formulas compare backend IC vs Excel-calculated IC
+  - IC_STATS: Excel formulas compare ic_stats for backend IC vs Excel IC
 """
 
 from __future__ import annotations
@@ -62,6 +63,7 @@ DATE_TIME_FORMAT = 'yyyy-mm-dd hh:mm:ss'
 NUMBER_FORMAT = '0.0000000000'
 IC_SHEET = 'IC'
 COMPARE_SHEET = 'BACKEND_COMPARE'
+STATS_SHEET = 'IC_STATS'
 IC_DATA_START_ROW = 4
 COMPARE_DATA_START_ROW = 10
 
@@ -111,6 +113,22 @@ def _normalise_number(value):
     value = float(value)
     if math.isnan(value) or math.isinf(value):
         return None
+    return value
+
+
+def _normalise_stat_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    value = float(value)
+    if math.isnan(value):
+        return None
+    if math.isinf(value):
+        return 'inf'
     return value
 
 
@@ -164,13 +182,10 @@ def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: p
         'Lag': 0,
         '$F': '1min',
     }
-    _factors, ic_series, _stats, re_table, fe_table, mask = run_ic_for_factor(tester, params, [factor])
+    _factors, ic_series, stats, re_table, fe_table, mask = run_ic_for_factor(tester, params, [factor])
 
     ic_series = pd.Series(pd.to_numeric(ic_series, errors='coerce'))
     signal_times = pd.DatetimeIndex([_signal_time(idx) for idx in ic_series.index])
-    window = (signal_times >= start) & (signal_times < end)
-    ic_series = ic_series.loc[window].copy()
-    signal_times = signal_times[window]
 
     product_data = {}
     for product in products:
@@ -193,7 +208,7 @@ def _build_backend_tables(products: list[CNFutures], start: pd.Timestamp, end: p
         'signal_time': signal_times,
         'backend_ic': ic_series.to_numpy(),
     })
-    return backend_ic, product_data
+    return backend_ic, product_data, stats
 
 
 def _write_product_sheet(ws, product_name: str, data: pd.DataFrame) -> None:
@@ -313,6 +328,77 @@ def _write_compare_sheet(ws, backend_ic_rows: int, valid_col: int, excel_ic_col:
         ws.cell(out_row, 6, f'=IF(C{out_row}="","MISSING",IF(D{out_row}<=$B$2,"PASS","FAIL"))')
 
 
+def _write_stats_sheet(ws, backend_ic_rows: int, excel_ic_col: int, backend_stats: pd.Series) -> None:
+    _write_remark(
+        ws,
+        'IC summary comparison: backend_stat is the backend ic_stats() output; excel_stat is calculated by Excel formulas.',
+        6,
+    )
+    ws.cell(2, 1, 'tolerance')
+    ws.cell(2, 2, TOLERANCE)
+    ws.cell(3, 1, 'compare_overall')
+    ws.cell(3, 2, '=BACKEND_COMPARE!B6')
+    ws.cell(4, 1, 'stats_overall')
+    ws.cell(4, 2, '=IF(COUNTIF(F8:F15,"FAIL")=0,"PASS","FAIL")')
+
+    _write_header(ws, 7, ['metric', 'backend_stat', 'excel_stat', 'abs_diff', 'tolerance', 'status'])
+    ws.freeze_panes = 'A8'
+    for col in 'ABCDEF':
+        ws.column_dimensions[col].width = 18
+
+    last_ic_row = IC_DATA_START_ROW + backend_ic_rows - 1
+    excel_ic_letter = ws.cell(1, excel_ic_col).column_letter
+    backend_range = f'IC!$B${IC_DATA_START_ROW}:$B${last_ic_row}'
+    excel_range = f'IC!${excel_ic_letter}${IC_DATA_START_ROW}:${excel_ic_letter}${last_ic_row}'
+
+    def ac1_formula(value_range: str) -> str:
+        return (
+            f'=LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
+            'n,ROWS(vals),'
+            'IF(n<=2,"",CORREL(DROP(vals,-1),DROP(vals,1))))'
+        )
+
+    def half_life_formula(value_range: str) -> str:
+        return (
+            f'=LET(vals,FILTER({value_range},ISNUMBER({value_range})),'
+            'n,ROWS(vals),'
+            'IF(n<=2,"",'
+            'LET(maxLag,MIN(20,MAX(1,QUOTIENT(n,2)-1)),'
+            'lags,SEQUENCE(maxLag),'
+            'acfs,MAP(lags,LAMBDA(k,CORREL(DROP(vals,-k),DROP(vals,k)))),'
+            'pos,IFERROR(XMATCH(TRUE,acfs<0.5),""),'
+            'IF(pos="","inf",'
+            'LET(curr,INDEX(acfs,pos),'
+            'prev,IF(pos=1,1,INDEX(acfs,pos-1)),'
+            'lag,INDEX(lags,pos),'
+            'lag-1+IF(curr=prev,0,(0.5-prev)/(curr-prev)))))))'
+        )
+
+    metrics = [
+        ('mean', _normalise_stat_value(backend_stats.get('mean')), f'=AVERAGE({excel_range})'),
+        ('std', _normalise_stat_value(backend_stats.get('std')), f'=STDEV.S({excel_range})'),
+        ('IR', _normalise_stat_value(backend_stats.get('IR')), f'=C8/C9'),
+        ('t_stat', _normalise_stat_value(backend_stats.get('t_stat')), f'=C8/(C9/SQRT(COUNT({excel_range})))'),
+        ('max', _normalise_stat_value(backend_stats.get('max')), f'=MAX({excel_range})'),
+        ('min', _normalise_stat_value(backend_stats.get('min')), f'=MIN({excel_range})'),
+        ('ac1', _normalise_stat_value(backend_stats.get('ac1')), ac1_formula(excel_range)),
+        ('half_life', _normalise_stat_value(backend_stats.get('half_life')), half_life_formula(excel_range)),
+    ]
+
+    for row_idx, (metric, backend_value, excel_formula) in enumerate(metrics, start=8):
+        ws.cell(row_idx, 1, metric)
+        ws.cell(row_idx, 2, backend_value).number_format = NUMBER_FORMAT
+        ws.cell(row_idx, 3, excel_formula).number_format = NUMBER_FORMAT
+        ws.cell(
+            row_idx, 4,
+            f'=IF(OR(B{row_idx}="",C{row_idx}=""),"",'
+            f'IF(OR(ISTEXT(B{row_idx}),ISTEXT(C{row_idx})),'
+            f'IF(B{row_idx}=C{row_idx},0,""),ABS(B{row_idx}-C{row_idx})))'
+        ).number_format = NUMBER_FORMAT
+        ws.cell(row_idx, 5, TOLERANCE).number_format = NUMBER_FORMAT
+        ws.cell(row_idx, 6, f'=IF(D{row_idx}="","FAIL",IF(D{row_idx}<=E{row_idx},"PASS","FAIL"))')
+
+
 def build_workbook(
     products: Iterable[str],
     start_date: str,
@@ -324,7 +410,7 @@ def build_workbook(
     end = start + pd.Timedelta(days=days)
     product_objs = [CNFutures(_product_name(product)) for product in products]
 
-    backend_ic, product_data = _build_backend_tables(product_objs, start, end, rf_minutes)
+    backend_ic, product_data, backend_stats = _build_backend_tables(product_objs, start, end, rf_minutes)
     if backend_ic.empty:
         raise RuntimeError('No backend IC rows in selected date window')
 
@@ -347,6 +433,9 @@ def build_workbook(
 
     compare_ws = wb.create_sheet(COMPARE_SHEET)
     _write_compare_sheet(compare_ws, len(backend_ic), valid_col, excel_ic_col)
+
+    stats_ws = wb.create_sheet(STATS_SHEET)
+    _write_stats_sheet(stats_ws, len(backend_ic), excel_ic_col, backend_stats)
 
     wb.save(out_path)
     wb.close()
@@ -379,11 +468,16 @@ def test_test3c_workbook_smoke():
     try:
         assert IC_SHEET in wb.sheetnames
         assert COMPARE_SHEET in wb.sheetnames
-        assert len(wb.sheetnames) == 4
+        assert STATS_SHEET in wb.sheetnames
+        assert len(wb.sheetnames) == 5
         assert wb[IC_SHEET].cell(3, 1).value == 'signal_time'
         assert wb[IC_SHEET].cell(3, 2).value == 'backend_ic'
         assert 'CORREL(RANK.AVG' in str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 8).value)
         assert wb[COMPARE_SHEET].cell(COMPARE_DATA_START_ROW - 1, 6).value == 'status'
+        assert wb[STATS_SHEET].cell(8, 1).value == 'mean'
+        assert wb[STATS_SHEET].cell(11, 1).value == 't_stat'
+        assert isinstance(wb[STATS_SHEET].cell(8, 2).value, (int, float))
+        assert str(wb[STATS_SHEET].cell(8, 3).value).startswith('=AVERAGE(IC!$')
     finally:
         wb.close()
 
