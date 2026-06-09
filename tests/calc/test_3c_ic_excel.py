@@ -294,7 +294,8 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
             ws.cell(
                 row_idx, col,
                 f'=IF(AND(ISNUMBER({fe_cell}),ISNUMBER({re_cell})),'
-                f'RANK.AVG({fe_cell},FILTER({fe_range},ISNUMBER({fe_range})*ISNUMBER({re_range})),1),"")'
+                f'1+SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}),--({fe_range}<{fe_cell}))'
+                f'+(SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}),--({fe_range}={fe_cell}))-1)/2,"")'
             )
             ws.cell(row_idx, col).number_format = NUMBER_FORMAT
         for offset, _product in enumerate(products):
@@ -304,7 +305,8 @@ def _write_ic_sheet(ws, backend_ic: pd.DataFrame, sheet_map: dict[str, str]) -> 
             ws.cell(
                 row_idx, col,
                 f'=IF(AND(ISNUMBER({fe_cell}),ISNUMBER({re_cell})),'
-                f'RANK.AVG({re_cell},FILTER({re_range},ISNUMBER({fe_range})*ISNUMBER({re_range})),1),"")'
+                f'1+SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}),--({re_range}<{re_cell}))'
+                f'+(SUMPRODUCT(--ISNUMBER({fe_range}),--ISNUMBER({re_range}),--({re_range}={re_cell}))-1)/2,"")'
             )
             ws.cell(row_idx, col).number_format = NUMBER_FORMAT
 
@@ -510,8 +512,8 @@ def test_test3c_workbook_smoke():
         assert wb[IC_SHEET].cell(3, 2).value == 'backend_ic'
         assert wb[IC_SHEET].cell(3, 7).value == 'FE_RANK_A.DCE'
         rank_formula = str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 7).value)
-        assert 'RANK.AVG' in rank_formula
-        assert 'FILTER(C4:D4,ISNUMBER(C4:D4)*ISNUMBER(E4:F4))' in rank_formula
+        assert 'SUMPRODUCT' in rank_formula
+        assert '--ISNUMBER(C4:D4),--ISNUMBER(E4:F4)' in rank_formula
         excel_ic_formula = str(wb[IC_SHEET].cell(IC_DATA_START_ROW, 12).value)
         assert 'IFERROR(CORREL' in excel_ic_formula
         assert wb[COMPARE_SHEET].cell(COMPARE_DATA_START_ROW - 1, 6).value == 'status'
