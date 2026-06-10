@@ -2040,7 +2040,7 @@ def test_by_group_single_factor(
         bundle: dict[str, Any] = {}
         if callable(getter):
             try:
-                bundle = dict(getter(list(_spec_field_names)) or {})
+                bundle = cast(dict[str, Any], getter(list(_spec_field_names)) or {})
             except Exception:
                 bundle = {}
         if not bundle:
