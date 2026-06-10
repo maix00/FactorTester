@@ -23,6 +23,8 @@ def _fee_frame() -> pd.DataFrame:
         'long_margin_fixed': 12000,
         'short_margin_ratio': 0.13,
         'short_margin_fixed': 13000,
+        'min_trade_quantity': 1,
+        'max_trade_quantity': 20,
     }])
 
 

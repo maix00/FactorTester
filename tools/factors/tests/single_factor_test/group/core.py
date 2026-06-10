@@ -1734,49 +1734,66 @@ def test_by_group_single_factor(
         nm = getattr(col, "name", str(col))
         return nm.split(".")[0].upper()
 
+    def _product_spec_value(col, product_field: str, default):
+        getter = getattr(col, "get_trading_spec_field", None)
+        if callable(getter):
+            try:
+                value = getter(product_field)
+                if value not in (None, ""):
+                    return value
+            except Exception:
+                pass
+        return getattr(col, product_field, default)
+
+    def _fee_or_product_value(col, fee_key: str, product_field: str, default):
+        spec = fee_map.get(_variety(col), {}) or {}
+        if fee_key in spec and spec.get(fee_key) not in (None, ""):
+            return spec.get(fee_key)
+        return _product_spec_value(col, product_field, default)
+
     half_fee = float(fee) / 2.0
     open_fee_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("open_rate", half_fee))
+        float(_fee_or_product_value(c, "open_rate", "open_ratio", half_fee))
         for c in valid_cols
     ], dtype=float)
     close_fee_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("close_rate", half_fee))
+        float(_fee_or_product_value(c, "close_rate", "close_ratio", half_fee))
         for c in valid_cols
     ], dtype=float)
     close_today_fee_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("close_today_rate", close_fee_vec[i]))
+        float(_fee_or_product_value(c, "close_today_rate", "closetoday_ratio", close_fee_vec[i]))
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     close_yesterday_fee_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("close_yesterday_rate", close_fee_vec[i]))
+        float(_fee_or_product_value(c, "close_yesterday_rate", "close_ratio", close_fee_vec[i]))
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     open_fee_fixed_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("open_fixed", 0.0))
+        float(_fee_or_product_value(c, "open_fixed", "open_fixed", 0.0))
         for c in valid_cols
     ], dtype=float)
     close_fee_fixed_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("close_fixed", 0.0))
+        float(_fee_or_product_value(c, "close_fixed", "close_fixed", 0.0))
         for c in valid_cols
     ], dtype=float)
     close_today_fee_fixed_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("close_today_fixed", close_fee_fixed_vec[i]))
+        float(_fee_or_product_value(c, "close_today_fixed", "closetoday_fixed", close_fee_fixed_vec[i]))
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     point_value_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("multiplier", getattr(c, "point_value", None) or 1.0))
+        float(_fee_or_product_value(c, "multiplier", "multiplier", getattr(c, "point_value", None) or 1.0))
         for c in valid_cols
     ], dtype=float)
     min_tick_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("min_tick", 0.0))
+        float(_fee_or_product_value(c, "min_tick", "min_tick", 0.0))
         for c in valid_cols
     ], dtype=float)
     min_trade_quantity_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("min_trade_quantity", getattr(c, "min_trade_quantity", 1.0) or 1.0))
+        float(_fee_or_product_value(c, "min_trade_quantity", "min_trade_quantity", getattr(c, "min_trade_quantity", 1.0) or 1.0))
         for c in valid_cols
     ], dtype=float)
     long_margin_ratio_vec = np.array([
-        float((fee_map.get(_variety(c), {}) or {}).get("long_margin_ratio", 1.0))
+        float(_fee_or_product_value(c, "long_margin_ratio", "long_margin_ratio", 1.0))
         for c in valid_cols
     ], dtype=float)
     is_margin_traded_vec = np.array([
