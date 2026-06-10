@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tools.factors.FactorTester import FactorTester, _active_tester
+from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import (
     _append_derived_group_memberships,
@@ -22,9 +22,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     _simulate_group_from_preloaded,
     materialize_group_outputs_from_result,
     slice_group_run_result,
-    test_by_group_single_factor,
 )
-from tools.factors.tests.single_factor_test.group.result import MergedGroupRunResult
 
 
 @dataclass(slots=True)
@@ -540,74 +538,6 @@ class FactorGroupTester:
             })
         return out
 
-    def _run_single_spec(
-        self,
-        entry: GroupSimulationSpec,
-        *,
-        fee: float,
-        fee_map: dict,
-        use_closetoday: bool,
-        initial_capital: float,
-        rebalance_mode: str,
-        start_date: Optional[Any],
-        end_date: Optional[Any],
-        calendar_index: Optional[pd.Index],
-    ) -> dict[str, Any]:
-        tester = entry.tester
-        factor = tester.resolve_factor(entry.factor_alias)
-        if factor is None:
-            raise ValueError(f"未找到因子 {entry.factor_alias}")
-
-        time_range: Optional[tuple[Any, Any]] = None
-        if start_date and end_date:
-            time_range = (pd.to_datetime(start_date), pd.to_datetime(end_date))
-
-        token = _active_tester.set(tester)
-        try:
-            _, returns_dict, report_df, cum_np, idx_list = test_by_group_single_factor(
-                tester,
-                factor,
-                returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-                n_groups=entry.n_groups,
-                n_groups_name=entry.spec.get("n_groups_name") or {},
-                time_range=time_range,
-                plot_remark_str=None,
-                plot_flag=False,
-                save_plot=False,
-                plot_show=False,
-                plot_n_group_list=None,
-                fee=fee,
-                fee_map=fee_map,
-                use_closetoday=use_closetoday,
-                rebalance_mode=str(entry.spec.get("rebalance_mode") or rebalance_mode),
-                derived_groups=entry.spec.get("derived_groups"),
-                group_fee_maps=None,
-                group_variants=None,
-                initial_capital=initial_capital,
-                calendar_index=calendar_index,
-                shared_inputs=entry.shared_inputs,
-                base_membership_np=entry.base_membership_np,
-                trade_valid_cols=entry.trade_valid_cols,
-                trade_membership_np=entry.trade_membership_np,
-            )
-        finally:
-            _active_tester.reset(token)
-
-        return {
-            "simulation_index": entry.simulation_index,
-            "submission_id": entry.submission_id,
-            "factor_alias": entry.factor_alias,
-            "n_groups": entry.n_groups,
-            "factor": factor,
-            "returns_dict": returns_dict,
-            "report_df": report_df,
-            "cum_np": cum_np,
-            "idx_list": idx_list,
-            "group_result": tester._get_result(factor).group_result,
-            "ls_configs": entry.spec.get("ls_configs"),
-            "tester": tester,
-        }
-
     def run(
         self,
         *,
@@ -670,10 +600,3 @@ class FactorGroupTester:
 
         results.sort(key=lambda item: int(item.get("simulation_index", 0)))
         return results
-
-    def merge(self) -> MergedGroupRunResult:
-        """Build merged execution plan.
-
-        Full merged simulation wiring will be added incrementally on top of this planner.
-        """
-        raise NotImplementedError("Merged group simulation execution is not wired yet.")
