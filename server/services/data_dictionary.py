@@ -300,14 +300,7 @@ def scan_settings() -> List[SettingEntry]:
 
 
 def scan_data_sources() -> List[DataSourceEntry]:
-    """扫描所有已注册的 DataSource 实例。通过 import CNFutures 触发模块级注册。"""
-    try:
-        from sources import load_all_sources
-
-        load_all_sources()
-    except Exception:
-        pass
-
+    """扫描当前已注册的 DataSource 实例，不负责触发加载。"""
     from tools.data.DataSource import DataSourceMeta
     entries = []
     try:
@@ -374,6 +367,12 @@ def scan_frequency_types() -> List[dict]:
 def build_data_dictionary() -> DataDictionary:
     """构建完整数据字典。"""
     from datetime import datetime
+    try:
+        from sources import load_all_sources
+
+        load_all_sources()
+    except Exception:
+        pass
     return DataDictionary(
         generated_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         data_columns=scan_data_columns_with_comments(),
