@@ -37,6 +37,16 @@ def _safe_bool(obj) -> bool:
     return bool(obj)
 
 
+def _parse_initial_capital(raw: Any, default: float = 100000.0) -> float:
+    """Parse initial capital with a stable backend default."""
+    if raw in (None, ''):
+        return float(default)
+    value = _safe_float(raw)
+    if value is None or value <= 0:
+        raise ValueError(f'初始金额必须是正数，收到: {raw!r}')
+    return float(value)
+
+
 def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
     """从收益率序列计算绩效指标。"""
     s = pd.Series(r_array).replace([np.inf, -np.inf], np.nan).dropna()
@@ -613,7 +623,7 @@ def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, fl
 
 def _run_single_batch(*, submission_id, factor_alias, n_groups,
                       fee_uniform, fee_map, use_closetoday,
-                      rebalance_mode, start_date, end_date,
+                      rebalance_mode, start_date, end_date, initial_capital,
                       return_freqs=None, derived_groups=None,
                       ls_configs=None, group_names=None,
                       group_fee_maps=None) -> dict:
@@ -685,6 +695,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
                     use_closetoday=use_closetoday,
+                    initial_capital=initial_capital,
                     rebalance_mode=rebalance_mode,
                     derived_groups=derived_groups,
                     group_fee_maps=group_fee_maps,
@@ -728,6 +739,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
             use_closetoday=use_closetoday,
+            initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
             derived_groups=derived_groups,
             group_fee_maps=group_fee_maps,
@@ -877,6 +889,10 @@ def run_group_test_batch():
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
+    try:
+        initial_capital = _parse_initial_capital(data.get('initial_capital'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     return_freqs = data.get('return_freqs', None)
     derived_groups = data.get('derived_groups', None)
     group_fee_maps = data.get('group_fee_maps', None)
@@ -927,6 +943,7 @@ def run_group_test_batch():
             rebalance_mode=rebalance_mode,
             start_date=start_date,
             end_date=end_date,
+            initial_capital=initial_capital,
             return_freqs=return_freqs,
             derived_groups=batch_derived_groups,
             ls_configs=ls_configs,
@@ -1161,6 +1178,10 @@ def run_group_test():
     rebalance_mode: str = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
     end_date   = data.get('end_date')
+    try:
+        initial_capital = _parse_initial_capital(data.get('initial_capital'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     # 多周期对比：传入 return_freqs 数组，如 ["1d","3d","5d","10d"]
     return_freqs: list = data.get('return_freqs', None)
     _gt_token = None
@@ -1223,6 +1244,7 @@ def run_group_test():
                     plot_flag=False, save_plot=False, plot_show=False,
                     fee=fee_uniform, fee_map=fee_map,
                     use_closetoday=use_closetoday,
+                    initial_capital=initial_capital,
                     rebalance_mode=rebalance_mode,
                     derived_groups=data.get('derived_groups'),
                     group_fee_maps=data.get('group_fee_maps'),
@@ -1269,6 +1291,7 @@ def run_group_test():
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
             use_closetoday=use_closetoday,
+            initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
             derived_groups=data.get('derived_groups'),
             group_fee_maps=data.get('group_fee_maps'),
@@ -1726,6 +1749,7 @@ def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> 
     # 解析费率
     fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(first, getattr(tester, 'products', None))
     rebalance_mode = str(first.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
+    initial_capital = _parse_initial_capital(first.get('initial_capital'))
 
     time_range = None
     if start_date and end_date:
@@ -1759,6 +1783,7 @@ def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> 
             plot_flag=False, save_plot=False, plot_show=False,
             fee=fee_uniform, fee_map=fee_map,
             use_closetoday=use_closetoday,
+            initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
             derived_groups=all_derived if all_derived else None,
         )

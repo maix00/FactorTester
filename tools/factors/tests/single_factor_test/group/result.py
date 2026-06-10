@@ -40,6 +40,7 @@ class GroupRunResult:
     margin_occupied_np: np.ndarray | None = None  # (T, M) float — 每期保证金占用
     total_equity_np: np.ndarray | None = None  # (T, M) float — 每期末总权益
     cash_np: np.ndarray | None = None  # (T, M) float — 每期末可用现金
+    initial_capital: float | None = None
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:

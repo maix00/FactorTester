@@ -4,26 +4,44 @@
     <!-- ═══════════════════════════════════════════════════════════════════════
          第1层：时间范围 + 同步时间模块
          ═══════════════════════════════════════════════════════════════════════ -->
-    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
-        <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
-        <div class="group-setting-row" style="margin-bottom:0;">
-            <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
-            <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;flex-direction:column;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
+            <div class="group-setting-row" style="margin-bottom:0;">
+                <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
+                <input type="number" id="group_start_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="group_start_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="group_start_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            </div>
+            <div class="group-setting-row" style="margin-bottom:0;">
+                <label style="margin-bottom:0;white-space:nowrap;">终止：</label>
+                <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+                <span style="color:#999;">-</span>
+                <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+            </div>
+            <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="white-space:nowrap;">同步时间模块</button>
+            <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
         </div>
-        <div class="group-setting-row" style="margin-bottom:0;">
-            <label style="margin-bottom:0;white-space:nowrap;">终止：</label>
-            <input type="number" id="group_end_year" placeholder="年" style="width:65px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_end_month" placeholder="月" min="1" max="12" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
-            <span style="color:#999;">-</span>
-            <input type="number" id="group_end_day" placeholder="日" min="1" max="31" style="width:50px;text-align:center;padding:6px;border:1px solid #ddd;border-radius:4px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <span style="font-weight:600;font-size:13px;color:#1f2937;">💵 初始金额</span>
+            <div class="group-setting-row" style="margin-bottom:0;">
+                <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
+                <input
+                    type="number"
+                    id="group_initial_capital"
+                    placeholder="100000"
+                    min="0"
+                    step="1000"
+                    value="100000"
+                    style="width:140px;text-align:right;padding:6px;border:1px solid #ddd;border-radius:4px;"
+                >
+            </div>
+            <span style="font-size:11px;color:#888;">用于交易簿回测的开仓资金；图表仍显示归一化净值</span>
         </div>
-        <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="white-space:nowrap;">同步时间模块</button>
-        <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
     </div>
     <!-- ═══════════════════════════════════════════════════════════════════════
          第2层：可折叠标题行 + 主 Tab + 子面板区
@@ -996,6 +1014,7 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/index.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/dates.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
 <!-- Datamodel layer — unified in core/group-settings.js -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
 <!-- Panel layer — UI components by category -->

@@ -153,7 +153,7 @@
                     },
                 },
             },
-            title: { text: '分组累计收益（初始净值 = 1）' },
+            title: { text: '分组累计净值（归一化）' },
             legend: {
                 enabled: true,
                 align: 'center',

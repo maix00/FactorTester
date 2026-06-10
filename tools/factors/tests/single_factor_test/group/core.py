@@ -443,6 +443,7 @@ def simulate_group_trading_book(
     is_margin_traded_vec: np.ndarray,
     margin_modes: np.ndarray | list[str],
     rebalance_modes: np.ndarray | list[str],
+    initial_capital: float = 100000.0,
 ) -> dict:
     """Simulate grouped trading with quantities, fees, cash, and margin accounting."""
     T, M, P = membership_np.shape
@@ -489,7 +490,10 @@ def simulate_group_trading_book(
     total_equity_np = np.zeros((T, M), dtype=float)
     cash_np = np.zeros((T, M), dtype=float)
 
-    equity = np.ones(M, dtype=float)
+    if not np.isfinite(initial_capital) or initial_capital <= 0:
+        raise ValueError(f"initial_capital must be positive, got {initial_capital!r}")
+
+    equity = np.full(M, float(initial_capital), dtype=float)
     quantities = np.zeros((M, P), dtype=float)
 
     def _round_price(raw_price: np.ndarray) -> np.ndarray:
@@ -653,6 +657,7 @@ def simulate_groups(
     margin_ratio_mat: np.ndarray | None = None,
     is_margin_traded_vec: np.ndarray | None = None,
     margin_modes: np.ndarray | list[str] | None = None,
+    initial_capital: float = 100000.0,
 ) -> dict:
     """Matrix simulation of group returns over T periods for n_groups groups.
 
@@ -731,6 +736,7 @@ def simulate_groups(
                 np.full(M, rebalance_mode, dtype=object)
                 if rebalance_modes is None else np.asarray(rebalance_modes, dtype=object)
             ),
+            initial_capital=initial_capital,
         )
 
     rebalance_modes_arr = None
@@ -1371,6 +1377,7 @@ def test_by_group_single_factor(
     derived_groups: Optional[List[dict]] = None,
     group_fee_maps: Optional[dict[int, dict]] = None,
     group_variants: Optional[dict[int, list[dict]]] = None,
+    initial_capital: float = 100000.0,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
@@ -2086,6 +2093,7 @@ def test_by_group_single_factor(
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=variant_liquidity_modes if variant_liquidity_modes else None,
         liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
+        initial_capital=initial_capital,
     )
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']
@@ -2195,6 +2203,7 @@ def test_by_group_single_factor(
         margin_occupied_np=sim_result.get('margin_occupied_np'),
         total_equity_np=sim_result.get('total_equity_np'),
         cash_np=sim_result.get('cash_np'),
+        initial_capital=float(initial_capital),
     )
     if r is not None:
         r.group_result = group_result
@@ -2298,6 +2307,7 @@ def test_by_group(
             fee=fee,
             fee_map=fee_map,
             use_closetoday=kwargs.pop('use_closetoday', False),
+            initial_capital=kwargs.pop('initial_capital', 100000.0),
             rebalance_mode=rebalance_mode,
             derived_groups=kwargs.pop('derived_groups', None),
             group_fee_maps=kwargs.pop('group_fee_maps', None),

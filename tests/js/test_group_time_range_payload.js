@@ -5,6 +5,7 @@ load('panels/list/selection-state.js');
 load('core/local-settings/index.js');
 load('core/dates.js');
 load('core/local-settings/dates.js');
+load('core/local-settings/initial-capital.js');
 load('core/group-settings.js');
 registerConfigFields(GT);
 load('core/prerun-collect.js');
@@ -15,6 +16,7 @@ document.registerElement('group_start_day').value = '03';
 document.registerElement('group_end_year').value = '2026';
 document.registerElement('group_end_month').value = '02';
 document.registerElement('group_end_day').value = '31';
+document.registerElement('group_initial_capital').value = '150000';
 
 assert.deepStrictEqual(GT.core.dates.readGroupTimeRangeInput(), {
   startDate: '2026-02-03',
@@ -40,6 +42,7 @@ GT.groupSettings.groups.add({
   assert.ifError(result.error);
   assert.strictEqual(result.payload.start_date, '2026-02-03');
   assert.strictEqual(result.payload.end_date, '2026-02-28');
+  assert.strictEqual(result.payload.initial_capital, 150000);
   assert.strictEqual(result.payload.fee, 0.0001);
   assert.strictEqual(result.payload.rebalance_mode, 'recycle');
   console.log('PASS: group run payload uses local-settings dates and group config fields');

@@ -238,6 +238,33 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
     np.testing.assert_allclose(result_too_expensive["position_quantities_np"][0, 0, 0], 0.0)
 
 
+def test_trading_book_initial_capital_changes_affordability():
+    base_kwargs = dict(
+        membership_np=np.ones((1, 1, 1), dtype=bool),
+        returns_np=np.array([[0.10]], dtype=float),
+        price_np=np.array([[100.0]], dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.zeros((1, 1), dtype=float),
+        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        point_value_vec=np.array([10.0]),
+        min_tick_vec=np.array([1.0]),
+        min_trade_quantity_vec=np.array([1.0]),
+        margin_ratio_mat=np.ones((1, 1), dtype=float),
+        is_margin_traded_vec=np.array([False]),
+        margin_modes=np.array(["cash"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+    )
+
+    result_small = simulate_groups(initial_capital=1.0, **base_kwargs)
+    result_large = simulate_groups(initial_capital=100000.0, **base_kwargs)
+
+    np.testing.assert_allclose(result_small["position_quantities_np"][0, 0, 0], 0.0)
+    np.testing.assert_allclose(result_small["net_returns_np"][0, 0], 0.0)
+    np.testing.assert_allclose(result_large["position_quantities_np"][0, 0, 0], 100.0)
+    np.testing.assert_allclose(result_large["gross_returns_np"][0, 0], 0.10)
+
+
 def test_simulate_each_period_percent_liquidity_caps_execution_only():
     """Percent liquidity caps execution after the normal equal-weight target."""
     T, N, P = 1, 1, 2
