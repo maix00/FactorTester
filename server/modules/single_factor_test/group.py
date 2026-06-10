@@ -193,59 +193,26 @@ def _normalize_group_names(group_names) -> dict[int, str]:
     return normalized
 
 
-def _parse_group_variants(group_names) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
-    """Parse group_names for variant support.
-
-    Accepts:
-        {0: "A1", 1: "A2"}               → regular names, no variants
-        {0: ["A1", "A1a"], 1: "A2"}     → group 0 has 2 variants (same group, different fees)
-
-    Returns:
-        (n_groups_name: dict[int, str], group_variants: dict[int, list[dict]] | None)
-        - n_groups_name: one-to-one mapping (group_index → display_name).
-          For variants, uses the first name as the group-level name.
-        - group_variants: None if no variants detected.
-          Otherwise, {group_index: [{name, fee_map}, ...]} where each variant has its own
-          fee_map (populated later by one simulation entry serializer).
-    """
+def _parse_group_names_payload(group_names) -> dict[int, str]:
+    """Parse frontend group names into a plain group-index -> display-name mapping."""
     if not isinstance(group_names, dict):
-        return {}, None
+        return {}
     n_groups_name: dict[int, str] = {}
-    group_variants: dict[int, list[dict]] = {}
-    has_variants = False
     for key, value in group_names.items():
         try:
             g = int(key)
         except (TypeError, ValueError):
             continue
-        if isinstance(value, list):
-            has_variants = True
-            # Each element is either a str (name only) or a dict {name, fee_map}
-            var_list: list[dict] = []
-            for vi, item in enumerate(value):
-                if isinstance(item, str):
-                    var_list.append({'name': str(item), 'fee_map': None})
-                elif isinstance(item, dict):
-                    display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}_var_{vi}'
-                    var_list.append({
-                        'name': str(display_name),
-                        'key': str(display_name),
-                        'fee_map': item.get('fee_map') or None,
-                        'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
-                        'fee_rate': item.get('fee_rate', item.get('feeRate')),
-                        'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
-                        'rebalance_mode': item.get('rebalance_mode') or item.get('rebalanceMode') or None,
-                        'liquidity_mode': item.get('liquidity_mode') or item.get('liquidityMode') or None,
-                        'liquidity_percent': item.get('liquidity_percent', item.get('liquidityPercent')),
-                    })
-            group_variants[g] = var_list
-            # Use first variant's name as group-level display name
-            n_groups_name[g] = var_list[0]['name'] if var_list else f'group_{g}'
+        if isinstance(value, list) and value:
+            first = value[0]
+            if isinstance(first, dict):
+                display_name = first.get('key') or first.get('shortAlias') or first.get('name') or f'group_{g}'
+                n_groups_name[g] = str(display_name)
+            else:
+                n_groups_name[g] = str(first)
         else:
             n_groups_name[g] = str(value)
-    if has_variants:
-        return n_groups_name, group_variants
-    return n_groups_name, None
+    return n_groups_name
 
 
 def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
@@ -692,7 +659,7 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
     if isinstance(groups, list) and groups:
         n_groups_name, _ = _parse_groups_payload(groups)
     else:
-        n_groups_name, _ = _parse_group_variants(group_names)
+        n_groups_name = _parse_group_names_payload(group_names)
     if not n_groups_name:
         n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
     entry_derived_groups = payload_entry.get('derived_groups')

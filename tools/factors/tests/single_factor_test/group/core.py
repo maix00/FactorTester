@@ -853,10 +853,7 @@ def _simulate_group_from_preloaded(
     valid_cols: list,
     index_list: list,
     n_names: dict[int, str],
-    derived_groups: Optional[List[dict]],
     derived_info: list[dict],
-    group_fee_maps: Optional[dict[int, dict]],
-    group_variants: Optional[dict[int, list[dict]]],
     use_closetoday: bool,
     rebalance_mode: str,
     initial_capital: float,
@@ -907,7 +904,6 @@ def _simulate_group_from_preloaded(
         liquidity_percents_list[g] = _liquidity_percent_from_spec(di)
         margin_modes_list[g] = str(di.get('margin_mode') or di.get('marginMode') or "margin")
 
-    group_maps = group_fee_maps or {}
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
     _group_progress(f"group fee matrix start factor={factor.alias} groups={group_count} products={P}")
     open_fee_mat = np.tile(open_fee_vec, (group_count, 1))
@@ -917,219 +913,30 @@ def _simulate_group_from_preloaded(
     close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (group_count, 1))
     close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (group_count, 1))
 
-    for g in range(group_count):
-        gmap = group_maps.get(g)
-        if gmap and isinstance(gmap, dict):
-            for raw_code, prod_fee in gmap.items():
-                if not isinstance(prod_fee, dict):
-                    continue
-                positions = positions_by_variety_code_lower.get(str(raw_code).lower(), [])
-                if not positions:
-                    continue
-                if 'open_rate' in prod_fee and prod_fee['open_rate'] is not None:
-                    open_fee_mat[g, positions] = float(prod_fee['open_rate'])
-                if 'close_rate' in prod_fee and prod_fee['close_rate'] is not None:
-                    close_fee_mat[g, positions] = float(prod_fee['close_rate'])
-                if 'close_today_rate' in prod_fee and prod_fee['close_today_rate'] is not None:
-                    close_today_fee_mat[g, positions] = float(prod_fee['close_today_rate'])
-                if 'open_fixed' in prod_fee and prod_fee['open_fixed'] is not None:
-                    open_fee_fixed_mat[g, positions] = float(prod_fee['open_fixed'])
-                if 'close_fixed' in prod_fee and prod_fee['close_fixed'] is not None:
-                    close_fee_fixed_mat[g, positions] = float(prod_fee['close_fixed'])
-                if 'close_today_fixed' in prod_fee and prod_fee['close_today_fixed'] is not None:
-                    close_today_fee_fixed_mat[g, positions] = float(prod_fee['close_today_fixed'])
-        if g >= n_base and derived_groups:
-            d_i = g - n_base
-            if d_i < len(derived_groups):
-                dd = derived_groups[d_i]
-                if isinstance(dd, dict):
-                    fo = dd.get('fee_override') or {}
-                    if 'open_rate' in fo and fo['open_rate'] is not None:
-                        open_fee_mat[g, :] = float(fo['open_rate'])
-                    if 'close_rate' in fo and fo['close_rate'] is not None:
-                        close_fee_mat[g, :] = float(fo['close_rate'])
-                    if 'close_today_rate' in fo and fo['close_today_rate'] is not None:
-                        close_today_fee_mat[g, :] = float(fo['close_today_rate'])
-                    if 'open_fixed' in fo and fo['open_fixed'] is not None:
-                        open_fee_fixed_mat[g, :] = float(fo['open_fixed'])
-                    if 'close_fixed' in fo and fo['close_fixed'] is not None:
-                        close_fee_fixed_mat[g, :] = float(fo['close_fixed'])
-                    if 'close_today_fixed' in fo and fo['close_today_fixed'] is not None:
-                        close_today_fee_fixed_mat[g, :] = float(fo['close_today_fixed'])
+    for d_idx, di in enumerate(derived_info):
+        g = n_base + d_idx
+        fee_override = di.get("fee_override") if isinstance(di, dict) else None
+        if not isinstance(fee_override, dict):
+            continue
+        if 'open_rate' in fee_override and fee_override['open_rate'] is not None:
+            open_fee_mat[g, :] = float(fee_override['open_rate'])
+        if 'close_rate' in fee_override and fee_override['close_rate'] is not None:
+            close_fee_mat[g, :] = float(fee_override['close_rate'])
+        if 'close_today_rate' in fee_override and fee_override['close_today_rate'] is not None:
+            close_today_fee_mat[g, :] = float(fee_override['close_today_rate'])
+        if 'open_fixed' in fee_override and fee_override['open_fixed'] is not None:
+            open_fee_fixed_mat[g, :] = float(fee_override['open_fixed'])
+        if 'close_fixed' in fee_override and fee_override['close_fixed'] is not None:
+            close_fee_fixed_mat[g, :] = float(fee_override['close_fixed'])
+        if 'close_today_fixed' in fee_override and fee_override['close_today_fixed'] is not None:
+            close_today_fee_fixed_mat[g, :] = float(fee_override['close_today_fixed'])
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
     effective_close_fee_mat = close_today_fee_mat if use_closetoday else None
-
-    def _apply_fee_strategy(
-        row_open: np.ndarray,
-        row_close: np.ndarray,
-        row_ct: np.ndarray,
-        row_open_fixed: np.ndarray,
-        row_close_fixed: np.ndarray,
-        row_ct_fixed: np.ndarray,
-        spec: dict | None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if not isinstance(spec, dict):
-            return row_open, row_close, row_ct, row_open_fixed, row_close_fixed, row_ct_fixed
-        mode = str(spec.get('fee_mode') or spec.get('feeMode') or '').strip()
-        if mode == 'none':
-            return (
-                np.zeros_like(row_open), np.zeros_like(row_close), np.zeros_like(row_ct),
-                np.zeros_like(row_open_fixed), np.zeros_like(row_close_fixed), np.zeros_like(row_ct_fixed),
-            )
-        if mode == 'uniform':
-            raw_rate = spec.get('fee_rate', spec.get('feeRate'))
-            half = float(raw_rate or 0.0) / 100.0 / 2.0
-            return (
-                np.full_like(row_open, half),
-                np.full_like(row_close, half),
-                np.full_like(row_ct, half),
-                np.zeros_like(row_open_fixed),
-                np.zeros_like(row_close_fixed),
-                np.zeros_like(row_ct_fixed),
-            )
-        if mode in {'per_product', 'custom'}:
-            row_open = open_fee_vec.copy()
-            row_close = close_fee_vec.copy()
-            row_ct = close_today_fee_vec.copy()
-            row_open_fixed = open_fee_fixed_vec.copy()
-            row_close_fixed = close_fee_fixed_vec.copy()
-            row_ct_fixed = close_today_fee_fixed_vec.copy()
-        vfm = spec.get('fee_map') or spec.get('feeMap') or {}
-        if vfm and isinstance(vfm, dict):
-            for raw_code, pf in vfm.items():
-                if not isinstance(pf, dict):
-                    continue
-                positions = positions_by_variety_code_lower.get(str(raw_code).lower(), [])
-                if not positions:
-                    continue
-                if 'open_rate' in pf and pf['open_rate'] is not None:
-                    row_open[positions] = float(pf['open_rate'])
-                if 'close_rate' in pf and pf['close_rate'] is not None:
-                    row_close[positions] = float(pf['close_rate'])
-                if 'close_today_rate' in pf and pf['close_today_rate'] is not None:
-                    row_ct[positions] = float(pf['close_today_rate'])
-                if 'open_fixed' in pf and pf['open_fixed'] is not None:
-                    row_open_fixed[positions] = float(pf['open_fixed'])
-                if 'close_fixed' in pf and pf['close_fixed'] is not None:
-                    row_close_fixed[positions] = float(pf['close_fixed'])
-                if 'close_today_fixed' in pf and pf['close_today_fixed'] is not None:
-                    row_ct_fixed[positions] = float(pf['close_today_fixed'])
-        return row_open, row_close, row_ct, row_open_fixed, row_close_fixed, row_ct_fixed
-
-    def _variant_uses_close_today(spec: dict | None) -> bool:
-        if isinstance(spec, dict):
-            value = spec.get('use_close_today', spec.get('useCloseToday'))
-            if value is not None:
-                return bool(value)
-        return bool(use_closetoday)
-
-    def _expand_variant_groups(
-        variants: dict[int, list[dict]] | None,
-    ) -> tuple[
-        np.ndarray, dict[Any, Any], list[dict], np.ndarray, np.ndarray, np.ndarray,
-        np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None,
-        int, int, list[str], list[str], list[float], list[str],
-    ] | None:
-        _variants = dict(variants or {})
-        if _variants:
-            for d_i, di in enumerate(derived_info):
-                derived_group_idx = n_base + d_i
-                if derived_group_idx not in _variants:
-                    _variants[derived_group_idx] = [{
-                        'name': di.get('name', f'第{di.get("base_group", 0) + 1}组精选'),
-                        'fee_mode': di.get('fee_mode'),
-                        'fee_rate': di.get('fee_rate'),
-                        'fee_map': di.get('fee_map'),
-                        'use_close_today': di.get('use_close_today'),
-                        'rebalance_mode': di.get('rebalance_mode'),
-                        'liquidity_mode': di.get('liquidity_mode'),
-                        'liquidity_percent': di.get('liquidity_percent'),
-                        'margin_mode': di.get('margin_mode'),
-                    }]
-        if not _variants:
-            return None
-        M_total = sum(len(_variants.get(g, [])) for g in range(group_count))
-        if M_total <= 0:
-            raise ValueError("group_variants must contain at least one variant")
-        variant_to_group = np.full(M_total, -1, dtype=int)
-        _new_names = {}
-        _new_derived_info: list[dict] = []
-        _new_open_mat = np.zeros((M_total, P), dtype=float)
-        _new_close_mat = np.zeros((M_total, P), dtype=float)
-        _new_ct_mat = np.zeros((M_total, P), dtype=float)
-        _new_open_fixed_mat = np.zeros((M_total, P), dtype=float)
-        _new_close_fixed_mat = np.zeros((M_total, P), dtype=float)
-        _new_ct_fixed_mat = np.zeros((M_total, P), dtype=float)
-        _new_margin_ratio_mat = np.zeros((M_total, P), dtype=float)
-        _variant_use_close_today = np.zeros(M_total, dtype=bool)
-        vi = 0
-        base_variant_count = 0
-        variant_rebalance_modes: list[str] = []
-        variant_liquidity_modes: list[str] = []
-        variant_liquidity_percents: list[float] = []
-        variant_margin_modes: list[str] = []
-        for g in range(group_count):
-            for vd in (_variants.get(g, []) or []):
-                variant_to_group[vi] = g
-                variant_name = vd.get('name', f"{n_names.get(g, f'group_{g}')}_var{vi}") if isinstance(vd, dict) else str(vd)
-                spec = vd if isinstance(vd, dict) else {'name': variant_name}
-                row_open = open_fee_mat[g].copy()
-                row_close = close_fee_mat[g].copy()
-                row_ct = close_today_fee_mat[g].copy()
-                row_open_fixed = open_fee_fixed_mat[g].copy()
-                row_close_fixed = close_fee_fixed_mat[g].copy()
-                row_ct_fixed = close_today_fee_fixed_mat[g].copy()
-                row_open, row_close, row_ct, row_open_fixed, row_close_fixed, row_ct_fixed = _apply_fee_strategy(
-                    row_open, row_close, row_ct, row_open_fixed, row_close_fixed, row_ct_fixed, spec
-                )
-                _variant_use_close_today[vi] = _variant_uses_close_today(spec)
-                _new_names[vi] = str(variant_name) if variant_name else n_names.get(g, f"group_{g}")
-                variant_rebalance_modes.append(str(spec.get('rebalance_mode') or spec.get('rebalanceMode') or rebalance_mode))
-                variant_liquidity_modes.append(_liquidity_mode_from_spec(spec))
-                variant_liquidity_percents.append(_liquidity_percent_from_spec(spec))
-                variant_margin_modes.append(str(spec.get('margin_mode') or spec.get('marginMode') or margin_modes_list[g]))
-                _new_open_mat[vi] = row_open
-                _new_close_mat[vi] = row_close
-                _new_ct_mat[vi] = row_ct
-                _new_open_fixed_mat[vi] = row_open_fixed
-                _new_close_fixed_mat[vi] = row_close_fixed
-                _new_ct_fixed_mat[vi] = row_ct_fixed
-                _new_margin_ratio_mat[vi] = margin_ratio_mat[g]
-                if g < n_base:
-                    base_variant_count += 1
-                else:
-                    d_i = g - n_base
-                    di = dict(derived_info[d_i]) if d_i < len(derived_info) else {}
-                    di['name'] = _new_names[vi]
-                    di['source_group'] = g
-                    di['source_base_group'] = di.get('base_group')
-                    _new_derived_info.append(di)
-                vi += 1
-        return (
-            variant_to_group, _new_names, _new_derived_info, _new_open_mat, _new_close_mat, _new_ct_mat,
-            _new_open_fixed_mat, _new_close_fixed_mat, _new_ct_fixed_mat, _new_margin_ratio_mat,
-            np.where(_variant_use_close_today[:, np.newaxis], close_today_fee_mat, close_fee_mat),
-            np.where(_variant_use_close_today[:, np.newaxis], close_today_fee_fixed_mat, close_fee_fixed_mat),
-            base_variant_count, M_total, variant_rebalance_modes, variant_liquidity_modes,
-            variant_liquidity_percents, variant_margin_modes,
-        )
-
-    expanded_variants = _expand_variant_groups(group_variants)
-    if expanded_variants is not None:
-        (
-            variant_to_group, n_names, derived_info, open_fee_mat, close_fee_mat, close_today_fee_mat,
-            open_fee_fixed_mat, close_fee_fixed_mat, close_today_fee_fixed_mat, margin_ratio_mat,
-            effective_close_fee_mat, effective_close_fee_fixed_mat, n_base, group_count,
-            variant_rebalance_modes, variant_liquidity_modes, variant_liquidity_percents, variant_margin_modes,
-        ) = expanded_variants
-        membership_np = membership_np[:, variant_to_group, :]
-    else:
-        variant_rebalance_modes = []
-        variant_liquidity_modes = liquidity_modes_list
-        variant_liquidity_percents = liquidity_percents_list
-        variant_margin_modes = margin_modes_list
-        effective_close_fee_fixed_mat = close_today_fee_fixed_mat if use_closetoday else close_fee_fixed_mat
+    variant_liquidity_modes = liquidity_modes_list
+    variant_liquidity_percents = liquidity_percents_list
+    variant_margin_modes = margin_modes_list
+    effective_close_fee_fixed_mat = close_today_fee_fixed_mat if use_closetoday else close_fee_fixed_mat
 
     if any(str(mode) == "percent" for mode in variant_liquidity_modes):
         liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_date, end_date)
@@ -1284,10 +1091,7 @@ def _execute_group_membership(
     fee_map: dict,
     use_closetoday: bool,
     rebalance_mode: str,
-    derived_groups: Optional[List[dict]],
     derived_info: list[dict],
-    group_fee_maps: Optional[dict[int, dict]],
-    group_variants: Optional[dict[int, list[dict]]],
     initial_capital: float,
     multi_session_active: bool,
     trade_valid_cols: Optional[list] = None,
@@ -1382,10 +1186,7 @@ def _execute_group_membership(
         valid_cols=valid_cols,
         index_list=index_list,
         n_names=n_names,
-        derived_groups=derived_groups,
         derived_info=derived_info,
-        group_fee_maps=group_fee_maps,
-        group_variants=group_variants,
         use_closetoday=use_closetoday,
         rebalance_mode=rebalance_mode,
         initial_capital=initial_capital,
@@ -2613,8 +2414,6 @@ def test_by_group_single_factor(
     use_closetoday: bool = False,
     rebalance_mode: str = "buy_and_hold",
     derived_groups: Optional[List[dict]] = None,
-    group_fee_maps: Optional[dict[int, dict]] = None,
-    group_variants: Optional[dict[int, list[dict]]] = None,
     initial_capital: float = 100000000.0,
     calendar_index: Optional[pd.Index] = None,
     shared_inputs: Optional[GroupSharedInputs] = None,
@@ -2623,19 +2422,6 @@ def test_by_group_single_factor(
     trade_membership_np: Optional[np.ndarray] = None,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
-
-    group_fee_maps: dict[group_index, variety_fee_map]
-        每个 group 独立的品种费率覆盖。variety_fee_map 结构与 fee_map 相同：
-        {variety_code: {open: float, close: float, close_today: float, ...}}。
-        只传被修改的单元格即可，未覆盖的品种/字段回退到全局 fee_map。
-
-    group_variants: dict[group_index, list[dict]]
-        混合费率变体。每个 key 对应一个 group，value 是 variant 列表。
-        variant dict: {name: str, fee_map: dict | None}。
-        fee_map 覆盖该 variant 下所有品种的费率（同名 key 替换），
-        或 None 表示继承 group 的费率（即该 group 的 open_fee_mat[g]）。
-        生成 N×M 映射矩阵，M = sum(len(variants)) for all groups，
-        每个 variant 独立计算 wealth、return 等指标。
 
     rebalance_mode:
       - "each_period":   每期等权再平衡 — 所有组成员每期重新平分资金
@@ -2717,10 +2503,7 @@ def test_by_group_single_factor(
         fee_map=fee_map,
         use_closetoday=use_closetoday,
         rebalance_mode=rebalance_mode,
-        derived_groups=derived_groups,
         derived_info=derived_info,
-        group_fee_maps=group_fee_maps,
-        group_variants=group_variants,
         initial_capital=initial_capital,
         multi_session_active=multi_session_active,
         trade_valid_cols=trade_valid_cols,
