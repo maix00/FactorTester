@@ -8,7 +8,7 @@ Core Blueprint — 应用入口和页面路由。
   - 工具类源码页 AST 解析 + 折叠渲染
 """
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, redirect, render_template, request
 
 core_bp = Blueprint('core', __name__)
 
@@ -26,8 +26,8 @@ def products():
 
 @core_bp.route('/local-data', methods=['GET'])
 def local_data():
-    """Local SQL data browser."""
-    return render_template('local_data.html')
+    """Local SQL data browser entry; redirects to sqlite-web."""
+    return redirect('/sqlite-web/')
 
 
 @core_bp.route('/api/local-data/stores', methods=['GET'])

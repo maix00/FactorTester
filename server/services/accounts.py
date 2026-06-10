@@ -69,6 +69,11 @@ def save_accounts(accounts: list) -> None:
     os.makedirs(os.path.dirname(ACCOUNTS_FILE), exist_ok=True)
     with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as file:
         json.dump(accounts, file, ensure_ascii=False, indent=2)
+    try:
+        from server.services.user_sqlite import sync_user_sqlite_store
+        sync_user_sqlite_store()
+    except Exception:
+        pass
 
 
 def load_organizations() -> list:
@@ -87,6 +92,11 @@ def save_organizations(organizations: list) -> None:
     os.makedirs(os.path.dirname(ORGANIZATIONS_FILE), exist_ok=True)
     with open(ORGANIZATIONS_FILE, 'w', encoding='utf-8') as file:
         json.dump(organizations, file, ensure_ascii=False, indent=2)
+    try:
+        from server.services.user_sqlite import sync_user_sqlite_store
+        sync_user_sqlite_store()
+    except Exception:
+        pass
 
 
 def load_levels() -> list:
@@ -105,6 +115,11 @@ def save_levels(levels: list) -> None:
     os.makedirs(os.path.dirname(LEVELS_FILE), exist_ok=True)
     with open(LEVELS_FILE, 'w', encoding='utf-8') as file:
         json.dump(levels, file, ensure_ascii=False, indent=2)
+    try:
+        from server.services.user_sqlite import sync_user_sqlite_store
+        sync_user_sqlite_store()
+    except Exception:
+        pass
 
 
 def slugify_org_id(name: str) -> str:
