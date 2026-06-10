@@ -15,6 +15,7 @@ from flask import Response, jsonify, request
 from tools.factors import Factor
 from tools.factors.FactorFamily import FactorFamily, _active_tester
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests import NextReturns
 from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 
 from . import sft_bp
@@ -203,7 +204,7 @@ def _compute_ic_groups(
     # ── node-level 进度统计 ──
     if emitter is not None:
         total_nodes = 0
-        from tools.factors import CrossSectionIC as _CSI
+        from tools.factors.tests import CrossSectionIC as _CSI
         for key, _ in param_items:
             fe_param = param_payloads[key].get('FE')
             if fe_param is not None and hasattr(fe_param, '_expr'):
@@ -506,6 +507,7 @@ def _prepare_ic_compute(
 
     shift = 0 if returns_col.value.name.startswith('OPEN') else 1
 
+    next_returns_family = NextReturns()
     for factor in factors:
         effective_freq = factor.freq
         if effective_freq is None:
@@ -519,10 +521,16 @@ def _prepare_ic_compute(
                 lag_i,
             )
             if key not in ic_param_map:
+                returns_factor = next_returns_family.get_factor(
+                    SC=returns_col.value,
+                    RF=effective_freq.value,
+                    S=shift,
+                    **{'$F': effective_freq.value, '$Rev': '0'},
+                )
                 ic_param_map[key] = []
                 param_payloads[key] = {
-                    'FE': factor, 'SC': returns_col.value,
-                    'RF': effective_freq.value, 'S': shift,
+                    'FE': factor,
+                    'RE': returns_factor,
                     'Lag': lag_i, '$F': effective_freq.value,
                 }
             ic_param_map[key].append(factor)

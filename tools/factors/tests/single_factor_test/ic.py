@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Tuple, cast
 import numpy as np
 import pandas as pd
 
-from tools.factors import CrossSectionIC, Factor
+from tools.factors import Factor
+from tools.factors.tests import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
 from tools.data.DataFreq import DataFreq
 
