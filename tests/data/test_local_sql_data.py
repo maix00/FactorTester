@@ -9,7 +9,7 @@ def test_local_sql_registry_exposes_openctp_store(monkeypatch, tmp_path):
     monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "openctp" / "openctp.sqlite")
 
     stores = local_sql_data.list_stores()
+    openctp_store = next(store for store in stores if store["key"] == "openctp")
 
-    assert stores[0]["key"] == "openctp"
-    assert stores[0]["label"] == "OpenCTP 字段数据"
-    assert stores[0]["database"].endswith("openctp.sqlite")
+    assert openctp_store["label"] == "OpenCTP 字段数据"
+    assert openctp_store["database"].endswith("openctp.sqlite")

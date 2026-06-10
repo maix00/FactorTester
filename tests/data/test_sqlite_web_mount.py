@@ -4,6 +4,7 @@ import json
 
 from server import create_app
 from server.services import accounts as account_store
+from server.services import data_source_sqlite
 from server.services import sqlite_web_mount
 from server.services import user_sqlite
 from sources.OpenCTP import client as openctp_client
@@ -26,6 +27,7 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
     monkeypatch.setattr(account_store, 'LEVELS_FILE', str(users_dir / 'levels.json'))
     monkeypatch.setattr(openctp_client, 'CACHE_DIR', tmp_path / 'cache' / 'openctp')
     monkeypatch.setattr(openctp_client, 'CACHE_DB_PATH', openctp_client.CACHE_DIR / 'openctp.sqlite')
+    monkeypatch.setattr(data_source_sqlite, 'PREVIEW_PRODUCTS_PER_SOURCE', 0)
     monkeypatch.setattr(user_sqlite, 'USER_SQLITE_DIR', users_db.parent)
     monkeypatch.setattr(user_sqlite, 'USER_SQLITE_PATH', users_db)
     monkeypatch.setattr(sqlite_web_mount, '_mounted_app', None)
@@ -60,7 +62,7 @@ def test_users_sqlite_mirror_is_loaded_by_sqlite_web(monkeypatch, tmp_path):
 
     assert openctp_db.exists()
     assert users_db.exists()
-    assert set(datasets.keys()) == {'openctp.sqlite', 'users.sqlite'}
+    assert set(datasets.keys()) == {'datasources.sqlite', 'openctp.sqlite', 'users.sqlite'}
 
     client = app.test_client()
     resp = client.get('/sqlite-web/')

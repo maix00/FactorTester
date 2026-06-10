@@ -30,7 +30,7 @@ def _ensure_openctp_store() -> str:
     return ensure_sqlite_store()
 
 
-STORES: dict[str, SQLiteStore] = {
+_STORE_REGISTRY: dict[str, SQLiteStore] = {
     "openctp": SQLiteStore(
         key="openctp",
         label="OpenCTP 字段数据",
@@ -38,6 +38,18 @@ STORES: dict[str, SQLiteStore] = {
         ensure=_ensure_openctp_store,
     ),
 }
+
+
+def register_store(store: SQLiteStore) -> SQLiteStore:
+    _STORE_REGISTRY[store.key] = store
+    return store
+
+
+def iter_stores() -> list[SQLiteStore]:
+    return [store for _, store in sorted(_STORE_REGISTRY.items(), key=lambda item: item[0])]
+
+
+STORES = _STORE_REGISTRY
 
 
 def list_stores() -> list[dict[str, Any]]:
@@ -48,12 +60,12 @@ def list_stores() -> list[dict[str, Any]]:
             "database": store.path(),
             "tables": len(list_tables(store.key)),
         }
-        for store in STORES.values()
+        for store in iter_stores()
     ]
 
 
 def _store_or_raise(store_key: str) -> SQLiteStore:
-    store = STORES.get(store_key)
+    store = _STORE_REGISTRY.get(store_key)
     if store is None:
         raise ValueError(f"Unknown SQL store: {store_key}")
     return store

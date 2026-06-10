@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.data_dir import DATA_DIR
+from server.services.local_sql_data import SQLiteStore, register_store
 
 
 USER_SQLITE_DIR = Path(DATA_DIR) / "cache" / "sqlite-web"
@@ -180,3 +181,13 @@ def sync_user_sqlite_store() -> str:
 def ensure_user_sqlite_store() -> str:
     """Ensure the SQLite mirror exists and is up-to-date."""
     return sync_user_sqlite_store()
+
+
+register_store(
+    SQLiteStore(
+        key="users",
+        label="用户数据镜像",
+        path_getter=lambda: str(USER_SQLITE_PATH),
+        ensure=ensure_user_sqlite_store,
+    )
+)

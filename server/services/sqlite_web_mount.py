@@ -4,6 +4,8 @@ from __future__ import annotations
 from flask import redirect, session
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
+from server.services.local_sql_data import iter_stores
+
 
 _mounted_app = None
 
@@ -16,12 +18,11 @@ def build_sqlite_web_app(secret_key):
 
     from sqlite_web.sqlite_web import app as sqlite_web_app
     from sqlite_web.sqlite_web import initialize_app
-    from sources.OpenCTP.client import ensure_sqlite_store
-    from server.services.user_sqlite import ensure_user_sqlite_store
+    import server.services.data_source_sqlite  # noqa: F401
+    import server.services.user_sqlite  # noqa: F401
 
-    openctp_db = ensure_sqlite_store()
-    user_db = ensure_user_sqlite_store()
-    initialize_app([openctp_db, user_db], read_only=True)
+    db_paths = [store.path() for store in iter_stores()]
+    initialize_app(db_paths, read_only=True)
     sqlite_web_app.secret_key = secret_key
 
     @sqlite_web_app.before_request
