@@ -1,7 +1,11 @@
 import pandas as pd
 import pytest
 
-from sources.LocalCNFutures.GenerateMain import preprocess_minute_data
+from sources.LocalCNFutures.GenerateMain import (
+    BACKWARD_BASE_DATE_COL,
+    generate_main_contract_series,
+    preprocess_minute_data,
+)
 
 
 def _minute_frame(uid: str, start: str) -> pd.DataFrame:
@@ -45,3 +49,107 @@ def test_preprocess_minute_data_appends_changed_raw_files(tmp_path):
     updated = pd.read_parquet(out_path)
     assert len(updated) == 4
     assert pd.to_datetime(updated["trade_time"]).max() == pd.Timestamp("2026-01-06 09:02")
+
+
+def _mapping(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        rows,
+        columns=["S_INFO_WINDCODE", "FS_MAPPING_WINDCODE", "STARTDATE", "ENDDATE"],
+    )
+
+
+def _uid(contract: str) -> str:
+    month = contract.removeprefix("A").removesuffix(".DCE")
+    return f"DCE|F|A|{month}"
+
+
+def _one_bar(uid: str, trading_day: str, close: float) -> dict:
+    ts = pd.Timestamp(f"{trading_day} 15:00:00")
+    return {
+        "unique_instrument_id": uid,
+        "contract_uid": uid,
+        "trade_timestamp": int(ts.timestamp() * 1000),
+        "trade_time": ts,
+        "trading_day": ts.normalize(),
+        "close_price": close,
+    }
+
+
+def test_generate_main_incremental_applies_last_forward_adjustment(tmp_path):
+    raw_dir = tmp_path / "raw_minute"
+    product_dir = tmp_path / "product_minute"
+    main_mink_dir = tmp_path / "main_mink"
+    main_dayk_dir = tmp_path / "main_dayk"
+    raw_dir.mkdir()
+
+    mapping_initial_path = tmp_path / "wind_mapping_initial.parquet"
+    mapping_incremental_path = tmp_path / "wind_mapping_incremental.parquet"
+    dayk_path = tmp_path / "dayk.parquet"
+    roller_path = tmp_path / "roller_info.parquet"
+
+    _mapping([
+        ("A.DCE", "A2401.DCE", "2024-01-01", "2024-01-02"),
+        ("A.DCE", "A2405.DCE", "2024-01-03", "2024-01-04"),
+    ]).to_parquet(mapping_initial_path, index=False)
+    _mapping([
+        ("A.DCE", "A2401.DCE", "2024-01-01", "2024-01-02"),
+        ("A.DCE", "A2405.DCE", "2024-01-03", "2024-01-04"),
+        ("A.DCE", "A2409.DCE", "2024-01-05", "2024-01-06"),
+    ]).to_parquet(mapping_incremental_path, index=False)
+
+    rows = [
+        _one_bar(_uid("A2401.DCE"), "2024-01-01", 95.0),
+        _one_bar(_uid("A2401.DCE"), "2024-01-02", 100.0),
+        _one_bar(_uid("A2405.DCE"), "2024-01-02", 110.0),
+        _one_bar(_uid("A2405.DCE"), "2024-01-03", 115.0),
+        _one_bar(_uid("A2405.DCE"), "2024-01-04", 120.0),
+        _one_bar(_uid("A2409.DCE"), "2024-01-04", 90.0),
+        _one_bar(_uid("A2409.DCE"), "2024-01-05", 91.0),
+        _one_bar(_uid("A2409.DCE"), "2024-01-06", 92.0),
+    ]
+    raw_df = pd.DataFrame(rows)
+    raw_df.drop(columns=["contract_uid"]).to_parquet(raw_dir / "minute.parquet", index=False)
+    raw_df.drop(columns=["contract_uid"]).to_parquet(dayk_path, index=False)
+
+    common_kwargs = dict(
+        dayk_path=str(dayk_path),
+        minute_data_dir=str(raw_dir),
+        minute_data_preprocessed_dir=str(product_dir),
+        main_mink_folder_path=str(main_mink_dir) + "/",
+        main_dayk_folder_path=str(main_dayk_dir) + "/",
+        roller_info_path=str(roller_path),
+    )
+
+    generate_main_contract_series(
+        contract_start_end_path=str(mapping_initial_path),
+        rebuild_minute_product=True,
+        rebuild_roller_info=True,
+        **common_kwargs,
+    )
+    first_mink = pd.read_parquet(main_mink_dir / "A.DCE.parquet")
+    assert first_mink.groupby("contract_uid")["adjustment_mul"].first().to_dict() == {
+        _uid("A2401.DCE"): pytest.approx(100.0 / 110.0),
+        _uid("A2405.DCE"): pytest.approx(1.0),
+    }
+
+    info = generate_main_contract_series(
+        contract_start_end_path=str(mapping_incremental_path),
+        rebuild_minute_product=False,
+        rebuild_roller_info=False,
+        **common_kwargs,
+    )
+
+    assert BACKWARD_BASE_DATE_COL in info.columns
+    assert "FORWARD_BASE_DATE" not in info.columns
+
+    factors = info.groupby("CONTRACT")["FORWARD_FACTOR"].first().to_dict()
+    assert factors["A2401.DCE"] == pytest.approx((100.0 / 110.0) * (120.0 / 90.0))
+    assert factors["A2405.DCE"] == pytest.approx(120.0 / 90.0)
+    assert factors["A2409.DCE"] == pytest.approx(1.0)
+
+    updated_mink = pd.read_parquet(main_mink_dir / "A.DCE.parquet")
+    assert updated_mink.groupby("contract_uid")["adjustment_mul"].first().to_dict() == {
+        _uid("A2401.DCE"): pytest.approx((100.0 / 110.0) * (120.0 / 90.0)),
+        _uid("A2405.DCE"): pytest.approx(120.0 / 90.0),
+        _uid("A2409.DCE"): pytest.approx(1.0),
+    }
