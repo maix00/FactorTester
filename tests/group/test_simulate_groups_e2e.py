@@ -148,6 +148,7 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["margin", "margin"], dtype=object),
         rebalance_modes=np.array(["each_period", "each_period"], dtype=object),
+        initial_capital=1.0,
     )
 
     np.testing.assert_allclose(result["position_quantities_np"][0, :, 0], [10.0, 10.0])
@@ -169,6 +170,7 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         is_margin_traded_vec=np.array([True]),
         margin_modes=np.array(["margin"], dtype=object),
         rebalance_modes=np.array(["each_period"], dtype=object),
+        initial_capital=1.0,
     )
     np.testing.assert_allclose(result_margin["margin_occupied_np"][0, 0], 0.11)
 
@@ -189,6 +191,7 @@ def test_trading_book_charges_fixed_fee_per_contract_without_rewriting_rate():
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
         rebalance_modes=np.array(["each_period"], dtype=object),
+        initial_capital=1.0,
     )
 
     # 10 shares would require 1.0 notional + 0.01 fixed fee, so the cash book scales to 9.
@@ -214,6 +217,7 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
         rebalance_modes=np.array(["each_period"], dtype=object),
+        initial_capital=1.0,
     )
 
     np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 100.0)
@@ -233,6 +237,7 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         is_margin_traded_vec=np.array([False]),
         margin_modes=np.array(["cash"], dtype=object),
         rebalance_modes=np.array(["each_period"], dtype=object),
+        initial_capital=1.0,
     )
 
     np.testing.assert_allclose(result_too_expensive["position_quantities_np"][0, 0, 0], 0.0)

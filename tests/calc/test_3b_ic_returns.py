@@ -440,6 +440,7 @@ def main(argv: list[str] | None = None) -> None:
 
 def test_backend_ic_re_workbook_for_a_product():
     out_path = process_product('A', rf_minutes=DEFAULT_RF_MINUTES)
+    expected_rf = _read_test3a_rf(TEST_3A_DIR / 'A.xlsx') or DEFAULT_RF_MINUTES
     wb = load_workbook(out_path, read_only=True, data_only=False)
     try:
         assert wb.sheetnames == [TEST_3A_RETURNS_SHEET, BACKEND_RE_SHEET, COMPARE_SHEET]
@@ -448,12 +449,14 @@ def test_backend_ic_re_workbook_for_a_product():
 
         assert backend_ws.cell(2, 2).value == 'backend_re'
         assert compare_ws.cell(2, 1).value == 'RF_MINUTES'
-        assert compare_ws.cell(2, 2).value == DEFAULT_RF_MINUTES
-        assert compare_ws.cell(COMPARE_START_ROW - 1, 6).value == 'entry_trade_time'
-        assert compare_ws.cell(COMPARE_START_ROW - 1, 8).value == 'exit_row'
-        assert compare_ws.cell(COMPARE_START_ROW, 5).value == f'=IF(D{COMPARE_START_ROW}="","",D{COMPARE_START_ROW}+1)'
-        assert f'D{COMPARE_START_ROW}+$B$2+1' in str(compare_ws.cell(COMPARE_START_ROW, 8).value)
-        assert f'INDEX(BACKEND_RE!$C:$C,H{COMPARE_START_ROW})/G{COMPARE_START_ROW}-1' in str(compare_ws.cell(COMPARE_START_ROW, 10).value)
+        assert compare_ws.cell(2, 2).value == expected_rf
+        assert compare_ws.cell(COMPARE_START_ROW - 1, 1).value == '_backend_row'
+        assert compare_ws.cell(COMPARE_START_ROW - 1, 2).value == 'signal_trade_time'
+        assert compare_ws.cell(COMPARE_START_ROW - 1, 6).value == 'status'
+        assert compare_ws.cell(COMPARE_START_ROW, 1).value == f'=ROW()-{COMPARE_START_ROW - BACKEND_DATA_START_ROW}'
+        assert f'INDEX(BACKEND_RE!A:A,A{COMPARE_START_ROW})' in str(compare_ws.cell(COMPARE_START_ROW, 2).value)
+        assert f'INDEX(TEST_3A_RETURNS!B:B,MATCH(TEXT(B{COMPARE_START_ROW},"yyyy-mm-dd hh:mm:ss"),TEST_3A_RETURNS!$C:$C,0))' in str(compare_ws.cell(COMPARE_START_ROW, 4).value)
+        assert f'IF(E{COMPARE_START_ROW}<=$B$3,"PASS","FAIL")' in str(compare_ws.cell(COMPARE_START_ROW, 6).value)
     finally:
         wb.close()
 
