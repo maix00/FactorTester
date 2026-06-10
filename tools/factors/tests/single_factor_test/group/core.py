@@ -23,6 +23,10 @@ _TARGET_REBUILD_MAX_ITERATIONS = 8
 _EACH_PERIOD_TARGET_MAX_ITERATIONS = 16
 
 
+def _group_progress(message: str) -> None:
+    print(f"[GroupCore] {message}", flush=True)
+
+
 def infer_periods_per_year(index_like) -> float:
     """Infer strategy periods/year from realised signal timestamps."""
     idx = pd.DatetimeIndex(_extract_signal_index(pd.Index(index_like)))
@@ -267,7 +271,14 @@ def _expand_trade_products(
     trade_pos_by_key: dict[tuple[str, str], int] = {}
     signal_to_trade = np.full((T, P_signal), -1, dtype=int)
 
-    for pi, product in enumerate(signal_products):
+    _group_progress(
+        f"expand trade products start T={T} groups={M} signal_products={P_signal}"
+    )
+    for pi, product in enumerate(tqdm(
+        signal_products,
+        desc="Expand trade products",
+        total=P_signal,
+    )):
         signal_to_trade[:, pi] = _expand_single_trade_product(
             product,
             signal_days,
@@ -280,10 +291,14 @@ def _expand_trade_products(
         return list(signal_products), signal_membership_np.copy()
 
     membership_np = np.zeros((T, M, len(trade_products)), dtype=bool)
-    for t in range(T):
-        mapped_cols = np.where(signal_to_trade[t] >= 0)[0]
-        for pi in mapped_cols:
-            membership_np[t, :, signal_to_trade[t, pi]] |= signal_membership_np[t, :, pi]
+    for pi in tqdm(range(P_signal), desc="Map trade membership"):
+        mapped = signal_to_trade[:, pi]
+        valid_pos = np.unique(mapped[mapped >= 0])
+        for pos in valid_pos:
+            time_mask = mapped == pos
+            if bool(time_mask.any()):
+                membership_np[time_mask, :, int(pos)] |= signal_membership_np[time_mask, :, pi]
+    _group_progress(f"expand trade products done trade_products={len(trade_products)}")
     return trade_products, membership_np
 
 
@@ -336,7 +351,8 @@ def _build_normalized_liquidity_capacity(
     P = len(products)
     raw = np.zeros((T, P), dtype=float)
 
-    for pi, product in enumerate(products):
+    _group_progress(f"liquidity capacity start T={T} products={P}")
+    for pi, product in enumerate(tqdm(products, desc="Build liquidity capacity", total=P)):
         try:
             dm = getattr(product, freq.name)
             cols = [DataColumn.TURNOVER.name, DataColumn.VOLUME.name, DataColumn.CLOSE_ADJUSTED.name]
@@ -374,13 +390,16 @@ def _build_normalized_liquidity_capacity(
 
     row_sum = raw.sum(axis=1)
     if not np.any(row_sum > 0):
+        _group_progress("liquidity capacity skipped no positive liquidity")
         return None
-    return np.divide(
+    capacity = np.divide(
         raw,
         row_sum[:, np.newaxis],
         out=np.zeros_like(raw, dtype=float),
         where=row_sum[:, np.newaxis] > 0,
     )
+    _group_progress("liquidity capacity done")
+    return capacity
 
 
 def build_target_amounts(
@@ -681,7 +700,8 @@ def simulate_group_trading_book(
         rounded[valid_tick] = np.round(px[valid_tick] / min_ticks[valid_tick]) * min_ticks[valid_tick]
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
 
-    for t in range(T):
+    _group_progress(f"trading book simulation start T={T} groups={M} products={P}")
+    for t in tqdm(range(T), desc="Trading book simulation"):
         price_t = _round_price(prices[t])
         tradable = np.isfinite(price_t) & (price_t > 0)
         contract_value = price_t * point_values
@@ -795,6 +815,7 @@ def simulate_group_trading_book(
         quantities = desired_quantities
         equity = end_equity
 
+    _group_progress("trading book simulation done")
     return {
         'net_returns_np': net_returns_np,
         'gross_returns_np': gross_returns_np,
@@ -975,7 +996,8 @@ def simulate_groups(
     target_amounts_np = np.zeros((T, M, P), dtype=float)
     prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
 
-    for t in range(T):
+    _group_progress(f"group simulation start T={T} groups={M} products={P}")
+    for t in tqdm(range(T), desc="Group simulation"):
         curr_mask_all = membership_np[t]           # (M, P)
         curr_count_all = member_counts[t]           # (M,)
         wealth_before_trade = wealth.copy()
@@ -1200,6 +1222,7 @@ def simulate_groups(
         target_amounts_np[t] = target_amounts
         prev_end_amounts_np[t] = prev_end_amounts
 
+    _group_progress("group simulation done")
     return {
         'net_returns_np': net_returns_np,
         'gross_returns_np': gross_returns_np,
@@ -1785,6 +1808,9 @@ def test_by_group_single_factor(
             f"自动启用多时段品种策略，忽略 rebalance_mode='{rebalance_mode}'。"
         )
 
+    _group_progress(
+        f"group membership start factor={factor.alias} T={T} groups={n_groups} products={P}"
+    )
     for t in tqdm(range(T), desc="Testing by group for factor " + factor.alias):
         row = table_np[t]
         ret_row = signal_returns_np[t]
@@ -1832,6 +1858,7 @@ def test_by_group_single_factor(
             )
 
         membership_np[t] = current_members
+    _group_progress(f"group membership done factor={factor.alias}")
 
     liquidity_capacity_np: np.ndarray | None = None
 
@@ -1844,7 +1871,8 @@ def test_by_group_single_factor(
     if derived_defs:
         display_names = [product_display_name(product)['name'] for product in signal_valid_cols]
         derived_slices: list[np.ndarray] = []
-        for dd in derived_defs:
+        _group_progress(f"derived groups start factor={factor.alias} count={len(derived_defs)}")
+        for dd in tqdm(derived_defs, desc=f"Build derived groups {factor.alias}"):
             if not isinstance(dd, dict):
                 continue
             base_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
@@ -1884,12 +1912,18 @@ def test_by_group_single_factor(
         if derived_slices:
             derived_membership = np.concatenate(derived_slices, axis=1)  # (T, n_derived, P)
             membership_np = np.concatenate([membership_np, derived_membership], axis=1)
+        _group_progress(f"derived groups done factor={factor.alias} built={len(derived_info)}")
 
     n_derived = len(derived_info)
     n_base = n_groups
     n_groups = membership_np.shape[1]  # 现在包含 base + derived
 
+    _group_progress(f"trade product expansion start factor={factor.alias}")
     trade_valid_cols, membership_np = _expand_trade_products(signal_valid_cols, index_list, membership_np)
+    _group_progress(
+        f"trade product expansion done factor={factor.alias} trade_products={len(trade_valid_cols)}"
+    )
+    _group_progress(f"trade returns evaluate start factor={factor.alias}")
     trade_returns_src = _evaluate_trade_returns_for_group(
         tester,
         factor,
@@ -1898,6 +1932,7 @@ def test_by_group_single_factor(
         source_freq,
         effective_return_freq,
     )
+    _group_progress(f"trade returns evaluate done factor={factor.alias}")
     trade_returns_src.index = _extract_signal_index(trade_returns_src.index)
     if start_date is not None:
         _sd = _align_ts_to_index(start_date, trade_returns_src.index)
@@ -1908,6 +1943,7 @@ def test_by_group_single_factor(
     trade_returns_src = trade_returns_src.reindex(index=index_list, columns=trade_valid_cols)
     returns_np = trade_returns_src[trade_valid_cols].to_numpy(dtype=float)
 
+    _group_progress(f"trade prices evaluate start factor={factor.alias}")
     raw_trade_prices = ColumnRef(price_col).evaluate(
         products=trade_valid_cols,
         freq=source_freq,
@@ -1923,6 +1959,7 @@ def test_by_group_single_factor(
         trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index <= _ed])
     trade_price_src = trade_price_src.reindex(index=index_list, columns=trade_valid_cols)
     price_np = trade_price_src[trade_valid_cols].to_numpy(dtype=float)
+    _group_progress(f"trade prices evaluate done factor={factor.alias}")
 
     bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
     returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
@@ -2082,13 +2119,15 @@ def test_by_group_single_factor(
     close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (n_groups, 1))
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (n_groups, 1))
 
-    for g in range(n_groups):
+    _group_progress(f"group fee matrix start factor={factor.alias} groups={n_groups} products={P}")
+    for g in tqdm(range(n_groups), desc=f"Build group fee matrix {factor.alias}"):
         open_fee_mat[g, :] = _resolve_group_fee(g, 'open', open_fee_vec)
         close_fee_mat[g, :] = _resolve_group_fee(g, 'close', close_fee_vec)
         close_today_fee_mat[g, :] = _resolve_group_fee(g, 'close_today', close_today_fee_vec)
         open_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'open_fixed', open_fee_fixed_vec)
         close_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'close_fixed', close_fee_fixed_vec)
         close_today_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'close_today_fixed', close_today_fee_fixed_vec)
+    _group_progress(f"group fee matrix done factor={factor.alias}")
 
     # close_fee_mat 始终=平昨，close_today_fee_mat 始终=平今
     effective_close_fee_mat = close_today_fee_mat if use_closetoday else None
@@ -2285,12 +2324,12 @@ def test_by_group_single_factor(
             end_date,
         )
 
-    products_dict = {
-        g: {index_list[t]: [valid_cols[i]
-                             for i in np.where(membership_np[t, g])[0]]
-            for t in range(T)}
-        for g in range(n_groups)
-    }
+    products_dict = {}
+    for g in tqdm(range(n_groups), desc=f"Build products by group {factor.alias}"):
+        products_dict[g] = {
+            idx_entry: [valid_cols[i] for i in np.where(mask_row)[0]]
+            for idx_entry, mask_row in zip(index_list, membership_np[:, g])
+        }
 
     member_counts = membership_np.sum(axis=2).astype(float)
 
@@ -2307,6 +2346,10 @@ def test_by_group_single_factor(
 
     # ── 逐期矩阵化收益计算（统一引擎：base + derived 一次跑完）──
     data_has_bar = present_np if multi_session_active else None
+    _group_progress(
+        f"simulate groups start factor={factor.alias} T={T} groups={n_groups} "
+        f"products={P} rebalance={rebalance_mode}"
+    )
     sim_result = simulate_groups(
         membership_np=membership_np,
         returns_np=returns_filled,
@@ -2331,6 +2374,7 @@ def test_by_group_single_factor(
         liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
         initial_capital=initial_capital,
     )
+    _group_progress(f"simulate groups done factor={factor.alias}")
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
@@ -2342,7 +2386,12 @@ def test_by_group_single_factor(
     if multi_session_active:
         print(f"[WARN] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
-    returns_dict = {g: {index_list[t]: float(group_returns_np[t, g]) for t in range(T)} for g in range(n_groups)}
+    returns_dict = {}
+    for g in tqdm(range(n_groups), desc=f"Build returns dict {factor.alias}"):
+        returns_dict[g] = {
+            idx_entry: float(value)
+            for idx_entry, value in zip(index_list, group_returns_np[:, g])
+        }
 
     bad = np.isnan(group_returns_np) | np.isinf(group_returns_np) | (group_returns_np <= -1.0)
     cum_rets_filled = np.where(bad, 0.0, group_returns_np)
@@ -2458,7 +2507,7 @@ def test_by_group_single_factor(
             plot_mask &= (signal_times >= _align_ts_to_index(_start_date, signal_times))
         if _end_date is not None:
             plot_mask &= (signal_times <= _align_ts_to_index(_end_date, signal_times))
-        plot_index = [index_list[t] for t in range(T) if plot_mask[t]]
+        plot_index = [idx_entry for idx_entry, keep in zip(index_list, plot_mask) if keep]
         dates = plot_index
         for idx in range(n_groups):
             if plot_n_group_list is not None and idx not in plot_n_group_list:

@@ -1,7 +1,7 @@
 """
 Group test endpoint: /run_group_test /run_multi_horizon_group_test
 """
-import logging, math, traceback
+import logging, math, time, traceback
 from typing import Any, cast
 import numpy as np
 import pandas as pd
@@ -17,6 +17,10 @@ import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_utc_epoch
 
 _log = logging.getLogger(__name__)
+
+
+def _progress(message: str) -> None:
+    print(f"[GroupTest] {message}", flush=True)
 
 
 def _safe_float(v):
@@ -277,22 +281,27 @@ def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_co
     if not legs:
         legs = [{'side': 1.0, 'group': 0, 'cap': 0.5}, {'side': -1.0, 'group': n_groups - 1, 'cap': 0.5}]
 
-    total_cap = sum(leg['cap'] for leg in legs) or 1.0
-    r_ls_list = []
-    ls_cum_list = []
-    for row_idx in range(gross_np.shape[0]):
-        for leg in legs:
-            group = leg['group']
-            gross = leg['side'] * gross_np[row_idx, group]
-            fee = fee_np[row_idx, group]
-            net = (1.0 - fee) * (1.0 + gross) - 1.0
-            net = 0.0 if (np.isnan(net) or np.isinf(net)) else float(net)
-            leg['cap'] *= 1.0 + net
-        new_total = sum(leg['cap'] for leg in legs)
-        r_ls_list.append(new_total / total_cap - 1.0)
-        ls_cum_list.append(new_total)
-        total_cap = new_total
-    return np.array(r_ls_list, dtype=float), np.array(ls_cum_list, dtype=float)
+    initial_caps = np.array([float(leg['cap']) for leg in legs], dtype=float)
+    groups = np.array([int(leg['group']) for leg in legs], dtype=int)
+    sides = np.array([float(leg['side']) for leg in legs], dtype=float)
+
+    leg_gross = gross_np[:, groups] * sides[np.newaxis, :]
+    leg_fee = fee_np[:, groups]
+    leg_net = (1.0 - leg_fee) * (1.0 + leg_gross) - 1.0
+    leg_net = np.where(np.isfinite(leg_net), leg_net, 0.0)
+
+    leg_caps = initial_caps[np.newaxis, :] * np.cumprod(1.0 + leg_net, axis=0)
+    total_caps = leg_caps.sum(axis=1)
+    previous_total_caps = np.concatenate([[initial_caps.sum() or 1.0], total_caps[:-1]])
+    r_ls = np.divide(
+        total_caps,
+        previous_total_caps,
+        out=np.ones_like(total_caps, dtype=float),
+        where=np.abs(previous_total_caps) > 1e-12,
+    ) - 1.0
+    r_ls = np.where(np.isfinite(r_ls), r_ls, 0.0)
+    total_caps = np.where(np.isfinite(total_caps), total_caps, previous_total_caps)
+    return r_ls.astype(float), total_caps.astype(float)
 
 
 def _build_fee_vectors(group_result, fee_map, fee_uniform):
@@ -663,8 +672,14 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
     _gt_token = None
     _saved_products = None
     tester = None
+    started = time.perf_counter()
+    _progress(
+        f"batch start submission={submission_id} factor={factor_alias} "
+        f"n_groups={n_groups} return_freqs={return_freqs or 'single'}"
+    )
     try:
         tester = runtime_state.get_factor_tester(submission_id, caller='run_single_batch')
+        _progress(f"batch tester loaded submission={submission_id} factor={factor_alias}")
         # 快照 products 以防并发修改
         _saved_products = tester.products.copy()
         tester.products = set(_saved_products)
@@ -707,7 +722,12 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             _saved_returns = tester.results.get(factor, FactorRunResult()).returns.copy() if _saved else pd.DataFrame()
 
             multi_horizon_results = []
-            for rf_str in return_freqs:
+            for rf_idx, rf_str in enumerate(return_freqs, start=1):
+                rf_started = time.perf_counter()
+                _progress(
+                    f"batch horizon start {rf_idx}/{len(return_freqs)} "
+                    f"submission={submission_id} factor={factor_alias} rf={rf_str}"
+                )
                 try:
                     freq = DataFreq(rf_str) if rf_str else None
                 except Exception:
@@ -742,12 +762,21 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     'ls_metrics': ls_metric,
                     'report': report_df.to_dict(orient='index') if not report_df.empty else {},
                 })
+                _progress(
+                    f"batch horizon done {rf_idx}/{len(return_freqs)} "
+                    f"submission={submission_id} factor={factor_alias} rf={rf_str} "
+                    f"elapsed={time.perf_counter() - rf_started:.2f}s"
+                )
 
             if factor in tester.results:
                 tester.results[factor].return_freq = _saved_freq
                 tester.results[factor].returns = _saved_returns
 
             _gr = tester._get_result(factor).group_result
+            _progress(
+                f"batch done submission={submission_id} factor={factor_alias} "
+                f"elapsed={time.perf_counter() - started:.2f}s"
+            )
             return {
                 'success': True, 'multi_horizon': True,
                 'results': multi_horizon_results, 'n_groups': n_groups,
@@ -759,6 +788,8 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             }
 
         # ── 单频率 ──
+        test_started = time.perf_counter()
+        _progress(f"batch test_by_group start submission={submission_id} factor={factor_alias}")
         _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
             factors=factor, n_groups=n_groups, time_range=time_range,
             plot_flag=False, save_plot=False, plot_show=False,
@@ -770,6 +801,10 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             group_fee_maps=group_fee_maps,
             n_groups_name=n_groups_name,
             group_variants=group_variants,
+        )
+        _progress(
+            f"batch test_by_group done submission={submission_id} factor={factor_alias} "
+            f"rows={len(idx_list)} elapsed={time.perf_counter() - test_started:.2f}s"
         )
 
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
@@ -786,7 +821,15 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         result_group_names = getattr(group_result, 'group_names', None) or _normalize_group_names(group_names)
         capital_warning = _build_zero_position_warning(group_result)
         groups_data = []
+        _progress(
+            f"batch serialize groups start submission={submission_id} "
+            f"factor={factor_alias} total_groups={n_total}"
+        )
         for g in range(n_total):
+            _progress(
+                f"batch serialize group {g + 1}/{n_total} "
+                f"submission={submission_id} factor={factor_alias}"
+            )
             is_derived = g >= n_base
             vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
             gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
@@ -820,11 +863,16 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     'id': di.get('id'),
                 }
             groups_data.append(entry)
+        _progress(f"batch serialize groups done submission={submission_id} factor={factor_alias}")
 
         metrics: dict = {}
         if not report_df.empty:
             raw_metrics = report_df.to_dict(orient='index')
-            for k, v in raw_metrics.items():
+            for metric_idx, (k, v) in enumerate(raw_metrics.items(), start=1):
+                _progress(
+                    f"batch serialize metric {metric_idx}/{len(raw_metrics)} "
+                    f"submission={submission_id} factor={factor_alias}"
+                )
                 display_key = _metric_display_key(k, n_base, derived_info, result_group_names)
                 metrics[display_key] = {
                     mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
@@ -832,7 +880,11 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                 }
         used_keys = set(metrics.keys())
         if ls_configs:
-            for ls_config in ls_configs:
+            for ls_idx, ls_config in enumerate(ls_configs, start=1):
+                _progress(
+                    f"batch LS start {ls_idx}/{len(ls_configs)} "
+                    f"submission={submission_id} factor={factor_alias} name={ls_config.get('name')}"
+                )
                 r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
                 # LS key: 去重后的唯一标识，name: 原始描述
                 ls_name = ls_config['name'] or 'Long-Short'
@@ -852,7 +904,15 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
                     'derived': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
                 })
                 metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
+                _progress(
+                    f"batch LS done {ls_idx}/{len(ls_configs)} "
+                    f"submission={submission_id} factor={factor_alias} key={ls_key}"
+                )
 
+        _progress(
+            f"batch done submission={submission_id} factor={factor_alias} "
+            f"elapsed={time.perf_counter() - started:.2f}s"
+        )
         return {
             'success': True,
             'groups': groups_data, 'metrics': metrics,
@@ -873,6 +933,10 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             },
         }
     except Exception as e:
+        _progress(
+            f"batch failed submission={submission_id} factor={factor_alias} "
+            f"elapsed={time.perf_counter() - started:.2f}s error={e}"
+        )
         return {'success': False, 'error': str(e), 'traceback': traceback.format_exc()}
     finally:
         if _saved_products is not None and tester is not None:
@@ -911,7 +975,12 @@ def run_group_test_batch():
     if not isinstance(batches_raw, list) or not batches_raw:
         return jsonify({'success': False, 'error': 'batches 必须是非空数组'}), 400
 
+    request_started = time.perf_counter()
     cross_batch_ls_raw = data.get('cross_batch_ls') or []
+    _progress(
+        f"batch request start batches={len(batches_raw)} "
+        f"cross_batch_ls={len(cross_batch_ls_raw) if isinstance(cross_batch_ls_raw, list) else 0}"
+    )
 
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
     start_date = data.get('start_date')
@@ -986,19 +1055,31 @@ def run_group_test_batch():
     batch_results: list[dict | None] = [None] * len(batches_raw)  # 按原始顺序
     errors = []
     max_workers = min(len(batches_raw), 6)
+    _progress(f"batch parallel submit count={len(batches_raw)} max_workers={max_workers}")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_run_one, b): i for i, b in enumerate(batches_raw)}
         for future in as_completed(futures):
             idx = futures[future]
+            batch = batches_raw[idx]
+            _progress(
+                f"batch future completed index={idx + 1}/{len(batches_raw)} "
+                f"submission={batch.get('submission_id')} factor={batch.get('factor_alias')}"
+            )
             try:
                 r = future.result()
             except Exception as e:
+                _progress(f"batch future failed index={idx + 1}/{len(batches_raw)} error={e}")
                 errors.append({'index': idx, 'error': str(e)})
                 continue
             if r.get('success'):
                 r['batch_index'] = idx
                 batch_results[idx] = r
+                _progress(f"batch future accepted index={idx + 1}/{len(batches_raw)}")
             else:
+                _progress(
+                    f"batch future returned error index={idx + 1}/{len(batches_raw)} "
+                    f"error={r.get('error', '未知错误')}"
+                )
                 errors.append({'index': idx, 'submission_id': batches_raw[idx].get('submission_id'),
                                'factor_alias': batches_raw[idx].get('factor_alias'),
                                'error': r.get('error', '未知错误'),
@@ -1006,6 +1087,7 @@ def run_group_test_batch():
 
     # 过滤掉 None（失败的 batch）
     valid_results = [r for r in batch_results if r is not None]
+    _progress(f"batch parallel done valid={len(valid_results)} errors={len(errors)}")
     if not valid_results:
         first_err = errors[0] if errors else {'error': '所有 batch 均失败'}
         return jsonify({
@@ -1024,12 +1106,15 @@ def run_group_test_batch():
 
     if cross_batch_ls_raw and not return_freqs:
         # 只有单频率才支持跨 batch LS
-        for cb in cross_batch_ls_raw:
+        _progress(f"cross-batch LS start count={len(cross_batch_ls_raw)}")
+        for cb_idx, cb in enumerate(cross_batch_ls_raw, start=1):
             if not isinstance(cb, dict):
+                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} invalid config")
                 continue
             long_info: dict = cb.get('long') or {}
             short_info: dict = cb.get('short') or {}
             ls_name = str(cb.get('name') or 'Long-Short').strip() or 'Long-Short'
+            _progress(f"cross-batch LS compute {cb_idx}/{len(cross_batch_ls_raw)} name={ls_name}")
 
             long_key = f"{long_info.get('submission_id','')}|{long_info.get('factor_alias','')}"
             short_key = f"{short_info.get('submission_id','')}|{short_info.get('factor_alias','')}"
@@ -1037,15 +1122,18 @@ def run_group_test_batch():
             short_bi = batch_index_by_key.get(short_key)
 
             if long_bi is None or short_bi is None:
+                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} missing batch")
                 continue
 
             long_br = batch_results[long_bi]
             short_br = batch_results[short_bi]
             if long_br is None or short_br is None:
+                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} failed source batch")
                 continue
             long_raw = _find_raw(long_br)
             short_raw = _find_raw(short_br)
             if long_raw is None or short_raw is None:
+                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} missing raw arrays")
                 continue
 
             long_group = int(long_info.get('group', 0))
@@ -1103,8 +1191,13 @@ def run_group_test_batch():
                 },
             })
             cross_ls_metrics[ls_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
+            _progress(f"cross-batch LS done {cb_idx}/{len(cross_batch_ls_raw)} name={ls_name}")
 
     # ── 阶段 3：合并结果 ──
+    _progress(
+        f"batch merge start valid={len(valid_results)} "
+        f"cross_ls={len(cross_ls_groups)}"
+    )
     merged_groups = []
     merged_metrics = {}
     used_merged_keys: set[str] = set()
@@ -1113,8 +1206,13 @@ def run_group_test_batch():
     last_multi_session = False
     last_rebalance = rebalance_mode
 
-    for br in valid_results:
+    for br_idx, br in enumerate(valid_results, start=1):
+        _progress(
+            f"batch merge result {br_idx}/{len(valid_results)} "
+            f"submission={br.get('batch_submission_id')} factor={br.get('batch_factor_alias')}"
+        )
         if br.get('multi_horizon'):
+            _progress(f"batch request done multi_horizon elapsed={time.perf_counter() - request_started:.2f}s")
             return jsonify({
                 'success': True, 'multi_horizon': True,
                 'results': br.get('results', []),
@@ -1164,7 +1262,8 @@ def run_group_test_batch():
 
     # 追加跨 batch LS 组
     if cross_ls_groups:
-        for group in cross_ls_groups:
+        for group_idx, group in enumerate(cross_ls_groups, start=1):
+            _progress(f"batch merge cross LS group {group_idx}/{len(cross_ls_groups)}")
             original_key = str(group.get('key') or group.get('name') or 'Long-Short')
             merged_key = _unique_group_key(original_key, used_merged_keys)
             if merged_key != original_key:
@@ -1177,6 +1276,10 @@ def run_group_test_batch():
             if original_key in cross_ls_metrics:
                 merged_metrics[merged_key] = cross_ls_metrics[original_key]
 
+    _progress(
+        f"batch request done groups={len(merged_groups)} metrics={len(merged_metrics)} "
+        f"elapsed={time.perf_counter() - request_started:.2f}s"
+    )
     return jsonify({
         'success': True,
         'groups': merged_groups,
@@ -1746,228 +1849,6 @@ def get_group_ranking_detail():
         return jsonify({'success': True, 'detail': build_group_ranking_detail(returns_np, index_list)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
-
-
-# ─────────────────────────────────────────────
-#  Issue #85: 批量分组任务端点
-# ─────────────────────────────────────────────
-
-def _merge_tasks_by_triple(run_tasks: list[dict]) -> dict[tuple, list[dict]]:
-    """按三元组 (submission_id, factor_alias, n_groups) 合并去重。
-
-    返回 {triple: [task, ...]}，同一三元组只执行一次 test_by_group。
-    """
-    groups: dict[tuple, list[dict]] = {}
-    for task in run_tasks:
-        if not isinstance(task, dict):
-            continue
-        sid = str(task.get('submission_id', ''))
-        fa  = str(task.get('factor_alias', ''))
-        ng  = int(task.get('n_groups', 5))
-        triple = (sid, fa, ng)
-        groups.setdefault(triple, []).append(task)
-    return groups
-
-
-def _execute_single_triple(tester, factor, triple: tuple, tasks: list[dict]) -> dict:
-    """对单个三元组执行 test_by_group，然后为每个 task 计算其 LS/派生组。"""
-    n_groups = triple[2]
-    first = tasks[0]
-    start_date = first.get('start_date')
-    end_date   = first.get('end_date')
-
-    # 解析费率
-    fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(first, getattr(tester, 'products', None))
-    rebalance_mode = str(first.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
-    initial_capital = _parse_initial_capital(first.get('initial_capital'))
-
-    time_range = None
-    if start_date and end_date:
-        start_dt = pd.to_datetime(start_date)
-        end_dt   = pd.to_datetime(end_date)
-        tz = getattr(tester.start_date, 'tz', None) if hasattr(tester.start_date, 'tz') else None
-        if tz:
-            if start_dt.tzinfo is None: start_dt = start_dt.tz_localize(tz)
-            if end_dt.tzinfo is None:   end_dt   = end_dt.tz_localize(tz)
-        time_range = (start_dt, end_dt)
-
-    # 收集所有 task 的派生组配置（合并去重）
-    all_derived: list[dict] = []
-    seen_dg: set = set()
-    for t in tasks:
-        for dg in (t.get('derived_groups') or []):
-            if not isinstance(dg, dict):
-                continue
-            key = (dg.get('base_group'), tuple(dg.get('product_names') or []))
-            if key not in seen_dg:
-                seen_dg.add(key)
-                all_derived.append(dg)
-
-    # 执行一次 test_by_group
-    _gt_token = _active_tester.set(tester)
-    _saved_products = tester.products.copy()
-    tester.products = set(_saved_products)
-    try:
-        _, _returns_dict, report_df, cum_np, idx_list = tester.test_by_group(
-            factors=factor, n_groups=n_groups, time_range=time_range,
-            plot_flag=False, save_plot=False, plot_show=False,
-            fee=fee_uniform, fee_map=fee_map,
-            use_closetoday=use_closetoday,
-            initial_capital=initial_capital,
-            rebalance_mode=rebalance_mode,
-            derived_groups=all_derived if all_derived else None,
-        )
-    finally:
-        tester.products = _saved_products
-        _active_tester.reset(_gt_token)
-
-    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
-    group_result = tester._get_result(factor).group_result
-    n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
-    n_base = getattr(group_result, 'n_base', n_groups) or n_groups
-    n_derived = getattr(group_result, 'n_derived', 0) or 0
-    derived_info = getattr(group_result, 'derived_info', None) or []
-    _gross = group_result.gross_returns_np if group_result is not None else None
-    gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
-    _fee = group_result.fee_costs_np if group_result is not None else None
-    fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
-
-    # 构建共享的 groups_data + metrics
-    groups_data = []
-    for g in range(n_total):
-        is_derived = g >= n_base
-        vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
-        gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
-        fee_vals   = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
-        entry = {
-            'key': _group_display_key(g, n_base, derived_info),
-            'name': f'Group {g+1}',
-            'group_index': g,
-            'timestamps': timestamps,
-            'cumulative_returns': vals,
-            'gross_returns': gross_vals,
-            'fee_costs': fee_vals,
-            'trade_notional_ratios': [
-                round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0
-                for v in group_result.trade_notional_ratio_np[:, g]
-            ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
-        }
-        if is_derived:
-            di = derived_info[g - n_base]
-            entry['name'] = di.get('name', entry['name'])
-            entry['is_derived'] = True
-            entry['derived'] = {
-                'base_group': di['base_group'],
-                'product_names': di['product_names'],
-                'id': di.get('id'),
-            }
-        groups_data.append(entry)
-
-    metrics: dict = {}
-    _derived_name_map: dict = {}
-    for di_idx, di in enumerate(derived_info):
-        _derived_name_map[n_base + di_idx] = di.get('name', f'第{n_base + di_idx + 1}组精选')
-    if not report_df.empty:
-        raw_metrics = report_df.to_dict(orient='index')
-        for k, v in raw_metrics.items():
-            display_key = _metric_display_key(k, n_base, derived_info)
-            metrics[display_key] = {
-                mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
-                for mk, mv in v.items()
-            }
-
-    # 为每个 task 计算其 LS 指标
-    task_results = []
-    for task in tasks:
-        ls_configs = _parse_ls_configs(task, n_groups)
-        ls_metrics_list = []
-        for ls_config in ls_configs:
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
-            ls_metric = _compute_ls_metrics(r_ls, report_df, idx_list)
-            ls_metrics_list.append({
-                'name': ls_config['name'],
-                'metrics': ls_metric,
-            })
-        task_results.append({
-            'task_index': task.get('_task_index'),
-            'ls_metrics': ls_metrics_list,
-        })
-
-    return {
-        'triple': list(triple),
-        'groups': groups_data,
-        'metrics': metrics,
-        'n_groups': n_total,
-        'n_base': n_base,
-        'task_results': task_results,
-        'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
-        'rebalance_mode': rebalance_mode,
-    }
-
-
-@sft_bp.route('/run_group_tasks', methods=['POST'])
-def run_group_tasks():
-    """批量执行分组测试任务。
-
-    请求：{
-        run_tasks: [
-            {submission_id, factor_alias, n_groups, rebalance_mode,
-             fee, fee_map, use_closetoday, start_date, end_date,
-             derived_groups, ls_configs}
-        ]
-    }
-
-    按三元组 (submission_id, factor_alias, n_groups) 合并去重，同一三元组只执行一次 test_by_group。
-    返回按三元组分组的完整结果 + 每个 task 独立的 LS 指标。
-    """
-    data = request.get_json() or {}
-    run_tasks: list = data.get('run_tasks', [])
-    if not run_tasks:
-        return jsonify({'success': False, 'error': '缺少 run_tasks 列表'}), 400
-
-    # 标记 task 原始索引
-    for i, task in enumerate(run_tasks):
-        if isinstance(task, dict):
-            task['_task_index'] = i
-
-    triple_groups = _merge_tasks_by_triple(run_tasks)
-    triple_results = []
-
-    for triple, tasks in triple_groups.items():
-        submission_id = triple[0]
-        factor_alias = triple[1]
-        n_groups = triple[2]
-        try:
-            tester = runtime_state.get_factor_tester(submission_id, caller='run_group_tasks')
-            factor = next((f for f in tester.factors if f.alias == factor_alias or f.name == factor_alias), None)
-            if not factor:
-                if not getattr(tester, 'factors', None):
-                    triple_results.append({
-                        'triple': list(triple),
-                        'error': '当前测试器尚未生成因子实例。请先在 IC 测试模块运行一次 IC 测试。',
-                        'needs_ic_test': True,
-                    })
-                else:
-                    triple_results.append({
-                        'triple': list(triple),
-                        'error': f'未找到因子 {factor_alias}',
-                    })
-                continue
-
-            result = _execute_single_triple(tester, factor, triple, tasks)
-            result['submission_id'] = submission_id
-            result['factor_alias'] = factor_alias
-            result['tester_alias'] = getattr(tester, 'alias', '?')
-            result['tester_product_count'] = len(tester.products) if hasattr(tester, 'products') else 0
-            triple_results.append(result)
-        except Exception as e:
-            triple_results.append({
-                'triple': list(triple),
-                'error': str(e),
-                'traceback': traceback.format_exc(),
-            })
-
-    return jsonify({'success': True, 'triple_results': triple_results})
 
 
 @sft_bp.route('/get_tester_session_info', methods=['POST'])
