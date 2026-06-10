@@ -246,7 +246,12 @@
         if (summaryEl) {
             summaryEl.innerHTML = renderGroupSummaryCards(detail.summary || {});
         }
-        document.getElementById('group-detail-frequency').innerHTML = T.renderGroupFrequency(detail.entry_frequency);
+        var actions = GT.panels && GT.panels.actions;
+        if (actions && typeof actions.renderGroupFrequency === 'function') {
+            document.getElementById('group-detail-frequency').innerHTML = actions.renderGroupFrequency(detail.entry_frequency);
+        } else {
+            document.getElementById('group-detail-frequency').innerHTML = T.renderGroupFrequency(detail.entry_frequency);
+        }
         if (typeof options.onRenderDerivedPanel === 'function') {
             options.onRenderDerivedPanel(options.groupIndex);
         } else {
