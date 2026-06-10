@@ -206,7 +206,7 @@ def _parse_group_variants(group_names) -> tuple[dict[int, str], dict[int, list[d
           For variants, uses the first name as the group-level name.
         - group_variants: None if no variants detected.
           Otherwise, {group_index: [{name, fee_map}, ...]} where each variant has its own
-          fee_map (populated later by _run_single_batch).
+          fee_map (populated later by one simulation entry serializer).
     """
     if not isinstance(group_names, dict):
         return {}, None
@@ -744,12 +744,12 @@ def _serialize_group_simulation_result(
 
     groups_data = []
     _progress(
-        f"batch serialize groups start submission={submission_id} "
+        f"simulation serialize groups start submission={submission_id} "
         f"factor={factor_alias} total_groups={n_total}"
     )
     for g in range(n_total):
         _progress(
-            f"batch serialize group {g + 1}/{n_total} "
+            f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
         is_derived = g >= n_base
@@ -785,14 +785,14 @@ def _serialize_group_simulation_result(
                 'id': di.get('id'),
             }
         groups_data.append(entry)
-    _progress(f"batch serialize groups done submission={submission_id} factor={factor_alias}")
+    _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
 
     metrics: dict = {}
     if not report_df.empty:
         raw_metrics = report_df.to_dict(orient='index')
         for metric_idx, (k, v) in enumerate(raw_metrics.items(), start=1):
             _progress(
-                f"batch serialize metric {metric_idx}/{len(raw_metrics)} "
+                f"simulation serialize metric {metric_idx}/{len(raw_metrics)} "
                 f"submission={submission_id} factor={factor_alias}"
             )
             display_key = _metric_display_key(k, n_base, derived_info, result_group_names)
@@ -804,7 +804,7 @@ def _serialize_group_simulation_result(
     if ls_configs:
         for ls_idx, ls_config in enumerate(ls_configs, start=1):
             _progress(
-                f"batch LS start {ls_idx}/{len(ls_configs)} "
+                f"simulation LS start {ls_idx}/{len(ls_configs)} "
                 f"submission={submission_id} factor={factor_alias} name={ls_config.get('name')}"
             )
             r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_np, fee_np, ls_config, n_total)
@@ -826,7 +826,7 @@ def _serialize_group_simulation_result(
             })
             metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
             _progress(
-                f"batch LS done {ls_idx}/{len(ls_configs)} "
+                f"simulation LS done {ls_idx}/{len(ls_configs)} "
                 f"submission={submission_id} factor={factor_alias} key={ls_key}"
             )
 
@@ -874,7 +874,8 @@ def run_group_test_batch():
         "derived_groups": null
     }
     
-    cross_batch_ls 中 group 为 0-based 组索引。
+    请求里的 `batches` / `cross_batch_ls` 仍保留原字段名；
+    后端内部按 submission entry / cross-entry LS 处理。
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -884,10 +885,10 @@ def run_group_test_batch():
         return jsonify({'success': False, 'error': 'batches 必须是非空数组'}), 400
 
     request_started = time.perf_counter()
-    cross_batch_ls_raw = data.get('cross_batch_ls') or []
+    cross_entry_ls_requests = data.get('cross_batch_ls') or []
     _progress(
         f"group simulations request start entries={len(submitted_entries)} "
-        f"cross_batch_ls={len(cross_batch_ls_raw) if isinstance(cross_batch_ls_raw, list) else 0}"
+        f"cross_entry_ls={len(cross_entry_ls_requests) if isinstance(cross_entry_ls_requests, list) else 0}"
     )
 
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
@@ -999,7 +1000,7 @@ def run_group_test_batch():
             f"freq={effective_group_calendar_freq}"
         )
 
-    # 构建前端提交条目→索引映射（供 cross-batch LS 反查）
+    # 构建前端提交条目→索引映射（供 cross-entry LS 反查）
     entry_index_by_key: dict[str, int] = {}
     for i, payload_entry in enumerate(submitted_entries):
         key = f"{payload_entry.get('submission_id','')}|{payload_entry.get('factor_alias','')}|{int(payload_entry.get('n_groups', 5))}"
@@ -1100,37 +1101,37 @@ def run_group_test_batch():
     cross_ls_groups: list[dict] = []
     cross_ls_metrics: dict = {}
 
-    if cross_batch_ls_raw:
-        _progress(f"cross-batch LS start count={len(cross_batch_ls_raw)}")
-        for cb_idx, cb in enumerate(cross_batch_ls_raw, start=1):
+    if cross_entry_ls_requests:
+        _progress(f"cross-entry LS start count={len(cross_entry_ls_requests)}")
+        for cb_idx, cb in enumerate(cross_entry_ls_requests, start=1):
             if not isinstance(cb, dict):
-                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} invalid config")
+                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} invalid config")
                 continue
             long_info: dict = cb.get('long') or {}
             short_info: dict = cb.get('short') or {}
             ls_name = str(cb.get('name') or 'Long-Short').strip() or 'Long-Short'
-            _progress(f"cross-batch LS compute {cb_idx}/{len(cross_batch_ls_raw)} name={ls_name}")
+            _progress(f"cross-entry LS compute {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
 
             long_n_groups = int(long_info.get('n_groups', long_info.get('group_count', 5)) or 5)
             short_n_groups = int(short_info.get('n_groups', short_info.get('group_count', 5)) or 5)
             long_key = f"{long_info.get('submission_id','')}|{long_info.get('factor_alias','')}|{long_n_groups}"
             short_key = f"{short_info.get('submission_id','')}|{short_info.get('factor_alias','')}|{short_n_groups}"
-            long_bi = entry_index_by_key.get(long_key)
-            short_bi = entry_index_by_key.get(short_key)
+            long_entry_idx = entry_index_by_key.get(long_key)
+            short_entry_idx = entry_index_by_key.get(short_key)
 
-            if long_bi is None or short_bi is None:
-                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} missing batch")
+            if long_entry_idx is None or short_entry_idx is None:
+                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing source entry")
                 continue
 
-            long_br = submission_results[long_bi]
-            short_br = submission_results[short_bi]
+            long_br = submission_results[long_entry_idx]
+            short_br = submission_results[short_entry_idx]
             if long_br is None or short_br is None:
-                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} failed source batch")
+                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} failed source entry")
                 continue
             long_raw = _find_raw(long_br)
             short_raw = _find_raw(short_br)
             if long_raw is None or short_raw is None:
-                _progress(f"cross-batch LS skip {cb_idx}/{len(cross_batch_ls_raw)} missing raw arrays")
+                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing raw arrays")
                 continue
 
             long_group = int(long_info.get('group', 0))
@@ -1138,7 +1139,7 @@ def run_group_test_batch():
             long_n = long_br.get('n_groups_requested', 5)
             short_n = short_br.get('n_groups_requested', 5)
 
-            # 跨 batch LS：从不同 batch 的 gross_np / fee_np 拼成 (T, 2) 数组
+            # 跨提交条目 LS：从不同 simulation entry 的 gross_np / fee_np 拼成 (T, 2) 数组
             gross_long = long_raw['gross_np'][:, long_group] if long_group < long_raw['gross_np'].shape[1] else np.zeros(long_raw['gross_np'].shape[0])
             fee_long = long_raw['fee_np'][:, long_group] if long_group < long_raw['fee_np'].shape[1] else np.zeros(long_raw['fee_np'].shape[0])
             gross_short = short_raw['gross_np'][:, short_group] if short_group < short_raw['gross_np'].shape[1] else np.zeros(short_raw['gross_np'].shape[0])
@@ -1162,7 +1163,7 @@ def run_group_test_batch():
             }
             r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_combined, fee_combined, ls_config, 2)
 
-            # 用第一个 batch 的 report_df 和 idx_list 来计算 metrics（近似）
+            # 用第一个 source entry 的 report_df 和 idx_list 来计算 metrics（近似）
             ref_raw = long_raw
             ref_report = ref_raw['report_df']
             ref_idx = ref_raw['idx_list']
@@ -1188,7 +1189,7 @@ def run_group_test_batch():
                 },
             })
             cross_ls_metrics[ls_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
-            _progress(f"cross-batch LS done {cb_idx}/{len(cross_batch_ls_raw)} name={ls_name}")
+            _progress(f"cross-entry LS done {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
 
     # ── 阶段 3：合并结果 ──
     _progress(
@@ -1244,7 +1245,7 @@ def run_group_test_batch():
         last_multi_session = simulation_multi_session or last_multi_session
         last_rebalance = br.get('rebalance_mode', last_rebalance) or last_rebalance
 
-    # 追加跨 batch LS 组
+    # 追加跨提交条目 LS 组
     if cross_ls_groups:
         for group_idx, group in enumerate(cross_ls_groups, start=1):
             _progress(f"simulation merge cross LS group {group_idx}/{len(cross_ls_groups)}")

@@ -491,7 +491,7 @@ class FactorTester(UniqueObject):
                 utc_values.append(ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC'))
         return pd.DatetimeIndex(utc_values).sort_values().unique()
 
-    def run_group_batch(
+    def run_group_simulation(
         self,
         *,
         factor_alias: str,
@@ -508,7 +508,7 @@ class FactorTester(UniqueObject):
         group_variants: Optional[dict[int, list[dict]]] = None,
         calendar_index: Optional[pd.Index] = None,
     ) -> dict:
-        """Run one group-test batch and return raw compute artifacts."""
+        """Run one group-test simulation entry and return raw compute artifacts."""
         factor = self.resolve_factor(factor_alias)
         if factor is None:
             if not self.factors:
@@ -559,7 +559,7 @@ class FactorTester(UniqueObject):
         requested_calendar_freq: Optional[Any] = None,
         progress_hook: Optional[Callable[[str], None]] = None,
     ) -> List[dict[str, Any]]:
-        """Run multiple group-test batches under one tester snapshot/context."""
+        """Run multiple group-test simulation entries under one tester snapshot/context."""
         saved_products = self.products.copy()
         token = None
         results: List[dict[str, Any]] = []
@@ -591,7 +591,7 @@ class FactorTester(UniqueObject):
                 factor_alias = str(spec.get('factor_alias') or '')
                 if progress_hook is not None:
                     progress_hook(f"tester group simulation {idx}/{len(group_specs)} factor={factor_alias}")
-                result = self.run_group_batch(
+                result = self.run_group_simulation(
                     factor_alias=factor_alias,
                     n_groups=int(spec.get('n_groups', 5)),
                     fee=fee,
