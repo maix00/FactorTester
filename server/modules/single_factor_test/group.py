@@ -279,69 +279,6 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
     return names, grouped or None
 
 
-def _coalesce_batches_by_triplet(batches_raw: list[dict]) -> list[dict]:
-    """Merge repeated request batches by (submission_id, factor_alias, n_groups).
-
-    Frontend may already group by this triplet, but backend normalizes again so
-    variant/derived payloads can be merged consistently and older clients still work.
-    """
-    merged_by_key: dict[tuple[str, str, int], dict] = {}
-    order: list[tuple[str, str, int]] = []
-
-    for batch in batches_raw:
-        if not isinstance(batch, dict):
-            continue
-        submission_id = str(batch.get('submission_id') or '')
-        factor_alias = str(batch.get('factor_alias') or '')
-        try:
-            n_groups = int(batch.get('n_groups', 5))
-        except (TypeError, ValueError):
-            n_groups = 5
-        key = (submission_id, factor_alias, n_groups)
-        if key not in merged_by_key:
-            merged_by_key[key] = {
-                'submission_id': submission_id,
-                'factor_alias': factor_alias,
-                'n_groups': n_groups,
-                'groups': [],
-                'group_names': {},
-                'derived_groups': [],
-                'ls_configs': [],
-            }
-            order.append(key)
-        merged = merged_by_key[key]
-
-        groups_payload = batch.get('groups')
-        if isinstance(groups_payload, list) and groups_payload:
-            merged['groups'].extend(item for item in groups_payload if isinstance(item, dict))
-
-        group_names_payload = batch.get('group_names')
-        if isinstance(group_names_payload, dict) and group_names_payload:
-            merged['group_names'].update(group_names_payload)
-
-        derived_payload = batch.get('derived_groups')
-        if isinstance(derived_payload, list) and derived_payload:
-            merged['derived_groups'].extend(item for item in derived_payload if isinstance(item, dict))
-
-        ls_payload = batch.get('ls_configs')
-        if isinstance(ls_payload, list) and ls_payload:
-            merged['ls_configs'].extend(item for item in ls_payload if isinstance(item, dict))
-
-    normalized: list[dict] = []
-    for key in order:
-        merged = merged_by_key[key]
-        normalized.append({
-            'submission_id': merged['submission_id'],
-            'factor_alias': merged['factor_alias'],
-            'n_groups': merged['n_groups'],
-            'groups': merged['groups'] or None,
-            'group_names': merged['group_names'] or None,
-            'derived_groups': merged['derived_groups'] or None,
-            'ls_configs': merged['ls_configs'] or None,
-        })
-    return normalized
-
-
 def _group_display_key(group_idx: int, n_base: int, derived_info: list[dict], group_names=None) -> str:
     names = _normalize_group_names(group_names)
     if group_idx in names:
