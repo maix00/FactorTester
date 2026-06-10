@@ -8,7 +8,7 @@ Core Blueprint — 应用入口和页面路由。
   - 工具类源码页 AST 解析 + 折叠渲染
 """
 
-from flask import Blueprint, render_template
+from flask import Blueprint, jsonify, render_template, request
 
 core_bp = Blueprint('core', __name__)
 
@@ -22,6 +22,42 @@ def home():
 def products():
     """产品管理 & 序列查看页面。"""
     return render_template('products.html')
+
+
+@core_bp.route('/local-data', methods=['GET'])
+def local_data():
+    """Local SQL data browser."""
+    return render_template('local_data.html')
+
+
+@core_bp.route('/api/local-data/stores', methods=['GET'])
+def api_local_data_stores():
+    from server.services.local_sql_data import list_stores
+    return jsonify({'success': True, 'stores': list_stores()})
+
+
+@core_bp.route('/api/local-data/<store_key>/tables', methods=['GET'])
+def api_local_data_tables(store_key):
+    from server.services.local_sql_data import list_tables
+    try:
+        return jsonify({'success': True, 'store': store_key, 'tables': list_tables(store_key)})
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+
+
+@core_bp.route('/api/local-data/<store_key>/table/<table_name>', methods=['GET'])
+def api_local_data_table(store_key, table_name):
+    from server.services.local_sql_data import read_table
+    try:
+        payload = read_table(
+            store_key,
+            table_name,
+            limit=int(request.args.get('limit', 200)),
+            offset=int(request.args.get('offset', 0)),
+        )
+        return jsonify({'success': True, **payload})
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
 
 
 @core_bp.route('/docs', methods=['GET'])

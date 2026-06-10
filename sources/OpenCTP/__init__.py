@@ -11,6 +11,8 @@ from .client import (
     frame_prices,
     frame_times,
     instruments_to_contract_specs,
+    list_sqlite_tables,
+    read_sqlite_table,
 )
 from .fields import (
     canonical_field,
@@ -41,6 +43,8 @@ __all__ = [
     "frame_prices",
     "frame_times",
     "instruments_to_contract_specs",
+    "list_sqlite_tables",
+    "read_sqlite_table",
     "canonical_field",
     "get_product_field",
     "get_product_fields",

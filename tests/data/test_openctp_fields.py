@@ -127,4 +127,8 @@ def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_pat
     assert len(calls) == 1
     with sqlite3.connect(tmp_path / "openctp" / "openctp.sqlite") as conn:
         count = conn.execute("SELECT count(*) FROM openctp_responses").fetchone()[0]
+        spec = conn.execute(
+            "SELECT instrument_id, product_id, open_ratio, open_fixed FROM openctp_cnfutures_contract_specs"
+        ).fetchone()
     assert count == 1
+    assert spec == ("IF2606", None, None, None)
