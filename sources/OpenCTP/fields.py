@@ -241,6 +241,21 @@ def get_product_fields(
     return result
 
 
+def get_products_fields(
+    products: list[Any] | tuple[Any, ...],
+    fields: list[str] | tuple[str, ...] | set[str],
+    *,
+    markets: str | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve the same field-set for several products in one call."""
+    ordered_products = list(products)
+    ordered_fields = list(fields)
+    return [
+        get_product_fields(product, ordered_fields, markets=markets)
+        for product in ordered_products
+    ]
+
+
 def make_field_getter(field: str) -> Callable[[Any], Any]:
     return lambda product: get_product_field(product, field)
 
