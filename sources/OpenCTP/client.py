@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import re
-from hashlib import sha1
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -27,6 +28,7 @@ from scripts.data_dir import DATA_DIR
 
 BASE_URL = "http://dict.openctp.cn"
 CACHE_DIR = Path(DATA_DIR) / "cache" / "openctp"
+CACHE_DB_PATH = CACHE_DIR / "openctp.sqlite"
 ENDPOINTS = {
     "markets": "/markets",
     "products": "/products",
@@ -47,30 +49,67 @@ def _comma(value: Any) -> str | None:
         return str(value)
 
 
-def _cache_path(endpoint: str, query: dict[str, str]) -> Path:
-    cache_key = urlencode(sorted(query.items()))
-    digest = sha1(cache_key.encode("utf-8")).hexdigest()[:16] if cache_key else "all"
-    return CACHE_DIR / endpoint / f"{digest}.json"
+def _cache_key(query: dict[str, str]) -> str:
+    return urlencode(sorted(query.items()))
 
 
-def _read_cache(path: Path) -> list[dict[str, Any]] | None:
+def _connect_cache() -> sqlite3.Connection:
+    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(CACHE_DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS openctp_responses (
+            endpoint TEXT NOT NULL,
+            query_key TEXT NOT NULL,
+            query_json TEXT NOT NULL,
+            url TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (endpoint, query_key)
+        )
+        """
+    )
+    return conn
+
+
+def _read_cache(endpoint: str, query: dict[str, str]) -> list[dict[str, Any]] | None:
     try:
-        if not path.is_file():
+        with _connect_cache() as conn:
+            row = conn.execute(
+                "SELECT data_json FROM openctp_responses WHERE endpoint = ? AND query_key = ?",
+                (endpoint, _cache_key(query)),
+            ).fetchone()
+        if row is None:
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        data = payload.get("data", payload)
+        data = json.loads(row[0])
         return data if isinstance(data, list) else None
     except Exception:
         return None
 
 
-def _write_cache(path: Path, data: list[dict[str, Any]], *, url: str) -> None:
+def _write_cache(endpoint: str, query: dict[str, str], data: list[dict[str, Any]], *, url: str) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"url": url, "data": data}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with _connect_cache() as conn:
+            conn.execute(
+                """
+                INSERT INTO openctp_responses
+                    (endpoint, query_key, query_json, url, data_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(endpoint, query_key) DO UPDATE SET
+                    query_json = excluded.query_json,
+                    url = excluded.url,
+                    data_json = excluded.data_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    endpoint,
+                    _cache_key(query),
+                    json.dumps(query, ensure_ascii=False, sort_keys=True),
+                    url,
+                    json.dumps(data, ensure_ascii=False),
+                    time.time(),
+                ),
+            )
     except Exception:
         pass
 
@@ -83,9 +122,8 @@ def _request(endpoint: str, *, refresh: bool = False, **params: Any) -> list[dic
         for key, value in params.items()
         if value is not None and _comma(value) not in (None, "")
     }
-    cache_path = _cache_path(endpoint, query)
     if not refresh:
-        cached = _read_cache(cache_path)
+        cached = _read_cache(endpoint, query)
         if cached is not None:
             return cached
     url = BASE_URL + ENDPOINTS[endpoint]
@@ -98,7 +136,7 @@ def _request(endpoint: str, *, refresh: bool = False, **params: Any) -> list[dic
     data = payload.get("data", [])
     if not isinstance(data, list):
         raise TypeError(f"OpenCTP {endpoint} returned non-list data")
-    _write_cache(cache_path, data, url=url)
+    _write_cache(endpoint, query, data, url=url)
     return data
 
 

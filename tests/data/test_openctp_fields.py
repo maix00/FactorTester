@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import sqlite3
 
 from server.modules.shared import price_services
 from sources.LocalCNFutures import FeeData
@@ -100,6 +101,7 @@ def test_public_fields_fill_missing_local_snapshot_from_product_resolver(monkeyp
 
 def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_path):
     monkeypatch.setattr(openctp_client, "CACHE_DIR", tmp_path / "openctp")
+    monkeypatch.setattr(openctp_client, "CACHE_DB_PATH", tmp_path / "openctp" / "openctp.sqlite")
     calls = []
 
     class _Response:
@@ -123,4 +125,6 @@ def test_openctp_request_uses_data_dir_cache_before_network(monkeypatch, tmp_pat
 
     assert first == second == [{"InstrumentID": "IF2606"}]
     assert len(calls) == 1
-    assert (tmp_path / "openctp" / "instruments").is_dir()
+    with sqlite3.connect(tmp_path / "openctp" / "openctp.sqlite") as conn:
+        count = conn.execute("SELECT count(*) FROM openctp_responses").fetchone()[0]
+    assert count == 1
