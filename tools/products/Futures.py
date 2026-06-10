@@ -218,12 +218,11 @@ class Futures(AdjustableProductMixin, Product):
 
     def list_roller_contracts(self) -> List[FuturesContract]:
         """返回 roller_info 中出现过的合约对象列表。"""
-        contracts = []
-        for row in self.iter_roller_contract_rows():
-            contract_id = str(row.get('CONTRACT_UID') or row.get('CONTRACT') or '')
-            if contract_id:
-                contracts.append(self.contract_class(contract_id))
-        return contracts
+        return [
+            self.contract_class(contract_id)
+            for row in self.iter_roller_contract_rows()
+            if (contract_id := str(getattr(row, 'CONTRACT_UID', '') or getattr(row, 'CONTRACT', '') or ''))
+        ]
 
     def get_roller_contracts_from_trading_day(self, trading_day: datetime | str, n: int = 1) -> List[FuturesContract]:
         """返回从某交易日所在主力段开始的后续 n 个主力合约。

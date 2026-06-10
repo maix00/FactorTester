@@ -1559,47 +1559,34 @@ def get_group_snapshot():
         # products_dict: {group_idx: {index_entry: [product_names]}}
         # index_entry 可能是 Timestamp 或 tuple
         first_group = next(iter(products_dict.values()))
-        all_times = []
-        for idx_entry in first_group.keys():
-            ts = _signal_time(idx_entry)
-            # 统一转为 naive epoch 秒用于比较
+        time_entries = list(first_group.keys())
+        if not time_entries:
+            return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
+
+        def _epoch_seconds(value):
+            ts = _signal_time(value)
             if isinstance(ts, pd.Timestamp):
                 ts_no_tz_untyped = ts.tz_localize(None) if ts.tzinfo else ts
-                ts_epoch = pd.Timestamp(ts_no_tz_untyped).value // 10**9
-            elif hasattr(ts, 'timestamp'):
-                ts_epoch = pd.Timestamp(ts).value // 10**9
-            else:
-                ts_epoch = float(ts)
-            all_times.append((ts_epoch, idx_entry))
+                return float(pd.Timestamp(ts_no_tz_untyped).value // 10**9)
+            if hasattr(ts, 'timestamp'):
+                return float(pd.Timestamp(ts).value // 10**9)
+            return float(ts)
+
+        time_epochs = np.array([_epoch_seconds(idx_entry) for idx_entry in time_entries], dtype=float)
 
         # 前端传来的 UTC epoch 毫秒
         target_epoch = float(timestamp_ms) / 1000.0
 
         # 找最近的
-        best_idx_entry = None
-        best_diff = float('inf')
-        for ts_epoch, idx_entry in all_times:
-            diff = abs(ts_epoch - target_epoch)
-            if diff < best_diff:
-                best_diff = diff
-                best_idx_entry = idx_entry
-
-        if best_idx_entry is None:
-            return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
+        best_pos = int(np.argmin(np.abs(time_epochs - target_epoch)))
+        best_idx_entry = time_entries[best_pos]
 
         # 找到上一时刻 — 用 all_times 的 epoch 排序（避免 tuple/array 直接比较）
         # 用 enumerate 添加位置索引作为 tiebreaker，防止 sorted 回退到 tuple 比较
         # （idx_entry 可能为包含 numpy 类型的 tuple，其 __eq__ 会触发 ambiguous truth value）
-        sorted_times = [item for _, item in sorted(enumerate(all_times), key=lambda pair: (pair[1][0], pair[0]))]
-        sorted_entries = [item[1] for item in sorted_times]
-        current_pos = None
-        for pos, (_, entry) in enumerate(sorted_times):
-            if entry is best_idx_entry:
-                current_pos = pos
-                break
-        if current_pos is None:
-            current_pos = 0
-        prev_entry = sorted_entries[current_pos - 1] if current_pos > 0 else None
+        sorted_pos = np.argsort(time_epochs, kind='stable')
+        current_pos = int(np.flatnonzero(sorted_pos == best_pos)[0]) if sorted_pos.size else 0
+        prev_entry = time_entries[int(sorted_pos[current_pos - 1])] if current_pos > 0 else None
 
         n_groups = len(products_dict)
         fee_rates_by_name = _product_fee_rates_by_name(group_result)
