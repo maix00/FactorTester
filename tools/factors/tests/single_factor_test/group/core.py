@@ -1891,18 +1891,31 @@ def simulate_group_trading_book(
             desired_quantities = np.floor(raw_quantities / lot_sizes[np.newaxis, :]) * lot_sizes[np.newaxis, :]
             desired_quantities = np.where(executable[np.newaxis, :], desired_quantities, quantities)
 
-        for g in range(M):
-            mode = str(rebalance_modes_arr[g] or "each_period")
-            if mode in {"buy_and_hold", "recycle"}:
-                staying = membership_np[t, g] & (quantities[g] > 0)
-                entering = membership_np[t, g] & (~staying)
-                if mode == "buy_and_hold":
-                    desired_quantities[g, staying] = quantities[g, staying]
-                elif mode == "recycle":
-                    desired_quantities[g, staying] = quantities[g, staying]
-                    if quantities[g].sum() > 0 and not np.any((quantities[g] > 0) & (~membership_np[t, g])):
-                        desired_quantities[g, entering] = 0.0
-            desired_quantities[g, ~executable] = quantities[g, ~executable]
+        hold_rows = np.isin(rebalance_modes_arr, ["buy_and_hold", "recycle"])
+        if bool(hold_rows.any()):
+            current_membership = membership_np[t]
+            current_positive = quantities > 0
+            staying_mask = current_membership & current_positive
+            entering_mask = current_membership & (~current_positive)
+            desired_quantities[hold_rows] = np.where(
+                staying_mask[hold_rows],
+                quantities[hold_rows],
+                desired_quantities[hold_rows],
+            )
+
+            recycle_rows = rebalance_modes_arr == "recycle"
+            if bool(recycle_rows.any()):
+                has_existing_positions = np.any(current_positive, axis=1)
+                has_exiting_positions = np.any(current_positive & (~current_membership), axis=1)
+                freeze_entering_rows = recycle_rows & has_existing_positions & (~has_exiting_positions)
+                if bool(freeze_entering_rows.any()):
+                    desired_quantities[freeze_entering_rows] = np.where(
+                        entering_mask[freeze_entering_rows],
+                        0.0,
+                        desired_quantities[freeze_entering_rows],
+                    )
+
+        desired_quantities[:, ~executable] = quantities[:, ~executable]
 
         use_margin = (margin_modes_arr == "margin")[:, np.newaxis] & margin_flags[np.newaxis, :]
 
