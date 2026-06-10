@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, cast
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 
 TERM_PRODUCT_COL = 'PRODUCT'
@@ -155,25 +156,32 @@ class AdjustableProductMixin:
         req_start: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(start_date)).normalize() if start_date else None
         req_end: pd.Timestamp | None = cast(pd.Timestamp, pd.Timestamp(end_date)).normalize() if end_date else None
 
-        contracts = []
-        for uid, row in grouped.iterrows():
-            t_min: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['min'])))
-            t_max: pd.Timestamp = cast(pd.Timestamp, pd.Timestamp(cast('Any', row['max'])))
+        min_days = pd.to_datetime(grouped['min']).dt.normalize()
+        max_days = pd.to_datetime(grouped['max']).dt.normalize()
+        mask = pd.Series(True, index=grouped.index)
+        if req_start is not None:
+            mask &= max_days >= req_start
+        if req_end is not None:
+            mask &= min_days <= req_end
+        filtered = grouped.loc[mask].copy()
+        filtered['min'] = pd.to_datetime(filtered['min'])
+        filtered['max'] = pd.to_datetime(filtered['max'])
 
-            if req_start is not None and cast(pd.Timestamp, t_max.normalize()) < req_start:
-                continue
-            if req_end is not None and cast(pd.Timestamp, t_min.normalize()) > req_end:
-                continue
-
-            uid_str = str(uid)
-            contracts.append({
-                'contract': str(row['first']),
-                'uid': uid_str,
-                'start': t_min.strftime('%Y-%m-%d'),
-                'end': t_max.strftime('%Y-%m-%d'),
-                'start_ts': int(t_min.timestamp() * 1000),
-                'end_ts': int(t_max.timestamp() * 1000),
-            })
+        contracts = [
+            {
+                'contract': str(row.first),
+                'uid': str(row.Index),
+                'start': row.min.strftime('%Y-%m-%d'),
+                'end': row.max.strftime('%Y-%m-%d'),
+                'start_ts': int(row.min.timestamp() * 1000),
+                'end_ts': int(row.max.timestamp() * 1000),
+            }
+            for row in tqdm(
+                filtered.itertuples(index=True),
+                total=len(filtered),
+                desc=f"Build contract list {getattr(self, 'name', 'product')}",
+            )
+        ]
 
         return contracts
 
@@ -341,12 +349,12 @@ def get_contract_product_map(path: str) -> dict:
             _contract_product_cache[path] = {}
         else:
             # 去重：每个 contract_uid 只保留第一个 product
-            mapping = {}
-            for _, row in df[[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL]].iterrows():
-                uid = str(row[TERM_CONTRACT_UID_COL])
-                if uid not in mapping:
-                    mapping[uid] = str(row[TERM_PRODUCT_COL])
-            _contract_product_cache[path] = mapping
+            dedup = df[[TERM_CONTRACT_UID_COL, TERM_PRODUCT_COL]].dropna()
+            dedup = dedup.drop_duplicates(subset=[TERM_CONTRACT_UID_COL], keep='first')
+            _contract_product_cache[path] = {
+                str(uid): str(product)
+                for uid, product in zip(dedup[TERM_CONTRACT_UID_COL], dedup[TERM_PRODUCT_COL])
+            }
     return _contract_product_cache[path]
 
 

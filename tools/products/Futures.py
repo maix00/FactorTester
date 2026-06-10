@@ -9,6 +9,7 @@ roller_info 的闲置释放由 tools.base.IdleResourceManager 统一管理。
 import pandas as pd
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, cast
 from datetime import datetime
+from tqdm import tqdm
 
 from tools.products.Product import Product
 from tools.base.IdleResourceManager import IdleResourceManager
@@ -123,26 +124,31 @@ class Futures(AdjustableProductMixin, Product):
         contracts = []
         if self.roller_info is None:
             return contracts
-        for _, row in cast(pd.DataFrame, self.roller_info).iterrows():
-            s_val = row.get('STARTDATE')
-            e_val = row.get('ENDDATE')
-            s = cast('Optional[pd.Timestamp]', pd.Timestamp(s_val)) if s_val is not None and cast(bool, pd.notna(s_val)) else None
-            e = cast('Optional[pd.Timestamp]', pd.Timestamp(e_val)) if e_val is not None and cast(bool, pd.notna(e_val)) else None
+        rows = cast(pd.DataFrame, self.roller_info)[['CONTRACT_UID', 'CONTRACT', 'STARTDATE', 'ENDDATE']].copy()
+        rows['STARTDATE'] = pd.to_datetime(rows['STARTDATE'])
+        rows['ENDDATE'] = pd.to_datetime(rows['ENDDATE'])
+        rows['STARTDATE_NORM'] = rows['STARTDATE'].dt.normalize()
+        rows['ENDDATE_NORM'] = rows['ENDDATE'].dt.normalize()
+        if req_start is not None:
+            rows = rows[rows['ENDDATE_NORM'] >= req_start]
+        if req_end is not None:
+            rows = rows[rows['STARTDATE_NORM'] <= req_end]
 
-            if req_start is not None and e is not None and e.normalize() < req_start:
-                continue
-            if req_end is not None and s is not None and s.normalize() > req_end:
-                continue
-
-            uid = str(row['CONTRACT_UID'])
-            contracts.append({
-                'contract': str(row['CONTRACT']),
-                'uid': uid,
-                'start': s.strftime('%Y-%m-%d') if s is not None else None,
-                'end': e.strftime('%Y-%m-%d') if e is not None else None,
-                'start_ts': int(s.timestamp() * 1000) if s is not None else None,
-                'end_ts': int(e.timestamp() * 1000) if e is not None else None,
-            })
+        contracts = [
+            {
+                'contract': str(row.CONTRACT),
+                'uid': str(row.CONTRACT_UID),
+                'start': row.STARTDATE.strftime('%Y-%m-%d') if pd.notna(row.STARTDATE) else None,
+                'end': row.ENDDATE.strftime('%Y-%m-%d') if pd.notna(row.ENDDATE) else None,
+                'start_ts': int(row.STARTDATE.timestamp() * 1000) if pd.notna(row.STARTDATE) else None,
+                'end_ts': int(row.ENDDATE.timestamp() * 1000) if pd.notna(row.ENDDATE) else None,
+            }
+            for row in tqdm(
+                rows.itertuples(index=False),
+                total=len(rows),
+                desc=f"Roller contracts {self.name}",
+            )
+        ]
         return contracts
 
     def get_contract_row_from_trading_day(self, trading_day: datetime | str) -> Optional[pd.Series]:
@@ -170,7 +176,8 @@ class Futures(AdjustableProductMixin, Product):
             return None
 
         starts = start_days.values
-        idx = starts.searchsorted(trading_day.to_datetime64(), side='right') - 1
+        trading_day64 = pd.Timestamp(trading_day).to_datetime64()
+        idx = starts.searchsorted(trading_day64, side='right') - 1
         if idx < 0:
             return None
         if end_days[idx] >= trading_day:
@@ -207,7 +214,7 @@ class Futures(AdjustableProductMixin, Product):
         self._ensure_roller_info()
         if self.roller_info is None or self.roller_info.empty:
             return iter(())
-        return (row for _, row in self.roller_info.iterrows())
+        return self.roller_info.itertuples(index=False)
 
     def list_roller_contracts(self) -> List[FuturesContract]:
         """返回 roller_info 中出现过的合约对象列表。"""
@@ -237,13 +244,12 @@ class Futures(AdjustableProductMixin, Product):
             idx = loc
         else:
             idx = int(loc[0])
-        rows = self.roller_info.iloc[idx:idx + max(1, int(n))]
-        contracts = []
-        for _, r in rows.iterrows():
-            contract_id = str(r.get('CONTRACT_UID') or r.get('CONTRACT') or '')
-            if contract_id:
-                contracts.append(self.contract_class(contract_id))
-        return contracts
+        rows = self.roller_info.iloc[idx:idx + max(1, int(n))][['CONTRACT_UID', 'CONTRACT']]
+        return [
+            self.contract_class(str(r.CONTRACT_UID or r.CONTRACT))
+            for r in tqdm(rows.itertuples(index=False), total=len(rows), desc=f"Chain contracts {self.name}")
+            if str(r.CONTRACT_UID or r.CONTRACT)
+        ]
 
     def get_nth_roller_contract_from_trading_day(self, trading_day: datetime | str, n: int = 0) -> Optional[FuturesContract]:
         """返回交易日所在主力段之后第 n 个主力链合约，n=0 为当期主力。"""
