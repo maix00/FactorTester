@@ -36,7 +36,7 @@ from tools.data.DataColumn import DataColumn
 from tools.factors.FactorExpr import ColumnRef
 from tools.factors.FactorFamily import FactorFamily
 from tools.factors.FactorTester import FactorTester
-from tools.factors.tests import NextReturns
+from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.ic import run_ic_for_factor
 
 from tests.calc import (

@@ -1504,6 +1504,7 @@ def get_group_snapshot():
         # ── 持仓金额数据 (refs #100) ──
         hold_np = getattr(group_result, 'hold_amounts_np', None)
         t_idx = None
+        assert group_result is not None, "group_result should not be None here"
         if hold_np is not None and group_result.index_list:
             try:
                 t_idx = group_result.index_list.index(best_idx_entry)

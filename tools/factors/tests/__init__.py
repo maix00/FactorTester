@@ -6,3 +6,5 @@ test logic lives in this package.
 
 from tools.factors.tests.CrossSectionIC import CrossSectionIC
 from tools.factors.tests.NextReturns import NextReturns
+
+__all__ = ["CrossSectionIC", "NextReturns"]

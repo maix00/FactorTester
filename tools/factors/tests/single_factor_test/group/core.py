@@ -14,7 +14,7 @@ from tools.data.DataFreq import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests import NextReturns
+from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 from tools.products import lookup_contract_product
 
@@ -184,6 +184,15 @@ def _append_trade_product(
     return pos
 
 
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    if value in (None, ""):
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _expand_single_trade_product(
     product: Any,
     signal_days: pd.DatetimeIndex,
@@ -203,10 +212,14 @@ def _expand_single_trade_product(
         product._ensure_roller_info()
     except Exception:
         pass
-    roller_info = getattr(product, "roller_info", None)
-    if isinstance(roller_info, pd.DataFrame) and not roller_info.empty:
-        start_days = pd.DatetimeIndex(pd.to_datetime(roller_info["STARTDATE"]))
-        end_days = pd.DatetimeIndex(pd.to_datetime(roller_info["ENDDATE"]))
+    roller_info_obj = getattr(product, "roller_info", None)
+    if not isinstance(roller_info_obj, pd.DataFrame):
+        roller_df = None
+    else:
+        roller_df = cast(pd.DataFrame, roller_info_obj)
+    if roller_df is not None and not roller_df.empty:
+        start_days = pd.DatetimeIndex(pd.to_datetime(roller_df["STARTDATE"]))
+        end_days = pd.DatetimeIndex(pd.to_datetime(roller_df["ENDDATE"]))
         if start_days.tz is not None:
             start_days = start_days.tz_localize(None)
         if end_days.tz is not None:
@@ -214,7 +227,8 @@ def _expand_single_trade_product(
         start_days = cast(pd.DatetimeIndex, start_days.normalize())
         end_days = cast(pd.DatetimeIndex, end_days.normalize())
 
-        for row_idx, row in roller_info.reset_index(drop=True).iterrows():
+        roller_rows = roller_df.reset_index(drop=True)
+        for row_idx, row in enumerate(roller_rows.itertuples(index=False)):
             left = int(signal_days.searchsorted(start_days[row_idx], side="left"))
             right = int(signal_days.searchsorted(end_days[row_idx], side="right"))
             if left >= right:
@@ -222,7 +236,7 @@ def _expand_single_trade_product(
             interval_active = active_mask[left:right]
             if not bool(interval_active.any()):
                 continue
-            contract_id = str(row.get("CONTRACT_UID") or row.get("CONTRACT") or "")
+            contract_id = str(getattr(row, "CONTRACT_UID", None) or getattr(row, "CONTRACT", None) or "")
             trade_product = product.contract_class(contract_id) if contract_id else product
             pos = _append_trade_product(trade_products, trade_pos_by_key, trade_product)
             mapped_slice = mapped[left:right]
@@ -248,7 +262,7 @@ def _expand_trade_products(
     """Map signal-level membership onto the union of actual traded products/contracts."""
     T, M, P_signal = signal_membership_np.shape
     signal_days = _normalize_signal_days(signal_index)
-    active_mask_np = signal_membership_np.any(axis=1)
+    active_mask_np = cast(np.ndarray, np.asarray(signal_membership_np.any(axis=1), dtype=bool))
     trade_products: list = []
     trade_pos_by_key: dict[tuple[str, str], int] = {}
     signal_to_trade = np.full((T, P_signal), -1, dtype=int)
@@ -1727,21 +1741,22 @@ def test_by_group_single_factor(
 
     # ── 多时段品种检测（基于 data_present_mask，而不是 signal NaN） ──
     if present_src is not None:
+        present_df = cast(pd.DataFrame, present_src)
         # 对齐索引层级（与 table_src/returns_src 同样抽取 signal index）
-        present_src.index = _extract_signal_index(present_src.index)
+        present_df.index = _extract_signal_index(present_df.index)
         # 与 table/returns 同样的起止截断
         if start_date is not None:
-            _sd = _align_ts_to_index(start_date, present_src.index)
-            present_src = cast(pd.DataFrame, present_src[present_src.index >= _sd])
+            _sd = _align_ts_to_index(start_date, present_df.index)
+            present_df = cast(pd.DataFrame, present_df[present_df.index >= _sd])
         if end_date is not None:
-            _ed = _align_ts_to_index(end_date, present_src.index)
-            present_src = cast(pd.DataFrame, present_src[present_src.index <= _ed])
+            _ed = _align_ts_to_index(end_date, present_df.index)
+            present_df = cast(pd.DataFrame, present_df[present_df.index <= _ed])
         # 与 table/returns 取共同索引与列
-        present_src = present_src.loc[common_index, signal_valid_cols]
+        present_df = present_df.loc[common_index, signal_valid_cols]
         # 跟随首尾截断（与 table_np/returns_np 一致）
         if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
-            present_src = present_src.iloc[trim_start:trim_end]
-        present_np = present_src.to_numpy(dtype=bool)
+            present_df = present_df.iloc[trim_start:trim_end]
+        present_np = present_df.to_numpy(dtype=bool)
     else:
         raise ValueError(f"{factor.alias}: data_present_mask 不可用，无法进行分组测试。")
 
@@ -1981,47 +1996,47 @@ def test_by_group_single_factor(
 
     half_fee = float(fee) / 2.0
     open_fee_vec = np.array([
-        float(_fee_or_product_value(c, "open_rate", "open_ratio", half_fee))
+        _coerce_float(_fee_or_product_value(c, "open_rate", "open_ratio", half_fee), half_fee)
         for c in valid_cols
     ], dtype=float)
     close_fee_vec = np.array([
-        float(_fee_or_product_value(c, "close_rate", "close_ratio", half_fee))
+        _coerce_float(_fee_or_product_value(c, "close_rate", "close_ratio", half_fee), half_fee)
         for c in valid_cols
     ], dtype=float)
     close_today_fee_vec = np.array([
-        float(_fee_or_product_value(c, "close_today_rate", "closetoday_ratio", close_fee_vec[i]))
+        _coerce_float(_fee_or_product_value(c, "close_today_rate", "closetoday_ratio", close_fee_vec[i]), close_fee_vec[i])
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     close_yesterday_fee_vec = np.array([
-        float(_fee_or_product_value(c, "close_yesterday_rate", "close_ratio", close_fee_vec[i]))
+        _coerce_float(_fee_or_product_value(c, "close_yesterday_rate", "close_ratio", close_fee_vec[i]), close_fee_vec[i])
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     open_fee_fixed_vec = np.array([
-        float(_fee_or_product_value(c, "open_fixed", "open_fixed", 0.0))
+        _coerce_float(_fee_or_product_value(c, "open_fixed", "open_fixed", 0.0), 0.0)
         for c in valid_cols
     ], dtype=float)
     close_fee_fixed_vec = np.array([
-        float(_fee_or_product_value(c, "close_fixed", "close_fixed", 0.0))
+        _coerce_float(_fee_or_product_value(c, "close_fixed", "close_fixed", 0.0), 0.0)
         for c in valid_cols
     ], dtype=float)
     close_today_fee_fixed_vec = np.array([
-        float(_fee_or_product_value(c, "close_today_fixed", "closetoday_fixed", close_fee_fixed_vec[i]))
+        _coerce_float(_fee_or_product_value(c, "close_today_fixed", "closetoday_fixed", close_fee_fixed_vec[i]), close_fee_fixed_vec[i])
         for i, c in enumerate(valid_cols)
     ], dtype=float)
     point_value_vec = np.array([
-        float(_fee_or_product_value(c, "multiplier", "multiplier", getattr(c, "point_value", None) or 1.0))
+        _coerce_float(_fee_or_product_value(c, "multiplier", "multiplier", getattr(c, "point_value", None) or 1.0), 1.0)
         for c in valid_cols
     ], dtype=float)
     min_tick_vec = np.array([
-        float(_fee_or_product_value(c, "min_tick", "min_tick", 0.0))
+        _coerce_float(_fee_or_product_value(c, "min_tick", "min_tick", 0.0), 0.0)
         for c in valid_cols
     ], dtype=float)
     min_trade_quantity_vec = np.array([
-        float(_fee_or_product_value(c, "min_trade_quantity", "min_trade_quantity", getattr(c, "min_trade_quantity", 1.0) or 1.0))
+        _coerce_float(_fee_or_product_value(c, "min_trade_quantity", "min_trade_quantity", getattr(c, "min_trade_quantity", 1.0) or 1.0), 1.0)
         for c in valid_cols
     ], dtype=float)
     long_margin_ratio_vec = np.array([
-        float(_fee_or_product_value(c, "long_margin_ratio", "long_margin_ratio", 1.0))
+        _coerce_float(_fee_or_product_value(c, "long_margin_ratio", "long_margin_ratio", 1.0), 1.0)
         for c in valid_cols
     ], dtype=float)
     is_margin_traded_vec = np.array([
@@ -2396,7 +2411,7 @@ def test_by_group_single_factor(
 
     report_df = pd.DataFrame(report_groups).T.sort_index()
     r = tester._get_result(factor) if hasattr(tester, "_get_result") else None
-    group_result = GroupRunResult(
+    group_result = cast(Any, GroupRunResult)(
         fee_costs_np=fee_costs_np,
         trade_notional_ratio_np=trade_notional_ratio_np,
         gross_returns_np=group_gross_returns_np,
