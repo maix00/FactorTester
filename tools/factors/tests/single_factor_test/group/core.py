@@ -1883,41 +1883,55 @@ def test_by_group_single_factor(
     # 每个 group 的独立品种费率覆盖，只传被修改的单元格。
     group_maps = group_fee_maps or {}
 
-    def _resolve_group_fee(g: int, fee_type: str, fallback_vec: np.ndarray) -> np.ndarray:
-        """Resolve per-product fee for group g.
-        优先级：group_fee_maps[g] > derived_groups[d_i].fee_override > 全局 fallback_vec
-        """
-        row = fallback_vec.copy()
-        field = fee_type if fee_type.endswith("_fixed") or fee_type.endswith("_rate") else f"{fee_type}_rate"
-        # 1. group_fee_maps: per-product override for this group
+    margin_ratio_mat = np.tile(long_margin_ratio_vec, (n_groups, 1))
+
+    _group_progress(f"group fee matrix start factor={factor.alias} groups={n_groups} products={P}")
+    open_fee_mat = np.tile(open_fee_vec, (n_groups, 1))
+    close_fee_mat = np.tile(close_fee_vec, (n_groups, 1))
+    close_today_fee_mat = np.tile(close_today_fee_vec, (n_groups, 1))
+    open_fee_fixed_mat = np.tile(open_fee_fixed_vec, (n_groups, 1))
+    close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (n_groups, 1))
+    close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (n_groups, 1))
+
+    for g in range(n_groups):
         gmap = group_maps.get(g)
         if gmap and isinstance(gmap, dict):
             for raw_code, prod_fee in gmap.items():
-                if not (prod_fee and isinstance(prod_fee, dict) and field in prod_fee and prod_fee[field] is not None):
+                if not isinstance(prod_fee, dict):
                     continue
                 positions = positions_by_variety_code_lower.get(str(raw_code).lower(), [])
-                if positions:
-                    row[positions] = float(prod_fee[field])
-        # 2. Derived groups: uniform fee_override covers all products
+                if not positions:
+                    continue
+                if 'open_rate' in prod_fee and prod_fee['open_rate'] is not None:
+                    open_fee_mat[g, positions] = float(prod_fee['open_rate'])
+                if 'close_rate' in prod_fee and prod_fee['close_rate'] is not None:
+                    close_fee_mat[g, positions] = float(prod_fee['close_rate'])
+                if 'close_today_rate' in prod_fee and prod_fee['close_today_rate'] is not None:
+                    close_today_fee_mat[g, positions] = float(prod_fee['close_today_rate'])
+                if 'open_fixed' in prod_fee and prod_fee['open_fixed'] is not None:
+                    open_fee_fixed_mat[g, positions] = float(prod_fee['open_fixed'])
+                if 'close_fixed' in prod_fee and prod_fee['close_fixed'] is not None:
+                    close_fee_fixed_mat[g, positions] = float(prod_fee['close_fixed'])
+                if 'close_today_fixed' in prod_fee and prod_fee['close_today_fixed'] is not None:
+                    close_today_fee_fixed_mat[g, positions] = float(prod_fee['close_today_fixed'])
         if g >= n_base and derived_groups:
             d_i = g - n_base
             if d_i < len(derived_groups):
                 dd = derived_groups[d_i]
                 if isinstance(dd, dict):
                     fo = dd.get('fee_override') or {}
-                    if field in fo and fo[field] is not None:
-                        row[:] = float(fo[field])
-        return row
-
-    margin_ratio_mat = np.tile(long_margin_ratio_vec, (n_groups, 1))
-
-    _group_progress(f"group fee matrix start factor={factor.alias} groups={n_groups} products={P}")
-    open_fee_mat = np.stack([_resolve_group_fee(g, 'open', open_fee_vec) for g in range(n_groups)], axis=0)
-    close_fee_mat = np.stack([_resolve_group_fee(g, 'close', close_fee_vec) for g in range(n_groups)], axis=0)
-    close_today_fee_mat = np.stack([_resolve_group_fee(g, 'close_today', close_today_fee_vec) for g in range(n_groups)], axis=0)
-    open_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'open_fixed', open_fee_fixed_vec) for g in range(n_groups)], axis=0)
-    close_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'close_fixed', close_fee_fixed_vec) for g in range(n_groups)], axis=0)
-    close_today_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'close_today_fixed', close_today_fee_fixed_vec) for g in range(n_groups)], axis=0)
+                    if 'open_rate' in fo and fo['open_rate'] is not None:
+                        open_fee_mat[g, :] = float(fo['open_rate'])
+                    if 'close_rate' in fo and fo['close_rate'] is not None:
+                        close_fee_mat[g, :] = float(fo['close_rate'])
+                    if 'close_today_rate' in fo and fo['close_today_rate'] is not None:
+                        close_today_fee_mat[g, :] = float(fo['close_today_rate'])
+                    if 'open_fixed' in fo and fo['open_fixed'] is not None:
+                        open_fee_fixed_mat[g, :] = float(fo['open_fixed'])
+                    if 'close_fixed' in fo and fo['close_fixed'] is not None:
+                        close_fee_fixed_mat[g, :] = float(fo['close_fixed'])
+                    if 'close_today_fixed' in fo and fo['close_today_fixed'] is not None:
+                        close_today_fee_fixed_mat[g, :] = float(fo['close_today_fixed'])
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
     # close_fee_mat 始终=平昨，close_today_fee_mat 始终=平今
