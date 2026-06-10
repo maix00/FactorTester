@@ -347,25 +347,67 @@ class FactorTester(UniqueObject):
                       plot_n_group_list: Optional[List[int]] = None,
                       sift_volume_ratio: Optional[float] = None,
                       fee: float = 0.0, fee_map: dict = {}, **kwargs) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-        """按因子值分组测试；核心实现位于 tools.factors.tests.single_factor_test.group。"""
-        from tools.factors.tests.single_factor_test.group.core import test_by_group
-        return test_by_group(
-            self,
-            factors=factors,
-            returns_col=returns_col,
-            n_groups=n_groups,
-            n_groups_name=n_groups_name,
-            time_range=time_range,
-            plot_remark_str=plot_remark_str,
-            plot_flag=plot_flag,
-            save_plot=save_plot,
-            plot_show=plot_show,
-            plot_n_group_list=plot_n_group_list,
-            sift_volume_ratio=sift_volume_ratio,
-            fee=fee,
-            fee_map=fee_map,
-            **kwargs,
-        )
+        """按因子值分组测试。"""
+        from tools.factors.tests.single_factor_test.group.core import test_by_group_single_factor
+
+        factors = [factors] if isinstance(factors, Factor) else (factors if factors is not None else self.factors)
+        assert isinstance(factors, list), f"factors must be a list, got {type(factors)}"
+
+        if plot_flag and plot_n_group_list is not None:
+            plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
+
+        products_out: Any = {}
+        returns_out: Any = {}
+        report_df: pd.DataFrame = pd.DataFrame()
+
+        use_closetoday = kwargs.pop('use_closetoday', False)
+        initial_capital = kwargs.pop('initial_capital', 100000000.0)
+        rebalance_mode = kwargs.pop('rebalance_mode', 'buy_and_hold')
+        derived_groups = kwargs.pop('derived_groups', None)
+        group_fee_maps = kwargs.pop('group_fee_maps', None)
+        group_variants = kwargs.pop('group_variants', None)
+
+        def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+            return test_by_group_single_factor(
+                self,
+                f,
+                returns_col=returns_col,
+                n_groups=n_groups,
+                n_groups_name=n_groups_name,
+                time_range=time_range,
+                plot_remark_str=plot_remark_str,
+                plot_flag=plot_flag,
+                save_plot=save_plot,
+                plot_show=plot_show,
+                plot_n_group_list=plot_n_group_list,
+                sift_volume_ratio=sift_volume_ratio,
+                fee=fee,
+                fee_map=fee_map,
+                use_closetoday=use_closetoday,
+                initial_capital=initial_capital,
+                rebalance_mode=rebalance_mode,
+                derived_groups=derived_groups,
+                group_fee_maps=group_fee_maps,
+                group_variants=group_variants,
+            )
+
+        cum_np_out: Optional[np.ndarray] = None
+        idx_list_out: Optional[list] = None
+
+        if len(factors) == 1:
+            products_out, returns_out, report_df, cum_np_out, idx_list_out = _run(factors[0])
+        else:
+            max_workers = min(len(factors), 8)
+            results: Dict[int, Any] = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_idx = {executor.submit(_run, f): i for i, f in enumerate(factors)}
+                for future in as_completed(future_to_idx):
+                    results[future_to_idx[future]] = future.result()
+            last_idx = max(results.keys())
+            products_out, returns_out, report_df, cum_np_out, idx_list_out = results[last_idx]
+
+        assert cum_np_out is not None and idx_list_out is not None
+        return products_out, returns_out, report_df, cum_np_out, idx_list_out
     
 
 def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
@@ -2399,82 +2398,3 @@ def test_by_group_single_factor(
     # NOTE: 不再将 returns_dict 写回 r.returns——returns_dict 是 {group_id: {ts: float}}
     # 的嵌套字典，会污染后续分组测试使用的 r.returns（IC测试的品种x时间矩阵）。
     return products_dict, returns_dict, report_df, cumulative_returns_np, index_list
-
-
-def test_by_group(
-    tester: Any,
-    factors: Optional[Factor | List[Factor]] = None,
-    returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-    n_groups: int = 5,
-    n_groups_name: Dict[int, str] = {},
-    time_range: Optional[Tuple] = None,
-    plot_remark_str: Optional[str] = None,
-    plot_flag: bool = False,
-    save_plot: bool = True,
-    plot_show: bool = True,
-    plot_n_group_list: Optional[List[int]] = None,
-    sift_volume_ratio: Optional[float] = None,
-    fee: float = 0.0,
-    fee_map: dict = {},
-    rebalance_mode: str = "buy_and_hold",
-    **kwargs,
-) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-    """Run group test for one or more factors.
-
-    rebalance_mode:
-      - \"each_period\":   每期等权再平衡
-      - \"buy_and_hold\":  组内持仓不动（默认）
-      - \"recycle\":       退出资金优先补新仓
-    """
-    factors = [factors] if isinstance(factors, Factor) else (factors if factors is not None else tester.factors)
-    assert isinstance(factors, list), f"factors must be a list, got {type(factors)}"
-
-    if plot_flag and plot_n_group_list is not None:
-        plot_n_group_list = [n_groups + n_group if n_group < 0 else n_group for n_group in plot_n_group_list] if plot_n_group_list else None
-
-    products_out: Any = {}
-    returns_out: Any = {}
-    report_df: pd.DataFrame = pd.DataFrame()
-
-    def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
-        products, returns, report, cum_np, idx_list = test_by_group_single_factor(
-            tester,
-            f,
-            returns_col=returns_col,
-            n_groups=n_groups,
-            n_groups_name=n_groups_name,
-            time_range=time_range,
-            plot_remark_str=plot_remark_str,
-            plot_flag=plot_flag,
-            save_plot=save_plot,
-            plot_show=plot_show,
-            plot_n_group_list=plot_n_group_list,
-            sift_volume_ratio=sift_volume_ratio,
-            fee=fee,
-            fee_map=fee_map,
-            use_closetoday=kwargs.pop('use_closetoday', False),
-            initial_capital=kwargs.pop('initial_capital', 100000000.0),
-            rebalance_mode=rebalance_mode,
-            derived_groups=kwargs.pop('derived_groups', None),
-            group_fee_maps=kwargs.pop('group_fee_maps', None),
-            group_variants=kwargs.pop('group_variants', None),
-        )
-        return products, returns, report, cum_np, idx_list
-
-    cum_np_out: Optional[np.ndarray] = None
-    idx_list_out: Optional[list] = None
-
-    if len(factors) == 1:
-        products_out, returns_out, report_df, cum_np_out, idx_list_out = _run(factors[0])
-    else:
-        max_workers = min(len(factors), 8)
-        results: Dict[int, Any] = {}
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {executor.submit(_run, f): i for i, f in enumerate(factors)}
-            for future in as_completed(future_to_idx):
-                results[future_to_idx[future]] = future.result()
-        last_idx = max(results.keys())
-        products_out, returns_out, report_df, cum_np_out, idx_list_out = results[last_idx]
-
-    assert cum_np_out is not None and idx_list_out is not None
-    return products_out, returns_out, report_df, cum_np_out, idx_list_out
