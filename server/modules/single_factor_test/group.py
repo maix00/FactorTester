@@ -855,7 +855,7 @@ def _serialize_group_simulation_result(
 
 @sft_bp.route('/run_group_test_batch', methods=['POST'])
 def run_group_test_batch():
-    """批量并行运行多个 batch 的分组测试，支持跨 batch Long-Short。
+    """批量并行运行多个分组测试提交条目，支持跨提交条目的 Long-Short。
     
     Request JSON:
     {
@@ -879,14 +879,14 @@ def run_group_test_batch():
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     data = request.get_json()
-    batches_raw = data.get('batches')
-    if not isinstance(batches_raw, list) or not batches_raw:
+    submitted_entries = data.get('batches')
+    if not isinstance(submitted_entries, list) or not submitted_entries:
         return jsonify({'success': False, 'error': 'batches 必须是非空数组'}), 400
 
     request_started = time.perf_counter()
     cross_batch_ls_raw = data.get('cross_batch_ls') or []
     _progress(
-        f"group simulations request start entries={len(batches_raw)} "
+        f"group simulations request start entries={len(submitted_entries)} "
         f"cross_batch_ls={len(cross_batch_ls_raw) if isinstance(cross_batch_ls_raw, list) else 0}"
     )
 
@@ -904,17 +904,17 @@ def run_group_test_batch():
         group_fee_maps = {int(k): v for k, v in group_fee_maps.items()}
 
     # 费率从第一个前端提交条目的 tester 解析
-    first_batch = batches_raw[0]
+    first_entry = submitted_entries[0]
     try:
-        sub_id = first_batch.get('submission_id')
+        sub_id = first_entry.get('submission_id')
         tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test_batch')
         fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
 
-    # 后端执行只区分 FactorTester；batch 仅是前端提交分组定义时的组织方式。
+    # 后端执行只区分 FactorTester；batches 只是前端提交分组定义时的组织方式。
     entries_by_submission: dict[str, list[tuple[int, dict[str, Any]]]] = {}
-    for idx, payload_entry in enumerate(batches_raw):
+    for idx, payload_entry in enumerate(submitted_entries):
         if not isinstance(payload_entry, dict):
             continue
         submission_id = str(payload_entry.get('submission_id') or '')
@@ -1001,7 +1001,7 @@ def run_group_test_batch():
 
     # 构建前端提交条目→索引映射（供 cross-batch LS 反查）
     entry_index_by_key: dict[str, int] = {}
-    for i, payload_entry in enumerate(batches_raw):
+    for i, payload_entry in enumerate(submitted_entries):
         key = f"{payload_entry.get('submission_id','')}|{payload_entry.get('factor_alias','')}|{int(payload_entry.get('n_groups', 5))}"
         entry_index_by_key[key] = i
 
@@ -1045,12 +1045,12 @@ def run_group_test_batch():
         return out
 
     # ── 阶段 1：并行计算所有 tester 提交 ──
-    submission_results: list[dict | None] = [None] * len(batches_raw)
+    submission_results: list[dict | None] = [None] * len(submitted_entries)
     errors = []
     max_workers = min(len(entries_by_submission), 6)
     _progress(
         f"submission parallel submit submissions={len(entries_by_submission)} "
-        f"entries={len(batches_raw)} max_workers={max_workers}"
+        f"entries={len(submitted_entries)} max_workers={max_workers}"
     )
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -1067,17 +1067,17 @@ def run_group_test_batch():
                 errors.append({'submission_id': submission_id, 'error': str(e)})
                 continue
             for idx, r in simulation_results:
-                payload_entry = batches_raw[idx]
+                payload_entry = submitted_entries[idx]
                 if r.get('success'):
                     r['simulation_index'] = idx
                     submission_results[idx] = r
-                    _progress(f"submission future accepted index={idx + 1}/{len(batches_raw)}")
+                    _progress(f"submission future accepted index={idx + 1}/{len(submitted_entries)}")
                 else:
                     _progress(
-                        f"submission future returned error index={idx + 1}/{len(batches_raw)} "
+                        f"submission future returned error index={idx + 1}/{len(submitted_entries)} "
                         f"error={r.get('error', '未知错误')}"
                     )
-                    errors.append({'index': idx, 'submission_id': batches_raw[idx].get('submission_id'),
+                    errors.append({'index': idx, 'submission_id': submitted_entries[idx].get('submission_id'),
                                    'factor_alias': payload_entry.get('factor_alias'),
                                    'error': r.get('error', '未知错误'),
                                    'traceback': r.get('traceback')})
@@ -1085,10 +1085,10 @@ def run_group_test_batch():
     valid_results = [r for r in submission_results if r is not None]
     _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")
     if not valid_results:
-        first_err = errors[0] if errors else {'error': '所有 batch 均失败'}
+        first_err = errors[0] if errors else {'error': '所有提交条目均失败'}
         return jsonify({
             'success': False,
-            'error': first_err.get('error', '所有 batch 均失败'),
+            'error': first_err.get('error', '所有提交条目均失败'),
             'traceback': first_err.get('traceback'),
             'simulation_errors': errors,
         }), 500
@@ -1272,8 +1272,8 @@ def run_group_test_batch():
         'multi_session_active': last_multi_session,
         'multi_session_entries': multi_session_entries,
         'rebalance_mode': last_rebalance,
-        'submission_id': batches_raw[0].get('submission_id', ''),
-        'factor_alias': batches_raw[0].get('factor_alias', ''),
+        'submission_id': submitted_entries[0].get('submission_id', ''),
+        'factor_alias': submitted_entries[0].get('factor_alias', ''),
         'tester_alias': valid_results[0].get('tester_alias', '?') if valid_results else '?',
         'tester_product_count': valid_results[0].get('tester_product_count', 0) if valid_results else 0,
         'simulation_count': len(valid_results),
