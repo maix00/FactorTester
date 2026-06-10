@@ -86,6 +86,14 @@ class Futures(AdjustableProductMixin, Product):
         subset = cast(pd.DataFrame, ri[ri['PRODUCT'] == self.name]).sort_values(by=['STARTDATE'])
         self.roller_info = subset if not subset.empty else None
 
+    @staticmethod
+    def _normalize_roller_day(value: datetime | str | pd.Timestamp) -> pd.Timestamp:
+        """Normalize roller/trading-day comparisons onto tz-naive day precision."""
+        ts = cast(pd.Timestamp, pd.Timestamp(value))
+        if ts.tzinfo is not None:
+            ts = cast(pd.Timestamp, ts.tz_localize(None))
+        return cast(pd.Timestamp, ts.normalize())
+
     # ── 合约列表 ──────────────────────────────────────────────────────────
 
     def get_contract_list(
@@ -148,15 +156,24 @@ class Futures(AdjustableProductMixin, Product):
         if self.roller_info is None or self.roller_info.empty:
             return None
 
-        trading_day = pd.to_datetime(trading_day)
-        if trading_day < self.roller_info['STARTDATE'].iloc[0] or trading_day > self.roller_info['ENDDATE'].iloc[-1]:
+        trading_day = self._normalize_roller_day(trading_day)
+        start_days = pd.DatetimeIndex(pd.to_datetime(self.roller_info['STARTDATE']))
+        end_days = pd.DatetimeIndex(pd.to_datetime(self.roller_info['ENDDATE']))
+        if start_days.tz is not None:
+            start_days = start_days.tz_localize(None)
+        if end_days.tz is not None:
+            end_days = end_days.tz_localize(None)
+        start_days = cast(pd.DatetimeIndex, start_days.normalize())
+        end_days = cast(pd.DatetimeIndex, end_days.normalize())
+
+        if trading_day < start_days[0] or trading_day > end_days[-1]:
             return None
 
-        starts = self.roller_info['STARTDATE'].values
+        starts = start_days.values
         idx = starts.searchsorted(trading_day.to_datetime64(), side='right') - 1
         if idx < 0:
             return None
-        if self.roller_info['ENDDATE'].iloc[idx] >= trading_day:
+        if end_days[idx] >= trading_day:
             return self.roller_info.iloc[idx]
         return None
 
