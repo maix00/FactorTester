@@ -1411,13 +1411,16 @@ def _expand_trade_products(
         return list(signal_products), signal_membership_np.copy()
 
     membership_np = np.zeros((T, M, len(trade_products)), dtype=bool)
-    for pi in tqdm(range(P_signal), desc="Map trade membership"):
-        mapped = signal_to_trade[:, pi]
-        valid_pos = np.unique(mapped[mapped >= 0])
-        for pos in valid_pos:
-            time_mask = mapped == pos
-            if bool(time_mask.any()):
-                membership_np[time_mask, :, int(pos)] |= signal_membership_np[time_mask, :, pi]
+    active_t, active_g, active_pi = np.nonzero(signal_membership_np)
+    if active_t.size > 0:
+        mapped_pos = signal_to_trade[active_t, active_pi]
+        valid = mapped_pos >= 0
+        if bool(valid.any()):
+            membership_np[
+                active_t[valid],
+                active_g[valid],
+                mapped_pos[valid].astype(int, copy=False),
+            ] = True
     _group_progress(f"expand trade products done trade_products={len(trade_products)}")
     return trade_products, membership_np
 
@@ -2447,17 +2450,8 @@ def test_by_group_single_factor(
     price_col = shared.price_col
     source_freq = shared.source_freq
     effective_return_freq = shared.effective_return_freq
-    table_src = shared.table_src
-    returns_src = shared.returns_src
-    price_src = shared.price_src
     signal_valid_cols = shared.signal_valid_cols
-    table_np = shared.table_np
-    signal_returns_np = shared.signal_returns_np
-    present_np = shared.present_np
-    signal_update_mask = shared.signal_update_mask
     index_list = shared.index_list
-    T = shared.T
-    P = shared.P
     multi_session_active = shared.multi_session_active
 
     r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
