@@ -1049,7 +1049,7 @@ def simulate_derived_group(
     精选组的 wealth 演化路径独立于 base group：期初 wealth 初始为 1，
     每期根据子集 mask 重新计算 target_amounts、fee、net returns。
 
-    底层复用 simulate_groups 引擎，构造 (T, 1, P) 的 membership matrix 后统一计算。
+    底层复用 simulate_group_trading_book，引入 (T, 1, P) 的 membership matrix 后统一计算。
 
     参数：
         open_fee_vec、close_fee_vec、close_today_fee_vec 由外部调用方构建传入，
@@ -1150,11 +1150,11 @@ def simulate_derived_groups_batch(
     use_closetoday: bool = False,
     close_today_fee_vec: np.ndarray | None = None,
 ) -> list[dict]:
-    """一次 simulate_groups 调用，批量计算同一基础组的多个派生组。
+    """一次 simulate_group_trading_book 调用，批量计算同一基础组的多个派生组。
 
     所有派生组必须共享同一个 group_index（基础组索引）。
     每个派生组的品种子集可能不同；取所有 selected_idx 的并集作为
-    P_all，构造 (T, N_derived, P_all) membership 后一次传入 simulate_groups。
+    P_all，构造 (T, N_derived, P_all) membership 后一次传入 simulate_group_trading_book。
 
     derivations: [{'selected_idx': [...], 'name': '...'}, ...]
     返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 derivations 相同)

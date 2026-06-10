@@ -497,7 +497,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                                          fee_uniform: float = 0.0) -> list[dict]:
     """一次 simulate_derived_groups_batch 调用，返回 [{success, group?, metric?, error?}, ...]。
 
-    同一 group_index 的条目合并为一次 simulate_groups 调用。
+    同一 group_index 的条目合并为一次精选组交易簿模拟调用。
     不同 group_index 的条目各自发送独立请求（此时回退到逐个 simulate_derived_group）。
     """
     from tools.products.product_utils import product_display_name
@@ -593,7 +593,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
             except Exception as e:
                 results[item['orig_index']] = {'index': item['orig_index'], 'success': False, 'error': str(e)}
         else:
-            # 多个派生组共享同一基础组 → 批量一次 simulate_groups
+            # 多个派生组共享同一基础组 → 批量一次精选组交易簿模拟
             # Apply each entry's fee_override
             derivations = []
             for item in items:
@@ -1586,7 +1586,7 @@ def get_group_detail():
 
 @sft_bp.route('/create_derived_groups_batch', methods=['POST'])
 def create_derived_groups_batch():
-    """批量生成多个派生组（一次调用，后端一次 simulate_groups 计算同基础组的所有派生组）。"""
+    """批量生成多个派生组（一次调用，后端一次交易簿模拟计算同基础组的所有派生组）。"""
     data = request.get_json() or {}
     submission_id = data.get('submission_id')
     entries = data.get('entries') or []  # [{group_index, product_names, name}, ...]
