@@ -690,9 +690,9 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
     groups = payload_entry.get('groups')
     group_names = payload_entry.get('group_names')
     if isinstance(groups, list) and groups:
-        n_groups_name, group_variants = _parse_groups_payload(groups)
+        n_groups_name, _ = _parse_groups_payload(groups)
     else:
-        n_groups_name, group_variants = _parse_group_variants(group_names)
+        n_groups_name, _ = _parse_group_variants(group_names)
     if not n_groups_name:
         n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
     entry_derived_groups = payload_entry.get('derived_groups')
@@ -711,7 +711,6 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
         'factor_alias': factor_alias,
         'n_groups': n_groups,
         'n_groups_name': n_groups_name,
-        'group_variants': group_variants,
         'derived_groups': entry_derived_groups,
         'ls_configs': ls_configs,
     }
@@ -899,11 +898,6 @@ def run_group_test_batch():
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     derived_groups = data.get('derived_groups', None)
-    group_fee_maps = data.get('group_fee_maps', None)
-    # group_fee_maps: {group_index: {variety_code: {open, close, close_today, ...}}} 或 null
-    if group_fee_maps is not None and isinstance(group_fee_maps, dict):
-        group_fee_maps = {int(k): v for k, v in group_fee_maps.items()}
-
     # 费率从第一个前端提交条目的 tester 解析
     first_entry = submitted_entries[0]
     try:
@@ -1006,15 +1000,36 @@ def run_group_test_batch():
         key = f"{payload_entry.get('submission_id','')}|{payload_entry.get('factor_alias','')}|{int(payload_entry.get('n_groups', 5))}"
         entry_index_by_key[key] = i
 
-    def _run_submission_simulations(submission_id: str, indexed_specs: list[tuple[int, dict[str, Any]]]) -> list[tuple[int, dict]]:
-        _progress(
-            f"submission simulations start submission={submission_id} "
-            f"count={len(indexed_specs)}"
-        )
+    submission_results: list[dict | None] = [None] * len(submitted_entries)
+    errors = []
+    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
+
+    submission_specs: list[tuple[str, Any, list[tuple[int, dict[str, Any]]]]] = []
+    for submission_id, indexed_specs in entries_by_submission.items():
         tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_batch_submission')
-        specs = [spec for _, spec in indexed_specs]
-        raw_results = tester.run_group_simulations(
-            specs,
+        submission_specs.append((submission_id, tester, indexed_specs))
+
+    overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
+    containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
+    merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
+    group_tester = FactorGroupTester.from_submission_specs(
+        submission_specs,
+        start_date=start_date,
+        end_date=end_date,
+        calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
+        rebalance_mode=rebalance_mode,
+        overlap_ratio=overlap_ratio,
+        containment_ratio=containment_ratio,
+        merge_cost_ratio=merge_cost_ratio,
+        progress_hook=_progress,
+    )
+    _progress(
+        f"group tester batches overlap_ratio={overlap_ratio:.2f} "
+        f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
+        f"batches={group_tester.build_batch_labels()}"
+    )
+    try:
+        raw_results = group_tester.run(
             fee=fee_uniform,
             fee_map=fee_map,
             use_closetoday=use_closetoday,
@@ -1022,66 +1037,34 @@ def run_group_test_batch():
             rebalance_mode=rebalance_mode,
             start_date=start_date,
             end_date=end_date,
-            group_fee_maps=group_fee_maps,
             calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
-            requested_calendar_freq=effective_group_calendar_freq,
-            progress_hook=lambda message: _progress(f"submission={submission_id} {message}"),
+            progress_hook=_progress,
         )
-        out: list[tuple[int, dict]] = []
-        for (idx, spec), raw_result in zip(indexed_specs, raw_results):
-            serialized = _serialize_group_simulation_result(
-                tester=tester,
-                submission_id=submission_id,
-                factor_alias=str(spec.get('factor_alias') or ''),
-                n_groups=int(spec.get('n_groups', 5)),
-                ls_configs=spec.get('ls_configs'),
-                rebalance_mode=str(spec.get('rebalance_mode') or rebalance_mode),
-                simulation_result=raw_result,
-            )
-            serialized['submission_id'] = submission_id
-            serialized['factor_alias'] = str(spec.get('factor_alias') or '')
-            serialized['n_groups_requested'] = int(spec.get('n_groups', 5))
-            out.append((idx, serialized))
-        _progress(f"submission simulations done submission={submission_id}")
-        return out
+    except Exception as e:
+        errors.append({'error': str(e)})
+        raw_results = []
 
-    # ── 阶段 1：并行计算所有 tester 提交 ──
-    submission_results: list[dict | None] = [None] * len(submitted_entries)
-    errors = []
-    max_workers = min(len(entries_by_submission), 6)
-    _progress(
-        f"submission parallel submit submissions={len(entries_by_submission)} "
-        f"entries={len(submitted_entries)} max_workers={max_workers}"
-    )
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_run_submission_simulations, submission_id, indexed_specs): submission_id
-            for submission_id, indexed_specs in entries_by_submission.items()
-        }
-        for future in as_completed(futures):
-            submission_id = futures[future]
-            _progress(f"submission future completed submission={submission_id}")
-            try:
-                simulation_results = future.result()
-            except Exception as e:
-                _progress(f"submission future failed submission={submission_id} error={e}")
-                errors.append({'submission_id': submission_id, 'error': str(e)})
-                continue
-            for idx, r in simulation_results:
-                payload_entry = submitted_entries[idx]
-                if r.get('success'):
-                    r['simulation_index'] = idx
-                    submission_results[idx] = r
-                    _progress(f"submission future accepted index={idx + 1}/{len(submitted_entries)}")
-                else:
-                    _progress(
-                        f"submission future returned error index={idx + 1}/{len(submitted_entries)} "
-                        f"error={r.get('error', '未知错误')}"
-                    )
-                    errors.append({'index': idx, 'submission_id': submitted_entries[idx].get('submission_id'),
-                                   'factor_alias': payload_entry.get('factor_alias'),
-                                   'error': r.get('error', '未知错误'),
-                                   'traceback': r.get('traceback')})
+    for raw_result in raw_results:
+        idx = int(raw_result.get('simulation_index', -1))
+        if idx < 0 or idx >= len(submitted_entries):
+            continue
+        spec = entries_by_submission[raw_result['submission_id']]
+        payload_entry = submitted_entries[idx]
+        serialized = _serialize_group_simulation_result(
+            tester=raw_result['tester'],
+            submission_id=str(raw_result.get('submission_id') or ''),
+            factor_alias=str(raw_result.get('factor_alias') or ''),
+            n_groups=int(raw_result.get('n_groups', 5)),
+            ls_configs=raw_result.get('ls_configs'),
+            rebalance_mode=str(payload_entry.get('rebalance_mode') or rebalance_mode),
+            simulation_result=raw_result,
+        )
+        serialized['submission_id'] = str(raw_result.get('submission_id') or '')
+        serialized['factor_alias'] = str(raw_result.get('factor_alias') or '')
+        serialized['n_groups_requested'] = int(raw_result.get('n_groups', 5))
+        serialized['simulation_index'] = idx
+        submission_results[idx] = serialized
+        _progress(f"group tester accepted index={idx + 1}/{len(submitted_entries)}")
 
     valid_results = [r for r in submission_results if r is not None]
     _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")

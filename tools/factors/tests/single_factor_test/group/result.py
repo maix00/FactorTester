@@ -1,4 +1,4 @@
-"""Result object for one group-test run."""
+"""Result objects for group backtest runs."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -55,3 +55,18 @@ class GroupRunResult:
         if self.report_df.empty or group_index not in self.report_df.index:
             return {}
         return self.report_df.loc[group_index].to_dict()
+
+
+@dataclass(slots=True)
+class MergedGroupRunResult:
+    """One merged simulate result on a global flat-group axis.
+
+    This owns the full execution output of a shared simulation and the mapping
+    metadata needed to slice back into per-submission / per-factor results.
+    """
+
+    merged_result: GroupRunResult
+    group_owner: list[dict[str, Any]]
+    submission_slices: dict[str, list[int]]
+    factor_slices: dict[str, list[int]]
+    overlap_batches: list[list[str]]
