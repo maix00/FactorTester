@@ -77,6 +77,7 @@ def _connect_cache() -> sqlite3.Connection:
             snapshot_date TEXT NOT NULL,
             exchange TEXT,
             product_id TEXT,
+            variety_name TEXT,
             instrument_id TEXT NOT NULL,
             instrument_name TEXT,
             product_class TEXT,
@@ -94,6 +95,12 @@ def _connect_cache() -> sqlite3.Connection:
             close_fixed REAL,
             closetoday_ratio REAL,
             closetoday_fixed REAL,
+            price REAL,
+            volume REAL,
+            open_interest REAL,
+            open_total_fee REAL,
+            close_total_fee REAL,
+            closetoday_total_fee REAL,
             delivery_year REAL,
             delivery_month REAL,
             open_date TEXT,
@@ -110,7 +117,26 @@ def _connect_cache() -> sqlite3.Connection:
         )
         """
     )
+    _ensure_columns(conn, "openctp_cnfutures_contract_specs", {
+        "variety_name": "TEXT",
+        "price": "REAL",
+        "volume": "REAL",
+        "open_interest": "REAL",
+        "open_total_fee": "REAL",
+        "close_total_fee": "REAL",
+        "closetoday_total_fee": "REAL",
+    })
     return conn
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {
+        str(row["name"])
+        for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+    }
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {definition}')
 
 
 def ensure_sqlite_store() -> str:
@@ -297,16 +323,31 @@ def _contract_specs_count() -> int:
     return int(row["n"])
 
 
+def _contract_specs_has_fee_snapshot_columns() -> bool:
+    with _connect_cache() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM openctp_cnfutures_contract_specs
+            WHERE variety_name IS NOT NULL
+               OR open_interest IS NOT NULL
+               OR open_total_fee IS NOT NULL
+            """
+        ).fetchone()
+    return int(row["n"]) > 0
+
+
 def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> None:
     if specs.empty:
         return
     now = time.time()
     columns = [
-        "snapshot_date", "exchange", "product_id", "instrument_id", "instrument_name",
+        "snapshot_date", "exchange", "product_id", "variety_name", "instrument_id", "instrument_name",
         "product_class", "multiplier", "min_tick", "min_trade_quantity", "max_trade_quantity",
         "long_margin_ratio", "long_margin_fixed", "short_margin_ratio", "short_margin_fixed",
         "open_ratio", "open_fixed", "close_ratio", "close_fixed", "closetoday_ratio",
-        "closetoday_fixed", "delivery_year", "delivery_month", "open_date", "expire_date",
+        "closetoday_fixed", "price", "volume", "open_interest", "open_total_fee",
+        "close_total_fee", "closetoday_total_fee", "delivery_year", "delivery_month", "open_date", "expire_date",
         "delivery_date", "underlying_instrument_id", "underlying_multiple", "options_type",
         "strike_price", "life_phase", "contract_key", "updated_at",
     ]
@@ -316,6 +357,7 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
         ON CONFLICT(snapshot_date, instrument_id) DO UPDATE SET
             exchange = excluded.exchange,
             product_id = excluded.product_id,
+            variety_name = excluded.variety_name,
             instrument_name = excluded.instrument_name,
             product_class = excluded.product_class,
             multiplier = excluded.multiplier,
@@ -332,6 +374,12 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
             close_fixed = excluded.close_fixed,
             closetoday_ratio = excluded.closetoday_ratio,
             closetoday_fixed = excluded.closetoday_fixed,
+            price = excluded.price,
+            volume = excluded.volume,
+            open_interest = excluded.open_interest,
+            open_total_fee = excluded.open_total_fee,
+            close_total_fee = excluded.close_total_fee,
+            closetoday_total_fee = excluded.closetoday_total_fee,
             delivery_year = excluded.delivery_year,
             delivery_month = excluded.delivery_month,
             open_date = excluded.open_date,
@@ -352,6 +400,7 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
             row_snapshot_date,
             _none_if_na(row.get("exchange")),
             _none_if_na(row.get("variety_code") or row.get("product_id")),
+            _none_if_na(row.get("variety_name")),
             _none_if_na(row.get("contract_code") or row.get("instrument_id")),
             _none_if_na(row.get("contract_name") or row.get("instrument_name")),
             _none_if_na(row.get("product_class")),
@@ -369,6 +418,12 @@ def _upsert_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = N
             _none_if_na(row.get("close_fixed")),
             _none_if_na(row.get("closetoday_ratio")),
             _none_if_na(row.get("closetoday_fixed")),
+            _none_if_na(row.get("price")),
+            _none_if_na(row.get("volume")),
+            _none_if_na(row.get("open_interest")),
+            _none_if_na(row.get("open_total_fee")),
+            _none_if_na(row.get("close_total_fee")),
+            _none_if_na(row.get("closetoday_total_fee")),
             _none_if_na(row.get("delivery_year")),
             _none_if_na(row.get("delivery_month")),
             _none_if_na(row.get("open_date")),
@@ -394,18 +449,27 @@ def _write_contract_specs(rows: list[dict[str, Any]], *, snapshot_date: str | No
     _upsert_contract_specs(specs, snapshot_date=snapshot_date)
 
 
-def sync_cnfutures_contract_specs_from_fee_parquet(*, force: bool = False) -> int:
+def upsert_cnfutures_contract_specs(specs: pd.DataFrame, *, snapshot_date: str | None = None) -> None:
+    """Upsert normalized CN futures contract specs into SQLite."""
+    _upsert_contract_specs(specs, snapshot_date=snapshot_date)
+
+
+def sync_cnfutures_contract_specs_from_fee_parquet(
+    *,
+    data_dir: str | Path | None = None,
+    force: bool = False,
+) -> int:
     """Import existing LocalCNFutures fee parquet snapshots into the SQLite typed table."""
-    if not force and _contract_specs_count() > 0:
+    if not force and _contract_specs_count() > 0 and _contract_specs_has_fee_snapshot_columns():
         return 0
     try:
         from sources.LocalCNFutures import FeeData
     except Exception:
         return 0
-    data_dir = getattr(FeeData, "_DATA_DIR", None)
-    if data_dir is None:
+    source_dir = Path(data_dir) if data_dir is not None else getattr(FeeData, "_DATA_DIR", None)
+    if source_dir is None:
         return 0
-    paths = sorted(Path(data_dir).glob("fees_contracts_2*.parquet"))
+    paths = sorted(Path(source_dir).glob("fees_contracts_2*.parquet"))
     imported = 0
     for path in paths:
         try:
@@ -421,6 +485,108 @@ def sync_cnfutures_contract_specs_from_fee_parquet(*, force: bool = False) -> in
         _upsert_contract_specs(df)
         imported += len(df)
     return imported
+
+
+def _contract_specs_sql_frame(where: str = "", params: tuple[Any, ...] = ()) -> pd.DataFrame:
+    sql = """
+        SELECT
+            snapshot_date AS date,
+            exchange,
+            product_id AS variety_code,
+            variety_name,
+            instrument_id AS contract_code,
+            instrument_name AS contract_name,
+            product_class,
+            multiplier,
+            min_tick,
+            min_trade_quantity,
+            max_trade_quantity,
+            long_margin_ratio,
+            long_margin_fixed,
+            short_margin_ratio,
+            short_margin_fixed,
+            open_ratio,
+            open_fixed,
+            close_ratio,
+            close_fixed,
+            closetoday_ratio,
+            closetoday_fixed,
+            price,
+            volume,
+            open_interest,
+            open_total_fee,
+            close_total_fee,
+            closetoday_total_fee,
+            delivery_year,
+            delivery_month,
+            open_date,
+            expire_date,
+            delivery_date,
+            underlying_instrument_id,
+            underlying_multiple,
+            options_type,
+            strike_price,
+            life_phase,
+            contract_key
+        FROM openctp_cnfutures_contract_specs
+    """
+    if where:
+        sql += " WHERE " + where
+    sql += " ORDER BY product_id, instrument_id"
+    with _connect_cache() as conn:
+        return pd.read_sql_query(sql, conn, params=params)
+
+
+def read_cnfutures_contract_specs_for_date(
+    trading_day: Any | None = None,
+    *,
+    allow_latest_fallback: bool = True,
+    fee_data_dir: str | Path | None = None,
+) -> pd.DataFrame:
+    """Read contract-level CN futures specs from SQLite with as-of semantics."""
+    sync_cnfutures_contract_specs_from_fee_parquet(data_dir=fee_data_dir)
+    target = pd.Timestamp(trading_day).strftime("%Y%m%d") if trading_day is not None else date.today().strftime("%Y%m%d")
+    with _connect_cache() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT snapshot_date
+            FROM openctp_cnfutures_contract_specs
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC
+            """,
+            (target,),
+        ).fetchall()
+        source_date = str(rows[0]["snapshot_date"]) if rows else None
+        source = "historical_snapshot" if source_date == target else "historical_forward_fill"
+        if source_date is None and allow_latest_fallback:
+            latest = conn.execute(
+                "SELECT MAX(snapshot_date) AS snapshot_date FROM openctp_cnfutures_contract_specs"
+            ).fetchone()
+            source_date = str(latest["snapshot_date"]) if latest and latest["snapshot_date"] else None
+            source = "latest_inferred"
+    if source_date is None:
+        raise FileNotFoundError(f"未找到 {target} 或更早的合约级费率快照")
+    df = _contract_specs_sql_frame("snapshot_date = ?", (source_date,))
+    df.attrs["fee_source"] = source
+    df.attrs["fee_source_date"] = source_date
+    df.attrs["requested_fee_date"] = target
+    return df
+
+
+def read_latest_cnfutures_product_specs(*, fee_data_dir: str | Path | None = None) -> pd.DataFrame:
+    """Read latest product-level display specs from contract specs in SQLite."""
+    df = read_cnfutures_contract_specs_for_date(
+        None,
+        allow_latest_fallback=True,
+        fee_data_dir=fee_data_dir,
+    )
+    if df.empty:
+        return df
+    if "open_interest" in df.columns:
+        df = df.sort_values("open_interest", ascending=False, na_position="last")
+    df = df.drop_duplicates(subset=["variety_code"], keep="first").copy()
+    df = df.rename(columns={"contract_code": "representative_contract_code"})
+    return df.reset_index(drop=True)
 
 
 def list_sqlite_tables() -> list[dict[str, Any]]:
