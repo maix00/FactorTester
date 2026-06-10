@@ -1763,6 +1763,9 @@ def test_by_group_single_factor(
     variety_codes_lower = [code.lower() for code in variety_codes]
     variety_code_by_id = {id(col): code for col, code in zip(valid_cols, variety_codes)}
     variety_code_lower_by_id = {id(col): code for col, code in zip(valid_cols, variety_codes_lower)}
+    positions_by_variety_code_lower: dict[str, list[int]] = {}
+    for idx, code_lower in enumerate(variety_codes_lower):
+        positions_by_variety_code_lower.setdefault(code_lower, []).append(idx)
 
     _spec_field_names = (
         "open_ratio",
@@ -1792,71 +1795,88 @@ def test_by_group_single_factor(
                     merged_bundle[field] = value
         _spec_bundle_by_id[id(col)] = merged_bundle
 
-    def _spec_bundle(col) -> dict[str, Any]:
-        return _spec_bundle_by_id.get(id(col), {})
-
-    def _product_spec_value(col, product_field: str, default):
-        bundle = _spec_bundle(col)
-        value = bundle.get(product_field)
-        if value not in (None, ""):
-            return value
-        return getattr(col, product_field, default)
-
-    def _fee_or_product_value(col, fee_key: str, product_field: str, default):
-        spec = fee_map.get(variety_code_by_id.get(id(col), ""), {}) or {}
-        if fee_key in spec and spec.get(fee_key) not in (None, ""):
-            return spec.get(fee_key)
-        return _product_spec_value(col, product_field, default)
-
     half_fee = float(fee) / 2.0
-    open_fee_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "open_rate", "open_ratio", half_fee), half_fee)
-        for c in valid_cols
-    ], dtype=float)
-    close_fee_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "close_rate", "close_ratio", half_fee), half_fee)
-        for c in valid_cols
-    ], dtype=float)
-    close_today_fee_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "close_today_rate", "closetoday_ratio", close_fee_vec[i]), close_fee_vec[i])
-        for i, c in enumerate(valid_cols)
-    ], dtype=float)
-    close_yesterday_fee_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "close_yesterday_rate", "close_ratio", close_fee_vec[i]), close_fee_vec[i])
-        for i, c in enumerate(valid_cols)
-    ], dtype=float)
-    open_fee_fixed_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "open_fixed", "open_fixed", 0.0), 0.0)
-        for c in valid_cols
-    ], dtype=float)
-    close_fee_fixed_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "close_fixed", "close_fixed", 0.0), 0.0)
-        for c in valid_cols
-    ], dtype=float)
-    close_today_fee_fixed_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "close_today_fixed", "closetoday_fixed", close_fee_fixed_vec[i]), close_fee_fixed_vec[i])
-        for i, c in enumerate(valid_cols)
-    ], dtype=float)
-    point_value_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "multiplier", "multiplier", getattr(c, "point_value", None) or 1.0), 1.0)
-        for c in valid_cols
-    ], dtype=float)
-    min_tick_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "min_tick", "min_tick", 0.0), 0.0)
-        for c in valid_cols
-    ], dtype=float)
-    min_trade_quantity_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "min_trade_quantity", "min_trade_quantity", getattr(c, "min_trade_quantity", 1.0) or 1.0), 1.0)
-        for c in valid_cols
-    ], dtype=float)
-    long_margin_ratio_vec = np.array([
-        _coerce_float(_fee_or_product_value(c, "long_margin_ratio", "long_margin_ratio", 1.0), 1.0)
-        for c in valid_cols
-    ], dtype=float)
-    is_margin_traded_vec = np.array([
-        bool(getattr(c, "is_margin_traded", False))
-        for c in valid_cols
-    ], dtype=bool)
+    open_fee_list: list[float] = []
+    close_fee_list: list[float] = []
+    close_today_fee_list: list[float] = []
+    close_yesterday_fee_list: list[float] = []
+    open_fee_fixed_list: list[float] = []
+    close_fee_fixed_list: list[float] = []
+    close_today_fee_fixed_list: list[float] = []
+    point_value_list: list[float] = []
+    min_tick_list: list[float] = []
+    min_trade_quantity_list: list[float] = []
+    long_margin_ratio_list: list[float] = []
+    is_margin_traded_list: list[bool] = []
+
+    for col in valid_cols:
+        bundle = _spec_bundle_by_id.get(id(col), {})
+        spec = fee_map.get(variety_code_by_id.get(id(col), ""), {}) or {}
+
+        def _pick_value(fee_key: str, product_field: str, default: Any) -> Any:
+            fee_value = spec.get(fee_key)
+            if fee_value not in (None, ""):
+                return fee_value
+            bundle_value = bundle.get(product_field)
+            if bundle_value not in (None, ""):
+                return bundle_value
+            return getattr(col, product_field, default)
+
+        open_fee_value = _coerce_float(_pick_value("open_rate", "open_ratio", half_fee), half_fee)
+        close_fee_value = _coerce_float(_pick_value("close_rate", "close_ratio", half_fee), half_fee)
+        close_today_fee_value = _coerce_float(
+            _pick_value("close_today_rate", "closetoday_ratio", close_fee_value),
+            close_fee_value,
+        )
+        close_yesterday_fee_value = _coerce_float(
+            _pick_value("close_yesterday_rate", "close_ratio", close_fee_value),
+            close_fee_value,
+        )
+        open_fee_fixed_value = _coerce_float(_pick_value("open_fixed", "open_fixed", 0.0), 0.0)
+        close_fee_fixed_value = _coerce_float(_pick_value("close_fixed", "close_fixed", 0.0), 0.0)
+        close_today_fee_fixed_value = _coerce_float(
+            _pick_value("close_today_fixed", "closetoday_fixed", close_fee_fixed_value),
+            close_fee_fixed_value,
+        )
+        point_value_value = _coerce_float(
+            _pick_value("multiplier", "multiplier", getattr(col, "point_value", None) or 1.0),
+            1.0,
+        )
+        min_tick_value = _coerce_float(_pick_value("min_tick", "min_tick", 0.0), 0.0)
+        min_trade_quantity_value = _coerce_float(
+            _pick_value("min_trade_quantity", "min_trade_quantity", getattr(col, "min_trade_quantity", 1.0) or 1.0),
+            1.0,
+        )
+        long_margin_ratio_value = _coerce_float(
+            _pick_value("long_margin_ratio", "long_margin_ratio", 1.0),
+            1.0,
+        )
+
+        open_fee_list.append(open_fee_value)
+        close_fee_list.append(close_fee_value)
+        close_today_fee_list.append(close_today_fee_value)
+        close_yesterday_fee_list.append(close_yesterday_fee_value)
+        open_fee_fixed_list.append(open_fee_fixed_value)
+        close_fee_fixed_list.append(close_fee_fixed_value)
+        close_today_fee_fixed_list.append(close_today_fee_fixed_value)
+        point_value_list.append(point_value_value)
+        min_tick_list.append(min_tick_value)
+        min_trade_quantity_list.append(min_trade_quantity_value)
+        long_margin_ratio_list.append(long_margin_ratio_value)
+        is_margin_traded_list.append(bool(getattr(col, "is_margin_traded", False)))
+
+    open_fee_vec = np.asarray(open_fee_list, dtype=float)
+    close_fee_vec = np.asarray(close_fee_list, dtype=float)
+    close_today_fee_vec = np.asarray(close_today_fee_list, dtype=float)
+    close_yesterday_fee_vec = np.asarray(close_yesterday_fee_list, dtype=float)
+    open_fee_fixed_vec = np.asarray(open_fee_fixed_list, dtype=float)
+    close_fee_fixed_vec = np.asarray(close_fee_fixed_list, dtype=float)
+    close_today_fee_fixed_vec = np.asarray(close_today_fee_fixed_list, dtype=float)
+    point_value_vec = np.asarray(point_value_list, dtype=float)
+    min_tick_vec = np.asarray(min_tick_list, dtype=float)
+    min_trade_quantity_vec = np.asarray(min_trade_quantity_list, dtype=float)
+    long_margin_ratio_vec = np.asarray(long_margin_ratio_list, dtype=float)
+    is_margin_traded_vec = np.asarray(is_margin_traded_list, dtype=bool)
 
     # ── 构造 per-group fee 矩阵 (n_groups, P) ──
     # group_fee_maps: {group_index: {variety_code: {open, close, close_today, ...}}}
@@ -1872,11 +1892,12 @@ def test_by_group_single_factor(
         # 1. group_fee_maps: per-product override for this group
         gmap = group_maps.get(g)
         if gmap and isinstance(gmap, dict):
-            for i, col in enumerate(valid_cols):
-                vname = variety_code_lower_by_id.get(id(col), "")
-                prod_fee = gmap.get(vname)
-                if prod_fee and isinstance(prod_fee, dict) and field in prod_fee and prod_fee[field] is not None:
-                    row[i] = float(prod_fee[field])
+            for raw_code, prod_fee in gmap.items():
+                if not (prod_fee and isinstance(prod_fee, dict) and field in prod_fee and prod_fee[field] is not None):
+                    continue
+                positions = positions_by_variety_code_lower.get(str(raw_code).lower(), [])
+                if positions:
+                    row[positions] = float(prod_fee[field])
         # 2. Derived groups: uniform fee_override covers all products
         if g >= n_base and derived_groups:
             d_i = g - n_base
@@ -1947,22 +1968,24 @@ def test_by_group_single_factor(
             row_ct_fixed = close_today_fee_fixed_vec.copy()
         vfm = spec.get('fee_map') or spec.get('feeMap') or {}
         if vfm and isinstance(vfm, dict):
-            for ci, col in enumerate(valid_cols):
-                vname = variety_code_lower_by_id.get(id(col), "")
-                pf = vfm.get(vname) or vfm.get(vname.upper())
-                if pf and isinstance(pf, dict):
-                    if 'open_rate' in pf and pf['open_rate'] is not None:
-                        row_open[ci] = float(pf['open_rate'])
-                    if 'close_rate' in pf and pf['close_rate'] is not None:
-                        row_close[ci] = float(pf['close_rate'])
-                    if 'close_today_rate' in pf and pf['close_today_rate'] is not None:
-                        row_ct[ci] = float(pf['close_today_rate'])
-                    if 'open_fixed' in pf and pf['open_fixed'] is not None:
-                        row_open_fixed[ci] = float(pf['open_fixed'])
-                    if 'close_fixed' in pf and pf['close_fixed'] is not None:
-                        row_close_fixed[ci] = float(pf['close_fixed'])
-                    if 'close_today_fixed' in pf and pf['close_today_fixed'] is not None:
-                        row_ct_fixed[ci] = float(pf['close_today_fixed'])
+            for raw_code, pf in vfm.items():
+                if not isinstance(pf, dict):
+                    continue
+                positions = positions_by_variety_code_lower.get(str(raw_code).lower(), [])
+                if not positions:
+                    continue
+                if 'open_rate' in pf and pf['open_rate'] is not None:
+                    row_open[positions] = float(pf['open_rate'])
+                if 'close_rate' in pf and pf['close_rate'] is not None:
+                    row_close[positions] = float(pf['close_rate'])
+                if 'close_today_rate' in pf and pf['close_today_rate'] is not None:
+                    row_ct[positions] = float(pf['close_today_rate'])
+                if 'open_fixed' in pf and pf['open_fixed'] is not None:
+                    row_open_fixed[positions] = float(pf['open_fixed'])
+                if 'close_fixed' in pf and pf['close_fixed'] is not None:
+                    row_close_fixed[positions] = float(pf['close_fixed'])
+                if 'close_today_fixed' in pf and pf['close_today_fixed'] is not None:
+                    row_ct_fixed[positions] = float(pf['close_today_fixed'])
         return row_open, row_close, row_ct, row_open_fixed, row_close_fixed, row_ct_fixed
 
     def _variant_uses_close_today(spec: dict | None) -> bool:
