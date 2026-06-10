@@ -38,8 +38,7 @@ import pandas as pd
 from scripts.data_dir import DATA_DIR
 
 # 本地存储目录（相对于项目根目录，即 Codes/）
-# NOTE: 有效费率版本使用独立目录 fees-effective，避免与旧缓存混淆
-_DATA_DIR = Path(DATA_DIR) / 'fees-effective'
+_DATA_DIR = Path(DATA_DIR) / 'fees'
 _LATEST_PATH = _DATA_DIR / 'fees_latest.parquet'
 _CONTRACT_LATEST_PATH = _DATA_DIR / 'fees_contracts_latest.parquet'
 _URL = 'http://openctp.cn/fees.html'
@@ -185,27 +184,6 @@ def _parse_contract_rows(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=['variety_code', 'open_ratio'])
     df = df[df['variety_code'].str.len() > 0]
     df = df[df['contract_key'].str.len() > 0]
-
-    # 计算有效费率并原地覆盖原始列
-    # effective_ratio = ratio × total_fee / (total_fee - fixed)
-    # 当 fixed=0 或 分母<=0 时，有效费率 = 原费率；当 fixed>0 时，有效费率 > 原费率
-    for kind, ratio_col, fixed_col, fee_col in [
-        ('open', 'open_ratio', 'open_fixed', 'open_total_fee'),
-        ('close', 'close_ratio', 'close_fixed', 'close_total_fee'),
-        ('closetoday', 'closetoday_ratio', 'closetoday_fixed', 'closetoday_total_fee'),
-    ]:
-        if fee_col not in df.columns or ratio_col not in df.columns:
-            continue
-        # 保留原始费率 → xxx_original_ratio
-        original_col = f'{kind}_original_ratio'
-        df[original_col] = df[ratio_col].copy()
-        fee = df[fee_col].fillna(0.0)
-        ratio = df[ratio_col].fillna(0.0)
-        fixed = df[fixed_col].fillna(0.0) if fixed_col in df.columns else 0.0
-        denominator = fee - fixed
-        safe = denominator > 1e-12
-        ratio[safe] = ratio[safe] * fee[safe] / denominator[safe]
-        df[ratio_col] = ratio
 
     df = df.drop(columns=_CONTRACT_ROW_DROP_COLS, errors='ignore')
     df = df.reset_index(drop=True)

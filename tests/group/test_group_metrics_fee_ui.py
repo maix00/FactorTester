@@ -61,10 +61,19 @@ def test_group_fee_config_parses_uniform_and_closetoday_rates():
     assert use_closetoday is True
     # 模式3：前端传的 fee_map 只做字段名映射，不加载 FeeData 补全
     assert fee_map == {'RB': {
-        'open': 0.0001,
-        'close': 0.0002,
-        'close_today': 0.0005,
-        'close_yesterday': 0.0002,
+        'open_rate': 0.0001,
+        'open_fixed': 0.0,
+        'close_rate': 0.0002,
+        'close_fixed': 0.0,
+        'close_today_rate': 0.0005,
+        'close_today_fixed': 0.0,
+        'close_yesterday_rate': 0.0002,
+        'close_yesterday_fixed': 0.0,
+        'multiplier': 1.0,
+        'min_tick': 0.0,
+        'min_trade_quantity': 1.0,
+        'long_margin_ratio': 1.0,
+        'short_margin_ratio': 1.0,
     }}
 
 

@@ -519,8 +519,10 @@ def _parse_group_fee_config(data, products: set | None = None):
                    含用户 _feeModifications 覆盖 + 平今/平昨选择）
 
     返回 (fee_uniform, fee_map, use_closetoday)，
-    其中 fee_map 仅在模式3时非空，key 格式：{open, close, close_today, close_yesterday}，
-    值为单边费率（按金额比例）。
+    其中 fee_map 仅在模式3时非空，key 格式保留 rate/fixed/spec 字段：
+    {open_rate, open_fixed, close_rate, close_fixed, close_today_rate,
+     close_today_fixed, close_yesterday_rate, close_yesterday_fixed,
+     multiplier, min_tick, min_trade_quantity, long_margin_ratio, short_margin_ratio}。
     模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
     """
     fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
@@ -531,19 +533,31 @@ def _parse_group_fee_config(data, products: set | None = None):
     if not fee_map_raw:
         return fee_uniform, {}, use_closetoday
 
-    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖，
-    # 只需做字段名映射：open_ratio→open, close_ratio→close, closetoday_ratio→close_today/close_yesterday
+    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖。
+    # ratio 与 fixed 分开保存；不要把固定费用折算成“有效费率”。
     fee_map: dict[str, dict[str, float]] = {}
     for code, rates in fee_map_raw.items():
         code_upper = str(code).upper()
-        o = float(rates.get('open_ratio', 0) or 0)
-        c = float(rates.get('close_ratio', 0) or 0)
-        ct = float(rates.get('closetoday_ratio', 0) or 0)
+        o = float(rates.get('open_ratio', rates.get('open_rate', 0)) or 0)
+        c = float(rates.get('close_ratio', rates.get('close_rate', 0)) or 0)
+        ct = float(rates.get('closetoday_ratio', rates.get('close_today_rate', 0)) or 0)
+        of = float(rates.get('open_fixed', 0) or 0)
+        cf = float(rates.get('close_fixed', 0) or 0)
+        ctf = float(rates.get('closetoday_fixed', rates.get('close_today_fixed', 0)) or 0)
         fee_map[code_upper] = {
-            'open': o,
-            'close': c,
-            'close_today': ct,
-            'close_yesterday': c,  # 平昨=平仓费率
+            'open_rate': o,
+            'open_fixed': of,
+            'close_rate': c,
+            'close_fixed': cf,
+            'close_today_rate': ct,
+            'close_today_fixed': ctf,
+            'close_yesterday_rate': c,
+            'close_yesterday_fixed': cf,
+            'multiplier': float(rates.get('multiplier', 1) or 1),
+            'min_tick': float(rates.get('min_tick', 0) or 0),
+            'min_trade_quantity': float(rates.get('min_trade_quantity', rates.get('lot_size', 1)) or 1),
+            'long_margin_ratio': float(rates.get('long_margin_ratio', 1) or 1),
+            'short_margin_ratio': float(rates.get('short_margin_ratio', rates.get('long_margin_ratio', 1)) or 1),
         }
 
     return fee_uniform, fee_map, use_closetoday

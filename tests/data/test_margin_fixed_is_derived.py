@@ -66,9 +66,24 @@ def test_calculated_margin_equals_market_value_times_ratio():
     assert mask.sum() >= 100, f"样本量不足: {mask.sum()}"
 
 
+def test_one_tick_pnl_equals_multiplier_times_min_tick():
+    """验证 1Tick 盈亏由合约乘数 × 最小跳动决定，不是最小交易手数。"""
+    raw = _fetch_openctp()
+
+    multiplier = pd.to_numeric(raw.iloc[:, 5], errors='coerce')
+    min_tick = pd.to_numeric(raw.iloc[:, 6], errors='coerce')
+    one_tick_pnl = pd.to_numeric(raw.iloc[:, 28], errors='coerce')
+
+    mask = (multiplier > 0) & (min_tick > 0) & (one_tick_pnl > 0)
+    assert mask.sum() > 0, "没有有效 1Tick 样本"
+
+    expected = multiplier[mask].values * min_tick[mask].values
+    actual = one_tick_pnl[mask].values
+    np.testing.assert_allclose(actual, expected, atol=1e-10)
+
+
 if __name__ == '__main__':
     test_margin_fixed_is_always_zero()
     print("✓ test_margin_fixed_is_always_zero passed")
     test_calculated_margin_equals_market_value_times_ratio()
     print("✓ test_calculated_margin_equals_market_value_times_ratio passed")
-

@@ -127,6 +127,117 @@ def test_simulate_each_period_equal_weight_zero_fee():
     np.testing.assert_allclose(net, expected, atol=1e-12)
 
 
+def test_trading_book_distinguishes_cash_and_margin_products():
+    membership = np.ones((1, 2, 1), dtype=bool)
+    returns = np.array([[0.10]], dtype=float)
+    price = np.array([[0.10]], dtype=float)
+    fee = np.zeros((2, 1), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        price_np=price,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        open_fee_fixed_mat=fee,
+        close_fee_fixed_mat=fee,
+        point_value_vec=np.array([1.0]),
+        min_tick_vec=np.array([0.01]),
+        min_trade_quantity_vec=np.array([1.0]),
+        margin_ratio_mat=np.array([[1.0], [0.10]]),
+        is_margin_traded_vec=np.array([False]),
+        margin_modes=np.array(["margin", "margin"], dtype=object),
+        rebalance_modes=np.array(["each_period", "each_period"], dtype=object),
+    )
+
+    np.testing.assert_allclose(result["position_quantities_np"][0, :, 0], [10.0, 10.0])
+    # Non-margin products are cash funded even if the variant says "margin".
+    np.testing.assert_allclose(result["margin_occupied_np"][0], [1.10, 1.10])
+
+    result_margin = simulate_groups(
+        membership_np=membership[:1, :1, :],
+        returns_np=returns,
+        price_np=price,
+        open_fee_mat=fee[:1],
+        close_fee_mat=fee[:1],
+        open_fee_fixed_mat=fee[:1],
+        close_fee_fixed_mat=fee[:1],
+        point_value_vec=np.array([1.0]),
+        min_tick_vec=np.array([0.01]),
+        min_trade_quantity_vec=np.array([1.0]),
+        margin_ratio_mat=np.array([[0.10]]),
+        is_margin_traded_vec=np.array([True]),
+        margin_modes=np.array(["margin"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+    )
+    np.testing.assert_allclose(result_margin["margin_occupied_np"][0, 0], 0.11)
+
+
+def test_trading_book_charges_fixed_fee_per_contract_without_rewriting_rate():
+    result = simulate_groups(
+        membership_np=np.ones((1, 1, 1), dtype=bool),
+        returns_np=np.array([[0.10]], dtype=float),
+        price_np=np.array([[0.10]], dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.zeros((1, 1), dtype=float),
+        open_fee_fixed_mat=np.array([[0.001]], dtype=float),
+        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        point_value_vec=np.array([1.0]),
+        min_tick_vec=np.array([0.01]),
+        min_trade_quantity_vec=np.array([1.0]),
+        margin_ratio_mat=np.ones((1, 1), dtype=float),
+        is_margin_traded_vec=np.array([False]),
+        margin_modes=np.array(["cash"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+    )
+
+    # 10 shares would require 1.0 notional + 0.01 fixed fee, so the cash book scales to 9.
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 9.0)
+    np.testing.assert_allclose(result["gross_returns_np"][0, 0], 0.09)
+    np.testing.assert_allclose(result["fee_costs_np"][0, 0], 0.009)
+    np.testing.assert_allclose(result["net_returns_np"][0, 0], 0.081)
+
+
+def test_trading_book_respects_min_trade_quantity_lot_size():
+    result = simulate_groups(
+        membership_np=np.ones((1, 1, 1), dtype=bool),
+        returns_np=np.array([[0.10]], dtype=float),
+        price_np=np.array([[0.01]], dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.zeros((1, 1), dtype=float),
+        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        point_value_vec=np.array([1.0]),
+        min_tick_vec=np.array([0.01]),
+        min_trade_quantity_vec=np.array([100.0]),
+        margin_ratio_mat=np.ones((1, 1), dtype=float),
+        is_margin_traded_vec=np.array([False]),
+        margin_modes=np.array(["cash"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+    )
+
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 100.0)
+
+    result_too_expensive = simulate_groups(
+        membership_np=np.ones((1, 1, 1), dtype=bool),
+        returns_np=np.array([[0.10]], dtype=float),
+        price_np=np.array([[0.02]], dtype=float),
+        open_fee_mat=np.zeros((1, 1), dtype=float),
+        close_fee_mat=np.zeros((1, 1), dtype=float),
+        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        point_value_vec=np.array([1.0]),
+        min_tick_vec=np.array([0.01]),
+        min_trade_quantity_vec=np.array([100.0]),
+        margin_ratio_mat=np.ones((1, 1), dtype=float),
+        is_margin_traded_vec=np.array([False]),
+        margin_modes=np.array(["cash"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+    )
+
+    np.testing.assert_allclose(result_too_expensive["position_quantities_np"][0, 0, 0], 0.0)
+
+
 def test_simulate_each_period_percent_liquidity_caps_execution_only():
     """Percent liquidity caps execution after the normal equal-weight target."""
     T, N, P = 1, 1, 2

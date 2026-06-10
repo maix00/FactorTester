@@ -70,7 +70,7 @@
         return _feeTableData;
     }
 
-    /** Build a fee map {variety_code: {open_ratio, close_ratio, closetoday_ratio}} from raw data. */
+    /** Build a trading-spec map from raw fee/spec rows. */
     function buildFeeMap() {
         var map = {};
         for (var i = 0; i < _feeTableData.length; i++) {
@@ -78,8 +78,16 @@
             var code = (r.variety_code || r.code || '').toLowerCase();
             map[code] = {
                 open_ratio: r.open_ratio,
+                open_fixed: r.open_fixed,
                 close_ratio: r.close_ratio,
-                closetoday_ratio: r.closetoday_ratio
+                close_fixed: r.close_fixed,
+                closetoday_ratio: r.closetoday_ratio,
+                closetoday_fixed: r.closetoday_fixed,
+                multiplier: r.multiplier,
+                min_tick: r.min_tick,
+                min_trade_quantity: r.min_trade_quantity || r.lot_size || 1,
+                long_margin_ratio: r.long_margin_ratio,
+                short_margin_ratio: r.short_margin_ratio
             };
         }
         return map;
