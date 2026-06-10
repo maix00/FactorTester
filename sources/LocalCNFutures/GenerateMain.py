@@ -23,6 +23,7 @@ ROLLER_INFO_PATH = os.path.join(DATA_DIR, 'roller_info.csv')        # 展期信�
 MAIN_DAYK_FOLDER = os.path.join(DATA_DIR, 'main_dayk') + '/'        # 日线主力序列输出文件
 
 _MINUTE_PREPROCESS_MANIFEST = '_minute_preprocess_manifest.json'
+BACKWARD_BASE_DATE_COL = 'BACKWARD_BASE_DATE'
 
 
 def preprocess_minute_data(minute_raw_dir: str, minute_product_dir: str, force_rebuild: bool = True):
@@ -123,7 +124,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     )
 
     # ========== 2. 加载已有 roller_info ==========
-    existing = pd.DataFrame(columns=['PRODUCT', 'CONTRACT', 'STARTDATE', 'ENDDATE', 'PREV_CLOSE', 'END_CLOSE', 'FORWARD_BASE_DATE', 'FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO'])
+    existing = pd.DataFrame(columns=['PRODUCT', 'CONTRACT', 'STARTDATE', 'ENDDATE', 'PREV_CLOSE', 'END_CLOSE', BACKWARD_BASE_DATE_COL, 'FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO'])
     if os.path.exists(roller_info_path) and not rebuild_roller_info:
         existing = ((df := pd.read_parquet(roller_info_path))
                     .assign(STARTDATE=pd.to_datetime(df['STARTDATE']), ENDDATE=pd.to_datetime(df['ENDDATE']))
@@ -185,10 +186,15 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             file_path = os.path.join(minute_data_preprocessed_dir, f"{uid}.parquet")
             if not os.path.exists(file_path):
                 return pd.DataFrame(columns=['trading_day', 'close_price', 'trade_time'])
-            return ((df := pd.read_parquet(file_path, filters=[('trading_day', '>=', start_date), ('trading_day', '<=', end_date)]))
+            lookback_start = start_date - pd.Timedelta(days=60)
+            return ((df := pd.read_parquet(file_path, filters=[('trading_day', '>=', lookback_start), ('trading_day', '<=', end_date)]))
                 .assign(trading_day=pd.to_datetime(df['trading_day']))).rename(columns={'unique_instrument_id': 'contract_uid'})
         
-        df_mink = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
+        df_mink_with_prev = load_contract_data_mink(row['CONTRACT_UID'], row['STARTDATE'], row['ENDDATE'])
+        df_mink_with_prev = df_mink_with_prev.sort_values('trade_time') if 'trade_time' in df_mink_with_prev.columns else df_mink_with_prev
+        prev_mink = df_mink_with_prev[df_mink_with_prev['trading_day'] < row['STARTDATE']]
+        df_mink = df_mink_with_prev[df_mink_with_prev['trading_day'] >= row['STARTDATE']]
+        prev_mink_close = prev_mink['close_price'].iloc[-1] if not prev_mink.empty else np.nan
         df_dayk = dayk_groups.get(row['CONTRACT_UID'], pd.DataFrame(columns=['trading_day', 'close_price']))
         # searchsorted 要求数据已排序；dayk_df 按多列排序后 groupby 不保证 trading_day 单调递增
         if not df_dayk['trading_day'].is_monotonic_increasing:
@@ -198,12 +204,12 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         interval_data = df_dayk.iloc[left:right]
         end_close = interval_data['close_price'].iloc[-1] if not interval_data.empty else np.nan
 
-        if (pd.isna(end_close) or interval_data.empty) and not df_mink.empty:
+        if not df_mink.empty:
             end_close = df_mink['close_price'].iloc[-1]
-            prev_close = df_dayk['close_price'].iloc[left - 1] if left > 0 else df_mink['close_price'].iloc[0]
-            start_interval = df_mink['trading_day'].iloc[0]
+            prev_close = prev_mink_close if not pd.isna(prev_mink_close) else df_dayk['close_price'].iloc[left - 1] if left > 0 else df_mink['close_price'].iloc[0]
+            start_interval = None if (not pd.isna(prev_mink_close) or left > 0) else df_mink['trading_day'].iloc[0]
             return prev_close, end_close, interval_data, start_interval, df_mink
-        
+
         if left > 0:
             return df_dayk['close_price'].iloc[left - 1], end_close, interval_data, None, df_mink
         else:
@@ -218,11 +224,12 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Truncating contracts (multi-thread)"):
             idx = futures[future]
             results[idx] = future.result() # type: ignore
-    added_df['PREV_CLOSE'], added_df['END_CLOSE'], pieces, added_df['FORWARD_BASE_DATE'], pieces_mink = zip(*results)
+    added_df['PREV_CLOSE'], added_df['END_CLOSE'], pieces, added_df[BACKWARD_BASE_DATE_COL], pieces_mink = zip(*results)
 
     # ========== 6. 合并数据，生成展期信息，并保存主力序列 ==========
     # 找出需要合并的行索引
     to_drop = []
+    continued_products = set()
     overlapped_products = set(existing['PRODUCT'].unique()) & set(added_df['PRODUCT'].unique())
     existing['_SOURCE'] = 'existing'
     added_df['_SOURCE'] = 'added'
@@ -237,6 +244,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             existing.loc[last_existing.name, 'ENDDATE'] = first_added['ENDDATE'] # 更新 existing 该行的 ENDDATE
             existing.loc[last_existing.name, 'END_CLOSE'] = first_added['END_CLOSE'] # 更新 existing 该行的 END_CLOSE
             existing.loc[last_existing.name, '_SOURCE'] = 'added'
+            continued_products.add(product)
             to_drop.append(first_added.name) # 标记 added_df 中的这一行需要删除
     added_df = added_df.drop(index=to_drop) # 删除 added_df 中已合并的行
     # 合并 remaining added_df 与 existing
@@ -246,15 +254,17 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     info_df['HAS_DATA'] = info_df['END_CLOSE'].notna()
     block_start = (info_df['PRODUCT'] != info_df['PRODUCT'].shift(1)) | (info_df['HAS_DATA'] & ~info_df['HAS_DATA'].shift(1).fillna(False).astype(bool))
     info_df['BLOCK_ID'] = block_start.cumsum()
-    info_df['FORWARD_BASE_DATE'] = pd.to_datetime(info_df.groupby('BLOCK_ID')['FORWARD_BASE_DATE'].ffill())
+    info_df[BACKWARD_BASE_DATE_COL] = pd.to_datetime(info_df.groupby('BLOCK_ID')[BACKWARD_BASE_DATE_COL].ffill())
 
     def compute_factors(block):
-        block['ADJ_RATIO'] = (block['PREV_CLOSE'] / block['END_CLOSE'].shift(1)).fillna(1)
-        block['FORWARD_FACTOR'] = block['ADJ_RATIO'].cumprod()
-        block['BACKWARD_FACTOR'] = block['ADJ_RATIO'].iloc[::-1].cumprod().shift(1).fillna(1).iloc[::-1]
+        block['ADJ_RATIO'] = (block['END_CLOSE'].shift(1) / block['PREV_CLOSE']).fillna(1)
+        # 前复权：最新合约因子为 1，历史合约反向累积到最新合约价格水平。
+        block['FORWARD_FACTOR'] = block['ADJ_RATIO'].iloc[::-1].cumprod().shift(1).fillna(1).iloc[::-1]
+        # 后复权：首个合约因子为 1，后续合约向历史价格水平累积。
+        block['BACKWARD_FACTOR'] = block['ADJ_RATIO'].cumprod()
         return block
     
-    valid_rows = info_df[info_df['HAS_DATA']].groupby(['PRODUCT', 'FORWARD_BASE_DATE'], group_keys=False).apply(compute_factors)
+    valid_rows = info_df[info_df['HAS_DATA']].groupby(['PRODUCT', BACKWARD_BASE_DATE_COL], group_keys=False).apply(compute_factors)
     info_df = info_df.merge(valid_rows[['FORWARD_FACTOR', 'BACKWARD_FACTOR', 'ADJ_RATIO']], left_index=True, right_index=True, how='left')
 
     df_copy = info_df.copy().drop(columns=['HAS_DATA', 'BLOCK_ID', '_SOURCE'])
@@ -262,7 +272,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
     df_copy.to_csv(roller_info_path if roller_info_path.endswith('.csv') else roller_info_path.removesuffix(roller_info_path.split('.')[-1]) + 'csv', index=False)
 
     # 找出每个产品最后一个块（BLOCK_ID 最大）
-    last_block_per_product = info_df[info_df['BACKWARD_FACTOR'].notna()].groupby('PRODUCT')['BLOCK_ID'].max()
+    last_block_per_product = info_df[info_df['FORWARD_FACTOR'].notna()].groupby('PRODUCT')['BLOCK_ID'].max()
     info_df['IS_LAST_BLOCK'] = info_df.apply(lambda row: row['BLOCK_ID'] == last_block_per_product.get(row['PRODUCT'], -1), axis=1)
     
     added_df = info_df[info_df['_SOURCE'] == 'added'].reset_index(drop=True)
@@ -276,7 +286,7 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
         product_data = {}
         for idx, df in tqdm(enumerate(pieces), desc=f"Asserting ADJ cols to {name} Main Series", position=0, leave=True, mininterval=0.5):
             if df.empty or not added_df.iloc[idx]['IS_LAST_BLOCK']: continue;
-            df = df.assign(adjustment_mul=added_df.iloc[idx]['BACKWARD_FACTOR'], adjustment_add=0.0)
+            df = df.assign(adjustment_mul=added_df.iloc[idx]['FORWARD_FACTOR'], adjustment_add=0.0)
             product_data.setdefault(added_df.iloc[idx]['PRODUCT'], []).append(df)
 
         added_first = {uid: group.iloc[0] for uid, group in added_df.groupby('PRODUCT')}
@@ -284,7 +294,10 @@ def generate_main_contract_series(contract_start_end_path: str|pd.DataFrame = CO
             save_path = os.path.join(main_folder_path, f"{product}.parquet")
             if product in overlapped_products and os.path.exists(save_path):
                 existing_df = (tdf := pd.read_parquet(save_path, filters=[('trading_day', '<', added_first[product]['STARTDATE'])])).assign(trading_day=pd.to_datetime(tdf['trading_day']))
-                existing_df['adjustment_mul'] *= added_first[product]['BACKWARD_FACTOR'] # 后复权
+                added_scale = added_first[product]['FORWARD_FACTOR']
+                if product not in continued_products:
+                    added_scale *= added_first[product]['ADJ_RATIO']
+                existing_df['adjustment_mul'] *= added_scale # 前复权：旧 parquet 历史段补乘新增切换因子
                 df_list = [existing_df] + df_list
             product_df = (
                 pd.concat(df_list, ignore_index=True)

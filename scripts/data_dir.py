@@ -11,11 +11,15 @@ import os as _os
 
 
 def _find_feat_root(start_dir: str) -> str | None:
-    """从 start_dir 向上查找包含 .workspace/ 子目录的最近祖先目录（即 Codes/ feat 根）。"""
+    """从 start_dir 向上查找包含 .workspace/fix/ 子目录的最近祖先目录（即 Codes/ feat 根）。
+    
+    排除 worktree 自身：worktree 下的 .workspace/ 只有 flask-manager 等辅助目录，
+    没有 fix/ 子目录，因此不会被误判为 feat 根。
+    """
     current = _os.path.abspath(start_dir)
     while True:
         marker = _os.path.join(current, '.workspace')
-        if _os.path.isdir(marker):
+        if _os.path.isdir(marker) and _os.path.isdir(_os.path.join(marker, 'fix')):
             return current
         parent = _os.path.dirname(current)
         if parent == current:  # 到达文件系统根
