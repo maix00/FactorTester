@@ -163,6 +163,83 @@ def _product_identity(product: Any) -> tuple[str, str]:
     return cls_name, name
 
 
+def _normalize_signal_days(signal_index: list) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(pd.to_datetime(list(signal_index)))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    return cast(pd.DatetimeIndex, idx.normalize())
+
+
+def _append_trade_product(
+    trade_products: list,
+    trade_pos_by_key: dict[tuple[str, str], int],
+    product: Any,
+) -> int:
+    key = _product_identity(product)
+    pos = trade_pos_by_key.get(key)
+    if pos is None:
+        pos = len(trade_products)
+        trade_pos_by_key[key] = pos
+        trade_products.append(product)
+    return pos
+
+
+def _expand_single_trade_product(
+    product: Any,
+    signal_days: pd.DatetimeIndex,
+    active_mask: np.ndarray,
+    trade_products: list,
+    trade_pos_by_key: dict[tuple[str, str], int],
+) -> np.ndarray:
+    mapped = np.full(len(signal_days), -1, dtype=int)
+    if not bool(active_mask.any()):
+        return mapped
+    if not _is_roll_mapped_product(product):
+        pos = _append_trade_product(trade_products, trade_pos_by_key, product)
+        mapped[active_mask] = pos
+        return mapped
+
+    try:
+        product._ensure_roller_info()
+    except Exception:
+        pass
+    roller_info = getattr(product, "roller_info", None)
+    if isinstance(roller_info, pd.DataFrame) and not roller_info.empty:
+        start_days = pd.DatetimeIndex(pd.to_datetime(roller_info["STARTDATE"]))
+        end_days = pd.DatetimeIndex(pd.to_datetime(roller_info["ENDDATE"]))
+        if start_days.tz is not None:
+            start_days = start_days.tz_localize(None)
+        if end_days.tz is not None:
+            end_days = end_days.tz_localize(None)
+        start_days = cast(pd.DatetimeIndex, start_days.normalize())
+        end_days = cast(pd.DatetimeIndex, end_days.normalize())
+
+        for row_idx, row in roller_info.reset_index(drop=True).iterrows():
+            left = int(signal_days.searchsorted(start_days[row_idx], side="left"))
+            right = int(signal_days.searchsorted(end_days[row_idx], side="right"))
+            if left >= right:
+                continue
+            interval_active = active_mask[left:right]
+            if not bool(interval_active.any()):
+                continue
+            contract_id = str(row.get("CONTRACT_UID") or row.get("CONTRACT") or "")
+            trade_product = product.contract_class(contract_id) if contract_id else product
+            pos = _append_trade_product(trade_products, trade_pos_by_key, trade_product)
+            mapped_slice = mapped[left:right]
+            mapped_slice[interval_active] = pos
+            mapped[left:right] = mapped_slice
+
+    unresolved = active_mask & (mapped < 0)
+    if bool(unresolved.any()):
+        fallback_times = signal_days[unresolved]
+        for ts in fallback_times:
+            t = int(signal_days.searchsorted(ts, side="left"))
+            trade_product = _resolve_trade_product(product, ts)
+            pos = _append_trade_product(trade_products, trade_pos_by_key, trade_product)
+            mapped[t] = pos
+    return mapped
+
+
 def _expand_trade_products(
     signal_products: list,
     signal_index: list,
@@ -170,21 +247,20 @@ def _expand_trade_products(
 ) -> tuple[list, np.ndarray]:
     """Map signal-level membership onto the union of actual traded products/contracts."""
     T, M, P_signal = signal_membership_np.shape
+    signal_days = _normalize_signal_days(signal_index)
+    active_mask_np = signal_membership_np.any(axis=1)
     trade_products: list = []
     trade_pos_by_key: dict[tuple[str, str], int] = {}
     signal_to_trade = np.full((T, P_signal), -1, dtype=int)
 
-    for t, signal_time in enumerate(signal_index):
-        active_signal_idx = np.where(signal_membership_np[t].any(axis=0))[0]
-        for pi in active_signal_idx:
-            trade_product = _resolve_trade_product(signal_products[pi], signal_time)
-            key = _product_identity(trade_product)
-            pos = trade_pos_by_key.get(key)
-            if pos is None:
-                pos = len(trade_products)
-                trade_pos_by_key[key] = pos
-                trade_products.append(trade_product)
-            signal_to_trade[t, pi] = pos
+    for pi, product in enumerate(signal_products):
+        signal_to_trade[:, pi] = _expand_single_trade_product(
+            product,
+            signal_days,
+            active_mask_np[:, pi],
+            trade_products,
+            trade_pos_by_key,
+        )
 
     if not trade_products:
         return list(signal_products), signal_membership_np.copy()
