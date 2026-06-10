@@ -301,9 +301,10 @@ def scan_settings() -> List[SettingEntry]:
 
 def scan_data_sources() -> List[DataSourceEntry]:
     """扫描所有已注册的 DataSource 实例。通过 import CNFutures 触发模块级注册。"""
-    # 触发 CNFutures 模块加载（DataSource 在模块级别被实例化注册）
     try:
-        import sources.LocalCNFutures.CNFutures  # noqa: F401
+        from sources import load_all_sources
+
+        load_all_sources()
     except Exception:
         pass
 

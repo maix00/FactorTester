@@ -123,7 +123,9 @@ def _product_alias(product: Any) -> str:
 def sync_data_source_sqlite_store() -> str:
     """Sync DataSource metadata and small Parquet previews into SQLite."""
     try:
-        import sources.LocalCNFutures.CNFutures  # noqa: F401
+        from sources import load_all_sources
+
+        load_all_sources()
     except Exception:
         pass
 
