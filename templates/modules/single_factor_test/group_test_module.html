@@ -4,8 +4,9 @@
     <!-- ═══════════════════════════════════════════════════════════════════════
          第1层：时间范围 + 同步时间模块
          ═══════════════════════════════════════════════════════════════════════ -->
-    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;flex-direction:column;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div class="group-test-layer" id="gt-layer-timerange" style="display:flex;flex-direction:column;gap:10px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fcfcfd;margin-top:12px;">
+        <div id="gt-local-settings-tab-bar" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+        <div data-local-settings-tab-panel="dates" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <span style="font-weight:600;font-size:13px;color:#1f2937;">⏱ 测试时间范围</span>
             <div class="group-setting-row" style="margin-bottom:0;">
                 <label style="margin-bottom:0;white-space:nowrap;">起始：</label>
@@ -26,7 +27,7 @@
             <button id="use_time_range_btn" class="btn btn-outline-secondary btn-sm" style="white-space:nowrap;">同步时间模块</button>
             <span style="font-size:11px;color:#888;">（留空使用产品数据全量时间范围）</span>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div data-local-settings-tab-panel="initialCapital" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <span style="font-weight:600;font-size:13px;color:#1f2937;">💵 初始金额</span>
             <div class="group-setting-row" style="margin-bottom:0;">
                 <label for="group_initial_capital" style="margin-bottom:0;white-space:nowrap;">资金：</label>
@@ -41,6 +42,28 @@
                 >
             </div>
             <span style="font-size:11px;color:#888;">用于交易簿回测的开仓资金；图表仍显示归一化净值</span>
+        </div>
+        <div data-local-settings-tab-panel="calendarFreq" style="display:flex;flex-direction:column;gap:10px;">
+            <label style="display:flex;align-items:center;gap:8px;margin:0;font-weight:600;font-size:13px;color:#1f2937;">
+                <input type="checkbox" id="group_calendar_freq_auto" checked>
+                自动判断公共时间轴频率
+            </label>
+            <div id="group_calendar_freq_manual_wrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:12px;color:#4b5563;">手动选择：</span>
+                <label style="display:flex;align-items:center;gap:4px;margin:0;">
+                    <input type="radio" name="group_calendar_freq" value="1min" checked>
+                    <span>1分钟</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;margin:0;">
+                    <input type="radio" name="group_calendar_freq" value="5min">
+                    <span>5分钟</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;margin:0;">
+                    <input type="radio" name="group_calendar_freq" value="1day">
+                    <span>1天</span>
+                </label>
+            </div>
+            <span style="font-size:11px;color:#888;">仅允许 1min、5min、1day；手动选择若不能整除参与测试因子频率，后端会直接报错</span>
         </div>
     </div>
     <!-- ═══════════════════════════════════════════════════════════════════════
@@ -154,17 +177,6 @@
             <table class="ic-table group-metrics-table">
                 <thead id="metrics_head"></thead>
                 <tbody id="metrics_body"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 多周期对比结果表格 -->
-    <div id="multi_horizon_container" style="margin-top:20px;display:none;">
-        <h6 style="margin-bottom:8px;">📊 多周期收益率对比</h6>
-        <div style="overflow-x:auto;">
-            <table class="ic-table" style="width:100%;font-size:12px;">
-                <thead id="multi_horizon_head"></thead>
-                <tbody id="multi_horizon_body"></tbody>
             </table>
         </div>
     </div>
@@ -1015,6 +1027,7 @@
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/dates.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/dates.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/initial-capital.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/local-settings/calendar-freq.js') }}"></script>
 <!-- Datamodel layer — unified in core/group-settings.js -->
 <script src="{{ url_for('static', filename='js/modules/single_factor_test/group_test/core/group-settings.js') }}"></script>
 <!-- Panel layer — UI components by category -->

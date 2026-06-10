@@ -633,6 +633,10 @@ def simulate_group_trading_book(
     close_fee_fixed_mat: np.ndarray,
     close_today_fee_rate_mat: np.ndarray | None = None,
     close_today_fee_fixed_mat: np.ndarray | None = None,
+    tradable_mask_np: np.ndarray | None = None,
+    liquidity_capacity_np: np.ndarray | None = None,
+    liquidity_modes: np.ndarray | list[str] | None = None,
+    liquidity_percents: np.ndarray | list[float] | None = None,
     point_value_vec: np.ndarray,
     min_tick_vec: np.ndarray,
     min_trade_quantity_vec: np.ndarray,
@@ -642,11 +646,14 @@ def simulate_group_trading_book(
     rebalance_modes: np.ndarray | list[str],
     initial_capital: float = 100000000.0,
 ) -> dict:
-    """Simulate grouped trading with quantities, fees, cash, and margin accounting."""
+    """Simulate grouped trading with quantities, fees, cash, margin, and per-period tradability."""
     T, M, P = membership_np.shape
     prices = np.asarray(price_np, dtype=float)
     if prices.shape != (T, P):
         raise ValueError(f"price_np shape={prices.shape} != {(T, P)}")
+    tradable_mask_arr = None if tradable_mask_np is None else np.asarray(tradable_mask_np, dtype=bool)
+    if tradable_mask_arr is not None and tradable_mask_arr.shape != (T, P):
+        raise ValueError(f"tradable_mask_np shape={tradable_mask_arr.shape} != {(T, P)}")
 
     point_values = np.asarray(point_value_vec, dtype=float).reshape(P)
     point_values = np.where(np.isfinite(point_values) & (point_values > 0), point_values, 1.0)
@@ -673,6 +680,13 @@ def simulate_group_trading_book(
     open_fixed_mat = np.asarray(open_fee_fixed_mat, dtype=float)
     margin_ratios = np.asarray(margin_ratio_mat, dtype=float)
     margin_ratios = np.where(np.isfinite(margin_ratios) & (margin_ratios > 0), margin_ratios, 1.0)
+    liquidity_modes_arr = np.asarray(liquidity_modes, dtype=object) if liquidity_modes is not None else np.full(M, "infinite", dtype=object)
+    liquidity_percents_arr = np.asarray(liquidity_percents, dtype=float) if liquidity_percents is not None else np.full(M, 100.0, dtype=float)
+    liquidity_capacity_arr = np.asarray(liquidity_capacity_np, dtype=float) if liquidity_capacity_np is not None else None
+    if liquidity_capacity_arr is not None and liquidity_capacity_arr.shape != (T, P):
+        raise ValueError(
+            f"liquidity_capacity_np shape={liquidity_capacity_arr.shape} != {(T, P)}"
+        )
 
     net_returns_np = np.zeros((T, M), dtype=float)
     gross_returns_np = np.zeros((T, M), dtype=float)
@@ -703,10 +717,11 @@ def simulate_group_trading_book(
     _group_progress(f"trading book simulation start T={T} groups={M} products={P}")
     for t in tqdm(range(T), desc="Trading book simulation"):
         price_t = _round_price(prices[t])
-        tradable = np.isfinite(price_t) & (price_t > 0)
+        valuated = np.isfinite(price_t) & (price_t > 0)
+        executable = valuated if tradable_mask_arr is None else (valuated & tradable_mask_arr[t])
         contract_value = price_t * point_values
-        contract_value = np.where(tradable & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
-        prev_notional = np.where(tradable[np.newaxis, :], quantities * contract_value[np.newaxis, :], 0.0)
+        contract_value = np.where(valuated & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
+        prev_notional = np.where(valuated[np.newaxis, :], quantities * contract_value[np.newaxis, :], 0.0)
 
         target_notional = build_target_amounts(
             membership_np[t],
@@ -722,7 +737,36 @@ def simulate_group_trading_book(
             where=np.isfinite(contract_value[np.newaxis, :]) & (contract_value[np.newaxis, :] > 0),
         )
         desired_quantities = np.floor(raw_quantities / lot_sizes[np.newaxis, :]) * lot_sizes[np.newaxis, :]
-        desired_quantities = np.where(membership_np[t] & tradable[np.newaxis, :], desired_quantities, 0.0)
+        desired_quantities = np.where(membership_np[t] & executable[np.newaxis, :], desired_quantities, 0.0)
+        desired_quantities[:, ~executable] = quantities[:, ~executable]
+
+        if liquidity_capacity_arr is not None and np.any(liquidity_modes_arr == "percent"):
+            base_capacity = np.where(
+                np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
+                liquidity_capacity_arr[t],
+                0.0,
+            )
+            base_capacity = np.where(executable, base_capacity, 0.0)
+            percent_scale = np.clip(liquidity_percents_arr, 0.0, 100.0) / 100.0
+            percent_rows = liquidity_modes_arr == "percent"
+            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
+            executable_capacity_t[percent_rows] = base_capacity[np.newaxis, :] * percent_scale[percent_rows, np.newaxis]
+            target_amounts = apply_liquidity_execution(
+                prev_notional,
+                target_notional,
+                equity,
+                executable_capacity_t,
+                open_rate_mat,
+                close_rate_mat,
+            )
+            raw_quantities = np.divide(
+                target_amounts,
+                contract_value[np.newaxis, :],
+                out=np.zeros_like(target_amounts, dtype=float),
+                where=np.isfinite(contract_value[np.newaxis, :]) & (contract_value[np.newaxis, :] > 0),
+            )
+            desired_quantities = np.floor(raw_quantities / lot_sizes[np.newaxis, :]) * lot_sizes[np.newaxis, :]
+            desired_quantities = np.where(executable[np.newaxis, :], desired_quantities, quantities)
 
         for g in range(M):
             mode = str(rebalance_modes_arr[g] or "each_period")
@@ -735,6 +779,7 @@ def simulate_group_trading_book(
                     desired_quantities[g, staying] = quantities[g, staying]
                     if quantities[g].sum() > 0 and not np.any((quantities[g] > 0) & (~membership_np[t, g])):
                         desired_quantities[g, entering] = 0.0
+            desired_quantities[g, ~executable] = quantities[g, ~executable]
 
         use_margin = (margin_modes_arr == "margin")[:, np.newaxis] & margin_flags[np.newaxis, :]
 
@@ -832,409 +877,6 @@ def simulate_group_trading_book(
         'margin_occupied_np': margin_occupied_np,
         'total_equity_np': total_equity_np,
         'cash_np': cash_np,
-    }
-
-
-def simulate_groups(
-    membership_np: np.ndarray,
-    returns_np: np.ndarray,
-    open_fee_mat: np.ndarray,
-    close_fee_mat: np.ndarray,
-    *,
-    rebalance_mode: str = "buy_and_hold",
-    close_today_fee_mat: np.ndarray | None = None,
-    data_has_bar: np.ndarray | None = None,
-    rebalance_modes: np.ndarray | list[str] | None = None,
-    liquidity_capacity_np: np.ndarray | None = None,
-    liquidity_modes: np.ndarray | list[str] | None = None,
-    liquidity_percents: np.ndarray | list[float] | None = None,
-    price_np: np.ndarray | None = None,
-    open_fee_fixed_mat: np.ndarray | None = None,
-    close_fee_fixed_mat: np.ndarray | None = None,
-    close_today_fee_fixed_mat: np.ndarray | None = None,
-    point_value_vec: np.ndarray | None = None,
-    min_tick_vec: np.ndarray | None = None,
-    min_trade_quantity_vec: np.ndarray | None = None,
-    margin_ratio_mat: np.ndarray | None = None,
-    is_margin_traded_vec: np.ndarray | None = None,
-    margin_modes: np.ndarray | list[str] | None = None,
-    initial_capital: float = 100000000.0,
-) -> dict:
-    """Matrix simulation of group returns over T periods for n_groups groups.
-
-    This is the *single shared engine* for both full group tests and
-    derived-group simulations.  The caller slices membership/returns down
-    to the desired products before calling.
-
-    Parameters
-    ----------
-    membership_np : (T, n_groups, P) bool
-    returns_np : (T, P) float — per-product period returns (NaN/inf/-1 already filled)
-    open_fee_mat : (M, P) float — per-variant per-product open fee rates (M >= n_groups)
-    close_fee_mat : (M, P) float — per-variant per-product close fee rates
-    close_today_fee_mat : (M, P) float | None — when set, overrides close_fee_mat for exiting
-    data_has_bar : (T, P) bool | None — when set, enables multi-session strategy
-    rebalance_mode : "each_period" | "buy_and_hold" | "recycle"
-    rebalance_modes : (M,) string array | None
-        Optional per-variant rebalance mode. When omitted, all rows use
-        rebalance_mode.
-
-    Returns
-    -------
-    dict with keys: net_returns_np, gross_returns_np, product_gross_contrib_np,
-    product_fee_contrib_np, fee_costs_np, trade_notional_ratio_np, multi_session_triggered,
-    target_amounts_np, prev_end_amounts_np
-
-    target_amounts_np : (T, M, P) float — 每期调仓后目标持仓金额
-    prev_end_amounts_np : (T, M, P) float — 每期结束时实际持仓金额（refs #100）
-    """
-    T, n_groups, P = membership_np.shape
-    if price_np is not None:
-        M = n_groups
-        return simulate_group_trading_book(
-            membership_np=membership_np,
-            returns_np=returns_np,
-            price_np=price_np,
-            open_fee_rate_mat=open_fee_mat,
-            close_fee_rate_mat=close_fee_mat,
-            close_today_fee_rate_mat=close_today_fee_mat,
-            open_fee_fixed_mat=(
-                np.zeros((M, P), dtype=float)
-                if open_fee_fixed_mat is None else np.asarray(open_fee_fixed_mat, dtype=float)
-            ),
-            close_fee_fixed_mat=(
-                np.zeros((M, P), dtype=float)
-                if close_fee_fixed_mat is None else np.asarray(close_fee_fixed_mat, dtype=float)
-            ),
-            close_today_fee_fixed_mat=(
-                None if close_today_fee_fixed_mat is None else np.asarray(close_today_fee_fixed_mat, dtype=float)
-            ),
-            point_value_vec=(
-                np.ones(P, dtype=float)
-                if point_value_vec is None else np.asarray(point_value_vec, dtype=float)
-            ),
-            min_tick_vec=(
-                np.zeros(P, dtype=float)
-                if min_tick_vec is None else np.asarray(min_tick_vec, dtype=float)
-            ),
-            min_trade_quantity_vec=(
-                np.ones(P, dtype=float)
-                if min_trade_quantity_vec is None else np.asarray(min_trade_quantity_vec, dtype=float)
-            ),
-            margin_ratio_mat=(
-                np.ones((M, P), dtype=float)
-                if margin_ratio_mat is None else np.asarray(margin_ratio_mat, dtype=float)
-            ),
-            is_margin_traded_vec=(
-                np.zeros(P, dtype=bool)
-                if is_margin_traded_vec is None else np.asarray(is_margin_traded_vec, dtype=bool)
-            ),
-            margin_modes=(
-                np.full(M, "cash", dtype=object)
-                if margin_modes is None else np.asarray(margin_modes, dtype=object)
-            ),
-            rebalance_modes=(
-                np.full(M, rebalance_mode, dtype=object)
-                if rebalance_modes is None else np.asarray(rebalance_modes, dtype=object)
-            ),
-            initial_capital=initial_capital,
-        )
-
-    rebalance_modes_arr = None
-    if rebalance_modes is not None:
-        rebalance_modes_arr = np.asarray(rebalance_modes, dtype=object)
-    liquidity_modes_arr = None
-    if liquidity_modes is not None:
-        liquidity_modes_arr = np.asarray(liquidity_modes, dtype=object)
-    liquidity_percents_arr = None
-    if liquidity_percents is not None:
-        liquidity_percents_arr = np.asarray(liquidity_percents, dtype=float)
-
-    # ── M = total variants (membership already expanded by caller) ──
-    M = n_groups
-    _variant_to_group = np.arange(M, dtype=int)
-    if rebalance_modes_arr is None:
-        rebalance_modes_arr = np.full(M, rebalance_mode, dtype=object)
-    elif rebalance_modes_arr.shape[0] != M:
-        raise ValueError(
-            f"rebalance_modes length={rebalance_modes_arr.shape[0]} != expanded groups={M}"
-        )
-    if liquidity_modes_arr is None:
-        liquidity_modes_arr = np.full(M, "infinite", dtype=object)
-    elif liquidity_modes_arr.shape[0] != M:
-        raise ValueError(
-            f"liquidity_modes length={liquidity_modes_arr.shape[0]} != expanded groups={M}"
-        )
-    if liquidity_percents_arr is None:
-        liquidity_percents_arr = np.full(M, 100.0, dtype=float)
-    elif liquidity_percents_arr.shape[0] != M:
-        raise ValueError(
-            f"liquidity_percents length={liquidity_percents_arr.shape[0]} != expanded groups={M}"
-        )
-    liquidity_capacity_arr = None
-    if liquidity_capacity_np is not None:
-        liquidity_capacity_arr = np.asarray(liquidity_capacity_np, dtype=float)
-        if liquidity_capacity_arr.shape != (T, P):
-            raise ValueError(
-                f"liquidity_capacity_np shape={liquidity_capacity_arr.shape} != {(T, P)}"
-            )
-    effective_close_fee_mat = close_today_fee_mat  # None means use close_fee_mat
-    multi_session_active = data_has_bar is not None
-    multi_session_triggered = 0
-
-    # Output arrays — sized by M (total variants)
-    net_returns_np = np.zeros((T, M), dtype=float)
-    gross_returns_np = np.zeros((T, M), dtype=float)
-    product_gross_contrib_np = np.zeros((T, M, P), dtype=float)
-    product_fee_contrib_np = np.zeros((T, M, P), dtype=float)
-    fee_costs_np = np.zeros((T, M), dtype=float)
-    trade_notional_ratio_np = np.zeros((T, M), dtype=float)
-
-    member_counts = membership_np.sum(axis=2).astype(float)  # (M,) per t
-    wealth = np.ones(M, dtype=float)
-    prev_end_amounts = np.zeros((M, P), dtype=float)
-
-    # 记录每期持仓金额 (refs #100)
-    target_amounts_np = np.zeros((T, M, P), dtype=float)
-    prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
-
-    _group_progress(f"group simulation start T={T} groups={M} products={P}")
-    for t in tqdm(range(T), desc="Group simulation"):
-        curr_mask_all = membership_np[t]           # (M, P)
-        curr_count_all = member_counts[t]           # (M,)
-        wealth_before_trade = wealth.copy()
-
-        # Multi-session check
-        has_bar_t = data_has_bar[t] if multi_session_active else np.ones(P, dtype=bool)
-        is_mixed_t = multi_session_active and has_bar_t.any() and (~has_bar_t).any()
-
-        target_amounts = np.zeros((M, P), dtype=float)
-        empty_mask = curr_count_all == 0
-        non_empty_mask = ~empty_mask
-
-        if multi_session_active and not has_bar_t.any():
-            target_amounts = prev_end_amounts.copy()
-            product_gross_contrib, gross = compute_group_gross_returns(
-                target_amounts, wealth_before_trade, returns_np[t],
-            )
-            wealth = wealth_before_trade * (1.0 + gross)
-            gross_returns_np[t] = gross
-            product_gross_contrib_np[t] = product_gross_contrib
-            net_returns_np[t] = gross
-            prev_end_amounts = target_amounts * (1.0 + returns_np[t][np.newaxis, :])
-            target_amounts_np[t] = target_amounts
-            prev_end_amounts_np[t] = prev_end_amounts
-            continue
-
-        # --- Empty groups ---
-        if empty_mask.any():
-            sell_empty = prev_end_amounts[empty_mask]
-            empty_target = np.zeros_like(sell_empty)
-            if multi_session_active:
-                empty_target[:, ~has_bar_t] = sell_empty[:, ~has_bar_t]
-            close_rates_empty = effective_close_fee_mat[empty_mask] if effective_close_fee_mat is not None else close_fee_mat[empty_mask]
-            _, sell_fee_empty = compute_sell_fee(
-                sell_empty, empty_target, close_rates_empty,
-                close_today_fee_vec=None,
-            )
-            sell_fee_ratio_empty = np.divide(
-                sell_fee_empty, wealth_before_trade[empty_mask],
-                out=np.zeros_like(sell_fee_empty, dtype=float),
-                where=wealth_before_trade[empty_mask] > 0,
-            )
-            empty_gross_contrib, gross_empty = compute_group_gross_returns(
-                empty_target, wealth_before_trade[empty_mask], returns_np[t],
-            )
-            net_ret_empty = gross_empty - sell_fee_ratio_empty
-            wealth[empty_mask] = wealth_before_trade[empty_mask] * (1.0 + net_ret_empty)
-            gross_returns_np[t, empty_mask] = gross_empty
-            product_gross_contrib_np[t, empty_mask] = empty_gross_contrib
-            sell_fee_per = np.clip(sell_empty - empty_target, 0.0, None) * close_rates_empty
-            empty_fee_contrib = np.where(
-                wealth_before_trade[empty_mask, np.newaxis] > 0,
-                sell_fee_per / wealth_before_trade[empty_mask, np.newaxis],
-                0.0,
-            )
-            product_fee_contrib_np[t, empty_mask] = empty_fee_contrib
-            fee_costs_np[t, empty_mask] = sell_fee_ratio_empty
-            net_returns_np[t, empty_mask] = net_ret_empty
-            prev_end_amounts[empty_mask] = empty_target * (1.0 + returns_np[t][np.newaxis, :])
-
-        if not non_empty_mask.any():
-            # 记录本期持仓金额（全空组，target_amounts 已在上方设为零）(refs #100)
-            target_amounts_np[t] = target_amounts
-            prev_end_amounts_np[t] = prev_end_amounts
-            continue
-
-        ne_idx = np.where(non_empty_mask)[0]
-
-        # Per-group fee vectors for this step
-        ne_open_fee = open_fee_mat[ne_idx]      # (k, P)
-        ne_close_fee = close_fee_mat[ne_idx]     # (k, P)
-        ne_close_today = effective_close_fee_mat[ne_idx] if effective_close_fee_mat is not None else None
-        target_close_fee_mat = effective_close_fee_mat if effective_close_fee_mat is not None else close_fee_mat
-
-        if is_mixed_t:
-            multi_session_triggered += 1
-        unique_modes = list(dict.fromkeys(str(m or rebalance_mode) for m in rebalance_modes_arr))
-        liquidity_active_t = liquidity_capacity_arr is not None and np.any(liquidity_modes_arr == "percent")
-        executable_capacity_t = None
-        if liquidity_active_t:
-            _liq_cap = cast(np.ndarray, liquidity_capacity_arr)  # type-narrow: guarded by liquidity_active_t
-            base_capacity = np.where(
-                np.isfinite(_liq_cap[t]) & (_liq_cap[t] > 0),
-                _liq_cap[t],
-                0.0,
-            )
-            percent_scale = np.clip(liquidity_percents_arr, 0.0, 100.0) / 100.0
-            percent_rows = liquidity_modes_arr == "percent"
-            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
-            executable_capacity_t[percent_rows] = base_capacity[np.newaxis, :] * percent_scale[percent_rows, np.newaxis]
-
-        def _build_targets_for_wealth(
-            wealth_for_target: np.ndarray,
-            *,
-            close_fee_already_paid: bool = False,
-        ) -> np.ndarray:
-            if is_mixed_t:
-                return build_multi_session_target_amounts(
-                    curr_mask_all, prev_end_amounts, wealth_for_target,
-                    has_bar_t, target_close_fee_mat,
-                )
-            if len(unique_modes) == 1:
-                return build_target_amounts(
-                    curr_mask_all, prev_end_amounts, wealth_for_target,
-                    unique_modes[0], close_fee_vec=target_close_fee_mat,
-                    close_fee_already_paid=close_fee_already_paid,
-                )
-            next_targets = np.zeros_like(prev_end_amounts, dtype=float)
-            for mode in unique_modes:
-                mode_mask = rebalance_modes_arr == mode
-                if not mode_mask.any():
-                    continue
-                next_targets[mode_mask] = build_target_amounts(
-                    curr_mask_all[mode_mask],
-                    prev_end_amounts[mode_mask],
-                    wealth_for_target[mode_mask],
-                    mode,
-                    close_fee_vec=target_close_fee_mat[mode_mask],
-                    close_fee_already_paid=close_fee_already_paid,
-                )
-            return next_targets
-
-        target_amounts = _build_targets_for_wealth(wealth_before_trade)
-
-        ne_target = target_amounts[ne_idx]
-        ne_prev = prev_end_amounts[ne_idx]
-        ne_wb = wealth_before_trade[ne_idx]
-        ne_cc = curr_count_all[ne_idx]
-        ne_ret = returns_np[t]
-
-        # Step 1: sell first, pay sell fee, then rebuild target with remaining wealth.
-        sell, sell_fee_candidate = _compute_sell_fee_per_group(
-            ne_prev, ne_target, ne_close_fee,
-            close_today_fee_mat=ne_close_today,
-        )
-        needs_rebuild = sell_fee_candidate > 0
-        if not is_mixed_t:
-            needs_rebuild &= rebalance_modes_arr[ne_idx] != "each_period"
-        if np.any(needs_rebuild):
-            for _ in range(_TARGET_REBUILD_MAX_ITERATIONS):
-                wealth_after_sell_fee = wealth_before_trade.copy()
-                wealth_after_sell_fee[ne_idx] = np.maximum(0.0, ne_wb - sell_fee_candidate)
-                next_target_amounts = _build_targets_for_wealth(
-                    wealth_after_sell_fee,
-                    close_fee_already_paid=True,
-                )
-                next_ne_target = next_target_amounts[ne_idx]
-                if np.allclose(next_ne_target, ne_target, rtol=1e-12, atol=1e-12):
-                    target_amounts = next_target_amounts
-                    ne_target = next_ne_target
-                    break
-                target_amounts = next_target_amounts
-                ne_target = next_ne_target
-                sell, sell_fee_candidate = _compute_sell_fee_per_group(
-                    ne_prev, ne_target, ne_close_fee,
-                    close_today_fee_mat=ne_close_today,
-                )
-
-        if executable_capacity_t is not None:
-            target_amounts[ne_idx] = apply_liquidity_execution(
-                prev_end_amounts[ne_idx],
-                target_amounts[ne_idx],
-                ne_wb,
-                executable_capacity_t[ne_idx],
-                ne_open_fee,
-                ne_close_today if ne_close_today is not None else ne_close_fee,
-            )
-            ne_target = target_amounts[ne_idx]
-            sell, sell_fee_candidate = _compute_sell_fee_per_group(
-                ne_prev, ne_target, ne_close_fee,
-                close_today_fee_mat=ne_close_today,
-            )
-
-        # Step 2: final sell fee (per-group fee vectors)
-        sell_fee = sell_fee_candidate
-        sell_fee_ratio = np.divide(
-            sell_fee, ne_wb,
-            out=np.zeros_like(sell_fee, dtype=float),
-            where=ne_wb > 0,
-        )
-
-        # Step 3: buy costs (per-group fee vectors)
-        buy, buy_fee, trade_notional_ratio = _compute_buy_costs_per_group(
-            ne_target, ne_prev, ne_open_fee, ne_wb,
-        )
-        buy_fee_ratio = np.divide(
-            buy_fee, ne_wb,
-            out=np.zeros_like(buy_fee, dtype=float),
-            where=ne_wb > 0,
-        )
-
-        # Per-product fee contrib
-        product_close_mat = ne_close_today if ne_close_today is not None else ne_close_fee
-        product_fee = buy * ne_open_fee + sell * product_close_mat
-        product_fee_contrib = np.where(
-            ne_wb[:, np.newaxis] > 0,
-            product_fee / ne_wb[:, np.newaxis],
-            0.0,
-        )
-
-        # Gross & net returns
-        buy_open_fees = buy * ne_open_fee
-        product_gross_contrib, gross = compute_group_gross_returns(
-            ne_target, ne_wb, ne_ret, buy_open_fees=buy_open_fees,
-        )
-        net_ret = compute_group_net_returns(gross, sell_fee_ratio, buy_fee_ratio, ne_wb, ne_target)
-
-        wealth[ne_idx] = ne_wb * (1.0 + net_ret)
-        gross_returns_np[t, ne_idx] = gross
-        product_gross_contrib_np[t, ne_idx] = product_gross_contrib
-        product_fee_contrib_np[t, ne_idx] = product_fee_contrib
-        fee_costs_np[t, ne_idx] = sell_fee_ratio + buy_fee_ratio
-        trade_notional_ratio_np[t, ne_idx] = trade_notional_ratio
-        net_returns_np[t, ne_idx] = net_ret
-
-        # Update prev_end_amounts
-        new_prev = (ne_target - buy_open_fees) * (1.0 + ne_ret[np.newaxis, :])
-        new_prev[ne_cc == 0] = 0.0
-        prev_end_amounts[ne_idx] = new_prev
-
-        # 记录本期持仓金额 (refs #100)
-        target_amounts_np[t] = target_amounts
-        prev_end_amounts_np[t] = prev_end_amounts
-
-    _group_progress("group simulation done")
-    return {
-        'net_returns_np': net_returns_np,
-        'gross_returns_np': gross_returns_np,
-        'product_gross_contrib_np': product_gross_contrib_np,
-        'product_fee_contrib_np': product_fee_contrib_np,
-        'fee_costs_np': fee_costs_np,
-        'trade_notional_ratio_np': trade_notional_ratio_np,
-        'multi_session_triggered': multi_session_triggered,
-        'target_amounts_np': target_amounts_np,
-        'prev_end_amounts_np': prev_end_amounts_np,
     }
 
 
@@ -1416,9 +1058,19 @@ def simulate_derived_group(
     """
     membership_np = getattr(group_result, 'membership_np', None)
     period_returns_np = getattr(group_result, 'period_returns_np', None)
+    price_np = getattr(group_result, 'price_np', None)
+    open_fee_fixed_vec = getattr(group_result, 'open_fee_fixed_vec', None)
+    close_fee_fixed_vec = getattr(group_result, 'close_fee_fixed_vec', None)
+    close_today_fee_fixed_vec = getattr(group_result, 'close_today_fee_fixed_vec', None)
+    point_value_vec = getattr(group_result, 'point_value_vec', None)
+    min_tick_vec = getattr(group_result, 'min_tick_vec', None)
+    min_trade_quantity_vec = getattr(group_result, 'min_trade_quantity_vec', None)
+    margin_ratio_vec = getattr(group_result, 'margin_ratio_vec', None)
+    is_margin_traded_vec = getattr(group_result, 'is_margin_traded_vec', None)
+    initial_capital = float(getattr(group_result, 'initial_capital', 1.0) or 1.0)
 
-    if membership_np is None or period_returns_np is None:
-        raise ValueError('GroupRunResult 缺少 membership_np 或 period_returns_np')
+    if membership_np is None or period_returns_np is None or price_np is None:
+        raise ValueError('GroupRunResult 缺少 membership_np / period_returns_np / price_np')
 
     sel = np.asarray(selected_idx, dtype=int)
     P = len(sel)
@@ -1428,7 +1080,21 @@ def simulate_derived_group(
         membership_np.shape[0], 1, P
     )  # (T, 1, P)
     returns = period_returns_np[:, sel]  # (T, P)
+    prices = price_np[:, sel]
     open_fv = open_fee_vec[sel] if open_fee_vec is not None else np.zeros(P)
+    open_fixed_fv = open_fee_fixed_vec[sel] if isinstance(open_fee_fixed_vec, np.ndarray) else np.zeros(P, dtype=float)
+    close_fixed_fv = close_fee_fixed_vec[sel] if isinstance(close_fee_fixed_vec, np.ndarray) else np.zeros(P, dtype=float)
+    close_today_fixed_fv = (
+        close_today_fee_fixed_vec[sel]
+        if isinstance(close_today_fee_fixed_vec, np.ndarray)
+        else np.zeros(P, dtype=float)
+    )
+    point_fv = point_value_vec[sel] if isinstance(point_value_vec, np.ndarray) else np.ones(P, dtype=float)
+    tick_fv = min_tick_vec[sel] if isinstance(min_tick_vec, np.ndarray) else np.full(P, 0.01, dtype=float)
+    lot_fv = min_trade_quantity_vec[sel] if isinstance(min_trade_quantity_vec, np.ndarray) else np.ones(P, dtype=float)
+    margin_ratio_fv = margin_ratio_vec[sel] if isinstance(margin_ratio_vec, np.ndarray) else np.ones(P, dtype=float)
+    margin_flag_fv = is_margin_traded_vec[sel] if isinstance(is_margin_traded_vec, np.ndarray) else np.zeros(P, dtype=bool)
+    margin_mode = np.array(["margin" if np.any(margin_flag_fv) else "cash"], dtype=object)
     # 根据 use_closetoday 选择平今或平昨
     if use_closetoday and close_today_fee_vec is not None:
         close_fv = close_today_fee_vec[sel]
@@ -1438,13 +1104,24 @@ def simulate_derived_group(
         close_fv = close_fee_vec[sel] if close_fee_vec is not None else np.zeros(P)
         effective_close_today = None
 
-    sim_result = simulate_groups(
+    sim_result = simulate_group_trading_book(
         membership_np=mask_1g,
         returns_np=returns,
-        open_fee_mat=open_fv.reshape(1, P),
-        close_fee_mat=close_fv.reshape(1, P),
-        close_today_fee_mat=effective_close_today.reshape(1, P) if effective_close_today is not None else None,
-        rebalance_mode=rebalance_mode,
+        price_np=prices,
+        open_fee_rate_mat=open_fv.reshape(1, P),
+        close_fee_rate_mat=close_fv.reshape(1, P),
+        open_fee_fixed_mat=open_fixed_fv.reshape(1, P),
+        close_fee_fixed_mat=close_fixed_fv.reshape(1, P),
+        close_today_fee_rate_mat=effective_close_today.reshape(1, P) if effective_close_today is not None else None,
+        close_today_fee_fixed_mat=close_today_fixed_fv.reshape(1, P) if effective_close_today is not None else None,
+        point_value_vec=point_fv,
+        min_tick_vec=tick_fv,
+        min_trade_quantity_vec=lot_fv,
+        margin_ratio_mat=margin_ratio_fv.reshape(1, P),
+        is_margin_traded_vec=margin_flag_fv,
+        margin_modes=margin_mode,
+        rebalance_modes=np.array([rebalance_mode], dtype=object),
+        initial_capital=initial_capital,
     )
 
     # Flatten (T, 1) → (T,)
@@ -1484,9 +1161,19 @@ def simulate_derived_groups_batch(
     """
     membership_np = getattr(group_result, 'membership_np', None)
     period_returns_np = getattr(group_result, 'period_returns_np', None)
+    price_np = getattr(group_result, 'price_np', None)
+    open_fee_fixed_vec = getattr(group_result, 'open_fee_fixed_vec', None)
+    close_fee_fixed_vec = getattr(group_result, 'close_fee_fixed_vec', None)
+    close_today_fee_fixed_vec = getattr(group_result, 'close_today_fee_fixed_vec', None)
+    point_value_vec = getattr(group_result, 'point_value_vec', None)
+    min_tick_vec = getattr(group_result, 'min_tick_vec', None)
+    min_trade_quantity_vec = getattr(group_result, 'min_trade_quantity_vec', None)
+    margin_ratio_vec = getattr(group_result, 'margin_ratio_vec', None)
+    is_margin_traded_vec = getattr(group_result, 'is_margin_traded_vec', None)
+    initial_capital = float(getattr(group_result, 'initial_capital', 1.0) or 1.0)
 
-    if membership_np is None or period_returns_np is None:
-        raise ValueError('GroupRunResult 缺少 membership_np 或 period_returns_np')
+    if membership_np is None or period_returns_np is None or price_np is None:
+        raise ValueError('GroupRunResult 缺少 membership_np / period_returns_np / price_np')
 
     if not derivations:
         return []
@@ -1512,7 +1199,21 @@ def simulate_derived_groups_batch(
         mask_batch[:, di, pos] = base_membership[:, sel]
 
     returns = period_returns_np[:, union_arr]  # (T, P_all)
+    prices = price_np[:, union_arr]
     open_fv = open_fee_vec[union_arr] if open_fee_vec is not None else np.zeros(P_all)
+    open_fixed_fv = open_fee_fixed_vec[union_arr] if isinstance(open_fee_fixed_vec, np.ndarray) else np.zeros(P_all, dtype=float)
+    close_fixed_fv = close_fee_fixed_vec[union_arr] if isinstance(close_fee_fixed_vec, np.ndarray) else np.zeros(P_all, dtype=float)
+    close_today_fixed_fv = (
+        close_today_fee_fixed_vec[union_arr]
+        if isinstance(close_today_fee_fixed_vec, np.ndarray)
+        else np.zeros(P_all, dtype=float)
+    )
+    point_fv = point_value_vec[union_arr] if isinstance(point_value_vec, np.ndarray) else np.ones(P_all, dtype=float)
+    tick_fv = min_tick_vec[union_arr] if isinstance(min_tick_vec, np.ndarray) else np.full(P_all, 0.01, dtype=float)
+    lot_fv = min_trade_quantity_vec[union_arr] if isinstance(min_trade_quantity_vec, np.ndarray) else np.ones(P_all, dtype=float)
+    margin_ratio_fv = margin_ratio_vec[union_arr] if isinstance(margin_ratio_vec, np.ndarray) else np.ones(P_all, dtype=float)
+    margin_flag_fv = is_margin_traded_vec[union_arr] if isinstance(is_margin_traded_vec, np.ndarray) else np.zeros(P_all, dtype=bool)
+    margin_mode = np.array(["margin" if np.any(margin_flag_fv) else "cash"] * N, dtype=object)
 
     if use_closetoday and close_today_fee_vec is not None:
         close_fv = close_today_fee_vec[union_arr]
@@ -1526,6 +1227,9 @@ def simulate_derived_groups_batch(
     open_fee_mat = np.tile(open_fv, (N, 1))
     close_fee_mat = np.tile(close_fv, (N, 1))
     ct_fee_mat = np.tile(effective_close_today, (N, 1)) if effective_close_today is not None else None
+    open_fee_fixed_mat = np.tile(open_fixed_fv, (N, 1))
+    close_fee_fixed_mat = np.tile(close_fixed_fv, (N, 1))
+    ct_fee_fixed_mat = np.tile(close_today_fixed_fv, (N, 1)) if effective_close_today is not None else None
 
     for di, d in enumerate(derivations):
         feo = d.get('fee_override')
@@ -1537,13 +1241,24 @@ def simulate_derived_groups_batch(
             if ct_fee_mat is not None and feo.get('close_today') is not None:
                 ct_fee_mat[di, :] = float(feo['close_today'])
 
-    sim_result = simulate_groups(
+    sim_result = simulate_group_trading_book(
         membership_np=mask_batch,
         returns_np=returns,
-        open_fee_mat=open_fee_mat,
-        close_fee_mat=close_fee_mat,
-        close_today_fee_mat=ct_fee_mat,
-        rebalance_mode=rebalance_mode,
+        price_np=prices,
+        open_fee_rate_mat=open_fee_mat,
+        close_fee_rate_mat=close_fee_mat,
+        open_fee_fixed_mat=open_fee_fixed_mat,
+        close_fee_fixed_mat=close_fee_fixed_mat,
+        close_today_fee_rate_mat=ct_fee_mat,
+        close_today_fee_fixed_mat=ct_fee_fixed_mat,
+        point_value_vec=point_fv,
+        min_tick_vec=tick_fv,
+        min_trade_quantity_vec=lot_fv,
+        margin_ratio_mat=np.tile(margin_ratio_fv, (N, 1)),
+        is_margin_traded_vec=margin_flag_fv,
+        margin_modes=margin_mode,
+        rebalance_modes=np.array([rebalance_mode] * N, dtype=object),
+        initial_capital=initial_capital,
     )
 
     # 拆回每个派生组的结果
@@ -1582,6 +1297,7 @@ def test_by_group_single_factor(
     group_fee_maps: Optional[dict[int, dict]] = None,
     group_variants: Optional[dict[int, list[dict]]] = None,
     initial_capital: float = 100000000.0,
+    calendar_index: Optional[pd.Index] = None,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
@@ -1643,8 +1359,8 @@ def test_by_group_single_factor(
         _ed = _align_ts_to_index(end_date, returns_src.index)
         returns_src = cast(pd.DataFrame, returns_src[returns_src.index <= _ed])
 
-    common_index = table_src.index.intersection(returns_src.index)
-    if len(common_index) == 0:
+    signal_index = table_src.index.intersection(returns_src.index)
+    if len(signal_index) == 0:
         def _idx_span(idx: pd.Index) -> str:
             if len(idx) == 0:
                 return "empty"
@@ -1654,8 +1370,17 @@ def test_by_group_single_factor(
             f"{factor.alias}: 因子表和收益表没有共同时间索引；"
             f"factor={_idx_span(table_src.index)}, returns={_idx_span(returns_src.index)}"
         )
-    table_src = table_src.loc[common_index]
-    returns_src = returns_src.loc[common_index]
+    table_src = table_src.loc[signal_index]
+    returns_src = returns_src.loc[signal_index]
+
+    if calendar_index is not None and len(calendar_index) > 0:
+        common_index = pd.Index(calendar_index)
+        signal_update_mask = common_index.isin(signal_index).to_numpy(dtype=bool, copy=False)
+        table_src = table_src.reindex(common_index)
+        returns_src = returns_src.reindex(common_index)
+    else:
+        common_index = signal_index
+        signal_update_mask = np.ones(len(common_index), dtype=bool)
 
     all_cols = list(table_src.columns)
     ret_cols = list(returns_src.columns)
@@ -1725,13 +1450,15 @@ def test_by_group_single_factor(
             present_src = None
 
     # ── 首尾全 NaN 行截断 ──
-    # 数据首尾可能存在所有品种均为 NaN 的行（数据尚未开始或已结束），截断之
+    # 对统一 calendar_index 而言，"无新信号" 的行允许全 NaN；
+    # 真正需要有效信号的是 signal_update_mask=True 的行。
     _all_nan = np.all(np.isnan(table_np), axis=1)  # (T,) — 整行全 NaN
-    _first_valid = int(np.argmin(_all_nan))  # 第一个非全NaN行（argmin找到第一个False=0）
-    _last_valid = int(len(_all_nan) - 1 - np.argmin(_all_nan[::-1]))  # 最后一个非全NaN行
-
-    if _all_nan.all():
+    _valid_signal_rows = signal_update_mask & (~_all_nan)
+    if not _valid_signal_rows.any():
         raise ValueError(f"{factor.alias}: 因子值序列全部为 NaN，无法进行分组测试。")
+    valid_positions = np.flatnonzero(_valid_signal_rows)
+    _first_valid = int(valid_positions[0])
+    _last_valid = int(valid_positions[-1])
 
     trim_start: int = 0
     trim_end: int = len(_all_nan)
@@ -1749,6 +1476,7 @@ def test_by_group_single_factor(
     # ── 中间全 NaN 行检测 ──
     # 截断后，中间不应再出现整行全 NaN
     _all_nan_mid = np.all(np.isnan(table_np), axis=1)
+    _all_nan_mid = _all_nan_mid & signal_update_mask
     if _all_nan_mid.any():
         bad_indices = [str(table_src.index[i]) for i in np.where(_all_nan_mid)[0]]
         raise ValueError(
@@ -1778,13 +1506,16 @@ def test_by_group_single_factor(
             _ed = _align_ts_to_index(end_date, present_df.index)
             present_df = cast(pd.DataFrame, present_df[present_df.index <= _ed])
         # 与 table/returns 取共同索引与列
-        present_df = present_df.loc[common_index, signal_valid_cols]
+        present_df = present_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
         # 跟随首尾截断（与 table_np/returns_np 一致）
         if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
             present_df = present_df.iloc[trim_start:trim_end]
         present_np = present_df.to_numpy(dtype=bool)
     else:
         raise ValueError(f"{factor.alias}: data_present_mask 不可用，无法进行分组测试。")
+
+    if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
+        signal_update_mask = signal_update_mask[trim_start:trim_end]
 
     # 排除“首部未上市/未有数据”的影响：对每列，把第一个 True 之前的 False 视为 True
     # （这些 False 不应触发多时段策略）
@@ -1798,7 +1529,7 @@ def test_by_group_single_factor(
     # 全 False 列：视为始终不存在，强制填 True（这些品种不会在 valid_cols 中参与交易）
     present_filled[:, ~col_has_any_present] = True
 
-    _mixed_mask = np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
+    _mixed_mask = signal_update_mask & np.any(~present_filled, axis=1) & (~np.all(~present_filled, axis=1))
     multi_session_active = bool(_mixed_mask.any())
     if multi_session_active:
         _after_head_missing = (~present_np) & (~head_missing)
@@ -1815,6 +1546,10 @@ def test_by_group_single_factor(
         f"group membership start factor={factor.alias} T={T} groups={n_groups} products={P}"
     )
     for t in tqdm(range(T), desc="Testing by group for factor " + factor.alias):
+        if t > 0 and not bool(signal_update_mask[t]):
+            membership_np[t] = current_members
+            continue
+
         row = table_np[t]
         ret_row = signal_returns_np[t]
 
@@ -1873,30 +1608,29 @@ def test_by_group_single_factor(
 
     if derived_defs:
         display_names = [product_display_name(product)['name'] for product in signal_valid_cols]
-        derived_slices: list[np.ndarray] = []
+        display_name_to_idx = {name: idx for idx, name in enumerate(display_names)}
         _group_progress(f"derived groups start factor={factor.alias} count={len(derived_defs)}")
-        for dd in tqdm(derived_defs, desc=f"Build derived groups {factor.alias}"):
-            if not isinstance(dd, dict):
-                continue
+
+        def _build_derived_pair(dd: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]] | None:
             base_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
             if base_group < 0 or base_group >= n_groups:
-                continue
+                return None
             product_names = dd.get('productNames', dd.get('product_names', []))
             if not product_names:
-                continue
-            selected = {str(n) for n in product_names}
-            sel_idx = [idx for idx, dn in enumerate(display_names) if dn in selected]
+                return None
+            sel_idx = [
+                display_name_to_idx[name]
+                for name in map(str, product_names)
+                if name in display_name_to_idx
+            ]
             if not sel_idx:
-                continue
+                return None
             sel = np.asarray(sel_idx, dtype=int)
             display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{base_group + 1}组精选'
 
-            # 从 base_group 的每期 membership 中切出选中品种 → (T, 1, P)
-            # mask_1g 需要是 (T, 1, P) 形状（P=全部品种数），只有选中品种位置有值
             mask_1g = np.zeros((T, 1, P), dtype=bool)
             mask_1g[:, 0, sel] = membership_np[:, base_group, :][:, sel]
-            derived_slices.append(mask_1g)
-            derived_info.append({
+            return mask_1g, {
                 'base_group': base_group,
                 'key': display_name,
                 'name': display_name,
@@ -1910,11 +1644,18 @@ def test_by_group_single_factor(
                 'liquidity_mode': dd.get('liquidity_mode', dd.get('liquidityMode')),
                 'liquidity_percent': dd.get('liquidity_percent', dd.get('liquidityPercent')),
                 'margin_mode': dd.get('margin_mode', dd.get('marginMode')),
-            })
+            }
 
-        if derived_slices:
-            derived_membership = np.concatenate(derived_slices, axis=1)  # (T, n_derived, P)
-            membership_np = np.concatenate([membership_np, derived_membership], axis=1)
+        derived_pairs = [
+            pair for pair in
+            (_build_derived_pair(dd) for dd in derived_defs if isinstance(dd, dict))
+            if pair is not None
+        ]
+
+        if derived_pairs:
+            derived_slices, derived_meta = zip(*derived_pairs)
+            membership_np = np.concatenate([membership_np, np.concatenate(list(derived_slices), axis=1)], axis=1)
+            derived_info.extend(list(derived_meta))
         _group_progress(f"derived groups done factor={factor.alias} built={len(derived_info)}")
 
     n_derived = len(derived_info)
@@ -1973,12 +1714,13 @@ def test_by_group_single_factor(
     for d_idx, di in enumerate(derived_info):
         n_names[n_base + d_idx] = di['name']
 
-    term_structure_paths = []
-    for product in signal_valid_cols:
-        getter = getattr(product, "get_term_structure_path", None)
-        path = getter() if callable(getter) else None
-        if path and path not in term_structure_paths:
-            term_structure_paths.append(path)
+    term_structure_paths = list(dict.fromkeys(
+        path
+        for product in signal_valid_cols
+        for getter in [getattr(product, "get_term_structure_path", None)]
+        for path in [getter() if callable(getter) else None]
+        if path
+    ))
 
     def _liquidity_mode_from_spec(spec: dict | None) -> str:
         if not isinstance(spec, dict):
@@ -2017,6 +1759,11 @@ def test_by_group_single_factor(
                 return str(parent).split(".")[0].upper()
         return nm.split(".")[0].upper()
 
+    variety_codes = [_variety(col) for col in valid_cols]
+    variety_codes_lower = [code.lower() for code in variety_codes]
+    variety_code_by_id = {id(col): code for col, code in zip(valid_cols, variety_codes)}
+    variety_code_lower_by_id = {id(col): code for col, code in zip(valid_cols, variety_codes_lower)}
+
     _spec_field_names = (
         "open_ratio",
         "close_ratio",
@@ -2029,27 +1776,24 @@ def test_by_group_single_factor(
         "min_trade_quantity",
         "long_margin_ratio",
     )
-    _spec_cache: dict[int, dict[str, Any]] = {}
-
-    def _spec_bundle(col) -> dict[str, Any]:
-        key = id(col)
-        cached = _spec_cache.get(key)
-        if cached is not None:
-            return cached
-        getter = getattr(col, "get_trading_spec_fields", None)
-        bundle: dict[str, Any] = {}
-        if callable(getter):
-            try:
-                bundle = cast(dict[str, Any], getter(list(_spec_field_names)) or {})
-            except Exception:
-                bundle = {}
-        if not bundle:
+    _spec_bundles: list[dict[str, Any]] = []
+    try:
+        from sources.OpenCTP.fields import get_products_fields
+        _spec_bundles = get_products_fields(list(valid_cols), list(_spec_field_names))
+    except Exception:
+        _spec_bundles = [{} for _ in valid_cols]
+    _spec_bundle_by_id: dict[int, dict[str, Any]] = {}
+    for col, bundle in zip(valid_cols, _spec_bundles):
+        merged_bundle = dict(bundle or {})
+        if not merged_bundle:
             for field in _spec_field_names:
                 value = getattr(col, field, None)
                 if value not in (None, ""):
-                    bundle[field] = value
-        _spec_cache[key] = bundle
-        return bundle
+                    merged_bundle[field] = value
+        _spec_bundle_by_id[id(col)] = merged_bundle
+
+    def _spec_bundle(col) -> dict[str, Any]:
+        return _spec_bundle_by_id.get(id(col), {})
 
     def _product_spec_value(col, product_field: str, default):
         bundle = _spec_bundle(col)
@@ -2059,7 +1803,7 @@ def test_by_group_single_factor(
         return getattr(col, product_field, default)
 
     def _fee_or_product_value(col, fee_key: str, product_field: str, default):
-        spec = fee_map.get(_variety(col), {}) or {}
+        spec = fee_map.get(variety_code_by_id.get(id(col), ""), {}) or {}
         if fee_key in spec and spec.get(fee_key) not in (None, ""):
             return spec.get(fee_key)
         return _product_spec_value(col, product_field, default)
@@ -2129,7 +1873,7 @@ def test_by_group_single_factor(
         gmap = group_maps.get(g)
         if gmap and isinstance(gmap, dict):
             for i, col in enumerate(valid_cols):
-                vname = _variety(col).lower()
+                vname = variety_code_lower_by_id.get(id(col), "")
                 prod_fee = gmap.get(vname)
                 if prod_fee and isinstance(prod_fee, dict) and field in prod_fee and prod_fee[field] is not None:
                     row[i] = float(prod_fee[field])
@@ -2144,22 +1888,15 @@ def test_by_group_single_factor(
                         row[:] = float(fo[field])
         return row
 
-    open_fee_mat = np.tile(open_fee_vec, (n_groups, 1))       # (n_groups, P) — default
-    close_fee_mat = np.tile(close_fee_vec, (n_groups, 1))
-    close_today_fee_mat = np.tile(close_today_fee_vec, (n_groups, 1))
-    open_fee_fixed_mat = np.tile(open_fee_fixed_vec, (n_groups, 1))
-    close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (n_groups, 1))
-    close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (n_groups, 1))
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (n_groups, 1))
 
     _group_progress(f"group fee matrix start factor={factor.alias} groups={n_groups} products={P}")
-    for g in tqdm(range(n_groups), desc=f"Build group fee matrix {factor.alias}"):
-        open_fee_mat[g, :] = _resolve_group_fee(g, 'open', open_fee_vec)
-        close_fee_mat[g, :] = _resolve_group_fee(g, 'close', close_fee_vec)
-        close_today_fee_mat[g, :] = _resolve_group_fee(g, 'close_today', close_today_fee_vec)
-        open_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'open_fixed', open_fee_fixed_vec)
-        close_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'close_fixed', close_fee_fixed_vec)
-        close_today_fee_fixed_mat[g, :] = _resolve_group_fee(g, 'close_today_fixed', close_today_fee_fixed_vec)
+    open_fee_mat = np.stack([_resolve_group_fee(g, 'open', open_fee_vec) for g in range(n_groups)], axis=0)
+    close_fee_mat = np.stack([_resolve_group_fee(g, 'close', close_fee_vec) for g in range(n_groups)], axis=0)
+    close_today_fee_mat = np.stack([_resolve_group_fee(g, 'close_today', close_today_fee_vec) for g in range(n_groups)], axis=0)
+    open_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'open_fixed', open_fee_fixed_vec) for g in range(n_groups)], axis=0)
+    close_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'close_fixed', close_fee_fixed_vec) for g in range(n_groups)], axis=0)
+    close_today_fee_fixed_mat = np.stack([_resolve_group_fee(g, 'close_today_fixed', close_today_fee_fixed_vec) for g in range(n_groups)], axis=0)
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
     # close_fee_mat 始终=平昨，close_today_fee_mat 始终=平今
@@ -2211,7 +1948,7 @@ def test_by_group_single_factor(
         vfm = spec.get('fee_map') or spec.get('feeMap') or {}
         if vfm and isinstance(vfm, dict):
             for ci, col in enumerate(valid_cols):
-                vname = _variety(col).lower()
+                vname = variety_code_lower_by_id.get(id(col), "")
                 pf = vfm.get(vname) or vfm.get(vname.upper())
                 if pf and isinstance(pf, dict):
                     if 'open_rate' in pf and pf['open_rate'] is not None:
@@ -2235,24 +1972,47 @@ def test_by_group_single_factor(
                 return bool(value)
         return bool(use_closetoday)
 
-    # ── 混合费率/派生变体：构建 group→variant 映射，扩展 fee 矩阵和元信息 ──
-    _variants = dict(group_variants or {})
-    if _variants:
-        for d_i, di in enumerate(derived_info):
-            derived_group_idx = n_base + d_i
-            if derived_group_idx not in _variants:
-                _variants[derived_group_idx] = [{
-                    'name': di.get('name', f'第{di.get("base_group", 0) + 1}组精选'),
-                    'fee_mode': di.get('fee_mode'),
-                    'fee_rate': di.get('fee_rate'),
-                    'fee_map': di.get('fee_map'),
-                    'use_close_today': di.get('use_close_today'),
-                    'rebalance_mode': di.get('rebalance_mode'),
-                    'liquidity_mode': di.get('liquidity_mode'),
-                    'liquidity_percent': di.get('liquidity_percent'),
-                    'margin_mode': di.get('margin_mode'),
-                }]
-    if _variants:
+    def _expand_variant_groups(
+        variants: dict[int, list[dict]] | None,
+    ) -> tuple[
+        np.ndarray,
+        dict[Any, Any],
+        list[dict],
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray | None,
+        np.ndarray | None,
+        int,
+        int,
+        list[str],
+        list[str],
+        list[float],
+        list[str],
+    ] | None:
+        _variants = dict(variants or {})
+        if _variants:
+            for d_i, di in enumerate(derived_info):
+                derived_group_idx = n_base + d_i
+                if derived_group_idx not in _variants:
+                    _variants[derived_group_idx] = [{
+                        'name': di.get('name', f'第{di.get("base_group", 0) + 1}组精选'),
+                        'fee_mode': di.get('fee_mode'),
+                        'fee_rate': di.get('fee_rate'),
+                        'fee_map': di.get('fee_map'),
+                        'use_close_today': di.get('use_close_today'),
+                        'rebalance_mode': di.get('rebalance_mode'),
+                        'liquidity_mode': di.get('liquidity_mode'),
+                        'liquidity_percent': di.get('liquidity_percent'),
+                        'margin_mode': di.get('margin_mode'),
+                    }]
+        if not _variants:
+            return None
+
         M_total = sum(len(_variants.get(g, [])) for g in range(n_groups))
         if M_total <= 0:
             raise ValueError("group_variants must contain at least one variant")
@@ -2317,29 +2077,59 @@ def test_by_group_single_factor(
                     _new_derived_info.append(di)
                 vi += 1
 
-        n_names = _new_names
-        membership_np = membership_np[:, variant_to_group, :]
-        open_fee_mat = _new_open_mat
-        close_fee_mat = _new_close_mat
-        close_today_fee_mat = _new_ct_mat
-        open_fee_fixed_mat = _new_open_fixed_mat
-        close_fee_fixed_mat = _new_close_fixed_mat
-        close_today_fee_fixed_mat = _new_ct_fixed_mat
-        margin_ratio_mat = _new_margin_ratio_mat
-        effective_close_fee_mat = np.where(
+        return (
+            variant_to_group,
+            _new_names,
+            _new_derived_info,
+            _new_open_mat,
+            _new_close_mat,
+            _new_ct_mat,
+            _new_open_fixed_mat,
+            _new_close_fixed_mat,
+            _new_ct_fixed_mat,
+            _new_margin_ratio_mat,
+            np.where(
             _variant_use_close_today[:, np.newaxis],
             close_today_fee_mat,
             close_fee_mat,
-        )
-        effective_close_fee_fixed_mat = np.where(
+            ),
+            np.where(
             _variant_use_close_today[:, np.newaxis],
             close_today_fee_fixed_mat,
             close_fee_fixed_mat,
+            ),
+            base_variant_count,
+            M_total,
+            variant_rebalance_modes,
+            variant_liquidity_modes,
+            variant_liquidity_percents,
+            variant_margin_modes,
         )
-        n_base = base_variant_count
-        derived_info = _new_derived_info
+
+    expanded_variants = _expand_variant_groups(group_variants)
+    if expanded_variants is not None:
+        (
+            variant_to_group,
+            n_names,
+            derived_info,
+            open_fee_mat,
+            close_fee_mat,
+            close_today_fee_mat,
+            open_fee_fixed_mat,
+            close_fee_fixed_mat,
+            close_today_fee_fixed_mat,
+            margin_ratio_mat,
+            effective_close_fee_mat,
+            effective_close_fee_fixed_mat,
+            n_base,
+            n_groups,
+            variant_rebalance_modes,
+            variant_liquidity_modes,
+            variant_liquidity_percents,
+            variant_margin_modes,
+        ) = expanded_variants
+        membership_np = membership_np[:, variant_to_group, :]
         n_derived = len(derived_info)
-        n_groups = M_total  # 后续代码中的 n_groups 现在指 M
     else:
         variant_rebalance_modes = []
         variant_liquidity_modes = liquidity_modes_list
@@ -2357,12 +2147,13 @@ def test_by_group_single_factor(
             end_date,
         )
 
-    products_dict = {}
-    for g in tqdm(range(n_groups), desc=f"Build products by group {factor.alias}"):
-        products_dict[g] = {
+    products_dict = {
+        g: {
             idx_entry: [valid_cols[i] for i in np.where(mask_row)[0]]
             for idx_entry, mask_row in zip(index_list, membership_np[:, g])
         }
+        for g in range(n_groups)
+    }
 
     member_counts = membership_np.sum(axis=2).astype(float)
 
@@ -2378,36 +2169,39 @@ def test_by_group_single_factor(
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
 
     # ── 逐期矩阵化收益计算（统一引擎：base + derived 一次跑完）──
-    data_has_bar = present_np if multi_session_active else None
+    trade_present_np = np.isfinite(price_np) & (price_np > 0)
+    data_has_bar = trade_present_np if np.any(~trade_present_np) else None
     _group_progress(
-        f"simulate groups start factor={factor.alias} T={T} groups={n_groups} "
+        f"simulate trading book start factor={factor.alias} T={T} groups={n_groups} "
         f"products={P} rebalance={rebalance_mode}"
     )
-    sim_result = simulate_groups(
+    sim_result = simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_filled,
-        open_fee_mat=open_fee_mat,
-        close_fee_mat=close_fee_mat,
-        close_today_fee_mat=effective_close_fee_mat,
+        price_np=price_np,
+        open_fee_rate_mat=open_fee_mat,
+        close_fee_rate_mat=close_fee_mat,
+        close_today_fee_rate_mat=effective_close_fee_mat,
         open_fee_fixed_mat=open_fee_fixed_mat,
         close_fee_fixed_mat=close_fee_fixed_mat,
         close_today_fee_fixed_mat=effective_close_fee_fixed_mat,
-        price_np=price_np,
+        tradable_mask_np=data_has_bar,
+        liquidity_capacity_np=liquidity_capacity_np,
+        liquidity_modes=variant_liquidity_modes if variant_liquidity_modes else None,
+        liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
         point_value_vec=point_value_vec,
         min_tick_vec=min_tick_vec,
         min_trade_quantity_vec=min_trade_quantity_vec,
         margin_ratio_mat=margin_ratio_mat,
         is_margin_traded_vec=is_margin_traded_vec,
         margin_modes=variant_margin_modes,
-        data_has_bar=data_has_bar,
-        rebalance_mode=rebalance_mode,
-        rebalance_modes=variant_rebalance_modes if variant_rebalance_modes else None,
-        liquidity_capacity_np=liquidity_capacity_np,
-        liquidity_modes=variant_liquidity_modes if variant_liquidity_modes else None,
-        liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
+        rebalance_modes=np.asarray(
+            variant_rebalance_modes if variant_rebalance_modes else [rebalance_mode] * n_groups,
+            dtype=object,
+        ),
         initial_capital=initial_capital,
     )
-    _group_progress(f"simulate groups done factor={factor.alias}")
+    _group_progress(f"simulate trading book done factor={factor.alias}")
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
@@ -2419,12 +2213,13 @@ def test_by_group_single_factor(
     if multi_session_active:
         print(f"[WARN] {factor.alias}: 多时段品种策略在 {multi_session_triggered_count}/{T} 期中触发。")
 
-    returns_dict = {}
-    for g in tqdm(range(n_groups), desc=f"Build returns dict {factor.alias}"):
-        returns_dict[g] = {
+    returns_dict = {
+        g: {
             idx_entry: float(value)
             for idx_entry, value in zip(index_list, group_returns_np[:, g])
         }
+        for g in range(n_groups)
+    }
 
     bad = np.isnan(group_returns_np) | np.isinf(group_returns_np) | (group_returns_np <= -1.0)
     cum_rets_filled = np.where(bad, 0.0, group_returns_np)
@@ -2522,6 +2317,15 @@ def test_by_group_single_factor(
         total_equity_np=sim_result.get('total_equity_np'),
         cash_np=sim_result.get('cash_np'),
         initial_capital=float(initial_capital),
+        price_np=price_np,
+        open_fee_fixed_vec=open_fee_fixed_vec,
+        close_fee_fixed_vec=close_fee_fixed_vec,
+        close_today_fee_fixed_vec=close_today_fee_fixed_vec,
+        point_value_vec=point_value_vec,
+        min_tick_vec=min_tick_vec,
+        min_trade_quantity_vec=min_trade_quantity_vec,
+        margin_ratio_vec=long_margin_ratio_vec,
+        is_margin_traded_vec=is_margin_traded_vec,
     )
     if r is not None:
         r.group_result = group_result

@@ -18,13 +18,47 @@ from tools.factors.tests.single_factor_test.group.core import (
     compute_group_gross_returns,
     compute_group_net_returns,
     simulate_derived_group,
-    simulate_groups,
+    simulate_group_trading_book,
     build_target_amounts,
 )
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
 # ── helpers ────────────────────────────────────────────────────────────
+
+def simulate_groups(
+    *,
+    membership_np: np.ndarray,
+    returns_np: np.ndarray,
+    open_fee_mat: np.ndarray,
+    close_fee_mat: np.ndarray,
+    rebalance_mode: str = "each_period",
+    close_today_fee_mat: np.ndarray | None = None,
+    rebalance_modes: np.ndarray | list[str] | None = None,
+) -> dict:
+    _, M, P = membership_np.shape
+    return simulate_group_trading_book(
+        membership_np=membership_np,
+        returns_np=returns_np,
+        price_np=np.full((returns_np.shape[0], P), 1e-6, dtype=float),
+        open_fee_rate_mat=np.asarray(open_fee_mat, dtype=float),
+        close_fee_rate_mat=np.asarray(close_fee_mat, dtype=float),
+        open_fee_fixed_mat=np.zeros((M, P), dtype=float),
+        close_fee_fixed_mat=np.zeros((M, P), dtype=float),
+        close_today_fee_rate_mat=None if close_today_fee_mat is None else np.asarray(close_today_fee_mat, dtype=float),
+        close_today_fee_fixed_mat=None,
+        point_value_vec=np.ones(P, dtype=float),
+        min_tick_vec=np.full(P, 1e-6, dtype=float),
+        min_trade_quantity_vec=np.ones(P, dtype=float),
+        margin_ratio_mat=np.ones((M, P), dtype=float),
+        is_margin_traded_vec=np.zeros(P, dtype=bool),
+        margin_modes=np.full(M, "cash", dtype=object),
+        rebalance_modes=(
+            np.full(M, rebalance_mode, dtype=object)
+            if rebalance_modes is None else np.asarray(rebalance_modes, dtype=object)
+        ),
+        initial_capital=1.0,
+    )
 
 def _make_group_result(
     membership_np: np.ndarray,
@@ -54,6 +88,16 @@ def _make_group_result(
         multi_session_active=False,
         rebalance_mode="buy_and_hold",
         report_df=pd.DataFrame(),
+        initial_capital=1.0,
+        price_np=np.full((T, P), 0.01, dtype=float),
+        open_fee_fixed_vec=np.zeros(P, dtype=float),
+        close_fee_fixed_vec=np.zeros(P, dtype=float),
+        close_today_fee_fixed_vec=np.zeros(P, dtype=float),
+        point_value_vec=np.ones(P, dtype=float),
+        min_tick_vec=np.full(P, 0.01, dtype=float),
+        min_trade_quantity_vec=np.ones(P, dtype=float),
+        margin_ratio_vec=np.ones(P, dtype=float),
+        is_margin_traded_vec=np.zeros(P, dtype=bool),
     )
 
 

@@ -99,6 +99,7 @@ class FactorTester(UniqueObject):
         logger    (Logger)      : 日志记录器（文件 + 可选控制台）
     """
     _instances = WeakValueDictionary()
+    _allowed_group_calendar_freqs = (DataFreq.MIN1, DataFreq.MIN5, DataFreq.DAY1)
 
     def __new__(cls, alias: Optional[str] = None, *args, user=None, **kwargs):
         core_alias = alias if alias else cls.__name__
@@ -118,6 +119,7 @@ class FactorTester(UniqueObject):
     def __init__(self, products: Sequence[Product],
                  alias: Optional[str] = None,
                  time_range: Optional[Tuple] = None,
+                 group_calendar_freq: Optional[Any] = None,
                  user: Optional['User'] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
                  logger_console: bool = False):
@@ -160,6 +162,7 @@ class FactorTester(UniqueObject):
 
             self.products = set(products)       # 当前测试品种集（可经筛选减少）
             self.all_products = set(products)   # 原始全量品种集
+            self.group_calendar_freq = DataFreq(group_calendar_freq or DataFreq.MIN1)
             self.selected_paths: list = []     # 提交时选取的路径列表（前端显示用）
             self.sift_product_by_empty_data_bool = False  # 记录是否已执行空数据过滤
             self.factors = []
@@ -338,6 +341,282 @@ class FactorTester(UniqueObject):
         from tools.factors.tests.single_factor_test.ic import ic_stats
         return ic_stats(ic_series)
 
+    def resolve_factor(self, factor_alias: str) -> Optional['Factor']:
+        """Resolve factor by alias or name within this tester."""
+        return next(
+            (f for f in self.factors if f.alias == factor_alias or f.name == factor_alias),
+            None,
+        )
+
+    @classmethod
+    def allowed_group_calendar_freqs(cls) -> tuple[DataFreq, ...]:
+        return tuple(DataFreq(freq) for freq in cls._allowed_group_calendar_freqs)
+
+    def collect_group_factor_freqs(self, factor_aliases: List[str]) -> List[DataFreq]:
+        freqs: list[DataFreq] = []
+        for factor_alias in factor_aliases:
+            factor = self.resolve_factor(str(factor_alias))
+            if factor is None:
+                continue
+            try:
+                factor_freq = factor.freq
+            except Exception:
+                factor_freq = None
+            if factor_freq is None:
+                continue
+            freqs.append(DataFreq(factor_freq))
+        return freqs
+
+    @classmethod
+    def resolve_group_calendar_freq_from_factor_freqs(
+        cls,
+        factor_freqs: Sequence[DataFreq],
+        requested: Optional[Any] = None,
+    ) -> DataFreq:
+        allowed = cls.allowed_group_calendar_freqs()
+        if not factor_freqs:
+            if requested in (None, '', 'auto', 'AUTO'):
+                return DataFreq.MIN1
+            calendar_freq = DataFreq(requested)
+            if str(calendar_freq) not in {str(freq) for freq in allowed}:
+                raise ValueError(
+                    "group_calendar_freq 只允许 "
+                    f"{[str(freq) for freq in allowed]}，收到 {calendar_freq}"
+                )
+            return calendar_freq
+
+        def _is_compatible(candidate: DataFreq) -> bool:
+            base_ns = candidate.value.value
+            return base_ns > 0 and all(freq.value.value > 0 and freq.value.value % base_ns == 0 for freq in factor_freqs)
+
+        if requested in (None, '', 'auto', 'AUTO'):
+            for candidate in reversed(allowed):
+                if _is_compatible(candidate):
+                    return candidate
+            raise ValueError(
+                "参与测试的因子频率无法映射到允许的 group_calendar_freq "
+                f"{[str(freq) for freq in allowed]}"
+            )
+
+        calendar_freq = DataFreq(requested)
+        if str(calendar_freq) not in {str(freq) for freq in allowed}:
+            raise ValueError(
+                "group_calendar_freq 只允许 "
+                f"{[str(freq) for freq in allowed]}，收到 {calendar_freq}"
+            )
+        if not _is_compatible(calendar_freq):
+            raise ValueError(
+                f"group_calendar_freq={calendar_freq} 不能整除参与测试的全部因子频率 "
+                f"{[str(freq) for freq in factor_freqs]}"
+            )
+        return calendar_freq
+
+    def resolve_group_calendar_freq(self, factor_aliases: List[str], requested: Optional[Any] = None) -> DataFreq:
+        """Resolve effective group calendar frequency for these factors."""
+        setting = self.group_calendar_freq if requested is None else requested
+        factor_freqs = self.collect_group_factor_freqs(factor_aliases)
+        return self.resolve_group_calendar_freq_from_factor_freqs(factor_freqs, setting)
+
+    def build_group_calendar_index(self, factor_aliases: List[str], requested_calendar_freq: Optional[Any] = None) -> pd.Index:
+        """Build a dense shared signal calendar for group testing within this tester."""
+        from tools.factors.tests.single_factor_test.group.core import (
+            align_table_for_group,
+            get_factor_table_for_group,
+        )
+
+        calendar_freq = self.resolve_group_calendar_freq(factor_aliases, requested_calendar_freq)
+        indices: list[pd.DatetimeIndex] = []
+
+        for factor_alias in factor_aliases:
+            factor = self.resolve_factor(str(factor_alias))
+            if factor is None:
+                continue
+            result = self._get_result(factor)
+            raw_returns = getattr(result, 'returns', None)
+            if not isinstance(raw_returns, pd.DataFrame) or raw_returns.empty:
+                continue
+            try:
+                table_src = get_factor_table_for_group(self, factor)
+                returns_src = align_table_for_group(factor, raw_returns)
+            except Exception:
+                continue
+            table_idx = _extract_signal_index(cast(pd.DataFrame, table_src).index)
+            returns_idx = _extract_signal_index(cast(pd.DataFrame, returns_src).index)
+            idx = pd.DatetimeIndex(table_idx.intersection(returns_idx)).dropna()
+            if len(idx) == 0:
+                continue
+            indices.append(idx)
+        merged = self.merge_group_calendar_indices(indices)
+        if len(merged) == 0:
+            return merged
+        merged_idx = pd.DatetimeIndex(merged).sort_values()
+        start = merged_idx[0]
+        end = merged_idx[-1]
+        return pd.date_range(start=start, end=end, freq=calendar_freq.value)
+
+    @staticmethod
+    def merge_group_calendar_indices(indices: Sequence[pd.Index]) -> pd.Index:
+        """Merge signal calendars across factors or testers into one dense shared index."""
+        cleaned: list[pd.DatetimeIndex] = []
+        tz_kinds: set[str] = set()
+        tz_values: set[str] = set()
+
+        for idx in indices:
+            if len(idx) == 0:
+                continue
+            dt_idx = pd.DatetimeIndex(idx).dropna()
+            if len(dt_idx) == 0:
+                continue
+            cleaned.append(dt_idx)
+            if dt_idx.tz is None:
+                tz_kinds.add('naive')
+            else:
+                tz_kinds.add('aware')
+                tz_values.add(str(dt_idx.tz))
+
+        if not cleaned:
+            return pd.Index([])
+
+        same_tz = len(tz_kinds) == 1 and (('naive' in tz_kinds) or len(tz_values) == 1)
+        if same_tz:
+            merged = cleaned[0]
+            for dt_idx in cleaned[1:]:
+                merged = merged.union(dt_idx)
+            return pd.DatetimeIndex(merged).sort_values().unique()
+
+        utc_values: list[pd.Timestamp] = []
+        for dt_idx in cleaned:
+            for value in dt_idx:
+                ts = pd.Timestamp(value)
+                utc_values.append(ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC'))
+        return pd.DatetimeIndex(utc_values).sort_values().unique()
+
+    def run_group_batch(
+        self,
+        *,
+        factor_alias: str,
+        n_groups: int,
+        fee: float,
+        fee_map: dict,
+        use_closetoday: bool,
+        initial_capital: float,
+        rebalance_mode: str,
+        time_range: Optional[Tuple] = None,
+        derived_groups: Optional[list] = None,
+        group_fee_maps: Optional[dict] = None,
+        n_groups_name: Optional[Dict[int, str]] = None,
+        group_variants: Optional[dict[int, list[dict]]] = None,
+        calendar_index: Optional[pd.Index] = None,
+    ) -> dict:
+        """Run one group-test batch and return raw compute artifacts."""
+        factor = self.resolve_factor(factor_alias)
+        if factor is None:
+            if not self.factors:
+                raise ValueError('当前测试器尚未生成因子实例。请先在 IC 测试模块运行一次 IC 测试。')
+            raise ValueError(f'未找到因子 {factor_alias}')
+
+        _, returns_dict, report_df, cum_np, idx_list = self.test_by_group(
+            factors=factor,
+            n_groups=n_groups,
+            time_range=time_range,
+            plot_flag=False,
+            save_plot=False,
+            plot_show=False,
+            fee=fee,
+            fee_map=fee_map,
+            use_closetoday=use_closetoday,
+            initial_capital=initial_capital,
+            rebalance_mode=rebalance_mode,
+            derived_groups=derived_groups,
+            group_fee_maps=group_fee_maps,
+            n_groups_name=n_groups_name or {},
+            group_variants=group_variants,
+            calendar_index=calendar_index,
+        )
+        group_result = self._get_result(factor).group_result
+        return {
+            'factor': factor,
+            'returns_dict': returns_dict,
+            'report_df': report_df,
+            'cum_np': cum_np,
+            'idx_list': idx_list,
+            'group_result': group_result,
+        }
+
+    def run_group_simulations(
+        self,
+        group_specs: List[dict[str, Any]],
+        *,
+        fee: float,
+        fee_map: dict,
+        use_closetoday: bool,
+        initial_capital: float,
+        rebalance_mode: str,
+        start_date: Optional[Any] = None,
+        end_date: Optional[Any] = None,
+        group_fee_maps: Optional[dict] = None,
+        calendar_index: Optional[pd.Index] = None,
+        requested_calendar_freq: Optional[Any] = None,
+        progress_hook: Optional[Callable[[str], None]] = None,
+    ) -> List[dict[str, Any]]:
+        """Run multiple group-test batches under one tester snapshot/context."""
+        saved_products = self.products.copy()
+        token = None
+        results: List[dict[str, Any]] = []
+
+        time_range: Optional[Tuple] = None
+        if start_date and end_date:
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            tz = getattr(self.start_date, 'tz', None) if hasattr(self.start_date, 'tz') else None
+            if tz:
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.tz_localize(tz)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.tz_localize(tz)
+            time_range = (start_dt, end_dt)
+
+        if calendar_index is None:
+            factor_aliases = list(dict.fromkeys(
+                str(spec.get('factor_alias') or '')
+                for spec in group_specs
+                if isinstance(spec, dict)
+            ))
+            calendar_index = self.build_group_calendar_index(factor_aliases, requested_calendar_freq=requested_calendar_freq)
+
+        try:
+            self.products = set(saved_products)
+            token = _active_tester.set(self)
+            for idx, spec in enumerate(group_specs, start=1):
+                factor_alias = str(spec.get('factor_alias') or '')
+                if progress_hook is not None:
+                    progress_hook(f"tester group simulation {idx}/{len(group_specs)} factor={factor_alias}")
+                result = self.run_group_batch(
+                    factor_alias=factor_alias,
+                    n_groups=int(spec.get('n_groups', 5)),
+                    fee=fee,
+                    fee_map=fee_map,
+                    use_closetoday=use_closetoday,
+                    initial_capital=initial_capital,
+                    rebalance_mode=str(spec.get('rebalance_mode') or rebalance_mode),
+                    time_range=time_range,
+                    derived_groups=spec.get('derived_groups'),
+                    group_fee_maps=group_fee_maps,
+                    n_groups_name=spec.get('n_groups_name'),
+                    group_variants=spec.get('group_variants'),
+                    calendar_index=calendar_index,
+                )
+                result['factor_alias'] = factor_alias
+                result['n_groups'] = int(spec.get('n_groups', 5))
+                result['ls_configs'] = spec.get('ls_configs')
+                results.append(result)
+        finally:
+            self.products = saved_products
+            if token is not None:
+                _active_tester.reset(token)
+
+        return results
+
     def test_by_group(self, factors: 'Optional[Factor|List[Factor]]' = None,
                       returns_col: FactorNextPeriodReturns = FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                       n_groups: int = 5, n_groups_name: Dict[int, str] = {},
@@ -366,6 +645,7 @@ class FactorTester(UniqueObject):
         derived_groups = kwargs.pop('derived_groups', None)
         group_fee_maps = kwargs.pop('group_fee_maps', None)
         group_variants = kwargs.pop('group_variants', None)
+        calendar_index = kwargs.pop('calendar_index', None)
 
         def _run(f: Factor) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
             return test_by_group_single_factor(
@@ -389,6 +669,7 @@ class FactorTester(UniqueObject):
                 derived_groups=derived_groups,
                 group_fee_maps=group_fee_maps,
                 group_variants=group_variants,
+                calendar_index=calendar_index,
             )
 
         cum_np_out: Optional[np.ndarray] = None

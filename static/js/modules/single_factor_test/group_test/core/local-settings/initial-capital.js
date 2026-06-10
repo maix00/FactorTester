@@ -49,6 +49,7 @@
     GT.localSettings.register({
         key: 'initialCapital',
         order: 20,
+        tabLabel: '初始金额',
         collect: collect,
         apply: apply,
         runFields: ['initialCapital'],

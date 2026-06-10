@@ -50,6 +50,7 @@
     GT.localSettings.register({
         key: 'dates',
         order: 10,
+        tabLabel: '时间',
         collect: collect,
         apply: apply,
         runFields: ['startDate', 'endDate'],

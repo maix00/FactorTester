@@ -57,17 +57,6 @@
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * 单次分组测试 POST
-     */
-    runTest.postGroupTest = function(payload) {
-        return fetch('/run_group_test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(function(res) { return res.json(); });
-    };
-
-    /**
      * 批量分组测试 POST（单次请求，后端并行计算）
      */
     runTest.postBatchGroupTest = function(payload) {
@@ -381,22 +370,22 @@
         var batchPayloads = [];
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
-            var groupNames = {};
+            var groupPayload = [];
             for (var gi = 0; gi < batch.groups.length; gi++) {
                 var g = batch.groups[gi];
                 var groupIdx = (g.groupIndex || (gi + 1)) - 1;
                 var variant = GT.panels.actions ? GT.panels.actions.serializeGroupVariant(g, 'Group ' + (groupIdx + 1))
                     : (GT.groupSettings.groups.serializeVariant ? GT.groupSettings.groups.serializeVariant(g, 'Group ' + (groupIdx + 1)) : null);
                 if (!variant) continue;
-                if (!groupNames[groupIdx]) groupNames[groupIdx] = [];
-                groupNames[groupIdx].push(variant);
+                variant.group_index = groupIdx;
+                groupPayload.push(variant);
             }
             var derivedPayload = batch.derivedPayload || [];
             batchPayloads.push({
                 submission_id: batch.testerId,
                 factor_alias: batch.factorAlias,
                 n_groups: batch.groupCount,
-                group_names: Object.keys(groupNames).length > 0 ? groupNames : null,
+                groups: groupPayload.length > 0 ? groupPayload : null,
                 ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null,
                 derived_groups: derivedPayload.length > 0 ? derivedPayload : null
             });
@@ -423,11 +412,13 @@
                 long: {
                     submission_id: cblLongBatch.testerId,
                     factor_alias: cblLongBatch.factorAlias,
+                    n_groups: cblLongBatch.groupCount,
                     group: cblLongIdx
                 },
                 short: {
                     submission_id: cblShortBatch.testerId,
                     factor_alias: cblShortBatch.factorAlias,
+                    n_groups: cblShortBatch.groupCount,
                     group: cblShortIdx
                 }
             });
@@ -487,7 +478,7 @@
             }
 
             if (statusSpan) {
-                var doneMsg = '✓ ' + data.batch_count + ' 批次完成';
+                var doneMsg = '✓ ' + data.simulation_count + ' 组模拟完成';
                 if (data.cross_batch_ls_count) {
                     doneMsg += '（含 ' + data.cross_batch_ls_count + ' 跨 Batch LS）';
                 }

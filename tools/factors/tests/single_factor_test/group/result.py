@@ -41,6 +41,15 @@ class GroupRunResult:
     total_equity_np: np.ndarray | None = None  # (T, M) float — 每期末总权益
     cash_np: np.ndarray | None = None  # (T, M) float — 每期末可用现金
     initial_capital: float | None = None
+    price_np: np.ndarray | None = None
+    open_fee_fixed_vec: np.ndarray | None = None
+    close_fee_fixed_vec: np.ndarray | None = None
+    close_today_fee_fixed_vec: np.ndarray | None = None
+    point_value_vec: np.ndarray | None = None
+    min_tick_vec: np.ndarray | None = None
+    min_trade_quantity_vec: np.ndarray | None = None
+    margin_ratio_vec: np.ndarray | None = None
+    is_margin_traded_vec: np.ndarray | None = None
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:

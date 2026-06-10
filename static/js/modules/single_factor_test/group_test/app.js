@@ -115,6 +115,9 @@
         call(dates().bindDateValidation, function(){})();
         call(dates().bindUseTimeRange, function(){})();
         call(dates().bindTimeSyncListeners, function(){})();
+        if (GT.localSettings && typeof GT.localSettings.initTabs === 'function') {
+            GT.localSettings.initTabs();
+        }
 
         if (GT.fee && typeof GT.fee.bind === 'function') GT.fee.bind();
 
