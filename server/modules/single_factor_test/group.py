@@ -37,7 +37,7 @@ def _safe_bool(obj) -> bool:
     return bool(obj)
 
 
-def _parse_initial_capital(raw: Any, default: float = 100000.0) -> float:
+def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
     """Parse initial capital with a stable backend default."""
     if raw in (None, ''):
         return float(default)
@@ -45,6 +45,31 @@ def _parse_initial_capital(raw: Any, default: float = 100000.0) -> float:
     if value is None or value <= 0:
         raise ValueError(f'初始金额必须是正数，收到: {raw!r}')
     return float(value)
+
+
+def _build_zero_position_warning(group_result: Any) -> str | None:
+    """Explain when the first rebalance cannot open any position."""
+    if group_result is None:
+        return None
+    quantities = getattr(group_result, 'position_quantities_np', None)
+    membership = getattr(group_result, 'membership_np', None)
+    initial_capital = getattr(group_result, 'initial_capital', None)
+    if quantities is None or membership is None:
+        return None
+    if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0:
+        return None
+    first_membership = np.asarray(membership[0], dtype=bool)
+    first_quantities = np.asarray(quantities[0], dtype=float)
+    wants_position = first_membership.any(axis=1)
+    has_position = np.any(np.abs(first_quantities) > 1e-12, axis=1)
+    blocked = np.where(wants_position & (~has_position))[0]
+    if blocked.size == 0:
+        return None
+    capital_text = f"{float(initial_capital):,.0f}" if isinstance(initial_capital, (int, float)) else "当前值"
+    return (
+        f"首期有 {int(blocked.size)} 个组未能开出任何仓位。"
+        f"这通常是初始金额 {capital_text} 仍不足以覆盖合约乘数、最小交易手数、手续费或保证金造成的。"
+    )
 
 
 def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
@@ -759,6 +784,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
         fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
 
         result_group_names = getattr(group_result, 'group_names', None) or _normalize_group_names(group_names)
+        capital_warning = _build_zero_position_warning(group_result)
         groups_data = []
         for g in range(n_total):
             is_derived = g >= n_base
@@ -832,6 +858,7 @@ def _run_single_batch(*, submission_id, factor_alias, n_groups,
             'groups': groups_data, 'metrics': metrics,
             'n_groups': n_total, 'n_base': n_base,
             'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
+            'capital_warning': capital_warning,
             'rebalance_mode': rebalance_mode,
             'submission_id': submission_id, 'factor_alias': factor_alias,
             'tester_alias': getattr(tester, 'alias', '?'),
@@ -1300,6 +1327,7 @@ def run_group_test():
         timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
 
         group_result = tester._get_result(factor).group_result
+        capital_warning = _build_zero_position_warning(group_result)
         n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
         n_base = getattr(group_result, 'n_base', n_groups) or n_groups
         n_derived = getattr(group_result, 'n_derived', 0) or 0
@@ -1376,6 +1404,7 @@ def run_group_test():
                         'n_base': n_base,
                         'structure_key': data.get('structure_key'),
                         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
+                        'capital_warning': capital_warning,
                         'rebalance_mode': rebalance_mode,
                         'submission_id': submission_id, 'factor_alias': factor_alias,
                         'tester_alias': getattr(tester, 'alias', '?'),

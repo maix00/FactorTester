@@ -443,7 +443,7 @@ def simulate_group_trading_book(
     is_margin_traded_vec: np.ndarray,
     margin_modes: np.ndarray | list[str],
     rebalance_modes: np.ndarray | list[str],
-    initial_capital: float = 100000.0,
+    initial_capital: float = 100000000.0,
 ) -> dict:
     """Simulate grouped trading with quantities, fees, cash, and margin accounting."""
     T, M, P = membership_np.shape
@@ -657,7 +657,7 @@ def simulate_groups(
     margin_ratio_mat: np.ndarray | None = None,
     is_margin_traded_vec: np.ndarray | None = None,
     margin_modes: np.ndarray | list[str] | None = None,
-    initial_capital: float = 100000.0,
+    initial_capital: float = 100000000.0,
 ) -> dict:
     """Matrix simulation of group returns over T periods for n_groups groups.
 
@@ -1377,7 +1377,7 @@ def test_by_group_single_factor(
     derived_groups: Optional[List[dict]] = None,
     group_fee_maps: Optional[dict[int, dict]] = None,
     group_variants: Optional[dict[int, list[dict]]] = None,
-    initial_capital: float = 100000.0,
+    initial_capital: float = 100000000.0,
 ) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
@@ -2307,7 +2307,7 @@ def test_by_group(
             fee=fee,
             fee_map=fee_map,
             use_closetoday=kwargs.pop('use_closetoday', False),
-            initial_capital=kwargs.pop('initial_capital', 100000.0),
+            initial_capital=kwargs.pop('initial_capital', 100000000.0),
             rebalance_mode=rebalance_mode,
             derived_groups=kwargs.pop('derived_groups', None),
             group_fee_maps=kwargs.pop('group_fee_maps', None),
