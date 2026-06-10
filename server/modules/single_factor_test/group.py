@@ -269,8 +269,8 @@ def _metric_display_key(raw_key, n_base: int, derived_info: list[dict], group_na
 
 
 def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_config: dict, n_groups: int) -> tuple[np.ndarray, np.ndarray]:
-    gross_np = np.asarray(gross_np, dtype=float)
-    fee_np = np.asarray(fee_np, dtype=float)
+    gross_np = np.nan_to_num(np.asarray(gross_np, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+    fee_np = np.nan_to_num(np.asarray(fee_np, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
     legs = []
     for leg in ls_config.get('long') or []:
         if 0 <= leg['group'] < n_groups:
@@ -291,8 +291,8 @@ def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_co
     leg_net = np.where(np.isfinite(leg_net), leg_net, 0.0)
 
     leg_caps = initial_caps[np.newaxis, :] * np.cumprod(1.0 + leg_net, axis=0)
-    total_caps = leg_caps.sum(axis=1)
-    previous_total_caps = np.concatenate([[initial_caps.sum() or 1.0], total_caps[:-1]])
+    total_caps = np.nansum(leg_caps, axis=1)
+    previous_total_caps = np.concatenate([[np.nansum(initial_caps) or 1.0], total_caps[:-1]])
     r_ls = np.divide(
         total_caps,
         previous_total_caps,
@@ -1641,7 +1641,7 @@ def get_group_snapshot():
                     # fallback: 取 g 但可能 index error
                     pass
 
-            total_amount = float(np.sum(g_amounts)) if g_amounts is not None and current_raw else 0.0
+            total_amount = float(np.nansum(g_amounts)) if g_amounts is not None and current_raw else 0.0
 
             # 注入 amount/weight/pending_exit 到每个产品
             if g_amounts is not None and col_to_pos and total_amount > 0:

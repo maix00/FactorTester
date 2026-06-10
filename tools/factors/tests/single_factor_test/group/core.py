@@ -62,13 +62,13 @@ def _build_each_period_targets_with_sell_fee(
     if not non_empty.any():
         return targets
 
-    non_member_fee = (prev_amounts * (~curr_mask).astype(float) * close_fees).sum(axis=1)
+    non_member_fee = np.nansum(prev_amounts * (~curr_mask).astype(float) * close_fees, axis=1)
     active = curr_mask & (prev_amounts > 0)
     target_each = np.zeros_like(wealth, dtype=float)
 
     for _ in range(_EACH_PERIOD_TARGET_MAX_ITERATIONS):
-        active_fee_sum = (active.astype(float) * close_fees).sum(axis=1)
-        active_fee_amount = (prev_amounts * active.astype(float) * close_fees).sum(axis=1)
+        active_fee_sum = np.nansum(active.astype(float) * close_fees, axis=1)
+        active_fee_amount = np.nansum(prev_amounts * active.astype(float) * close_fees, axis=1)
         denom = np.maximum(counts - active_fee_sum, 1e-12)
         next_target_each = np.divide(
             wealth - non_member_fee - active_fee_amount,
@@ -388,7 +388,7 @@ def _build_normalized_liquidity_capacity(
         except Exception:
             continue
 
-    row_sum = raw.sum(axis=1)
+    row_sum = np.nansum(raw, axis=1)
     if not np.any(row_sum > 0):
         _group_progress("liquidity capacity skipped no positive liquidity")
         return None
@@ -441,7 +441,7 @@ def build_target_amounts(
             )
         return out
 
-    counts = curr_mask.sum(axis=1).astype(float)
+    counts = np.nansum(curr_mask, axis=1).astype(float)
     targets = np.zeros_like(prev_amounts, dtype=float)
     non_empty = counts > 0
     if not non_empty.any():
@@ -458,14 +458,14 @@ def build_target_amounts(
     staying = curr_mask & prev_mask
     exiting = prev_mask & (~curr_mask)
     entering = curr_mask & (~prev_mask)
-    n_entering = entering.sum(axis=1).astype(float)
+    n_entering = np.nansum(entering, axis=1).astype(float)
     # Gross released amount (before close fee)
-    sell_amounts = (prev_amounts * exiting.astype(float)).sum(axis=1)
+    sell_amounts = np.nansum(prev_amounts * exiting.astype(float), axis=1)
 
     # Subtract close fee from released capital — the actual cash available
     # after selling is sell_amounts * (1 - close_fee) per exiting product.
     if close_fees is not None:
-        sell_fees = (prev_amounts * exiting.astype(float) * close_fees).sum(axis=1)
+        sell_fees = np.nansum(prev_amounts * exiting.astype(float) * close_fees, axis=1)
         released = np.maximum(0.0, sell_amounts - sell_fees)
     else:
         released = sell_amounts
@@ -489,7 +489,7 @@ def build_target_amounts(
     else:
         raise ValueError(f"Unknown rebalance_mode: {rebalance_mode!r}")
 
-    totals = targets.sum(axis=1)
+    totals = np.nansum(targets, axis=1)
     # Rescale to wealth only when we did NOT deduct close fees (backward
     # compat).  When close_fee_mat is provided, exiting capital is already
     # net of fees so targets.sum() < wealth is expected — do not rescale.
@@ -524,7 +524,7 @@ def build_multi_session_target_amounts(
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast
 
     def _equal_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
-        counts_local = mask.sum(axis=1).astype(float)
+        counts_local = np.nansum(mask, axis=1).astype(float)
         out = np.zeros_like(prev_amounts, dtype=float)
         rows = counts_local > 0
         if rows.any():
@@ -547,9 +547,9 @@ def build_multi_session_target_amounts(
     sell_amounts = prev_amounts * exiting_with_bar
     recycled = np.maximum(
         0.0,
-        sell_amounts.sum(axis=1) - (sell_amounts * close_fees).sum(axis=1),
+        np.nansum(sell_amounts, axis=1) - np.nansum(sell_amounts * close_fees, axis=1),
     )
-    entering_counts = entering_with_bar.sum(axis=1).astype(float)
+    entering_counts = np.nansum(entering_with_bar, axis=1).astype(float)
 
     targets = prev_amounts * (staying | exiting_without_bar)
     funded = non_empty & (entering_counts > 0) & (recycled > 0)
@@ -592,13 +592,13 @@ def apply_liquidity_execution(
 
     sell_exec = np.minimum(desired_sell, caps)
     after_sell = prev - sell_exec
-    sell_fee = (sell_exec * close_fee_mat).sum(axis=1)
-    cash_before = np.maximum(0.0, wealth - prev.sum(axis=1))
-    cash_after_sell = np.maximum(0.0, cash_before + sell_exec.sum(axis=1) - sell_fee)
+    sell_fee = np.nansum(sell_exec * close_fee_mat, axis=1)
+    cash_before = np.maximum(0.0, wealth - np.nansum(prev, axis=1))
+    cash_after_sell = np.maximum(0.0, cash_before + np.nansum(sell_exec, axis=1) - sell_fee)
 
     buy_capacity = np.minimum(desired_buy, caps)
     buy_capacity = np.where(np.isfinite(buy_capacity) & (buy_capacity > 0), buy_capacity, 0.0)
-    buy_capacity_sum = buy_capacity.sum(axis=1)
+    buy_capacity_sum = np.nansum(buy_capacity, axis=1)
     buy_budget = np.minimum(cash_after_sell, buy_capacity_sum)
 
     buy_exec = np.zeros_like(prev, dtype=float)
@@ -608,7 +608,7 @@ def apply_liquidity_execution(
 
     # Do not allow open fees to push total wealth negative.  If fees are large,
     # scale the buy leg down once more using the effective cash requirement.
-    buy_cash_need = (buy_exec * (1.0 + open_fee_mat)).sum(axis=1)
+    buy_cash_need = np.nansum(buy_exec * (1.0 + open_fee_mat), axis=1)
     over = buy_cash_need > np.maximum(cash_after_sell, 0.0) + 1e-12
     if over.any():
         scale = np.divide(
@@ -746,8 +746,8 @@ def simulate_group_trading_book(
             buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
             sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
             position_notional = desired_quantities * contract_value[np.newaxis, :]
-            occupied = np.where(use_margin, position_notional * margin_ratios, position_notional).sum(axis=1)
-            required = occupied + buy_fee.sum(axis=1) + sell_fee.sum(axis=1)
+            occupied = np.nansum(np.where(use_margin, position_notional * margin_ratios, position_notional), axis=1)
+            required = occupied + np.nansum(buy_fee, axis=1) + np.nansum(sell_fee, axis=1)
             over = required > equity + 1e-12
             if not over.any():
                 break
@@ -773,9 +773,10 @@ def simulate_group_trading_book(
             position_notional / equity[:, np.newaxis] * returns_np[t][np.newaxis, :],
             0.0,
         )
-        gross = gross_contrib.sum(axis=1)
+        gross_contrib = np.nan_to_num(gross_contrib, nan=0.0, posinf=0.0, neginf=0.0)
+        gross = np.nansum(gross_contrib, axis=1)
         fee_ratio = np.divide(
-            fee_amount.sum(axis=1),
+            np.nansum(fee_amount, axis=1),
             equity,
             out=np.zeros(M, dtype=float),
             where=equity > 0,
@@ -788,7 +789,8 @@ def simulate_group_trading_book(
             use_margin,
             end_notional * margin_ratios,
             end_notional,
-        ).sum(axis=1)
+        )
+        end_occupied = np.nansum(end_occupied, axis=1)
 
         net_returns_np[t] = net
         gross_returns_np[t] = gross
@@ -800,7 +802,7 @@ def simulate_group_trading_book(
         )
         fee_costs_np[t] = fee_ratio
         trade_notional_ratio_np[t] = np.divide(
-            (buy_notional + sell_notional).sum(axis=1),
+            np.nansum(buy_notional + sell_notional, axis=1),
             equity,
             out=np.zeros(M, dtype=float),
             where=equity > 0,
@@ -1255,7 +1257,8 @@ def compute_group_gross_returns(
         invested / wealth_before_trade[:, np.newaxis]
         * product_returns[np.newaxis, :]
     )
-    return product_contrib, product_contrib.sum(axis=1)
+    product_contrib = np.nan_to_num(product_contrib, nan=0.0, posinf=0.0, neginf=0.0)
+    return product_contrib, np.nansum(product_contrib, axis=1)
 
 
 def compute_group_net_returns(
@@ -1322,7 +1325,7 @@ def compute_sell_fee(
     )
     if effective.ndim == 1:
         effective = effective[np.newaxis, :]  # (1, P) → broadcast
-    sell_fee = (sell * effective).sum(axis=1)
+    sell_fee = np.nansum(sell * effective, axis=1)
     return sell, sell_fee
 
 
@@ -1337,7 +1340,7 @@ def _compute_sell_fee_per_group(
     target = np.asarray(target_amounts, dtype=float)
     sell = np.clip(prev - target, 0.0, None)
     effective = np.asarray(close_today_fee_mat if close_today_fee_mat is not None else close_fee_mat, dtype=float)
-    sell_fee = (sell * effective).sum(axis=1)
+    sell_fee = np.nansum(sell * effective, axis=1)
     return sell, sell_fee
 
 
@@ -1360,9 +1363,9 @@ def compute_buy_costs(
     open_fees = np.asarray(open_fee_vec, dtype=float)
     if open_fees.ndim == 1:
         open_fees = open_fees[np.newaxis, :]  # (1, P) → broadcast
-    buy_fee = (buy * open_fees).sum(axis=1)
+    buy_fee = np.nansum(buy * open_fees, axis=1)
     trade_notional_ratio = np.divide(
-        (buy + sell).sum(axis=1),
+        np.nansum(buy + sell, axis=1),
         wealth_before_trade,
         out=np.zeros_like(buy_fee, dtype=float),
         where=wealth_before_trade > 0,
@@ -1379,9 +1382,9 @@ def _compute_buy_costs_per_group(
     """Per-group version of compute_buy_costs with (k, P) fee matrix instead of (P,) vector."""
     buy = np.clip(target_amounts - np.asarray(prev_end_amounts), 0.0, None)
     sell = np.clip(np.asarray(prev_end_amounts) - target_amounts, 0.0, None)
-    buy_fee = (buy * open_fee_mat).sum(axis=1)
+    buy_fee = np.nansum(buy * open_fee_mat, axis=1)
     trade_notional_ratio = np.divide(
-        (buy + sell).sum(axis=1),
+        np.nansum(buy + sell, axis=1),
         wealth_before_trade,
         out=np.zeros_like(buy_fee, dtype=float),
         where=wealth_before_trade > 0,
