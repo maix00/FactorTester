@@ -15,7 +15,9 @@ from tools.data.DataFreq import DataFreq
 from tools.factors import Factor
 from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests import NextReturns
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
+from tools.products import lookup_contract_product
 
 
 _TARGET_REBUILD_MAX_ITERATIONS = 8
@@ -134,6 +136,93 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
 
     # 最后兜底：重新计算
     return factor.evaluate(tester.products)
+
+
+def _is_roll_mapped_product(product: Any) -> bool:
+    if getattr(product, "is_term_contract", None):
+        try:
+            if bool(product.is_term_contract()):
+                return False
+        except Exception:
+            pass
+    return callable(getattr(product, "get_contract_from_trading_day", None))
+
+
+def _resolve_trade_product(product: Any, signal_time: Any) -> Any:
+    if not _is_roll_mapped_product(product):
+        return product
+    try:
+        contract = product.get_contract_from_trading_day(signal_time)
+    except Exception:
+        contract = None
+    return contract if contract is not None else product
+
+
+def _product_identity(product: Any) -> tuple[str, str]:
+    cls_name = type(product).__name__
+    name = str(getattr(product, "name", product))
+    return cls_name, name
+
+
+def _expand_trade_products(
+    signal_products: list,
+    signal_index: list,
+    signal_membership_np: np.ndarray,
+) -> tuple[list, np.ndarray]:
+    """Map signal-level membership onto the union of actual traded products/contracts."""
+    T, M, P_signal = signal_membership_np.shape
+    trade_products: list = []
+    trade_pos_by_key: dict[tuple[str, str], int] = {}
+    signal_to_trade = np.full((T, P_signal), -1, dtype=int)
+
+    for t, signal_time in enumerate(signal_index):
+        active_signal_idx = np.where(signal_membership_np[t].any(axis=0))[0]
+        for pi in active_signal_idx:
+            trade_product = _resolve_trade_product(signal_products[pi], signal_time)
+            key = _product_identity(trade_product)
+            pos = trade_pos_by_key.get(key)
+            if pos is None:
+                pos = len(trade_products)
+                trade_pos_by_key[key] = pos
+                trade_products.append(trade_product)
+            signal_to_trade[t, pi] = pos
+
+    if not trade_products:
+        return list(signal_products), signal_membership_np.copy()
+
+    membership_np = np.zeros((T, M, len(trade_products)), dtype=bool)
+    for t in range(T):
+        mapped_cols = np.where(signal_to_trade[t] >= 0)[0]
+        for pi in mapped_cols:
+            membership_np[t, :, signal_to_trade[t, pi]] |= signal_membership_np[t, :, pi]
+    return trade_products, membership_np
+
+
+def _evaluate_trade_returns_for_group(
+    tester: Any,
+    factor: Factor,
+    products: list,
+    returns_col: FactorNextPeriodReturns,
+    source_freq: DataFreq,
+    return_freq: DataFreq,
+) -> pd.DataFrame:
+    if not products:
+        return pd.DataFrame()
+    shift = 0 if returns_col.value.name.startswith("OPEN") else 1
+    returns_factor = NextReturns().get_factor(
+        SC=returns_col.value,
+        RF=return_freq.value,
+        S=shift,
+        **{'$F': return_freq.value, '$Rev': '0'},
+    )
+    try:
+        table = returns_factor.evaluate(products, freq=source_freq)
+        return cast(pd.DataFrame, table.copy(deep=False))
+    finally:
+        if hasattr(tester, "discard_result"):
+            tester.discard_result(returns_factor)
+        else:
+            returns_factor.clear()
 
 
 def _build_normalized_liquidity_capacity(
@@ -1455,15 +1544,15 @@ def test_by_group_single_factor(
 
     all_cols = list(table_src.columns)
     ret_cols = list(returns_src.columns)
-    valid_cols = list(set((valid := table_src.isna().all(axis=0))[~valid].index).intersection(set(ret_cols)))
-    if not valid_cols:
+    signal_valid_cols = list(set((valid := table_src.isna().all(axis=0))[~valid].index).intersection(set(ret_cols)))
+    if not signal_valid_cols:
         raise ValueError(
             f"{factor.alias}: 因子表和收益表没有共同品种列；"
             f"factor_cols={len(all_cols)}, returns_cols={len(ret_cols)}"
         )
 
-    table_np = table_src[valid_cols].to_numpy(dtype=float)
-    returns_np = returns_src[valid_cols].to_numpy(dtype=float)
+    table_np = table_src[signal_valid_cols].to_numpy(dtype=float)
+    signal_returns_np = returns_src[signal_valid_cols].to_numpy(dtype=float)
 
     def _trade_price_column(col: FactorNextPeriodReturns) -> DataColumn:
         dc = DataColumn(col.value)
@@ -1481,8 +1570,14 @@ def test_by_group_single_factor(
         if getattr(factor, "_source_freq", None) is not None
         else (factor.freq if getattr(factor, "freq", None) is not None else DataFreq.MIN1),
     )
+    effective_return_freq = cast(
+        DataFreq,
+        r.return_freq
+        if r is not None and getattr(r, "return_freq", None) is not None
+        else (factor.freq if getattr(factor, "freq", None) is not None else source_freq),
+    )
     raw_prices = ColumnRef(price_col).evaluate(
-        products=valid_cols,
+        products=signal_valid_cols,
         freq=source_freq,
         start_calc_point=start_date,
     )
@@ -1494,10 +1589,9 @@ def test_by_group_single_factor(
     if end_date is not None:
         _ed = _align_ts_to_index(end_date, price_src.index)
         price_src = cast(pd.DataFrame, price_src[price_src.index <= _ed])
-    price_src = price_src.reindex(index=common_index, columns=valid_cols)
+    price_src = price_src.reindex(index=common_index, columns=signal_valid_cols)
     if price_src.isna().all(axis=None):
         raise ValueError(f"{factor.alias}: 无法取得分组回测交易价格列 {price_col.name}")
-    price_np = price_src[valid_cols].to_numpy(dtype=float)
 
     # ── data_present_mask（原始 bar 是否存在）──
     # 重要：不要用因子信号 NaN 来判断“是否有数据/是否可交易”：
@@ -1531,8 +1625,7 @@ def test_by_group_single_factor(
         trim_start = _first_valid
         trim_end = _last_valid + 1
         table_np = table_np[trim_start:trim_end]
-        returns_np = returns_np[trim_start:trim_end]
-        price_np = price_np[trim_start:trim_end]
+        signal_returns_np = signal_returns_np[trim_start:trim_end]
         table_src = table_src.iloc[trim_start:trim_end]
         returns_src = returns_src.iloc[trim_start:trim_end]
         price_src = price_src.iloc[trim_start:trim_end]
@@ -1553,7 +1646,7 @@ def test_by_group_single_factor(
 
     n_names = {i: n_groups_name.get(i, "group_" + str(i)) for i in range(n_groups)}
 
-    P = len(valid_cols)
+    P = len(signal_valid_cols)
     membership_np = np.zeros((T, n_groups, P), dtype=bool)
     current_members = np.zeros((n_groups, P), dtype=bool)
 
@@ -1569,7 +1662,7 @@ def test_by_group_single_factor(
             _ed = _align_ts_to_index(end_date, present_src.index)
             present_src = cast(pd.DataFrame, present_src[present_src.index <= _ed])
         # 与 table/returns 取共同索引与列
-        present_src = present_src.loc[common_index, valid_cols]
+        present_src = present_src.loc[common_index, signal_valid_cols]
         # 跟随首尾截断（与 table_np/returns_np 一致）
         if _first_valid > 0 or _last_valid < len(_all_nan) - 1:
             present_src = present_src.iloc[trim_start:trim_end]
@@ -1594,7 +1687,7 @@ def test_by_group_single_factor(
     if multi_session_active:
         _after_head_missing = (~present_np) & (~head_missing)
         _missing_cols = np.where(np.any(_after_head_missing, axis=0))[0]
-        _missing_names = [str(valid_cols[i]) for i in _missing_cols]
+        _missing_names = [str(signal_valid_cols[i]) for i in _missing_cols]
         print(
             f"[INFO] {factor.alias}: 检测到 {int(_mixed_mask.sum())}/{T} 期存在部分品种无原始数据 "
             f"（{len(_missing_names)} 个品种存在缺失：{', '.join(_missing_names[:5])}"
@@ -1604,13 +1697,13 @@ def test_by_group_single_factor(
 
     for t in tqdm(range(T), desc="Testing by group for factor " + factor.alias):
         row = table_np[t]
-        ret_row = returns_np[t]
+        ret_row = signal_returns_np[t]
 
         isnan_ret = np.isnan(ret_row)
         isnan_fac = np.isnan(row)
         isbad_ret = (ret_row <= -1.0) | np.isinf(ret_row)
         if isbad_ret.any():
-            bad_products = [valid_cols[i] for i in np.where(isbad_ret)[0]]
+            bad_products = [signal_valid_cols[i] for i in np.where(isbad_ret)[0]]
             bad_rets = [float(ret_row[i]) for i in np.where(isbad_ret)[0]]
             print(
                 f"[WARN] t={t} ({index_list[t]}): 品种收益异常（≤-1 或 inf），将从分配中剔除: "
@@ -1650,9 +1743,6 @@ def test_by_group_single_factor(
 
         membership_np[t] = current_members
 
-    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
-    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
-
     liquidity_capacity_np: np.ndarray | None = None
 
     # ── 派生组（精选组）：拼入 membership_np 作为额外组，统一计算 ──
@@ -1662,7 +1752,7 @@ def test_by_group_single_factor(
     from tools.products.product_utils import product_display_name
 
     if derived_defs:
-        display_names = [product_display_name(product)['name'] for product in valid_cols]
+        display_names = [product_display_name(product)['name'] for product in signal_valid_cols]
         derived_slices: list[np.ndarray] = []
         for dd in derived_defs:
             if not isinstance(dd, dict):
@@ -1709,9 +1799,56 @@ def test_by_group_single_factor(
     n_base = n_groups
     n_groups = membership_np.shape[1]  # 现在包含 base + derived
 
+    trade_valid_cols, membership_np = _expand_trade_products(signal_valid_cols, index_list, membership_np)
+    trade_returns_src = _evaluate_trade_returns_for_group(
+        tester,
+        factor,
+        trade_valid_cols,
+        returns_col,
+        source_freq,
+        effective_return_freq,
+    )
+    trade_returns_src.index = _extract_signal_index(trade_returns_src.index)
+    if start_date is not None:
+        _sd = _align_ts_to_index(start_date, trade_returns_src.index)
+        trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index >= _sd])
+    if end_date is not None:
+        _ed = _align_ts_to_index(end_date, trade_returns_src.index)
+        trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index <= _ed])
+    trade_returns_src = trade_returns_src.reindex(index=index_list, columns=trade_valid_cols)
+    returns_np = trade_returns_src[trade_valid_cols].to_numpy(dtype=float)
+
+    raw_trade_prices = ColumnRef(price_col).evaluate(
+        products=trade_valid_cols,
+        freq=source_freq,
+        start_calc_point=start_date,
+    )
+    trade_price_src = align_table_for_group(factor, raw_trade_prices)
+    trade_price_src.index = _extract_signal_index(trade_price_src.index)
+    if start_date is not None:
+        _sd = _align_ts_to_index(start_date, trade_price_src.index)
+        trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index >= _sd])
+    if end_date is not None:
+        _ed = _align_ts_to_index(end_date, trade_price_src.index)
+        trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index <= _ed])
+    trade_price_src = trade_price_src.reindex(index=index_list, columns=trade_valid_cols)
+    price_np = trade_price_src[trade_valid_cols].to_numpy(dtype=float)
+
+    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
+    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
+    valid_cols = trade_valid_cols
+    P = len(valid_cols)
+
     # 扩展组名映射（派生组用 derived_info 中的 name）
     for d_idx, di in enumerate(derived_info):
         n_names[n_base + d_idx] = di['name']
+
+    term_structure_paths = []
+    for product in signal_valid_cols:
+        getter = getattr(product, "get_term_structure_path", None)
+        path = getter() if callable(getter) else None
+        if path and path not in term_structure_paths:
+            term_structure_paths.append(path)
 
     def _liquidity_mode_from_spec(spec: dict | None) -> str:
         if not isinstance(spec, dict):
@@ -1739,6 +1876,15 @@ def test_by_group_single_factor(
 
     def _variety(col) -> str:
         nm = getattr(col, "name", str(col))
+        marker = getattr(col, "is_term_contract", None)
+        try:
+            is_term_contract = bool(marker()) if callable(marker) else bool(marker)
+        except Exception:
+            is_term_contract = False
+        if is_term_contract and term_structure_paths:
+            parent = lookup_contract_product(nm, term_structure_paths)
+            if parent:
+                return str(parent).split(".")[0].upper()
         return nm.split(".")[0].upper()
 
     def _product_spec_value(col, product_field: str, default):
