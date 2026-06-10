@@ -2017,15 +2017,45 @@ def test_by_group_single_factor(
                 return str(parent).split(".")[0].upper()
         return nm.split(".")[0].upper()
 
-    def _product_spec_value(col, product_field: str, default):
-        getter = getattr(col, "get_trading_spec_field", None)
+    _spec_field_names = (
+        "open_ratio",
+        "close_ratio",
+        "closetoday_ratio",
+        "open_fixed",
+        "close_fixed",
+        "closetoday_fixed",
+        "multiplier",
+        "min_tick",
+        "min_trade_quantity",
+        "long_margin_ratio",
+    )
+    _spec_cache: dict[int, dict[str, Any]] = {}
+
+    def _spec_bundle(col) -> dict[str, Any]:
+        key = id(col)
+        cached = _spec_cache.get(key)
+        if cached is not None:
+            return cached
+        getter = getattr(col, "get_trading_spec_fields", None)
+        bundle: dict[str, Any] = {}
         if callable(getter):
             try:
-                value = getter(product_field)
-                if value not in (None, ""):
-                    return value
+                bundle = dict(getter(list(_spec_field_names)) or {})
             except Exception:
-                pass
+                bundle = {}
+        if not bundle:
+            for field in _spec_field_names:
+                value = getattr(col, field, None)
+                if value not in (None, ""):
+                    bundle[field] = value
+        _spec_cache[key] = bundle
+        return bundle
+
+    def _product_spec_value(col, product_field: str, default):
+        bundle = _spec_bundle(col)
+        value = bundle.get(product_field)
+        if value not in (None, ""):
+            return value
         return getattr(col, product_field, default)
 
     def _fee_or_product_value(col, fee_key: str, product_field: str, default):

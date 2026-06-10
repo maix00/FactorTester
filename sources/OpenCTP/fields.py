@@ -156,15 +156,7 @@ def online_instrument_field(product: Any, field: str, *, markets: str | None = N
 
 def get_product_field(product: Any, field: str, *, markets: str | None = None) -> Any:
     """Resolve one reference field: local object → local snapshot → OpenCTP online."""
-    for getter in (
-        local_product_field,
-        local_snapshot_field,
-        lambda p, f: online_instrument_field(p, f, markets=markets),
-    ):
-        value = getter(product, field)
-        if value not in (None, ""):
-            return value
-    return None
+    return get_product_fields(product, [field], markets=markets).get(field)
 
 
 def get_product_fields(
@@ -174,10 +166,79 @@ def get_product_fields(
     markets: str | None = None,
 ) -> dict[str, Any]:
     """Resolve several reference fields independently for one product."""
-    return {
-        field: get_product_field(product, field, markets=markets)
-        for field in fields
+    ordered_fields = list(fields)
+    result: dict[str, Any] = {field: None for field in ordered_fields}
+    canonical_to_originals: dict[str, list[str]] = {}
+    for field in ordered_fields:
+        canonical = canonical_field(field)
+        canonical_to_originals.setdefault(canonical, []).append(field)
+
+    # Local product attributes first.
+    for field in ordered_fields:
+        value = local_product_field(product, field)
+        if value not in (None, ""):
+            result[field] = value
+
+    missing_canonicals = {
+        canonical for canonical, originals in canonical_to_originals.items()
+        if any(result[field] in (None, "") for field in originals)
     }
+    if not missing_canonicals:
+        return result
+
+    # Local snapshot next, resolved once per product.
+    snapshot_values: dict[str, Any] = {}
+    try:
+        from sources.LocalCNFutures.FeeData import get_contract_fee_row, load_latest
+        from tools.products.Futures import FuturesContract
+
+        row = None
+        if isinstance(product, FuturesContract):
+            row = get_contract_fee_row(getattr(product, "name", ""), allow_latest_fallback=True)
+        if row is None:
+            df = load_latest()
+            if isinstance(df, pd.DataFrame) and not df.empty and "variety_code" in df.columns:
+                variety = _product_code(product).upper()
+                match = df[df["variety_code"].astype(str).str.upper() == variety]
+                if not match.empty:
+                    row = match.iloc[0]
+        if row is not None:
+            for field in ordered_fields:
+                key = canonical_field(field)
+                if key in row and pd.notna(row[key]):
+                    snapshot_values[field] = row[key]
+                    result[field] = row[key]
+    except Exception:
+        snapshot_values = {}
+
+    missing_canonicals = {
+        canonical for canonical, originals in canonical_to_originals.items()
+        if any(result[field] in (None, "") for field in originals)
+    }
+    if not missing_canonicals:
+        return result
+
+    # Online fallback is fetched once, then all missing fields are read from the same row.
+    contract = _contract_code(product)
+    df = pd.DataFrame()
+    if contract:
+        df = _online_contract_specs(contract)
+    if df.empty:
+        product_code = _product_code(product)
+        if product_code:
+            df = _online_product_specs(product_code, markets=markets)
+    if not df.empty:
+        row = df.iloc[0]
+        for field in ordered_fields:
+            if result[field] not in (None, ""):
+                continue
+            key = canonical_field(field)
+            if key in row.index:
+                value = row[key]
+                if value not in (None, "") and not pd.isna(value):
+                    result[field] = value
+
+    return result
 
 
 def make_field_getter(field: str) -> Callable[[Any], Any]:

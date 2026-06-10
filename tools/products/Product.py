@@ -121,7 +121,8 @@ class Product(UniqueObject):
         """Return selected product trading-spec fields, resolved independently."""
         if fields is None:
             fields = list(self.TRADING_SPEC_FIELDS)
-        return {field: self.get_trading_spec_field(field) for field in fields}
+        from sources.OpenCTP.fields import get_product_fields
+        return get_product_fields(self, fields)
 
     def get_multiplier(self, default: Any = None) -> Any:
         return self.get_trading_spec_field("multiplier", default)
