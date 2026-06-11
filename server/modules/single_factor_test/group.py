@@ -249,19 +249,39 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
     return names, grouped or None
 
 
-def _extract_product_names_from_group(group: dict) -> list[str]:
-    """从 group 对象中提取产品名列表（扁平化 productMask → 产品名数组）."""
-    # 优先用 productNames（已经是数组）
-    pn = group.get('productNames')
+def _map_group_item(item: dict) -> dict:
+    """将前端 group payload item 映射为 _FactorGroupTestGroup 的可选字段。
+
+    前端字段名同时支持 camelCase 和 snake_case。
+    """
+    def _get(*keys):
+        for k in keys:
+            v = item.get(k)
+            if v is not None:
+                return v
+        return None
+
+    return {
+        'fee_modifications': _get('fee_modifications', 'feeModifications'),
+        'fee_mode': _get('fee_mode', 'feeMode'),
+        'fee_rate': _get('fee_rate', 'feeRate'),
+        'use_close_today': _get('use_close_today', 'useCloseToday'),
+        'rebalance_mode': _get('rebalance_mode', 'rebalanceMode'),
+        'liquidity_mode': _get('liquidity_mode', 'liquidityMode'),
+        'liquidity_percent': _get('liquidity_percent', 'liquidityPercent'),
+        'margin_mode': _get('margin_mode', 'marginMode'),
+    }
+
+
+def _product_list_from_group(item: dict) -> list[str] | None:
+    """从 group item 提取 product_list；None 表示不筛选（全量）。"""
+    pn = item.get('productNames')
     if isinstance(pn, list) and pn:
         return [str(n) for n in pn]
-
-    # productMask: { productName: true/false }
-    mask = group.get('productMask')
+    mask = item.get('productMask')
     if isinstance(mask, dict):
         return sorted([str(k) for k, v in mask.items() if v])
-
-    return []
+    return None
 
 
 def _build_flat_groups_from_payload(
@@ -269,16 +289,7 @@ def _build_flat_groups_from_payload(
     *,
     entry_index: int = 0,
 ) -> tuple[list, list[dict] | None]:
-    """Build a flat list of _FactorGroupTestGroup from a single frontend payload entry.
-
-    Parses the frontend ``groups`` array (flat format) and converts each entry
-    into a ``_FactorGroupTestGroup`` instance.
-
-    Returns
-    -------
-    (groups, ls_configs) where groups is list[_FactorGroupTestGroup] and
-    ls_configs is parsed LS configs (or None).
-    """
+    """将单个前端 submit entry 构建为 _FactorGroupTestGroup 列表。"""
     from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 
     factor_alias = str(payload_entry.get('factor_alias') or '')
@@ -287,7 +298,7 @@ def _build_flat_groups_from_payload(
     groups = payload_entry.get('groups')
     group_names = payload_entry.get('group_names')
 
-    # Parse group names (for base groups without their own name)
+    # 解析 group name map（用于 group 没有自己的 key/name 时 fallback）
     if isinstance(groups, list) and groups:
         n_groups_name, _ = _parse_groups_payload(groups)
     else:
@@ -301,58 +312,24 @@ def _build_flat_groups_from_payload(
         for item in groups:
             if not isinstance(item, dict):
                 continue
-            has_parent = bool(item.get('parentId') or item.get('parent_id'))
-            if not has_parent:
-                # Base group (no parentId): one flat group per entry
-                try:
-                    gi = int(item.get('group_index', item.get('groupIndex', 0)))
-                except (TypeError, ValueError):
-                    continue
-                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
-                flat_groups.append(_FactorGroupTestGroup(
-                    tester_id=submission_id,
-                    factor_alias=factor_alias,
-                    n_groups=n_groups,
-                    group_index=gi,
-                    key=str(display_name),
-                    name=str(display_name),
-                    product_list=None,
-                    fee_modifications=item.get('fee_modifications') or item.get('feeModifications') or None,
-                    fee_mode=item.get('fee_mode') or item.get('feeMode') or None,
-                    fee_rate=item.get('fee_rate', item.get('feeRate')),
-                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
-                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode') or None,
-                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode') or None,
-                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
-                    margin_mode=item.get('margin_mode') or item.get('marginMode') or None,
-                ))
-            else:
-                # Screened group (has parentId): one flat group with product_list
-                base_group = int(item.get('baseGroup', item.get('base_group',
-                    item.get('parentId', item.get('parent_id', 0)))))
-                product_names = _extract_product_names_from_group(item)
-                if not product_names:
-                    continue
-                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'筛选_{base_group}'
-                flat_groups.append(_FactorGroupTestGroup(
-                    tester_id=submission_id,
-                    factor_alias=factor_alias,
-                    n_groups=n_groups,
-                    group_index=base_group,
-                    key=str(display_name),
-                    name=str(display_name),
-                    product_list=product_names,
-                    fee_modifications=item.get('fee_modifications') or item.get('feeModifications') or None,
-                    fee_mode=item.get('fee_mode') or item.get('feeMode') or None,
-                    fee_rate=item.get('fee_rate', item.get('feeRate')),
-                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
-                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode') or None,
-                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode') or None,
-                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
-                    margin_mode=item.get('margin_mode') or item.get('marginMode') or None,
-                ))
+            try:
+                gi = int(item.get('group_index', item.get('groupIndex', 0)))
+            except (TypeError, ValueError):
+                continue
+            display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
+            extra = _map_group_item(item)
+            product_list = _product_list_from_group(item)  # None=全量, list=筛选
+            flat_groups.append(_FactorGroupTestGroup(
+                tester_id=submission_id,
+                factor_alias=factor_alias,
+                n_groups=n_groups,
+                group_index=gi,
+                key=str(display_name),
+                name=str(display_name),
+                product_list=product_list,
+                **extra,
+            ))
     else:
-        # No groups payload: create default base groups from group_names
         for gi in range(n_groups):
             display_name = n_groups_name.get(gi, f'Group {gi + 1}')
             flat_groups.append(_FactorGroupTestGroup(
