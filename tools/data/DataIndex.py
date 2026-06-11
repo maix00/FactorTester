@@ -27,6 +27,21 @@ import pandas as pd
 # ── MultiIndex _SIGNAL@ 命名约定 ──────────────────────────────────────────
 _SIGNAL_PREFIX = "_SIGNAL@"
 
+# 不会产生日内分辨率的频率名前缀（用于 exact 守卫和 day 精度层级选择）
+# DataFreq 不支持 WEEK/MONTH 等，这里用手工前缀匹配作为回退
+_DAY_LEVEL_PREFIXES = ('DAY', 'WEEK', 'MONTH', 'YEAR')
+
+
+def _is_day_level_name(name: str) -> bool:
+    """判断层级名是否表示天倍数级别（如 _SIGNAL@DAY1 / _SIGNAL@WEEK1）。"""
+    from tools.data.DataFreq import DataFreq
+
+    freq_str = name.split(_SIGNAL_PREFIX, 1)[-1] if _SIGNAL_PREFIX in name else name
+    try:
+        return DataFreq(freq_str).is_day_multiple()
+    except Exception:
+        return freq_str.upper().startswith(_DAY_LEVEL_PREFIXES)
+
 
 class DataIndex:
     """时间索引管理器 — 封装 DatetimeIndex / MultiIndex（纯时间层）的操作。
@@ -289,8 +304,10 @@ class DataIndex:
         if precision == "day":
             di_for_slice = self
             if self.is_multi:
+                from tools.data.DataFreq import DataFreq
                 day_name = next(
-                    (n for n in self.raw.names if n and str(n).startswith('_SIGNAL@DAY')),
+                    (n for n in self.raw.names
+                     if n and _is_day_level_name(str(n))),
                     None,
                 )
                 if day_name is not None:
@@ -299,12 +316,13 @@ class DataIndex:
             end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
-            # 守卫：exact 精度要求日内索引（通过信号名判断，而非时间戳间隔）
-            sig_name = self.signal_name
-            if sig_name and sig_name.startswith('_SIGNAL@DAY'):
+            # 守卫：exact 精度要求日内索引（通过信号名推断频率，检查是否日倍数）
+            sig_freq = self.freq
+            if sig_freq is not None and sig_freq.is_day_multiple():
                 raise ValueError(
                     f"slice_by_datatime: exact precision requires intraday signal_index, "
-                    f"but signal_name='{sig_name}' is a day-level index. "
+                    f"but signal_name='{self.signal_name}' has freq={sig_freq} "
+                    f"which is a day-multiple (>= 1day, no sub-day component). "
                     f"Use precision='day' or provide an intraday DataIndex."
                 )
             return self.slice_by(start_dt.ts, end_dt.ts)

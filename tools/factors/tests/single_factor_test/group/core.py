@@ -252,11 +252,12 @@ def _prepare_group_shared_inputs(
     factor: Factor,
     *,
     returns_col: FactorNextPeriodReturns,
-    time_range: Optional[Tuple],
+    start_dt: Optional[Any] = None,  # DataTime
+    end_dt: Optional[Any] = None,    # DataTime
     calendar_index: Optional[pd.Index],
 ) -> GroupSharedInputs:
-    start_date = pd.to_datetime(time_range[0]) if time_range is not None else tester.start_date
-    end_date = pd.to_datetime(time_range[1]) if time_range is not None else tester.end_date
+    start_date = start_dt.ts if start_dt is not None and start_dt.is_set else tester.start_date
+    end_date = end_dt.ts if end_dt is not None and end_dt.is_set else tester.end_date
 
     r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
     if r is None or r.returns.empty:
@@ -277,16 +278,12 @@ def _prepare_group_shared_inputs(
     returns_src: pd.DataFrame = cast(pd.DataFrame, returns_for_group.copy(deep=False))
     table_src.index = DataIndex(table_src.index).signal_index
     returns_src.index = DataIndex(returns_src.index).signal_index
-    if start_date is not None:
-        _sd = DataIndex(table_src.index).tz_align(start_date)
-        table_src = cast(pd.DataFrame, table_src[table_src.index >= _sd])
-        _sd = DataIndex(returns_src.index).tz_align(start_date)
-        returns_src = cast(pd.DataFrame, returns_src[returns_src.index >= _sd])
-    if end_date is not None:
-        _ed = DataIndex(table_src.index).tz_align(end_date)
-        table_src = cast(pd.DataFrame, table_src[table_src.index <= _ed])
-        _ed = DataIndex(returns_src.index).tz_align(end_date)
-        returns_src = cast(pd.DataFrame, returns_src[returns_src.index <= _ed])
+    di = DataIndex(table_src.index)
+    mask = di.slice_by_datatime(start_dt, end_dt)
+    table_src = cast(pd.DataFrame, table_src[mask])
+    di_r = DataIndex(returns_src.index)
+    mask_r = di_r.slice_by_datatime(start_dt, end_dt)
+    returns_src = cast(pd.DataFrame, returns_src[mask_r])
 
     signal_index = table_src.index.intersection(returns_src.index)
     if len(signal_index) == 0:
@@ -352,12 +349,9 @@ def _prepare_group_shared_inputs(
     )
     price_src = align_table_for_group(factor, raw_prices)
     price_src.index = DataIndex(price_src.index).signal_index
-    if start_date is not None:
-        _sd = DataIndex(price_src.index).tz_align(start_date)
-        price_src = cast(pd.DataFrame, price_src[price_src.index >= _sd])
-    if end_date is not None:
-        _ed = DataIndex(price_src.index).tz_align(end_date)
-        price_src = cast(pd.DataFrame, price_src[price_src.index <= _ed])
+    di_p = DataIndex(price_src.index)
+    mask_p = di_p.slice_by_datatime(start_dt, end_dt)
+    price_src = cast(pd.DataFrame, price_src[mask_p])
     price_src = price_src.reindex(index=common_index, columns=signal_valid_cols)
     if price_src.isna().all(axis=None):
         raise ValueError(f"{factor.alias}: 无法取得分组回测交易价格列 {price_col.name}")
@@ -401,12 +395,9 @@ def _prepare_group_shared_inputs(
 
     present_df = cast(pd.DataFrame, present_src)
     present_df.index = DataIndex(present_df.index).signal_index
-    if start_date is not None:
-        _sd = DataIndex(present_df.index).tz_align(start_date)
-        present_df = cast(pd.DataFrame, present_df[present_df.index >= _sd])
-    if end_date is not None:
-        _ed = DataIndex(present_df.index).tz_align(end_date)
-        present_df = cast(pd.DataFrame, present_df[present_df.index <= _ed])
+    di_pr = DataIndex(present_df.index)
+    mask_pr = di_pr.slice_by_datatime(start_dt, end_dt)
+    present_df = cast(pd.DataFrame, present_df[mask_pr])
     present_df = present_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
     if trim_start > 0 or trim_end < len(_all_nan):
         present_df = present_df.iloc[trim_start:trim_end]
@@ -638,8 +629,8 @@ def _load_group_trade_returns(
     returns_col: FactorNextPeriodReturns,
     source_freq: DataFreq,
     effective_return_freq: DataFreq,
-    start_date: Any,
-    end_date: Any,
+    start_dt: Optional[Any] = None,  # DataTime
+    end_dt: Optional[Any] = None,    # DataTime
     index_list: list,
 ) -> np.ndarray:
     _group_progress(f"trade returns evaluate start factor={factor.alias}")
@@ -653,12 +644,9 @@ def _load_group_trade_returns(
     )
     _group_progress(f"trade returns evaluate done factor={factor.alias}")
     trade_returns_src.index = DataIndex(trade_returns_src.index).signal_index
-    if start_date is not None:
-        _sd = DataIndex(trade_returns_src.index).tz_align(start_date)
-        trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index >= _sd])
-    if end_date is not None:
-        _ed = DataIndex(trade_returns_src.index).tz_align(end_date)
-        trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index <= _ed])
+    di = DataIndex(trade_returns_src.index)
+    mask = di.slice_by_datatime(start_dt, end_dt)
+    trade_returns_src = cast(pd.DataFrame, trade_returns_src[mask])
     trade_returns_src = trade_returns_src.reindex(index=index_list, columns=trade_valid_cols)
     return trade_returns_src[trade_valid_cols].to_numpy(dtype=float)
 
@@ -669,26 +657,25 @@ def _load_group_trade_prices(
     trade_valid_cols: list,
     price_col: DataColumn,
     source_freq: DataFreq,
-    start_date: Any,
-    end_date: Any,
+    start_dt: Optional[Any] = None,  # DataTime
+    end_dt: Optional[Any] = None,    # DataTime
     index_list: list,
 ) -> np.ndarray:
     from tools.factors.expr import ColumnRef
+
+    start_calc_point = start_dt.ts if start_dt is not None and start_dt.is_set else None
 
     _group_progress(f"trade prices evaluate start factor={factor.alias}")
     raw_trade_prices = ColumnRef(price_col).evaluate(
         products=trade_valid_cols,
         freq=source_freq,
-        start_calc_point=start_date,
+        start_calc_point=start_calc_point,
     )
     trade_price_src = align_table_for_group(factor, raw_trade_prices)
     trade_price_src.index = DataIndex(trade_price_src.index).signal_index
-    if start_date is not None:
-        _sd = DataIndex(trade_price_src.index).tz_align(start_date)
-        trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index >= _sd])
-    if end_date is not None:
-        _ed = DataIndex(trade_price_src.index).tz_align(end_date)
-        trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index <= _ed])
+    di = DataIndex(trade_price_src.index)
+    mask = di.slice_by_datatime(start_dt, end_dt)
+    trade_price_src = cast(pd.DataFrame, trade_price_src[mask])
     trade_price_src = trade_price_src.reindex(index=index_list, columns=trade_valid_cols)
     price_np = trade_price_src[trade_valid_cols].to_numpy(dtype=float)
     _group_progress(f"trade prices evaluate done factor={factor.alias}")
@@ -923,8 +910,8 @@ def _simulate_group_from_preloaded(
     rebalance_mode: str,
     initial_capital: float,
     multi_session_active: bool,
-    start_date: Any,
-    end_date: Any,
+    start_dt: Optional[Any] = None,  # DataTime
+    end_dt: Optional[Any] = None,    # DataTime
     source_freq: DataFreq,
     open_fee_vec: np.ndarray,
     close_fee_vec: np.ndarray,
@@ -1004,7 +991,7 @@ def _simulate_group_from_preloaded(
     effective_close_fee_fixed_mat = close_today_fee_fixed_mat if use_closetoday else close_fee_fixed_mat
 
     if any(str(mode) == "percent" for mode in variant_liquidity_modes):
-        liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_date, end_date)
+        liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_dt, end_dt)
 
     # products_by_group built lazily by GroupRunResult.get_products_by_group()
     member_counts = membership_np.sum(axis=2).astype(float)
@@ -1057,10 +1044,7 @@ def _simulate_group_from_preloaded(
         avg_turnover = np.divide(turnover_ratio.sum(axis=0), turnover_observations, out=np.zeros(group_count, dtype=float), where=turnover_observations > 0)
     signal_times = pd.DatetimeIndex(index_list)
     mask_report = np.ones(len(index_list), dtype=bool)
-    if start_date is not None:
-        mask_report &= (signal_times >= DataIndex(signal_times).tz_align(start_date))
-    if end_date is not None:
-        mask_report &= (signal_times <= DataIndex(signal_times).tz_align(end_date))
+    mask_report &= DataIndex(signal_times).slice_by_datatime(start_dt, end_dt)
     report_groups = {}
     annual_periods = infer_periods_per_year(index_list)
     for idx in range(group_count):
@@ -1318,8 +1302,8 @@ def _build_normalized_liquidity_capacity(
     products: list,
     signal_index: list,
     freq: DataFreq,
-    start_date: Any,
-    end_date: Any,
+    start_dt: Optional[Any] = None,  # DataTime
+    end_dt: Optional[Any] = None,    # DataTime
 ) -> np.ndarray | None:
     """Return (T, P) capacity shares from turnover, fallbacking to volume*price*multiplier.
 
@@ -1341,15 +1325,15 @@ def _build_normalized_liquidity_capacity(
         try:
             dm = getattr(product, freq.name)
             cols = [DataColumn.TURNOVER.name, DataColumn.VOLUME.name, DataColumn.CLOSE_ADJUSTED.name]
-            data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_date)
+            start_calc_point = start_dt.ts if start_dt is not None and start_dt.is_set else None
+            data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_calc_point)
             if data.empty:
                 continue
             idx = DataIndex(data.index).signal_index
             frame = data.copy(deep=False)
             frame.index = idx
-            if end_date is not None:
-                _ed = DataIndex(frame.index).tz_align(end_date)
-                frame = frame[frame.index <= _ed]
+            mask = DataIndex(frame.index).slice_by_datatime(start_dt, end_dt)
+            frame = cast(pd.DataFrame, frame[mask])
             if frame.empty:
                 continue
             if DataColumn.TURNOVER.name in frame.columns and frame[DataColumn.TURNOVER.name].notna().any():

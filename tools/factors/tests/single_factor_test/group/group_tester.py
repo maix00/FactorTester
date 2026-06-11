@@ -80,6 +80,8 @@ class FactorGroupTester:
         overlap_ratio: float | None = None,
         containment_ratio: float | None = None,
         merge_cost_ratio: float | None = None,
+        start_dt: Optional[Any] = None,  # DataTime
+        end_dt: Optional[Any] = None,    # DataTime
     ):
         self.specs = list(specs)
         self.overlap_ratio = float(
@@ -91,6 +93,8 @@ class FactorGroupTester:
         self.merge_cost_ratio = float(
             self.DEFAULT_MERGE_COST_RATIO if merge_cost_ratio is None else merge_cost_ratio
         )
+        self.start_dt = start_dt
+        self.end_dt = end_dt
 
     @classmethod
     def from_submission_specs(
@@ -106,10 +110,6 @@ class FactorGroupTester:
         merge_cost_ratio: float | None = None,
         progress_hook: Optional[Callable[[str], None]] = None,
     ) -> "FactorGroupTester":
-        time_range: Optional[tuple[Any, Any]] = None
-        if start_dt is not None and end_dt is not None and start_dt.is_set and end_dt.is_set:
-            time_range = (start_dt.ts, end_dt.ts)
-
         built_specs: list[GroupSimulationSpec] = []
         for submission_id, tester, indexed_specs in submission_specs:
             if progress_hook is not None:
@@ -130,7 +130,8 @@ class FactorGroupTester:
                     tester,
                     factor,
                     returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
-                    time_range=time_range,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
                     calendar_index=calendar_index,
                 )
 
@@ -206,6 +207,8 @@ class FactorGroupTester:
             overlap_ratio=overlap_ratio,
             containment_ratio=containment_ratio,
             merge_cost_ratio=merge_cost_ratio,
+            start_dt=start_dt,
+            end_dt=end_dt,
         )
 
     @staticmethod
@@ -434,8 +437,8 @@ class FactorGroupTester:
                 returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                 source_freq=entry.shared_inputs.source_freq,
                 effective_return_freq=entry.shared_inputs.effective_return_freq,
-                start_date=entry.shared_inputs.start_date,
-                end_date=entry.shared_inputs.end_date,
+                start_dt=self.start_dt,
+                end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
             local_price_np = _load_group_trade_prices(
@@ -443,8 +446,8 @@ class FactorGroupTester:
                 trade_valid_cols=list(trade_valid_cols),
                 price_col=entry.shared_inputs.price_col,
                 source_freq=entry.shared_inputs.source_freq,
-                start_date=entry.shared_inputs.start_date,
-                end_date=entry.shared_inputs.end_date,
+                start_dt=self.start_dt,
+                end_dt=self.end_dt,
                 index_list=entry.shared_inputs.index_list,
             )
             for local_col_idx, product in enumerate(trade_valid_cols):
@@ -526,8 +529,8 @@ class FactorGroupTester:
             rebalance_mode=rebalance_mode,
             initial_capital=initial_capital,
             multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
-            start_date=first_entry.shared_inputs.start_date,
-            end_date=first_entry.shared_inputs.end_date,
+            start_dt=self.start_dt,
+            end_dt=self.end_dt,
             source_freq=first_entry.shared_inputs.source_freq,
             open_fee_vec=spec_bundle.open_fee_vec,
             close_fee_vec=spec_bundle.close_fee_vec,
