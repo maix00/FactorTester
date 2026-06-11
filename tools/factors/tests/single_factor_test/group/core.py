@@ -303,7 +303,7 @@ def _prepare_group_shared_inputs(
 
     if calendar_index is not None and len(calendar_index) > 0:
         common_index = pd.Index(calendar_index)
-        signal_update_mask = common_index.isin(signal_index).to_numpy(dtype=bool, copy=False)
+        signal_update_mask = common_index.isin(signal_index)
         table_src = table_src.reindex(common_index)
         returns_src = returns_src.reindex(common_index)
     else:

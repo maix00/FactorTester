@@ -419,6 +419,7 @@ class FactorTester(UniqueObject):
 
     def build_group_calendar_index(self, factor_aliases: List[str], requested_calendar_freq: Optional[Any] = None) -> pd.Index:
         """Build a dense shared signal calendar for group testing within this tester."""
+        from typing import cast
         from tools.factors.tests.single_factor_test.group.core import (
             align_table_for_group,
             get_factor_table_for_group,
