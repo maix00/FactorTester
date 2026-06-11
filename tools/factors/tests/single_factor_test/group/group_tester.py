@@ -479,7 +479,7 @@ class FactorGroupTester:
                 info["source_group"] = local_to_global.get(local_group_idx, local_group_idx)
                 combined_derived_info.append(info)
 
-        _, _, _, _, merged_group_result = _simulate_group_from_preloaded(
+        _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,
             membership_np=plan.merged_membership_np,
             returns_filled=returns_filled,

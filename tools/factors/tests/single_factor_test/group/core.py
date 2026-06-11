@@ -1061,7 +1061,7 @@ def _simulate_group_from_preloaded(
         is_margin_traded_vec=is_margin_traded_vec,
     )
     returns_dict, report_df_out, cumulative_returns_np, _ = materialize_group_outputs_from_result(group_result)
-    return products_dict, returns_dict, report_df_out, cumulative_returns_np, group_result
+    return returns_dict, report_df_out, cumulative_returns_np, group_result
 
 
 def _execute_group_membership(
@@ -1088,7 +1088,7 @@ def _execute_group_membership(
     multi_session_active: bool,
     trade_valid_cols: Optional[list] = None,
     trade_membership_np: Optional[np.ndarray] = None,
-) -> tuple[Any, Any, pd.DataFrame, np.ndarray, GroupRunResult]:
+) -> tuple[Any, pd.DataFrame, np.ndarray, GroupRunResult]:
     liquidity_capacity_np: np.ndarray | None = None
     n_base = group_count - len(derived_info)
     if trade_valid_cols is None or trade_membership_np is None:
@@ -2432,7 +2432,7 @@ def test_by_group_single_factor(
     base_membership_np: Optional[np.ndarray] = None,
     trade_valid_cols: Optional[list] = None,
     trade_membership_np: Optional[np.ndarray] = None,
-) -> Tuple[Any, Any, pd.DataFrame, np.ndarray, list]:
+) -> Tuple[Any, pd.DataFrame, np.ndarray, list]:
     """Single-factor group test core logic.
 
     rebalance_mode:
@@ -2488,7 +2488,7 @@ def test_by_group_single_factor(
     for d_idx, di in enumerate(derived_info):
         n_names[n_base + d_idx] = di['name']
     group_count = membership_np.shape[1]
-    products_out, returns_out, report_df, cumulative_returns_np, group_result = _execute_group_membership(
+    returns_out, report_df, cumulative_returns_np, group_result = _execute_group_membership(
         tester,
         factor,
         returns_col=returns_col,
@@ -2562,4 +2562,4 @@ def test_by_group_single_factor(
 
     # NOTE: 不再将 returns_dict 写回 r.returns——returns_dict 是 {group_id: {ts: float}}
     # 的嵌套字典，会污染后续分组测试使用的 r.returns（IC测试的品种x时间矩阵）。
-    return products_out, returns_out, report_df, cumulative_returns_np, index_list
+    return returns_out, report_df, cumulative_returns_np, index_list
