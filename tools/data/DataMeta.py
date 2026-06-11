@@ -28,6 +28,7 @@ import pandas as pd
 
 from tools.base.UniqueObject import UniqueObject
 from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.DataIndex import DataIndex
 from tools.data.DataFreq import DataFreq
 from tools.data.DataColumn import DataColumn
 from tools.data.DataSource import DataSource
