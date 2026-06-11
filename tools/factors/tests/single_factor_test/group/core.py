@@ -1084,12 +1084,10 @@ def _simulate_group_from_preloaded(
         membership_np=membership_np,
         returns_np=returns_filled,
         price_np=price_np,
-        open_fee_rate_mat=open_ratio_mat,
-        close_fee_rate_mat=effective_close_ratio_mat,
-        close_today_fee_rate_mat=None,
-        open_fee_fixed_mat=open_fixed_mat,
-        close_fee_fixed_mat=effective_close_fixed_mat,
-        close_today_fee_fixed_mat=None,
+        open_rate_mat=open_ratio_mat,
+        close_rate_mat=effective_close_ratio_mat,
+        open_fixed_mat=open_fixed_mat,
+        close_fixed_mat=effective_close_fixed_mat,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=group_liquidity_modes if group_liquidity_modes else None,
@@ -1666,13 +1664,11 @@ def simulate_group_trading_book(
     membership_np: np.ndarray,
     returns_np: np.ndarray,
     price_np: np.ndarray,
-    open_fee_rate_mat: np.ndarray,
-    close_fee_rate_mat: np.ndarray,
+    open_rate_mat: np.ndarray,
+    close_rate_mat: np.ndarray,
     *,
-    open_fee_fixed_mat: np.ndarray,
-    close_fee_fixed_mat: np.ndarray,
-    close_today_fee_rate_mat: np.ndarray | None = None,
-    close_today_fee_fixed_mat: np.ndarray | None = None,
+    open_fixed_mat: np.ndarray,
+    close_fixed_mat: np.ndarray,
     tradable_mask_np: np.ndarray | None = None,
     liquidity_capacity_np: np.ndarray | None = None,
     liquidity_modes: np.ndarray | list[str] | None = None,
@@ -1708,16 +1704,10 @@ def simulate_group_trading_book(
     if rebalance_modes_arr.shape[0] != M:
         raise ValueError(f"rebalance_modes length={rebalance_modes_arr.shape[0]} != groups={M}")
 
-    close_rate_mat = (
-        np.asarray(close_today_fee_rate_mat, dtype=float)
-        if close_today_fee_rate_mat is not None else np.asarray(close_fee_rate_mat, dtype=float)
-    )
-    close_fixed_mat = (
-        np.asarray(close_today_fee_fixed_mat, dtype=float)
-        if close_today_fee_fixed_mat is not None else np.asarray(close_fee_fixed_mat, dtype=float)
-    )
-    open_rate_mat = np.asarray(open_fee_rate_mat, dtype=float)
-    open_fixed_mat = np.asarray(open_fee_fixed_mat, dtype=float)
+    close_rate_mat = np.asarray(close_rate_mat, dtype=float)
+    close_fixed_mat = np.asarray(close_fixed_mat, dtype=float)
+    open_rate_mat = np.asarray(open_rate_mat, dtype=float)
+    open_fixed_mat = np.asarray(open_fixed_mat, dtype=float)
     margin_ratios = np.asarray(margin_ratio_mat, dtype=float)
     margin_ratios = np.where(np.isfinite(margin_ratios) & (margin_ratios > 0), margin_ratios, 1.0)
     liquidity_modes_arr = np.asarray(liquidity_modes, dtype=object) if liquidity_modes is not None else np.full(M, "infinite", dtype=object)

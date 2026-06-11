@@ -18,15 +18,13 @@ def simulate_groups(
     open_fee_mat: np.ndarray,
     close_fee_mat: np.ndarray,
     rebalance_mode: str = "each_period",
-    close_today_fee_mat: np.ndarray | None = None,
     data_has_bar: np.ndarray | None = None,
     liquidity_capacity_np: np.ndarray | None = None,
     liquidity_modes: np.ndarray | list[str] | None = None,
     liquidity_percents: np.ndarray | list[float] | None = None,
     price_np: np.ndarray | None = None,
-    open_fee_fixed_mat: np.ndarray | None = None,
-    close_fee_fixed_mat: np.ndarray | None = None,
-    close_today_fee_fixed_mat: np.ndarray | None = None,
+    open_fixed_mat: np.ndarray | None = None,
+    close_fixed_mat: np.ndarray | None = None,
     point_value_vec: np.ndarray | None = None,
     min_tick_vec: np.ndarray | None = None,
     min_trade_quantity_vec: np.ndarray | None = None,
@@ -39,8 +37,8 @@ def simulate_groups(
     """Local adapter so the tests exercise the trading book directly."""
     _, M, P = membership_np.shape
     prices = np.full((returns_np.shape[0], P), 1e-6, dtype=float) if price_np is None else np.asarray(price_np, dtype=float)
-    open_fixed = np.zeros((M, P), dtype=float) if open_fee_fixed_mat is None else np.asarray(open_fee_fixed_mat, dtype=float)
-    close_fixed = np.zeros((M, P), dtype=float) if close_fee_fixed_mat is None else np.asarray(close_fee_fixed_mat, dtype=float)
+    open_fixed = np.zeros((M, P), dtype=float) if open_fixed_mat is None else np.asarray(open_fixed_mat, dtype=float)
+    close_fixed = np.zeros((M, P), dtype=float) if close_fixed_mat is None else np.asarray(close_fixed_mat, dtype=float)
     point_values = np.ones(P, dtype=float) if point_value_vec is None else np.asarray(point_value_vec, dtype=float)
     min_ticks = np.full(P, 1e-6, dtype=float) if min_tick_vec is None else np.asarray(min_tick_vec, dtype=float)
     lot_sizes = np.ones(P, dtype=float) if min_trade_quantity_vec is None else np.asarray(min_trade_quantity_vec, dtype=float)
@@ -52,12 +50,10 @@ def simulate_groups(
         membership_np=membership_np,
         returns_np=returns_np,
         price_np=prices,
-        open_fee_rate_mat=np.asarray(open_fee_mat, dtype=float),
-        close_fee_rate_mat=np.asarray(close_fee_mat, dtype=float),
-        open_fee_fixed_mat=open_fixed,
-        close_fee_fixed_mat=close_fixed,
-        close_today_fee_rate_mat=None if close_today_fee_mat is None else np.asarray(close_today_fee_mat, dtype=float),
-        close_today_fee_fixed_mat=None if close_today_fee_fixed_mat is None else np.asarray(close_today_fee_fixed_mat, dtype=float),
+        open_rate_mat=np.asarray(open_fee_mat, dtype=float),
+        close_rate_mat=np.asarray(close_fee_mat, dtype=float),
+        open_fixed_mat=open_fixed,
+        close_fixed_mat=close_fixed,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=liquidity_modes,
@@ -203,8 +199,8 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         price_np=price,
         open_fee_mat=fee,
         close_fee_mat=fee,
-        open_fee_fixed_mat=fee,
-        close_fee_fixed_mat=fee,
+        open_fixed_mat=fee,
+        close_fixed_mat=fee,
         point_value_vec=np.array([1.0]),
         min_tick_vec=np.array([0.01]),
         min_trade_quantity_vec=np.array([1.0]),
@@ -225,8 +221,8 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         price_np=price,
         open_fee_mat=fee[:1],
         close_fee_mat=fee[:1],
-        open_fee_fixed_mat=fee[:1],
-        close_fee_fixed_mat=fee[:1],
+        open_fixed_mat=fee[:1],
+        close_fixed_mat=fee[:1],
         point_value_vec=np.array([1.0]),
         min_tick_vec=np.array([0.01]),
         min_trade_quantity_vec=np.array([1.0]),
@@ -246,8 +242,8 @@ def test_trading_book_charges_fixed_fee_per_contract_without_rewriting_rate():
         price_np=np.array([[0.10]], dtype=float),
         open_fee_mat=np.zeros((1, 1), dtype=float),
         close_fee_mat=np.zeros((1, 1), dtype=float),
-        open_fee_fixed_mat=np.array([[0.001]], dtype=float),
-        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        open_fixed_mat=np.array([[0.001]], dtype=float),
+        close_fixed_mat=np.zeros((1, 1), dtype=float),
         point_value_vec=np.array([1.0]),
         min_tick_vec=np.array([0.01]),
         min_trade_quantity_vec=np.array([1.0]),
@@ -272,8 +268,8 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         price_np=np.array([[0.01]], dtype=float),
         open_fee_mat=np.zeros((1, 1), dtype=float),
         close_fee_mat=np.zeros((1, 1), dtype=float),
-        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
-        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        open_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fixed_mat=np.zeros((1, 1), dtype=float),
         point_value_vec=np.array([1.0]),
         min_tick_vec=np.array([0.01]),
         min_trade_quantity_vec=np.array([100.0]),
@@ -292,8 +288,8 @@ def test_trading_book_respects_min_trade_quantity_lot_size():
         price_np=np.array([[0.02]], dtype=float),
         open_fee_mat=np.zeros((1, 1), dtype=float),
         close_fee_mat=np.zeros((1, 1), dtype=float),
-        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
-        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        open_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fixed_mat=np.zeros((1, 1), dtype=float),
         point_value_vec=np.array([1.0]),
         min_tick_vec=np.array([0.01]),
         min_trade_quantity_vec=np.array([100.0]),
@@ -314,8 +310,8 @@ def test_trading_book_initial_capital_changes_affordability():
         price_np=np.array([[100.0]], dtype=float),
         open_fee_mat=np.zeros((1, 1), dtype=float),
         close_fee_mat=np.zeros((1, 1), dtype=float),
-        open_fee_fixed_mat=np.zeros((1, 1), dtype=float),
-        close_fee_fixed_mat=np.zeros((1, 1), dtype=float),
+        open_fixed_mat=np.zeros((1, 1), dtype=float),
+        close_fixed_mat=np.zeros((1, 1), dtype=float),
         point_value_vec=np.array([10.0]),
         min_tick_vec=np.array([1.0]),
         min_trade_quantity_vec=np.array([1.0]),
@@ -655,28 +651,24 @@ def test_recycle_expansion_does_not_compound_unfunded_new_member_returns():
 
 
 # ═══════════════════════════════════════════════════════════════════
-# close_today_fee_mat override
+# close_today override — now handled upstream via effective close matrix
 # ═══════════════════════════════════════════════════════════════════
 
 def test_simulate_close_today_overrides_close_fee():
-    """close_today_fee_mat overrides close_fee_mat for exiting positions."""
+    """close_today rate overrides close rate — caller passes effective close matrix."""
     T, N, P = 1, 1, 1
-    membership = np.zeros((T, N, P), dtype=bool)
-    # t=0: member present → buy at t=0, sell at t=1 (but T=1 so no exit in loop)
-    # Need 2 periods to see exit
     membership = np.zeros((2, 1, 1), dtype=bool)
     membership[0, 0, 0] = True
     # t=1: empty → exit
 
     returns = np.array([[0.0], [0.0]], dtype=float)
-    close_fee = np.full((1, 1), 0.010, dtype=float)    # 1% close_yesterday
-    close_today = np.full((1, 1), 0.025, dtype=float)   # 2.5% close_today
+    close_rate = np.full((1, 1), 0.025, dtype=float)   # 2.5% close (effective)
     open_fee = np.zeros((1, 1), dtype=float)
 
     result = simulate_groups(
         membership_np=membership, returns_np=returns,
-        open_fee_mat=open_fee, close_fee_mat=close_fee,
-        close_today_fee_mat=close_today, rebalance_mode='buy_and_hold',
+        open_fee_mat=open_fee, close_fee_mat=close_rate,
+        rebalance_mode='buy_and_hold',
     )
 
     net = result['net_returns_np'][:, 0]
