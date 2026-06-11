@@ -868,8 +868,23 @@ def _append_derived_group_memberships(
                 if (ln := name.lower()) in lower_to_name
             ]
         if not sel_idx:
+            _group_progress(
+                f"[DEBUG] derived pair skipped base_group={base_group} "
+                f"product_names={product_names_str[:5]}... "
+                f"display_names_sample={display_names[:5]}... "
+                f"display_name_to_idx_keys={list(display_name_to_idx.keys())[:10]}"
+            )
             return None
         sel = np.asarray(sel_idx, dtype=int)
+        # Debug: check if base_group has any membership for selected products
+        base_membership = membership_np[:, base_group, :][:, sel]
+        base_any = base_membership.any(axis=0)
+        base_total = base_membership.sum()
+        _group_progress(
+            f"[DEBUG] derived pair base_group={base_group} sel_idx={sel_idx} "
+            f"sel_count={len(sel_idx)} base_any_per_product={base_any.tolist()} "
+            f"base_total_memberships={int(base_total)}"
+        )
         display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{base_group + 1}组精选'
 
         mask_1g = np.zeros((T, 1, P), dtype=bool)
