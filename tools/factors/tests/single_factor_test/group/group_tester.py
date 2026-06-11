@@ -13,11 +13,12 @@ from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import (
     _append_derived_group_memberships,
+    _build_product_remap_matrix,
     _build_group_memberships_from_shared,
     _load_group_trade_prices,
     _load_group_trade_returns,
     _prepare_group_shared_inputs,
-    _prepare_group_trade_membership,
+    _remap_membership_to_trade,
     _resolve_group_trade_specs,
     _simulate_group_from_preloaded,
     materialize_group_outputs_from_result,
@@ -33,13 +34,13 @@ class GroupSimulationSpec:
     factor_alias: str
     n_groups: int
     spec: dict[str, Any]
-    trade_products: frozenset[str]
     shared_inputs: Any
     base_membership_np: np.ndarray
     derived_info: list[dict[str, Any]]
     group_name_map: dict[int, str]
-    trade_valid_cols: list
-    trade_membership_np: np.ndarray
+    # signal-dimension fields (before remap to trade axis)
+    signal_products: frozenset[str]  # frozenset of f"{cls_name}:{product_name}"
+    signal_membership_np: np.ndarray  # (T, M, P_signal) — expanded base+derived membership on signal axis
 
 
 @dataclass(slots=True)
@@ -54,6 +55,9 @@ class BatchExecutionPlan:
     merged_returns_np: np.ndarray | None = None
     merged_price_np: np.ndarray | None = None
     merged_spec_bundle: Any = None
+    # Per-entry trade-dim data (built during plan construction)
+    entry_trade_valid_cols: dict[int, list] | None = None
+    entry_trade_membership_np: dict[int, np.ndarray] | None = None
 
 
 class FactorGroupTester:
@@ -116,7 +120,6 @@ class FactorGroupTester:
                 )
             shared_inputs_by_factor_alias: dict[str, Any] = {}
             memberships_by_factor_alias: dict[str, dict[int, np.ndarray]] = {}
-            trade_memberships_by_factor_alias: dict[str, dict[int, tuple[list, np.ndarray]]] = {}
 
             for _, spec in indexed_specs:
                 factor_alias = str(spec.get("factor_alias") or "")
@@ -155,23 +158,17 @@ class FactorGroupTester:
                     n_groups: membership_np
                     for n_groups, membership_np in zip(unique_group_counts, membership_list)
                 }
-                trade_memberships_by_factor_alias[factor_alias] = {
-                    n_groups: _prepare_group_trade_membership(
-                        factor,
-                        shared_inputs.signal_valid_cols,
-                        shared_inputs.index_list,
-                        membership_np,
-                    )
-                    for n_groups, membership_np in memberships_by_factor_alias[factor_alias].items()
-                }
 
             for simulation_index, spec in indexed_specs:
                 factor_alias = str(spec.get("factor_alias") or "")
                 n_groups = int(spec.get("n_groups", 5))
-                trade_membership_entry = trade_memberships_by_factor_alias.get(factor_alias, {}).get(n_groups)
-                if trade_membership_entry is None:
+                shared = shared_inputs_by_factor_alias.get(factor_alias)
+                base_membership = memberships_by_factor_alias.get(factor_alias, {}).get(n_groups)
+                if shared is None or base_membership is None:
                     continue
-                trade_valid_cols, trade_membership_np = trade_membership_entry
+                factor = tester.resolve_factor(factor_alias)
+                if factor is None:
+                    continue
                 n_groups_name = spec.get("n_groups_name") or {}
                 group_name_map = {
                     i: n_groups_name.get(i, f"group_{i}")
@@ -179,19 +176,13 @@ class FactorGroupTester:
                 }
                 expanded_membership_np, derived_info = _append_derived_group_memberships(
                     factor,
-                    shared_inputs_by_factor_alias[factor_alias].signal_valid_cols,
-                    memberships_by_factor_alias[factor_alias][n_groups].copy(),
+                    shared.signal_valid_cols,
+                    base_membership.copy(),
                     n_base_groups=n_groups,
                     derived_groups=spec.get("derived_groups"),
                 )
                 for d_idx, di in enumerate(derived_info):
                     group_name_map[n_groups + d_idx] = str(di.get("name") or f"group_{n_groups + d_idx}")
-                trade_valid_cols, trade_membership_np = _prepare_group_trade_membership(
-                    factor,
-                    shared_inputs_by_factor_alias[factor_alias].signal_valid_cols,
-                    shared_inputs_by_factor_alias[factor_alias].index_list,
-                    expanded_membership_np,
-                )
                 built_specs.append(
                     GroupSimulationSpec(
                         simulation_index=simulation_index,
@@ -200,16 +191,15 @@ class FactorGroupTester:
                         factor_alias=factor_alias,
                         n_groups=n_groups,
                         spec=spec,
-                        trade_products=frozenset(
-                            getattr(product, "name", str(product))
-                            for product in trade_valid_cols
-                        ),
-                        shared_inputs=shared_inputs_by_factor_alias[factor_alias],
-                        base_membership_np=memberships_by_factor_alias[factor_alias][n_groups],
+                        shared_inputs=shared,
+                        base_membership_np=base_membership,
                         derived_info=derived_info,
                         group_name_map=group_name_map,
-                        trade_valid_cols=trade_valid_cols,
-                        trade_membership_np=trade_membership_np,
+                        signal_products=frozenset(
+                            f"{type(product).__name__}:{getattr(product, 'name', str(product))}"
+                            for product in shared.signal_valid_cols
+                        ),
+                        signal_membership_np=expanded_membership_np,
                     )
                 )
 
@@ -238,24 +228,24 @@ class FactorGroupTester:
 
     @staticmethod
     def _flattened_group_count(entry: GroupSimulationSpec) -> int:
-        return int(entry.trade_membership_np.shape[1])
+        return int(entry.signal_membership_np.shape[1])
 
     def _should_link_specs(self, left: GroupSimulationSpec, right: GroupSimulationSpec) -> bool:
-        overlap = self.compute_overlap_ratio(left.trade_products, right.trade_products)
-        containment = self.compute_containment_ratio(left.trade_products, right.trade_products)
+        overlap = self.compute_overlap_ratio(left.signal_products, right.signal_products)
+        containment = self.compute_containment_ratio(left.signal_products, right.signal_products)
         return overlap >= self.overlap_ratio or containment >= self.containment_ratio
 
     def _estimate_batch_cost(self, batch: list[GroupSimulationSpec]) -> tuple[float, float]:
         if not batch:
             return 0.0, 0.0
         separate_cost = float(sum(
-            self._flattened_group_count(entry) * len(entry.trade_products)
+            self._flattened_group_count(entry) * len(entry.signal_products)
             for entry in batch
         ))
         merged_products: set[str] = set()
         merged_group_count = 0
         for entry in batch:
-            merged_products.update(entry.trade_products)
+            merged_products.update(entry.signal_products)
             merged_group_count += self._flattened_group_count(entry)
         merged_cost = float(merged_group_count * len(merged_products))
         return separate_cost, merged_cost
@@ -317,38 +307,78 @@ class FactorGroupTester:
         index_list = batch[0].shared_inputs.index_list
         T = len(index_list)
 
+        # ── Step 1: deduplicate (signal_valid_cols, signal_index) combos,
+        #           build product remap matrix once per unique key ──
+        # We use id(tuple) as a stable key for the same signal_valid_cols list
+        # and the same index_list across specs sharing a tester+factor_alias.
+        _remap_cache: dict[int, tuple[np.ndarray, list]] = {}
+        def _remap_key(entry: GroupSimulationSpec) -> int:
+            # signal_valid_cols identity + index_list identity is enough
+            # because same FactorTester + same factor_alias → same SharedInputs
+            return id(entry.shared_inputs)
+
+        entry_trade_valid_cols: dict[int, list] = {}
+        entry_trade_membership_np: dict[int, np.ndarray] = {}
+
+        for entry in batch:
+            key = _remap_key(entry)
+            if key not in _remap_cache:
+                signal_to_trade, trade_products, _ = _build_product_remap_matrix(
+                    entry.shared_inputs.signal_valid_cols,
+                    entry.shared_inputs.index_list,
+                )
+                _remap_cache[key] = (signal_to_trade, list(trade_products))
+            signal_to_trade, trade_cols = _remap_cache[key]
+            trade_membership_np = _remap_membership_to_trade(
+                entry.signal_membership_np,
+                signal_to_trade,
+                len(trade_cols),
+            )
+            si = entry.simulation_index
+            entry_trade_valid_cols[si] = trade_cols
+            entry_trade_membership_np[si] = trade_membership_np
+
+        # ── Step 2: merge all trade products into unified axis ──
         trade_product_names = sorted({
             getattr(product, "name", str(product))
             for entry in batch
-            for product in entry.trade_valid_cols
+            for product in entry_trade_valid_cols[entry.simulation_index]
         })
         trade_product_positions = {
             product_name: idx
             for idx, product_name in enumerate(trade_product_names)
         }
 
-        total_group_count = int(sum(entry.trade_membership_np.shape[1] for entry in batch))
-        merged_membership_np = np.zeros((T, total_group_count, len(trade_product_names)), dtype=bool)
+        total_group_count = int(sum(
+            entry_trade_membership_np[entry.simulation_index].shape[1]
+            for entry in batch
+        ))
+        merged_membership_np = np.zeros(
+            (T, total_group_count, len(trade_product_names)), dtype=bool,
+        )
         group_owner: list[dict[str, Any]] = []
         group_slices: dict[int, list[int]] = {}
 
         group_offset = 0
         for entry in batch:
-            local_group_count = int(entry.trade_membership_np.shape[1])
+            si = entry.simulation_index
+            local = entry_trade_membership_np[si]
+            local_group_count = int(local.shape[1])
             product_indices = np.asarray(
-                [trade_product_positions[getattr(product, "name", str(product))] for product in entry.trade_valid_cols],
+                [trade_product_positions[getattr(product, "name", str(product))]
+                 for product in entry_trade_valid_cols[si]],
                 dtype=int,
             )
             merged_membership_np[
                 :,
                 group_offset:group_offset + local_group_count,
                 product_indices,
-            ] = entry.trade_membership_np
-            group_slices[entry.simulation_index] = list(range(group_offset, group_offset + local_group_count))
+            ] = local
+            group_slices[si] = list(range(group_offset, group_offset + local_group_count))
             for local_group_idx in range(local_group_count):
                 group_label = entry.group_name_map.get(local_group_idx, f"group_{local_group_idx}")
                 group_owner.append({
-                    "simulation_index": entry.simulation_index,
+                    "simulation_index": si,
                     "submission_id": entry.submission_id,
                     "factor_alias": entry.factor_alias,
                     "requested_n_groups": entry.n_groups,
@@ -365,6 +395,8 @@ class FactorGroupTester:
             group_owner=group_owner,
             group_slices=group_slices,
             merged_membership_np=merged_membership_np,
+            entry_trade_valid_cols=entry_trade_valid_cols,
+            entry_trade_membership_np=entry_trade_membership_np,
         )
 
     def build_batch_execution_plans(self) -> list[BatchExecutionPlan]:
@@ -387,16 +419,20 @@ class FactorGroupTester:
         merged_price_np = np.full((T, P), np.nan, dtype=float)
         global_products_by_name: dict[str, Any] = {}
 
+        if plan.entry_trade_valid_cols is None:
+            raise ValueError("BatchExecutionPlan has no entry_trade_valid_cols (build_batch_execution_plan must be called first)")
+
         for entry_idx, entry in enumerate(plan.entries, start=1):
             factor = entry.tester.resolve_factor(entry.factor_alias)
             if factor is None:
                 raise ValueError(f"未找到因子 {entry.factor_alias}")
-            if len(entry.trade_valid_cols) == 0:
+            trade_valid_cols = plan.entry_trade_valid_cols.get(entry.simulation_index)
+            if not trade_valid_cols:
                 continue
             local_returns_np = _load_group_trade_returns(
                 entry.tester,
                 factor,
-                trade_valid_cols=list(entry.trade_valid_cols),
+                trade_valid_cols=list(trade_valid_cols),
                 returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
                 source_freq=entry.shared_inputs.source_freq,
                 effective_return_freq=entry.shared_inputs.effective_return_freq,
@@ -406,14 +442,14 @@ class FactorGroupTester:
             )
             local_price_np = _load_group_trade_prices(
                 factor,
-                trade_valid_cols=list(entry.trade_valid_cols),
+                trade_valid_cols=list(trade_valid_cols),
                 price_col=entry.shared_inputs.price_col,
                 source_freq=entry.shared_inputs.source_freq,
                 start_date=entry.shared_inputs.start_date,
                 end_date=entry.shared_inputs.end_date,
                 index_list=entry.shared_inputs.index_list,
             )
-            for local_col_idx, product in enumerate(entry.trade_valid_cols):
+            for local_col_idx, product in enumerate(trade_valid_cols):
                 product_name = getattr(product, "name", str(product))
                 global_products_by_name.setdefault(product_name, product)
                 global_col_idx = plan.trade_product_positions[product_name]

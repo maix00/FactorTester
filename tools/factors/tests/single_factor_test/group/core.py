@@ -552,18 +552,82 @@ def _build_group_memberships_from_shared(
     ]
 
 
-def _prepare_group_trade_membership(
-    factor: Factor,
-    signal_valid_cols: list,
-    index_list: list,
-    membership_np: np.ndarray,
-) -> tuple[list, np.ndarray]:
-    _group_progress(f"trade product expansion start factor={factor.alias}")
-    trade_valid_cols, trade_membership_np = _expand_trade_products(signal_valid_cols, index_list, membership_np)
+def _build_product_remap_matrix(
+    signal_products: list,
+    signal_index: list,
+) -> tuple[np.ndarray, list, dict[tuple[str, str], int]]:
+    """Pre-build signal-product → trade-product term-structure mapping.
+
+    Uses a full active mask so the resulting matrix works for all membership_np
+    variants (different n_groups / derived specs) that share the same
+    (signal_products, signal_index).
+
+    Returns
+    -------
+    signal_to_trade : (T, P_signal) int
+        signal_to_trade[t, pi] = position in trade_products, or -1 if unresolved.
+    trade_products : list
+        Deduplicated trade product list (union of contracts across all products).
+    trade_pos_by_key : dict
+        (cls_name, product_name) → index in trade_products.
+    """
+    T = len(signal_index)
+    P_signal = len(signal_products)
+    signal_days = _normalize_signal_days(signal_index)
+    full_mask = np.ones(T, dtype=bool)
+
+    trade_products: list = []
+    trade_pos_by_key: dict[tuple[str, str], int] = {}
+    signal_to_trade = np.full((T, P_signal), -1, dtype=int)
+
     _group_progress(
-        f"trade product expansion done factor={factor.alias} trade_products={len(trade_valid_cols)}"
+        f"build product remap matrix start T={T} signal_products={P_signal}"
     )
-    return trade_valid_cols, trade_membership_np
+    for pi, product in enumerate(tqdm(
+        signal_products,
+        desc="Build product remap matrix",
+        total=P_signal,
+    )):
+        signal_to_trade[:, pi] = _expand_single_trade_product(
+            product, signal_days, full_mask,
+            trade_products, trade_pos_by_key,
+        )
+    _group_progress(
+        f"build product remap matrix done trade_products={len(trade_products)}"
+    )
+    return signal_to_trade, trade_products, trade_pos_by_key
+
+
+def _remap_membership_to_trade(
+    membership_np: np.ndarray,
+    signal_to_trade: np.ndarray,
+    trade_count: int,
+) -> np.ndarray:
+    """Remap signal-dim membership to trade-dim using pre-built contract matrix.
+
+    membership_np  : (T, M, P_signal) bool
+    signal_to_trade: (T, P_signal) int, from _build_product_remap_matrix
+    trade_count    : len(trade_products)
+
+    Returns (T, M, trade_count) bool membership on trade-product axis.
+    """
+    T, M, P_signal = membership_np.shape
+    trade_membership = np.zeros((T, M, trade_count), dtype=bool)
+
+    active_t, active_g, active_pi = np.nonzero(membership_np)
+    if active_t.size == 0:
+        return trade_membership
+
+    mapped_pos = signal_to_trade[active_t, active_pi]
+    valid = mapped_pos >= 0
+    if valid.any():
+        trade_membership[
+            active_t[valid],
+            active_g[valid],
+            mapped_pos[valid],
+        ] = True
+
+    return trade_membership
 
 
 def _load_group_trade_returns(
@@ -1064,143 +1128,6 @@ def _simulate_group_from_preloaded(
     return returns_dict, report_df_out, cumulative_returns_np, group_result
 
 
-def _execute_group_membership(
-    tester: Any,
-    factor: Factor,
-    *,
-    returns_col: FactorNextPeriodReturns,
-    start_date: Any,
-    end_date: Any,
-    price_col: DataColumn,
-    source_freq: DataFreq,
-    effective_return_freq: DataFreq,
-    signal_valid_cols: list,
-    index_list: list,
-    membership_np: np.ndarray,
-    group_count: int,
-    n_names: dict[int, str],
-    fee: float,
-    fee_map: dict,
-    use_closetoday: bool,
-    rebalance_mode: str,
-    derived_info: list[dict],
-    initial_capital: float,
-    multi_session_active: bool,
-    trade_valid_cols: Optional[list] = None,
-    trade_membership_np: Optional[np.ndarray] = None,
-) -> tuple[Any, pd.DataFrame, np.ndarray, GroupRunResult]:
-    liquidity_capacity_np: np.ndarray | None = None
-    n_base = group_count - len(derived_info)
-    if trade_valid_cols is None or trade_membership_np is None:
-        trade_valid_cols, membership_np = _prepare_group_trade_membership(
-            factor,
-            signal_valid_cols,
-            index_list,
-            membership_np,
-        )
-    else:
-        membership_np = trade_membership_np.copy()
-    returns_np = _load_group_trade_returns(
-        tester,
-        factor,
-        trade_valid_cols=trade_valid_cols,
-        returns_col=returns_col,
-        source_freq=source_freq,
-        effective_return_freq=effective_return_freq,
-        start_date=start_date,
-        end_date=end_date,
-        index_list=index_list,
-    )
-    price_np = _load_group_trade_prices(
-        factor,
-        trade_valid_cols=trade_valid_cols,
-        price_col=price_col,
-        source_freq=source_freq,
-        start_date=start_date,
-        end_date=end_date,
-        index_list=index_list,
-    )
-
-    bad_ret_mask = np.isnan(returns_np) | np.isinf(returns_np) | (returns_np <= -1.0)
-    returns_filled = np.where(bad_ret_mask, 0.0, returns_np)
-    spec_bundle = _resolve_group_trade_specs(
-        signal_valid_cols=signal_valid_cols,
-        valid_cols=trade_valid_cols,
-        fee=fee,
-        fee_map=fee_map,
-    )
-    valid_cols = spec_bundle.valid_cols
-    P = len(valid_cols)
-
-    def _liquidity_mode_from_spec(spec: dict | None) -> str:
-        if not isinstance(spec, dict):
-            return "infinite"
-        mode = str(spec.get("liquidity_mode") or spec.get("liquidityMode") or "infinite").strip()
-        return mode if mode == "percent" else "infinite"
-
-    def _liquidity_percent_from_spec(spec: dict | None) -> float:
-        if not isinstance(spec, dict):
-            return 100.0
-        raw = spec.get("liquidity_percent", spec.get("liquidityPercent", 100.0))
-        try:
-            return min(100.0, max(0.0, float(raw)))
-        except (TypeError, ValueError):
-            return 100.0
-
-    liquidity_modes_list = ["infinite"] * group_count
-    liquidity_percents_list = [100.0] * group_count
-    margin_modes_list = ["margin"] * group_count
-    for d_idx, di in enumerate(derived_info):
-        g = n_base + d_idx
-        liquidity_modes_list[g] = _liquidity_mode_from_spec(di)
-        liquidity_percents_list[g] = _liquidity_percent_from_spec(di)
-        margin_modes_list[g] = str(di.get('margin_mode') or di.get('marginMode') or "margin")
-
-    positions_by_variety_code_lower = spec_bundle.positions_by_variety_code_lower
-    open_fee_vec = spec_bundle.open_fee_vec
-    close_fee_vec = spec_bundle.close_fee_vec
-    close_today_fee_vec = spec_bundle.close_today_fee_vec
-    close_yesterday_fee_vec = spec_bundle.close_yesterday_fee_vec
-    open_fee_fixed_vec = spec_bundle.open_fee_fixed_vec
-    close_fee_fixed_vec = spec_bundle.close_fee_fixed_vec
-    close_today_fee_fixed_vec = spec_bundle.close_today_fee_fixed_vec
-    point_value_vec = spec_bundle.point_value_vec
-    min_tick_vec = spec_bundle.min_tick_vec
-    min_trade_quantity_vec = spec_bundle.min_trade_quantity_vec
-    long_margin_ratio_vec = spec_bundle.long_margin_ratio_vec
-    is_margin_traded_vec = spec_bundle.is_margin_traded_vec
-
-    return _simulate_group_from_preloaded(
-        factor,
-        membership_np=membership_np,
-        returns_filled=returns_filled,
-        price_np=price_np,
-        valid_cols=valid_cols,
-        index_list=index_list,
-        n_names=n_names,
-        derived_info=derived_info,
-        use_closetoday=use_closetoday,
-        rebalance_mode=rebalance_mode,
-        initial_capital=initial_capital,
-        multi_session_active=multi_session_active,
-        start_date=start_date,
-        end_date=end_date,
-        source_freq=source_freq,
-        open_fee_vec=open_fee_vec,
-        close_fee_vec=close_fee_vec,
-        close_today_fee_vec=close_today_fee_vec,
-        close_yesterday_fee_vec=close_yesterday_fee_vec,
-        open_fee_fixed_vec=open_fee_fixed_vec,
-        close_fee_fixed_vec=close_fee_fixed_vec,
-        close_today_fee_fixed_vec=close_today_fee_fixed_vec,
-        point_value_vec=point_value_vec,
-        min_tick_vec=min_tick_vec,
-        min_trade_quantity_vec=min_trade_quantity_vec,
-        long_margin_ratio_vec=long_margin_ratio_vec,
-        is_margin_traded_vec=is_margin_traded_vec,
-        positions_by_variety_code_lower=positions_by_variety_code_lower,
-    )
-
 
 def align_table_for_group(factor: Factor, raw_table: pd.DataFrame) -> pd.DataFrame:
     """Temporarily project a raw FE/RE table onto factor signal timestamps."""
@@ -1368,53 +1295,6 @@ def _expand_single_trade_product(
             pos = _append_trade_product(trade_products, trade_pos_by_key, trade_product)
             mapped[t] = pos
     return mapped
-
-
-def _expand_trade_products(
-    signal_products: list,
-    signal_index: list,
-    signal_membership_np: np.ndarray,
-) -> tuple[list, np.ndarray]:
-    """Map signal-level membership onto the union of actual traded products/contracts."""
-    T, M, P_signal = signal_membership_np.shape
-    signal_days = _normalize_signal_days(signal_index)
-    active_mask_np = cast(np.ndarray, np.asarray(signal_membership_np.any(axis=1), dtype=bool))
-    trade_products: list = []
-    trade_pos_by_key: dict[tuple[str, str], int] = {}
-    signal_to_trade = np.full((T, P_signal), -1, dtype=int)
-
-    _group_progress(
-        f"expand trade products start T={T} groups={M} signal_products={P_signal}"
-    )
-    for pi, product in enumerate(tqdm(
-        signal_products,
-        desc="Expand trade products",
-        total=P_signal,
-    )):
-        signal_to_trade[:, pi] = _expand_single_trade_product(
-            product,
-            signal_days,
-            active_mask_np[:, pi],
-            trade_products,
-            trade_pos_by_key,
-        )
-
-    if not trade_products:
-        return list(signal_products), signal_membership_np.copy()
-
-    membership_np = np.zeros((T, M, len(trade_products)), dtype=bool)
-    active_t, active_g, active_pi = np.nonzero(signal_membership_np)
-    if active_t.size > 0:
-        mapped_pos = signal_to_trade[active_t, active_pi]
-        valid = mapped_pos >= 0
-        if bool(valid.any()):
-            membership_np[
-                active_t[valid],
-                active_g[valid],
-                mapped_pos[valid].astype(int, copy=False),
-            ] = True
-    _group_progress(f"expand trade products done trade_products={len(trade_products)}")
-    return trade_products, membership_np
 
 
 def _evaluate_trade_returns_for_group(
