@@ -755,15 +755,15 @@ def _resolve_group_trade_specs(
                 return bundle_value
             return getattr(col, product_field, default)
 
-        open_fee_list.append(_coerce_float(_pick_value("open_rate", "open_ratio", half_fee), half_fee))
-        close_fee_value = _coerce_float(_pick_value("close_rate", "close_ratio", half_fee), half_fee)
+        open_fee_list.append(_coerce_float(_pick_value("open", "open_ratio", half_fee), half_fee))
+        close_fee_value = _coerce_float(_pick_value("close", "close_ratio", half_fee), half_fee)
         close_fee_list.append(close_fee_value)
         close_today_fee_list.append(_coerce_float(
-            _pick_value("close_today_rate", "closetoday_ratio", close_fee_value),
+            _pick_value("close_today", "closetoday_ratio", close_fee_value),
             close_fee_value,
         ))
         close_yesterday_fee_list.append(_coerce_float(
-            _pick_value("close_yesterday_rate", "close_ratio", close_fee_value),
+            _pick_value("close_yesterday", "close_ratio", close_fee_value),
             close_fee_value,
         ))
         close_fee_fixed_value = _coerce_float(_pick_value("close_fixed", "close_fixed", 0.0), 0.0)
@@ -1010,6 +1010,7 @@ def _simulate_group_from_preloaded(
     open_fee_mat = np.tile(open_fee_vec, (group_count, 1))
     close_fee_mat = np.tile(close_fee_vec, (group_count, 1))
     close_today_fee_mat = np.tile(close_today_fee_vec, (group_count, 1))
+    close_yesterday_fee_mat = np.tile(close_yesterday_fee_vec, (group_count, 1))
     open_fee_fixed_mat = np.tile(open_fee_fixed_vec, (group_count, 1))
     close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (group_count, 1))
     close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (group_count, 1))
@@ -1021,18 +1022,14 @@ def _simulate_group_from_preloaded(
         fee_override = cfg.get("fee_override") if isinstance(cfg, dict) else None
         if not isinstance(fee_override, dict):
             continue
-        if 'open_rate' in fee_override and fee_override['open_rate'] is not None:
-            open_fee_mat[g_idx, :] = float(fee_override['open_rate'])
-        if 'close_rate' in fee_override and fee_override['close_rate'] is not None:
-            close_fee_mat[g_idx, :] = float(fee_override['close_rate'])
-        if 'close_today_rate' in fee_override and fee_override['close_today_rate'] is not None:
-            close_today_fee_mat[g_idx, :] = float(fee_override['close_today_rate'])
-        if 'open_fixed' in fee_override and fee_override['open_fixed'] is not None:
-            open_fee_fixed_mat[g_idx, :] = float(fee_override['open_fixed'])
-        if 'close_fixed' in fee_override and fee_override['close_fixed'] is not None:
-            close_fee_fixed_mat[g_idx, :] = float(fee_override['close_fixed'])
-        if 'close_today_fixed' in fee_override and fee_override['close_today_fixed'] is not None:
-            close_today_fee_fixed_mat[g_idx, :] = float(fee_override['close_today_fixed'])
+        if 'open' in fee_override and fee_override['open'] is not None:
+            open_fee_mat[g_idx, :] = float(fee_override['open'])
+        if 'close' in fee_override and fee_override['close'] is not None:
+            close_fee_mat[g_idx, :] = float(fee_override['close'])
+        if 'close_today' in fee_override and fee_override['close_today'] is not None:
+            close_today_fee_mat[g_idx, :] = float(fee_override['close_today'])
+        if 'close_yesterday' in fee_override and fee_override['close_yesterday'] is not None:
+            close_yesterday_fee_mat[g_idx, :] = float(fee_override['close_yesterday'])
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
     effective_close_fee_mat = close_today_fee_mat if use_closetoday else None

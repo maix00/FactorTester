@@ -490,8 +490,7 @@ def run_group_test():
         ],
         "fee": 0.0001, "fee_map": {...}, "use_closetoday": false,
         "start_date": "2024-01-01", "end_date": "2024-12-31",
-        "rebalance_mode": "buy_and_hold",
-        "derived_groups": null
+        "rebalance_mode": "buy_and_hold"
     }
     
     请求里的 `batches` / `cross_batch_ls` 仍保留原字段名；
@@ -524,7 +523,7 @@ def _parse_group_fee_config(data, products: set | None = None):
                    含用户 _feeModifications 覆盖 + 平今/平昨选择）
 
     返回 (fee_uniform, fee_map, use_closetoday)，
-    其中 fee_map 仅在模式3时非空，key 格式：{open, close, close_today, close_yesterday}，
+    其中 fee_map 仅在模式3时非空，key 格式：{open, close_today, close_yesterday}，
     值为单边费率（按金额比例）。
     模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
     """
@@ -537,7 +536,8 @@ def _parse_group_fee_config(data, products: set | None = None):
         return fee_uniform, {}, use_closetoday
 
     # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖，
-    # 只需做字段名映射：open_ratio→open, close_ratio→close, closetoday_ratio→close_today/close_yesterday
+    # 字段名映射：open_ratio→open, closetoday_ratio→close_today
+    # close_yesterday = close_ratio（平昨=平仓费率）
     fee_map: dict[str, dict[str, float]] = {}
     for code, rates in fee_map_raw.items():
         code_upper = str(code).upper()
@@ -546,9 +546,8 @@ def _parse_group_fee_config(data, products: set | None = None):
         ct = float(rates.get('closetoday_ratio', 0) or 0)
         fee_map[code_upper] = {
             'open': o,
-            'close': c,
             'close_today': ct,
-            'close_yesterday': c,  # 平昨=平仓费率
+            'close_yesterday': c,
         }
 
     return fee_uniform, fee_map, use_closetoday
@@ -909,9 +908,6 @@ def _parse_group_fee_config(data, products: set | None = None):
                 if merged_key != original_key:
                     group = dict(group)
                     group['key'] = merged_key
-                    if isinstance(group.get('derived'), dict) and group['derived'].get('key') == original_key:
-                        group['derived'] = dict(group['derived'])
-                        group['derived']['key'] = merged_key
                 merged_groups.append(group)
                 if original_key in br_metrics:
                     merged_metrics[merged_key] = br_metrics[original_key]
@@ -943,9 +939,6 @@ def _parse_group_fee_config(data, products: set | None = None):
             if merged_key != original_key:
                 group = dict(group)
                 group['key'] = merged_key
-                if isinstance(group.get('derived'), dict):
-                    group['derived'] = dict(group['derived'])
-                    group['derived']['key'] = merged_key
             merged_groups.append(group)
             if original_key in cross_ls_metrics:
                 merged_metrics[merged_key] = cross_ls_metrics[original_key]

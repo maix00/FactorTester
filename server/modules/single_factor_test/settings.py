@@ -38,8 +38,7 @@ def save_group_settings():
         factor_alias: str,       // factor family key
         name: str,               // human-readable snapshot name (optional)
         config: {
-            baseGroups: [...],
-            derivedGraph: [...],
+            flatGroups: [...],
             lsConfigs: [...],
             registrations: [...]
         }
@@ -126,7 +125,7 @@ def list_group_settings():
     {
         success: true,
         snapshots: [
-            { id, name, timestamp, config_summary: { baseGroups: N, derivedGraph: N, ... } },
+            { id, name, timestamp, config_summary: { flatGroups: N, lsConfigs: N, ... } },
             ...
         ]
     }
@@ -152,8 +151,7 @@ def list_group_settings():
                 'name': s.get('name', ''),
                 'timestamp': s.get('timestamp', ''),
                 'config_summary': {
-                    'baseGroups': len(cfg.get('baseGroups', [])),
-                    'derivedGraph': len(cfg.get('derivedGraph', [])),
+                    'flatGroups': len(cfg.get('flatGroups', [])),
                     'lsConfigs': len(cfg.get('lsConfigs', [])),
                     'registrations': len(cfg.get('registrations', [])),
                 },
