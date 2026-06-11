@@ -225,7 +225,7 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
         if not isinstance(item, dict):
             continue
         try:
-            g = int(item.get('group_index'))
+            g = int(item.get('group_index', 0))
         except (TypeError, ValueError):
             continue
         display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}'
@@ -1298,6 +1298,9 @@ def get_group_snapshot():
         sorted_pos = np.argsort(time_epochs, kind='stable')
         current_pos = int(np.flatnonzero(sorted_pos == best_pos)[0]) if sorted_pos.size else 0
         prev_entry = time_entries[int(sorted_pos[current_pos - 1])] if current_pos > 0 else None
+
+        # (ts_epoch, idx_entry) 对列表，供 all_timestamps_ms 构建和前/后导航使用
+        all_times = list(zip(time_epochs, time_entries))
 
         n_groups = len(products_dict)
         fee_rates_by_name = _product_fee_rates_by_name(group_result)

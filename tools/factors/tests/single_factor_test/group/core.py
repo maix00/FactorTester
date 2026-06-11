@@ -875,7 +875,7 @@ def _simulate_group_from_preloaded(
     long_margin_ratio_vec: np.ndarray,
     is_margin_traded_vec: np.ndarray,
     positions_by_variety_code_lower: dict[str, list[int]],
-) -> tuple[Any, Any, pd.DataFrame, np.ndarray, GroupRunResult]:
+) -> tuple[Any, pd.DataFrame, np.ndarray, GroupRunResult]:
     liquidity_capacity_np: np.ndarray | None = None
     group_count = membership_np.shape[1]
     n_base = group_count - len(derived_info)
@@ -1866,6 +1866,7 @@ def simulate_group_trading_book(
         desired_quantities[:, ~executable] = quantities[:, ~executable]
 
         if has_percent_liquidity:
+            assert liquidity_capacity_arr is not None
             base_capacity = np.where(
                 np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
                 liquidity_capacity_arr[t],
