@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
-from tools.factors.tests.group import _FactorGroupTestGroup
+from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 from tools.factors.tests.single_factor_test.group.core import (
     build_flat_membership_from_groups,
     _build_product_remap_matrix,

@@ -751,7 +751,7 @@ def _build_flat_groups_from_payload(
     (groups, ls_configs) where groups is list[_FactorGroupTestGroup] and
     ls_configs is parsed LS configs (or None).
     """
-    from tools.factors.tests.group import _FactorGroupTestGroup
+    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 
     factor_alias = str(payload_entry.get('factor_alias') or '')
     n_groups = int(payload_entry.get('n_groups', 5))
@@ -1069,7 +1069,7 @@ def run_group_test():
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
 
-    from tools.factors.tests.group import _FactorGroupTestGroup
+    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 
     # ── Build flat groups from all submitted entries ──
     all_flat_groups: list[_FactorGroupTestGroup] = []
