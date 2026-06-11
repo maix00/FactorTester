@@ -11,8 +11,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools.factors.FactorTester import FactorTester
 from tools.factors.Parameters import FactorNextPeriodReturns
+from tools.factors.tests.group import _FactorGroupTestGroup
 from tools.factors.tests.single_factor_test.group.core import (
-    _append_derived_group_memberships,
+    build_flat_membership_from_groups,
     _build_product_remap_matrix,
     _build_group_memberships_from_shared,
     _load_group_trade_prices,
@@ -36,11 +37,11 @@ class GroupSimulationSpec:
     spec: dict[str, Any]
     shared_inputs: Any
     base_membership_np: np.ndarray
-    derived_info: list[dict[str, Any]]
+    flat_group_info: list[dict[str, Any]]  # from build_flat_membership_from_groups
     group_name_map: dict[int, str]
     # signal-dimension fields (before remap to trade axis)
     signal_products: frozenset[str]  # frozenset of f"{cls_name}:{product_name}"
-    signal_membership_np: np.ndarray  # (T, M, P_signal) — expanded base+derived membership on signal axis
+    signal_membership_np: np.ndarray  # (T, M, P_signal) — flat membership on signal axis
 
 
 @dataclass(slots=True)
@@ -97,10 +98,12 @@ class FactorGroupTester:
         self.end_dt = end_dt
 
     @classmethod
-    def from_submission_specs(
+    def from_flat_groups(
         cls,
-        submission_specs: list[tuple[str, FactorTester, list[tuple[int, dict[str, Any]]]]],
+        flat_groups: list[_FactorGroupTestGroup],
         *,
+        spec_index_by_group: dict[int, int] | None = None,  # group → simulation_index
+        ls_configs_by_index: dict[int, list[dict] | None] | None = None,
         start_dt: Optional[Any] = None,  # DataTime
         end_dt: Optional[Any] = None,    # DataTime
         calendar_index: Optional[pd.Index],
@@ -110,23 +113,49 @@ class FactorGroupTester:
         merge_cost_ratio: float | None = None,
         progress_hook: Optional[Callable[[str], None]] = None,
     ) -> "FactorGroupTester":
-        built_specs: list[GroupSimulationSpec] = []
-        for submission_id, tester, indexed_specs in submission_specs:
-            if progress_hook is not None:
-                progress_hook(
-                    f"group tester prepare submission={submission_id} specs={len(indexed_specs)}"
-                )
-            shared_inputs_by_factor_alias: dict[str, Any] = {}
-            memberships_by_factor_alias: dict[str, dict[int, np.ndarray]] = {}
+        """Build a FactorGroupTester from a flat list of _FactorGroupTestGroup.
 
-            for _, spec in indexed_specs:
-                factor_alias = str(spec.get("factor_alias") or "")
-                if not factor_alias or factor_alias in shared_inputs_by_factor_alias:
-                    continue
+        Deduplicates (tester_id, factor_alias, n_groups) triples:
+        - Runs ``_prepare_group_shared_inputs`` once per unique tester+factor_alias.
+        - Runs ``_build_group_memberships_from_shared`` once per unique triple.
+        - Then calls ``build_flat_membership_from_groups`` to assemble the flat
+          (T, M_total, P) membership from the group list.
+        """
+        if spec_index_by_group is None:
+            spec_index_by_group = {i: i for i in range(len(flat_groups))}
+
+        # ── Group by tester_id ──
+        tester_by_id: dict[str, tuple[FactorTester, list[_FactorGroupTestGroup]]] = {}
+        for group in flat_groups:
+            try:
+                from server.services import runtime_state
+                tester = runtime_state.get_factor_tester(group.tester_id, caller='from_flat_groups')
+            except Exception:
+                # tester_id may be a raw tester object in some contexts
+                continue
+            tester_by_id.setdefault(group.tester_id, (tester, []))[1].append(group)
+
+        if progress_hook is not None:
+            progress_hook(
+                f"group tester prepare testers={len(tester_by_id)} groups={len(flat_groups)}"
+            )
+
+        # ── Deduplicate (tester_id, factor_alias, n_groups) triples ──
+        # Map: triple → shared_inputs
+        shared_inputs_by_triple: dict[tuple, Any] = {}
+        signal_valid_cols_by_triple: dict[tuple, list] = {}
+        memberships_by_triple: dict[tuple, np.ndarray] = {}
+
+        # Unique factor aliases per tester
+        for tester_id, (tester, tester_groups) in tester_by_id.items():
+            unique_factor_aliases = list(dict.fromkeys(
+                (g.factor_alias, g.tester_id) for g in tester_groups
+            ))
+            for factor_alias, _ in unique_factor_aliases:
                 factor = tester.resolve_factor(factor_alias)
                 if factor is None:
                     continue
-                shared_inputs_by_factor_alias[factor_alias] = _prepare_group_shared_inputs(
+                shared_inputs = _prepare_group_shared_inputs(
                     tester,
                     factor,
                     returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
@@ -134,73 +163,90 @@ class FactorGroupTester:
                     end_dt=end_dt,
                     calendar_index=calendar_index,
                 )
-
-            for factor_alias, shared_inputs in shared_inputs_by_factor_alias.items():
-                factor_specs = [
-                    spec for _, spec in indexed_specs
-                    if str(spec.get("factor_alias") or "") == factor_alias
-                ]
-                unique_group_counts = sorted({
-                    int(spec.get("n_groups", 5))
-                    for spec in factor_specs
+                # Index by a canonical triple key
+                triple = (tester_id, factor_alias, 0)  # placeholder n_groups
+                # Collect unique n_groups for this (tester, factor)
+                unique_n_groups = sorted({
+                    g.n_groups for g in tester_groups
+                    if g.factor_alias == factor_alias
                 })
-                factor = tester.resolve_factor(factor_alias)
-                if factor is None or not unique_group_counts:
-                    continue
                 membership_list = _build_group_memberships_from_shared(
                     factor,
                     shared_inputs,
-                    group_counts=unique_group_counts,
+                    group_counts=unique_n_groups,
                     rebalance_mode=rebalance_mode,
                 )
-                memberships_by_factor_alias[factor_alias] = {
-                    n_groups: membership_np
-                    for n_groups, membership_np in zip(unique_group_counts, membership_list)
-                }
+                for n_groups, membership_np in zip(unique_n_groups, membership_list):
+                    triple = (tester_id, factor_alias, n_groups)
+                    shared_inputs_by_triple[triple] = shared_inputs
+                    signal_valid_cols_by_triple[triple] = shared_inputs.signal_valid_cols
+                    memberships_by_triple[triple] = membership_np
 
-            for simulation_index, spec in indexed_specs:
-                factor_alias = str(spec.get("factor_alias") or "")
-                n_groups = int(spec.get("n_groups", 5))
-                shared = shared_inputs_by_factor_alias.get(factor_alias)
-                base_membership = memberships_by_factor_alias.get(factor_alias, {}).get(n_groups)
-                if shared is None or base_membership is None:
-                    continue
-                factor = tester.resolve_factor(factor_alias)
-                if factor is None:
-                    continue
-                n_groups_name = spec.get("n_groups_name") or {}
-                group_name_map = {
-                    i: n_groups_name.get(i, f"group_{i}")
-                    for i in range(n_groups)
-                }
-                expanded_membership_np, derived_info = _append_derived_group_memberships(
-                    factor,
-                    shared.signal_valid_cols,
-                    base_membership.copy(),
-                    n_base_groups=n_groups,
-                    derived_groups=spec.get("derived_groups"),
+        # ── Build flat membership for all groups ──
+        flat_membership_np, flat_group_info = build_flat_membership_from_groups(
+            flat_groups,
+            shared_inputs_by_triple=shared_inputs_by_triple,
+            signal_valid_cols_by_triple=signal_valid_cols_by_triple,
+            memberships_by_triple=memberships_by_triple,
+        )
+
+        # ── Build GroupSimulationSpec per simulation_index ──
+        # Determine the first shared input for each triple to use as the spec's shared_inputs
+        # Also build group_name_map
+        built_specs: list[GroupSimulationSpec] = []
+        # Group flat_group_info by simulation_index
+        groups_by_sim_index: dict[int, list[tuple[int, _FactorGroupTestGroup]]] = {}
+        for flat_idx, group in enumerate(flat_groups):
+            si = spec_index_by_group.get(flat_idx, flat_idx)
+            groups_by_sim_index.setdefault(si, []).append((flat_idx, group))
+
+        # For each simulation_index, slice the flat membership and build a spec
+        for si, indexed_groups in groups_by_sim_index.items():
+            first_group = indexed_groups[0][1]
+            factor_alias = first_group.factor_alias
+            n_groups = first_group.n_groups
+            triple = first_group.triple_key
+            shared = shared_inputs_by_triple.get(triple)
+            base_membership = memberships_by_triple.get(triple)
+            if shared is None or base_membership is None:
+                continue
+            tester = tester_by_id[first_group.tester_id][0]
+            factor = tester.resolve_factor(factor_alias)
+            if factor is None:
+                continue
+
+            # group_name_map: global_group_index → display_name
+            group_name_map: dict[int, str] = {}
+            si_flat_info: list[dict] = []
+            global_indices: list[int] = []
+            for flat_idx, group in indexed_groups:
+                global_indices.append(flat_idx)
+                info = flat_group_info[flat_idx]
+                si_flat_info.append(info)
+                group_name_map[flat_idx] = str(group.name or group.key or f"group_{flat_idx}")
+
+            # Slice the flat membership to only this simulation_index's groups
+            si_membership_np = flat_membership_np[:, global_indices, :]
+
+            built_specs.append(
+                GroupSimulationSpec(
+                    simulation_index=si,
+                    submission_id=first_group.tester_id,
+                    tester=tester,
+                    factor_alias=factor_alias,
+                    n_groups=n_groups,
+                    spec={"ls_configs": (ls_configs_by_index or {}).get(si)},
+                    shared_inputs=shared,
+                    base_membership_np=base_membership,
+                    flat_group_info=si_flat_info,
+                    group_name_map=group_name_map,
+                    signal_products=frozenset(
+                        f"{type(product).__name__}:{getattr(product, 'name', str(product))}"
+                        for product in shared.signal_valid_cols
+                    ),
+                    signal_membership_np=si_membership_np,
                 )
-                for d_idx, di in enumerate(derived_info):
-                    group_name_map[n_groups + d_idx] = str(di.get("name") or f"group_{n_groups + d_idx}")
-                built_specs.append(
-                    GroupSimulationSpec(
-                        simulation_index=simulation_index,
-                        submission_id=submission_id,
-                        tester=tester,
-                        factor_alias=factor_alias,
-                        n_groups=n_groups,
-                        spec=spec,
-                        shared_inputs=shared,
-                        base_membership_np=base_membership,
-                        derived_info=derived_info,
-                        group_name_map=group_name_map,
-                        signal_products=frozenset(
-                            f"{type(product).__name__}:{getattr(product, 'name', str(product))}"
-                            for product in shared.signal_valid_cols
-                        ),
-                        signal_membership_np=expanded_membership_np,
-                    )
-                )
+            )
 
         return cls(
             built_specs,
@@ -502,7 +548,7 @@ class FactorGroupTester:
         entries_by_simulation_index = {entry.simulation_index: entry for entry in plan.entries}
 
         # Build per-group configs: one config dict per global group index.
-        # Each entry contributes its groups (both unscreened and screened) via group_variants.
+        # Each entry contributes its groups via flat_group_info.
         group_count = plan.merged_membership_np.shape[1]
         group_configs: list[dict] = [{} for _ in range(group_count)]
         for simulation_index, group_indices in plan.group_slices.items():
@@ -511,34 +557,17 @@ class FactorGroupTester:
                 local_idx: global_idx
                 for local_idx, global_idx in enumerate(group_indices)
             }
-            # entry.spec.group_variants = {local_group_index: [variant_dict, ...]}
-            entry_variants: dict = entry.spec.get("group_variants") or {}
-            if isinstance(entry_variants, dict):
-                for local_idx_str, variant_list in entry_variants.items():
-                    try:
-                        local_idx = int(local_idx_str)
-                    except (TypeError, ValueError):
-                        continue
-                    if local_idx not in local_to_global:
-                        continue
-                    global_idx = local_to_global[local_idx]
-                    if isinstance(variant_list, list) and variant_list:
-                        # Take the first variant's config for this global group.
-                        first_variant = variant_list[0]
-                        if isinstance(first_variant, dict):
-                            group_configs[global_idx] = dict(first_variant)
-            # Also handle screened (formerly "derived") groups from derived_info
-            for derived_pos, original_info in enumerate(entry.derived_info):
-                info = dict(original_info)
-                local_group_idx = entry.n_groups + derived_pos
-                if local_group_idx not in local_to_global:
+            # Use flat_group_info to populate configs
+            for flat_pos, info in enumerate(entry.flat_group_info):
+                info_copy = dict(info)
+                global_idx = local_to_global.get(flat_pos)
+                if global_idx is None:
                     continue
-                global_idx = local_to_global[local_group_idx]
                 # Map base_group reference
-                base_group = info.get("base_group")
+                base_group = info_copy.get("base_group")
                 if isinstance(base_group, int):
-                    info["base_group"] = local_to_global.get(base_group, base_group)
-                group_configs[global_idx] = info
+                    info_copy["base_group"] = local_to_global.get(base_group, base_group)
+                group_configs[global_idx] = info_copy
 
         _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,

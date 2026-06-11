@@ -338,6 +338,9 @@ def _extract_product_names_from_group(group: dict) -> list[str]:
         return sorted([str(k) for k, v in mask.items() if v])
 
     return []
+
+
+def _group_display_key(group_idx: int, n_base: int, derived_info: list[dict], group_names=None) -> str:
     names = _normalize_group_names(group_names)
     if group_idx in names:
         return names[group_idx]
@@ -733,26 +736,107 @@ def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, fl
     return display
 
 
-def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups=None) -> dict[str, Any]:
+def _build_flat_groups_from_payload(
+    payload_entry: dict,
+    *,
+    entry_index: int = 0,
+) -> tuple[list, list[dict] | None]:
+    """Build a flat list of _FactorGroupTestGroup from a single frontend payload entry.
+
+    Parses the frontend ``groups`` array (flat format) and converts each entry
+    into a ``_FactorGroupTestGroup`` instance.
+
+    Returns
+    -------
+    (groups, ls_configs) where groups is list[_FactorGroupTestGroup] and
+    ls_configs is parsed LS configs (or None).
+    """
+    from tools.factors.tests.group import _FactorGroupTestGroup
+
     factor_alias = str(payload_entry.get('factor_alias') or '')
     n_groups = int(payload_entry.get('n_groups', 5))
+    submission_id = str(payload_entry.get('submission_id') or '')
     groups = payload_entry.get('groups')
     group_names = payload_entry.get('group_names')
-    group_variants = None  # {group_index: [variant_dict, ...]}
+
+    # Parse group names (for base groups without their own name)
     if isinstance(groups, list) and groups:
-        n_groups_name, group_variants = _parse_groups_payload(groups)
+        n_groups_name, _ = _parse_groups_payload(groups)
     else:
         n_groups_name = _parse_group_names_payload(group_names)
     if not n_groups_name:
         n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
 
-    # 从 groups 数组中提取子组（有 parentId 的条目）
-    entry_derived_groups = _extract_derived_groups_from_payload(groups, n_groups_name)
-    if not entry_derived_groups:
-        entry_derived_groups = payload_entry.get('derived_groups')
-    if not isinstance(entry_derived_groups, list):
-        entry_derived_groups = default_derived_groups
+    flat_groups: list = []
 
+    if isinstance(groups, list) and groups:
+        for item in groups:
+            if not isinstance(item, dict):
+                continue
+            has_parent = bool(item.get('parentId') or item.get('parent_id'))
+            if not has_parent:
+                # Base group (no parentId): one flat group per entry
+                try:
+                    gi = int(item.get('group_index', item.get('groupIndex', 0)))
+                except (TypeError, ValueError):
+                    continue
+                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
+                flat_groups.append(_FactorGroupTestGroup(
+                    tester_id=submission_id,
+                    factor_alias=factor_alias,
+                    n_groups=n_groups,
+                    group_index=gi,
+                    key=str(display_name),
+                    name=str(display_name),
+                    product_list=None,
+                    fee_map=item.get('fee_map') or item.get('feeMap'),
+                    fee_mode=item.get('fee_mode') or item.get('feeMode'),
+                    fee_rate=item.get('fee_rate', item.get('feeRate')),
+                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
+                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode'),
+                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode'),
+                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
+                    margin_mode=item.get('margin_mode') or item.get('marginMode'),
+                ))
+            else:
+                # Screened group (has parentId): one flat group with product_list
+                base_group = int(item.get('baseGroup', item.get('base_group',
+                    item.get('parentId', item.get('parent_id', 0)))))
+                product_names = _extract_product_names_from_group(item)
+                if not product_names:
+                    continue
+                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'筛选_{base_group}'
+                flat_groups.append(_FactorGroupTestGroup(
+                    tester_id=submission_id,
+                    factor_alias=factor_alias,
+                    n_groups=n_groups,
+                    group_index=base_group,
+                    key=str(display_name),
+                    name=str(display_name),
+                    product_list=product_names,
+                    fee_map=item.get('fee_map') or item.get('feeMap'),
+                    fee_mode=item.get('fee_mode') or item.get('feeMode'),
+                    fee_rate=item.get('fee_rate', item.get('feeRate')),
+                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
+                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode'),
+                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode'),
+                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
+                    margin_mode=item.get('margin_mode') or item.get('marginMode'),
+                ))
+    else:
+        # No groups payload: create default base groups from group_names
+        for gi in range(n_groups):
+            display_name = n_groups_name.get(gi, f'Group {gi + 1}')
+            flat_groups.append(_FactorGroupTestGroup(
+                tester_id=submission_id,
+                factor_alias=factor_alias,
+                n_groups=n_groups,
+                group_index=gi,
+                key=str(display_name),
+                name=str(display_name),
+            ))
+
+    # Parse LS configs
     raw_ls = payload_entry.get('ls_configs')
     ls_configs = None
     if isinstance(raw_ls, list) and raw_ls:
@@ -762,14 +846,8 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
                 parsed = _parse_ls_config({'ls_config': raw}, n_groups)
                 if parsed['long'] and parsed['short']:
                     ls_configs.append(parsed)
-    return {
-        'factor_alias': factor_alias,
-        'n_groups': n_groups,
-        'n_groups_name': n_groups_name,
-        'group_variants': group_variants,
-        'derived_groups': entry_derived_groups,
-        'ls_configs': ls_configs,
-    }
+
+    return flat_groups, ls_configs
 
 
 def _serialize_group_simulation_result(
@@ -781,14 +859,28 @@ def _serialize_group_simulation_result(
     ls_configs: list[dict] | None,
     rebalance_mode: str,
     simulation_result: dict[str, Any],
+    flat_group_info: list[dict] | None = None,
 ) -> dict[str, Any]:
     report_df = simulation_result['report_df']
     idx_list = simulation_result['idx_list']
     timestamps = [to_epoch_ms(_signal_time(d)) for d in idx_list]
     group_result = simulation_result['group_result']
     n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
-    n_base = getattr(group_result, 'n_base', n_groups) or n_groups
-    derived_info = getattr(group_result, 'derived_info', None) or []
+
+    # ── Resolve group metadata: prefer flat_group_info, fallback to derived_info ──
+    if flat_group_info is not None and len(flat_group_info) > 0:
+        # New flat model: every group is a flat entry
+        n_base = sum(1 for fi in flat_group_info if not fi.get('product_names'))
+        derived_info = [
+            fi for fi in flat_group_info
+            if fi.get('product_names')
+        ]
+        # derived_info entries have base_group pointing to the base group index
+    else:
+        # Old model: fallback
+        n_base = getattr(group_result, 'n_base', n_groups) or n_groups
+        derived_info = getattr(group_result, 'derived_info', None) or []
+
     _gross = group_result.gross_returns_np if group_result is not None else None
     gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
     _fee = group_result.fee_costs_np if group_result is not None else None
@@ -977,19 +1069,40 @@ def run_group_test():
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
 
-    # 后端执行只区分 FactorTester；batches 只是前端提交分组定义时的组织方式。
-    entries_by_submission: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    from tools.factors.tests.group import _FactorGroupTestGroup
+
+    # ── Build flat groups from all submitted entries ──
+    all_flat_groups: list[_FactorGroupTestGroup] = []
+    sim_index_by_group: dict[int, int] = {}  # flat_group_position → simulation_index
+    all_ls_configs_by_index: dict[int, list[dict] | None] = {}
+    # Also collect factor_aliases per submission for calendar building
+    factor_aliases_by_submission: dict[str, list[str]] = {}
+
     for idx, payload_entry in enumerate(submitted_entries):
         if not isinstance(payload_entry, dict):
             continue
         submission_id = str(payload_entry.get('submission_id') or '')
-        spec = _normalize_group_simulation_spec(payload_entry, derived_groups)
-        entries_by_submission.setdefault(submission_id, []).append((idx, spec))
+        flat_groups, ls_configs = _build_flat_groups_from_payload(
+            payload_entry, entry_index=idx,
+        )
+        offset = len(all_flat_groups)
+        for gi, _ in enumerate(flat_groups):
+            sim_index_by_group[offset + gi] = idx
+        all_flat_groups.extend(flat_groups)
+        all_ls_configs_by_index[idx] = ls_configs
+        factor_alias = str(payload_entry.get('factor_alias') or '')
+        if factor_alias:
+            factor_aliases_by_submission.setdefault(submission_id, [])
+            if factor_alias not in factor_aliases_by_submission[submission_id]:
+                factor_aliases_by_submission[submission_id].append(factor_alias)
+
+    if not all_flat_groups:
+        return jsonify({'success': False, 'error': '没有有效的分组配置'}), 400
 
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
     requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
     _progress(
-        f"calendar resolve start submissions={len(entries_by_submission)} "
+        f"calendar resolve start submissions={len(factor_aliases_by_submission)} "
         f"mode={'auto' if auto_group_calendar_freq else 'manual'} "
         f"requested={requested_group_calendar_freq if requested_group_calendar_freq is not None else 'auto'}"
     )
@@ -997,18 +1110,12 @@ def run_group_test():
     # 构建跨所有 tester 的统一 calendar_index。
     calendar_indices: list[pd.Index] = []
     all_factor_freqs: list[Any] = []
-    factor_aliases_by_submission: dict[str, list[str]] = {}
-    for submission_id, indexed_specs in entries_by_submission.items():
+    for submission_id, factor_aliases in factor_aliases_by_submission.items():
         try:
             tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar')
         except Exception as exc:
             _progress(f"calendar build skip submission={submission_id} error={exc}")
             continue
-        factor_aliases = list(dict.fromkeys(
-            str(spec.get('factor_alias') or '')
-            for _, spec in indexed_specs
-        ))
-        factor_aliases_by_submission[submission_id] = factor_aliases
         tester_factor_freqs = tester.collect_group_factor_freqs(factor_aliases)
         all_factor_freqs.extend(tester_factor_freqs)
         _progress(
@@ -1074,16 +1181,13 @@ def run_group_test():
     errors = []
     from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
 
-    submission_specs: list[tuple[str, Any, list[tuple[int, dict[str, Any]]]]] = []
-    for submission_id, indexed_specs in entries_by_submission.items():
-        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_submission')
-        submission_specs.append((submission_id, tester, indexed_specs))
-
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
     containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
     merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
-    group_tester = FactorGroupTester.from_submission_specs(
-        submission_specs,
+    group_tester = FactorGroupTester.from_flat_groups(
+        all_flat_groups,
+        spec_index_by_group=sim_index_by_group,
+        ls_configs_by_index=all_ls_configs_by_index,
         start_dt=start_dt,
         end_dt=end_dt,
         calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
@@ -1118,8 +1222,31 @@ def run_group_test():
         idx = int(raw_result.get('simulation_index', -1))
         if idx < 0 or idx >= len(submitted_entries):
             continue
-        spec = entries_by_submission[raw_result['submission_id']]
         payload_entry = submitted_entries[idx]
+        # Collect flat_group_info for this simulation_index
+        si_groups = [
+            g for gi, g in enumerate(all_flat_groups)
+            if sim_index_by_group.get(gi) == idx
+        ]
+        # Build flat_group_info list matching the group order in the result
+        flat_info = [
+            {
+                'base_group': g.group_index,
+                'key': g.key,
+                'name': g.name,
+                'id': g._id,
+                'product_names': g.product_list,
+                'fee_mode': g.fee_mode,
+                'fee_rate': g.fee_rate,
+                'fee_map': g.fee_map,
+                'use_close_today': g.use_close_today,
+                'rebalance_mode': g.rebalance_mode,
+                'liquidity_mode': g.liquidity_mode,
+                'liquidity_percent': g.liquidity_percent,
+                'margin_mode': g.margin_mode,
+            }
+            for g in si_groups
+        ]
         serialized = _serialize_group_simulation_result(
             tester=raw_result['tester'],
             submission_id=str(raw_result.get('submission_id') or ''),
@@ -1128,6 +1255,7 @@ def run_group_test():
             ls_configs=raw_result.get('ls_configs'),
             rebalance_mode=str(payload_entry.get('rebalance_mode') or rebalance_mode),
             simulation_result=raw_result,
+            flat_group_info=flat_info if flat_info else None,
         )
         serialized['submission_id'] = str(raw_result.get('submission_id') or '')
         serialized['factor_alias'] = str(raw_result.get('factor_alias') or '')

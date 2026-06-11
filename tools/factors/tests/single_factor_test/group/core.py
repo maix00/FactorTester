@@ -914,6 +914,136 @@ def _append_sifted_group_memberships(
     return membership_np, sifted_info
 
 
+def build_flat_membership_from_groups(
+    groups: list,
+    *,
+    shared_inputs_by_triple: dict,
+    signal_valid_cols_by_triple: dict,
+    memberships_by_triple: dict,
+) -> tuple[np.ndarray, list[dict]]:
+    """Build a flat (T, M_total, P) membership from a list of _FactorGroupTestGroup.
+
+    Strategy:
+    1. Groups are already deduplicated by (tester_id, factor_alias, n_groups) —
+       the caller has pre-computed membership for each unique triple.
+    2. For each group:
+       - If product_list is None: copy the membership row directly.
+       - If product_list is set: copy only the columns matching those products
+         (zero out others), i.e. intersection of base membership & product filter.
+
+    Returns
+    -------
+    membership_np : (T, M_total, P) bool
+        Concatenated membership across all groups.
+    group_info : list[dict]
+        Per-global-group-index metadata dict (compatible with old ``derived_info``
+        shape: {base_group, name, id, product_names, ...}).
+    """
+    from tools.products.product_utils import product_display_name
+
+    if not groups:
+        raise ValueError("groups must not be empty")
+
+    # Determine P from the first group's shared inputs
+    first_group = groups[0]
+    first_triple = first_group.triple_key
+    first_shared = shared_inputs_by_triple.get(first_triple)
+    if first_shared is None:
+        raise ValueError(
+            f"Unknown triple {first_triple} in shared_inputs_by_triple"
+        )
+    first_valid_cols = signal_valid_cols_by_triple.get(first_triple)
+    if first_valid_cols is None:
+        first_valid_cols = first_shared.signal_valid_cols
+
+    T = first_shared.T
+    P = len(first_valid_cols)
+
+    _group_progress(f"flat membership build start groups={len(groups)} T={T} P={P}")
+
+    slices: list[np.ndarray] = []
+    group_info: list[dict] = []
+
+    for gi, group in enumerate(groups):
+        triple = group.triple_key
+        base_membership = memberships_by_triple.get(triple)
+        if base_membership is None:
+            raise ValueError(f"Missing base membership for triple {triple}")
+        valid_cols = signal_valid_cols_by_triple.get(triple) or []
+        if not list(valid_cols):
+            valid_cols = list(first_valid_cols)
+
+        source_row = base_membership[:, group.group_index, :]  # (T, P)
+
+        if group.product_list:
+            # Screened group: intersect base membership with product filter
+            display_names_map = {
+                product_display_name(product)['name']: idx
+                for idx, product in enumerate(valid_cols)
+            }
+            selected_idx = []
+            for pname in group.product_list:
+                pos = display_names_map.get(pname)
+                if pos is None:
+                    # Case-insensitive fallback
+                    lower_map = {k.lower(): v for k, v in display_names_map.items()}
+                    pos = lower_map.get(pname.lower())
+                if pos is not None:
+                    selected_idx.append(pos)
+
+            mask_1g = np.zeros((T, 1, P), dtype=bool)
+            if selected_idx:
+                sel = np.asarray(selected_idx, dtype=int)
+                mask_1g[:, 0, sel] = source_row[:, sel]
+            slices.append(mask_1g)
+            group_info.append({
+                'base_group': group.group_index,
+                'key': group.key,
+                'name': group.name,
+                'id': group._id,
+                'product_names': group.product_list,
+                'fee_mode': group.fee_mode,
+                'fee_rate': group.fee_rate,
+                'fee_map': group.fee_map,
+                'use_close_today': group.use_close_today,
+                'rebalance_mode': group.rebalance_mode,
+                'liquidity_mode': group.liquidity_mode,
+                'liquidity_percent': group.liquidity_percent,
+                'margin_mode': group.margin_mode,
+            })
+        else:
+            # Identity group: copy the row directly
+            mask_1g = source_row[:, np.newaxis, :].copy()  # (T, 1, P)
+            slices.append(mask_1g)
+            group_info.append({
+                'base_group': group.group_index,
+                'key': group.key,
+                'name': group.name,
+                'id': group._id,
+                'product_names': None,
+                'fee_mode': group.fee_mode,
+                'fee_rate': group.fee_rate,
+                'fee_map': group.fee_map,
+                'use_close_today': group.use_close_today,
+                'rebalance_mode': group.rebalance_mode,
+                'liquidity_mode': group.liquidity_mode,
+                'liquidity_percent': group.liquidity_percent,
+                'margin_mode': group.margin_mode,
+            })
+        _group_progress(
+            f"flat membership group {gi}/{len(groups)} "
+            f"key={group.key} screened={group.is_screened} "
+            f"mask_sum={int(slices[-1].sum())}"
+        )
+
+    membership_np = np.concatenate(slices, axis=1)  # (T, M_total, P)
+    _group_progress(
+        f"flat membership build done shape={membership_np.shape} "
+        f"total_memberships={int(membership_np.sum())}"
+    )
+    return membership_np, group_info
+
+
 def _simulate_group_from_preloaded(
     factor: Factor,
     *,
