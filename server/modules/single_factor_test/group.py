@@ -311,7 +311,7 @@ def _build_flat_groups_from_payload(
     if isinstance(groups, list) and groups:
         # 收集所有 valid group_index，用于校准 n_groups
         group_indices: list[int] = []
-        pending: list[dict] = []
+        pending: list[tuple] = []
         for item in groups:
             if not isinstance(item, dict):
                 continue
