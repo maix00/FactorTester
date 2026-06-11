@@ -1,14 +1,14 @@
 """Result objects for group backtest runs."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 
-@dataclass(slots=True)
+@dataclass
 class GroupRunResult:
     """All artifacts produced by a single grouped backtest run."""
 
@@ -20,16 +20,17 @@ class GroupRunResult:
     returns_np: np.ndarray
     period_returns_np: np.ndarray
     membership_np: np.ndarray
-    products_by_group: dict
-    valid_cols: list
-    open_fee_vec: np.ndarray
-    close_fee_vec: np.ndarray        # 始终=平昨
-    close_today_fee_vec: np.ndarray  # 始终=平今
-    close_yesterday_fee_vec: np.ndarray  # 始终=平昨（同 close_fee_vec），用于前端分列展示
-    index_list: list
-    multi_session_active: bool
-    rebalance_mode: str
-    report_df: pd.DataFrame
+    products_by_group: dict | None = None  # None → lazily built on first access
+    _products_by_group_cache: dict | None = field(default=None, init=False, repr=False)
+    valid_cols: list = field(default_factory=list)
+    open_fee_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
+    close_fee_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
+    close_today_fee_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
+    close_yesterday_fee_vec: np.ndarray = field(default_factory=lambda: np.empty(0))
+    index_list: list = field(default_factory=list)
+    multi_session_active: bool = False
+    rebalance_mode: str = ""
+    report_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     # 派生组（精选组）元信息
     n_base: int = 0
     n_derived: int = 0
@@ -50,6 +51,38 @@ class GroupRunResult:
     min_trade_quantity_vec: np.ndarray | None = None
     margin_ratio_vec: np.ndarray | None = None
     is_margin_traded_vec: np.ndarray | None = None
+
+    def get_products_by_group(self) -> dict:
+        """Lazy builder: {group_idx: {idx_entry: [product_names]}}."""
+        cached = self._products_by_group_cache
+        if cached is not None:
+            return cached
+        if self.products_by_group is not None:
+            self._products_by_group_cache = self.products_by_group
+            return self.products_by_group
+
+        membership = np.asarray(self.membership_np)
+        valid = list(self.valid_cols)
+        idx_list = list(self.index_list)
+        if membership.size == 0 or not valid or not idx_list:
+            return {}
+
+        group_count = membership.shape[1] if membership.ndim >= 2 else 0
+        result: dict = {}
+        for g in range(group_count):
+            group_dict = {}
+            for t, idx_entry in enumerate(idx_list):
+                mask_row = membership[t, g]
+                if hasattr(mask_row, 'ndim') and mask_row.ndim > 0:
+                    names = [valid[i] for i in np.where(mask_row)[0]]
+                elif mask_row:
+                    names = list(valid)
+                else:
+                    names = []
+                group_dict[idx_entry] = names
+            result[g] = group_dict
+        self._products_by_group_cache = result
+        return result
 
     def summary_for_group(self, group_index: int) -> dict[str, Any]:
         if self.report_df.empty or group_index not in self.report_df.index:

@@ -93,8 +93,9 @@ def slice_group_run_result(
             return value
         return np.take(arr, group_indices, axis=1)
 
+    source_products = group_result.get_products_by_group()
     new_products_by_group = {
-        new_idx: dict(group_result.products_by_group.get(old_idx, {}))
+        new_idx: dict(source_products.get(old_idx, {}))
         for new_idx, old_idx in enumerate(group_indices)
     }
 
@@ -941,13 +942,7 @@ def _simulate_group_from_preloaded(
     if any(str(mode) == "percent" for mode in variant_liquidity_modes):
         liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_date, end_date)
 
-    products_dict = {
-        g: {
-            idx_entry: [valid_cols[i] for i in np.where(mask_row)[0]]
-            for idx_entry, mask_row in zip(index_list, membership_np[:, g])
-        }
-        for g in range(group_count)
-    }
+    # products_by_group built lazily by GroupRunResult.get_products_by_group()
     member_counts = membership_np.sum(axis=2).astype(float)
     _VALID_MODES = frozenset({"each_period", "buy_and_hold", "recycle"})
     if rebalance_mode not in _VALID_MODES:
@@ -1038,7 +1033,7 @@ def _simulate_group_from_preloaded(
         returns_np=group_returns_np,
         period_returns_np=returns_filled,
         membership_np=membership_np,
-        products_by_group=products_dict,
+        products_by_group=None,  # lazily built by get_products_by_group()
         valid_cols=valid_cols,
         open_fee_vec=open_fee_vec,
         close_fee_vec=close_fee_vec,

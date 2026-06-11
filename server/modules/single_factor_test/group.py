@@ -1260,7 +1260,7 @@ def get_group_snapshot():
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
 
         group_result = _latest_group_result(tester)
-        products_dict = group_result.products_by_group if group_result is not None else None
+        products_dict = group_result.get_products_by_group() if group_result is not None else None
         valid_cols_raw = group_result.valid_cols if group_result is not None else None
         if not products_dict or not _safe_bool(valid_cols_raw):
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
@@ -1441,7 +1441,7 @@ def get_group_detail():
         group_index = int(group_index)
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_detail')
         group_result = _latest_group_result(tester)
-        products = group_result.products_by_group if group_result is not None else None
+        products = group_result.get_products_by_group() if group_result is not None else None
         returns_np = group_result.returns_np if group_result is not None else None
         product_contrib_np = group_result.product_gross_contrib_np if group_result is not None else None
         gross_returns_np = group_result.gross_returns_np if group_result is not None else None
