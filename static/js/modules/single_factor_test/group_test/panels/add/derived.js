@@ -151,7 +151,7 @@
                 helpers.mountTab('config-product-sift');
                 helpers.renderActions();
             },
-            standalone: false
+            standalone: true
         });
 
         M.registerEditAction({
@@ -175,7 +175,7 @@
                 helpers.mountTab('config-product-sift');
                 helpers.renderActions();
             },
-            standalone: false
+            standalone: true
         });
     }
 
