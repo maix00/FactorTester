@@ -136,8 +136,8 @@
                         batchLetterMap[bk] = letter;
                     }
 
-                    // 同一 batch 共享 addBatch (refs #100)
-                    var batchAddBatch = GT.groupSettings.groups.newAddBatch();
+                    // groupAddBatch: ensure batch exists for this tester+factor combo (refs #100)
+                    var batchObj = GT.groupSettings.batch.ensure(testerId, factorAlias, GROUPS_PER_FACTOR);
 
                     var createdIds = [];
                     for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
@@ -152,8 +152,7 @@
                                 shortAlias: letter + gi,
                                 feeMode: 'none',
                                 useCloseToday: false,
-                                rebalanceMode: 'each_period',
-                                addBatch: batchAddBatch
+                                rebalanceMode: 'each_period'
                             });
                             createdIds.push({ id: id, index: gi });
                         } catch (e) {
@@ -394,10 +393,10 @@
             for (var gi = 0; gi < batch.groups.length; gi++) {
                 if (batch.groups[gi] && batch.groups[gi].id) batchGroupIds[batch.groups[gi].id] = true;
             }
-            // 筛选组：找出 baseGroupId 指向本 batch 中某个 group 的筛选组
+            // 筛选组：通过 parentId 找到指向本 batch 中某个 group 的筛选组
             for (var si = 0; si < allStoredGroups.length; si++) {
                 var sg = allStoredGroups[si];
-                if (sg && sg.parentId && sg.baseGroupId && batchGroupIds[sg.baseGroupId]) {
+                if (sg && sg.parentId && batchGroupIds[sg.parentId]) {
                     batchGroupIds[sg.id] = true;
                 }
             }

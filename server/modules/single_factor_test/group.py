@@ -277,19 +277,18 @@ def _extract_derived_groups_from_payload(
         if not item.get('parentId'):
             continue
 
-        base_group_id = item.get('baseGroupId')
-        if base_group_id == '__batch__':
-            # 可以遍扫描后稍后解析
-            pass
-
-        # 解析 base_group 索引
         base_group = None
-        if base_group_id and base_group_id != '__batch__':
-            base_group = gid_to_index.get(str(base_group_id))
-        if base_group is None:
-            idx = item.get('groupIndex')
-            if isinstance(idx, (int, float)):
-                base_group = int(idx) - 1
+        # Walk parentId chain to find root and use its groupIndex
+        parent_id = item.get('parentId')
+        if parent_id:
+            root_idx = gid_to_index.get(str(parent_id))
+            if root_idx is None:
+                # parent not in gid_to_index, try groupIndex as fallback
+                idx = item.get('groupIndex')
+                if isinstance(idx, (int, float)):
+                    base_group = int(idx) - 1
+            else:
+                base_group = root_idx
 
         if base_group is None:
             continue

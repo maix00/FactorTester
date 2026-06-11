@@ -82,16 +82,20 @@
             var prov = _chipProviders[i];
             if (filterSet && !filterSet[prov.category]) continue;
 
-            // INFO chips inherit from base group for derived groups,
-            // but CONFIG and DERIVED chips always use the group itself.
-            // DERIVED chips need the derived group's own productMask etc.
-            // CONFIG chips need the derived group's own fee config (resolved via synth).
+            // INFO chips inherit from root group for child groups
             var g = group;
-            if (prov.category === CHIP_CATEGORY.INFO && group.parentId && group.baseGroupId) {
+            if (prov.category === CHIP_CATEGORY.INFO && group.parentId) {
                 var GT2 = window.GroupTest;
-                if (GT2 && GT2.groupSettings && GT2.groupSettings.groups) {
-                    var bg = GT2.groupSettings.groups.get(group.baseGroupId);
-                    if (bg) g = bg;
+                if (GT2 && GT2.groupSettings && GT2.groupSettings.groups && GT2.groupSettings.groups.resolveRootField) {
+                    // Walk parentId chain to root for INFO chips
+                    var root = group;
+                    var visited = {};
+                    while (root && root.parentId) {
+                        if (visited[root.id]) break;
+                        visited[root.id] = true;
+                        root = GT2.groupSettings.groups.get(root.parentId);
+                    }
+                    if (root) g = root;
                 }
             }
             var provChips = prov.getChips(g);
@@ -133,24 +137,21 @@
             name: 'builtin-info',
             getChips: function(g) {
                 var chips = [];
+                var isChild = !!(g.parentId);
 
-                // Resolve base group for derived groups
-                var bg = null;
-                if (g.parentId && g.baseGroupId) {
-                    var GT3 = window.GroupTest;
-                    if (GT3 && GT3.groupSettings && GT3.groupSettings.groups) {
-                        bg = GT3.groupSettings.groups.get(g.baseGroupId);
-                    }
-                }
+                // Resolve root values via parentId chain
+                var resolveRoot = (typeof resolveRootField === 'function')
+                    ? function(field) { return resolveRootField(g, field); }
+                    : function(field) { return g[field]; };
 
-                // 1) Factor alias — child always inherits from base
-                var factorAlias = g.parentId && bg ? bg.factorAlias : g.factorAlias;
+                // 1) Factor alias — child always inherits from root
+                var factorAlias = isChild ? resolveRoot('factorAlias') : g.factorAlias;
                 if (factorAlias) {
                     chips.push({ label: 'factor', html: factorAlias, style: CHIP_STYLE_PLAIN });
                 }
 
-                // 2) Tester label — child always inherits from base
-                var testerId = g.parentId && bg ? bg.testerId : g.testerId;
+                // 2) Tester label — child always inherits from root
+                var testerId = isChild ? resolveRoot('testerId') : g.testerId;
                 if (testerId) {
                     var label = _resolveTesterLabel(testerId);
                     if (label) {
@@ -158,15 +159,10 @@
                     }
                 }
 
-                // 3) Group index / count — child always inherits from base
+                // 3) Group index / count — child always inherits from root
                 var groupCount, groupIndex;
-                if (g.parentId && bg) {
-                    groupCount = bg.groupCount;
-                    groupIndex = bg.groupIndex;
-                } else {
-                    groupCount = g.groupCount;
-                    groupIndex = g.groupIndex;
-                }
+                groupCount = isChild ? resolveRoot('groupCount') : g.groupCount;
+                groupIndex = isChild ? resolveRoot('groupIndex') : g.groupIndex;
                 if (groupCount) {
                     var gi = groupIndex || 1;
                     chips.push({ label: 'group-index', html: gi + '/' + groupCount, style: CHIP_STYLE_PLAIN });
@@ -214,7 +210,7 @@
     }
 
     function _getDerivedProducts(node, seen) {
-        if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
+        if (!node) return [];
         seen = seen || {};
         if (seen[node.id]) return [];
         seen[node.id] = true;
@@ -227,9 +223,9 @@
         if (node.parentId) {
             inherited = _getDerivedProducts(groups.get(node.parentId), seen);
         } else {
-            var bg = groups.get(node.baseGroupId);
-            if (!bg || !bg.testerId) return [];
-            inherited = _productsFromTester(bg.testerId);
+            // Root node: get products from its own testerId
+            if (!node.testerId) return [];
+            inherited = _productsFromTester(node.testerId);
         }
 
         return _filterProducts(inherited, node.productMask);

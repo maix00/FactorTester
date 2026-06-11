@@ -75,9 +75,12 @@
     }
 
     function nodeTesterId(node) {
-        if (!node.baseGroupId || node.baseGroupId === '__batch__') return null;
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
-        return bg ? bg.testerId : null;
+        if (!node) return null;
+        if (node.parentId) {
+            return (GT.groupSettings.groups && GT.groupSettings.groups.resolveRootField) 
+                ? GT.groupSettings.groups.resolveRootField(node, 'testerId') : null;
+        }
+        return node.testerId || null;
     }
 
     function nodeProducts(node) {
@@ -95,16 +98,15 @@
     }
 
     /**
-     * Build a shallow display object for a derived node.
+     * Build a shallow display object for a child node.
      * Config fields are group fields; no global resolver is involved.
      */
-    function synthGroupForDerivedNode(node) {
-        if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return null;
+    function synthGroupForChildNode(node) {
+        if (!node) return null;
         var GS = GT.groupSettings;
         return {
             id: node.id,
-            parentId: node.baseGroupId,
-            baseGroupId: node.baseGroupId,
+            parentId: node.parentId || node.id,
             feeMode: node.feeMode || GS.getFieldDefault('feeMode'),
             feeRate: node.feeRate !== undefined ? node.feeRate : null,
             feeMap: node.feeMap !== undefined ? node.feeMap : null,
@@ -148,15 +150,14 @@
     }
 
     function deriveShortAlias(node) {
-        if (!node || !node.baseGroupId) return node ? (node.name || '?') : '?';
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
-        var bgAlias = bg ? (bg.shortAlias || bg.label || bg.id) : node.baseGroupId;
-        // Find this node's index among siblings (same parentId, same baseGroupId)
+        if (!node) return '?';
+        if (!node.parentId) return node.shortAlias || node.name || node.id || '?';
+        // Find this node's index among siblings (same parentId)
         var allNodes = GT.groupSettings.groups && GT.groupSettings.groups.getAll();
-        if (!allNodes) return bgAlias + ':?';
+        if (!allNodes) return node.name || '?';
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
+            if (allNodes[i].parentId === node.parentId) {
                 siblings.push(allNodes[i]);
             }
         }
@@ -165,15 +166,10 @@
             if (siblings[j].id === node.id) { idx = j; break; }
         }
         var num = idx >= 0 ? (idx + 1) : '?';
-        // Build alias from parent chain: use parent's short alias as prefix if derived parent
-        if (node.parentId) {
-            var parentNode = GT.groupSettings.groups.get(node.parentId);
-            if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
-                var parentAlias = deriveShortAlias(parentNode);
-                return parentAlias + ':' + num;
-            }
-        }
-        return bgAlias + ':' + num;
+        // Build alias from parent chain
+        var parentNode = GT.groupSettings.groups.get(node.parentId);
+        var parentAlias = parentNode ? deriveShortAlias(parentNode) : (node.parentId || '?');
+        return parentAlias + ':' + num;
     }
 
     /** Get batchKey from group settings */
@@ -229,16 +225,24 @@
     }
 
     /**
-     * Get config chips for a derived node using REG.getChips, diffed against base group.
-     * Only shows chips where the resolved value differs from the base group.
+     * Get config chips for a child node using REG.getChips, diffed against root.
+     * Only shows chips where the resolved value differs from the root.
      */
     function deriveOverrideChips(node) {
-        if (!node || !node.baseGroupId || node.baseGroupId === '__batch__') return [];
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(node.baseGroupId);
+        if (!node || !node.parentId) return [];
+        // Walk parentId chain to root
+        var cur = node;
+        var visited = {};
+        while (cur && cur.parentId) {
+            if (visited[cur.id]) { cur = null; break; }
+            visited[cur.id] = true;
+            cur = GT.groupSettings.groups && GT.groupSettings.groups.get(cur.parentId);
+        }
+        var bg = cur;
         if (!bg) return [];
         if (!REG || typeof REG.getChips !== 'function') return [];
 
-        var derivedSynth = synthGroupForDerivedNode(node);
+        var derivedSynth = synthGroupForChildNode(node);
         if (!derivedSynth) return [];
 
         var GS = GT.groupSettings;

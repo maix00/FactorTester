@@ -4,7 +4,7 @@
  * 职责：
  *   - _dirty:   编辑模式下被修改但未提交的参数字典（{key: value}）
  *   - _cache:   运行时计算结果缓存（回测结果、结构快照等）
- *   - groups:   Group 对象 CRUD（base + derived 统一存储）
+ *   - groups:   Group 对象 CRUD（parent/child 统一树存储）
  *   - lsConfigs: Long-Short 配置 CRUD
  *   - settings: 快照/恢复/对比（序列化层）
  *
@@ -96,9 +96,6 @@
 
     var _groupItems = [];
     var _groupIdCounter = 0;
-    var _groupAddBatchCounter = 0;  // monotonic counter for addBatch (refs #100)
-    // groupAddBatch registry: { [number]: {number, name, submission_id, factor, n_groups} }
-    var _batches = {};
 
     function _groupUuid() {
         _groupIdCounter += 1;
@@ -112,78 +109,7 @@
         return -1;
     }
 
-    // ── groupAddBatch CRUD ──
-
-    /** Create a new groupAddBatch object. Returns the batch number. */
-    function _batchCreate(submissionId, factorAlias, nGroups) {
-        _groupAddBatchCounter += 1;
-        var letter = '';
-        var n = _groupAddBatchCounter;
-        while (n > 0) { n--; letter = String.fromCharCode(65 + (n % 26)) + letter; n = Math.floor(n / 26); }
-        _batches[_groupAddBatchCounter] = {
-            number: _groupAddBatchCounter,
-            name: letter,
-            submission_id: submissionId || '',
-            factor: factorAlias || '',
-            n_groups: nGroups || 0
-        };
-        return _groupAddBatchCounter;
-    }
-
-    function _batchGet(number) {
-        return _batches[number] || null;
-    }
-
-    function _batchGetAll() {
-        return Object.keys(_batches).map(function(k) { return _batches[k]; });
-    }
-
-    function _batchForGroup(group) {
-        if (!group || !group.addBatch) return null;
-        return _batches[group.addBatch] || null;
-    }
-
-    function _batchUpdate(number, patch) {
-        var b = _batches[number];
-        if (!b) return null;
-        Object.keys(patch).forEach(function(k) { b[k] = patch[k]; });
-        return b;
-    }
-
-    function _batchRemove(number) {
-        delete _batches[number];
-    }
-
-    function _batchAutoSyncFromGroups() {
-        // Ensure _batches exists for every addBatch referenced by groups
-        var allGroups = _groupItems;
-        for (var i = 0; i < allGroups.length; i++) {
-            var bnum = allGroups[i].addBatch;
-            if (bnum && !_batches[bnum]) {
-                // Infer batch info from the root group in this batch
-                var batchGroups = allGroups.filter(function(g) { return g.addBatch === bnum; });
-                var root = null;
-                for (var j = 0; j < batchGroups.length; j++) {
-                    if (!batchGroups[j].parentId) { root = batchGroups[j]; break; }
-                }
-                if (!root && batchGroups.length > 0) root = batchGroups[0];
-                _batches[bnum] = {
-                    number: bnum,
-                    name: _batchNumberToLetter(bnum),
-                    submission_id: root ? (root.testerId || '') : '',
-                    factor: root ? (root.factorAlias || '') : '',
-                    n_groups: root ? (root.groupCount || 0) : (batchGroups.length || 0)
-                };
-            }
-        }
-    }
-
-    function _batchNumberToLetter(num) {
-        var letter = '';
-        var n = num;
-        while (n > 0) { n--; letter = String.fromCharCode(65 + (n % 26)) + letter; n = Math.floor(n / 26); }
-        return letter;
-    }
+    // ── Group raw access ──
 
     function _groupGetRaw(id) {
         var idx = _groupFindIndex(id);
@@ -211,13 +137,10 @@
 
         // ── Tree / lineage ──
         { key: 'parentId',     type: 'string',  default: null },
-        { key: 'baseGroupId',  type: 'string',  default: null },
 
-        // ── Tester / factor scoping ──
-        { key: 'testerId',    type: 'string',  default: '',
-          validate: function(v, config) { return (!v || typeof v !== 'string') ? 'testerId is required' : null; } },
-        { key: 'factorAlias', type: 'string',  default: '',
-          validate: function(v, config) { return (!v || typeof v !== 'string') ? 'factorAlias is required' : null; } },
+        // ── Tester / factor scoping (root only; child inherit from parent chain) ──
+        { key: 'testerId',    type: 'string',  default: '' },
+        { key: 'factorAlias', type: 'string',  default: '' },
         { key: 'groupCount',  type: 'number',  default: 5,
           validate: function(v) {
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
@@ -231,9 +154,6 @@
           } },
         { key: 'isAllGroups', type: 'boolean', default: false },
 
-        // ── Grouping batch — 同一批添加的 group/sifted 共享 (refs #100) ──
-        { key: 'addBatch',  type: 'number',  default: 0 },
-
         // ── State ──
         { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
 
@@ -244,7 +164,7 @@
         // ── Display ──
         { key: 'shortAlias', type: 'string', default: '' },
 
-        // ── Derived overrides ──
+        // ── Child overrides ──
         { key: 'overrides',    type: 'object',  default: null },
 
         // ── Runtime (never persisted) ──
@@ -306,7 +226,7 @@
     };
 
     // ═══════════════════════════════════════════════════════════════
-    // Group CRUD — unified (base + derived)
+    // Group CRUD — unified (parent/child tree)
     // ═══════════════════════════════════════════════════════════════
 
     function _groupsValidate(config) {
@@ -322,24 +242,21 @@
         }
 
         if (hasParent) {
-            if (config.parentId !== undefined && config.parentId !== null) {
-                if (_groupFindIndex(config.parentId) === -1) {
-                    errors.push('parentId references a non-existent group: ' + config.parentId);
-                }
-            }
-            if (config.baseGroupId !== undefined && config.baseGroupId !== null) {
-                if (config.baseGroupId !== '__batch__' && !_groupGetRaw(config.baseGroupId)) {
-                    errors.push('baseGroupId references a non-existent group: ' + config.baseGroupId);
-                }
+            if (_groupFindIndex(config.parentId) === -1) {
+                errors.push('parentId references a non-existent group: ' + config.parentId);
             }
         }
 
-        if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
-            errors.push('testerId is required (non-empty string)');
+        if (!hasParent) {
+            // Root nodes require testerId + factorAlias
+            if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
+                errors.push('testerId is required (non-empty string)');
+            }
+            if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
+                errors.push('factorAlias is required (non-empty string)');
+            }
         }
-        if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
-            errors.push('factorAlias is required (non-empty string)');
-        }
+
         if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
             errors.push('groupCount must be a positive integer (≥ 1)');
         }
@@ -374,13 +291,6 @@
         if (_groupFindIndex(itemId) !== -1) { throw new Error('Duplicate group id: ' + itemId); }
 
         var item = { id: itemId, name: config.name ? config.name.trim() : '' };
-
-        // ── addBatch 自动递增 (refs #100) ──
-        // 如果调用方显式传入，使用传入值；否则递增分配新 batch。
-        if (config.addBatch == null || config.addBatch === 0) {
-            _groupAddBatchCounter += 1;
-            config.addBatch = _groupAddBatchCounter;
-        }
 
         // Apply all fields from FIELD_SCHEMA
         _fillGroupFromConfig(item, config, hasParent);
@@ -431,11 +341,6 @@
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id' || f.key === 'name') continue;
-            // baseGroupId: for root nodes, skip if not provided (no default needed)
-            if (f.key === 'baseGroupId' && !config.hasOwnProperty(f.key)) {
-                item[f.key] = null;
-                continue;
-            }
             if (config.hasOwnProperty(f.key)) {
                 item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
             } else {
@@ -530,7 +435,7 @@
         return result;
     }
 
-    function _groupsGetRoots(derivedOnly) {
+    function _groupsGetRoots() {
         var result = [];
         for (var i = 0; i < _groupItems.length; i++) {
             if (_groupItems[i].parentId !== null) continue;
@@ -554,70 +459,6 @@
         return result;
     }
 
-    function _groupsBuildTreeNode(id) {
-        var idx = _groupFindIndex(id);
-        if (idx === -1) return null;
-        var node = _deepCopy(_groupItems[idx]);
-        node.children = [];
-        for (var i = 0; i < _groupItems.length; i++) {
-            if (_groupItems[i].parentId === id) {
-                var childTree = _groupsBuildTreeNode(_groupItems[i].id);
-                if (childTree) node.children.push(childTree);
-            }
-        }
-        return node;
-    }
-
-    function _groupsGetTree(derivedOnly) {
-        // Refresh batches from group data
-        _batchAutoSyncFromGroups();
-
-        // Build group tree nodes keyed by id
-        var groupTreeById = {};
-        for (var i = 0; i < _groupItems.length; i++) {
-            var g = _groupItems[i];
-            if (derivedOnly && !g.parentId) continue;
-            groupTreeById[g.id] = _groupsBuildTreeNode(g.id);
-        }
-
-        // Batch-根组映射: batch number → [root nodes]
-        var batchRoots = {};
-        var rootsWithoutBatch = [];
-        Object.keys(groupTreeById).forEach(function(id) {
-            var g = _groupGetRaw(id);
-            if (!g || g.parentId) return; // only roots
-            var bnum = g.addBatch;
-            if (bnum && _batches[bnum]) {
-                if (!batchRoots[bnum]) batchRoots[bnum] = [];
-                batchRoots[bnum].push(groupTreeById[id]);
-            } else {
-                rootsWithoutBatch.push(groupTreeById[id]);
-            }
-        });
-
-        // Assemble: batch nodes wrapping their roots, + orphan roots
-        var tree = [];
-        var batchNums = Object.keys(batchRoots).sort(function(a, b) { return Number(a) - Number(b); });
-        for (var bi = 0; bi < batchNums.length; bi++) {
-            var bn = Number(batchNums[bi]);
-            var batch = _batches[bn];
-            var batchNode = {
-                _batch: true,
-                id: 'batch_' + bn,
-                name: (batch.name || 'Batch') + ' · ' + (batch.factor || '') + ' · ' + (batch.submission_id || ''),
-                number: bn,
-                children: batchRoots[bn],
-                _expanded: true
-            };
-            tree.push(batchNode);
-        }
-        for (var ri = 0; ri < rootsWithoutBatch.length; ri++) {
-            tree.push(rootsWithoutBatch[ri]);
-        }
-
-        return tree;
-    }
-
     function _groupsToggleExpanded(id) {
         var idx = _groupFindIndex(id);
         if (idx === -1) return null;
@@ -633,6 +474,26 @@
             node = _groupGetRaw(node.parentId);
         }
         return false;
+    }
+
+    /**
+     * Walk parentId chain to root and return the value of fieldName from root.
+     * Returns undefined if not found or if node is already root.
+     */
+    function _resolveRootField(nodeOrId, fieldName) {
+        var node = typeof nodeOrId === 'string' ? _groupGetRaw(nodeOrId) : nodeOrId;
+        if (!node) return undefined;
+        if (!node.parentId) return node[fieldName]; // already root
+        // Walk up
+        var visited = {};
+        var cur = node;
+        while (cur && cur.parentId) {
+            if (visited[cur.id]) return undefined; // cycle
+            visited[cur.id] = true;
+            cur = _groupGetRaw(cur.parentId);
+            if (!cur) return undefined;
+        }
+        return cur ? cur[fieldName] : undefined;
     }
 
     function _groupsWouldCycle(nodeId, newParentId) {
@@ -708,7 +569,6 @@
 
     api.groups = {
         add: _groupsAdd,
-        newAddBatch: function(submissionId, factorAlias, nGroups) { return _batchCreate(submissionId, factorAlias, nGroups); },  // (refs #100)
         get: _groupsGet,
         getAll: _groupsGetAll,
         update: _groupsUpdate,
@@ -719,24 +579,13 @@
         extractLetter: _groupsExtractLetter,
         displayKey: _groupsDisplayKey,
         effectiveProductNames: _groupsEffectiveProductNames,
-        getTree: _groupsGetTree,
         getDescendants: _groupsGetDescendants,
         getChildren: _groupsGetChildren,
         getRoots: _groupsGetRoots,
         toggleExpanded: _groupsToggleExpanded,
+        resolveRootField: _resolveRootField,
         _reset: _groupsReset,
-    };
-
-    // ── groupAddBatch API (refs #100) ──
-
-    api.batch = {
-        create: _batchCreate,
-        get: _batchGet,
-        getAll: _batchGetAll,
-        update: _batchUpdate,
-        remove: _batchRemove,
-        forGroup: _batchForGroup,
-        autoSync: _batchAutoSyncFromGroups,
+        _getRaw: _groupGetRaw,  // internal: batch.forGroup needs this
     };
 
     // ═══════════════════════════════════════════════════════════════

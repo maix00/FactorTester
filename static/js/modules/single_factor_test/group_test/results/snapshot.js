@@ -193,7 +193,7 @@
 
     /**
      * 构建 group_index → group meta 的映射 (refs #100)。
-     * 返回：{ batchMap: {idx: addBatch}, aliasMap: {idx: shortAlias}, groupMeta: {idx: {addBatch, shortAlias, parentId}} }
+     * 返回：{ aliasMap: {idx: shortAlias}, groupMeta: {idx: {batchNumber, shortAlias, parentId}} }
      */
     function _buildGroupMetaMap(snapshotData) {
         var groupNames = snapshotData.group_names || {};
@@ -205,7 +205,6 @@
             if (g.shortAlias) aliasToItem[g.shortAlias] = g;
         });
 
-        var batchMap = {};
         var aliasMap = {};
         var groupMeta = {};
 
@@ -217,20 +216,21 @@
             aliasMap[idx] = alias;
 
             if (item) {
-                batchMap[idx] = item.addBatch;
+                // Get batch number via groupAddBatch.forGroup (walks parentId chain to root)
+                var bobj = GT.groupSettings.batch && GT.groupSettings.batch.forGroup
+                    ? GT.groupSettings.batch.forGroup(item)
+                    : null;
                 groupMeta[idx] = {
-                    addBatch: item.addBatch,
+                    batchNumber: bobj ? bobj.number : null,
                     shortAlias: item.shortAlias || alias,
                     parentId: item.parentId || null,
-                    baseGroupId: item.baseGroupId || null,
                     id: item.id || null
                 };
             } else {
                 groupMeta[idx] = {
-                    addBatch: undefined,
+                    batchNumber: null,
                     shortAlias: alias,
                     parentId: null,
-                    baseGroupId: null,
                     id: null
                 };
             }
@@ -243,10 +243,9 @@
             derived_info: snapshotData.derived_info,
             frontendAliases: Object.keys(aliasToItem),
             groupMeta: groupMeta,
-            batchMap: batchMap
         });
 
-        return { batchMap: batchMap, aliasMap: aliasMap, groupMeta: groupMeta };
+        return { aliasMap: aliasMap, groupMeta: groupMeta };
     }
 
     /** 格式化时间戳 */
@@ -343,22 +342,20 @@
     // ──────────── 按 addBatch + 派生树 渲染 (refs #100) ────────────
 
     /**
-     * 构建派生组森林。
-     * derivedIndices 是 base 组中 derived 组的索引。
+     * 构建子组森林。
+     * derivedIndices 是子组的索引（parentId !== null）。
      * groupMeta[idx].parentId 是前端 group id (UUID)，.id 需要从 groupMeta 中获取。
      * 返回：{ trees: [{root: idx, indices: [idx,...]}], nodeToRoot: {idx: rootIdx} }
      */
     function _buildDerivedForest(derivedIndices, groupMeta) {
-        // 构建 idx → {id, parentId, baseGroupId}
+        // 构建 idx → {id, parentId}
         var idxToId = {};
         var idxToParentId = {};
-        var idxToBaseGroupId = {};
         derivedIndices.forEach(function(idx) {
             var meta = groupMeta[idx];
             if (meta) {
                 idxToId[idx] = meta.id || null;
                 idxToParentId[idx] = meta.parentId || null;
-                idxToBaseGroupId[idx] = meta.baseGroupId || null;
             }
         });
 
@@ -379,7 +376,7 @@
             }
         });
 
-        // 找 roots：parentId 不在 idSet 中（即 parent 不在 derivedIndices 中）
+        // 找 roots：parentId 不在 idSet 中（即 parent 不在 derivedIndices 中，说明 parent 是 base 组）
         var roots = [];
         derivedIndices.forEach(function(idx) {
             var parentId = idxToParentId[idx];
@@ -388,13 +385,13 @@
             }
         });
 
-        // 构建 baseGroupId → 基础组 idx 的映射
-        var baseGroupIdToIdx = {};
+        // 构建 root id → base 组 idx 的映射（root 的 parentId 指向 base 组）
+        var rootParentIdToBaseIdx = {};
         for (var key in groupMeta) {
             if (!groupMeta.hasOwnProperty(key)) continue;
             var kmeta = groupMeta[key];
             if (!kmeta.parentId && kmeta.id) {
-                baseGroupIdToIdx[kmeta.id] = parseInt(key, 10);
+                rootParentIdToBaseIdx[kmeta.id] = parseInt(key, 10);
             }
         }
 
@@ -411,11 +408,11 @@
                 var kids = children[idxToId[node]] || [];
                 kids.forEach(function(k) { queue.push(k); });
             }
-            // anchorIndex: 该树挂载到的基础组 index
+            // anchorIndex: 该树的 root 的 parentId 所指向的 base 组 idx
             var anchorIndex = null;
-            var rootBaseGroupId = idxToBaseGroupId[root];
-            if (rootBaseGroupId && baseGroupIdToIdx.hasOwnProperty(rootBaseGroupId)) {
-                anchorIndex = baseGroupIdToIdx[rootBaseGroupId];
+            var rootParentId = idxToParentId[root];
+            if (rootParentId && rootParentIdToBaseIdx.hasOwnProperty(rootParentId)) {
+                anchorIndex = rootParentIdToBaseIdx[rootParentId];
             }
             trees.push({ root: root, indices: tree, anchorIndex: anchorIndex });
         });
@@ -524,12 +521,12 @@
         // ── 派生森林 ──
         var forest = _buildDerivedForest(derivedIndices, groupMeta);
 
-        // ── 普通组按 addBatch 分组 ──
-        var batchBuckets = {};    // addBatch → [idx]
+        // ── 普通组按 batchNumber 分组 ──
+        var batchBuckets = {};    // batchNumber → [idx]
         var batchOrder = [];
         normalIndices.forEach(function(idx) {
             var meta = groupMeta[idx];
-            var b = (meta && meta.addBatch !== undefined) ? meta.addBatch : null;
+            var b = (meta && meta.batchNumber !== undefined) ? meta.batchNumber : null;
             if (!batchBuckets.hasOwnProperty(b)) {
                 batchBuckets[b] = [];
                 batchOrder.push(b);
