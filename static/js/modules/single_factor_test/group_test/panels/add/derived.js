@@ -153,6 +153,30 @@
             },
             standalone: false
         });
+
+        M.registerEditAction({
+            name: 'create-child',
+            label: '＋ 新增子组',
+            priority: 15,
+            condition: function(ctx) {
+                return ctx && ctx.count >= 1;
+            },
+            action: function(ctx, helpers) {
+                if (!ctx || ctx.ids.length === 0) { alert('请至少选择 1 行'); return; }
+                // Use first selected as parent
+                var draft = _buildDerivedAddDraft(ctx);
+                if (!draft.preselectedParentId) {
+                    alert('无法识别选中的分组类型');
+                    return;
+                }
+                helpers.exitEdit();
+                M.enterAdd('derived');
+                M.setAddDraft(draft);
+                helpers.mountTab('config-product-sift');
+                helpers.renderActions();
+            },
+            standalone: false
+        });
     }
 
     GT.log('panels/add/derived loaded');
