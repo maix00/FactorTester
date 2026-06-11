@@ -28,6 +28,7 @@ from tools.factors.FactorRunResult import FactorRunResult
 from tools.products.Product import Product
 from tools import UniqueObject, DataColumn, DataFreq
 from tools.base.User import User
+from tools.data.DataTime import DataTime
 from tools.factors.Parameters import StartCalcPointParam, FactorNextPeriodReturns
 
 from Settings import get_all_products, logger_dir_path_default
@@ -106,7 +107,8 @@ class FactorTester(UniqueObject):
 
     def __init__(self, products: Sequence[Product],
                  alias: Optional[str] = None,
-                 time_range: Optional[Tuple] = None,
+                 start_dt: Optional[DataTime] = None,
+                 end_dt: Optional[DataTime] = None,
                  group_calendar_freq: Optional[Any] = None,
                  user: Optional['User'] = None,
                  logger_file: bool = True, logger_dir_path: str = logger_dir_path_default,
@@ -117,7 +119,8 @@ class FactorTester(UniqueObject):
         参数：
             products       : 参与测试的品种列表
             alias          : 实例别名，默认类名
-            time_range     : (start, end) 测试时间区间（Timestamp 或可解析字符串）
+            start_dt       : 测试起始 DataTime
+            end_dt         : 测试截止 DataTime
             user           : 创建此 tester 的 User 实例
             logger_file    : 是否写日志到文件
             logger_dir_path: 日志目录
@@ -162,12 +165,14 @@ class FactorTester(UniqueObject):
             self.results: Dict['Factor', FactorRunResult] = {}
             self._results_lock = threading.RLock()
             self.last_group_factor: Optional['Factor'] = None
-            if time_range is not None:
-                self.update_time_range(time_range)
+            if start_dt is not None and end_dt is not None:
+                self.update_time_range(start_dt, end_dt)
             else:
+                self.start_dt = None
+                self.end_dt = None
                 self.start_date = None
                 self.end_date = None
-                self.start_calc_point = None  # 计算起始点（带时区 Timestamp，与 start_date 合并为同一概念）
+                self.start_calc_point = None  # DataTime | None，计算起始点
             self.logger.info(f"FactorTester initialized with {len(self.products)} products")
 
     def delete(self):
@@ -238,12 +243,14 @@ class FactorTester(UniqueObject):
         if clear_factor:
             factor.clear()
 
-    def update_time_range(self, time_range: Tuple):
-        """更新测试时间区间并记录日志。start_calc_point 与 start_date 为同一概念。"""
-        self.start_date = pd.to_datetime(time_range[0])
-        self.end_date = pd.to_datetime(time_range[1])
-        self.start_calc_point = self.start_date  # 带时区，与 start_date 保持同步
-        self.logger.info(f"Time range updated to {self.start_date} - {self.end_date}")
+    def update_time_range(self, start_dt: DataTime, end_dt: DataTime):
+        """更新测试时间区间。start_dt/end_dt 均为 DataTime。"""
+        self.start_dt = start_dt
+        self.end_dt = end_dt
+        self.start_date = start_dt.ts
+        self.end_date = end_dt.ts
+        self.start_calc_point = start_dt
+        self.logger.info(f"Time range updated to {start_dt} - {end_dt}")
 
     def sift_product(self, sift_func: Callable[[Product], bool]):
         """按自定义函数筛选品种，不满足条件的品种从 self.products 中移除。"""
@@ -480,14 +487,15 @@ class FactorTester(UniqueObject):
                 utc_values.append(ts.tz_localize('UTC') if ts.tzinfo is None else ts.tz_convert('UTC'))
         return pd.DatetimeIndex(utc_values).sort_values().unique()
 
-def get_factor_tester(time_range: Optional[Any] = None) -> FactorTester:
+def get_factor_tester(start_dt: Optional[DataTime] = None, end_dt: Optional[DataTime] = None) -> FactorTester:
     """
     创建包含全部品种的 FactorTester 实例（便捷工厂函数）。
 
     参数：
-        time_range : (start, end) 测试时间区间，None 则不设置
+        start_dt : 测试起始 DataTime
+        end_dt   : 测试截止 DataTime
 
     返回：
         FactorTester 实例
     """
-    return FactorTester(products=get_all_products(), time_range=time_range)
+    return FactorTester(products=get_all_products(), start_dt=start_dt, end_dt=end_dt)

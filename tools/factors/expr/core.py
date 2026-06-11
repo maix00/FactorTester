@@ -40,7 +40,7 @@ class EvaluateContext(NamedTuple):
     source: Optional['DataSource'] = None
     cache: Optional[Dict[Any, Any]] = None
     preloaded: Optional[Dict[Any, pd.DataFrame]] = None
-    start_calc_point: Optional[Any] = None  # pd.Timestamp or None
+    start_calc_point: Optional[Any] = None  # DataTime | None
     run_result: Optional[Any] = None
     panel_timeline: Optional['PanelTimeline'] = None
 

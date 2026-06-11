@@ -73,7 +73,7 @@ class Product(UniqueObject):
             for freq in DataFreq:
                 setattr(self, freq.name, DataMeta(alias=f"{freq}", object=self, data_freq=freq, timezone=self.timezone))
             if TYPE_CHECKING:
-                from tools.parameters import DateOrTimeParam
+                from tools.parameters import DataTimeParam
 
     def list_available_freqs(self) -> List[DataFreq]:
         """列出本产品在所有已注册 DataSource 中可用的数据频率。"""

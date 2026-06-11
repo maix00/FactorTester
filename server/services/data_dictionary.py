@@ -328,7 +328,7 @@ def scan_param_types() -> List[ParamTypeEntry]:
     param_types_info = [
         ('WindowParam', '$W', '窗口参数：正整数或正 Timedelta，如 10 表示回看10根K线', '1'),
         ('DataColumnParam', '$P', '数据列参数：选择 OHLC/V/OI 等价格/量列', 'CLOSE'),
-        ('DateOrTimeParam', '$Date/$Time', '日期/时间参数：支持日期字符串或 time 对象', "'2024-01-01'"),
+        ('DataTimeParam', '$Date/$Time', '日期/时间参数：支持日期字符串或 time 对象', "'2024-01-01'"),
         ('FinRangeParam', '—', '有限枚举参数：从预定义列表中选取一个值', '第一个选项'),
         ('TypeParam', '—', '类型约束参数：限制值为特定 Python 类型', '—'),
         ('TimeDeltaParam', '—', '时间增量参数：支持正/负/非负等约束的 pd.Timedelta', '—'),

@@ -2,11 +2,14 @@
 Shared time-range routes:
   GET  /api/default_time_range
   POST /set_time_range
+
+set_time_range 直接构造 DataTime，全链路使用 DataTime。
 """
 import uuid as _uuid
 import pandas as pd
 from flask import request, jsonify
 import Settings
+from tools.data.DataTime import DataTime
 from server.services.factor_registry import get_factor_family_instance
 import server.services.runtime_state as runtime_state
 from server.services.runtime_state import factor_testers_lock
@@ -59,17 +62,15 @@ def set_time_range():
     is_trading_day  = data.get('is_trading_day', False)
     timezone        = data.get('timezone', 'UTC')
 
-    new_start = (
-        pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone)
-        if not is_trading_day else pd.Timestamp(start_date).tz_localize(timezone)
-    )
-    new_end = (
-        pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone)
-        if not is_trading_day else pd.Timestamp(end_date).tz_localize(timezone)
-    )
+    if is_trading_day:
+        start_dt = DataTime(ts=pd.Timestamp(start_date).tz_localize(timezone), precision='day')
+        end_dt   = DataTime(ts=pd.Timestamp(end_date).tz_localize(timezone),   precision='day')
+    else:
+        start_dt = DataTime(ts=pd.Timestamp(f"{start_date} {start_time}").tz_localize(timezone))
+        end_dt   = DataTime(ts=pd.Timestamp(f"{end_date} {end_time}").tz_localize(timezone))
 
     # 写入 page_uuid 对应的时间
-    runtime_state.set_runtime_time(page_uuid, new_start, new_end)
+    runtime_state.set_runtime_time(page_uuid, start_dt, end_dt)
 
     # 更新与当前 page_uuid 绑定的 tester
     from tools.factors.FactorTester import FactorTester
@@ -77,7 +78,7 @@ def set_time_range():
     with factor_testers_lock:
         for tester in runtime_state.factor_testers:
             if isinstance(tester, FactorTester) and getattr(tester, '_page_uuid', None) == page_uuid:
-                tester.update_time_range((new_start, new_end))
+                tester.update_time_range(start_dt, end_dt)
                 tester_count += 1
 
     return api_ok({

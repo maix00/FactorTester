@@ -165,7 +165,7 @@ def submit_selected_products():
         return api_fail('请先在时间范围设置模块中设置起止时间')
     _start, _end, _start_calc = time_entry
     user = runtime_state.current_user_obj()
-    factor_tester = FactorTester(products=selected_products, alias=id_time, time_range=(_start, _end), user=user)
+    factor_tester = FactorTester(products=selected_products, alias=id_time, start_dt=_start, end_dt=_end, user=user)
     factor_tester.selected_paths = selected_paths  # 保存原始路径用于前端显示
     if group_name:
         factor_tester.product_group = group_name

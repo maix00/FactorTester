@@ -345,7 +345,7 @@ def _prepare_group_shared_inputs(
     raw_prices = ColumnRef(price_col).evaluate(
         products=signal_valid_cols,
         freq=source_freq,
-        start_calc_point=start_date,
+        start_calc_point=start_dt,
     )
     price_src = align_table_for_group(factor, raw_prices)
     price_src.index = DataIndex(price_src.index).signal_index
@@ -663,13 +663,11 @@ def _load_group_trade_prices(
 ) -> np.ndarray:
     from tools.factors.expr import ColumnRef
 
-    start_calc_point = start_dt.ts if start_dt is not None and start_dt.is_set else None
-
     _group_progress(f"trade prices evaluate start factor={factor.alias}")
     raw_trade_prices = ColumnRef(price_col).evaluate(
         products=trade_valid_cols,
         freq=source_freq,
-        start_calc_point=start_calc_point,
+        start_calc_point=start_dt,
     )
     trade_price_src = align_table_for_group(factor, raw_trade_prices)
     trade_price_src.index = DataIndex(trade_price_src.index).signal_index
@@ -1325,8 +1323,7 @@ def _build_normalized_liquidity_capacity(
         try:
             dm = getattr(product, freq.name)
             cols = [DataColumn.TURNOVER.name, DataColumn.VOLUME.name, DataColumn.CLOSE_ADJUSTED.name]
-            start_calc_point = start_dt.ts if start_dt is not None and start_dt.is_set else None
-            data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_calc_point)
+            data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_dt)
             if data.empty:
                 continue
             idx = DataIndex(data.index).signal_index

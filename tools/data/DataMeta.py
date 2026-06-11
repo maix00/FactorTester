@@ -253,7 +253,7 @@ class DataMeta(UniqueObject):
     def get_data(self, copy: bool = False, start_calc_point: Optional[Any] = None, **kwargs) -> pd.DataFrame:
         """
         获取 DataFrame（通过 IdleResourceManager 缓存 + 自动回收）。
-        start_calc_point: 可选 Timestamp（带时区），为 None 时不截断。
+        start_calc_point: DataTime | None，为 None 时不截断。
         copy=True 时返回副本，避免外部修改影响缓存。
 
         Issue #3: start_calc_point 必须显式传入，不再隐式从 _active_tester 读取。
@@ -285,8 +285,8 @@ class DataMeta(UniqueObject):
                                         time: Optional[Any] = None, time_is_date: Optional[bool] = None,
                                         copy: bool = False) -> pd.DataFrame:
         """
-        按起始时间截断数据。
-        time 可是带时区的 Timestamp，与索引比较时自动对齐时区。
+        按起始时间截断数据。time 必须是 DataTime（或 None）。
+        通过 DataIndex.slice_by_datatime() 统一处理时区对齐和截断。
 
         Issue #3: time 参数必须显式传入，不再通过 _active_tester 隐式获取。
         """
@@ -294,29 +294,18 @@ class DataMeta(UniqueObject):
             return data
         if time is None:
             return data.copy() if copy else data
-        if time is not None:
-            ts = pd.Timestamp(time)
-            if time_col is None:
-                data_day_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1day')][-1]
-                data_min_col = [str(level) for level in data.index.names if DataFreq(str(level).split('@')[-1]).value >= pd.Timedelta('1min')][-1]
-                if time_is_date is None:
-                    time_is_date = (ts.hour == 0 and ts.minute == 0 and ts.second == 0)
-                if self.freq.value >= pd.Timedelta('1day') and time_is_date:
-                    time_col = data_day_col
-                else:
-                    time_col = data_day_col if time_is_date else data_min_col
-            idx = self._get_level_index(data, time_col)
-            assert isinstance(idx, pd.DatetimeIndex), f"Expected DatetimeIndex for column '{time_col}', got {type(idx).__name__}"
-            # 对齐时区：如果索引带时区而 ts 不带（或反之），进行转换
-            if idx.tz is not None:
-                if ts.tzinfo is None:
-                    ts = ts.tz_localize(idx.tz)
-                else:
-                    ts = ts.tz_convert(idx.tz)
-            else:
-                if ts.tzinfo is not None:
-                    ts = ts.tz_convert('UTC').tz_localize(None)
-            data = cast(pd.DataFrame, data[idx >= ts])
+
+        from tools.data.DataTime import DataTime
+
+        if not isinstance(time, DataTime):
+            raise TypeError(f"_filter_data_by_start_calc_point: time must be DataTime, got {type(time)}")
+        if not time.is_set:
+            return data.copy() if copy else data
+
+        di = DataIndex(data.index)
+        # 只有起始点无结束点：用 slice_by(start_ts, None)
+        mask = di.slice_by(time.ts, None)
+        data = cast(pd.DataFrame, data[mask])
         return cast(pd.DataFrame, data.copy()) if copy else data
     
     @staticmethod
