@@ -12,8 +12,8 @@ from tqdm import tqdm
 from Settings import factor_info_path
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
+from tools.data.DataIndex import DataIndex
 from tools.factors import Factor
-from tools.factors.FactorTester import _align_ts_to_index, _extract_signal_index
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
@@ -186,7 +186,7 @@ def materialize_group_outputs_from_result(
 
 def infer_periods_per_year(index_like) -> float:
     """Infer strategy periods/year from realised signal timestamps."""
-    idx = pd.DatetimeIndex(_extract_signal_index(pd.Index(index_like)))
+    idx = DataIndex(pd.Index(index_like)).signal_index
     idx = idx.dropna()
     if len(idx) < 2:
         return 252.0
@@ -275,17 +275,17 @@ def _prepare_group_shared_inputs(
 
     table_src: pd.DataFrame = cast(pd.DataFrame, get_factor_table_for_group(tester, factor))
     returns_src: pd.DataFrame = cast(pd.DataFrame, returns_for_group.copy(deep=False))
-    table_src.index = _extract_signal_index(table_src.index)
-    returns_src.index = _extract_signal_index(returns_src.index)
+    table_src.index = DataIndex(table_src.index).signal_index
+    returns_src.index = DataIndex(returns_src.index).signal_index
     if start_date is not None:
-        _sd = _align_ts_to_index(start_date, table_src.index)
+        _sd = DataIndex(table_src.index).tz_align(start_date)
         table_src = cast(pd.DataFrame, table_src[table_src.index >= _sd])
-        _sd = _align_ts_to_index(start_date, returns_src.index)
+        _sd = DataIndex(returns_src.index).tz_align(start_date)
         returns_src = cast(pd.DataFrame, returns_src[returns_src.index >= _sd])
     if end_date is not None:
-        _ed = _align_ts_to_index(end_date, table_src.index)
+        _ed = DataIndex(table_src.index).tz_align(end_date)
         table_src = cast(pd.DataFrame, table_src[table_src.index <= _ed])
-        _ed = _align_ts_to_index(end_date, returns_src.index)
+        _ed = DataIndex(returns_src.index).tz_align(end_date)
         returns_src = cast(pd.DataFrame, returns_src[returns_src.index <= _ed])
 
     signal_index = table_src.index.intersection(returns_src.index)
@@ -351,12 +351,12 @@ def _prepare_group_shared_inputs(
         start_calc_point=start_date,
     )
     price_src = align_table_for_group(factor, raw_prices)
-    price_src.index = _extract_signal_index(price_src.index)
+    price_src.index = DataIndex(price_src.index).signal_index
     if start_date is not None:
-        _sd = _align_ts_to_index(start_date, price_src.index)
+        _sd = DataIndex(price_src.index).tz_align(start_date)
         price_src = cast(pd.DataFrame, price_src[price_src.index >= _sd])
     if end_date is not None:
-        _ed = _align_ts_to_index(end_date, price_src.index)
+        _ed = DataIndex(price_src.index).tz_align(end_date)
         price_src = cast(pd.DataFrame, price_src[price_src.index <= _ed])
     price_src = price_src.reindex(index=common_index, columns=signal_valid_cols)
     if price_src.isna().all(axis=None):
@@ -400,12 +400,12 @@ def _prepare_group_shared_inputs(
         )
 
     present_df = cast(pd.DataFrame, present_src)
-    present_df.index = _extract_signal_index(present_df.index)
+    present_df.index = DataIndex(present_df.index).signal_index
     if start_date is not None:
-        _sd = _align_ts_to_index(start_date, present_df.index)
+        _sd = DataIndex(present_df.index).tz_align(start_date)
         present_df = cast(pd.DataFrame, present_df[present_df.index >= _sd])
     if end_date is not None:
-        _ed = _align_ts_to_index(end_date, present_df.index)
+        _ed = DataIndex(present_df.index).tz_align(end_date)
         present_df = cast(pd.DataFrame, present_df[present_df.index <= _ed])
     present_df = present_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
     if trim_start > 0 or trim_end < len(_all_nan):
@@ -573,7 +573,7 @@ def _build_product_remap_matrix(
     """
     T = len(signal_index)
     P_signal = len(signal_products)
-    signal_days = _normalize_signal_days(signal_index)
+    signal_days = DataIndex(signal_index).to_trading_days()
     full_mask = np.ones(T, dtype=bool)
 
     trade_products: list = []
@@ -652,12 +652,12 @@ def _load_group_trade_returns(
         effective_return_freq,
     )
     _group_progress(f"trade returns evaluate done factor={factor.alias}")
-    trade_returns_src.index = _extract_signal_index(trade_returns_src.index)
+    trade_returns_src.index = DataIndex(trade_returns_src.index).signal_index
     if start_date is not None:
-        _sd = _align_ts_to_index(start_date, trade_returns_src.index)
+        _sd = DataIndex(trade_returns_src.index).tz_align(start_date)
         trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index >= _sd])
     if end_date is not None:
-        _ed = _align_ts_to_index(end_date, trade_returns_src.index)
+        _ed = DataIndex(trade_returns_src.index).tz_align(end_date)
         trade_returns_src = cast(pd.DataFrame, trade_returns_src[trade_returns_src.index <= _ed])
     trade_returns_src = trade_returns_src.reindex(index=index_list, columns=trade_valid_cols)
     return trade_returns_src[trade_valid_cols].to_numpy(dtype=float)
@@ -682,12 +682,12 @@ def _load_group_trade_prices(
         start_calc_point=start_date,
     )
     trade_price_src = align_table_for_group(factor, raw_trade_prices)
-    trade_price_src.index = _extract_signal_index(trade_price_src.index)
+    trade_price_src.index = DataIndex(trade_price_src.index).signal_index
     if start_date is not None:
-        _sd = _align_ts_to_index(start_date, trade_price_src.index)
+        _sd = DataIndex(trade_price_src.index).tz_align(start_date)
         trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index >= _sd])
     if end_date is not None:
-        _ed = _align_ts_to_index(end_date, trade_price_src.index)
+        _ed = DataIndex(trade_price_src.index).tz_align(end_date)
         trade_price_src = cast(pd.DataFrame, trade_price_src[trade_price_src.index <= _ed])
     trade_price_src = trade_price_src.reindex(index=index_list, columns=trade_valid_cols)
     price_np = trade_price_src[trade_valid_cols].to_numpy(dtype=float)
@@ -1058,9 +1058,9 @@ def _simulate_group_from_preloaded(
     signal_times = pd.DatetimeIndex(index_list)
     mask_report = np.ones(len(index_list), dtype=bool)
     if start_date is not None:
-        mask_report &= (signal_times >= _align_ts_to_index(start_date, signal_times))
+        mask_report &= (signal_times >= DataIndex(signal_times).tz_align(start_date))
     if end_date is not None:
-        mask_report &= (signal_times <= _align_ts_to_index(end_date, signal_times))
+        mask_report &= (signal_times <= DataIndex(signal_times).tz_align(end_date))
     report_groups = {}
     annual_periods = infer_periods_per_year(index_list)
     for idx in range(group_count):
@@ -1206,13 +1206,6 @@ def _product_identity(product: Any) -> tuple[str, str]:
     return cls_name, name
 
 
-def _normalize_signal_days(signal_index: list) -> pd.DatetimeIndex:
-    idx = pd.DatetimeIndex(pd.to_datetime(list(signal_index)))
-    if idx.tz is not None:
-        idx = idx.tz_localize(None)
-    return cast(pd.DatetimeIndex, idx.normalize())
-
-
 def _append_trade_product(
     trade_products: list,
     trade_pos_by_key: dict[tuple[str, str], int],
@@ -1271,9 +1264,14 @@ def _expand_single_trade_product(
         end_days = cast(pd.DatetimeIndex, end_days.normalize())
 
         roller_rows = roller_df.reset_index(drop=True)
+        n_rows = len(roller_rows)
         for row_idx, row in enumerate(roller_rows.itertuples(index=False)):
             left = int(signal_days.searchsorted(start_days[row_idx], side="left"))
-            right = int(signal_days.searchsorted(end_days[row_idx], side="right"))
+            if row_idx == n_rows - 1:
+                # Last contract extends to the end of signal_days
+                right = len(signal_days)
+            else:
+                right = int(signal_days.searchsorted(end_days[row_idx], side="right"))
             if left >= right:
                 continue
             interval_active = active_mask[left:right]
@@ -1286,14 +1284,6 @@ def _expand_single_trade_product(
             mapped_slice[interval_active] = pos
             mapped[left:right] = mapped_slice
 
-    unresolved = active_mask & (mapped < 0)
-    if bool(unresolved.any()):
-        fallback_times = signal_days[unresolved]
-        for ts in fallback_times:
-            t = int(signal_days.searchsorted(ts, side="left"))
-            trade_product = _resolve_trade_product(product, ts)
-            pos = _append_trade_product(trade_products, trade_pos_by_key, trade_product)
-            mapped[t] = pos
     return mapped
 
 
@@ -1354,11 +1344,11 @@ def _build_normalized_liquidity_capacity(
             data = dm.get_and_adjust_cols(cols, copy=False, start_calc_point=start_date)
             if data.empty:
                 continue
-            idx = pd.DatetimeIndex(_extract_signal_index(data.index))
+            idx = DataIndex(data.index).signal_index
             frame = data.copy(deep=False)
             frame.index = idx
             if end_date is not None:
-                _ed = _align_ts_to_index(end_date, frame.index)
+                _ed = DataIndex(frame.index).tz_align(end_date)
                 frame = frame[frame.index <= _ed]
             if frame.empty:
                 continue

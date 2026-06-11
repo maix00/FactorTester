@@ -65,26 +65,14 @@ def _align_ts(lhs: Any, rhs: Any) -> Any:
 
 def _align_ts_to_index(ts: Any, idx: pd.Index) -> pd.Timestamp:
     """将时间戳的时区规整到 DatetimeIndex，避免 tz-aware/naive 比较错误。"""
-    ts = pd.Timestamp(ts)
-    idx = _extract_signal_index(idx)
-    if idx.tz is None:
-        return ts.tz_localize(None) if ts.tzinfo is not None else ts
-    if ts.tzinfo is None:
-        return ts.tz_localize(idx.tz)
-    return ts.tz_convert(idx.tz)
+    from tools.data.DataIndex import DataIndex
+    return DataIndex(idx).tz_align(ts)
 
 
 def _extract_signal_index(idx: pd.Index) -> pd.DatetimeIndex:
-    """从信号索引中提取时间戳层，返回 DatetimeIndex。
-
-    - DatetimeIndex：直接转换后返回
-    - MultiIndex：优先取名称以 _SIGNAL@ 开头的层级，否则取最后一层
-    """
-    if isinstance(idx, pd.MultiIndex):
-        signal_name = next((n for n in idx.names if n and str(n).startswith('_SIGNAL')), None)
-        level = idx.names.index(signal_name) if signal_name is not None else -1
-        return pd.DatetimeIndex(idx.get_level_values(level), name=idx.names[level])
-    return pd.DatetimeIndex(idx)
+    """从信号索引中提取时间戳层，返回 DatetimeIndex。"""
+    from tools.data.DataIndex import DataIndex
+    return DataIndex(idx).signal_index
 
 class FactorTester(UniqueObject):
     """

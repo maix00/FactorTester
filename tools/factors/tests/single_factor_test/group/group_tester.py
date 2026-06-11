@@ -97,8 +97,8 @@ class FactorGroupTester:
         cls,
         submission_specs: list[tuple[str, FactorTester, list[tuple[int, dict[str, Any]]]]],
         *,
-        start_date: Optional[Any],
-        end_date: Optional[Any],
+        start_dt: Optional[Any] = None,  # DataTime
+        end_dt: Optional[Any] = None,    # DataTime
         calendar_index: Optional[pd.Index],
         rebalance_mode: str,
         overlap_ratio: float | None = None,
@@ -107,10 +107,8 @@ class FactorGroupTester:
         progress_hook: Optional[Callable[[str], None]] = None,
     ) -> "FactorGroupTester":
         time_range: Optional[tuple[Any, Any]] = None
-        if start_date and end_date:
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            time_range = (start_dt, end_dt)
+        if start_dt is not None and end_dt is not None and start_dt.is_set and end_dt.is_set:
+            time_range = (start_dt.ts, end_dt.ts)
 
         built_specs: list[GroupSimulationSpec] = []
         for submission_id, tester, indexed_specs in submission_specs:
@@ -579,8 +577,8 @@ class FactorGroupTester:
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
-        start_date: Optional[Any],
-        end_date: Optional[Any],
+        start_dt: Optional[Any] = None,  # DataTime
+        end_dt: Optional[Any] = None,    # DataTime
         calendar_index: Optional[pd.Index],
         progress_hook: Optional[Callable[[str], None]] = None,
         max_workers: Optional[int] = None,

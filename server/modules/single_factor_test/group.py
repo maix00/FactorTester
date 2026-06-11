@@ -858,8 +858,18 @@ def run_group_test_batch():
     )
 
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
+
+    from tools.data.DataTime import DataTime
+
+    # 精度统一：start/end 同精度
+    precision = data.get("precision") or data.get("time_precision") or "exact"
+    start_dt = DataTime.from_dict(data, precision=precision)
+    end_data = dict(data)
+    # 将 start_xxx 映射为 end_xxx，from_dict 会取第一个有值的
+    end_data["date"] = end_data.pop("end_date", end_data.pop("date", None))
+    end_data["time"] = end_data.pop("end_time", end_data.pop("time", None))
+    end_dt = DataTime.from_dict(end_data, precision=precision)
+
     try:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
     except ValueError as e:
@@ -981,8 +991,8 @@ def run_group_test_batch():
     merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
     group_tester = FactorGroupTester.from_submission_specs(
         submission_specs,
-        start_date=start_date,
-        end_date=end_date,
+        start_dt=start_dt,
+        end_dt=end_dt,
         calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
         rebalance_mode=rebalance_mode,
         overlap_ratio=overlap_ratio,
@@ -1002,8 +1012,8 @@ def run_group_test_batch():
             use_closetoday=use_closetoday,
             initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
-            start_date=start_date,
-            end_date=end_date,
+            start_dt=start_dt,
+            end_dt=end_dt,
             calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
             progress_hook=_progress,
         )
