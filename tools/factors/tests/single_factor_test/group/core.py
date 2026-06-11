@@ -970,10 +970,7 @@ def _simulate_group_from_preloaded(
         margin_ratio_mat=margin_ratio_mat,
         is_margin_traded_vec=is_margin_traded_vec,
         margin_modes=variant_margin_modes,
-        rebalance_modes=np.asarray(
-            variant_rebalance_modes if variant_rebalance_modes else [rebalance_mode] * group_count,
-            dtype=object,
-        ),
+        rebalance_modes=np.asarray([rebalance_mode] * group_count, dtype=object),
         initial_capital=initial_capital,
     )
     _group_progress(f"simulate trading book done factor={factor.alias}")
