@@ -913,6 +913,19 @@ def _append_derived_group_memberships(
     if derived_pairs:
         derived_slices, derived_meta = zip(*derived_pairs)
         membership_np = np.concatenate([membership_np, np.concatenate(list(derived_slices), axis=1)], axis=1)
+        # Debug: verify derived groups have non-zero memberships
+        for di, ds in enumerate(derived_slices):
+            ds_sum = ds.sum()
+            n_base = membership_np.shape[1] - len(derived_slices)
+            _group_progress(
+                f"[DEBUG] derived group {di} (global idx={n_base + di}) "
+                f"mask_1g total memberships={int(ds_sum)} "
+                f"first_5_products_sum={ds[:, 0, :5].sum()}"
+            )
+        _group_progress(
+            f"[DEBUG] after concat membership_np shape={membership_np.shape} "
+            f"last_group_sum={int(membership_np[:, -1, :].sum())}"
+        )
         derived_info.extend(list(derived_meta))
     _group_progress(f"derived groups done factor={factor.alias} built={len(derived_info)}")
     return membership_np, derived_info
