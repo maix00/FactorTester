@@ -833,8 +833,17 @@
         _lsConfigsReset();
 
         if (snap.groups && Array.isArray(snap.groups)) {
-            for (var gi = 0; gi < snap.groups.length; gi++) {
-                try { _groupsAdd(snap.groups[gi]); result.applied.groups++; }
+            // Sort: roots first (parentId null/missing), then children — avoids
+            // validation failure when child appears before parent in snapshot.
+            var sorted = snap.groups.slice().sort(function(a, b) {
+                var aHasParent = !!(a.parentId);
+                var bHasParent = !!(b.parentId);
+                if (aHasParent && !bHasParent) return 1;
+                if (!aHasParent && bHasParent) return -1;
+                return 0;
+            });
+            for (var gi = 0; gi < sorted.length; gi++) {
+                try { _groupsAdd(sorted[gi]); result.applied.groups++; }
                 catch (e) { result.errors.push('groups[' + gi + ']: ' + e.message); }
             }
         }

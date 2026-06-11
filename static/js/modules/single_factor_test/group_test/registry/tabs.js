@@ -185,8 +185,9 @@
             html += ' <button id="gt-action-cancel-edit" class="btn btn-outline-secondary btn-sm" style="padding:4px 12px;font-size:12px;">取消编辑</button>';
 
         } else {
-            // list 模式 — 固定显示「新增基础组」
+            // list 模式 — 固定显示「新增基础组」+「新增子组」
             html += '<button id="gt-action-add-group" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增分组</button>';
+            html += ' <button id="gt-action-add-derived" class="btn btn-outline-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增子组</button>';
         }
 
         bar.innerHTML = html;

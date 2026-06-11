@@ -112,6 +112,7 @@
         M.registerAddFlow({
             flow: 'derived',
             priority: 10,
+            defaultTab: 'config-product-sift',
             condition: function(ctx) {
                 if (ctx && ctx.groups && ctx.groups.length >= 1) {
                     for (var i = 0; i < ctx.groups.length; i++) {

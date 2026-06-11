@@ -386,9 +386,8 @@
         var treeById = {};
         for (var j = 0; j < myNodes.length; j++) {
             var n = myNodes[j];
-            treeById[n.id] = { id: n.id, label: n.label, name: n.name, parentId: n.parentId,
-                factorAlias: n.factorAlias, testerId: n.testerId, productMask: n.productMask,
-                childGroupIds: n.childGroupIds || [], children: [] };
+            n.children = [];
+            treeById[n.id] = n;
         }
         // Link children (grandchildren, etc.) by walking parentId chain within myNodes
         for (var j = 0; j < myNodes.length; j++) {
