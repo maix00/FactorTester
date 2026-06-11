@@ -175,6 +175,7 @@
             // 动态 edit actions（仅非 config tab 时显示 standalone=false 的按钮）
             var actions = M.getMatchingEditActions();
             var isConfigTab = _currentTab && _currentTab.indexOf('config-') === 0;
+            console.log('[tabs] _renderTabActions edit mode:', 'currentTab=', _currentTab, 'isConfigTab=', isConfigTab, 'actions=', actions.map(function(a) { return a.name; }));
             for (var i = 0; i < actions.length; i++) {
                 var act = actions[i];
                 if (isConfigTab && !act.standalone) continue;
@@ -246,6 +247,7 @@
     }
 
     function _enterEditMode(selection) {
+        console.log('[tabs] _enterEditMode called, selection=', selection);
         var REG = window.GT_CONFIG_REGISTRY;
         if (REG) REG.rollbackDirty();
         M.enterEdit(selection);
