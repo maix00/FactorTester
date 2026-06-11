@@ -1819,6 +1819,14 @@ def simulate_group_trading_book(
             current_positive = quantities > 0
             staying_mask = current_membership & current_positive
             entering_mask = current_membership & (~current_positive)
+            if t == 0:
+                for g in range(M):
+                    if hold_rows[g]:
+                        _group_progress(
+                            f"[DEBUG] t=0 hold_rows g={g} desired_before={float(desired_quantities[g].sum()):.4f} "
+                            f"staying_any={bool(staying_mask[g].any())} "
+                            f"entering_any={bool(entering_mask[g].any())}"
+                        )
             desired_quantities[hold_rows] = np.where(
                 staying_mask[hold_rows],
                 quantities[hold_rows],
