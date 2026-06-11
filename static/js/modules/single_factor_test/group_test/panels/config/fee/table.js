@@ -139,7 +139,6 @@
     // ── State ──────────────────────────────────────────────────────────────
 
     var _selectedCode = null;        // currently selected variety_code
-    var _onSelectCallback = null;    // called when a row is clicked
 
     // ── Render ─────────────────────────────────────────────────────────────
 
@@ -147,11 +146,10 @@
      * Render the fee table into a container element.
      *
      * @param {HTMLElement} container - target DOM element
-     * @param {object}      group     - group settings (for product filter + useCloseToday)
-     * @param {function}    [onSelect] - callback(varietyCode, rowData) when a row is selected
+     * @param {object}      [group]   - group settings (falls back to _configFee.getGroup())
      */
-    function renderFeeTable(container, group, onSelect) {
-        _onSelectCallback = onSelect || null;
+    function renderFeeTable(container, group) {
+        if (!group) group = (_configFee && _configFee.getGroup) ? _configFee.getGroup() : null;
 
         var rows = _buildRowData(group);
 
@@ -267,14 +265,16 @@
         _selectedCode = code;
 
         // Find row data
-        var rows = _buildRowData(_configFee._group);
+        var group = (_configFee && _configFee.getGroup) ? _configFee.getGroup() : null;
+        var rows = _buildRowData(group);
         var rowData = null;
         for (var j = 0; j < rows.length; j++) {
             if (rows[j].code === code) { rowData = rows[j]; break; }
         }
 
-        if (typeof _onSelectCallback === 'function') {
-            _onSelectCallback(code, rowData);
+        // Fire the onSelectRow callback (set by modification.js)
+        if (_configFee && typeof _configFee.onSelectRow === 'function') {
+            _configFee.onSelectRow(code, rowData);
         }
     }
 
@@ -308,6 +308,13 @@
         clearSelection: clearSelection,
         buildRowData: _buildRowData,
     };
+
+    // Register render hook on overlay (loaded before table.js via script order)
+    if (GT.overlays && GT.overlays.configFeeTable) {
+        GT.overlays.configFeeTable._renderTable = function(container) {
+            renderFeeTable(container);
+        };
+    }
 
 })();
 

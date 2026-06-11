@@ -25,9 +25,13 @@
     // ═══════════════════════════════════════════════════════════════════════════
 
     var _feeTableData = [];          // 原始费率数据（从后端获取，不可变）
-    var _feeModifications = {};      // 用户修改：{variety_code: {open_ratio, close_ratio, closetoday_ratio}}
+    var _feeModifications = [];      // FeeModification[] - 用户修改列表
     var _useCloseToday = false;       // 平今仓/平昨仓
     var _feeNotice = null;            // 当前费率表来源提示
+
+    /** Valid fee field names for FeeModification.fields */
+    var VALID_FEE_FIELDS = ['open_ratio', 'close_ratio', 'closetoday_ratio',
+                            'open_fixed', 'close_fixed', 'closetoday_fixed'];
 
     // ── Fee data API ───────────────────────────────────────────────────────────
 
@@ -102,16 +106,95 @@
         return _feeNotice ? JSON.parse(JSON.stringify(_feeNotice)) : null;
     }
 
-    /** Get fee modifications snapshot. */
+    /** Get fee modifications snapshot (FeeModification[]). */
     function getModifications() {
         return JSON.parse(JSON.stringify(_feeModifications));
     }
 
-    /** Apply fee modifications snapshot. */
+    /** Apply fee modifications snapshot (FeeModification[]). */
     function applyModifications(mods) {
-        _feeModifications = mods && typeof mods === 'object' ? JSON.parse(JSON.stringify(mods)) : {};
+        _feeModifications = Array.isArray(mods) ? JSON.parse(JSON.stringify(mods)) : [];
         if (GT.events && typeof GT.events.emit === 'function') {
             GT.events.emit('feeDataChanged');
+        }
+    }
+
+    /**
+     * Add a new fee modification.
+     * @param {string} varietyCode - uppercase variety code
+     * @param {string|null} contractName
+     * @param {object} fields - {open_ratio: 0.0001, ...}
+     * @param {string|null} timeFrom
+     * @param {string|null} timeTo
+     */
+    function addModification(varietyCode, contractName, fields, timeFrom, timeTo) {
+        var mod = {
+            variety_code: String(varietyCode).toUpperCase(),
+            contract_name: contractName || null,
+            fields: {},
+            time_from: timeFrom || null,
+            time_to: timeTo || null,
+            timestamp: Date.now()
+        };
+        for (var k = 0; k < VALID_FEE_FIELDS.length; k++) {
+            var f = VALID_FEE_FIELDS[k];
+            if (typeof fields[f] === 'number' && !isNaN(fields[f]) && fields[f] >= 0) {
+                mod.fields[f] = fields[f];
+            }
+        }
+        if (Object.keys(mod.fields).length === 0) return;
+        _feeModifications.push(mod);
+        if (GT.events && typeof GT.events.emit === 'function') {
+            GT.events.emit('feeDataChanged');
+        }
+    }
+
+    /**
+     * Apply all modifications to a raw fee row.
+     * Priority: later timestamps win. Returns overridden values + modification flags.
+     */
+    function applyModificationsToRow(varietyCode, rawRow, tradingDay) {
+        var code = String(varietyCode).toUpperCase();
+        var result = {
+            open_ratio: rawRow.open_ratio,
+            close_ratio: rawRow.close_ratio,
+            closetoday_ratio: rawRow.closetoday_ratio,
+            open_fixed: rawRow.open_fixed,
+            close_fixed: rawRow.close_fixed,
+            closetoday_fixed: rawRow.closetoday_fixed,
+            fieldsModified: {}
+        };
+        // Sort by timestamp asc, then apply (later overrides earlier)
+        var sorted = _feeModifications.slice().sort(function(a, b) {
+            return (a.timestamp || 0) - (b.timestamp || 0);
+        });
+        for (var i = 0; i < sorted.length; i++) {
+            var m = sorted[i];
+            if (String(m.variety_code || '').toUpperCase() !== code) continue;
+            if (tradingDay) {
+                if (m.time_from && tradingDay < m.time_from) continue;
+                if (m.time_to && tradingDay > m.time_to) continue;
+            }
+            var fields = m.fields || {};
+            var keys = Object.keys(fields);
+            for (var k = 0; k < keys.length; k++) {
+                var f = keys[k];
+                if (VALID_FEE_FIELDS.indexOf(f) >= 0) {
+                    result[f] = fields[f];
+                    result.fieldsModified[f] = true;
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Remove a modification by index. */
+    function removeModification(index) {
+        if (index >= 0 && index < _feeModifications.length) {
+            _feeModifications.splice(index, 1);
+            if (GT.events && typeof GT.events.emit === 'function') {
+                GT.events.emit('feeDataChanged');
+            }
         }
     }
 
@@ -220,7 +303,7 @@
             }
             html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
             html += '<button id="' + CONTAINER_ID + '-edit-fee-btn" style="padding:6px 16px;font-size:12px;border:1px solid #0078d4;border-radius:4px;background:#0078d4;color:#fff;cursor:pointer;">📋 查看/编辑品种费率表</button>';
-            html += '<span style="font-size:12px;color:#888;">修改过的费率标记为黄色，编辑费率表中可设置自定义费率</span>';
+            html += '<span style="font-size:12px;color:#888;">选择行后在编辑区修改字段并设置时间范围，提交后记录显示在表格上方</span>';
             html += '</div>';
             html += '</div>';
         }
@@ -370,11 +453,10 @@
                 style: chipPlain
             });
         } else if (mode === 'per_product') {
-            var feeMap = group.feeMap;
-            var hasCustom = feeMap && typeof feeMap === 'object' && Object.keys(feeMap).length > 0;
+            var hasCustom = _feeModifications.length > 0;
             chips.push({
                 label: 'fee-per-product',
-                html: hasCustom ? '📊 分品种费率(自定义)' : '📊 分品种费率',
+                html: hasCustom ? '📊 分品种费率(自定义) ' + _feeModifications.length + '条' : '📊 分品种费率',
                 style: chipClickable,
                 onClick: function(chipEl, g) {
                     if (GT.overlays && GT.overlays.configFeeTable) {
@@ -421,6 +503,10 @@
         getFeeNotice: getFeeNotice,
         getModifications: getModifications,
         applyModifications: applyModifications,
+        addModification: addModification,
+        applyModificationsToRow: applyModificationsToRow,
+        removeModification: removeModification,
+        isValidField: function(f) { return VALID_FEE_FIELDS.indexOf(f) >= 0; },
         useCloseToday: useCloseToday,
         setUseCloseToday: setUseCloseToday,
         bind: bindFeeControls,
@@ -472,6 +558,7 @@
         GS.registerField({ key: 'feeMap',         type: 'object',  default: null });
         GS.registerField({ key: 'feeSensitivity', type: 'number',  default: 1 });
         GS.registerField({ key: 'useCloseToday',  type: 'boolean', default: false });
+        GS.registerField({ key: 'feeModifications', type: 'array',  default: null });
     }
 
     // Register as category-3 config panel
@@ -480,7 +567,7 @@
             name: 'fee',
             label: '费率',
             panel: GT.panels.config.fee,
-            fields: ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday'],
+            fields: ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday', 'feeModifications'],
         }, 'config-fee');
     }
 

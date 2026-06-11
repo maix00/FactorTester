@@ -249,7 +249,8 @@
         // Trigger re-render of edit panel with current selected row
         var varietyCode = _configFee.table ? _configFee.table.getSelectedCode() : null;
         if (varietyCode) {
-            var rows = _configFee.table.buildRowData(_configFee._group);
+            var group = (_configFee && _configFee.getGroup) ? _configFee.getGroup() : null;
+            var rows = _configFee.table.buildRowData(group);
             var rowData = null;
             for (var i = 0; i < rows.length; i++) {
                 if (rows[i].code === varietyCode) { rowData = rows[i]; break; }
@@ -343,6 +344,20 @@
         }
     }
 
+    // ── Register row selection callback ────────────────────────────────────
+
+    /**
+     * Called by table.js when a row is clicked.
+     * Auto-opens the edit panel for the selected variety.
+     */
+    _configFee.onSelectRow = function(varietyCode, rowData) {
+        _editingIndex = -1; // new modification, not editing existing
+        var editContainer = document.getElementById('fee-edit-panel-container');
+        if (editContainer) {
+            renderEditPanel(editContainer, varietyCode, rowData);
+        }
+    };
+
     // ── Public API ─────────────────────────────────────────────────────────
 
     _configFee.modification = {
@@ -350,5 +365,16 @@
         renderEditPanel: renderEditPanel,
         getEditingIndex: function() { return _editingIndex; },
     };
+
+    // Register render hooks on overlay (loaded before modification.js via script order)
+    if (GT.overlays && GT.overlays.configFeeTable) {
+        GT.overlays.configFeeTable._renderModHistory = function(container) {
+            renderModList(container);
+        };
+        GT.overlays.configFeeTable._renderModEdit = function(container) {
+            renderEditPanel(container);
+        };
+    }
+
 
 })();
