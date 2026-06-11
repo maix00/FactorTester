@@ -860,8 +860,29 @@
 
     function _settingsNormalizeSnapshot(snap) {
         snap = snap || {};
+        var groups = Array.isArray(snap.groups) ? snap.groups.slice() : [];
+        // Backward compat: old snapshots use isDerived + baseGroupId instead of parentId
+        groups = groups.map(function(g) {
+            var normalized = {};
+            var k;
+            for (k in g) {
+                if (Object.prototype.hasOwnProperty.call(g, k)) normalized[k] = g[k];
+            }
+            if (!normalized.parentId && normalized.isDerived && normalized.baseGroupId) {
+                normalized.parentId = normalized.baseGroupId;
+            }
+            // Drop legacy fields that no longer exist in the flat model
+            delete normalized.isDerived;
+            delete normalized.baseGroupId;
+            delete normalized.derivedDepth;
+            // Ensure groupCount exists (old templates may omit it for derived groups)
+            if (typeof normalized.groupCount !== 'number' || normalized.groupCount < 1) {
+                normalized.groupCount = 1;
+            }
+            return normalized;
+        });
         return {
-            groups: Array.isArray(snap.groups) ? snap.groups : [],
+            groups: groups,
             lsConfigs: Array.isArray(snap.lsConfigs) ? snap.lsConfigs : [],
         };
     }
