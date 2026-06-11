@@ -309,6 +309,9 @@ def _build_flat_groups_from_payload(
     flat_groups: list = []
 
     if isinstance(groups, list) and groups:
+        # 收集所有 valid group_index，用于校准 n_groups
+        group_indices: list[int] = []
+        pending: list[dict] = []
         for item in groups:
             if not isinstance(item, dict):
                 continue
@@ -316,9 +319,18 @@ def _build_flat_groups_from_payload(
                 gi = int(item.get('group_index', item.get('groupIndex', 0)))
             except (TypeError, ValueError):
                 continue
+            group_indices.append(gi)
             display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
             extra = _map_group_item(item)
             product_list = _product_list_from_group(item)  # None=全量, list=筛选
+            pending.append((gi, display_name, extra, product_list))
+
+        # 校准 n_groups：确保 membership 数组能容纳所有 group_index
+        if group_indices:
+            max_gi = max(group_indices)
+            n_groups = max(n_groups, max_gi + 1)
+
+        for gi, display_name, extra, product_list in pending:
             flat_groups.append(_FactorGroupTestGroup(
                 tester_id=submission_id,
                 factor_alias=factor_alias,
