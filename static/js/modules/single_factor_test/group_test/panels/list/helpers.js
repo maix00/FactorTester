@@ -98,24 +98,45 @@
     }
 
     /**
-     * Build a shallow display object for a child node.
-     * Config fields are group fields; no global resolver is involved.
+     * Resolve group fields by walking parentId chain for null values.
+     * Traverses all own keys on the node and fills null/undefined from
+     * the nearest ancestor that has a non-null value, falling back to
+     * GT.groupSettings.getFieldDefault as a last resort.
      */
-    function synthGroupForChildNode(node) {
+    function synthGroupResolved(node) {
         if (!node) return null;
         var GS = GT.groupSettings;
-        return {
-            id: node.id,
-            parentId: node.parentId || node.id,
-            feeMode: node.feeMode || GS.getFieldDefault('feeMode'),
-            feeRate: node.feeRate !== undefined ? node.feeRate : null,
-            feeMap: node.feeMap !== undefined ? node.feeMap : null,
-            feeSensitivity: node.feeSensitivity !== undefined ? node.feeSensitivity : 1,
-            useCloseToday: !!node.useCloseToday,
-            rebalanceMode: node.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-            liquidityMode: node.liquidityMode || GS.getFieldDefault('liquidityMode'),
-            liquidityPercent: node.liquidityPercent !== undefined && node.liquidityPercent !== null ? node.liquidityPercent : GS.getFieldDefault('liquidityPercent')
-        };
+        var groups = GS.groups;
+        var resolved = {};
+        var keys = Object.keys(node);
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            var v = node[k];
+            if (v != null) {
+                resolved[k] = v;
+                continue;
+            }
+            // walk parentId chain
+            var cur = node;
+            var visited = {};
+            var found = false;
+            while (cur && cur.parentId) {
+                if (visited[cur.id]) break;
+                visited[cur.id] = true;
+                var parent = groups && groups.get(cur.parentId);
+                if (!parent) break;
+                if (parent[k] != null) {
+                    resolved[k] = parent[k];
+                    found = true;
+                    break;
+                }
+                cur = parent;
+            }
+            if (!found) {
+                resolved[k] = GS.getFieldDefault(k);
+            }
+        }
+        return resolved;
     }
 
     function derivedFeeDisplay(node) {
@@ -242,20 +263,10 @@
         if (!bg) return [];
         if (!REG || typeof REG.getChips !== 'function') return [];
 
-        var derivedSynth = synthGroupForChildNode(node);
+        var derivedSynth = synthGroupResolved(node);
         if (!derivedSynth) return [];
 
-        var GS = GT.groupSettings;
-        var baseSynth = {
-            feeMode: bg.feeMode || GS.getFieldDefault('feeMode'),
-            feeRate: bg.feeRate,
-            feeMap: bg.feeMap,
-            feeSensitivity: bg.feeSensitivity,
-            useCloseToday: !!bg.useCloseToday,
-            rebalanceMode: bg.rebalanceMode || GS.getFieldDefault('rebalanceMode'),
-            liquidityMode: bg.liquidityMode || GS.getFieldDefault('liquidityMode'),
-            liquidityPercent: bg.liquidityPercent !== undefined && bg.liquidityPercent !== null ? bg.liquidityPercent : GS.getFieldDefault('liquidityPercent')
-        };
+        var baseSynth = synthGroupResolved(bg);
 
         var baseChips = REG.getChips(baseSynth);
         var derivedChips = REG.getChips(derivedSynth);
@@ -326,7 +337,8 @@
         getGroup: getGroup,
         nodeTesterId: nodeTesterId,
         nodeProducts: nodeProducts,
-        synthGroupForDerivedNode: synthGroupForDerivedNode,
+        synthGroupForChildNode: synthGroupResolved,
+        synthGroupForDerivedNode: synthGroupResolved,
         derivedFeeDisplay: derivedFeeDisplay,
         derivedRebalanceLabel: derivedRebalanceLabel,
         derivedCloseTodayLabel: derivedCloseTodayLabel,
