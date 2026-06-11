@@ -10,7 +10,7 @@ from tools.factors.tests.single_factor_test.group.detail import build_group_deta
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
-from server.modules.shared.price_data_helpers import to_utc_epoch
+from server.modules.shared.price_data_helpers import to_epoch_ms
 
 _log = logging.getLogger(__name__)
 
@@ -376,13 +376,13 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
         use_closetoday=use_closetoday,
     )
 
-    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+    timestamps = [to_epoch_ms(_signal_time(d), use_utc=True) for d in idx_list]
     metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
 
     group = {
         'name': name or f'第{group_index + 1}组精选',
         'timestamps': timestamps,
-        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
@@ -446,7 +446,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
     results: list = [None] * len(entries)
 
     rebalance_mode = getattr(group_result, 'rebalance_mode', 'buy_and_hold')
-    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+    timestamps = [to_epoch_ms(_signal_time(d), use_utc=True) for d in idx_list]
 
     for gi, items in groups_by_gi.items():
         if len(items) == 1:
@@ -482,7 +482,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                     'group': {
                         'name': item['name'],
                         'timestamps': timestamps,
-                        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+                        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
                         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
                         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
                         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
@@ -525,7 +525,7 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                     'group': {
                         'name': item['name'],
                         'timestamps': timestamps,
-                        'cumulative_returns': _serialize_float_series(sim['cumulative'], default=0.0),
+                        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
                         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
                         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
                         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
@@ -694,9 +694,8 @@ def _serialize_group_simulation_result(
     simulation_result: dict[str, Any],
 ) -> dict[str, Any]:
     report_df = simulation_result['report_df']
-    cum_np = simulation_result['cum_np']
     idx_list = simulation_result['idx_list']
-    timestamps = [to_utc_epoch(_signal_time(d)) for d in idx_list]
+    timestamps = [to_epoch_ms(_signal_time(d)) for d in idx_list]
     group_result = simulation_result['group_result']
     n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
     n_base = getattr(group_result, 'n_base', n_groups) or n_groups
@@ -705,6 +704,13 @@ def _serialize_group_simulation_result(
     gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
     _fee = group_result.fee_costs_np if group_result is not None else None
     fee_np = _fee if _fee is not None else np.zeros((len(timestamps), n_total))
+
+    # 用模拟中实盘总权益（市值+现金），而非 cumsum(returns)
+    _equity = group_result.total_equity_np if group_result is not None else None
+    equity_np = _equity if _equity is not None else np.zeros((len(timestamps), n_total))
+    # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
+    cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
+    equity_np = np.where(equity_np <= 0, cap, equity_np)
     result_group_names = getattr(group_result, 'group_names', None) or {}
     capital_warning = _build_zero_position_warning(group_result)
 
@@ -719,7 +725,7 @@ def _serialize_group_simulation_result(
             f"submission={submission_id} factor={factor_alias}"
         )
         is_derived = g >= n_base
-        vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in cum_np[:, g]]
+        vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
         fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
         group_key = _group_display_key(g, n_base, derived_info, result_group_names)
@@ -734,7 +740,7 @@ def _serialize_group_simulation_result(
             'group_index': g,
             'submission_id': submission_id,
             'timestamps': timestamps,
-            'cumulative_returns': vals,
+            'total_equity': vals,
             'gross_returns': gross_vals,
             'fee_costs': fee_vals,
             'trade_notional_ratios': [
@@ -782,7 +788,7 @@ def _serialize_group_simulation_result(
                 'name': ls_name,
                 'submission_id': submission_id,
                 'timestamps': timestamps,
-                'cumulative_returns': ls_vals,
+                'total_equity': ls_vals,
                 'gross_returns': _serialize_float_series(r_ls, default=0.0),
                 'fee_costs': [0.0] * len(r_ls),
                 'trade_notional_ratios': [0.0] * len(r_ls),
@@ -802,6 +808,7 @@ def _serialize_group_simulation_result(
         'metrics': metrics,
         'n_groups': n_total,
         'n_base': n_base,
+        'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
         'capital_warning': capital_warning,
         'rebalance_mode': rebalance_mode,
@@ -1135,7 +1142,7 @@ def run_group_test_batch():
                 'key': ls_key,
                 'name': ls_name,
                 'timestamps': timestamps,
-                'cumulative_returns': ls_vals,
+                'total_equity': ls_vals,
                 'gross_returns': _serialize_float_series(r_ls, default=0.0),
                 'fee_costs': [0.0] * len(r_ls),
                 'trade_notional_ratios': [0.0] * len(r_ls),

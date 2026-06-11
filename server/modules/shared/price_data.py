@@ -17,7 +17,7 @@ from tools.data.DataIndex import finest_index
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
 from tools.products.product_utils import get_contract_desc, get_product_contracts
-from .price_data_helpers import format_price_row, to_utc_epoch
+from .price_data_helpers import format_price_row
 from server.modules.shared.price_services import (
     available_freq_names_for_product as _available_freq_names_for_product,
     available_sources_for_product as _available_sources_for_product,

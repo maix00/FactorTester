@@ -25,7 +25,7 @@ from .factor_data_helpers import (
     resolve_product_from_tester,
     series_to_frontend,
 )
-from .price_data_helpers import to_utc_epoch
+from .price_data_helpers import to_epoch_ms
 
 
 @shared_bp.route('/api/factor_list')
@@ -397,7 +397,7 @@ def get_factor_distribution():
 
         return jsonify({
             'success': True,
-            'timestamp': to_utc_epoch(actual_ts) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
+            'timestamp': to_epoch_ms(actual_ts, use_utc=True) if hasattr(actual_ts, 'timestamp') else timestamp_ms,
             'n': n,
             'stats': {'mean': mean, 'std': std, 'min': mn, 'max': mx, 'skewness': skew, 'kurtosis': kurt, 'percentiles': pcts},
             'values': sorted(values, key=lambda v: v['value']),

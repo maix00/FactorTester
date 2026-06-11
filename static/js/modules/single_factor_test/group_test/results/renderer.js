@@ -23,6 +23,9 @@
     var setLastMetrics   = function(v) { var c = cache(); if (c) c.setLastMetrics(v); };
     var getLastGrossData = function() { var c = cache(); return c ? c.getLastGrossData() : null; };
     var getLastMetrics   = function() { var c = cache(); return c ? c.getLastMetrics() : null; };
+    var _lastInitialCapital = 100000000;
+    function setLastInitialCapital(v) { if (typeof v === 'number' && v > 0) _lastInitialCapital = v; }
+    function getLastInitialCapital() { return _lastInitialCapital; }
 
 
     // ════════════════════════════════════════════════════════════════
@@ -33,9 +36,10 @@
      * 画分组累计收益图。
      */
     renderer.drawGroupChart = function(groups) {
-        console.log('[snapshot-debug] drawGroupChart called: groupsLen=', groups ? groups.length : 0, 'hasSnapshot=', !!GT.results.snapshot, 'hasFetchGroupSnapshot=', !!(GT.results.snapshot && GT.results.snapshot.fetchGroupSnapshot));
+        console.log('[snapshot-debug] drawGroupChart called: groupsLen=', groups ? groups.length : 0);
         if (GT.results && GT.results.chart && GT.results.chart.groups && typeof GT.results.chart.groups.draw === 'function') {
             GT.results.chart.groups.draw(groups, {
+                initialCapital: getLastInitialCapital(),
                 onSnapshot: function(t) {
                     return GT.results.snapshot ? GT.results.snapshot.fetchGroupSnapshot(t) : null;
                 },
@@ -91,6 +95,7 @@
         // 2) 持久化到 cache
         setLastGrossData(data.groups);
         setLastMetrics(data.metrics);
+        setLastInitialCapital(data.initial_capital);
 
         // 3) 画图 + 指标表
         renderer.drawGroupChart(data.groups);

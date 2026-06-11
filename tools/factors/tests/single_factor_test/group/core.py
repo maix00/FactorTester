@@ -179,8 +179,11 @@ def materialize_group_outputs_from_result(
         for g in range(group_count)
     }
     bad = np.isnan(group_returns_np) | np.isinf(group_returns_np) | (group_returns_np <= -1.0)
-    cum_rets_filled = np.where(bad, 0.0, group_returns_np)
-    cumulative_returns_np = np.cumprod(1 + cum_rets_filled, axis=0)
+    returns_filled = np.where(bad, 0.0, group_returns_np)
+    capital = getattr(group_result, 'initial_capital', 1.0)
+    if capital is None:
+        capital = 1.0
+    cumulative_returns_np = np.cumsum(returns_filled * float(capital), axis=0)
     return returns_dict, group_result.report_df.copy(), cumulative_returns_np, index_list
 
 
@@ -2192,14 +2195,14 @@ def simulate_derived_group(
     gross_returns_arr = sim_result['gross_returns_np'][:, 0]
     fee_costs_arr = sim_result['fee_costs_np'][:, 0]
     notional_ratio_arr = sim_result['trade_notional_ratio_np'][:, 0]
-    cumulative = np.cumprod(1.0 + net_returns_arr)
+    total_equity_arr = sim_result['total_equity_np'][:, 0]
 
     return {
         'net_returns': net_returns_arr,
         'gross_returns': gross_returns_arr,
         'fee_costs': fee_costs_arr,
         'notional_ratios': notional_ratio_arr,
-        'cumulative': cumulative,
+        'total_equity': total_equity_arr,
     }
 
 
@@ -2327,13 +2330,12 @@ def simulate_derived_groups_batch(
     # 拆回每个派生组的结果
     results = []
     for di in range(N):
-        net_r = sim_result['net_returns_np'][:, di]
         results.append({
-            'net_returns': net_r,
+            'net_returns': sim_result['net_returns_np'][:, di],
             'gross_returns': sim_result['gross_returns_np'][:, di],
             'fee_costs': sim_result['fee_costs_np'][:, di],
             'notional_ratios': sim_result['trade_notional_ratio_np'][:, di],
-            'cumulative': np.cumprod(1.0 + net_r),
+            'total_equity': sim_result['total_equity_np'][:, di],
         })
 
     return results
