@@ -81,7 +81,32 @@ class _FactorGroupTestGroup:
     margin_mode: Optional[str] = None
 
     # ── Display ──
-    _id: Optional[str] = field(default=None, compare=False)
+    _id: Optional[str] = field(default=None, compare=False, repr=False)
+
+    def __repr__(self) -> str:
+        return f"Group: {self.name}"
+
+    @property
+    def info(self) -> dict:
+        """全部字段的浅拷贝 dict，供序列化/调试。"""
+        return {
+            'tester_id': self.tester_id,
+            'factor_alias': self.factor_alias,
+            'n_groups': self.n_groups,
+            'group_index': self.group_index,
+            'key': self.key,
+            'name': self.name,
+            'product_list': self.product_list,
+            'fee_modifications': self.fee_modifications,
+            'fee_mode': self.fee_mode,
+            'fee_rate': self.fee_rate,
+            'use_close_today': self.use_close_today,
+            'rebalance_mode': self.rebalance_mode,
+            'liquidity_mode': self.liquidity_mode,
+            'liquidity_percent': self.liquidity_percent,
+            'margin_mode': self.margin_mode,
+            '_id': self._id,
+        }
 
     @property
     def triple_key(self) -> tuple[str, str, int]:
