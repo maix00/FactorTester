@@ -457,7 +457,7 @@ class FactorGroupTester:
         plan: BatchExecutionPlan,
         *,
         fee: float,
-        fee_map: dict,
+        fee_modifications: list | None = None,
     ) -> BatchExecutionPlan:
         first_entry = plan.entries[0]
         T = len(first_entry.shared_inputs.index_list)
@@ -519,7 +519,7 @@ class FactorGroupTester:
             signal_valid_cols=signal_valid_cols,
             valid_cols=ordered_trade_products,
             fee=fee,
-            fee_map=fee_map,
+            fee_modifications=fee_modifications,
         )
         return plan
 
@@ -528,12 +528,12 @@ class FactorGroupTester:
         plan: BatchExecutionPlan,
         *,
         fee: float,
-        fee_map: dict,
+        fee_modifications: list | None = None,
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
     ) -> list[dict[str, Any]]:
-        plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_map=fee_map)
+        plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications)
         first_entry = plan.entries[0]
         first_factor = first_entry.tester.resolve_factor(first_entry.factor_alias)
         if first_factor is None or plan.merged_returns_np is None or plan.merged_price_np is None or plan.merged_spec_bundle is None:
@@ -621,7 +621,7 @@ class FactorGroupTester:
         self,
         *,
         fee: float,
-        fee_map: dict,
+        fee_modifications: list | None = None,
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
@@ -658,7 +658,7 @@ class FactorGroupTester:
             out = self._run_merged_batch(
                 plan,
                 fee=fee,
-                fee_map=fee_map,
+                fee_modifications=fee_modifications,
                 use_closetoday=use_closetoday,
                 initial_capital=initial_capital,
                 rebalance_mode=rebalance_mode,

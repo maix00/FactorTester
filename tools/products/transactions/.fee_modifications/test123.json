@@ -1,0 +1,22 @@
+[
+  {
+    "variety_code": "CU",
+    "contract_name": null,
+    "fields": {
+      "close_fixed": 2.5
+    },
+    "time_from": null,
+    "time_to": null,
+    "timestamp": 1704067300000
+  },
+  {
+    "variety_code": "AG",
+    "contract_name": null,
+    "fields": {
+      "open_ratio": 5e-05
+    },
+    "time_from": null,
+    "time_to": null,
+    "timestamp": 1704067200000
+  }
+]

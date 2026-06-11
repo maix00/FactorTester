@@ -34,7 +34,7 @@ def save_fee_modifications():
 
     cleaned = sort_modifications(clean_modifications(mods))
     _fee_store.save(sub_id, cleaned)
-    return api_ok({'modifications': cleaned, 'count': len(cleaned)})
+    return api_ok({'modifications': [m.to_dict() for m in cleaned], 'count': len(cleaned)})
 
 
 @cn_futures_bp.route('/get_fee_modifications', methods=['POST'])
@@ -45,7 +45,7 @@ def get_fee_modifications():
     if not sub_id:
         return api_fail('缺少 submission_id')
     mods = _fee_store.load(sub_id)
-    return api_ok({'modifications': mods, 'count': len(mods)})
+    return api_ok({'modifications': [m.to_dict() for m in mods], 'count': len(mods)})
 
 
 # ── Fee table ──────────────────────────────────────────────────────────────

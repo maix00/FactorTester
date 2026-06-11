@@ -235,7 +235,7 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
         config = {
             'name': str(display_name),
             'key': str(display_name),
-            'fee_map': item.get('fee_map') or item.get('feeMap') or None,
+            'fee_modifications': item.get('fee_modifications') or item.get('feeModifications') or None,
             'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
             'fee_rate': item.get('fee_rate', item.get('feeRate')),
             'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
@@ -299,34 +299,6 @@ def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_co
     r_ls = np.where(np.isfinite(r_ls), r_ls, 0.0)
     total_caps = np.where(np.isfinite(total_caps), total_caps, previous_total_caps)
     return r_ls.astype(float), total_caps.astype(float)
-
-
-def _build_fee_vectors(group_result, fee_map, fee_uniform):
-    """从 group_result.valid_cols 构建 (open_fv, close_fv, close_today_fv) 向量."""
-    valid_cols = getattr(group_result, 'valid_cols', None)
-    if valid_cols is None:
-        return None, None, None
-
-    def _variety(col) -> str:
-        nm = getattr(col, "name", str(col))
-        return nm.split(".")[0].upper()
-
-    _fm = fee_map or {}
-    half_fee = float(fee_uniform) / 2.0
-    open_fv = np.array([
-        float((_fm.get(_variety(c), {}) or {}).get("open", half_fee))
-        for c in valid_cols
-    ], dtype=float)
-    close_fv = np.array([
-        float((_fm.get(_variety(c), {}) or {}).get("close", half_fee))
-        for c in valid_cols
-    ], dtype=float)
-    close_today_fv = np.array([
-        float((_fm.get(_variety(c), {}) or {}).get("close_today", close_fv[i]))
-        for i, c in enumerate(valid_cols)
-    ], dtype=float)
-    return open_fv, close_fv, close_today_fv
-
 
 
 def _serialize_group_simulation_result(
@@ -517,40 +489,27 @@ def _parse_group_fee_config(data, products: set | None = None):
     """解析前端费率配置。
 
     前端三种模式：
-    1. 不扣除费用 → fee=0, fee_map={}
-    2. 统一费率   → fee>0, fee_map={}
-    3. 按品种费率 → fee=0, fee_map 非空（来自前端 /get_fee_table 的 FeeData 全量，
-                   含用户 _feeModifications 覆盖 + 平今/平昨选择）
+    1. 不扣除费用 → fee=0
+    2. 统一费率   → fee>0
+    3. 按品种费率 → fee=0，fee_modifications 非空
 
-    返回 (fee_uniform, fee_map, use_closetoday)，
-    其中 fee_map 仅在模式3时非空，key 格式：{open, close_today, close_yesterday}，
-    值为单边费率（按金额比例）。
-    模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
+    返回 (fee_uniform, fee_modifications, use_closetoday)，
+    fee_modifications 为 list[FeeModification] 或空列表。
+    费率/费用覆盖在 _resolve_group_trade_specs 中由 fee_modifications 驱动。
     """
     fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
-    fee_map_raw = data.get('fee_map', {}) or {}
     use_closetoday = bool(data.get('use_closetoday', False))
 
-    # 模式1/2：不扣除或统一费率 → fee_map 保持空
-    if not fee_map_raw:
-        return fee_uniform, {}, use_closetoday
+    # ── Read fee_modifications (per-group, from frontend) ──
+    fee_modifications_raw = data.get('fee_modifications')
+    if not isinstance(fee_modifications_raw, list) or not fee_modifications_raw:
+        return fee_uniform, [], use_closetoday
 
-    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖，
-    # 字段名映射：open_ratio→open, closetoday_ratio→close_today
-    # close_yesterday = close_ratio（平昨=平仓费率）
-    fee_map: dict[str, dict[str, float]] = {}
-    for code, rates in fee_map_raw.items():
-        code_upper = str(code).upper()
-        o = float(rates.get('open_ratio', 0) or 0)
-        c = float(rates.get('close_ratio', 0) or 0)
-        ct = float(rates.get('closetoday_ratio', 0) or 0)
-        fee_map[code_upper] = {
-            'open': o,
-            'close_today': ct,
-            'close_yesterday': c,
-        }
-
-    return fee_uniform, fee_map, use_closetoday
+    from tools.products.transactions.fees import (
+        clean_modifications, sort_modifications,
+    )
+    fee_modifications = sort_modifications(clean_modifications(fee_modifications_raw))
+    return fee_uniform, fee_modifications, use_closetoday
 
 
     from tools.data.DataTime import DataTime
@@ -573,7 +532,7 @@ def _parse_group_fee_config(data, products: set | None = None):
     try:
         sub_id = first_entry.get('submission_id')
         tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test')
-        fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
+        fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
 
@@ -713,7 +672,7 @@ def _parse_group_fee_config(data, products: set | None = None):
     try:
         raw_results = group_tester.run(
             fee=fee_uniform,
-            fee_map=fee_map,
+            fee_modifications=fee_modifications,
             use_closetoday=use_closetoday,
             initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
@@ -746,7 +705,7 @@ def _parse_group_fee_config(data, products: set | None = None):
                 'product_names': g.product_list,
                 'fee_mode': g.fee_mode,
                 'fee_rate': g.fee_rate,
-                'fee_map': g.fee_map,
+                'fee_modifications': g.fee_modifications,
                 'use_close_today': g.use_close_today,
                 'rebalance_mode': g.rebalance_mode,
                 'liquidity_mode': g.liquidity_mode,

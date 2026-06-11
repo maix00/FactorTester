@@ -667,7 +667,7 @@ def _resolve_group_trade_specs(
     signal_valid_cols: list,
     valid_cols: list,
     fee: float,
-    fee_map: dict,
+    fee_modifications: list | None = None,
 ) -> GroupTradeSpecBundle:
     term_structure_paths = list(dict.fromkeys(
         path
@@ -742,48 +742,79 @@ def _resolve_group_trade_specs(
     long_margin_ratio_list: list[float] = []
     is_margin_traded_list: list[bool] = []
 
+    # ── Build modifications_by_variety from fee_modifications ──
+    modifications_by_variety: dict[str, dict] = {}
+    if fee_modifications:
+        from tools.products.transactions.fees import (
+            clean_modifications, sort_modifications, VALID_FEE_FIELDS,
+        )
+        cleaned = sort_modifications(clean_modifications(fee_modifications))
+        for mod in cleaned:
+            vc = mod.variety_code.upper()
+            fields = modifications_by_variety.setdefault(vc, {})
+            for fname, fval in mod.fields.items():
+                if fname in VALID_FEE_FIELDS:
+                    fields[fname] = float(fval)
+
+    # 字段名映射：FeeModification field name → _pick_value 的 product_field / col 属性名
+    _MOD_FIELD_TO_PRODUCT_FIELD = {
+        "open_ratio": "open_ratio",
+        "close_ratio": "close_ratio",
+        "closetoday_ratio": "closetoday_ratio",
+        "open_fixed": "open_fixed",
+        "close_fixed": "close_fixed",
+        "closetoday_fixed": "closetoday_fixed",
+    }
+
     for col in valid_cols:
         bundle = _spec_bundle_by_id.get(id(col), {})
-        spec = fee_map.get(variety_code_by_id.get(id(col), ""), {}) or {}
+        mod_overrides = modifications_by_variety.get(
+            variety_code_by_id.get(id(col), ""), {}
+        )
 
-        def _pick_value(fee_key: str, product_field: str, default: Any) -> Any:
-            fee_value = spec.get(fee_key)
-            if fee_value not in (None, ""):
-                return fee_value
+        def _pick_value(default: Any, product_field: str) -> Any:
+            """优先级：modification > bundle(product字段) > col属性 > default"""
+            # 1. fee_modification 覆盖
+            mod_val = mod_overrides.get(product_field)
+            if mod_val not in (None, ""):
+                return mod_val
+            # 2. bundle (产品数据库字段)
             bundle_value = bundle.get(product_field)
             if bundle_value not in (None, ""):
                 return bundle_value
+            # 3. col 属性
             return getattr(col, product_field, default)
 
-        open_fee_list.append(_coerce_float(_pick_value("open", "open_ratio", half_fee), half_fee))
-        close_fee_value = _coerce_float(_pick_value("close", "close_ratio", half_fee), half_fee)
+        open_fee_list.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
+        close_fee_value = _coerce_float(_pick_value(half_fee, "close_ratio"), half_fee)
         close_fee_list.append(close_fee_value)
         close_today_fee_list.append(_coerce_float(
-            _pick_value("close_today", "closetoday_ratio", close_fee_value),
+            _pick_value(close_fee_value, "closetoday_ratio"),
             close_fee_value,
         ))
         close_yesterday_fee_list.append(_coerce_float(
-            _pick_value("close_yesterday", "close_ratio", close_fee_value),
+            _pick_value(close_fee_value, "close_ratio"),
             close_fee_value,
         ))
-        close_fee_fixed_value = _coerce_float(_pick_value("close_fixed", "close_fixed", 0.0), 0.0)
-        open_fee_fixed_list.append(_coerce_float(_pick_value("open_fixed", "open_fixed", 0.0), 0.0))
+        close_fee_fixed_value = _coerce_float(_pick_value(0.0, "close_fixed"), 0.0)
+        open_fee_fixed_list.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
         close_fee_fixed_list.append(close_fee_fixed_value)
         close_today_fee_fixed_list.append(_coerce_float(
-            _pick_value("close_today_fixed", "closetoday_fixed", close_fee_fixed_value),
+            _pick_value(close_fee_fixed_value, "closetoday_fixed"),
             close_fee_fixed_value,
         ))
         point_value_list.append(_coerce_float(
-            _pick_value("multiplier", "multiplier", getattr(col, "point_value", None) or 1.0),
+            _pick_value(1.0, "multiplier") if "multiplier" in bundle
+            else getattr(col, "point_value", None) or 1.0,
             1.0,
         ))
-        min_tick_list.append(_coerce_float(_pick_value("min_tick", "min_tick", 0.0), 0.0))
+        min_tick_list.append(_coerce_float(_pick_value(0.0, "min_tick"), 0.0))
         min_trade_quantity_list.append(_coerce_float(
-            _pick_value("min_trade_quantity", "min_trade_quantity", getattr(col, "min_trade_quantity", 1.0) or 1.0),
+            _pick_value(getattr(col, "min_trade_quantity", 1.0) or 1.0, "min_trade_quantity"),
             1.0,
         ))
         long_margin_ratio_list.append(_coerce_float(
-            _pick_value("long_margin_ratio", "long_margin_ratio", 1.0),
+            _pick_value(1.0, "long_margin_ratio"),
             1.0,
         ))
         is_margin_traded_list.append(bool(getattr(col, "is_margin_traded", False)))

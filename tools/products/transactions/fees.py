@@ -95,35 +95,25 @@ def _clean_fields(fields: dict) -> dict:
     return cleaned
 
 
-def clean_modifications(mods: list[dict]) -> list[dict]:
+def clean_modifications(mods: list[dict]) -> list[FeeModification]:
     """Validate and clean a list of raw modification dicts from API / JSON.
 
-    Returns only valid entries (has variety_code + non-empty cleaned fields).
+    Returns FeeModification instances (valid entries only).
     """
     cleaned = []
     for m in mods:
         if not isinstance(m, dict):
             continue
-        fields = _clean_fields(m.get('fields'))
-        if not fields:
+        fm = FeeModification.from_dict(m)
+        if not fm.fields or not fm.variety_code:
             continue
-        variety = str(m.get('variety_code', '') or '').strip()
-        if not variety:
-            continue
-        cleaned.append({
-            'variety_code': variety.upper(),
-            'contract_name': str(m.get('contract_name') or '') or None,
-            'fields': fields,
-            'time_from': str(m.get('time_from') or '') or None,
-            'time_to': str(m.get('time_to') or '') or None,
-            'timestamp': int(m.get('timestamp', 0) or 0) or int(time.time() * 1000),
-        })
+        cleaned.append(fm)
     return cleaned
 
 
-def sort_modifications(mods: list[dict]) -> list[dict]:
+def sort_modifications(mods: list[FeeModification]) -> list[FeeModification]:
     """Sort modifications by timestamp DESC (latest wins), then by variety_code."""
-    return sorted(mods, key=lambda m: (-m['timestamp'], m['variety_code']))
+    return sorted(mods, key=lambda m: (-m.timestamp, m.variety_code))
 
 
 # ── Persistent storage ────────────────────────────────────────────────────────
@@ -141,17 +131,23 @@ class FeeModificationStore:
         safe_id = "".join(c for c in str(submission_id) if c.isalnum() or c in '_-')
         return os.path.join(self._base_dir, f"{safe_id}.json")
 
-    def load(self, submission_id: str) -> list[dict]:
+    def load(self, submission_id: str) -> list[FeeModification]:
         path = self._file_path(submission_id)
         if not os.path.exists(path):
             return []
         try:
             with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                raw = json.load(f)
+            return clean_modifications(raw)
         except Exception:
             return []
 
-    def save(self, submission_id: str, mods: list[dict]) -> None:
+    def save(self, submission_id: str, mods: list) -> None:
         path = self._file_path(submission_id)
+        dicts = [
+            m.to_dict() if isinstance(m, FeeModification)
+            else FeeModification.from_dict(m).to_dict()
+            for m in mods
+        ]
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(mods, f, ensure_ascii=False, indent=2)
+            json.dump(dicts, f, ensure_ascii=False, indent=2)
