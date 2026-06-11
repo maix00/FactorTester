@@ -5,7 +5,7 @@
  *   - 运行分组测试（单次/批量/全因子）
  *   - 加载默认分组
  *   - 派生组生成/删除
- *   - 工具函数：postGroupTest, clearResults
+ *   - 工具函数：postGroupTest, postBatchGroupTest, clearResults
  *
  * 挂载到 GT.core.runTest。
  */
@@ -57,7 +57,57 @@
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * 分组测试 POST
+     * 批量分组测试 POST（SSE 流式）
+     */
+    runTest.postBatchGroupTest = function(payload, onEvent) {
+        return fetch('/run_group_test_stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(async function(res) {
+            if (!res.ok) {
+                throw new Error('HTTP ' + res.status);
+            }
+            var reader = res.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var lastEvent = '';
+            var resultData = null;
+
+            while (true) {
+                var readResult = await reader.read();
+                if (readResult.done) break;
+                buffer += decoder.decode(readResult.value, { stream: true });
+                var lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i];
+                    if (line.startsWith('event: ')) {
+                        lastEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        try {
+                            var payload = JSON.parse(line.slice(6));
+                            if (onEvent) {
+                                onEvent(lastEvent, payload);
+                            }
+                            if (lastEvent === 'result') {
+                                resultData = payload;
+                            } else if (lastEvent === 'error') {
+                                resultData = payload;
+                            }
+                        } catch (e) {
+                            // skip malformed JSON
+                        }
+                    }
+                }
+            }
+            return resultData || { success: false, error: '无响应数据' };
+        });
+    };
+
+    /**
+     * 单次分组测试 POST
      */
     runTest.postGroupTest = function(payload) {
         return fetch('/run_group_test', {
@@ -441,22 +491,49 @@
         Object.assign(bulkPayload, localRun.payload || {});
 
         try {
-            // ── 进度条 ──
+            // ── 确定性进度条 ──
             var progressBarId = 'gt-batch-progress';
             var progressBar = document.getElementById(progressBarId);
             if (!progressBar) {
                 progressBar = document.createElement('div');
                 progressBar.id = progressBarId;
                 progressBar.className = 'gt-progress-container';
-                progressBar.innerHTML = '<div class="gt-progress-bar"><div class="gt-progress-indeterminate"></div></div>' +
-                                        '<span class="gt-progress-text">计算中...</span>';
+                progressBar.innerHTML =
+                    '<div class="gt-progress-bar" style="background:#e0e0e0;border-radius:6px;height:12px;overflow:hidden;margin-bottom:4px;">' +
+                    '<div id="' + progressBarId + '-fill" class="gt-progress-fill" style="width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:6px;"></div>' +
+                    '</div>' +
+                    '<span id="' + progressBarId + '-text" class="gt-progress-text" style="font-size:13px;color:#666;">准备中...</span>';
                 var chartContainer = document.getElementById('group_chart_container');
                 var insertParent = chartContainer ? chartContainer.parentNode : (runBtn ? runBtn.parentNode : document.body);
                 var insertBefore = chartContainer || (runBtn ? runBtn.nextSibling : null);
                 insertParent.insertBefore(progressBar, insertBefore);
             }
 
-            var data = await runTest.postGroupTest(bulkPayload);
+            var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
+                var fill = document.getElementById(progressBarId + '-fill');
+                var text = document.getElementById(progressBarId + '-text');
+                if (event === 'start') {
+                    if (fill) fill.style.width = '0%';
+                    if (text) text.textContent = '0/' + (payload.total || 1) + ' 批次';
+                } else if (event === 'progress') {
+                    var pct = payload.total > 0 ? (payload.completed / payload.total * 100) : 0;
+                    if (fill) fill.style.width = pct + '%';
+                    if (text) {
+                        var phaseLabel = '';
+                        if (payload.phase === 'batch') {
+                            phaseLabel = '批次 ';
+                        } else if (payload.phase === 'membership') {
+                            phaseLabel = '隶属度 ';
+                        } else if (payload.phase === 'trade_data') {
+                            phaseLabel = '交易数据 ';
+                        } else if (payload.phase === 'simulate') {
+                            phaseLabel = '模拟 ';
+                        }
+                        text.textContent = phaseLabel + (payload.completed || 0) + '/' + (payload.total || 1);
+                    }
+                }
+            });
+
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
                     ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'

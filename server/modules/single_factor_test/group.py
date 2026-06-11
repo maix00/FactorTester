@@ -613,12 +613,28 @@ def run_group_test():
     请求里的 `batches` / `cross_batch_ls` 仍保留原字段名；
     后端内部按 submission entry / cross-entry LS 处理。
     """
+    data = request.get_json(silent=True) or {}
+    success, result = _run_group_test_core(data)
+    if success:
+        return jsonify(result)
+    else:
+        status = result.get('status', 500)
+        return jsonify(result), status
+
+
+def _run_group_test_core(data: dict) -> tuple[bool, dict]:
+    """
+    核心分组测试逻辑，可以被 /run_group_test (JSON) 和 /run_group_test_stream (SSE) 共享。
+    
+    返回 (success, dict)
+    - success=True：dict 是成功响应
+    - success=False：dict 包含 error 和 status 字段
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    data = request.get_json()
     submitted_entries = data.get('batches')
     if not isinstance(submitted_entries, list) or not submitted_entries:
-        return jsonify({'success': False, 'error': 'batches 必须是非空数组'}), 400
+        return False, {'success': False, 'error': 'batches 必须是非空数组', 'status': 400}
 
     request_started = time.perf_counter()
     cross_entry_ls_requests = data.get('cross_batch_ls') or []
@@ -643,7 +659,7 @@ def run_group_test():
     try:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
     except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return False, {'success': False, 'error': str(e), 'status': 400}
     # 费率从第一个前端提交条目的 tester 解析
     first_entry = submitted_entries[0]
     try:
@@ -651,7 +667,7 @@ def run_group_test():
         tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test')
         fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
     except Exception as e:
-        return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
+        return False, {'success': False, 'error': f'费率解析失败: {e}', 'status': 400}
 
     from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
 
@@ -681,7 +697,7 @@ def run_group_test():
                 factor_aliases_by_submission[submission_id].append(factor_alias)
 
     if not all_flat_groups:
-        return jsonify({'success': False, 'error': '没有有效的分组配置'}), 400
+        return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
 
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
     requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
@@ -712,10 +728,11 @@ def run_group_test():
             'auto' if auto_group_calendar_freq else requested_group_calendar_freq,
         )
     except ValueError as exc:
-        return jsonify({
+        return False, {
             'success': False,
             'error': str(exc),
-        }), 400
+            'status': 400,
+        }
     _progress(
         f"calendar resolve done effective_freq={effective_group_calendar_freq} "
         f"factor_freq_count={len(all_factor_freqs)}"
@@ -852,12 +869,13 @@ def run_group_test():
     _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")
     if not valid_results:
         first_err = errors[0] if errors else {'error': '所有提交条目均失败'}
-        return jsonify({
+        return False, {
             'success': False,
             'error': first_err.get('error', '所有提交条目均失败'),
             'traceback': first_err.get('traceback'),
             'simulation_errors': errors,
-        }), 500
+            'status': 500,
+        }
 
     # ── 阶段 2：跨 tester LS 计算 ──
     def _find_raw(br_dict: dict | None) -> dict | None:
@@ -1023,7 +1041,7 @@ def run_group_test():
         f"group simulations request done groups={len(merged_groups)} metrics={len(merged_metrics)} "
         f"elapsed={time.perf_counter() - request_started:.2f}s"
     )
-    return jsonify({
+    return True, {
         'success': True,
         'groups': merged_groups,
         'metrics': merged_metrics,
@@ -1038,7 +1056,7 @@ def run_group_test():
         'simulation_count': len(valid_results),
         'cross_batch_ls_count': len(cross_ls_groups),
         'errors': errors if errors else None,
-    })
+    }
 
 @sft_bp.route('/get_group_snapshot', methods=['POST'])
 def get_group_snapshot():
@@ -1350,3 +1368,76 @@ def get_tester_session_info():
             testers_info.append({'submission_id': str(sid), 'error': str(e)})
 
     return jsonify({'success': True, 'testers': testers_info})
+
+
+# ═══════════════════════════════════════════════════
+#  SSE 流式端点
+# ═══════════════════════════════════════════════════
+
+@sft_bp.route('/run_group_test_stream', methods=['POST'])
+def run_group_test_stream():
+    """SSE 流式分组测试——推送 batch/membership/simulate 进度 + 最终结果。"""
+    import threading
+    import json as _json
+    from flask import Response, stream_with_context
+    from server.services.sse_progress import SSEProgressEmitter
+    from tools.factors.tests.single_factor_test.group.core import (
+        register_group_progress,
+        unregister_group_progress,
+    )
+
+    data = request.get_json(silent=True) or {}
+
+    # ── 在主线程中完成 data 校验 ──
+    submitted_entries = data.get('batches')
+    if not isinstance(submitted_entries, list) or not submitted_entries:
+        def _early_err():
+            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'batches 必须是非空数组'}, default=str)}\n\n"
+        return Response(_early_err(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+    emitter = SSEProgressEmitter()
+
+    def _compute_and_emit():
+        try:
+            # ── 注册进度桥接：core.py 的 _emit_progress → emitter ──
+            def _progress_bridge(phase: str, message: str, extra: dict):
+                completed = extra.get('completed', 0)
+                total = extra.get('total', 0)
+                if phase in ('batch',):
+                    # batch 进度：completed/total 是 batch 计数
+                    emitter.emit_progress(
+                        completed=completed, total=total,
+                        phase='batch', message=message, **extra,
+                    )
+                elif phase == 'init':
+                    emitter.emit_start(
+                        total=total, groups=extra.get('total_groups', 0),
+                        phase='batch', message=message, **extra,
+                    )
+                else:
+                    # membership / remap / trade_data / simulate
+                    emitter.emit_progress(
+                        completed=completed, total=total,
+                        phase=phase, message=message, **extra,
+                    )
+
+            register_group_progress(_progress_bridge)
+
+            success, result = _run_group_test_core(data)
+            if success:
+                emitter.emit_result(result)
+            else:
+                emitter.emit_error(
+                    result.get('error', '未知错误'),
+                    traceback=result.get('traceback', ''),
+                )
+        except Exception as e:
+            import traceback as _tb
+            emitter.emit_error(str(e), traceback=_tb.format_exc())
+        finally:
+            unregister_group_progress()
+            emitter.close()
+
+    threading.Thread(target=_compute_and_emit, daemon=True).start()
+    return emitter.get_response()

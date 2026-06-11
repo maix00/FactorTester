@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,45 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.NextReturns import NextReturns
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 from tools.products import lookup_contract_product
+
+
+# ── 进度回调注册机制 ──
+
+_group_progress_lock = threading.Lock()
+_group_progress_callback: Callable[[str, str, dict], None] | None = None
+
+
+def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
+    """注册结构化进度回调。回调签名为 callback(phase: str, message: str, extra: dict)。
+
+    phase 取值：
+    - membership  — 计算分组隶属度
+    - remap       — 产品重新映射
+    - trade_data  — 加载交易数据（returns + prices + specs）
+    - simulate    — 交易模拟中
+    - batch       — batch 级进度
+    - info        — 一般信息
+    """
+    global _group_progress_callback
+    with _group_progress_lock:
+        _group_progress_callback = callback
+
+
+def unregister_group_progress() -> None:
+    global _group_progress_callback
+    with _group_progress_lock:
+        _group_progress_callback = None
+
+
+def _emit_progress(phase: str, message: str, **extra) -> None:
+    cb = None
+    with _group_progress_lock:
+        cb = _group_progress_callback
+    if cb is not None:
+        try:
+            cb(phase, message, extra)
+        except Exception:
+            pass
 
 
 _TARGET_REBUILD_MAX_ITERATIONS = 8
@@ -66,6 +106,7 @@ class GroupTradeSpecBundle:
 
 def _group_progress(message: str) -> None:
     print(f"[GroupCore] {message}", flush=True)
+    _emit_progress("info", message)
 
 
 def slice_group_run_result(

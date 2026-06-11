@@ -16,6 +16,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     build_flat_membership_from_groups,
     _build_product_remap_matrix,
     _build_group_memberships_from_shared,
+    _emit_progress,
     _load_group_trade_prices,
     _load_group_trade_returns,
     _prepare_group_shared_inputs,
@@ -634,6 +635,12 @@ class FactorGroupTester:
     ) -> list[dict[str, Any]]:
         plans = self.build_batch_execution_plans()
         batches = [plan.entries for plan in plans]
+        total_entries = len(self.specs)
+        total_groups = sum(len(plan.group_owner) for plan in plans)
+        total_batches = len(batches)
+
+        _emit_progress("init", f"run start batches={total_batches} entries={total_entries} overlap={self.overlap_ratio:.2f}",
+                       total_batches=total_batches, total_entries=total_entries, total_groups=total_groups)
         if progress_hook is not None:
             progress_hook(
                 f"group tester run start specs={len(self.specs)} batches={len(batches)} overlap_ratio={self.overlap_ratio:.2f}"
@@ -645,15 +652,20 @@ class FactorGroupTester:
                     f"trade_products={len(plan.trade_product_names)}"
                 )
 
+        batches_completed = 0
+
         def _run_batch(batch_idx: int, batch: list[GroupSimulationSpec]) -> list[dict[str, Any]]:
+            nonlocal batches_completed
             plan = plans[batch_idx]
+            batch_label = f"{batch_idx + 1}/{total_batches}"
+            _emit_progress("batch", f"batch {batch_label} start entries={len(batch)} groups={len(plan.group_owner)} products={len(plan.trade_product_names)}",
+                           batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch))
             if progress_hook is not None:
                 progress_hook(
-                    f"group tester batch start {batch_idx + 1}/{len(batches)} size={len(batch)}"
+                    f"group tester batch start {batch_idx + 1}/{total_batches} size={len(batch)}"
                 )
-            if progress_hook is not None:
                 progress_hook(
-                    f"group tester batch merged simulate {batch_idx + 1}/{len(batches)} "
+                    f"group tester batch merged simulate {batch_idx + 1}/{total_batches} "
                     f"entries={len(batch)} groups={len(plan.group_owner)} products={len(plan.trade_product_names)}"
                 )
             out = self._run_merged_batch(
@@ -664,8 +676,12 @@ class FactorGroupTester:
                 initial_capital=initial_capital,
                 rebalance_mode=rebalance_mode,
             )
+            batches_completed += 1
+            _emit_progress("batch", f"batch {batch_label} done entries={len(batch)}",
+                           batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch),
+                           completed=batches_completed, total=total_batches)
             if progress_hook is not None:
-                progress_hook(f"group tester batch done {batch_idx + 1}/{len(batches)} size={len(batch)} merged=true")
+                progress_hook(f"group tester batch done {batch_idx + 1}/{total_batches} size={len(batch)} merged=true")
             return out
 
         results: list[dict[str, Any]] = []
@@ -679,4 +695,6 @@ class FactorGroupTester:
                 results.extend(future.result())
 
         results.sort(key=lambda item: int(item.get("simulation_index", 0)))
+        _emit_progress("batch", f"all batches done batches={total_batches} entries_done={len(results)}",
+                       completed=total_batches, total=total_batches)
         return results
