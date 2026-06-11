@@ -1802,14 +1802,17 @@ def simulate_group_trading_book(
             )
             base_capacity = np.where(executable, base_capacity, 0.0)
             # liquidity_capacity_arr stores cross-sectional shares (sum=1 per row).
-            # Convert to absolute notional capacity per group by multiplying by equity
-            # (the simulator now uses absolute notional amounts, not normalized wealth).
-            capacity_amounts = base_capacity[np.newaxis, :] * equity[:, np.newaxis] * percent_scale[:, np.newaxis]
+            # Convert to absolute notional capacity per group for percent-restricted rows.
+            # Non-percent rows keep inf so they are not capped.
+            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
+            executable_capacity_t[percent_rows] = (
+                base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
+            )
             target_amounts = apply_liquidity_execution(
                 prev_notional,
                 target_notional,
                 equity,
-                capacity_amounts,
+                executable_capacity_t,
                 open_rate_mat,
                 close_rate_mat,
             )
