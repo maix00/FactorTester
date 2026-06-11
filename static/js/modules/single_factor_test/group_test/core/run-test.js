@@ -284,31 +284,13 @@
                     expandedIndex += 1;
                 }
             }
-            // 筛选组：直接从 groupSettings 读取
-            b.derivedPayload = [];
+            // 子组（有 parentId）：分配 expandedIndex，不改动字段名
             var allGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
             for (var ai = 0; ai < allGroups.length; ai++) {
                 var ag = allGroups[ai];
                 if (!ag || !ag.parentId) continue;
-                b.derivedPayload.push({
-                    id: ag.id,
-                    parentId: ag.parentId,
-                    key: ag.shortAlias || ag.name || '筛选组',
-                    name: ag.shortAlias || ag.name || '筛选组',
-                    fee_mode: ag.feeMode || null,
-                    fee_rate: ag.feeRate != null ? ag.feeRate : null,
-                    useCloseToday: ag.useCloseToday !== undefined ? !!ag.useCloseToday : false,
-                    rebalance_mode: ag.rebalanceMode || null,
-                    liquidity_mode: ag.liquidityMode || null,
-                    liquidity_percent: ag.liquidityPercent != null ? ag.liquidityPercent : null,
-                    margin_mode: ag.marginMode || null
-                });
-            }
-            for (var di = 0; di < b.derivedPayload.length; di++) {
-                if (b.derivedPayload[di].id) {
-                    b.groupIdToIndex[b.derivedPayload[di].id] = expandedIndex;
-                    expandedIndex += 1;
-                }
+                b.groupIdToIndex[ag.id] = expandedIndex;
+                expandedIndex += 1;
             }
             b.lsPayloads = [];
         }

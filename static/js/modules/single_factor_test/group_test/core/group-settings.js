@@ -851,17 +851,8 @@
 
     function _settingsNormalizeSnapshot(snap) {
         snap = snap || {};
-        if (Array.isArray(snap.groups)) {
-            return {
-                groups: snap.groups,
-                lsConfigs: Array.isArray(snap.lsConfigs) ? snap.lsConfigs : [],
-            };
-        }
-        var groups = [];
-        if (Array.isArray(snap.baseGroups)) groups = groups.concat(snap.baseGroups);
-        if (Array.isArray(snap.derivedGraph)) groups = groups.concat(snap.derivedGraph);
         return {
-            groups: groups,
+            groups: Array.isArray(snap.groups) ? snap.groups : [],
             lsConfigs: Array.isArray(snap.lsConfigs) ? snap.lsConfigs : [],
         };
     }
