@@ -272,6 +272,9 @@ class DataIndex:
         - 否则用当前 signal_index 精确截断
         - DataTime.ts 的时区由 DataTime 保证（exact + tz → tz-aware；day → tz-naive）
           此处通过 slice_by() → tz_align() 自动对齐
+
+        守卫：
+        - exact 精度要求 signal_index 频率 < 1day（日内），否则天级索引无法做日内截断
         """
         from tools.data.DataTime import DataTime  # noqa: F811
 
@@ -296,6 +299,14 @@ class DataIndex:
             end_ts = cast(pd.Timestamp, end_dt.ts) + pd.Timedelta(days=1)
             return di_for_slice.slice_by(start_dt.ts, end_ts)
         else:
+            # 守卫：exact 精度要求日内索引（通过信号名判断，而非时间戳间隔）
+            sig_name = self.signal_name
+            if sig_name and sig_name.startswith('_SIGNAL@DAY'):
+                raise ValueError(
+                    f"slice_by_datatime: exact precision requires intraday signal_index, "
+                    f"but signal_name='{sig_name}' is a day-level index. "
+                    f"Use precision='day' or provide an intraday DataIndex."
+                )
             return self.slice_by(start_dt.ts, end_dt.ts)
 
     def where(self, mask: pd.Index | np.ndarray) -> DataIndex:
