@@ -445,6 +445,33 @@ def _serialize_group_simulation_result(
     }
 
 
+def _parse_group_fee_config(data, products: set | None = None):
+    """解析前端费率配置。
+
+    前端三种模式：
+    1. 不扣除费用 → fee=0
+    2. 统一费率   → fee>0
+    3. 按品种费率 → fee=0，fee_modifications 非空
+
+    返回 (fee_uniform, fee_modifications, use_closetoday)，
+    fee_modifications 为 list[FeeModification] 或空列表。
+    费率/费用覆盖在 _resolve_group_trade_specs 中由 fee_modifications 驱动。
+    """
+    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
+    use_closetoday = bool(data.get('use_closetoday', False))
+
+    # ── Read fee_modifications (per-group, from frontend) ──
+    fee_modifications_raw = data.get('fee_modifications')
+    if not isinstance(fee_modifications_raw, list) or not fee_modifications_raw:
+        return fee_uniform, [], use_closetoday
+
+    from tools.products.transactions.fees import (
+        clean_modifications, sort_modifications,
+    )
+    fee_modifications = sort_modifications(clean_modifications(fee_modifications_raw))
+    return fee_uniform, fee_modifications, use_closetoday
+
+
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
     """批量并行运行多个分组测试提交条目，支持跨提交条目的 Long-Short。
@@ -483,34 +510,6 @@ def run_group_test():
     )
 
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
-
-
-def _parse_group_fee_config(data, products: set | None = None):
-    """解析前端费率配置。
-
-    前端三种模式：
-    1. 不扣除费用 → fee=0
-    2. 统一费率   → fee>0
-    3. 按品种费率 → fee=0，fee_modifications 非空
-
-    返回 (fee_uniform, fee_modifications, use_closetoday)，
-    fee_modifications 为 list[FeeModification] 或空列表。
-    费率/费用覆盖在 _resolve_group_trade_specs 中由 fee_modifications 驱动。
-    """
-    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
-    use_closetoday = bool(data.get('use_closetoday', False))
-
-    # ── Read fee_modifications (per-group, from frontend) ──
-    fee_modifications_raw = data.get('fee_modifications')
-    if not isinstance(fee_modifications_raw, list) or not fee_modifications_raw:
-        return fee_uniform, [], use_closetoday
-
-    from tools.products.transactions.fees import (
-        clean_modifications, sort_modifications,
-    )
-    fee_modifications = sort_modifications(clean_modifications(fee_modifications_raw))
-    return fee_uniform, fee_modifications, use_closetoday
-
 
     from tools.data.DataTime import DataTime
 
