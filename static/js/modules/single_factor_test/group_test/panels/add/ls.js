@@ -39,13 +39,18 @@
 
     /** Same logic as list panel's _deriveShortAlias */
     function _deriveShortAlias(node) {
-        if (!node || !node.baseGroupId) return node ? (node.shortAlias || node.name || '?') : '?';
-        var bg = _getGroup(node.baseGroupId);
-        var bgAlias = bg ? (bg.shortAlias || bg.name || bg.id) : node.baseGroupId;
+        if (!node || !node.parentId) return node ? (node.shortAlias || node.name || '?') : '?';
+        // Walk up to root
+        var root = node;
+        while (root && root.parentId) {
+            root = _getGroup(root.parentId);
+            if (!root) break;
+        }
+        var bgAlias = root ? (root.shortAlias || root.name || root.id) : (node.parentId || '?');
         var allNodes = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
         var siblings = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === node.baseGroupId && allNodes[i].parentId === node.parentId) {
+            if (allNodes[i].parentId === node.parentId) {
                 siblings.push(allNodes[i]);
             }
         }
@@ -56,7 +61,7 @@
         var num = idx >= 0 ? (idx + 1) : '?';
         if (node.parentId) {
             var parentNode = _getGroup(node.parentId);
-            if (parentNode && parentNode.baseGroupId === node.baseGroupId) {
+            if (parentNode && parentNode.parentId === node.parentId) {
                 var parentAlias = _deriveShortAlias(parentNode);
                 return parentAlias + ':' + num;
             }

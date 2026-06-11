@@ -107,8 +107,7 @@ def test_snapshot_summary_reads_new_group_settings_shape():
             {
                 "id": "derived-1",
                 "name": "A1:1",
-                "isDerived": True,
-                "baseGroupId": "bg-tester-1-A1",
+                "parentId": "bg-tester-1-A1",
             },
         ],
         "lsConfigs": [

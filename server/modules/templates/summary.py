@@ -85,8 +85,8 @@ def build_snapshot_summary(snapshot: dict) -> dict:
     if group_settings:
         group_parts = []
         raw_groups = group_settings.get('groups') or []
-        base_groups = [group for group in raw_groups if not group.get('isDerived')]
-        derived_groups = [group for group in raw_groups if group.get('isDerived')]
+        base_groups = [group for group in raw_groups if not group.get('parentId')]
+        derived_groups = [group for group in raw_groups if group.get('parentId')]
         if not raw_groups:
             base_groups = group_settings.get('baseGroups') or []
             derived_groups = group_settings.get('derivedGraph') or []
@@ -116,7 +116,7 @@ def build_snapshot_summary(snapshot: dict) -> dict:
                 group_parts.append(f"…另 {len(base_groups) - 8} 个基础组")
             for derived in derived_groups[:4]:
                 label = derived.get('shortAlias') or derived.get('name') or derived.get('id') or '未命名派生组'
-                group_parts.append(f"派生组 {label} · 来源 {derived.get('baseGroupId') or '未设置'}")
+                group_parts.append(f"派生组 {label} · 来源 {derived.get('parentId') or '未设置'}")
             for ls_config in ls_configs[:4]:
                 label = ls_config.get('shortAlias') or ls_config.get('name') or ls_config.get('id') or '未命名 Long-Short'
                 group_parts.append(

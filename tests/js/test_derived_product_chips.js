@@ -26,16 +26,13 @@ const baseId = GT.groupSettings.groups.add({
 const parentId = GT.groupSettings.groups.add({
   id: 'derived-parent',
   name: 'Parent',
-  isDerived: true,
-  baseGroupId: baseId,
+  parentId: baseId,
   productMask: { IF: true, RB: true },
 });
 const childId = GT.groupSettings.groups.add({
   id: 'derived-child',
   name: 'Child',
-  isDerived: true,
-  baseGroupId: baseId,
-  parentId,
+  parentId: parentId,
   productMask: { RB: true },
 });
 

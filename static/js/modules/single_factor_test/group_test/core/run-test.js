@@ -289,13 +289,12 @@
             var allGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
             for (var ai = 0; ai < allGroups.length; ai++) {
                 var ag = allGroups[ai];
-                if (!ag || !ag.parentId || !ag.baseGroupId) continue;
+                if (!ag || !ag.parentId) continue;
                 b.derivedPayload.push({
                     id: ag.id,
+                    parentId: ag.parentId,
                     key: ag.shortAlias || ag.name || '筛选组',
                     name: ag.shortAlias || ag.name || '筛选组',
-                    baseGroup: (ag.baseGroupId || 1) - 1,
-                    productNames: ag.productNames && ag.productNames.length ? ag.productNames.slice() : [],
                     fee_mode: ag.feeMode || null,
                     fee_rate: ag.feeRate != null ? ag.feeRate : null,
                     useCloseToday: ag.useCloseToday !== undefined ? !!ag.useCloseToday : false,
@@ -604,7 +603,12 @@
             return;
         }
 
-        var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
+        // Walk parentId to root
+        var baseNode = node;
+        while (baseNode && baseNode.parentId) {
+            baseNode = GT.groupSettings.groups.get(baseNode.parentId);
+            if (!baseNode) break;
+        }
         var baseGroupIndex = c ? c.getCurrentGroupDetailIndex() : null;
         if (baseGroupIndex == null && baseNode) {
             baseGroupIndex = (baseNode.groupIndex || 1) - 1;
@@ -647,8 +651,13 @@
         var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
         var c = cache();
         var baseGroupIndex = c ? c.getCurrentGroupDetailIndex() : null;
-        if (baseGroupIndex == null && node && node.baseGroupId) {
-            var baseNode = GT.groupSettings.groups.get(node.baseGroupId);
+        if (baseGroupIndex == null && node && node.parentId) {
+            // Walk parentId to root
+            var baseNode = node;
+            while (baseNode && baseNode.parentId) {
+                baseNode = GT.groupSettings.groups.get(baseNode.parentId);
+                if (!baseNode) break;
+            }
             if (baseNode) baseGroupIndex = (baseNode.groupIndex || 1) - 1;
         }
 

@@ -303,10 +303,15 @@
     function lsTesterLabel(dgId) {
         if (!dgId) return '—';
         var dg = GT.groupSettings.groups && GT.groupSettings.groups.get(dgId);
-        if (!dg || !dg.baseGroupId) return '—';
-        var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(dg.baseGroupId);
-        if (!bg || !bg.testerId) return '—';
-        return testerLabel(bg.testerId);
+        if (!dg) return '—';
+        // Walk parentId to root
+        var root = dg;
+        while (root && root.parentId) {
+            root = GT.groupSettings.groups.get(root.parentId);
+            if (!root) break;
+        }
+        if (!root || !root.testerId) return '—';
+        return testerLabel(root.testerId);
     }
 
     // -- 挂载 --

@@ -40,8 +40,7 @@ GT.groupSettings.groups.add({
 GT.groupSettings.groups.add({
   id: 'derived-list',
   name: 'List:1',
-  isDerived: true,
-  baseGroupId: 'base-list',
+  parentId: 'base-list',
   productMask: { IF: true },
   rebalanceMode: 'each_period',
 });

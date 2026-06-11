@@ -24,9 +24,7 @@ const baseId = GT.groupSettings.groups.add({
 const childId = GT.groupSettings.groups.add({
   id: 'base-a-1',
   name: 'A:1',
-  isDerived: true,
-  baseGroupId: baseId,
-  parentId: null,
+  parentId: baseId,
   productMask: { IF: true },
   feeMode: 'none',
   rebalanceMode: 'each_period',
@@ -64,14 +62,13 @@ GT.groupSettings.settings.apply({
   derivedGraph: [{
     id: 'legacy-derived',
     name: 'Legacy Derived',
-    isDerived: true,
-    baseGroupId: 'legacy-base',
+    parentId: 'legacy-base',
     productMask: { IF: true },
   }],
   lsConfigs: [],
 });
 assert.strictEqual(GT.groupSettings.groups.getAll().length, 2);
-assert.strictEqual(GT.groupSettings.groups.get('legacy-derived').isDerived, true);
+assert.strictEqual(GT.groupSettings.groups.get('legacy-derived').parentId, 'legacy-base');
 assert.ok(GT.groupSettings.settings.summarize(GT.groupSettings.settings.collect())[0].includes('基础组 1 个'));
 
 console.log('PASS: groupSettings core stores group fields directly');

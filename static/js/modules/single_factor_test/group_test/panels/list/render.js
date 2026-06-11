@@ -138,7 +138,7 @@
         if (!isEdit) {
             html += '<label style="display:block;margin-bottom:12px;">';
             html += '<span style="display:block;font-size:13px;margin-bottom:4px;">基础组 <span style="color:red;">*</span></span>';
-            html += '<select id="dg-f-baseGroupId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
+            html += '<select id="dg-f-parentId" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;">';
             html += '<option value="">— 选择 —</option>';
             for (var i = 0; i < bgs.length; i++) {
                 html += '<option value="' + H.escapeHTML(bgs[i].id) + '">' + H.escapeHTML(bgs[i].label) + ' (' + H.escapeHTML(bgs[i].factorAlias) + ')</option>';
@@ -198,9 +198,8 @@
         var parentId = modal._parentId;
         var data = { name: H.$('dg-f-name').value.trim(), parentId: parentId || null };
         if (!editId) {
-            data.baseGroupId = H.$('dg-f-baseGroupId').value;
-            if (!data.baseGroupId) { alert('请选择基础组'); return; }
-            data.parentId = parentId || null;
+            data.parentId = H.$('dg-f-parentId').value;
+            if (!data.parentId) { alert('请选择基础组'); return; }
         }
         var cbs = document.querySelectorAll('#dg-f-product-mask .dg-f-prod');
         var mask = {};
@@ -371,34 +370,44 @@
         return h;
     }
 
-    function _renderDerivedTreeForBase(baseGroupId, expandedBatches) {
+    function _renderDerivedTreeForBase(rootGroupId, expandedBatches) {
         _ensureDeps();
         if (!GT.groupSettings.groups) return '';
         var allNodes = GT.groupSettings.groups.getAll();
         var myNodes = [];
         for (var i = 0; i < allNodes.length; i++) {
-            if (allNodes[i].baseGroupId === baseGroupId) {
+            if (allNodes[i].parentId === rootGroupId) {
                 myNodes.push(allNodes[i]);
             }
         }
         if (myNodes.length === 0) return '';
 
-        var treeRoots = GT.groupSettings.groups.getTree();
+        // Build tree nodes from flat list using parentId
         var treeById = {};
-        (function indexTree(nodes) {
-            for (var i = 0; i < nodes.length; i++) {
-                treeById[nodes[i].id] = nodes[i];
-                if (nodes[i].children && nodes[i].children.length > 0) indexTree(nodes[i].children);
+        for (var j = 0; j < myNodes.length; j++) {
+            var n = myNodes[j];
+            treeById[n.id] = { id: n.id, label: n.label, name: n.name, parentId: n.parentId,
+                factorAlias: n.factorAlias, testerId: n.testerId, productMask: n.productMask,
+                childGroupIds: n.childGroupIds || [], children: [] };
+        }
+        // Link children (grandchildren, etc.) by walking parentId chain within myNodes
+        for (var j = 0; j < myNodes.length; j++) {
+            var n2 = myNodes[j];
+            var allFlat = GT.groupSettings.groups.getAll();
+            for (var ki = 0; ki < allFlat.length; ki++) {
+                if (allFlat[ki].parentId === n2.id) {
+                    var childId = allFlat[ki].id;
+                    if (treeById[childId]) {
+                        treeById[n2.id].children.push(treeById[childId]);
+                    }
+                }
             }
-        })(treeRoots);
-
-        var myIds = {};
-        for (var j = 0; j < myNodes.length; j++) { myIds[myNodes[j].id] = true; }
+        }
 
         var roots = [];
         for (var k = 0; k < myNodes.length; k++) {
             var pid = myNodes[k].parentId;
-            if (!pid || !myIds[pid]) {
+            if (!pid || pid === rootGroupId) {
                 var treeNode = treeById[myNodes[k].id];
                 if (treeNode) roots.push(treeNode);
             }

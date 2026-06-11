@@ -40,8 +40,13 @@
 
     function _resolvedConfigForDraft(group) {
         var base = null;
-        if (group && group.baseGroupId && GT.groupSettings.groups) {
-            base = GT.groupSettings.groups.get(group.baseGroupId);
+        if (group && group.parentId && GT.groupSettings.groups) {
+            // Walk parentId to root
+            base = group;
+            while (base && base.parentId) {
+                base = GT.groupSettings.groups.get(base.parentId);
+                if (!base) break;
+            }
         }
         var GS = GT.groupSettings;
         return {
