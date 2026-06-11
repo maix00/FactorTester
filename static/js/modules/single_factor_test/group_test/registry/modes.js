@@ -161,11 +161,12 @@
     api.getMatchingEditActions = function() {
         if (_panelMode !== 'edit') return [];
         var ctx = _buildEditContext();
-        console.log('[modes] getMatchingEditActions: panelMode=', _panelMode, 'ctx=', ctx, 'registry=', _editActionRegistry.map(function(r) { return r.name + '(cond:' + (typeof r.condition === 'function') + ')'; }));
         var result = _editActionRegistry.filter(function(def) {
             if (typeof def.condition === 'function') return def.condition(ctx);
             return true;
         });
+        console.log('[modes] getMatchingEditActions:', 'panelMode=', _panelMode, 'ctx.count=', ctx.count, 'ctx.ids=', ctx.ids, 'matched=', result.map(function(r) { return r.name; }));
+        return result;
     };
 
     // ── add mode ──
