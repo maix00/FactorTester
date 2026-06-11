@@ -162,10 +162,11 @@
         if (_panelMode !== 'edit') return [];
         var ctx = _buildEditContext();
         var result = _editActionRegistry.filter(function(def) {
-            if (typeof def.condition === 'function') return def.condition(ctx);
-            return true;
+            var condResult = typeof def.condition === 'function' ? def.condition(ctx) : true;
+            console.log('[modes] action:', def.name, 'priority=', def.priority, 'condition=', condResult, 'ctx.count=', ctx.count);
+            return condResult;
         });
-        console.log('[modes] getMatchingEditActions:', 'panelMode=', _panelMode, 'ctx.count=', ctx.count, 'ctx.ids=', ctx.ids, 'matched=', result.map(function(r) { return r.name; }));
+        console.log('[modes] getMatchingEditActions:', 'matched=', result.map(function(r) { return r.name; }));
         return result;
     };
 
