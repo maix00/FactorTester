@@ -377,6 +377,7 @@ def _prepare_group_shared_inputs(
     trim_start = _first_valid
     trim_end = _last_valid + 1
     if trim_start > 0 or trim_end < len(_all_nan):
+        signal_update_mask = signal_update_mask[trim_start:trim_end]
         table_np = table_np[trim_start:trim_end]
         signal_returns_np = signal_returns_np[trim_start:trim_end]
         table_src = table_src.iloc[trim_start:trim_end]
@@ -401,7 +402,6 @@ def _prepare_group_shared_inputs(
     present_df = present_df.reindex(index=common_index, columns=signal_valid_cols, fill_value=False)
     if trim_start > 0 or trim_end < len(_all_nan):
         present_df = present_df.iloc[trim_start:trim_end]
-        signal_update_mask = signal_update_mask[trim_start:trim_end]
     present_np = present_df.to_numpy(dtype=bool)
 
     index_list = list(table_src.index)
@@ -472,7 +472,7 @@ def _build_group_membership_from_shared(
     _group_progress(
         f"group membership start factor={factor.alias} T={T} groups={group_count} products={P}"
     )
-    for t in tqdm(range(T), desc="Testing by group for factor " + factor.alias):
+    for t in tqdm(range(T), desc="Computing memberships: " + factor.alias):
         if t > 0 and not bool(signal_update_mask[t]):
             membership_np[t] = current_members
             continue
