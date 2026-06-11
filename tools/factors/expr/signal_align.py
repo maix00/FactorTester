@@ -127,18 +127,24 @@ def signal_align(
     signal_map = cast(pd.Series, idx_series.index.isin(signal_pos))
 
     # 构建新的索引
+    # 过滤掉旧的 _SIGNAL@ 层级 — 确保新索引中只有一个 _SIGNAL@ 列
     signal_name = f'_SIGNAL@{freq_dc.name}'
+    _SIGNAL_PREFIX = '_SIGNAL@'
     left_arrays = [
         data.index.get_level_values(index_names[i]).to_series().where(signal_map)
         for i in range(first_true_idx)
+        if not str(index_names[i]).startswith(_SIGNAL_PREFIX)
     ]
     signal_vals = idx_series.where(signal_map)
     right_arrays = [
         data.index.get_level_values(index_names[i]).to_series()
         for i in range(first_true_idx + 1, len(index_names))
+        if not str(index_names[i]).startswith(_SIGNAL_PREFIX)
     ]
-    left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]]
-    right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]]
+    left_names = [str(n).split('@')[-1] for n in index_names[:first_true_idx]
+                  if not str(n).startswith(_SIGNAL_PREFIX)]
+    right_names = [str(n).split('@')[-1] for n in index_names[first_true_idx + 1:]
+                   if not str(n).startswith(_SIGNAL_PREFIX)]
     new_index = pd.MultiIndex.from_arrays(
         left_arrays + [signal_vals] + right_arrays,
         names=left_names + [signal_name] + right_names
