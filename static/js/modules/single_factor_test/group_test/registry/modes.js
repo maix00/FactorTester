@@ -161,13 +161,9 @@
     api.getMatchingEditActions = function() {
         if (_panelMode !== 'edit') return [];
         var ctx = _buildEditContext();
-        var result = _editActionRegistry.filter(function(def) {
-            var condResult = typeof def.condition === 'function' ? def.condition(ctx) : true;
-            console.log('[modes] action:', def.name, 'priority=', def.priority, 'condition=', condResult, 'ctx.count=', ctx.count);
-            return condResult;
+        return _editActionRegistry.filter(function(def) {
+            return typeof def.condition === 'function' ? def.condition(ctx) : true;
         });
-        console.log('[modes] getMatchingEditActions:', 'matched=', result.map(function(r) { return r.name; }));
-        return result;
     };
 
     // ── add mode ──

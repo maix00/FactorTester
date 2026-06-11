@@ -12,7 +12,6 @@
     if (!GT.panels.add) { GT.panels.add = {}; }
 
     var M = GT.modes;
-    var TABS = GT.tabs;
 
     function _getGroup(id) {
         return GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
@@ -108,7 +107,7 @@
         helpers.exitAdd();
     }
 
-    if (M && TABS) {
+    if (M) {
         M.registerAddFlow({
             flow: 'derived',
             priority: 10,
