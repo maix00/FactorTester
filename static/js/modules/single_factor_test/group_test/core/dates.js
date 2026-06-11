@@ -122,21 +122,58 @@
         };
     };
 
-    // ---------- 读取分组时间范围输入 ----------
+    // ---------- 读取分组时间范围输入（完整版：含时分和模式） ----------
     dates.readGroupTimeRangeInput = function() {
-        var sy = document.getElementById('group_start_year') ? document.getElementById('group_start_year').value : null;
-        var sm = document.getElementById('group_start_month') ? document.getElementById('group_start_month').value : null;
-        var sd = document.getElementById('group_start_day') ? document.getElementById('group_start_day').value : null;
-        var ey = document.getElementById('group_end_year') ? document.getElementById('group_end_year').value : null;
-        var em = document.getElementById('group_end_month') ? document.getElementById('group_end_month').value : null;
-        var ed = document.getElementById('group_end_day') ? document.getElementById('group_end_day').value : null;
+        var sy = document.getElementById('group_start_year');
+        var sm = document.getElementById('group_start_month');
+        var sd = document.getElementById('group_start_day');
+        var sh = document.getElementById('group_start_hour');
+        var si = document.getElementById('group_start_minute');
+        var ey = document.getElementById('group_end_year');
+        var em = document.getElementById('group_end_month');
+        var ed = document.getElementById('group_end_day');
+        var eh = document.getElementById('group_end_hour');
+        var ei = document.getElementById('group_end_minute');
+
+        var hasStartDate = sy && sm && sd && sy.value && sm.value && sd.value;
+        var hasEndDate = ey && em && ed && ey.value && em.value && ed.value;
+
+        // 时分：仅在输入值存在时使用
+        var startHour = (sh && sh.value) ? sh.value : null;
+        var startMinute = (si && si.value) ? si.value : null;
+        var endHour = (eh && eh.value) ? eh.value : null;
+        var endMinute = (ei && ei.value) ? ei.value : null;
+
+        // 时间精度
+        var precEl = document.querySelector('input[name="group_time_precision"]:checked');
+        var precision = precEl ? precEl.value : 'exact';
+
+        // 时区（仅 exact 精度时有效）
+        var tzEl = document.getElementById('group_tz');
+        var tz = (precision === 'exact' && tzEl) ? tzEl.value : null;
+
         return {
-            startDate: (sy && sm && sd) ? dates.buildValidDate(sy, sm, sd) : null,
-            endDate: (ey && em && ed) ? dates.buildValidDate(ey, em, ed) : null,
+            startDate: hasStartDate ? dates.buildValidDate(sy.value, sm.value, sd.value) : null,
+            endDate: hasEndDate ? dates.buildValidDate(ey.value, em.value, ed.value) : null,
+            startHour: startHour,
+            startMinute: startMinute,
+            endHour: endHour,
+            endMinute: endMinute,
+            precision: precision,
+            tz: tz,
+            // 派生：完整时间字符串 (YYYY-MM-DD HH:MM)
+            startDt: hasStartDate ? dates.buildValidDate(sy.value, sm.value, sd.value) + (startHour ? ' ' + startHour + ':' + (startMinute || '00') : '') : null,
+            endDt: hasEndDate ? dates.buildValidDate(ey.value, em.value, ed.value) + (endHour ? ' ' + endHour + ':' + (endMinute || '00') : '') : null,
         };
     };
 
-    // ---------- 解析分组运行时间范围 ----------
+    // ---------- 读取旧版时间范围（仅年月日，向后兼容） ----------
+    dates.readGroupDateOnlyInput = function() {
+        var tr = dates.readGroupTimeRangeInput();
+        return { startDate: tr.startDate, endDate: tr.endDate };
+    };
+
+    // ---------- 解析分组运行时间范围（含新模式字段） ----------
     dates.resolveGroupRunTimeRange = function(savedStartDate, savedEndDate) {
         var explicit = dates.readGroupTimeRangeInput();
         var startDate = explicit.startDate || savedStartDate || null;
@@ -144,65 +181,53 @@
         return {
             startDate: startDate,
             endDate: endDate,
+            startHour: explicit.startHour,
+            startMinute: explicit.startMinute,
+            endHour: explicit.endHour,
+            endMinute: explicit.endMinute,
+            timeMode: explicit.timeMode,
+            startDt: explicit.startDt,
+            endDt: explicit.endDt,
             explicitStartDate: explicit.startDate,
             explicitEndDate: explicit.endDate,
+            precision: explicit.precision,
         };
     };
 
-    // ---------- 绑定"使用当前时间范围"按钮 ----------
-    dates.bindUseTimeRange = function() {
-        var btn = document.getElementById('use_time_range_btn');
-        if (!btn) return;
-        btn.addEventListener('click', function() {
-            var startYear = document.getElementById('start_year') ? document.getElementById('start_year').value : null;
-            var startMonth = document.getElementById('start_month') ? document.getElementById('start_month').value : null;
-            var startDay = document.getElementById('start_day') ? document.getElementById('start_day').value : null;
-            var endYear = document.getElementById('end_year') ? document.getElementById('end_year').value : null;
-            var endMonth = document.getElementById('end_month') ? document.getElementById('end_month').value : null;
-            var endDay = document.getElementById('end_day') ? document.getElementById('end_day').value : null;
-            
-            var startDate = null, endDate = null;
-            if (startYear && startMonth && startDay) {
-                startDate = dates.buildValidDate(startYear, startMonth, startDay);
-                if (startDate) {
-                    var parts = startDate.split('-');
-                    document.getElementById('group_start_year').value = parts[0];
-                    document.getElementById('group_start_month').value = parseInt(parts[1], 10);
-                    document.getElementById('group_start_day').value = parseInt(parts[2], 10);
+    // ---------- 绑定时间精度切换：时分自动禁用/启用 ----------
+    dates.bindTimePrecisionSwitch = function() {
+        var radios = document.querySelectorAll('input[name="group_time_precision"]');
+        if (!radios.length) return;
+
+        function setHourMinuteDisabled(disabled) {
+            ['group_start_hour', 'group_start_minute', 'group_end_hour', 'group_end_minute'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) {
+                    el.disabled = disabled;
+                    el.style.background = disabled ? '#ccc' : '#eee';
                 }
+            });
+        }
+
+        function onPrecisionChange() {
+            var prec = document.querySelector('input[name="group_time_precision"]:checked');
+            if (!prec) return;
+            var val = prec.value;
+            // exact → 手动时分可用，时区显示；day → 时分禁用，时区隐藏
+            var isExact = (val === 'exact');
+            setHourMinuteDisabled(!isExact);
+            var tzWrap = document.getElementById('group_tz_wrap');
+            if (tzWrap) {
+                tzWrap.style.display = isExact ? '' : 'none';
             }
-            if (endYear && endMonth && endDay) {
-                endDate = dates.buildValidDate(endYear, endMonth, endDay);
-                if (endDate) {
-                    var parts = endDate.split('-');
-                    document.getElementById('group_end_year').value = parts[0];
-                    document.getElementById('group_end_month').value = parseInt(parts[1], 10);
-                    document.getElementById('group_end_day').value = parseInt(parts[2], 10);
-                }
-            }
-        });
-    };
+        }
 
-    // ---------- 从时间模块同步时间到分组测试时间输入框 ----------
-    dates.syncFromTimeModule = function() {
-        var IDs = [
-            ['start_year','group_start_year'], ['start_month','group_start_month'], ['start_day','group_start_day'],
-            ['end_year','group_end_year'], ['end_month','group_end_month'], ['end_day','group_end_day']
-        ];
-        IDs.forEach(function(pair) {
-            var src = document.getElementById(pair[0]);
-            var dst = document.getElementById(pair[1]);
-            if (src && dst && src.value) dst.value = src.value;
+        radios.forEach(function(r) {
+            r.addEventListener('change', onPrecisionChange);
         });
 
-    };
-
-    // ---------- 绑定时间同步监听器 ----------
-    dates.bindTimeSyncListeners = function() {
-        ['start_year','start_month','start_day','end_year','end_month','end_day'].forEach(function(id) {
-            var el = document.getElementById(id);
-            if (el) el.addEventListener('change', dates.syncFromTimeModule);
-        });
+        // 初始状态
+        onPrecisionChange();
     };
 
     // ---------- 解析运行时间范围（含 submission 日期 fallback） ----------

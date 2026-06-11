@@ -113,8 +113,7 @@
 
     function init() {
         call(dates().bindDateValidation, function(){})();
-        call(dates().bindUseTimeRange, function(){})();
-        call(dates().bindTimeSyncListeners, function(){})();
+        call(dates().bindTimePrecisionSwitch, function(){})();
         if (GT.localSettings && typeof GT.localSettings.initTabs === 'function') {
             GT.localSettings.initTabs();
         }
@@ -141,11 +140,6 @@
         if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
             GT.panels.actions.updateRebalanceModeDescription();
         }
-        call(dates().syncFromTimeModule, function(){})();
-        document.addEventListener('timeRangeDefaultLoaded', function() {
-            call(dates().syncFromTimeModule, function(){})();
-        }, { once: true });
-        setTimeout(function() { call(dates().syncFromTimeModule, function(){})(); }, 0);
 
         var runBtn = document.getElementById('run_group_test_btn');
         if (runBtn) {
