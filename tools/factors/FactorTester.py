@@ -5,7 +5,7 @@
 # FactorTester 负责驱动因子的量化分析流程，包括：
 #   - 品种管理（全量 / 按成交量筛选 / 按空数据过滤）
 #   - calc_factor  : 批量计算各 Factor 的信号表
-#   - ic_stats / test_by_group: 分组收益与 IC 分析
+#   - ic_stats / calc_factor : 因子计算与 IC 分析
 #
 # 辅助函数：
 #   get_factor_tester : 一键创建包含全部品种的 FactorTester 实例
