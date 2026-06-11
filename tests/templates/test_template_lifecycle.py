@@ -47,8 +47,7 @@ def _make_minimal_snapshot(*, submissions=None, base_groups=None, name="测试�
     }
     if base_groups is not None:
         snap["group_settings"] = {
-            "baseGroups": base_groups,
-            "derivedGraph": [],
+            "groups": base_groups,
             "lsConfigs": [],
             "registrations": [],
         }
@@ -218,7 +217,7 @@ class TestTemplateStorageLifecycle:
         snap = found["snapshot"]
         assert snap["time_data"]["start_date"] == "2024-01-01"
         assert len(snap["submissions"]) == 1
-        assert snap["group_settings"]["baseGroups"][0]["testerId"] == "t1"
+        assert snap["group_settings"]["groups"][0]["testerId"] == "t1"
 
     def test_rename_template(self, tmp_storage):
         """更新模板的 name 字段。"""
@@ -378,7 +377,8 @@ class TestTesterIdRemapping:
         """模拟 global_template_module.js 步骤 3.5 的逻辑。"""
         snap = copy.deepcopy(snapshot)
 
-        if not (snap.get("group_settings", {}).get("baseGroups") and snap.get("submissions")):
+        groups = snap.get("group_settings", {}).get("groups", [])
+        if not (groups and snap.get("submissions")):
             return snap
 
         # 构建 {旧testerId → 新testerId}：按位置 i 匹配
@@ -389,10 +389,10 @@ class TestTesterIdRemapping:
             if old_id and new_id:
                 old_to_new[str(old_id)] = str(new_id)
 
-        # 替换 baseGroups 中的 testerId
-        for bg in snap["group_settings"]["baseGroups"]:
-            if bg.get("testerId") and str(bg["testerId"]) in old_to_new:
-                bg["testerId"] = old_to_new[str(bg["testerId"])]
+        # 替换 groups 中的 testerId（所有 group，不限于根组）
+        for g in snap["group_settings"]["groups"]:
+            if g.get("testerId") and str(g["testerId"]) in old_to_new:
+                g["testerId"] = old_to_new[str(g["testerId"])]
 
         # 同样处理 registrations
         for reg_entry in snap["group_settings"].get("registrations", []):
@@ -411,7 +411,7 @@ class TestTesterIdRemapping:
 
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
-        assert result["group_settings"]["baseGroups"][0]["testerId"] == "new-id-1"
+        assert result["group_settings"]["groups"][0]["testerId"] == "new-id-1"
 
     def test_remap_multiple_testers_preserves_order(self):
         """多个 tester：按位置一一对应，不交叉。"""
@@ -436,13 +436,13 @@ class TestTesterIdRemapping:
 
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
-        bgs = result["group_settings"]["baseGroups"]
+        bgs = result["group_settings"]["groups"]
         assert bgs[0]["testerId"] == "new-A"
         assert bgs[1]["testerId"] == "new-B"
         assert bgs[2]["testerId"] == "new-C"
 
     def test_multiple_base_groups_same_tester(self):
-        """同一个 tester 下有多个 baseGroup，全部应被替换。"""
+        """同一个 tester 下有多个 group，全部应被替换。"""
         snapshot = _make_minimal_snapshot(
             submissions=[_make_submission_item("old-tester", "品种A")],
             base_groups=[
@@ -455,7 +455,7 @@ class TestTesterIdRemapping:
 
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
-        for bg in result["group_settings"]["baseGroups"]:
+        for bg in result["group_settings"]["groups"]:
             assert bg["testerId"] == "new-tester"
 
     def test_unmatched_tester_id_preserved(self):
@@ -471,9 +471,9 @@ class TestTesterIdRemapping:
 
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
-        assert result["group_settings"]["baseGroups"][0]["testerId"] == "new-A"
+        assert result["group_settings"]["groups"][0]["testerId"] == "new-A"
         # orphan-id 不在映射中，保持不变（实际场景中这表示模板数据有问题）
-        assert result["group_settings"]["baseGroups"][1]["testerId"] == "orphan-id"
+        assert result["group_settings"]["groups"][1]["testerId"] == "orphan-id"
 
     def test_empty_submissions_no_crash(self):
         """空 submissions 时不应崩溃。"""
@@ -482,7 +482,7 @@ class TestTesterIdRemapping:
         assert result["group_settings"] == {}
 
     def test_no_base_groups_no_crash(self):
-        """无 baseGroups 时不应崩溃。"""
+        """无 groups 时不应崩溃。"""
         snapshot = _make_minimal_snapshot(
             submissions=[_make_submission_item("old-A", "品种A")],
         )
@@ -510,7 +510,7 @@ class TestTesterIdRemapping:
         """位置调换后，映射仍按位置一一对应（不是按 ID 匹配）。
 
         场景：用户保存前调换了 A 和 B 的顺序。
-        快照中 submissions = [B, A]，baseGroups 的 testerId 也对应 B 和 A。
+        快照中 submissions = [B, A]，groups 的 testerId 也对应 B 和 A。
         重建后 cur_submissions = [B', A'] 按同顺序。
         """
         snapshot = _make_minimal_snapshot(
@@ -532,9 +532,9 @@ class TestTesterIdRemapping:
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
         # 位置 0: old-B → new-B
-        assert result["group_settings"]["baseGroups"][0]["testerId"] == "new-B"
+        assert result["group_settings"]["groups"][0]["testerId"] == "new-B"
         # 位置 1: old-A → new-A
-        assert result["group_settings"]["baseGroups"][1]["testerId"] == "new-A"
+        assert result["group_settings"]["groups"][1]["testerId"] == "new-A"
 
     def test_partial_overlap_tester_ids(self):
         """新 tester 数量多于旧 tester 时（比如用户添加了新 tester），多余的新 tester 不影响旧映射。"""
@@ -556,8 +556,8 @@ class TestTesterIdRemapping:
 
         result = self._remap_tester_ids(snapshot, cur_submissions)
 
-        assert result["group_settings"]["baseGroups"][0]["testerId"] == "new-A"
-        assert result["group_settings"]["baseGroups"][1]["testerId"] == "new-B"
+        assert result["group_settings"]["groups"][0]["testerId"] == "new-A"
+        assert result["group_settings"]["groups"][1]["testerId"] == "new-B"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -569,7 +569,7 @@ class TestApplySnapshotFullFlow:
     """模拟完整的 applySnapshot 流程：清空 + 重建 + 重映射 + 应用。
 
     这是前端 JS applySnapshot 的 Python 等价模拟，用于验证
-    「删掉所有现有的 → 按模板顺序重建新 tester → baseGroups 指向新 testerId」
+    「删掉所有现有的 → 按模板顺序重建新 tester → groups 指向新 testerId」
     的流程。
     """
 
@@ -605,8 +605,8 @@ class TestApplySnapshotFullFlow:
             if old_id and new_id:
                 old_to_new[str(old_id)] = str(new_id)
 
-        if snap.get("group_settings", {}).get("baseGroups"):
-            for bg in snap["group_settings"]["baseGroups"]:
+        if snap.get("group_settings", {}).get("groups"):
+            for bg in snap["group_settings"]["groups"]:
                 if bg.get("testerId") and str(bg["testerId"]) in old_to_new:
                     bg["testerId"] = old_to_new[str(bg["testerId"])]
 
@@ -616,10 +616,10 @@ class TestApplySnapshotFullFlow:
                     reg_entry["testerId"] = old_to_new[str(reg_entry["testerId"])]
 
         # ── 步骤 5: 应用 group_settings ──
-        # 验证 baseGroups 的 testerId 都指向新 submissions 中的有效 id
+        # 验证 groups 的 testerId 都指向新 submissions 中的有效 id
         valid_ids = {s["id"] for s in new_submissions}
         orphan_bgs = []
-        for bg in snap.get("group_settings", {}).get("baseGroups", []):
+        for bg in snap.get("group_settings", {}).get("groups", []):
             if bg.get("testerId") not in valid_ids:
                 orphan_bgs.append(bg)
 
@@ -631,7 +631,7 @@ class TestApplySnapshotFullFlow:
         }
 
     def test_all_base_groups_point_to_new_testers(self):
-        """完整流程后，所有 baseGroup 的 testerId 应指向新 tester。"""
+        """完整流程后，所有 group 的 testerId 应指向新 tester。"""
         snapshot = _make_minimal_snapshot(
             submissions=[
                 _make_submission_item("old-A", "品种A"),
@@ -646,20 +646,20 @@ class TestApplySnapshotFullFlow:
 
         result = self._simulate_apply_snapshot(snapshot)
 
-        # 无孤儿 baseGroup
+        # 无孤儿 group
         assert result["orphan_base_groups"] == []
 
         # 所有 testerId 都在新 submissions 中
         valid_ids = {s["id"] for s in result["new_submissions"]}
-        for bg in result["group_settings"]["baseGroups"]:
+        for bg in result["group_settings"]["groups"]:
             assert bg["testerId"] in valid_ids
 
         # 旧 id 不应再出现
-        for bg in result["group_settings"]["baseGroups"]:
+        for bg in result["group_settings"]["groups"]:
             assert bg["testerId"] not in ("old-A", "old-B")
 
     def test_without_remap_base_groups_are_orphans(self):
-        """如果没有步骤 3.5，baseGroups 会引用不存在的旧 testerId。"""
+        """如果没有步骤 3.5，groups 会引用不存在的旧 testerId。"""
         snapshot = _make_minimal_snapshot(
             submissions=[_make_submission_item("old-A", "品种A")],
             base_groups=[_make_base_group("old-A", "G1")],
@@ -671,15 +671,15 @@ class TestApplySnapshotFullFlow:
         new_id = f"{ts}-0"
         new_submissions = [{"id": new_id}]
 
-        # baseGroups 的 testerId 还是 "old-A"
-        bgs = snapshot["group_settings"]["baseGroups"]
+        # groups 的 testerId 还是 "old-A"
+        bgs = snapshot["group_settings"]["groups"]
         # 检查：如果没有重映射，"old-A" 不在有效 id 中
         valid_ids = {s["id"] for s in new_submissions}
         assert bgs[0]["testerId"] not in valid_ids
         # 这就是步骤 3.5 要解决的问题
 
     def test_simple_group_config_remapped_correctly(self):
-        """简单场景：保存一个 tester + 一个 baseGroup，加载后正确重映射。"""
+        """简单场景：保存一个 tester + 一个 group，加载后正确重映射。"""
         snapshot = _make_minimal_snapshot(
             submissions=[_make_submission_item("saved-id-001", "测试品种")],
             base_groups=[_make_base_group("saved-id-001", "测试分组", factor_alias="Return", group_count=5)],
@@ -687,7 +687,7 @@ class TestApplySnapshotFullFlow:
 
         result = self._simulate_apply_snapshot(snapshot)
 
-        bg = result["group_settings"]["baseGroups"][0]
+        bg = result["group_settings"]["groups"][0]
         new_sub = result["new_submissions"][0]
 
         assert bg["testerId"] == new_sub["id"]
