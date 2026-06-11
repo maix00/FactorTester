@@ -1041,6 +1041,14 @@ def _simulate_group_from_preloaded(
     trade_present_np = np.isfinite(price_np) & (price_np > 0)
     data_has_bar = trade_present_np if np.any(~trade_present_np) else None
     _group_progress(f"simulate trading book start factor={factor.alias} T={len(index_list)} groups={group_count} products={P} rebalance={rebalance_mode}")
+    # Debug: check derived-group membership before simulation
+    for d_idx in range(len(derived_info)):
+        g = n_base + d_idx
+        _group_progress(
+            f"[DEBUG] pre-sim derived group {d_idx} (global={g}) "
+            f"membership_sum={int(membership_np[:, g, :].sum())} "
+            f"rebalance_mode={rebalance_modes_list[g]}"
+        )
     sim_result = simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_filled,
@@ -1066,6 +1074,16 @@ def _simulate_group_from_preloaded(
     )
     _group_progress(f"simulate trading book done factor={factor.alias}")
     group_returns_np = sim_result['net_returns_np']
+    # Debug: check derived-group returns
+    for d_idx in range(len(derived_info)):
+        g = n_base + d_idx
+        ret = group_returns_np[:, g]
+        _group_progress(
+            f"[DEBUG] post-sim derived group {d_idx} (global={g}) "
+            f"net_returns sum={float(np.nansum(ret)):.6f} "
+            f"non_zero_count={int(np.count_nonzero(ret))} "
+            f"first_5_values={ret[:5].tolist()}"
+        )
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
     group_product_fee_contrib_np = sim_result['product_fee_contrib_np']
