@@ -157,10 +157,6 @@
         return GT.groupSettings.groups.serializeFeeMap(feeMap);
     };
 
-    actions.serializeGroupVariant = function(group, fallbackName) {
-        return GT.groupSettings.groups.serializeVariant(group, fallbackName);
-    };
-
     actions.collectSelectedDerivedProducts = function() {
         var names = [];
         document.querySelectorAll('.derived-product-checkbox:checked').forEach(function(cb) {
@@ -185,7 +181,7 @@
             : Number(groupIndex);
         var expectedIndex = baseGroupIndex + 1;
         var matches = all.filter(function(group) {
-            if (!group || group.isDerived) return false;
+            if (!group || group.parentId) return false;
             if (Number(group.groupIndex) !== expectedIndex) return false;
             if (submissionId && String(group.testerId) !== String(submissionId)) return false;
             if (factorAlias && String(group.factorAlias || '') !== String(factorAlias || '')) return false;
@@ -220,7 +216,7 @@
         var key = node ? actions.groupDisplayKey(node) : null;
         if (lastGrossData) {
             lastGrossData = lastGrossData.filter(function(group) {
-                return !(group && group.is_derived && group.derived && group.derived.id === id);
+                return !(group && group._id === id);
             });
             c.setLastGrossData(lastGrossData);
         }
@@ -247,9 +243,8 @@
         try {
             newId = GT.groupSettings.groups.add({
                 name: '',
-                isDerived: true,
+                parentId: baseGroupId,
                 baseGroupId: baseGroupId,
-                parentId: null,
                 productMask: productMask
             });
         } catch (e) {
@@ -268,7 +263,7 @@
         if (baseGroupId && GT.groupSettings.groups) {
             var allNodes = GT.groupSettings.groups.getAll();
             for (var i = 0; i < allNodes.length; i++) {
-                if (allNodes[i].isDerived && allNodes[i].baseGroupId === baseGroupId) {
+                if (allNodes[i].parentId && allNodes[i].baseGroupId === baseGroupId) {
                     derivedNodes.push(allNodes[i]);
                 }
             }
@@ -291,7 +286,7 @@
                 var node = derivedNodes[d];
                 var alias = actions.groupDisplayKey(node);
                 var products = actions.effectiveDerivedProductNames(node);
-                var generated = grossData.some(function(g) { return g && g.is_derived && g.derived && g.derived.id === node.id; });
+                var generated = grossData.some(function(g) { return g && g._id === node.id; });
 
                 html += '<div class="derived-group-list-row" data-derived-id="' + escapeHtml(node.id) + '"'
                     + ' style="display:flex;align-items:center;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;">'

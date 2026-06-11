@@ -5,7 +5,7 @@
  *   - 运行分组测试（单次/批量/全因子）
  *   - 加载默认分组
  *   - 派生组生成/删除
- *   - 工具函数：postBatchGroupTest, clearResults
+ *   - 工具函数：postGroupTest, clearResults
  *
  * 挂载到 GT.core.runTest。
  */
@@ -57,10 +57,10 @@
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * 分组测试 POST（单次请求，后端统一调度）
+     * 分组测试 POST
      */
-    runTest.postBatchGroupTest = function(payload) {
-        return fetch('/run_group_test_batch', {
+    runTest.postGroupTest = function(payload) {
+        return fetch('/run_group_test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -96,7 +96,7 @@
         var groups = GT.groupSettings.groups;
         var lsConfigs = GT.groupSettings.lsConfigs;
 
-        var existingBase = (groups.getAll() || []).filter(function(g) { return !g.isDerived; });
+        var existingBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; });
         var existingLS = lsConfigs.getAll() || [];
 
         if (existingBase.length > 0 || existingLS.length > 0) {
@@ -183,7 +183,7 @@
             }
 
             if (statusSpan) {
-                var totalBase = (groups.getAll() || []).filter(function(g) { return !g.isDerived; }).length;
+                var totalBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; }).length;
                 var totalLS = (lsConfigs.getAll() || []).length;
                 statusSpan.innerHTML = '✓ 已加载 ' + totalBase + ' 个基础组 + ' + totalLS + ' 个 LS 组';
                 statusSpan.style.color = '#28a745';
@@ -220,7 +220,7 @@
 
         // ── 0. 没有分组则自动加载默认分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
-        var nonDerived = allBase.filter(function(g) { return !g.isDerived; });
+        var nonDerived = allBase.filter(function(g) { return !g.parentId; });
         if (nonDerived.length === 0) {
             if (statusSpan) {
                 statusSpan.innerHTML = '⏳ 无现有分组，正在加载默认分组...';
@@ -228,7 +228,7 @@
             }
             await runTest.loadDefaultGroups();
             allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
-            nonDerived = allBase.filter(function(g) { return !g.isDerived; });
+            nonDerived = allBase.filter(function(g) { return !g.parentId; });
             if (nonDerived.length === 0) {
                 if (statusSpan) {
                     statusSpan.innerHTML = '✗ 无法加载默认分组';
@@ -285,9 +285,27 @@
                     expandedIndex += 1;
                 }
             }
-            b.derivedPayload = (GT.core.prerunCollect && typeof GT.core.prerunCollect.collectDerivedPayloadForBatch === 'function')
-                ? GT.core.prerunCollect.collectDerivedPayloadForBatch(b)
-                : [];
+            // 筛选组：直接从 groupSettings 读取
+            b.derivedPayload = [];
+            var allGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
+            for (var ai = 0; ai < allGroups.length; ai++) {
+                var ag = allGroups[ai];
+                if (!ag || !ag.parentId || !ag.baseGroupId) continue;
+                b.derivedPayload.push({
+                    id: ag.id,
+                    key: ag.shortAlias || ag.name || '筛选组',
+                    name: ag.shortAlias || ag.name || '筛选组',
+                    baseGroup: (ag.baseGroupId || 1) - 1,
+                    productNames: ag.productNames && ag.productNames.length ? ag.productNames.slice() : [],
+                    fee_mode: ag.feeMode || null,
+                    fee_rate: ag.feeRate != null ? ag.feeRate : null,
+                    useCloseToday: ag.useCloseToday !== undefined ? !!ag.useCloseToday : false,
+                    rebalance_mode: ag.rebalanceMode || null,
+                    liquidity_mode: ag.liquidityMode || null,
+                    liquidity_percent: ag.liquidityPercent != null ? ag.liquidityPercent : null,
+                    margin_mode: ag.marginMode || null
+                });
+            }
             for (var di = 0; di < b.derivedPayload.length; di++) {
                 if (b.derivedPayload[di].id) {
                     b.groupIdToIndex[b.derivedPayload[di].id] = expandedIndex;
@@ -346,7 +364,7 @@
             var allFeeGroups = GT.groupSettings.groups.getAll() || [];
             for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
                 var fg = allFeeGroups[fgi];
-                if (fg.isDerived) continue;
+                if (fg.parentId) continue;
                 if (fg.feeMode === 'per_product') hasPerProduct = true;
                 if (fg.feeMode === 'uniform' && fee === 0) {
                     fee = fg.feeRate != null ? fg.feeRate : 0.0025;
@@ -366,28 +384,34 @@
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 构建 batch payloads ──
+        // ── 构建 batch payloads：直接传 groupSettings 的原样数据 ──
+        var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
         var batchPayloads = [];
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
-            var groupPayload = [];
+            // 收集本 batch 涉及的所有 group id
+            var batchGroupIds = {};
             for (var gi = 0; gi < batch.groups.length; gi++) {
-                var g = batch.groups[gi];
-                var groupIdx = (g.groupIndex || (gi + 1)) - 1;
-                var variant = GT.panels.actions ? GT.panels.actions.serializeGroupVariant(g, 'Group ' + (groupIdx + 1))
-                    : (GT.groupSettings.groups.serializeVariant ? GT.groupSettings.groups.serializeVariant(g, 'Group ' + (groupIdx + 1)) : null);
-                if (!variant) continue;
-                variant.group_index = groupIdx;
-                groupPayload.push(variant);
+                if (batch.groups[gi] && batch.groups[gi].id) batchGroupIds[batch.groups[gi].id] = true;
             }
-            var derivedPayload = batch.derivedPayload || [];
+            // 筛选组：找出 baseGroupId 指向本 batch 中某个 group 的筛选组
+            for (var si = 0; si < allStoredGroups.length; si++) {
+                var sg = allStoredGroups[si];
+                if (sg && sg.parentId && sg.baseGroupId && batchGroupIds[sg.baseGroupId]) {
+                    batchGroupIds[sg.id] = true;
+                }
+            }
+            // 从存储中取出本 batch 涉及的所有 group（保持添加顺序）
+            var groupList = [];
+            for (var ai = 0; ai < allStoredGroups.length; ai++) {
+                if (batchGroupIds[allStoredGroups[ai].id]) groupList.push(allStoredGroups[ai]);
+            }
             batchPayloads.push({
                 submission_id: batch.testerId,
                 factor_alias: batch.factorAlias,
                 n_groups: batch.groupCount,
-                groups: groupPayload.length > 0 ? groupPayload : null,
-                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null,
-                derived_groups: derivedPayload.length > 0 ? derivedPayload : null
+                groups: groupList.length > 0 ? groupList : null,
+                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
             });
         }
 
@@ -451,7 +475,7 @@
                 insertParent.insertBefore(progressBar, insertBefore);
             }
 
-            var data = await runTest.postBatchGroupTest(bulkPayload);
+            var data = await runTest.postGroupTest(bulkPayload);
             if (!data.success) {
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
                     ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
@@ -537,7 +561,7 @@
         def.generated = true;
         var group = result.group;
         group.name = def.name;
-        group.is_derived = true;
+        group.parent_id = true;
         group.derived = Object.assign({}, group.derived || {}, { id: def.id, key: def.key });
         var c = cache();
         var grossData = c ? c.getLastGrossData() : null;
@@ -567,7 +591,7 @@
     /** 单个派生组生成：发 1 次请求，更新数据，刷新 1 次 */
     runTest.generateDerivedGroup = async function(id) {
         var node = GT.groupSettings.groups ? GT.groupSettings.groups.get(id) : null;
-        if (!node || !node.isDerived) return;
+        if (!node || !node.parentId) return;
         var products = GT.panels.actions ? GT.panels.actions.effectiveDerivedProductNames(node) : [];
         if (!products.length) {
             alert('该派生组没有选中任何品种。');

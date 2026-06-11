@@ -193,7 +193,7 @@
 
     /**
      * 构建 group_index → group meta 的映射 (refs #100)。
-     * 返回：{ batchMap: {idx: addBatch}, aliasMap: {idx: shortAlias}, groupMeta: {idx: {addBatch, shortAlias, parentId, isDerived}} }
+     * 返回：{ batchMap: {idx: addBatch}, aliasMap: {idx: shortAlias}, groupMeta: {idx: {addBatch, shortAlias, parentId}} }
      */
     function _buildGroupMetaMap(snapshotData) {
         var groupNames = snapshotData.group_names || {};
@@ -223,7 +223,6 @@
                     shortAlias: item.shortAlias || alias,
                     parentId: item.parentId || null,
                     baseGroupId: item.baseGroupId || null,
-                    isDerived: !!item.isDerived,
                     id: item.id || null
                 };
             } else {
@@ -232,7 +231,6 @@
                     shortAlias: alias,
                     parentId: null,
                     baseGroupId: null,
-                    isDerived: false,
                     id: null
                 };
             }
@@ -395,7 +393,7 @@
         for (var key in groupMeta) {
             if (!groupMeta.hasOwnProperty(key)) continue;
             var kmeta = groupMeta[key];
-            if (!kmeta.isDerived && kmeta.id) {
+            if (!kmeta.parentId && kmeta.id) {
                 baseGroupIdToIdx[kmeta.id] = parseInt(key, 10);
             }
         }
@@ -516,7 +514,7 @@
                 normalIndices.push(i);
                 continue;
             }
-            if (meta.isDerived) {
+            if (meta.parentId) {
                 derivedIndices.push(i);
             } else {
                 normalIndices.push(i);

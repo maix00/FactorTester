@@ -1,5 +1,5 @@
 /**
- * panels/add/base.js — Add-flow panel: "新建基础组" (category-2)
+ * panels/add/group.js — Add-flow panel: "新建分组" (category-2)
  *
  * Renders tester selector → groupIndex/groupCount (side-by-side) → allGroups
  * checkbox → factor selector → submit handled by app.js
@@ -10,7 +10,7 @@
     if (!GT.panels) { GT.panels = {}; }
     if (!GT.panels.add) { GT.panels.add = {}; }
 
-    var _containerId = 'add-base';
+    var _containerId = 'add-group';
     var _mounted = false;
 
     function $(id) { return document.getElementById(id); }
@@ -480,7 +480,7 @@
     // ── Export ──
 
     GT.panels.add = GT.panels.add || {};
-    GT.panels.add.base = {
+    GT.panels.add.group = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
@@ -491,12 +491,12 @@
     // ── Register add flow to GT.modes ──
     if (GT.modes) {
         GT.modes.registerAddFlow({
-            flow: 'base',
+            flow: 'group',
             priority: 0,
             condition: function() { return true; },
             buildDraft: function() {
                 return {
-                    addFlow: 'base',
+                    addFlow: 'group',
                     testerId: null,
                     groupCount: 5,
                     allGroups: true,
@@ -512,9 +512,9 @@
                 submitAddBatches(draft);
                 helpers.exitAdd();
             },
-            defaultTab: 'add-base'
+            defaultTab: 'add-group'
         });
     }
 
-    GT.log('panels.base.add loaded');
+    GT.log('panels.add.group loaded');
 })();

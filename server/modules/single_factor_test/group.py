@@ -224,8 +224,11 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
     for item in groups_payload:
         if not isinstance(item, dict):
             continue
+        # 子组（有 parentId/parent_id）不在 variant mapping 中处理 —— 走 _extract_derived_groups_from_payload
+        if item.get('parentId') or item.get('parent_id'):
+            continue
         try:
-            g = int(item.get('group_index', 0))
+            g = int(item.get('group_index', item.get('groupIndex', 0)))
         except (TypeError, ValueError):
             continue
         display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}'
@@ -246,7 +249,96 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
     return names, grouped or None
 
 
-def _group_display_key(group_idx: int, n_base: int, derived_info: list[dict], group_names=None) -> str:
+def _extract_derived_groups_from_payload(
+    groups_payload, n_groups_name: dict[int, str] | None = None
+) -> list[dict] | None:
+    """从扁平的 groups 数组中提取子组（有 parentId 的条目）。
+
+    每个子组需要 base_group（指向基组索引，按 groupIndex/gid）、
+    product_names（从 productMask 或 productNames 提取），以及元数据。
+    """
+    if not isinstance(groups_payload, list):
+        return None
+
+    # 第一遍：为所有组建立 id → groupIndex 映射
+    gid_to_index: dict[str, int] = {}
+    for item in groups_payload:
+        if not isinstance(item, dict):
+            continue
+        gid = item.get('id')
+        idx = item.get('groupIndex')
+        if gid and isinstance(idx, (int, float)):
+            gid_to_index[str(gid)] = int(idx) - 1  # groupIndex 是 1-based
+
+    derived = []
+    for item in groups_payload:
+        if not isinstance(item, dict):
+            continue
+        if not item.get('parentId'):
+            continue
+
+        base_group_id = item.get('baseGroupId')
+        if base_group_id == '__batch__':
+            # 可以遍扫描后稍后解析
+            pass
+
+        # 解析 base_group 索引
+        base_group = None
+        if base_group_id and base_group_id != '__batch__':
+            base_group = gid_to_index.get(str(base_group_id))
+        if base_group is None:
+            idx = item.get('groupIndex')
+            if isinstance(idx, (int, float)):
+                base_group = int(idx) - 1
+
+        if base_group is None:
+            continue
+
+        # 提取产品列表
+        product_names = _extract_product_names_from_group(item)
+
+        display_name = (
+            item.get('shortAlias')
+            or item.get('name')
+            or item.get('key')
+            or f'第{base_group + 1}组精选'
+        )
+
+        entry = {
+            'name': str(display_name),
+            'key': str(display_name),
+            'base_group': base_group,
+            'group_index': base_group,
+            'product_names': product_names,
+        }
+        # 额外转发配置字段
+        for src, dst in [
+            ('feeMode', 'fee_mode'), ('feeRate', 'fee_rate'), ('feeMap', 'fee_map'),
+            ('useCloseToday', 'use_close_today'),
+            ('rebalanceMode', 'rebalance_mode'), ('liquidityMode', 'liquidity_mode'),
+            ('liquidityPercent', 'liquidity_percent'), ('marginMode', 'margin_mode'),
+        ]:
+            val = item.get(src)
+            if val is not None:
+                entry[dst] = val
+        derived.append(entry)
+
+    return derived if derived else None
+
+
+def _extract_product_names_from_group(group: dict) -> list[str]:
+    """从 group 对象中提取产品名列表（扁平化 productMask → 产品名数组）."""
+    # 优先用 productNames（已经是数组）
+    pn = group.get('productNames')
+    if isinstance(pn, list) and pn:
+        return [str(n) for n in pn]
+
+    # productMask: { productName: true/false }
+    mask = group.get('productMask')
+    if isinstance(mask, dict):
+        return sorted([str(k) for k, v in mask.items() if v])
+
+    return []
     names = _normalize_group_names(group_names)
     if group_idx in names:
         return names[group_idx]
@@ -386,11 +478,8 @@ def _build_derived_group_payload(group_result, group_index: int, product_names: 
         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-        'is_derived': True,
-        'derived': {
-            'base_group': group_index,
-            'product_names': [display_names[idx] for idx in selected_idx],
-        },
+        'parent_id': group_index,
+        'product_names': [display_names[idx] for idx in selected_idx],
     }
     return group, metric
 
@@ -486,11 +575,8 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
                         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
                         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-                        'is_derived': True,
-                        'derived': {
-                            'base_group': gi,
-                            'product_names': [display_names[idx] for idx in item['selected_idx']],
-                        },
+                        'parent_id': gi,
+                        'product_names': [display_names[idx] for idx in item['selected_idx']],
                     },
                     'metric': metric,
                 }
@@ -529,11 +615,8 @@ def _build_derived_groups_batch_payload(group_result, entries: list[dict],
                         'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
                         'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
                         'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-                        'is_derived': True,
-                        'derived': {
-                            'base_group': gi,
-                            'product_names': [display_names[idx] for idx in item['selected_idx']],
-                        },
+                        'parent_id': gi,
+                        'product_names': [display_names[idx] for idx in item['selected_idx']],
                     },
                     'metric': metric,
                 }
@@ -656,15 +739,21 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
     n_groups = int(payload_entry.get('n_groups', 5))
     groups = payload_entry.get('groups')
     group_names = payload_entry.get('group_names')
+    group_variants = None  # {group_index: [variant_dict, ...]}
     if isinstance(groups, list) and groups:
-        n_groups_name, _ = _parse_groups_payload(groups)
+        n_groups_name, group_variants = _parse_groups_payload(groups)
     else:
         n_groups_name = _parse_group_names_payload(group_names)
     if not n_groups_name:
         n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
-    entry_derived_groups = payload_entry.get('derived_groups')
+
+    # 从 groups 数组中提取子组（有 parentId 的条目）
+    entry_derived_groups = _extract_derived_groups_from_payload(groups, n_groups_name)
+    if not entry_derived_groups:
+        entry_derived_groups = payload_entry.get('derived_groups')
     if not isinstance(entry_derived_groups, list):
         entry_derived_groups = default_derived_groups
+
     raw_ls = payload_entry.get('ls_configs')
     ls_configs = None
     if isinstance(raw_ls, list) and raw_ls:
@@ -678,6 +767,7 @@ def _normalize_group_simulation_spec(payload_entry: dict, default_derived_groups
         'factor_alias': factor_alias,
         'n_groups': n_groups,
         'n_groups_name': n_groups_name,
+        'group_variants': group_variants,
         'derived_groups': entry_derived_groups,
         'ls_configs': ls_configs,
     }
@@ -724,12 +814,12 @@ def _serialize_group_simulation_result(
             f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
-        is_derived = g >= n_base
+        is_child = g >= n_base
         vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
         fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
         group_key = _group_display_key(g, n_base, derived_info, result_group_names)
-        if is_derived:
+        if is_child:
             di = derived_info[g - n_base]
             group_name = di.get('name', f'Group {g + 1}')
         else:
@@ -748,14 +838,12 @@ def _serialize_group_simulation_result(
                 for v in group_result.trade_notional_ratio_np[:, g]
             ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
         }
-        if is_derived:
+        if is_child:
             di = derived_info[g - n_base]
-            entry['is_derived'] = True
-            entry['derived'] = {
-                'base_group': di['base_group'],
-                'product_names': di['product_names'],
-                'id': di.get('id'),
-            }
+            entry['parent_id'] = di['base_group']
+            entry['product_names'] = di['product_names']
+            if di.get('id'):
+                entry['_id'] = di['id']
         groups_data.append(entry)
     _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
 
@@ -793,8 +881,7 @@ def _serialize_group_simulation_result(
                 'fee_costs': [0.0] * len(r_ls),
                 'trade_notional_ratios': [0.0] * len(r_ls),
                 'is_ls': True,
-                'is_derived': True,
-                'derived': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
+                'ls_info': {'type': 'long_short', 'key': ls_key, 'config': ls_config},
             })
             metrics[ls_key] = _compute_ls_metrics(r_ls, report_df, idx_list)
             _progress(
@@ -826,8 +913,8 @@ def _serialize_group_simulation_result(
     }
 
 
-@sft_bp.route('/run_group_test_batch', methods=['POST'])
-def run_group_test_batch():
+@sft_bp.route('/run_group_test', methods=['POST'])
+def run_group_test():
     """批量并行运行多个分组测试提交条目，支持跨提交条目的 Long-Short。
     
     Request JSON:
@@ -886,7 +973,7 @@ def run_group_test_batch():
     first_entry = submitted_entries[0]
     try:
         sub_id = first_entry.get('submission_id')
-        tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test_batch')
+        tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test')
         fee_uniform, fee_map, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
     except Exception as e:
         return jsonify({'success': False, 'error': f'费率解析失败: {e}'}), 400
@@ -914,7 +1001,7 @@ def run_group_test_batch():
     factor_aliases_by_submission: dict[str, list[str]] = {}
     for submission_id, indexed_specs in entries_by_submission.items():
         try:
-            tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_batch_calendar')
+            tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar')
         except Exception as exc:
             _progress(f"calendar build skip submission={submission_id} error={exc}")
             continue
@@ -944,7 +1031,7 @@ def run_group_test_batch():
         f"factor_freq_count={len(all_factor_freqs)}"
     )
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
-        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_batch_calendar_build')
+        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar_build')
         _progress(
             f"calendar build start submission={submission_id} "
             f"factors={len(factor_aliases)} freq={effective_group_calendar_freq}"
@@ -990,7 +1077,7 @@ def run_group_test_batch():
 
     submission_specs: list[tuple[str, Any, list[tuple[int, dict[str, Any]]]]] = []
     for submission_id, indexed_specs in entries_by_submission.items():
-        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_batch_submission')
+        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_submission')
         submission_specs.append((submission_id, tester, indexed_specs))
 
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
@@ -1147,9 +1234,8 @@ def run_group_test_batch():
                 'fee_costs': [0.0] * len(r_ls),
                 'trade_notional_ratios': [0.0] * len(r_ls),
                 'is_ls': True,
-                'is_derived': True,
                 'is_cross_batch': True,
-                'derived': {
+                'cross_ls_info': {
                     'type': 'long_short',
                     'long_batch': long_info,
                     'short_batch': short_info,

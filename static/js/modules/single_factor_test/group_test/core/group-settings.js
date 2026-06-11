@@ -97,6 +97,8 @@
     var _groupItems = [];
     var _groupIdCounter = 0;
     var _groupAddBatchCounter = 0;  // monotonic counter for addBatch (refs #100)
+    // groupAddBatch registry: { [number]: {number, name, submission_id, factor, n_groups} }
+    var _batches = {};
 
     function _groupUuid() {
         _groupIdCounter += 1;
@@ -108,6 +110,79 @@
             if (_groupItems[i].id === id) return i;
         }
         return -1;
+    }
+
+    // ── groupAddBatch CRUD ──
+
+    /** Create a new groupAddBatch object. Returns the batch number. */
+    function _batchCreate(submissionId, factorAlias, nGroups) {
+        _groupAddBatchCounter += 1;
+        var letter = '';
+        var n = _groupAddBatchCounter;
+        while (n > 0) { n--; letter = String.fromCharCode(65 + (n % 26)) + letter; n = Math.floor(n / 26); }
+        _batches[_groupAddBatchCounter] = {
+            number: _groupAddBatchCounter,
+            name: letter,
+            submission_id: submissionId || '',
+            factor: factorAlias || '',
+            n_groups: nGroups || 0
+        };
+        return _groupAddBatchCounter;
+    }
+
+    function _batchGet(number) {
+        return _batches[number] || null;
+    }
+
+    function _batchGetAll() {
+        return Object.keys(_batches).map(function(k) { return _batches[k]; });
+    }
+
+    function _batchForGroup(group) {
+        if (!group || !group.addBatch) return null;
+        return _batches[group.addBatch] || null;
+    }
+
+    function _batchUpdate(number, patch) {
+        var b = _batches[number];
+        if (!b) return null;
+        Object.keys(patch).forEach(function(k) { b[k] = patch[k]; });
+        return b;
+    }
+
+    function _batchRemove(number) {
+        delete _batches[number];
+    }
+
+    function _batchAutoSyncFromGroups() {
+        // Ensure _batches exists for every addBatch referenced by groups
+        var allGroups = _groupItems;
+        for (var i = 0; i < allGroups.length; i++) {
+            var bnum = allGroups[i].addBatch;
+            if (bnum && !_batches[bnum]) {
+                // Infer batch info from the root group in this batch
+                var batchGroups = allGroups.filter(function(g) { return g.addBatch === bnum; });
+                var root = null;
+                for (var j = 0; j < batchGroups.length; j++) {
+                    if (!batchGroups[j].parentId) { root = batchGroups[j]; break; }
+                }
+                if (!root && batchGroups.length > 0) root = batchGroups[0];
+                _batches[bnum] = {
+                    number: bnum,
+                    name: _batchNumberToLetter(bnum),
+                    submission_id: root ? (root.testerId || '') : '',
+                    factor: root ? (root.factorAlias || '') : '',
+                    n_groups: root ? (root.groupCount || 0) : (batchGroups.length || 0)
+                };
+            }
+        }
+    }
+
+    function _batchNumberToLetter(num) {
+        var letter = '';
+        var n = num;
+        while (n > 0) { n--; letter = String.fromCharCode(65 + (n % 26)) + letter; n = Math.floor(n / 26); }
+        return letter;
     }
 
     function _groupGetRaw(id) {
@@ -132,27 +207,19 @@
         // ── Identity ──
         { key: 'id',          type: 'string',  default: '',    patchable: false },
         { key: 'name',        type: 'string',  default: '',
-          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
-        { key: 'isDerived',   type: 'boolean', default: false, patchable: false },
+          validate: function(v, config) { return (!v || typeof v !== 'string' || !v.trim()) ? 'name is required (non-empty string)' : null; } },
 
         // ── Tree / lineage ──
         { key: 'parentId',     type: 'string',  default: null },
-        { key: 'baseGroupId',  type: 'string',  default: null,
-          validate: function(v, config) {
-              if (!config || !config.isDerived) return null;
-              if (!v || typeof v !== 'string') return 'baseGroupId is required for derived groups';
-              if (v !== '__batch__' && !_groupGetRaw(v)) return 'baseGroupId references a non-existent group: ' + v;
-              return null;
-          } },
+        { key: 'baseGroupId',  type: 'string',  default: null },
 
         // ── Tester / factor scoping ──
         { key: 'testerId',    type: 'string',  default: '',
-          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string') ? 'testerId is required' : null; } },
+          validate: function(v, config) { return (!v || typeof v !== 'string') ? 'testerId is required' : null; } },
         { key: 'factorAlias', type: 'string',  default: '',
-          validate: function(v, config) { if (config && config.isDerived) return null; return (!v || typeof v !== 'string') ? 'factorAlias is required' : null; } },
+          validate: function(v, config) { return (!v || typeof v !== 'string') ? 'factorAlias is required' : null; } },
         { key: 'groupCount',  type: 'number',  default: 5,
-          validate: function(v, config) {
-              if (config && config.isDerived) return null;
+          validate: function(v) {
               if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
               return null;
           } },
@@ -164,8 +231,8 @@
           } },
         { key: 'isAllGroups', type: 'boolean', default: false },
 
-        // ── Grouping batch — 同一批添加的 group/variant/derived 共享 (refs #100) ──
-        { key: 'addBatch',  type: 'number',  default: 0,    patchable: false },
+        // ── Grouping batch — 同一批添加的 group/sifted 共享 (refs #100) ──
+        { key: 'addBatch',  type: 'number',  default: 0 },
 
         // ── State ──
         { key: 'needsRegenerate', type: 'boolean', default: true, patchable: false },
@@ -244,38 +311,37 @@
 
     function _groupsValidate(config) {
         var errors = [];
-        var isDerived = !!(config.isDerived);
+        var hasParent = !!(config.parentId);
 
         if (!config || typeof config !== 'object') {
             return { valid: false, errors: ['config must be an object'] };
         }
 
-        if (!config.name || typeof config.name !== 'string' || !config.name.trim()) {
-            if (!isDerived) { errors.push('name is required (non-empty string)'); }
+        if (!hasParent && (!config.name || typeof config.name !== 'string' || !config.name.trim())) {
+            errors.push('name is required (non-empty string)');
         }
 
-        if (isDerived) {
-            if (!config.baseGroupId || typeof config.baseGroupId !== 'string') {
-                errors.push('baseGroupId is required for derived groups');
-            } else if (config.baseGroupId !== '__batch__') {
-                var bg = _groupGetRaw(config.baseGroupId);
-                if (!bg) { errors.push('baseGroupId references a non-existent group: ' + config.baseGroupId); }
-            }
+        if (hasParent) {
             if (config.parentId !== undefined && config.parentId !== null) {
                 if (_groupFindIndex(config.parentId) === -1) {
                     errors.push('parentId references a non-existent group: ' + config.parentId);
                 }
             }
-        } else {
-            if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
-                errors.push('testerId is required (non-empty string)');
+            if (config.baseGroupId !== undefined && config.baseGroupId !== null) {
+                if (config.baseGroupId !== '__batch__' && !_groupGetRaw(config.baseGroupId)) {
+                    errors.push('baseGroupId references a non-existent group: ' + config.baseGroupId);
+                }
             }
-            if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
-                errors.push('factorAlias is required (non-empty string)');
-            }
-            if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
-                errors.push('groupCount must be a positive integer (≥ 1)');
-            }
+        }
+
+        if (!config.testerId || typeof config.testerId !== 'string' || !config.testerId.trim()) {
+            errors.push('testerId is required (non-empty string)');
+        }
+        if (!config.factorAlias || typeof config.factorAlias !== 'string' || !config.factorAlias.trim()) {
+            errors.push('factorAlias is required (non-empty string)');
+        }
+        if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
+            errors.push('groupCount must be a positive integer (≥ 1)');
         }
 
         if (config.groupIndex !== undefined && config.groupIndex !== null) {
@@ -303,11 +369,11 @@
         var result = _groupsValidate(config);
         if (!result.valid) { throw new Error('Validation failed: ' + result.errors.join('; ')); }
 
-        var isDerived = !!(config.isDerived);
+        var hasParent = !!(config.parentId);
         var itemId = (config.id && typeof config.id === 'string' && config.id.trim()) ? config.id.trim() : _groupUuid();
         if (_groupFindIndex(itemId) !== -1) { throw new Error('Duplicate group id: ' + itemId); }
 
-        var item = { id: itemId, name: config.name.trim(), isDerived: isDerived };
+        var item = { id: itemId, name: config.name ? config.name.trim() : '' };
 
         // ── addBatch 自动递增 (refs #100) ──
         // 如果调用方显式传入，使用传入值；否则递增分配新 batch。
@@ -317,21 +383,20 @@
         }
 
         // Apply all fields from FIELD_SCHEMA
-        _fillGroupFromConfig(item, config, isDerived);
+        _fillGroupFromConfig(item, config, hasParent);
 
         _groupItems.push(item);
 
-        // 派生组自动计算 shortAlias 和 name (refs #100)
-        // 必须在 push 之后计算，因为 deriveShortAlias 需要 getAll() 中包含新节点来找 sibling 序号
-        if (isDerived) {
+        // 子节点自动计算 shortAlias 和 name
+        if (hasParent) {
             var needShortAlias = !item.shortAlias || !item.shortAlias.trim();
             var needName = !item.name || !item.name.trim();
             if (needShortAlias || needName) {
-                // 找 siblings（同 parentId, 同 baseGroupId）
+                // 找 siblings（同 parentId）
                 var siblings = [];
                 for (var si = 0; si < _groupItems.length; si++) {
                     var sg = _groupItems[si];
-                    if (sg.isDerived && sg.baseGroupId === item.baseGroupId && sg.parentId === item.parentId) {
+                    if (sg.parentId === item.parentId) {
                         siblings.push(sg);
                     }
                 }
@@ -351,39 +416,39 @@
                         for (var pi = 0; pi < _groupItems.length; pi++) {
                             if (_groupItems[pi].id === item.parentId) { parentNode = _groupItems[pi]; break; }
                         }
-                    } else {
-                        for (var bi = 0; bi < _groupItems.length; bi++) {
-                            if (_groupItems[bi].id === item.baseGroupId) { parentNode = _groupItems[bi]; break; }
-                        }
                     }
                     var parentName = parentNode ? (parentNode.name || parentNode.shortAlias || 'Group') : 'Group';
-                    item.name = parentName + '_派生组' + sibNum;
+                    item.name = parentName + '_子组' + sibNum;
                 }
             }
         }
 
-        _emit('groupsChanged', { action: 'add', id: item.id, isDerived: isDerived });
+        _emit('groupsChanged', { action: 'add', id: item.id });
         return item.id;
     }
 
-    function _fillGroupFromConfig(item, config, isDerived) {
+    function _fillGroupFromConfig(item, config, hasParent) {
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
-            if (f.key === 'id' || f.key === 'name' || f.key === 'isDerived') continue;
+            if (f.key === 'id' || f.key === 'name') continue;
+            // baseGroupId: for root nodes, skip if not provided (no default needed)
+            if (f.key === 'baseGroupId' && !config.hasOwnProperty(f.key)) {
+                item[f.key] = null;
+                continue;
+            }
             if (config.hasOwnProperty(f.key)) {
                 item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
             } else {
                 item[f.key] = (f.type === 'object') ? _deepCopy(f.default) : f.default;
             }
         }
-        // Reset nullable config fields for derived groups (they resolve from base)
-        if (isDerived) {
+        // Reset nullable config fields for child nodes (they resolve from parent)
+        if (hasParent) {
             for (var j = 0; j < _dynamicFieldSpecs.length; j++) {
                 var df = _dynamicFieldSpecs[j];
                 if (!config.hasOwnProperty(df.key)) item[df.key] = null;
             }
         }
-
     }
 
     function _groupsGet(id) {
@@ -414,7 +479,7 @@
         if (!result.valid) { throw new Error('Validation failed: ' + result.errors.join('; ')); }
 
         var needsRegen = false;
-        if (!_groupItems[idx].isDerived && 'groupCount' in patch && patch.groupCount !== _groupItems[idx].groupCount) {
+        if (!_groupItems[idx].parentId && 'groupCount' in patch && patch.groupCount !== _groupItems[idx].groupCount) {
             needsRegen = true;
         }
 
@@ -429,7 +494,7 @@
 
         if (needsRegen) { _groupItems[idx].needsRegenerate = true; }
 
-        _emit('groupsChanged', { action: 'update', id: id, needsRegenerate: needsRegen, isDerived: _groupItems[idx].isDerived });
+        _emit('groupsChanged', { action: 'update', id: id, needsRegenerate: needsRegen });
         return _deepCopy(_groupItems[idx]);
     }
 
@@ -469,7 +534,6 @@
         var result = [];
         for (var i = 0; i < _groupItems.length; i++) {
             if (_groupItems[i].parentId !== null) continue;
-            if (derivedOnly && !_groupItems[i].isDerived) continue;
             result.push(_deepCopy(_groupItems[i]));
         }
         return result;
@@ -505,14 +569,53 @@
     }
 
     function _groupsGetTree(derivedOnly) {
-        if (derivedOnly === undefined) derivedOnly = true;
-        var roots = [];
+        // Refresh batches from group data
+        _batchAutoSyncFromGroups();
+
+        // Build group tree nodes keyed by id
+        var groupTreeById = {};
         for (var i = 0; i < _groupItems.length; i++) {
-            if (_groupItems[i].parentId) continue;
-            if (derivedOnly && !_groupItems[i].isDerived) continue;
-            roots.push(_groupsBuildTreeNode(_groupItems[i].id));
+            var g = _groupItems[i];
+            if (derivedOnly && !g.parentId) continue;
+            groupTreeById[g.id] = _groupsBuildTreeNode(g.id);
         }
-        return roots;
+
+        // Batch-根组映射: batch number → [root nodes]
+        var batchRoots = {};
+        var rootsWithoutBatch = [];
+        Object.keys(groupTreeById).forEach(function(id) {
+            var g = _groupGetRaw(id);
+            if (!g || g.parentId) return; // only roots
+            var bnum = g.addBatch;
+            if (bnum && _batches[bnum]) {
+                if (!batchRoots[bnum]) batchRoots[bnum] = [];
+                batchRoots[bnum].push(groupTreeById[id]);
+            } else {
+                rootsWithoutBatch.push(groupTreeById[id]);
+            }
+        });
+
+        // Assemble: batch nodes wrapping their roots, + orphan roots
+        var tree = [];
+        var batchNums = Object.keys(batchRoots).sort(function(a, b) { return Number(a) - Number(b); });
+        for (var bi = 0; bi < batchNums.length; bi++) {
+            var bn = Number(batchNums[bi]);
+            var batch = _batches[bn];
+            var batchNode = {
+                _batch: true,
+                id: 'batch_' + bn,
+                name: (batch.name || 'Batch') + ' · ' + (batch.factor || '') + ' · ' + (batch.submission_id || ''),
+                number: bn,
+                children: batchRoots[bn],
+                _expanded: true
+            };
+            tree.push(batchNode);
+        }
+        for (var ri = 0; ri < rootsWithoutBatch.length; ri++) {
+            tree.push(rootsWithoutBatch[ri]);
+        }
+
+        return tree;
     }
 
     function _groupsToggleExpanded(id) {
@@ -552,55 +655,19 @@
 
     function _groupsDisplayKey(group, allGroups) {
         if (!group) return '';
-        if (!group.isDerived) return group.shortAlias || group.name || group.id || '';
+        // 根节点：直接显示 shortAlias/name/id
+        if (!group.parentId) return group.shortAlias || group.name || group.id || '';
 
         allGroups = allGroups || _groupItems;
-        var base = _groupGetRaw(group.baseGroupId);
-        var baseAlias = base ? (base.shortAlias || base.name || base.id) : (group.baseGroupId || '');
+        // 子节点：向上找链（用 parentId）
+        var parent = _groupGetRaw(group.parentId);
+        var parentAlias = parent ? _groupsDisplayKey(parent, allGroups) : (group.parentId || '');
         var siblings = allGroups.filter(function(item) {
-            return item && item.isDerived && item.baseGroupId === group.baseGroupId && item.parentId === group.parentId;
+            return item && item.parentId === group.parentId;
         });
         var pos = siblings.findIndex(function(item) { return item.id === group.id; });
         var suffix = pos >= 0 ? String(pos + 1) : (group.name || group.id || '?');
-        if (group.parentId) {
-            var parent = _groupGetRaw(group.parentId);
-            var parentAlias = parent ? _groupsDisplayKey(parent, allGroups) : baseAlias;
-            return parentAlias + ':' + suffix;
-        }
-        return baseAlias + ':' + suffix;
-    }
-
-    function _groupsSerializeFeeMap(feeMap) {
-        if (!feeMap || typeof feeMap !== 'object') return null;
-        var serialized = {};
-        Object.keys(feeMap).forEach(function(code) {
-            var override = feeMap[code];
-            if (override && typeof override === 'object') {
-                serialized[String(code).toLowerCase()] = {
-                    open: override.open_ratio != null ? override.open_ratio : null,
-                    close: override.close_ratio != null ? override.close_ratio : null,
-                    close_today: override.closetoday_ratio != null ? override.closetoday_ratio : (override.close_today_ratio != null ? override.close_today_ratio : null)
-                };
-            }
-        });
-        return Object.keys(serialized).length > 0 ? serialized : null;
-    }
-
-    function _groupsSerializeVariant(group, fallbackName) {
-        if (!group) return null;
-        var mode = group.feeMode || api.getFieldDefault('feeMode');
-        var displayName = group.shortAlias || group.name || fallbackName || group.id || '';
-        return {
-            name: displayName,
-            key: displayName,
-            fee_mode: mode,
-            fee_rate: group.feeRate != null ? group.feeRate : null,
-            fee_map: (mode === 'per_product' || mode === 'custom') ? _groupsSerializeFeeMap(group.feeMap) : null,
-            use_close_today: group.useCloseToday !== undefined ? !!group.useCloseToday : null,
-            rebalance_mode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
-            liquidity_mode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
-            liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent')
-        };
+        return parentAlias + ':' + suffix;
     }
 
     function _groupsEffectiveProductNames(node, options, seen) {
@@ -617,52 +684,12 @@
         if (node.parentId) {
             return _groupsEffectiveProductNames(_groupsGet(node.parentId), options, seen);
         }
-        if (node.baseGroupId) {
-            var base = _groupsGet(node.baseGroupId);
-            if (base && Array.isArray(base.products) && base.products.length) return base.products.slice();
-            if (base && base.testerId && typeof options.getProductsForTester === 'function') {
-                return options.getProductsForTester(base.testerId) || [];
-            }
+        // 根节点：用自身 products 或 testerId 解析
+        if (Array.isArray(node.products) && node.products.length) return node.products.slice();
+        if (node.testerId && typeof options.getProductsForTester === 'function') {
+            return options.getProductsForTester(node.testerId) || [];
         }
         return [];
-    }
-
-    function _groupsCollectDerivedPayloadForBatch(batch, options) {
-        if (!batch) return [];
-        var all = _groupsGetAll();
-        var baseById = {};
-        (batch.groups || []).forEach(function(group) {
-            if (group && group.id) baseById[group.id] = group;
-        });
-
-        var payload = [];
-        all.forEach(function(group) {
-            if (!group || !group.isDerived || !group.baseGroupId) return;
-            var base = baseById[group.baseGroupId];
-            if (!base) return;
-            var products = _groupsEffectiveProductNames(group, options);
-            if (!products.length) return;
-            var name = group.shortAlias || _groupsDisplayKey(group, all) || group.name || '派生组';
-
-            payload.push({
-                id: group.id,
-                key: name,
-                name: name,
-                baseGroup: (base.groupIndex || 1) - 1,
-                productNames: products,
-                fee_mode: group.feeMode || api.getFieldDefault('feeMode'),
-                fee_rate: group.feeRate != null ? group.feeRate : null,
-                fee_map: _groupsSerializeFeeMap(group.feeMap),
-                useCloseToday: group.useCloseToday !== undefined ? !!group.useCloseToday : false,
-                rebalanceMode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
-                rebalance_mode: group.rebalanceMode || api.getFieldDefault('rebalanceMode'),
-                liquidityMode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
-                liquidity_mode: group.liquidityMode || api.getFieldDefault('liquidityMode'),
-                liquidityPercent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent'),
-                liquidity_percent: group.liquidityPercent !== undefined && group.liquidityPercent !== null ? group.liquidityPercent : api.getFieldDefault('liquidityPercent')
-            });
-        });
-        return payload;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -681,7 +708,7 @@
 
     api.groups = {
         add: _groupsAdd,
-        newAddBatch: function() { _groupAddBatchCounter += 1; return _groupAddBatchCounter; },  // (refs #100)
+        newAddBatch: function(submissionId, factorAlias, nGroups) { return _batchCreate(submissionId, factorAlias, nGroups); },  // (refs #100)
         get: _groupsGet,
         getAll: _groupsGetAll,
         update: _groupsUpdate,
@@ -691,16 +718,25 @@
         batchKey: _groupsBatchKey,
         extractLetter: _groupsExtractLetter,
         displayKey: _groupsDisplayKey,
-        serializeFeeMap: _groupsSerializeFeeMap,
-        serializeVariant: _groupsSerializeVariant,
         effectiveProductNames: _groupsEffectiveProductNames,
-        collectDerivedPayloadForBatch: _groupsCollectDerivedPayloadForBatch,
         getTree: _groupsGetTree,
         getDescendants: _groupsGetDescendants,
         getChildren: _groupsGetChildren,
         getRoots: _groupsGetRoots,
         toggleExpanded: _groupsToggleExpanded,
         _reset: _groupsReset,
+    };
+
+    // ── groupAddBatch API (refs #100) ──
+
+    api.batch = {
+        create: _batchCreate,
+        get: _batchGet,
+        getAll: _batchGetAll,
+        update: _batchUpdate,
+        remove: _batchRemove,
+        forGroup: _batchForGroup,
+        autoSync: _batchAutoSyncFromGroups,
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -728,7 +764,7 @@
     function _lsGroupAlias(group) {
         if (!group) return '';
         if (group.shortAlias) return group.shortAlias;
-        if (!group.isDerived) return group.name || group.id || '';
+        if (!group.parentId) return group.name || group.id || '';
         return _groupsDisplayKey(group, _groupItems);
     }
 
@@ -986,10 +1022,10 @@
         var groups = snap.groups || [];
         var lsConfigs = snap.lsConfigs || [];
         if (!groups.length && !lsConfigs.length) return null;
-        var baseGroups = groups.filter(function(group) { return !group.isDerived; });
-        var derivedGroups = groups.filter(function(group) { return group.isDerived; });
+        var baseGroups = groups.filter(function(group) { return !group.parentId; });
+        var childGroups = groups.filter(function(group) { return !!group.parentId; });
         var lines = [
-            '基础组 ' + baseGroups.length + ' 个 · 派生组 ' + derivedGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个'
+            '基础组 ' + baseGroups.length + ' 个 · 子组 ' + childGroups.length + ' 个 · Long-Short ' + lsConfigs.length + ' 个'
         ];
         baseGroups.slice(0, 8).forEach(function(group) {
             var alias = group.shortAlias || group.name || group.id || '未命名组';
@@ -1003,9 +1039,10 @@
         if (baseGroups.length > 8) {
             lines.push('…另 ' + (baseGroups.length - 8) + ' 个基础组');
         }
-        derivedGroups.slice(0, 4).forEach(function(group) {
-            lines.push('派生组 ' + (group.shortAlias || group.name || group.id || '未命名派生组')
-                + ' · 来源 ' + (group.baseGroupId || '未设置'));
+        childGroups.slice(0, 4).forEach(function(group) {
+            var parent = group.parentId ? _groupsGet(group.parentId) : null;
+            lines.push('子组 ' + (group.shortAlias || group.name || group.id || '未命名子组')
+                + ' · 父节点 ' + (parent ? (parent.shortAlias || parent.name || parent.id) : (group.parentId || '未设置')));
         });
         lsConfigs.slice(0, 4).forEach(function(config) {
             lines.push('Long-Short ' + (config.shortAlias || config.name || config.id || '未命名 Long-Short')

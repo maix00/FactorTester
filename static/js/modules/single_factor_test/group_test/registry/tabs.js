@@ -8,7 +8,7 @@
  *   - 模式编排：enterAddMode / exitAddMode / enterEditMode / exitEditMode
  *
  * 设计原则：
- *   - tabs.js 不硬编码任何具体 addFlow（如 base/derived/ls）
+ *   - tabs.js 不硬编码任何具体 addFlow（如 group/derived/ls）
  *   - 按钮通过 modes.getMatchingEditActions() 和 modes.getActiveFlowMeta() 动态生成
  *   - 面板通过 registerPanel() 注册，不在此文件中硬编码
  *
@@ -109,8 +109,8 @@
         if (!bar) return;
 
         // list 模式按钮（非交互式 focus 场景，click 即可）
-        var addBaseBtn = document.getElementById('gt-action-add-base');
-        if (addBaseBtn) addBaseBtn.addEventListener('click', function() { _enterAddMode('base'); });
+        var addGroupBtn = document.getElementById('gt-action-add-group');
+        if (addGroupBtn) addGroupBtn.addEventListener('click', function() { _enterAddMode('group'); });
         var addDerivedBtn = document.getElementById('gt-action-add-derived');
         if (addDerivedBtn) addDerivedBtn.addEventListener('click', function() { _enterAddMode('derived'); });
         var addLSBtn = document.getElementById('gt-action-add-ls');
@@ -186,7 +186,7 @@
 
         } else {
             // list 模式 — 固定显示「新增基础组」
-            html += '<button id="gt-action-add-base" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增基础组</button>';
+            html += '<button id="gt-action-add-group" class="btn btn-primary btn-sm" style="padding:4px 12px;font-size:12px;">＋ 新增分组</button>';
         }
 
         bar.innerHTML = html;
@@ -347,11 +347,11 @@
                 category: TAB_CATEGORY.LIST, panel: P.list.index
             });
         }
-        if (P.add && P.add.base) {
+        if (P.add && P.add.group) {
             registerPanel({
-                name: 'add-base', label: '新建基础组', containerId: 'add-base',
-                category: TAB_CATEGORY.ADD, panel: P.add.base,
-                visible: function() { return M.isAddFlow('base'); }
+                name: 'add-group', label: '新建分组', containerId: 'add-group',
+                category: TAB_CATEGORY.ADD, panel: P.add.group,
+                visible: function() { return M.isAddFlow('group'); }
             });
         }
         // add-ls panel removed — LS creation is now direct via edit action (refs #109)
@@ -373,7 +373,12 @@
                 category: TAB_CATEGORY.CONFIG, panel: P.config.liquidity
             });
         }
-        // config-derived 由 derived-addon.js 注册（不在核心内置）
+        if (P.config && P.config.productSift) {
+            registerPanel({
+                name: 'config-product-sift', label: '🌾 品种筛选', containerId: 'config-product-sift',
+                category: TAB_CATEGORY.CONFIG, panel: P.config.productSift
+            });
+        }
     }
 
     function init() {

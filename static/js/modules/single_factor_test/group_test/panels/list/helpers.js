@@ -103,7 +103,7 @@
         var GS = GT.groupSettings;
         return {
             id: node.id,
-            isDerived: true,
+            parentId: node.baseGroupId,
             baseGroupId: node.baseGroupId,
             feeMode: node.feeMode || GS.getFieldDefault('feeMode'),
             feeRate: node.feeRate !== undefined ? node.feeRate : null,
@@ -187,7 +187,7 @@
         _batchMap = {};
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
-            if (item.isDerived) continue;
+            if (item.parentId) continue;
             var key = batchKey(item.testerId, item.factorAlias, item.groupCount);
             if (!_batchMap[key]) {
                 _batchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
@@ -213,7 +213,7 @@
         var items = GT.groupSettings.groups.getAll();
         var ids = [];
         for (var i = 0; i < items.length; i++) {
-            if (items[i].isDerived) continue;
+            if (items[i].parentId) continue;
             if (batchKey(items[i].testerId, items[i].factorAlias, items[i].groupCount) === batchKeyVal) {
                 ids.push(items[i].id);
             }
@@ -282,7 +282,7 @@
             var chip = allChips[i];
             var s = (chip.style || CHIP_STYLE_PLAIN) + ';white-space:nowrap;';
             if (chip.onClick) {
-                var attr = g.isDerived
+                var attr = g.parentId
                     ? ('data-dgid="' + escapeHTML(g.id) + '"')
                     : ('data-gid="' + escapeHTML(g.id) + '"');
                 html += '<span class="unified-config-chip" ' + attr

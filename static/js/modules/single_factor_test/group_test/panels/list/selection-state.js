@@ -103,7 +103,7 @@
     function getFirstBaseGroup() {
         var group = getFirstGroup();
         if (!group) return null;
-        if (!group.isDerived) return group;
+        if (!group.parentId) return group;
         return _groupById(group.baseGroupId) || group;
     }
 

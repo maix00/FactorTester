@@ -500,21 +500,45 @@ class FactorGroupTester:
             for idx, owner in enumerate(plan.group_owner)
         }
         entries_by_simulation_index = {entry.simulation_index: entry for entry in plan.entries}
-        combined_derived_info: list[dict[str, Any]] = []
+
+        # Build per-group configs: one config dict per global group index.
+        # Each entry contributes its groups (both unscreened and screened) via group_variants.
+        group_count = plan.merged_membership_np.shape[1]
+        group_configs: list[dict] = [{} for _ in range(group_count)]
         for simulation_index, group_indices in plan.group_slices.items():
             entry = entries_by_simulation_index[simulation_index]
             local_to_global = {
                 local_idx: global_idx
                 for local_idx, global_idx in enumerate(group_indices)
             }
+            # entry.spec.group_variants = {local_group_index: [variant_dict, ...]}
+            entry_variants: dict = entry.spec.get("group_variants") or {}
+            if isinstance(entry_variants, dict):
+                for local_idx_str, variant_list in entry_variants.items():
+                    try:
+                        local_idx = int(local_idx_str)
+                    except (TypeError, ValueError):
+                        continue
+                    if local_idx not in local_to_global:
+                        continue
+                    global_idx = local_to_global[local_idx]
+                    if isinstance(variant_list, list) and variant_list:
+                        # Take the first variant's config for this global group.
+                        first_variant = variant_list[0]
+                        if isinstance(first_variant, dict):
+                            group_configs[global_idx] = dict(first_variant)
+            # Also handle screened (formerly "derived") groups from derived_info
             for derived_pos, original_info in enumerate(entry.derived_info):
                 info = dict(original_info)
                 local_group_idx = entry.n_groups + derived_pos
+                if local_group_idx not in local_to_global:
+                    continue
+                global_idx = local_to_global[local_group_idx]
+                # Map base_group reference
                 base_group = info.get("base_group")
                 if isinstance(base_group, int):
                     info["base_group"] = local_to_global.get(base_group, base_group)
-                info["source_group"] = local_to_global.get(local_group_idx, local_group_idx)
-                combined_derived_info.append(info)
+                group_configs[global_idx] = info
 
         _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,
@@ -524,7 +548,7 @@ class FactorGroupTester:
             valid_cols=spec_bundle.valid_cols,
             index_list=list(first_entry.shared_inputs.index_list),
             n_names=group_name_map,
-            derived_info=combined_derived_info,
+            group_configs=group_configs,
             use_closetoday=use_closetoday,
             rebalance_mode=rebalance_mode,
             initial_capital=initial_capital,

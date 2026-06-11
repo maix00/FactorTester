@@ -87,7 +87,7 @@
             // DERIVED chips need the derived group's own productMask etc.
             // CONFIG chips need the derived group's own fee config (resolved via synth).
             var g = group;
-            if (prov.category === CHIP_CATEGORY.INFO && group.isDerived && group.baseGroupId) {
+            if (prov.category === CHIP_CATEGORY.INFO && group.parentId && group.baseGroupId) {
                 var GT2 = window.GroupTest;
                 if (GT2 && GT2.groupSettings && GT2.groupSettings.groups) {
                     var bg = GT2.groupSettings.groups.get(group.baseGroupId);
@@ -136,21 +136,21 @@
 
                 // Resolve base group for derived groups
                 var bg = null;
-                if (g.isDerived && g.baseGroupId) {
+                if (g.parentId && g.baseGroupId) {
                     var GT3 = window.GroupTest;
                     if (GT3 && GT3.groupSettings && GT3.groupSettings.groups) {
                         bg = GT3.groupSettings.groups.get(g.baseGroupId);
                     }
                 }
 
-                // 1) Factor alias — derived always inherits from base
-                var factorAlias = g.isDerived && bg ? bg.factorAlias : g.factorAlias;
+                // 1) Factor alias — child always inherits from base
+                var factorAlias = g.parentId && bg ? bg.factorAlias : g.factorAlias;
                 if (factorAlias) {
                     chips.push({ label: 'factor', html: factorAlias, style: CHIP_STYLE_PLAIN });
                 }
 
-                // 2) Tester label — derived always inherits from base
-                var testerId = g.isDerived && bg ? bg.testerId : g.testerId;
+                // 2) Tester label — child always inherits from base
+                var testerId = g.parentId && bg ? bg.testerId : g.testerId;
                 if (testerId) {
                     var label = _resolveTesterLabel(testerId);
                     if (label) {
@@ -158,9 +158,9 @@
                     }
                 }
 
-                // 3) Group index / count — derived always inherits from base
+                // 3) Group index / count — child always inherits from base
                 var groupCount, groupIndex;
-                if (g.isDerived && bg) {
+                if (g.parentId && bg) {
                     groupCount = bg.groupCount;
                     groupIndex = bg.groupIndex;
                 } else {
@@ -267,7 +267,7 @@
             category: CHIP_CATEGORY.DERIVED,
             name: 'builtin-derived-products',
             getChips: function(g) {
-                if (!g || !g.isDerived) return [];
+                if (!g || !g.parentId) return [];
                 var products = _getDerivedProducts(g);
                 if (products.length === 0) return [];
                 var isExpanded = _expandedProducts[g.id] === true;

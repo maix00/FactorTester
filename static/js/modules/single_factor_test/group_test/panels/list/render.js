@@ -196,7 +196,7 @@
         var modal = H.$(_dgModalId);
         var editId = modal._editId;
         var parentId = modal._parentId;
-        var data = { name: H.$('dg-f-name').value.trim(), isDerived: true };
+        var data = { name: H.$('dg-f-name').value.trim(), parentId: parentId || null };
         if (!editId) {
             data.baseGroupId = H.$('dg-f-baseGroupId').value;
             if (!data.baseGroupId) { alert('请选择基础组'); return; }

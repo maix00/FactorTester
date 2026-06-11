@@ -1,16 +1,5 @@
 /**
- * panels/config/derived.js — 品种筛选面板 (CONFIG category)
- *
- * Dual-mode panel for editing a derived group's product mask:
- *   Edit mode: product multi-select with inherited/overridden state
- *   View mode (active node): read-only display of inherited or overridden product mask
- *
- * Contract:
- *   GT.panels.list.selection.getFirst() → id|null
- *   GT.panels.list.selection.on('selectionChanged', cb)
- *   GT.events.on('derivedGraphChanged', cb)
- *   GT.groupSettings.groups.get(id) → node|null
- *   GT.groupSettings.groups.getAll() → base groups (for product sourcing)
+ * panels/config/product-sift.js — 品种筛选面板 (CONFIG category)
  */
 
 (function() {
@@ -19,7 +8,7 @@
     if (!GT.panels) { GT.panels = {}; }
     if (!GT.panels.config) { GT.panels.config = {}; }
 
-    var CONTAINER_ID = 'config-derived';
+    var CONTAINER_ID = 'config-product-sift';
 
     var _mounted = false;
     var _activeId = null;
@@ -36,6 +25,19 @@
         if (REG) REG.setDirty('productMask', mask);
     }
 
+    /** Get inheritAllProducts flag from dirty workspace. Default: true (inherit all). */
+    function _inheritAllProducts() {
+        var REG = window.GT_CONFIG_REGISTRY;
+        var val = REG && REG.getDirty('inheritAllProducts');
+        return val === undefined ? true : !!val;
+    }
+
+    /** Set inheritAllProducts flag into dirty workspace. */
+    function _setInheritAllProducts(val) {
+        var REG = window.GT_CONFIG_REGISTRY;
+        if (REG) REG.setDirty('inheritAllProducts', !!val);
+    }
+
     function $(id) { return document.getElementById(id); }
 
     function escapeHTML(str) { return GT.escapeHTML(str); }
@@ -48,59 +50,89 @@
     }
 
     /**
-     * Collect all available products from base groups.
-     * Resolves products via window.submissions using testerId.
-     * Returns [{name, desc}] objects.
+     * Collect available products for the current add context.
+     *
+     * Rule:
+     *   1. draft has parentId (non-null) → walk up parentId chain to root,
+     *      then get root's products (from its productList or testerId).
+     *   2. draft has parentId = null → get draft's own testerId products.
      */
     function _allProducts() {
-        var map = {}; // keyed by name for dedup
-        var baseGroups = GT.groupSettings.groups.getAll();
-        var seenTesterIds = {};
-
-        // Try the active derived node first — use its effective products
         var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
-        var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
-        if (preselectedParentDerivedId) {
-            var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentDerivedId);
-            if (pNode) {
-                var effProds = _effectiveProducts(pNode);
-                for (var ep = 0; ep < effProds.products.length; ep++) {
-                    var epn = effProds.products[ep];
-                    if (typeof epn === 'string') {
-                        map[epn] = '';
-                    } else if (epn && epn.name) {
-                        map[epn.name] = epn.desc || '';
-                    }
-                }
-                if (pNode.baseGroupId && pNode.baseGroupId !== '__batch__') {
-                    var bg = GT.groupSettings.groups && GT.groupSettings.groups.get(pNode.baseGroupId);
-                    if (bg && bg.testerId) {
-                        _addProductsFromTesterId(map, bg.testerId);
-                    }
-                }
-                var names = Object.keys(map).sort();
-                return names.map(function(n) { return { name: n, desc: map[n] || '' }; });
+        var parentId = (draft && draft.preselectedParentId) || null;
+        var map = {};
+
+        if (parentId) {
+            // Walk parentId chain to find the root node (parentId === null)
+            var root = _getRootByParentChain(parentId);
+            if (root) {
+                _addProductsFromNode(map, root);
+            }
+        } else {
+            // parentId is null — use testerId from draft's own node or context
+            var testerId = (draft && draft.testerId) || null;
+            if (!testerId) {
+                // No testerId in draft: try get it from the selected node in edit mode
+                var node = _getNode();
+                if (node) testerId = node.testerId;
+            }
+            if (testerId) {
+                _addProductsFromTesterId(map, testerId);
             }
         }
 
-        // Fallback: collect from all base groups
-        for (var i = 0; i < baseGroups.length; i++) {
-            var tid = baseGroups[i].testerId;
-            if (tid && !seenTesterIds[tid]) {
-                seenTesterIds[tid] = true;
-                _addProductsFromTesterId(map, tid);
+        // Fallback: collect from all root nodes (parentId === null) via their testerIds
+        if (Object.keys(map).length === 0) {
+            var groups = GT.groupSettings.groups.getAll();
+            var seenTesterIds = {};
+            for (var i = 0; i < groups.length; i++) {
+                var g = groups[i];
+                if (g.parentId) continue;  // only root nodes
+                if (g.testerId && !seenTesterIds[g.testerId]) {
+                    seenTesterIds[g.testerId] = true;
+                    _addProductsFromTesterId(map, g.testerId);
+                }
             }
         }
-        var baseId = (draft && draft.preselectedBaseGroupId) || null;
-        if (baseId) {
-            var bg2 = GT.groupSettings.groups.get(baseId);
-            if (bg2 && bg2.testerId && !seenTesterIds[bg2.testerId]) {
-                seenTesterIds[bg2.testerId] = true;
-                _addProductsFromTesterId(map, bg2.testerId);
-            }
-        }
+
         var sorted = Object.keys(map).sort();
         return sorted.map(function(n) { return { name: n, desc: map[n] || '' }; });
+    }
+
+    /** Walk parentId chain to root (node where parentId === null). Returns null if no root found. */
+    function _getRootByParentChain(startId) {
+        var groups = GT.groupSettings.groups;
+        if (!groups) return null;
+        var visited = {};
+        var id = startId;
+        while (id) {
+            if (visited[id]) return null; // cycle
+            visited[id] = true;
+            var node = groups.get(id);
+            if (!node) return null;
+            if (!node.parentId) return node; // root
+            id = node.parentId;
+        }
+        return null;
+    }
+
+    /** Add products from a node: first try its own products list, then testerId. */
+    function _addProductsFromNode(map, node) {
+        if (!node) return;
+        // If node has explicit productList, use it
+        if (node.products && node.products.length > 0) {
+            for (var i = 0; i < node.products.length; i++) {
+                var p = node.products[i];
+                var name = typeof p === 'string' ? p : (p.name || '');
+                var desc = typeof p === 'string' ? '' : (p.desc || '');
+                if (name && !map[name]) map[name] = desc;
+            }
+            return;
+        }
+        // Otherwise resolve via testerId
+        if (node.testerId) {
+            _addProductsFromTesterId(map, node.testerId);
+        }
     }
 
     function _addProductsFromTesterId(map, testerId) {
@@ -124,7 +156,7 @@
     }
 
     /**
-     * Walk the chain to collect effective products.
+     * Walk the parentId chain to collect effective products.
      */
     function _effectiveProducts(node) {
         if (!node) return { products: [], source: 'none' };
@@ -134,11 +166,15 @@
         if (node.parentId) {
             return _effectiveProducts(GT.groupSettings.groups.get(node.parentId));
         }
-        if (node.baseGroupId) {
-            var bg = GT.groupSettings.groups.get(node.baseGroupId);
-            if (bg) {
-                return { products: bg.products || [], source: 'baseGroup', name: bg.name || node.baseGroupId };
-            }
+        // Root node: use its own products or resolve via testerId
+        if (node.products && node.products.length > 0) {
+            return { products: node.products.slice(), source: 'rootProducts', name: node.name || node.id };
+        }
+        if (node.testerId) {
+            var map = {};
+            _addProductsFromTesterId(map, node.testerId);
+            var prods = Object.keys(map).sort();
+            return { products: prods, source: 'testerId', name: node.name || node.id };
         }
         return { products: [], source: 'none' };
     }
@@ -148,7 +184,7 @@
         var id = sel ? sel.getFirst() : null;
         if (!id) return;
         var node = GT.groupSettings.groups && GT.groupSettings.groups.get(id);
-        if (!node || !node.isDerived) return;
+if (!node) return;
         var mask = node.productMask || {};
         var dirtyMask = {};
         var keys = Object.keys(mask);
@@ -167,34 +203,40 @@
 
         // Determine parent info
         var draft = GT.tabs && GT.tabs.getAddDraft ? GT.tabs.getAddDraft() : null;
-        var preselectedBaseGroupId = (draft && draft.preselectedBaseGroupId) || null;
-        var preselectedParentDerivedId = (draft && draft.preselectedParentDerivedId) || null;
+        var preselectedParentId = (draft && draft.preselectedParentId) || null;
         var parentLabel = '';
         var parentType = '';
 
-        if (preselectedParentDerivedId) {
-            var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentDerivedId);
-            parentLabel = pNode ? (pNode.name || pNode.id) : preselectedParentDerivedId;
-            parentType = 'derived';
-        } else if (preselectedBaseGroupId) {
-            var bg = GT.groupSettings.groups.get(preselectedBaseGroupId);
-            parentLabel = bg ? (bg.name || bg.id) : preselectedBaseGroupId;
-            parentType = 'base';
+        if (preselectedParentId) {
+            var pNode = GT.groupSettings.groups && GT.groupSettings.groups.get(preselectedParentId);
+            parentLabel = pNode ? (pNode.name || pNode.id) : preselectedParentId;
+            parentType = pNode && pNode.parentId ? 'derived' : 'group';
         }
+
+        var inheritAll = _inheritAllProducts();
 
         var html = '<div style="margin-bottom:16px;">';
         html += '<h3 style="margin:0 0 4px 0;font-size:15px;">品种筛选</h3>';
         if (parentType === 'derived') {
             html += '<p style="margin:0 0 8px 0;font-size:12px;color:#7c3aed;">关联上级派生组: <strong>' + escapeHTML(parentLabel) + '</strong></p>';
-        } else if (parentType === 'base') {
-            html += '<p style="margin:0 0 8px 0;font-size:12px;color:#0078d4;">关联基础组: <strong>' + escapeHTML(parentLabel) + '</strong></p>';
+        } else if (parentType === 'group') {
+            html += '<p style="margin:0 0 8px 0;font-size:12px;color:#0078d4;">关联父分组: <strong>' + escapeHTML(parentLabel) + '</strong></p>';
         }
-        html += '<p style="margin:0;font-size:12px;color:#666;">选择派生组包含的品种（留空则继承上级全部品种）</p>';
+        html += '</div>';
+
+        // ── Inherit all checkbox ──
+        html += '<div style="margin-bottom:12px;">';
+        html += '<label id="product-sift-inherit-label" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#333;">';
+        html += '<input type="checkbox" id="product-sift-inherit-all"' + (inheritAll ? ' checked' : '') + ' style="width:16px;height:16px;">';
+        html += '<span>不筛选 · 继承上级全部品种</span>';
+        html += '</label>';
         html += '</div>';
 
         if (allProducts.length === 0) {
-            html += '<div style="padding:24px;text-align:center;color:#888;">未找到品种数据</div>';
-        } else {
+            if (!inheritAll) {
+                html += '<div style="padding:24px;text-align:center;color:#888;">未找到品种数据</div>';
+            }
+        } else if (!inheritAll) {
             // Select all / Deselect all
             html += '<div style="margin-bottom:8px;">';
             html += '<button id="derived-products-select-all" style="padding:2px 10px;font-size:12px;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer;margin-right:6px;">全选</button>';
@@ -202,7 +244,7 @@
             html += '<span style="margin-left:12px;font-size:12px;color:#666;">已选 <span id="derived-products-count">0</span> / ' + allProducts.length + ' 个品种</span>';
             html += '</div>';
 
-            html += '<div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:8px;background:#fafbfc;">';
+            html += '<div id="product-sift-list" style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:8px;background:#fafbfc;">';
             for (var i = 0; i < allProducts.length; i++) {
                 var p = allProducts[i];
                 var name = p.name;
@@ -225,6 +267,15 @@
     }
 
     function _bindEvents(container, allProducts) {
+        // Inherit all toggle — re-render when toggled
+        var inheritCb = container.querySelector('#product-sift-inherit-all');
+        if (inheritCb) {
+            inheritCb.addEventListener('change', function() {
+                _setInheritAllProducts(this.checked);
+                _render(container);
+            });
+        }
+
         var cbs = container.querySelectorAll('.derived-product-cb');
         for (var i = 0; i < cbs.length; i++) {
             cbs[i].addEventListener('change', function() {
@@ -280,7 +331,7 @@
         var selIds = Array.isArray(ids) ? ids : (ids.groupIds || Object.keys(ids).filter(function(k) { return ids[k]; }));
         if (selIds.length !== 1) return;
         var node = GT.groupSettings.groups && GT.groupSettings.groups.get(selIds[0]);
-        if (!node || !node.isDerived) return;
+        if (!node) return;
         var mask = node.productMask || {};
         // Copy truthy entries into dirty (shallow copy; productMask keys have boolean values)
         var dirtyMask = {};
@@ -357,6 +408,7 @@
     function refresh() { if (_mounted) render(); }
 
     function getSelectedProducts() {
+        if (_inheritAllProducts()) return [];  // empty = inherit all
         var mask = _dirtyProductMask();
         return Object.keys(mask).filter(function(k) { return mask[k]; });
     }
@@ -369,7 +421,7 @@
     // Export
     // ---------------------------------------------------------------------------
 
-    GT.panels.config.derived = {
+    GT.panels.config.productSift = {
         mount: mount,
         unmount: unmount,
         refresh: refresh,
@@ -382,17 +434,18 @@
     var GS = GT.groupSettings;
     if (GS && GS.registerField) {
         GS.registerField({ key: 'productMask', type: 'object', default: {} });
+        GS.registerField({ key: 'inheritAllProducts', type: 'boolean', default: true });
     }
 
     // Register as category-3 config panel with productMask field
     if (window.GT_CONFIG_REGISTRY) {
         window.GT_CONFIG_REGISTRY.register({
-            name: 'derived',
+            name: 'productSift',
             label: '品种筛选',
-            panel: GT.panels.config.derived,
-            fields: ['productMask'],
-        }, 'config-derived');
+            panel: GT.panels.config.productSift,
+            fields: ['productMask', 'inheritAllProducts'],
+        }, 'config-product-sift');
     }
 
-    GT.log('panels.config.derived loaded');
+    GT.log('panels/config/productSift loaded');
 })();

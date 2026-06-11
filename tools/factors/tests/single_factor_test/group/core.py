@@ -81,8 +81,6 @@ def slice_group_run_result(
         raise ValueError("group_indices must not be empty")
 
     old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(group_indices)}
-    old_n_base = int(getattr(group_result, "n_base", 0) or 0)
-    old_derived_info = list(getattr(group_result, "derived_info", None) or [])
     old_group_names = dict(getattr(group_result, "group_names", None) or {})
 
     def _take_group_axis(value: Any) -> Any:
@@ -107,22 +105,7 @@ def slice_group_run_result(
         for new_idx, old_idx in enumerate(group_indices)
     }
 
-    new_derived_info: list[dict[str, Any]] = []
-    for old_idx in group_indices:
-        if old_idx < old_n_base:
-            continue
-        derived_pos = old_idx - old_n_base
-        if derived_pos < 0 or derived_pos >= len(old_derived_info):
-            continue
-        info = dict(old_derived_info[derived_pos])
-        base_group = info.get("base_group")
-        if isinstance(base_group, int) and base_group in old_to_new:
-            info["base_group"] = old_to_new[base_group]
-        info["source_group"] = old_idx
-        new_derived_info.append(info)
-
-    new_n_base = sum(1 for old_idx in group_indices if old_idx < old_n_base)
-
+    new_group_count = len(group_indices)
     return GroupRunResult(
         fee_costs_np=np.take(group_result.fee_costs_np, group_indices, axis=1),
         trade_notional_ratio_np=np.take(group_result.trade_notional_ratio_np, group_indices, axis=1),
@@ -142,9 +125,9 @@ def slice_group_run_result(
         multi_session_active=bool(group_result.multi_session_active),
         rebalance_mode=str(group_result.rebalance_mode),
         report_df=report_df,
-        n_base=new_n_base,
-        n_derived=len(new_derived_info),
-        derived_info=new_derived_info,
+        n_base=new_group_count,
+        n_derived=0,
+        derived_info=[],
         group_names=new_group_names,
         hold_amounts_np=_take_group_axis(group_result.hold_amounts_np),
         position_quantities_np=_take_group_axis(group_result.position_quantities_np),
@@ -828,30 +811,30 @@ def _resolve_group_trade_specs(
     )
 
 
-def _append_derived_group_memberships(
+def _append_sifted_group_memberships(
     factor: Factor,
     signal_valid_cols: list,
     membership_np: np.ndarray,
     *,
-    n_base_groups: int,
-    derived_groups: Optional[List[dict]],
+    n_original_groups: int,
+    sifted_groups: Optional[List[dict]],
 ) -> tuple[np.ndarray, list[dict]]:
-    """Append derived-group memberships onto the flat group axis."""
-    derived_defs = derived_groups or []
-    derived_info: list[dict] = []
-    if not derived_defs:
-        return membership_np, derived_info
+    """Append sifted-group memberships (product-filtered copies of existing groups)."""
+    sifted_defs = sifted_groups or []
+    sifted_info: list[dict] = []
+    if not sifted_defs:
+        return membership_np, sifted_info
 
     from tools.products.product_utils import product_display_name
 
     T, _, P = membership_np.shape
     display_names = [product_display_name(product)['name'] for product in signal_valid_cols]
     display_name_to_idx = {name: idx for idx, name in enumerate(display_names)}
-    _group_progress(f"derived groups start factor={factor.alias} count={len(derived_defs)}")
+    _group_progress(f"sifted groups start factor={factor.alias} count={len(sifted_defs)}")
 
-    def _build_derived_pair(dd: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]] | None:
-        base_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
-        if base_group < 0 or base_group >= n_base_groups:
+    def _build_sifted_pair(dd: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]] | None:
+        source_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
+        if source_group < 0 or source_group >= n_original_groups:
             return None
         product_names = dd.get('productNames', dd.get('product_names', []))
         if not product_names:
@@ -872,28 +855,26 @@ def _append_derived_group_memberships(
             ]
         if not sel_idx:
             _group_progress(
-                f"[DEBUG] derived pair skipped base_group={base_group} "
+                f"[DEBUG] sifted pair skipped source_group={source_group} "
                 f"product_names={product_names_str[:5]}... "
                 f"display_names_sample={display_names[:5]}... "
-                f"display_name_to_idx_keys={list(display_name_to_idx.keys())[:10]}"
             )
             return None
         sel = np.asarray(sel_idx, dtype=int)
-        # Debug: check if base_group has any membership for selected products
-        base_membership = membership_np[:, base_group, :][:, sel]
-        base_any = base_membership.any(axis=0)
-        base_total = base_membership.sum()
+        source_membership = membership_np[:, source_group, :][:, sel]
+        source_any = source_membership.any(axis=0)
+        source_total = source_membership.sum()
         _group_progress(
-            f"[DEBUG] derived pair base_group={base_group} sel_idx={sel_idx} "
-            f"sel_count={len(sel_idx)} base_any_per_product={base_any.tolist()} "
-            f"base_total_memberships={int(base_total)}"
+            f"[DEBUG] sifted pair source_group={source_group} sel_idx={sel_idx} "
+            f"sel_count={len(sel_idx)} source_any_per_product={source_any.tolist()} "
+            f"source_total_memberships={int(source_total)}"
         )
-        display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{base_group + 1}组精选'
+        display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{source_group + 1}组筛选'
 
         mask_1g = np.zeros((T, 1, P), dtype=bool)
-        mask_1g[:, 0, sel] = membership_np[:, base_group, :][:, sel]
+        mask_1g[:, 0, sel] = membership_np[:, source_group, :][:, sel]
         return mask_1g, {
-            'base_group': base_group,
+            'source_group': source_group,
             'key': display_name,
             'name': display_name,
             'id': dd.get('id'),
@@ -908,30 +889,29 @@ def _append_derived_group_memberships(
             'margin_mode': dd.get('margin_mode', dd.get('marginMode')),
         }
 
-    derived_pairs = [
+    sifted_pairs = [
         pair for pair in
-        (_build_derived_pair(dd) for dd in derived_defs if isinstance(dd, dict))
+        (_build_sifted_pair(dd) for dd in sifted_defs if isinstance(dd, dict))
         if pair is not None
     ]
-    if derived_pairs:
-        derived_slices, derived_meta = zip(*derived_pairs)
-        membership_np = np.concatenate([membership_np, np.concatenate(list(derived_slices), axis=1)], axis=1)
-        # Debug: verify derived groups have non-zero memberships
-        for di, ds in enumerate(derived_slices):
-            ds_sum = ds.sum()
-            n_base = membership_np.shape[1] - len(derived_slices)
+    if sifted_pairs:
+        sifted_slices, sifted_meta = zip(*sifted_pairs)
+        membership_np = np.concatenate([membership_np, np.concatenate(list(sifted_slices), axis=1)], axis=1)
+        for si, ss in enumerate(sifted_slices):
+            ss_sum = ss.sum()
+            n_orig = membership_np.shape[1] - len(sifted_slices)
             _group_progress(
-                f"[DEBUG] derived group {di} (global idx={n_base + di}) "
-                f"mask_1g total memberships={int(ds_sum)} "
-                f"first_5_products_sum={ds[:, 0, :5].sum()}"
+                f"[DEBUG] sifted group {si} (global idx={n_orig + si}) "
+                f"mask_1g total memberships={int(ss_sum)} "
+                f"first_5_products_sum={ss[:, 0, :5].sum()}"
             )
         _group_progress(
             f"[DEBUG] after concat membership_np shape={membership_np.shape} "
             f"last_group_sum={int(membership_np[:, -1, :].sum())}"
         )
-        derived_info.extend(list(derived_meta))
-    _group_progress(f"derived groups done factor={factor.alias} built={len(derived_info)}")
-    return membership_np, derived_info
+        sifted_info.extend(list(sifted_meta))
+    _group_progress(f"sifted groups done factor={factor.alias} built={len(sifted_info)}")
+    return membership_np, sifted_info
 
 
 def _simulate_group_from_preloaded(
@@ -943,7 +923,7 @@ def _simulate_group_from_preloaded(
     valid_cols: list,
     index_list: list,
     n_names: dict[int, str],
-    derived_info: list[dict],
+    group_configs: list[dict] | None = None,
     use_closetoday: bool,
     rebalance_mode: str,
     initial_capital: float,
@@ -967,7 +947,6 @@ def _simulate_group_from_preloaded(
 ) -> tuple[Any, pd.DataFrame, np.ndarray, GroupRunResult]:
     liquidity_capacity_np: np.ndarray | None = None
     group_count = membership_np.shape[1]
-    n_base = group_count - len(derived_info)
     P = len(valid_cols)
 
     def _liquidity_mode_from_spec(spec: dict | None) -> str:
@@ -991,14 +970,18 @@ def _simulate_group_from_preloaded(
     liquidity_percents_list = [100.0] * group_count
     margin_modes_list = ["margin"] * group_count
     rebalance_modes_list = [rebalance_mode] * group_count
-    for d_idx, di in enumerate(derived_info):
-        g = n_base + d_idx
-        liquidity_modes_list[g] = _liquidity_mode_from_spec(di)
-        liquidity_percents_list[g] = _liquidity_percent_from_spec(di)
-        margin_modes_list[g] = str(di.get('margin_mode') or di.get('marginMode') or "margin")
-        drm = str(di.get('rebalance_mode') or di.get('rebalanceMode') or rebalance_mode)
+
+    # Apply per-group configs (all groups treated uniformly)
+    _group_configs = group_configs or []
+    for g_idx, cfg in enumerate(_group_configs):
+        if not isinstance(cfg, dict) or g_idx >= group_count:
+            continue
+        liquidity_modes_list[g_idx] = _liquidity_mode_from_spec(cfg)
+        liquidity_percents_list[g_idx] = _liquidity_percent_from_spec(cfg)
+        margin_modes_list[g_idx] = str(cfg.get('margin_mode') or cfg.get('marginMode') or "margin")
+        drm = str(cfg.get('rebalance_mode') or cfg.get('rebalanceMode') or rebalance_mode)
         if drm in _VALID_MODES:
-            rebalance_modes_list[g] = drm
+            rebalance_modes_list[g_idx] = drm
 
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
     _group_progress(f"group fee matrix start factor={factor.alias} groups={group_count} products={P}")
@@ -1009,32 +992,34 @@ def _simulate_group_from_preloaded(
     close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (group_count, 1))
     close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (group_count, 1))
 
-    for d_idx, di in enumerate(derived_info):
-        g = n_base + d_idx
-        fee_override = di.get("fee_override") if isinstance(di, dict) else None
+    # Apply per-group fee overrides from group_configs
+    for g_idx, cfg in enumerate(_group_configs):
+        if g_idx >= group_count:
+            continue
+        fee_override = cfg.get("fee_override") if isinstance(cfg, dict) else None
         if not isinstance(fee_override, dict):
             continue
         if 'open_rate' in fee_override and fee_override['open_rate'] is not None:
-            open_fee_mat[g, :] = float(fee_override['open_rate'])
+            open_fee_mat[g_idx, :] = float(fee_override['open_rate'])
         if 'close_rate' in fee_override and fee_override['close_rate'] is not None:
-            close_fee_mat[g, :] = float(fee_override['close_rate'])
+            close_fee_mat[g_idx, :] = float(fee_override['close_rate'])
         if 'close_today_rate' in fee_override and fee_override['close_today_rate'] is not None:
-            close_today_fee_mat[g, :] = float(fee_override['close_today_rate'])
+            close_today_fee_mat[g_idx, :] = float(fee_override['close_today_rate'])
         if 'open_fixed' in fee_override and fee_override['open_fixed'] is not None:
-            open_fee_fixed_mat[g, :] = float(fee_override['open_fixed'])
+            open_fee_fixed_mat[g_idx, :] = float(fee_override['open_fixed'])
         if 'close_fixed' in fee_override and fee_override['close_fixed'] is not None:
-            close_fee_fixed_mat[g, :] = float(fee_override['close_fixed'])
+            close_fee_fixed_mat[g_idx, :] = float(fee_override['close_fixed'])
         if 'close_today_fixed' in fee_override and fee_override['close_today_fixed'] is not None:
-            close_today_fee_fixed_mat[g, :] = float(fee_override['close_today_fixed'])
+            close_today_fee_fixed_mat[g_idx, :] = float(fee_override['close_today_fixed'])
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
     effective_close_fee_mat = close_today_fee_mat if use_closetoday else None
-    variant_liquidity_modes = liquidity_modes_list
-    variant_liquidity_percents = liquidity_percents_list
-    variant_margin_modes = margin_modes_list
+    group_liquidity_modes = liquidity_modes_list
+    group_liquidity_percents = liquidity_percents_list
+    group_margin_modes = margin_modes_list
     effective_close_fee_fixed_mat = close_today_fee_fixed_mat if use_closetoday else close_fee_fixed_mat
 
-    if any(str(mode) == "percent" for mode in variant_liquidity_modes):
+    if any(str(mode) == "percent" for mode in group_liquidity_modes):
         liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_dt, end_dt)
 
     # products_by_group built lazily by GroupRunResult.get_products_by_group()
@@ -1044,14 +1029,6 @@ def _simulate_group_from_preloaded(
     trade_present_np = np.isfinite(price_np) & (price_np > 0)
     data_has_bar = trade_present_np if np.any(~trade_present_np) else None
     _group_progress(f"simulate trading book start factor={factor.alias} T={len(index_list)} groups={group_count} products={P} rebalance={rebalance_mode}")
-    # Debug: check derived-group membership before simulation
-    for d_idx in range(len(derived_info)):
-        g = n_base + d_idx
-        _group_progress(
-            f"[DEBUG] pre-sim derived group {d_idx} (global={g}) "
-            f"membership_sum={int(membership_np[:, g, :].sum())} "
-            f"rebalance_mode={rebalance_modes_list[g]}"
-        )
     sim_result = simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_filled,
@@ -1064,29 +1041,19 @@ def _simulate_group_from_preloaded(
         close_today_fee_fixed_mat=effective_close_fee_fixed_mat,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
-        liquidity_modes=variant_liquidity_modes if variant_liquidity_modes else None,
-        liquidity_percents=variant_liquidity_percents if variant_liquidity_percents else None,
+        liquidity_modes=group_liquidity_modes if group_liquidity_modes else None,
+        liquidity_percents=group_liquidity_percents if group_liquidity_percents else None,
         point_value_vec=point_value_vec,
         min_tick_vec=min_tick_vec,
         min_trade_quantity_vec=min_trade_quantity_vec,
         margin_ratio_mat=margin_ratio_mat,
         is_margin_traded_vec=is_margin_traded_vec,
-        margin_modes=variant_margin_modes,
+        margin_modes=group_margin_modes,
         rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
     )
     _group_progress(f"simulate trading book done factor={factor.alias}")
     group_returns_np = sim_result['net_returns_np']
-    # Debug: check derived-group returns
-    for d_idx in range(len(derived_info)):
-        g = n_base + d_idx
-        ret = group_returns_np[:, g]
-        _group_progress(
-            f"[DEBUG] post-sim derived group {d_idx} (global={g}) "
-            f"net_returns sum={float(np.nansum(ret)):.6f} "
-            f"non_zero_count={int(np.count_nonzero(ret))} "
-            f"first_5_values={ret[:5].tolist()}"
-        )
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
     group_product_fee_contrib_np = sim_result['product_fee_contrib_np']
@@ -1149,9 +1116,9 @@ def _simulate_group_from_preloaded(
         multi_session_active=multi_session_active,
         rebalance_mode=rebalance_mode,
         report_df=report_df.copy(),
-        n_base=n_base,
-        n_derived=len(derived_info),
-        derived_info=derived_info,
+        n_base=group_count,
+        n_derived=0,
+        derived_info=[],
         group_names=n_names,
         hold_amounts_np=sim_result.get('prev_end_amounts_np'),
         position_quantities_np=sim_result.get('position_quantities_np'),
@@ -2108,7 +2075,7 @@ def _compute_buy_costs_per_group(
     return buy, buy_fee, trade_notional_ratio
 
 
-def simulate_derived_group(
+def simulate_sifted_group(
     group_index: int,
     selected_idx: list[int],
     group_result: GroupRunResult,
@@ -2118,9 +2085,9 @@ def simulate_derived_group(
     use_closetoday: bool = False,
     close_today_fee_vec: np.ndarray | None = None,
 ) -> dict:
-    """逐期模拟精选组（base group 的品种子集），返回 net/gross/fee/cumulative 序列。
+    """逐期模拟筛选组（source group 的品种子集），返回 net/gross/fee/cumulative 序列。
 
-    精选组的 wealth 演化路径独立于 base group：期初 wealth 初始为 1，
+    筛选组的 wealth 演化路径独立于源组：期初 wealth 初始为 1，
     每期根据子集 mask 重新计算 target_amounts、fee、net returns。
 
     底层复用 simulate_group_trading_book，引入 (T, 1, P) 的 membership matrix 后统一计算。
@@ -2128,7 +2095,7 @@ def simulate_derived_group(
     参数：
         open_fee_vec、close_fee_vec、close_today_fee_vec 由外部调用方构建传入，
         **不得**从 group_result 的属性中获取（group_result 的 fee 数据属于
-        上一次 base group 运行时的上下文，可能与当前请求的费率配置不一致）。
+        上一次源组运行时的上下文，可能与当前请求的费率配置不一致）。
     """
     membership_np = getattr(group_result, 'membership_np', None)
     period_returns_np = getattr(group_result, 'period_returns_np', None)
@@ -2214,9 +2181,9 @@ def simulate_derived_group(
     }
 
 
-def simulate_derived_groups_batch(
+def simulate_sifted_groups_batch(
     group_index: int,
-    derivations: list[dict],
+    siftings: list[dict],
     group_result: GroupRunResult,
     open_fee_vec: np.ndarray,
     close_fee_vec: np.ndarray,
@@ -2224,14 +2191,14 @@ def simulate_derived_groups_batch(
     use_closetoday: bool = False,
     close_today_fee_vec: np.ndarray | None = None,
 ) -> list[dict]:
-    """一次 simulate_group_trading_book 调用，批量计算同一基础组的多个派生组。
+    """一次 simulate_group_trading_book 调用，批量计算同一源组的多个筛选组。
 
-    所有派生组必须共享同一个 group_index（基础组索引）。
-    每个派生组的品种子集可能不同；取所有 selected_idx 的并集作为
-    P_all，构造 (T, N_derived, P_all) membership 后一次传入 simulate_group_trading_book。
+    所有筛选组必须共享同一个 group_index（源组索引）。
+    每个筛选组的品种子集可能不同；取所有 selected_idx 的并集作为
+    P_all，构造 (T, N_sifted, P_all) membership 后一次传入 simulate_group_trading_book。
 
-    derivations: [{'selected_idx': [...], 'name': '...'}, ...]
-    返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 derivations 相同)
+    siftings: [{'selected_idx': [...], 'name': '...'}, ...]
+    返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 siftings 相同)
     """
     membership_np = getattr(group_result, 'membership_np', None)
     period_returns_np = getattr(group_result, 'period_returns_np', None)
