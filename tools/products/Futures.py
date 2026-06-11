@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from tools.products.Product import Product
 from tools.base.IdleResourceManager import IdleResourceManager
+from tools.data.DataIndex import DataIndex
 from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,
@@ -163,14 +164,8 @@ class Futures(AdjustableProductMixin, Product):
             return None
 
         trading_day = self._normalize_roller_day(trading_day)
-        start_days = pd.DatetimeIndex(pd.to_datetime(self.roller_info['STARTDATE']))
-        end_days = pd.DatetimeIndex(pd.to_datetime(self.roller_info['ENDDATE']))
-        if start_days.tz is not None:
-            start_days = start_days.tz_localize(None)
-        if end_days.tz is not None:
-            end_days = end_days.tz_localize(None)
-        start_days = cast(pd.DatetimeIndex, start_days.normalize())
-        end_days = cast(pd.DatetimeIndex, end_days.normalize())
+        start_days = DataIndex.normalized_days(self.roller_info['STARTDATE'])
+        end_days = DataIndex.normalized_days(self.roller_info['ENDDATE'])
 
         if trading_day < start_days[0] or trading_day > end_days[-1]:
             return None

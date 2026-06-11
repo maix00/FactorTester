@@ -212,22 +212,17 @@ class DataIndex:
             return result
         return pd.DatetimeIndex(idx)
 
-    # ── 时区 ──────────────────────────────────────────────────────────────
+    @staticmethod
+    def normalized_days(values: Any) -> pd.DatetimeIndex:
+        """从原始列值构造标准化的日级别 DatetimeIndex（去tz + normalize）。
 
-
-def finest_index(index: pd.Index) -> pd.DatetimeIndex:
-    """取索引的最精细时间列 — 始终返回最后一层 DatetimeIndex，零构造开销。
-
-    调用方无需构造 DataIndex 实例：
-        from tools.data.DataIndex import finest_index
-        ts = finest_index(df.index)
-
-    与 MultiIndex 中的 _SIGNAL@ 命名约定无关；
-    仅取最后一层 (get_level_values(-1))。
-    """
-    if isinstance(index, pd.MultiIndex):
-        return pd.DatetimeIndex(index.get_level_values(-1))
-    return pd.DatetimeIndex(index)
+        等价于 pd.DatetimeIndex(pd.to_datetime(values)).tz_localize(None).normalize()，
+        零构造开销（无 DataIndex 实例）。
+        """
+        result = pd.DatetimeIndex(pd.to_datetime(values))
+        if result.tz is not None:
+            result = result.tz_localize(None)  # type: ignore[assignment]
+        return cast(pd.DatetimeIndex, result.normalize())
 
     # ── 时区 ──────────────────────────────────────────────────────────────
 
@@ -419,3 +414,18 @@ def finest_index(index: pd.Index) -> pd.DatetimeIndex:
 
     def __hash__(self) -> int:
         return hash(id(self))
+
+
+def finest_index(index: pd.Index) -> pd.DatetimeIndex:
+    """取索引的最精细时间列 — 始终返回最后一层 DatetimeIndex，零构造开销。
+
+    调用方无需构造 DataIndex 实例：
+        from tools.data.DataIndex import finest_index
+        ts = finest_index(df.index)
+
+    与 MultiIndex 中的 _SIGNAL@ 命名约定无关；
+    仅取最后一层 (get_level_values(-1))。
+    """
+    if isinstance(index, pd.MultiIndex):
+        return pd.DatetimeIndex(index.get_level_values(-1))
+    return pd.DatetimeIndex(index)

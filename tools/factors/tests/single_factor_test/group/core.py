@@ -1236,14 +1236,8 @@ def _expand_single_trade_product(
     else:
         roller_df = cast(pd.DataFrame, roller_info_obj)
     if roller_df is not None and not roller_df.empty:
-        start_days = pd.DatetimeIndex(pd.to_datetime(roller_df["STARTDATE"]))
-        end_days = pd.DatetimeIndex(pd.to_datetime(roller_df["ENDDATE"]))
-        if start_days.tz is not None:
-            start_days = start_days.tz_localize(None)
-        if end_days.tz is not None:
-            end_days = end_days.tz_localize(None)
-        start_days = cast(pd.DatetimeIndex, start_days.normalize())
-        end_days = cast(pd.DatetimeIndex, end_days.normalize())
+        start_days = DataIndex.normalized_days(roller_df["STARTDATE"])
+        end_days = DataIndex.normalized_days(roller_df["ENDDATE"])
 
         roller_rows = roller_df.reset_index(drop=True)
         n_rows = len(roller_rows)
