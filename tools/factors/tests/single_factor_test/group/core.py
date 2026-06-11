@@ -853,11 +853,20 @@ def _append_derived_group_memberships(
         product_names = dd.get('productNames', dd.get('product_names', []))
         if not product_names:
             return None
+        product_names_str = [str(name) for name in product_names]
         sel_idx = [
             display_name_to_idx[name]
-            for name in map(str, product_names)
+            for name in product_names_str
             if name in display_name_to_idx
         ]
+        if not sel_idx:
+            # Try case-insensitive fallback
+            lower_to_name = {n.lower(): n for n in display_names}
+            sel_idx = [
+                display_name_to_idx[lower_to_name[ln]]
+                for name in product_names_str
+                if (ln := name.lower()) in lower_to_name
+            ]
         if not sel_idx:
             return None
         sel = np.asarray(sel_idx, dtype=int)
@@ -948,11 +957,15 @@ def _simulate_group_from_preloaded(
     liquidity_modes_list = ["infinite"] * group_count
     liquidity_percents_list = [100.0] * group_count
     margin_modes_list = ["margin"] * group_count
+    rebalance_modes_list = [rebalance_mode] * group_count
     for d_idx, di in enumerate(derived_info):
         g = n_base + d_idx
         liquidity_modes_list[g] = _liquidity_mode_from_spec(di)
         liquidity_percents_list[g] = _liquidity_percent_from_spec(di)
         margin_modes_list[g] = str(di.get('margin_mode') or di.get('marginMode') or "margin")
+        drm = str(di.get('rebalance_mode') or di.get('rebalanceMode') or rebalance_mode)
+        if drm in _VALID_MODES:
+            rebalance_modes_list[g] = drm
 
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
     _group_progress(f"group fee matrix start factor={factor.alias} groups={group_count} products={P}")
@@ -1019,7 +1032,7 @@ def _simulate_group_from_preloaded(
         margin_ratio_mat=margin_ratio_mat,
         is_margin_traded_vec=is_margin_traded_vec,
         margin_modes=variant_margin_modes,
-        rebalance_modes=np.asarray([rebalance_mode] * group_count, dtype=object),
+        rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
     )
     _group_progress(f"simulate trading book done factor={factor.alias}")
@@ -1680,6 +1693,10 @@ def simulate_group_trading_book(
         valid_tick = np.isfinite(min_ticks) & (min_ticks > 0)
         rounded = px.copy()
         rounded[valid_tick] = np.round(px[valid_tick] / min_ticks[valid_tick]) * min_ticks[valid_tick]
+        # Fallback: round to 2 decimal places for products without min_tick
+        no_tick = np.isfinite(px) & (~valid_tick)
+        if no_tick.any():
+            rounded[no_tick] = np.round(px[no_tick], 2)
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
 
     _group_progress(f"trading book simulation start T={T} groups={M} products={P}")
@@ -1693,6 +1710,10 @@ def simulate_group_trading_book(
         contract_value_row = contract_value[np.newaxis, :]
         prev_notional = np.where(executable_row, quantities * contract_value_row, 0.0)
 
+        # Build initial targets per-group using each group's own rebalance mode.
+        # For all groups: always start with "each_period" for the initial allocation
+        # (even buy_and_hold/recycle need first-period full weighting).
+        # The hold/recycle logic below will freeze reuse after the first period.
         target_notional = build_target_amounts(
             membership_np[t],
             prev_notional,
