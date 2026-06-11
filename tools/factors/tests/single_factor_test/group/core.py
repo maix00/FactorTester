@@ -48,13 +48,13 @@ class GroupSharedInputs:
 @dataclass(slots=True)
 class GroupTradeSpecBundle:
     valid_cols: list
-    open_fee_vec: np.ndarray
-    close_fee_vec: np.ndarray
-    close_today_fee_vec: np.ndarray
-    close_yesterday_fee_vec: np.ndarray
-    open_fee_fixed_vec: np.ndarray
-    close_fee_fixed_vec: np.ndarray
-    close_today_fee_fixed_vec: np.ndarray
+    open_ratio_vec: np.ndarray
+    open_fixed_vec: np.ndarray
+    close_ratio_vec: np.ndarray      # 平昨 (close_yesterday)
+    close_fixed_vec: np.ndarray      # 平昨 (close_yesterday)
+    close_today_ratio_vec: np.ndarray
+    close_today_fixed_vec: np.ndarray
+    use_closetoday_vec: np.ndarray   # per-product bool: True=平今, False=平昨
     point_value_vec: np.ndarray
     min_tick_vec: np.ndarray
     min_trade_quantity_vec: np.ndarray
@@ -117,10 +117,13 @@ def slice_group_run_result(
         membership_np=np.take(group_result.membership_np, group_indices, axis=1),
         products_by_group=new_products_by_group,
         valid_cols=list(group_result.valid_cols),
-        open_fee_vec=np.asarray(group_result.open_fee_vec).copy(),
-        close_fee_vec=np.asarray(group_result.close_fee_vec).copy(),
-        close_today_fee_vec=np.asarray(group_result.close_today_fee_vec).copy(),
-        close_yesterday_fee_vec=np.asarray(group_result.close_yesterday_fee_vec).copy(),
+        open_ratio_vec=np.asarray(group_result.open_ratio_vec).copy(),
+        open_fixed_vec=None if group_result.open_fixed_vec is None else np.asarray(group_result.open_fixed_vec).copy(),
+        close_ratio_vec=np.asarray(group_result.close_ratio_vec).copy(),
+        close_fixed_vec=None if group_result.close_fixed_vec is None else np.asarray(group_result.close_fixed_vec).copy(),
+        close_today_ratio_vec=np.asarray(group_result.close_today_ratio_vec).copy(),
+        close_today_fixed_vec=None if group_result.close_today_fixed_vec is None else np.asarray(group_result.close_today_fixed_vec).copy(),
+        use_closetoday_vec=None if group_result.use_closetoday_vec is None else np.asarray(group_result.use_closetoday_vec).copy(),
         index_list=list(group_result.index_list),
         multi_session_active=bool(group_result.multi_session_active),
         rebalance_mode=str(group_result.rebalance_mode),
@@ -133,9 +136,6 @@ def slice_group_run_result(
         cash_np=_take_group_axis(group_result.cash_np),
         initial_capital=group_result.initial_capital,
         price_np=None if group_result.price_np is None else np.asarray(group_result.price_np).copy(),
-        open_fee_fixed_vec=None if group_result.open_fee_fixed_vec is None else np.asarray(group_result.open_fee_fixed_vec).copy(),
-        close_fee_fixed_vec=None if group_result.close_fee_fixed_vec is None else np.asarray(group_result.close_fee_fixed_vec).copy(),
-        close_today_fee_fixed_vec=None if group_result.close_today_fee_fixed_vec is None else np.asarray(group_result.close_today_fee_fixed_vec).copy(),
         point_value_vec=None if group_result.point_value_vec is None else np.asarray(group_result.point_value_vec).copy(),
         min_tick_vec=None if group_result.min_tick_vec is None else np.asarray(group_result.min_tick_vec).copy(),
         min_trade_quantity_vec=None if group_result.min_trade_quantity_vec is None else np.asarray(group_result.min_trade_quantity_vec).copy(),
@@ -668,6 +668,7 @@ def _resolve_group_trade_specs(
     valid_cols: list,
     fee: float,
     fee_modifications: list | None = None,
+    use_closetoday: bool = False,
 ) -> GroupTradeSpecBundle:
     term_structure_paths = list(dict.fromkeys(
         path
@@ -729,13 +730,13 @@ def _resolve_group_trade_specs(
         _spec_bundle_by_id[id(col)] = merged_bundle
 
     half_fee = float(fee) / 2.0
-    open_fee_list: list[float] = []
-    close_fee_list: list[float] = []
-    close_today_fee_list: list[float] = []
-    close_yesterday_fee_list: list[float] = []
-    open_fee_fixed_list: list[float] = []
-    close_fee_fixed_list: list[float] = []
-    close_today_fee_fixed_list: list[float] = []
+    open_ratio_list: list[float] = []
+    open_fixed_list: list[float] = []
+    close_ratio_list: list[float] = []       # 平昨 (close_yesterday)
+    close_today_ratio_list: list[float] = []
+    close_fixed_list: list[float] = []       # 平昨 (close_yesterday)
+    close_today_fixed_list: list[float] = []
+    use_closetoday_list: list[bool] = []
     point_value_list: list[float] = []
     min_tick_list: list[float] = []
     min_trade_quantity_list: list[float] = []
@@ -785,23 +786,24 @@ def _resolve_group_trade_specs(
             # 3. col 属性
             return getattr(col, product_field, default)
 
-        open_fee_list.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
-        close_fee_value = _coerce_float(_pick_value(half_fee, "close_yesterday_ratio"), half_fee)
-        close_fee_list.append(close_fee_value)
-        close_today_fee_list.append(_coerce_float(
-            _pick_value(close_fee_value, "close_today_ratio"),
-            close_fee_value,
+        open_ratio_list.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
+        open_fixed_list.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
+        # close (平昨 / close_yesterday)
+        close_ratio_val = _coerce_float(_pick_value(half_fee, "close_yesterday_ratio"), half_fee)
+        close_ratio_list.append(close_ratio_val)
+        close_fixed_val = _coerce_float(_pick_value(0.0, "close_yesterday_fixed"), 0.0)
+        close_fixed_list.append(close_fixed_val)
+        # close_today (平今)
+        close_today_ratio_list.append(_coerce_float(
+            _pick_value(close_ratio_val, "close_today_ratio"),
+            close_ratio_val,
         ))
-        close_yesterday_fee_list.append(_coerce_float(
-            _pick_value(close_fee_value, "close_yesterday_ratio"),
-            close_fee_value,
+        close_today_fixed_list.append(_coerce_float(
+            _pick_value(close_fixed_val, "close_today_fixed"),
+            close_fixed_val,
         ))
-        close_fee_fixed_value = _coerce_float(_pick_value(0.0, "close_yesterday_fixed"), 0.0)
-        open_fee_fixed_list.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
-        close_fee_fixed_list.append(close_fee_fixed_value)
-        close_today_fee_fixed_list.append(_coerce_float(
-            _pick_value(close_fee_fixed_value, "close_today_fixed"),
-            close_fee_fixed_value,
+        use_closetoday_list.append(bool(
+            getattr(col, "use_closetoday", None) or use_closetoday
         ))
         point_value_list.append(_coerce_float(
             _pick_value(1.0, "multiplier") if "multiplier" in bundle
@@ -821,13 +823,13 @@ def _resolve_group_trade_specs(
 
     return GroupTradeSpecBundle(
         valid_cols=list(valid_cols),
-        open_fee_vec=np.asarray(open_fee_list, dtype=float),
-        close_fee_vec=np.asarray(close_fee_list, dtype=float),
-        close_today_fee_vec=np.asarray(close_today_fee_list, dtype=float),
-        close_yesterday_fee_vec=np.asarray(close_yesterday_fee_list, dtype=float),
-        open_fee_fixed_vec=np.asarray(open_fee_fixed_list, dtype=float),
-        close_fee_fixed_vec=np.asarray(close_fee_fixed_list, dtype=float),
-        close_today_fee_fixed_vec=np.asarray(close_today_fee_fixed_list, dtype=float),
+        open_ratio_vec=np.asarray(open_ratio_list, dtype=float),
+        open_fixed_vec=np.asarray(open_fixed_list, dtype=float),
+        close_ratio_vec=np.asarray(close_ratio_list, dtype=float),
+        close_fixed_vec=np.asarray(close_fixed_list, dtype=float),
+        close_today_ratio_vec=np.asarray(close_today_ratio_list, dtype=float),
+        close_today_fixed_vec=np.asarray(close_today_fixed_list, dtype=float),
+        use_closetoday_vec=np.asarray(use_closetoday_list, dtype=bool),
         point_value_vec=np.asarray(point_value_list, dtype=float),
         min_tick_vec=np.asarray(min_tick_list, dtype=float),
         min_trade_quantity_vec=np.asarray(min_trade_quantity_list, dtype=float),
@@ -977,20 +979,19 @@ def _simulate_group_from_preloaded(
     index_list: list,
     n_names: dict[int, str],
     group_configs: list[dict] | None = None,
-    use_closetoday: bool,
+    use_closetoday_vec: np.ndarray,
     rebalance_mode: str,
     initial_capital: float,
     multi_session_active: bool,
     start_dt: Optional[Any] = None,  # DataTime
     end_dt: Optional[Any] = None,    # DataTime
     source_freq: DataFreq,
-    open_fee_vec: np.ndarray,
-    close_fee_vec: np.ndarray,
-    close_today_fee_vec: np.ndarray,
-    close_yesterday_fee_vec: np.ndarray,
-    open_fee_fixed_vec: np.ndarray,
-    close_fee_fixed_vec: np.ndarray,
-    close_today_fee_fixed_vec: np.ndarray,
+    open_ratio_vec: np.ndarray,
+    close_ratio_vec: np.ndarray,
+    close_today_ratio_vec: np.ndarray,
+    open_fixed_vec: np.ndarray,
+    close_fixed_vec: np.ndarray,
+    close_today_fixed_vec: np.ndarray,
     point_value_vec: np.ndarray,
     min_tick_vec: np.ndarray,
     min_trade_quantity_vec: np.ndarray,
@@ -1038,13 +1039,12 @@ def _simulate_group_from_preloaded(
 
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
     _group_progress(f"group fee matrix start factor={factor.alias} groups={group_count} products={P}")
-    open_fee_mat = np.tile(open_fee_vec, (group_count, 1))
-    close_fee_mat = np.tile(close_fee_vec, (group_count, 1))
-    close_today_fee_mat = np.tile(close_today_fee_vec, (group_count, 1))
-    close_yesterday_fee_mat = np.tile(close_yesterday_fee_vec, (group_count, 1))
-    open_fee_fixed_mat = np.tile(open_fee_fixed_vec, (group_count, 1))
-    close_fee_fixed_mat = np.tile(close_fee_fixed_vec, (group_count, 1))
-    close_today_fee_fixed_mat = np.tile(close_today_fee_fixed_vec, (group_count, 1))
+    open_ratio_mat = np.tile(open_ratio_vec, (group_count, 1))
+    close_ratio_mat = np.tile(close_ratio_vec, (group_count, 1))
+    close_today_ratio_mat = np.tile(close_today_ratio_vec, (group_count, 1))
+    open_fixed_mat = np.tile(open_fixed_vec, (group_count, 1))
+    close_fixed_mat = np.tile(close_fixed_vec, (group_count, 1))
+    close_today_fixed_mat = np.tile(close_today_fixed_vec, (group_count, 1))
 
     # Apply per-group fee overrides from group_configs
     for g_idx, cfg in enumerate(_group_configs):
@@ -1054,20 +1054,21 @@ def _simulate_group_from_preloaded(
         if not isinstance(fee_override, dict):
             continue
         if 'open' in fee_override and fee_override['open'] is not None:
-            open_fee_mat[g_idx, :] = float(fee_override['open'])
+            open_ratio_mat[g_idx, :] = float(fee_override['open'])
         if 'close' in fee_override and fee_override['close'] is not None:
-            close_fee_mat[g_idx, :] = float(fee_override['close'])
+            close_ratio_mat[g_idx, :] = float(fee_override['close'])
         if 'close_today' in fee_override and fee_override['close_today'] is not None:
-            close_today_fee_mat[g_idx, :] = float(fee_override['close_today'])
-        if 'close_yesterday' in fee_override and fee_override['close_yesterday'] is not None:
-            close_yesterday_fee_mat[g_idx, :] = float(fee_override['close_yesterday'])
+            close_today_ratio_mat[g_idx, :] = float(fee_override['close_today'])
     _group_progress(f"group fee matrix done factor={factor.alias}")
 
-    effective_close_fee_mat = close_today_fee_mat if use_closetoday else None
+    # Build per-product effective close matrices using use_closetoday_vec
+    use_closetoday_brd = use_closetoday_vec[np.newaxis, :]  # (1, P) -> broadcast across groups
+    effective_close_ratio_mat = np.where(use_closetoday_brd, close_today_ratio_mat, close_ratio_mat)
+    effective_close_fixed_mat = np.where(use_closetoday_brd, close_today_fixed_mat, close_fixed_mat)
+
     group_liquidity_modes = liquidity_modes_list
     group_liquidity_percents = liquidity_percents_list
     group_margin_modes = margin_modes_list
-    effective_close_fee_fixed_mat = close_today_fee_fixed_mat if use_closetoday else close_fee_fixed_mat
 
     if any(str(mode) == "percent" for mode in group_liquidity_modes):
         liquidity_capacity_np = _build_normalized_liquidity_capacity(valid_cols, index_list, source_freq, start_dt, end_dt)
@@ -1083,12 +1084,12 @@ def _simulate_group_from_preloaded(
         membership_np=membership_np,
         returns_np=returns_filled,
         price_np=price_np,
-        open_fee_rate_mat=open_fee_mat,
-        close_fee_rate_mat=close_fee_mat,
-        close_today_fee_rate_mat=effective_close_fee_mat,
-        open_fee_fixed_mat=open_fee_fixed_mat,
-        close_fee_fixed_mat=close_fee_fixed_mat,
-        close_today_fee_fixed_mat=effective_close_fee_fixed_mat,
+        open_fee_rate_mat=open_ratio_mat,
+        close_fee_rate_mat=effective_close_ratio_mat,
+        close_today_fee_rate_mat=None,
+        open_fee_fixed_mat=open_fixed_mat,
+        close_fee_fixed_mat=effective_close_fixed_mat,
+        close_today_fee_fixed_mat=None,
         tradable_mask_np=data_has_bar,
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=group_liquidity_modes if group_liquidity_modes else None,
@@ -1158,10 +1159,9 @@ def _simulate_group_from_preloaded(
         membership_np=membership_np,
         products_by_group=None,  # lazily built by get_products_by_group()
         valid_cols=valid_cols,
-        open_fee_vec=open_fee_vec,
-        close_fee_vec=close_fee_vec,
-        close_today_fee_vec=close_today_fee_vec,
-        close_yesterday_fee_vec=close_yesterday_fee_vec,
+        open_ratio_vec=open_fee_vec,
+        close_ratio_vec=close_fee_vec,
+        close_today_ratio_vec=close_today_fee_vec,
         index_list=index_list,
         multi_session_active=multi_session_active,
         rebalance_mode=rebalance_mode,
@@ -1174,9 +1174,9 @@ def _simulate_group_from_preloaded(
         cash_np=sim_result.get('cash_np'),
         initial_capital=float(initial_capital),
         price_np=price_np,
-        open_fee_fixed_vec=open_fee_fixed_vec,
-        close_fee_fixed_vec=close_fee_fixed_vec,
-        close_today_fee_fixed_vec=close_today_fee_fixed_vec,
+        open_fixed_vec=open_fee_fixed_vec,
+        close_fixed_vec=close_fee_fixed_vec,
+        close_today_fixed_vec=close_today_fee_fixed_vec,
         point_value_vec=point_value_vec,
         min_tick_vec=min_tick_vec,
         min_trade_quantity_vec=min_trade_quantity_vec,

@@ -1145,9 +1145,9 @@ def get_group_detail():
             group_index, products, returns_np, index_list, summary,
             product_contrib_np, valid_cols, gross_returns_np, trade_notional_np,
             group_result.fee_costs_np if group_result is not None else None,
-            group_result.open_fee_vec if group_result is not None else None,
-            group_result.close_fee_vec if group_result is not None else None,
-            group_result.close_today_fee_vec if group_result is not None else None,
+            group_result.open_ratio_vec if group_result is not None else None,
+            group_result.close_ratio_vec if group_result is not None else None,
+            group_result.close_today_ratio_vec if group_result is not None else None,
         )
         return jsonify({'success': True, 'detail': detail})
     except Exception as e:

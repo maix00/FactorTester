@@ -458,6 +458,7 @@ class FactorGroupTester:
         *,
         fee: float,
         fee_modifications: list | None = None,
+        use_closetoday: bool = False,
     ) -> BatchExecutionPlan:
         first_entry = plan.entries[0]
         T = len(first_entry.shared_inputs.index_list)
@@ -520,6 +521,7 @@ class FactorGroupTester:
             valid_cols=ordered_trade_products,
             fee=fee,
             fee_modifications=fee_modifications,
+            use_closetoday=use_closetoday,
         )
         return plan
 
@@ -533,7 +535,7 @@ class FactorGroupTester:
         initial_capital: float,
         rebalance_mode: str,
     ) -> list[dict[str, Any]]:
-        plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications)
+        plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications, use_closetoday=use_closetoday)
         first_entry = plan.entries[0]
         first_factor = first_entry.tester.resolve_factor(first_entry.factor_alias)
         if first_factor is None or plan.merged_returns_np is None or plan.merged_price_np is None or plan.merged_spec_bundle is None:
@@ -570,20 +572,19 @@ class FactorGroupTester:
             index_list=list(first_entry.shared_inputs.index_list),
             n_names=group_name_map,
             group_configs=group_configs,
-            use_closetoday=use_closetoday,
+            use_closetoday_vec=spec_bundle.use_closetoday_vec,
             rebalance_mode=rebalance_mode,
             initial_capital=initial_capital,
             multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
             start_dt=self.start_dt,
             end_dt=self.end_dt,
             source_freq=first_entry.shared_inputs.source_freq,
-            open_fee_vec=spec_bundle.open_fee_vec,
-            close_fee_vec=spec_bundle.close_fee_vec,
-            close_today_fee_vec=spec_bundle.close_today_fee_vec,
-            close_yesterday_fee_vec=spec_bundle.close_yesterday_fee_vec,
-            open_fee_fixed_vec=spec_bundle.open_fee_fixed_vec,
-            close_fee_fixed_vec=spec_bundle.close_fee_fixed_vec,
-            close_today_fee_fixed_vec=spec_bundle.close_today_fee_fixed_vec,
+            open_ratio_vec=spec_bundle.open_ratio_vec,
+            close_ratio_vec=spec_bundle.close_ratio_vec,
+            close_today_ratio_vec=spec_bundle.close_today_ratio_vec,
+            open_fixed_vec=spec_bundle.open_fixed_vec,
+            close_fixed_vec=spec_bundle.close_fixed_vec,
+            close_today_fixed_vec=spec_bundle.close_today_fixed_vec,
             point_value_vec=spec_bundle.point_value_vec,
             min_tick_vec=spec_bundle.min_tick_vec,
             min_trade_quantity_vec=spec_bundle.min_trade_quantity_vec,
