@@ -13,6 +13,7 @@ import pandas as pd
 from flask import request, jsonify
 from . import shared_bp
 from server.services.product_tree import convert_to_fancytree, find_node_by_path
+from tools.data.DataIndex import finest_index
 from tools.data.DataSource import DataSource
 from tools.products.Futures import Futures
 from tools.products.product_utils import get_contract_desc, get_product_contracts
@@ -363,7 +364,7 @@ def get_price_data():
 
         # 还原索引
         if not isinstance(price_df.index, pd.DatetimeIndex):
-            price_df.index = pd.to_datetime(price_df.index.get_level_values(-1))
+            price_df.index = pd.to_datetime(finest_index(price_df.index))
 
         # 时区统一：日内数据统一到 product 时区，日频数据保持 naive
         # format_price_row 会将所有时间统一转为 UTC epoch，前端按浏览器本地时区渲染

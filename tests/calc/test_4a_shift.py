@@ -34,6 +34,7 @@ from openpyxl.styles import Alignment
 from openpyxl.utils.datetime import from_excel
 
 from sources.LocalCNFutures.CNFutures import CNFutures
+from tools.data.DataIndex import finest_index
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
 from tools.factors.FactorExpr import ColumnRef, EvaluateContext, ShiftOp
@@ -153,7 +154,7 @@ def _normalise_excel_datetime(value):
 
 
 def _normalise_series_index(series: pd.Series) -> pd.Series:
-    index = series.index.get_level_values(-1) if isinstance(series.index, pd.MultiIndex) else series.index
+    index = finest_index(series.index) if isinstance(series.index, pd.MultiIndex) else series.index
     ts_index = pd.DatetimeIndex(index)
     if ts_index.tz is not None:
         ts_index = ts_index.tz_convert('Asia/Shanghai').tz_localize(None)

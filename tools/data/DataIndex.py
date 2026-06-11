@@ -198,6 +198,37 @@ class DataIndex:
         """原始索引是否为纯 DatetimeIndex。"""
         return isinstance(self.raw, pd.DatetimeIndex)
 
+    @property
+    def finest_index(self) -> pd.DatetimeIndex:
+        """始终返回最精细的时间列作为 DatetimeIndex。
+
+        与 signal_index 不同：finest_index 始终取最后一层 (get_level_values(-1))，
+        不遵循 _SIGNAL@ 前缀匹配优先级。
+        用于需要逐 bar 精度（格式化输出、逐点截断、day_periods 计算等）。
+        """
+        idx = self.raw
+        if isinstance(idx, pd.MultiIndex):
+            result = pd.DatetimeIndex(idx.get_level_values(-1))
+            return result
+        return pd.DatetimeIndex(idx)
+
+    # ── 时区 ──────────────────────────────────────────────────────────────
+
+
+def finest_index(index: pd.Index) -> pd.DatetimeIndex:
+    """取索引的最精细时间列 — 始终返回最后一层 DatetimeIndex，零构造开销。
+
+    调用方无需构造 DataIndex 实例：
+        from tools.data.DataIndex import finest_index
+        ts = finest_index(df.index)
+
+    与 MultiIndex 中的 _SIGNAL@ 命名约定无关；
+    仅取最后一层 (get_level_values(-1))。
+    """
+    if isinstance(index, pd.MultiIndex):
+        return pd.DatetimeIndex(index.get_level_values(-1))
+    return pd.DatetimeIndex(index)
+
     # ── 时区 ──────────────────────────────────────────────────────────────
 
     @property

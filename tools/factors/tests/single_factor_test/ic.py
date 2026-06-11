@@ -10,6 +10,7 @@ from tools.factors import Factor
 from tools.factors.tests import CrossSectionIC
 from tools.factors.FactorTester import _align_ts
 from tools.data.DataFreq import DataFreq
+from tools.data.DataIndex import finest_index
 
 
 def ic_stats(ic_series: pd.Series) -> pd.Series:
@@ -77,11 +78,11 @@ def run_ic_for_factor(
             ic_series = cast(pd.Series, pd.Series(ic_series))
 
         if tester.start_date is not None and len(ic_series) > 0:
-            idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
+            idx_ts = finest_index(ic_series.index)
             ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.start_date)
             ic_series = cast(pd.Series, ic_series[idx_ts >= _align_ts(pd.Timestamp(tester.start_date), ref_ts)])
         if tester.end_date is not None and len(ic_series) > 0:
-            idx_ts = cast(pd.Index, ic_series.index.get_level_values(-1))
+            idx_ts = finest_index(ic_series.index)
             ref_ts = idx_ts[0] if len(idx_ts) > 0 else pd.Timestamp(tester.end_date)
             ic_series = cast(pd.Series, ic_series[idx_ts <= _align_ts(pd.Timestamp(tester.end_date), ref_ts)])
 

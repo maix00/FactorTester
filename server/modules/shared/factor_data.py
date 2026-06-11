@@ -12,6 +12,7 @@ import traceback
 from flask import request, jsonify
 from server.services.factor_registry import get_factor_family_instance
 from server.services.runtime_state import get_factor_tester, get_session_params
+from tools.data.DataIndex import finest_index
 from . import shared_bp
 from server.services.api_response import api_fail, api_ok, route_guard
 from .factor_data_helpers import (
@@ -247,7 +248,7 @@ def get_price_series():
                 if col not in raw_df.columns:
                     return None
             if not isinstance(raw_df.index, pd.DatetimeIndex):
-                raw_df.index = pd.to_datetime(raw_df.index.get_level_values(-1))
+                raw_df.index = pd.to_datetime(finest_index(raw_df.index))
             if raw_df.index.tz is not None:
                 raw_df.index = raw_df.index.tz_convert('UTC').tz_localize(None)
 
@@ -353,7 +354,7 @@ def get_factor_distribution():
         if not isinstance(table, pd.DataFrame) or table.empty:
             return jsonify({'error': '未找到可用的因子截面数据，请先运行 IC 测试后再查看分布'}), 400
 
-        idx = table.index.get_level_values(-1) if isinstance(table.index, pd.MultiIndex) else table.index
+        idx = finest_index(table.index) if isinstance(table.index, pd.MultiIndex) else table.index
         tz = getattr(idx, 'tz', None)
         ts_compare = ts.tz_localize(tz) if tz and ts.tzinfo is None else (
             ts.replace(tzinfo=None) if not tz and ts.tzinfo else ts)
@@ -364,7 +365,7 @@ def get_factor_distribution():
             return jsonify({'error': f'未找到 {ts_compare} 附近的因子数据，最近差 {nearest_diff}'}), 404
 
         row = table.iloc[nearest_i]
-        actual_ts: Any = idx[nearest_i]
+        actual_ts: Any = idx[int(nearest_i)]
         values = []
         for col, val in row.items():
             if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):

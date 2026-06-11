@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from tools.data.DataIndex import finest_index
 from tools.data.DataFreq import DataFreq
 
 
@@ -103,7 +104,7 @@ def _union_index(frames) -> pd.Index:
 
 
 def _timestamps(index: pd.Index) -> pd.DatetimeIndex:
-    values = index.get_level_values(-1) if isinstance(index, pd.MultiIndex) else index
+    values = finest_index(index) if isinstance(index, pd.MultiIndex) else index
     return pd.DatetimeIndex(values)
 
 

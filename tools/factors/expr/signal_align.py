@@ -13,6 +13,7 @@ from typing import (
 )
 
 from tools.data.DataColumn import DataColumn
+from tools.data.DataIndex import finest_index
 from tools.data.DataFreq import DataFreq
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ def signal_align(
         # Mark rows whose innermost timestamp matches the requested basepoint time.
         # NOTE: we deliberately produce a boolean Series (not a DataFrame) so the
         # downstream basepoint selection logic stays consistent.
-        last_level = data.index.get_level_values(-1)
+        last_level = finest_index(data.index)
         times = pd.DatetimeIndex(last_level)
         series = pd.Series(times.time == base_time)
     elif isinstance(bp, str):

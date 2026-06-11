@@ -100,7 +100,7 @@ class DataMeta(UniqueObject):
         if self._day_periods is not None:
             return self._day_periods
         df = self.get_data()
-        idx_level = df.index.get_level_values(-1)
+        idx_level = finest_index(df.index)
         dates = pd.Series(getattr(pd.DatetimeIndex(idx_level), 'date'))
         day_boundaries = np.diff(np.where(dates != dates.shift(1))[0])
         if len(day_boundaries) == 0:
