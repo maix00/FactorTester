@@ -1381,6 +1381,7 @@ def run_group_test_stream():
     import json as _json
     from flask import Response, stream_with_context
     from server.services.sse_progress import SSEProgressEmitter
+    from tools.factors.backtest_progress import BacktestProgressRegistry
     from tools.factors.tests.single_factor_test.group.core import (
         register_group_progress,
         unregister_group_progress,
@@ -1397,46 +1398,60 @@ def run_group_test_stream():
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
     emitter = SSEProgressEmitter()
+    registry = BacktestProgressRegistry()
+
+    # ── 将 registry 的三个生命周期回调桥接到 SSE emitter ──
+    registry.register_before(
+        lambda total, groups, phase, extra: emitter.emit_start(
+            total=total, groups=groups, phase=phase, **extra,
+        )
+    )
+    registry.register_phase(
+        lambda phase, message, completed, total, extra: emitter.emit_progress(
+            completed=completed, total=total, phase=phase, message=message, **extra,
+        )
+    )
+    registry.register_after(
+        lambda success, data: emitter.emit_result(data) if success else emitter.emit_error(
+            data.get('error', '未知错误'),
+            traceback=data.get('traceback', ''),
+        )
+    )
 
     def _compute_and_emit():
         try:
-            # ── 注册进度桥接：core.py 的 _emit_progress → emitter ──
+            # ── 将 registry 桥接到 core.py 的全局注册 ──
             def _progress_bridge(phase: str, message: str, extra: dict):
                 completed = extra.get('completed', 0)
                 total = extra.get('total', 0)
-                if phase in ('batch',):
-                    # batch 进度：completed/total 是 batch 计数
-                    emitter.emit_progress(
-                        completed=completed, total=total,
-                        phase='batch', message=message, **extra,
-                    )
-                elif phase == 'init':
-                    emitter.emit_start(
+                if phase == 'init':
+                    registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
-                        phase='batch', message=message, **extra,
+                        phase='batch', **extra,
                     )
                 else:
-                    # membership / remap / trade_data / simulate
-                    emitter.emit_progress(
+                    registry.emit_phase(
+                        phase, message=message,
                         completed=completed, total=total,
-                        phase=phase, message=message, **extra,
+                        **extra,
                     )
 
             register_group_progress(_progress_bridge)
 
             success, result = _run_group_test_core(data)
             if success:
-                emitter.emit_result(result)
+                registry.emit_result(result)
             else:
-                emitter.emit_error(
+                registry.emit_error(
                     result.get('error', '未知错误'),
                     traceback=result.get('traceback', ''),
                 )
         except Exception as e:
             import traceback as _tb
-            emitter.emit_error(str(e), traceback=_tb.format_exc())
+            registry.emit_error(str(e), traceback=_tb.format_exc())
         finally:
             unregister_group_progress()
+            registry.cleanup()
             emitter.close()
 
     threading.Thread(target=_compute_and_emit, daemon=True).start()
