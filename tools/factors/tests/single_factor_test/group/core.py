@@ -1768,6 +1768,15 @@ def simulate_group_trading_book(
             "each_period",
             close_fee_vec=None,
         )
+        if t == 0 and M > 5:
+            for g in range(5, M):
+                _group_progress(
+                    f"[DEBUG] t=0 g={g} membership_sum={int(membership_np[t, g].sum())} "
+                    f"target_notional_sum={float(target_notional[g].sum()):.4f} "
+                    f"equity={float(equity[g]):.2f} "
+                    f"price_has_value={bool(np.isfinite(prices[t]).any())} "
+                    f"contract_value_has_value={bool(np.isfinite(contract_value).any())}"
+                )
         raw_quantities = np.divide(
             target_notional,
             contract_value_row,
