@@ -89,6 +89,7 @@
             name: resolvedName,
             parentId: parentId,
             productMask: productMask,
+            groupCount: (parentNode && parentNode.groupCount) || 1,
         };
         ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
          'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
