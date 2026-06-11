@@ -1360,12 +1360,15 @@ def _build_normalized_liquidity_capacity(
     start_dt: Optional[Any] = None,  # DataTime
     end_dt: Optional[Any] = None,    # DataTime
 ) -> np.ndarray | None:
-    """Return (T, P) capacity shares from turnover, fallbacking to volume*price*multiplier.
+    """Return (T, P) cross-sectional liquidity capacity shares (row sum = 1).
 
-    The simulator uses normalized wealth (initial capital = 1), so raw market
-    notional is converted into per-period cross-sectional shares.  A 20%
-    liquidity setting therefore means "this strategy may trade up to 20% of
-    the current period's cross-sectional tradable notional, allocated by
+    These shares represent each product's proportion of the total tradable
+    notional in each period. They are converted to absolute notional capacity
+    inside `simulate_group_trading_book` by multiplying by the current group
+    equity and the user-specified ``liquidity_percent``.
+
+    A 20% liquidity setting therefore means "this strategy may trade up to 20%
+    of the current period's cross-sectional tradable notional, allocated by
     product liquidity".
     """
     if not products or not signal_index:
@@ -1798,13 +1801,15 @@ def simulate_group_trading_book(
                 0.0,
             )
             base_capacity = np.where(executable, base_capacity, 0.0)
-            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
-            executable_capacity_t[percent_rows] = base_capacity[np.newaxis, :] * percent_scale[percent_rows, np.newaxis]
+            # liquidity_capacity_arr stores cross-sectional shares (sum=1 per row).
+            # Convert to absolute notional capacity per group by multiplying by equity
+            # (the simulator now uses absolute notional amounts, not normalized wealth).
+            capacity_amounts = base_capacity[np.newaxis, :] * equity[:, np.newaxis] * percent_scale[:, np.newaxis]
             target_amounts = apply_liquidity_execution(
                 prev_notional,
                 target_notional,
                 equity,
-                executable_capacity_t,
+                capacity_amounts,
                 open_rate_mat,
                 close_rate_mat,
             )
