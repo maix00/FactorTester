@@ -30,8 +30,8 @@
     var _feeNotice = null;            // 当前费率表来源提示
 
     /** Valid fee field names for FeeModification.fields */
-    var VALID_FEE_FIELDS = ['open_ratio', 'close_ratio', 'closetoday_ratio',
-                            'open_fixed', 'close_fixed', 'closetoday_fixed'];
+    var VALID_FEE_FIELDS = ['open_ratio', 'close_yesterday_ratio', 'close_today_ratio',
+                            'open_fixed', 'close_yesterday_fixed', 'close_today_fixed'];
 
     // ── Fee data API ───────────────────────────────────────────────────────────
 
@@ -83,10 +83,10 @@
             map[code] = {
                 open_ratio: r.open_ratio,
                 open_fixed: r.open_fixed,
-                close_ratio: r.close_ratio,
-                close_fixed: r.close_fixed,
-                closetoday_ratio: r.closetoday_ratio,
-                closetoday_fixed: r.closetoday_fixed,
+                close_yesterday_ratio: r.close_ratio,
+                close_yesterday_fixed: r.close_fixed,
+                close_today_ratio: r.closetoday_ratio,
+                close_today_fixed: r.closetoday_fixed,
                 multiplier: r.multiplier,
                 min_tick: r.min_tick,
                 min_trade_quantity: r.min_trade_quantity || r.lot_size || 1,
@@ -157,11 +157,11 @@
         var code = String(varietyCode).toUpperCase();
         var result = {
             open_ratio: rawRow.open_ratio,
-            close_ratio: rawRow.close_ratio,
-            closetoday_ratio: rawRow.closetoday_ratio,
+            close_yesterday_ratio: rawRow.close_ratio,
+            close_today_ratio: rawRow.closetoday_ratio,
             open_fixed: rawRow.open_fixed,
-            close_fixed: rawRow.close_fixed,
-            closetoday_fixed: rawRow.closetoday_fixed,
+            close_yesterday_fixed: rawRow.close_fixed,
+            close_today_fixed: rawRow.closetoday_fixed,
             fieldsModified: {}
         };
         // Sort by timestamp asc, then apply (later overrides earlier)
@@ -220,7 +220,7 @@
      * Idempotently ensure the global fee table is loaded from the backend.
      * Always returns a fresh fee map built from loaded data.
      *
-     * @returns {Promise<object>} — {variety_code: {open_ratio, close_ratio, closetoday_ratio}}
+     * @returns {Promise<object>} — {variety_code: {open_ratio, close_yesterday_ratio, close_today_ratio}}
      */
     function ensureFeeData() {
         return fetchFeeTable(true).then(function() {
@@ -323,7 +323,7 @@
             html += '<span>平仓口径</span>';
             html += '<button id="' + CONTAINER_ID + '-ct-toggle" style="padding:4px 12px;font-size:12px;border:1px solid ' + (useCT ? '#0078d4' : '#ccc') + ';border-radius:4px;background:' + (useCT ? '#0078d4' : '#fff') + ';color:' + (useCT ? '#fff' : '#333') + ';cursor:pointer;">' + (useCT ? '平今仓' : '平昨仓') + '</button>';
             html += '</label>';
-            html += '<div style="font-size:11px;color:#888;margin-top:4px;">平今仓模式使用 closetoday_ratio 计算手续费；平昨仓模式使用 close_ratio</div>';
+            html += '<div style="font-size:11px;color:#888;margin-top:4px;">平今仓模式使用 close_today_ratio 计算手续费；平昨仓模式使用 close_yesterday_ratio</div>';
             html += '</div>';
         }
 

@@ -20,16 +20,16 @@
 
     // ── Constants ──────────────────────────────────────────────────────────
 
-    var VALID_FEE_FIELDS = ['open_ratio', 'close_ratio', 'closetoday_ratio',
-                            'open_fixed', 'close_fixed', 'closetoday_fixed'];
+    var VALID_FEE_FIELDS = ['open_ratio', 'close_yesterday_ratio', 'close_today_ratio',
+                            'open_fixed', 'close_yesterday_fixed', 'close_today_fixed'];
 
     var FIELD_LABELS = {
-        open_ratio:       '开仓比率',
-        open_fixed:       '开仓费用',
-        close_ratio:      '平昨比率',
-        close_fixed:      '平昨费用',
-        closetoday_ratio: '平今比率',
-        closetoday_fixed: '平今费用',
+        open_ratio:           '开仓比率',
+        open_fixed:           '开仓费用',
+        close_yesterday_ratio:'平昨比率',
+        close_yesterday_fixed:'平昨费用',
+        close_today_ratio:    '平今比率',
+        close_today_fixed:    '平今费用',
     };
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -155,10 +155,10 @@
         var existing = {
             open_ratio: rowData.open_ratio != null ? Number(rowData.open_ratio) : 0,
             open_fixed: rowData.open_fixed != null ? Number(rowData.open_fixed) : 0,
-            close_ratio: rowData.close_ratio != null ? Number(rowData.close_ratio) : 0,
-            close_fixed: rowData.close_fixed != null ? Number(rowData.close_fixed) : 0,
-            closetoday_ratio: rowData.closetoday_ratio != null ? Number(rowData.closetoday_ratio) : 0,
-            closetoday_fixed: rowData.closetoday_fixed != null ? Number(rowData.closetoday_fixed) : 0,
+            close_yesterday_ratio: rowData.close_ratio != null ? Number(rowData.close_ratio) : 0,
+            close_yesterday_fixed: rowData.close_fixed != null ? Number(rowData.close_fixed) : 0,
+            close_today_ratio: rowData.closetoday_ratio != null ? Number(rowData.closetoday_ratio) : 0,
+            close_today_fixed: rowData.closetoday_fixed != null ? Number(rowData.closetoday_fixed) : 0,
         };
 
         var editingLabel = _editingIndex >= 0 ? ' (编辑第' + (_editingIndex + 1) + '条)' : '';

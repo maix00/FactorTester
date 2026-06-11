@@ -62,8 +62,8 @@
      * Build row data from raw fee rows + modifications.
      *
      * Returns [{code, name, exchange, multiplier, min_tick,
-     *           open_ratio, close_ratio, closetoday_ratio,
-     *           open_fixed, close_fixed, closetoday_fixed,
+     *           open_ratio, close_yesterday_ratio, close_today_ratio,
+     *           open_fixed, close_yesterday_fixed, close_today_fixed,
      *           fieldsModified: {open_ratio:true, ...},
      *           buyPerLot, sellPerLot}]
      */
@@ -90,8 +90,8 @@
                 applied = GT.fee.applyModificationsToRow(code, r, null);
             } else {
                 applied = {
-                    open_ratio: r.open_ratio, close_ratio: r.close_ratio, closetoday_ratio: r.closetoday_ratio,
-                    open_fixed: r.open_fixed, close_fixed: r.close_fixed, closetoday_fixed: r.closetoday_fixed,
+                    open_ratio: r.open_ratio, close_yesterday_ratio: r.close_ratio, close_today_ratio: r.closetoday_ratio,
+                    open_fixed: r.open_fixed, close_yesterday_fixed: r.close_fixed, close_today_fixed: r.closetoday_fixed,
                     fieldsModified: {}
                 };
             }
@@ -100,11 +100,11 @@
             // show components: ratio% * multiplier and fixed fees
             var mlt = Number(r.multiplier) || 1;
             var openRatio  = Number(applied.open_ratio)  || 0;
-            var closeRatio = Number(applied.close_ratio) || 0;
-            var cTDRatio   = Number(applied.closetoday_ratio) || 0;
+            var closeRatio = Number(applied.close_yesterday_ratio) || 0;
+            var cTDRatio   = Number(applied.close_today_ratio) || 0;
             var openFixed  = Number(applied.open_fixed)  || 0;
-            var closeFixed = Number(applied.close_fixed) || 0;
-            var cTDFixed   = Number(applied.closetoday_fixed) || 0;
+            var closeFixed = Number(applied.close_yesterday_fixed) || 0;
+            var cTDFixed   = Number(applied.close_today_fixed) || 0;
 
             // Approximate per-lot fee (no price): percentage part * multiplier ≈ notional-based
             // Show both ratio-based total and fixed total separately
@@ -120,11 +120,11 @@
                 multiplier:       mlt,
                 min_tick:         (r.min_tick != null) ? r.min_tick : '',
                 open_ratio:       openRatio,
-                close_ratio:      closeRatio,
-                closetoday_ratio: cTDRatio,
+                close_yesterday_ratio:  closeRatio,
+                close_today_ratio: cTDRatio,
                 open_fixed:       openFixed,
-                close_fixed:      closeFixed,
-                closetoday_fixed: cTDFixed,
+                close_yesterday_fixed:  closeFixed,
+                close_today_fixed: cTDFixed,
                 fieldsModified:   applied.fieldsModified || {},
                 // Per-lot fee components
                 buyPerLotPct:     buyPerLotPct,
@@ -178,8 +178,8 @@
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
             var fm = row.fieldsModified;
-            var hasMod = (fm.open_ratio || fm.close_ratio || fm.closetoday_ratio ||
-                          fm.open_fixed || fm.close_fixed || fm.closetoday_fixed);
+            var hasMod = (fm.open_ratio || fm.close_yesterday_ratio || fm.close_today_ratio ||
+                          fm.open_fixed || fm.close_yesterday_fixed || fm.close_today_fixed);
             var isSelected = (_selectedCode === row.code);
             var rowStyle = 'border-bottom:1px solid #eef2f7;cursor:pointer;';
             if (isSelected) rowStyle += 'background:' + ROW_SELECTED_BG + ';';
@@ -194,10 +194,10 @@
             // Ratio columns (with modification highlight)
             html += _cellTD(fmtNum(row.open_ratio),   fm.open_ratio);
             html += _cellTD(fmtNum(row.open_fixed, 2), fm.open_fixed);
-            html += _cellTD(fmtNum(row.closetoday_ratio),   fm.closetoday_ratio);
-            html += _cellTD(fmtNum(row.closetoday_fixed, 2), fm.closetoday_fixed);
-            html += _cellTD(fmtNum(row.close_ratio),   fm.close_ratio);
-            html += _cellTD(fmtNum(row.close_fixed, 2), fm.close_fixed);
+            html += _cellTD(fmtNum(row.close_today_ratio),   fm.close_today_ratio);
+            html += _cellTD(fmtNum(row.close_today_fixed, 2), fm.close_today_fixed);
+            html += _cellTD(fmtNum(row.close_yesterday_ratio),   fm.close_yesterday_ratio);
+            html += _cellTD(fmtNum(row.close_yesterday_fixed, 2), fm.close_yesterday_fixed);
 
             // Per-lot fee: buy = open+close_yday, sell = open+close_today
             var buyPctStr  = row.buyPerLotPct > 0 ? row.buyPerLotPct.toFixed(2) + '‰' : '—';

@@ -33,8 +33,8 @@ from typing import Optional
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 VALID_FEE_FIELDS = frozenset({
-    'open_ratio', 'close_ratio', 'closetoday_ratio',
-    'open_fixed', 'close_fixed', 'closetoday_fixed',
+    'open_ratio', 'close_yesterday_ratio', 'close_today_ratio',
+    'open_fixed', 'close_yesterday_fixed', 'close_today_fixed',
 })
 
 

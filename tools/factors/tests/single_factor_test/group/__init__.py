@@ -41,8 +41,8 @@ class _FactorGroupTestGroup:
         (the group inherits the full product universe of its membership row).
         When non-empty, the membership is the intersection of the base row
         with this product set.
-    fee_map : dict | None
-        Per-product fee overrides for this group.
+    fee_modifications : list | None
+        Per-group fee modifications (FeeModification objects serialized as dicts).
     fee_mode : str | None
         Fee mode override for this group.
     fee_rate : float | None
@@ -71,7 +71,7 @@ class _FactorGroupTestGroup:
     product_list: Optional[list[str]] = None
 
     # ── Fee / config overrides ──
-    fee_map: Optional[dict] = None
+    fee_modifications: Optional[list] = None
     fee_mode: Optional[str] = None
     fee_rate: Optional[float] = None
     use_close_today: Optional[bool] = None

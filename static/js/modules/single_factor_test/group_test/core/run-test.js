@@ -338,7 +338,7 @@
 
         // ── 费率聚合 ──
         var fee = 0;
-        var fee_map = {};
+        var fee_modifications = [];
         var hasPerProduct = false;
         if (GT.groupSettings.groups) {
             var allFeeGroups = GT.groupSettings.groups.getAll() || [];
@@ -353,7 +353,9 @@
         }
         if (hasPerProduct && GT.fee) {
             try {
-                fee_map = await GT.fee.ensureFeeData();
+                // 仍然需要确保费率数据加载（_resolve_group_trade_specs 会从产品数据库取值）
+                await GT.fee.ensureFeeData();
+                fee_modifications = GT.fee.getModifications ? GT.fee.getModifications() : [];
             } catch (err) {
                 console.error('[runBatch] ensureFeeData failed:', err);
             }
@@ -432,8 +434,7 @@
             batches: batchPayloads,
             cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
             fee: fee,
-            fee_map: fee_map,
-            group_fee_maps: null,
+            fee_modifications: fee_modifications,
             use_closetoday: use_closetoday,
             rebalance_mode: rebalance_mode
         };
@@ -511,7 +512,7 @@
     // ════════════════════════════════════════════════════════════════
 
     /** 为单个派生组发请求，不画图 */
-    runTest._generateDerivedGroupOnce = async function(def, fee, fee_map, submissionId) {
+    runTest._generateDerivedGroupOnce = async function(def, fee, fee_mods, submissionId) {
         if (!def || !submissionId) return null;
         if (def.baseGroup == null) return null;
         try {
@@ -522,7 +523,7 @@
                 name: def.name,
                 use_closetoday: def.useCloseToday !== undefined ? !!def.useCloseToday : false,
                 fee: fee || 0,
-                fee_map: fee_map || {}
+                fee_modifications: fee_mods || []
             });
             if (!resp || !resp.success) return { success: false, def: def, error: (resp && resp.error) || '未知错误' };
             return { success: true, def: def, group: resp.group || {}, metric: resp.metric || {} };
@@ -597,13 +598,14 @@
         }
 
         var fee = 0;
-        var fee_map = {};
+        var fee_mods = [];
         if (baseNode) {
             if (baseNode.feeMode === 'uniform') {
                 fee = baseNode.feeRate != null ? baseNode.feeRate : 0.0025;
             } else if (baseNode.feeMode === 'per_product') {
                 try {
-                    fee_map = await GT.fee.ensureFeeData();
+                    await GT.fee.ensureFeeData();
+                    fee_mods = GT.fee.getModifications ? GT.fee.getModifications() : [];
                 } catch (err) {
                     console.error('[generateDerivedGroup] ensureFeeData failed:', err);
                 }
@@ -619,7 +621,7 @@
             productMask: node.productMask || {}
         };
 
-        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_map, baseNode ? baseNode.testerId : null);
+        var result = await runTest._generateDerivedGroupOnce(def, fee, fee_mods, baseNode ? baseNode.testerId : null);
         if (!result || !result.success) {
             alert('生成派生组失败: ' + ((result && result.error) || '未知错误'));
             return;

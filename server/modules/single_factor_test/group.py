@@ -460,7 +460,7 @@ def run_group_test():
                           "short": {"submission_id": "...", "factor_alias": "...", "group": 4}},
             ...
         ],
-        "fee": 0.0001, "fee_map": {...}, "use_closetoday": false,
+        "fee": 0.0001, "fee_modifications": [...], "use_closetoday": false,
         "start_date": "2024-01-01", "end_date": "2024-12-31",
         "rebalance_mode": "buy_and_hold"
     }

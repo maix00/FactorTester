@@ -759,11 +759,11 @@ def _resolve_group_trade_specs(
     # 字段名映射：FeeModification field name → _pick_value 的 product_field / col 属性名
     _MOD_FIELD_TO_PRODUCT_FIELD = {
         "open_ratio": "open_ratio",
-        "close_ratio": "close_ratio",
-        "closetoday_ratio": "closetoday_ratio",
+        "close_yesterday_ratio": "close_ratio",
+        "close_today_ratio": "close_today_ratio",
         "open_fixed": "open_fixed",
-        "close_fixed": "close_fixed",
-        "closetoday_fixed": "closetoday_fixed",
+        "close_yesterday_fixed": "close_fixed",
+        "close_today_fixed": "close_today_fixed",
     }
 
     for col in valid_cols:
@@ -786,21 +786,21 @@ def _resolve_group_trade_specs(
             return getattr(col, product_field, default)
 
         open_fee_list.append(_coerce_float(_pick_value(half_fee, "open_ratio"), half_fee))
-        close_fee_value = _coerce_float(_pick_value(half_fee, "close_ratio"), half_fee)
+        close_fee_value = _coerce_float(_pick_value(half_fee, "close_yesterday_ratio"), half_fee)
         close_fee_list.append(close_fee_value)
         close_today_fee_list.append(_coerce_float(
-            _pick_value(close_fee_value, "closetoday_ratio"),
+            _pick_value(close_fee_value, "close_today_ratio"),
             close_fee_value,
         ))
         close_yesterday_fee_list.append(_coerce_float(
-            _pick_value(close_fee_value, "close_ratio"),
+            _pick_value(close_fee_value, "close_yesterday_ratio"),
             close_fee_value,
         ))
-        close_fee_fixed_value = _coerce_float(_pick_value(0.0, "close_fixed"), 0.0)
+        close_fee_fixed_value = _coerce_float(_pick_value(0.0, "close_yesterday_fixed"), 0.0)
         open_fee_fixed_list.append(_coerce_float(_pick_value(0.0, "open_fixed"), 0.0))
         close_fee_fixed_list.append(close_fee_fixed_value)
         close_today_fee_fixed_list.append(_coerce_float(
-            _pick_value(close_fee_fixed_value, "closetoday_fixed"),
+            _pick_value(close_fee_fixed_value, "close_today_fixed"),
             close_fee_fixed_value,
         ))
         point_value_list.append(_coerce_float(
@@ -927,7 +927,7 @@ def build_flat_membership_from_groups(
                 'product_names': group.product_list,
                 'fee_mode': group.fee_mode,
                 'fee_rate': group.fee_rate,
-                'fee_map': group.fee_map,
+                'fee_modifications': group.fee_modifications,
                 'use_close_today': group.use_close_today,
                 'rebalance_mode': group.rebalance_mode,
                 'liquidity_mode': group.liquidity_mode,
@@ -946,7 +946,7 @@ def build_flat_membership_from_groups(
                 'product_names': None,
                 'fee_mode': group.fee_mode,
                 'fee_rate': group.fee_rate,
-                'fee_map': group.fee_map,
+                'fee_modifications': group.fee_modifications,
                 'use_close_today': group.use_close_today,
                 'rebalance_mode': group.rebalance_mode,
                 'liquidity_mode': group.liquidity_mode,
