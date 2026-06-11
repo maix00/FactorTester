@@ -954,6 +954,8 @@ def _simulate_group_from_preloaded(
         except (TypeError, ValueError):
             return 100.0
 
+    _VALID_MODES = frozenset({"each_period", "buy_and_hold", "recycle"})
+
     liquidity_modes_list = ["infinite"] * group_count
     liquidity_percents_list = [100.0] * group_count
     margin_modes_list = ["margin"] * group_count
@@ -1006,7 +1008,6 @@ def _simulate_group_from_preloaded(
 
     # products_by_group built lazily by GroupRunResult.get_products_by_group()
     member_counts = membership_np.sum(axis=2).astype(float)
-    _VALID_MODES = frozenset({"each_period", "buy_and_hold", "recycle"})
     if rebalance_mode not in _VALID_MODES:
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
     trade_present_np = np.isfinite(price_np) & (price_np > 0)
