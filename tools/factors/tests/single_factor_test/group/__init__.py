@@ -1,16 +1,15 @@
 """Flat group definition for FactorTester grouped backtests.
 
 A ``_FactorGroupTestGroup`` is the atomic unit of a group configuration.
-It replaces the old base/derived/variant/sifted nesting with a flat list:
-every group that the user wants to simulate is a separate instance.
+Every group that the user wants to simulate is a separate, independent instance
+in a flat list.
 
-Groups with ``product_list=None`` are "identity" groups (previously "base"
-groups): their membership is an exact copy of the membership row computed
-from the (tester, factor, n_groups) triple.
+Groups with ``product_list=None`` are "identity" groups: their membership is an
+exact copy of the membership row computed from the (tester, factor, n_groups) triple.
 
-Groups with ``product_list`` are "screened" groups (previously "derived" or
-"sifted"): their membership is the same row filtered to only those products,
-i.e. the intersection of the base row and the product set.
+Groups with ``product_list`` are "screened" groups: their membership is the same
+row filtered to only those products, i.e. the intersection of the identity row
+and the product set.
 """
 
 from __future__ import annotations

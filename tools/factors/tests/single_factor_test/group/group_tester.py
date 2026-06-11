@@ -559,15 +559,7 @@ class FactorGroupTester:
             }
             # Use flat_group_info to populate configs
             for flat_pos, info in enumerate(entry.flat_group_info):
-                info_copy = dict(info)
-                global_idx = local_to_global.get(flat_pos)
-                if global_idx is None:
-                    continue
-                # Map base_group reference
-                base_group = info_copy.get("base_group")
-                if isinstance(base_group, int):
-                    info_copy["base_group"] = local_to_global.get(base_group, base_group)
-                group_configs[global_idx] = info_copy
+                group_configs[global_idx] = dict(info)
 
         _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,

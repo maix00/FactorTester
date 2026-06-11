@@ -216,7 +216,7 @@ def _parse_group_names_payload(group_names) -> dict[int, str]:
 
 
 def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
-    """Parse flat frontend group payloads into group-name and variant mappings."""
+    """Parse flat frontend group payloads into group-name and config mappings."""
     if not isinstance(groups_payload, list):
         return {}, None
     grouped: dict[int, list[dict]] = {}
@@ -224,7 +224,7 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
     for item in groups_payload:
         if not isinstance(item, dict):
             continue
-        # 子组（有 parentId/parent_id）不在 variant mapping 中处理 —— 走 _extract_derived_groups_from_payload
+        # 跳过有 parentId/parent_id 的条目（不在扁平化组中）
         if item.get('parentId') or item.get('parent_id'):
             continue
         try:
@@ -232,7 +232,7 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
         except (TypeError, ValueError):
             continue
         display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}'
-        variant = {
+        config = {
             'name': str(display_name),
             'key': str(display_name),
             'fee_map': item.get('fee_map') or item.get('feeMap') or None,
@@ -244,118 +244,25 @@ def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, lis
             'liquidity_percent': item.get('liquidity_percent', item.get('liquidityPercent')),
             'margin_mode': item.get('margin_mode') or item.get('marginMode') or None,
         }
-        grouped.setdefault(g, []).append(variant)
+        grouped.setdefault(g, []).append(config)
         names.setdefault(g, str(display_name))
     return names, grouped or None
 
 
-def _extract_derived_groups_from_payload(
-    groups_payload, n_groups_name: dict[int, str] | None = None
-) -> list[dict] | None:
-    """从扁平的 groups 数组中提取子组（有 parentId 的条目）。
-
-    每个子组需要 base_group（指向基组索引，按 groupIndex/gid）、
-    product_names（从 productMask 或 productNames 提取），以及元数据。
-    """
-    if not isinstance(groups_payload, list):
-        return None
-
-    # 第一遍：为所有组建立 id → groupIndex 映射
-    gid_to_index: dict[str, int] = {}
-    for item in groups_payload:
-        if not isinstance(item, dict):
-            continue
-        gid = item.get('id')
-        idx = item.get('groupIndex')
-        if gid and isinstance(idx, (int, float)):
-            gid_to_index[str(gid)] = int(idx) - 1  # groupIndex 是 1-based
-
-    derived = []
-    for item in groups_payload:
-        if not isinstance(item, dict):
-            continue
-        if not item.get('parentId'):
-            continue
-
-        base_group = None
-        # Walk parentId chain to find root and use its groupIndex
-        parent_id = item.get('parentId')
-        if parent_id:
-            root_idx = gid_to_index.get(str(parent_id))
-            if root_idx is None:
-                # parent not in gid_to_index, try groupIndex as fallback
-                idx = item.get('groupIndex')
-                if isinstance(idx, (int, float)):
-                    base_group = int(idx) - 1
-            else:
-                base_group = root_idx
-
-        if base_group is None:
-            continue
-
-        # 提取产品列表
-        product_names = _extract_product_names_from_group(item)
-
-        display_name = (
-            item.get('shortAlias')
-            or item.get('name')
-            or item.get('key')
-            or f'第{base_group + 1}组精选'
-        )
-
-        entry = {
-            'name': str(display_name),
-            'key': str(display_name),
-            'base_group': base_group,
-            'group_index': base_group,
-            'product_names': product_names,
-        }
-        # 额外转发配置字段
-        for src, dst in [
-            ('feeMode', 'fee_mode'), ('feeRate', 'fee_rate'), ('feeMap', 'fee_map'),
-            ('useCloseToday', 'use_close_today'),
-            ('rebalanceMode', 'rebalance_mode'), ('liquidityMode', 'liquidity_mode'),
-            ('liquidityPercent', 'liquidity_percent'), ('marginMode', 'margin_mode'),
-        ]:
-            val = item.get(src)
-            if val is not None:
-                entry[dst] = val
-        derived.append(entry)
-
-    return derived if derived else None
-
-
-def _extract_product_names_from_group(group: dict) -> list[str]:
-    """从 group 对象中提取产品名列表（扁平化 productMask → 产品名数组）."""
-    # 优先用 productNames（已经是数组）
-    pn = group.get('productNames')
-    if isinstance(pn, list) and pn:
-        return [str(n) for n in pn]
-
-    # productMask: { productName: true/false }
-    mask = group.get('productMask')
-    if isinstance(mask, dict):
-        return sorted([str(k) for k, v in mask.items() if v])
-
-    return []
-
-
-def _group_display_key(group_idx: int, n_base: int, derived_info: list[dict], group_names=None) -> str:
+def _group_display_key(group_idx: int, group_names=None) -> str:
+    """扁平模型：直接用 group_names dict 或索引作为显示名。"""
     names = _normalize_group_names(group_names)
     if group_idx in names:
         return names[group_idx]
-    if group_idx >= n_base:
-        di = derived_info[group_idx - n_base] if group_idx - n_base < len(derived_info) else {}
-        return str(di.get('key') or di.get('name') or f'Group {group_idx + 1}')
     return str(group_idx)
 
 
-def _metric_display_key(raw_key, n_base: int, derived_info: list[dict], group_names=None) -> str:
+def _metric_display_key(raw_key, group_names=None) -> str:
     try:
         key_int = int(raw_key)
     except (TypeError, ValueError):
         return str(raw_key)
-    return _group_display_key(key_int, n_base, derived_info, group_names)
+    return _group_display_key(key_int, group_names)
 
 
 def _compute_weighted_ls_returns(gross_np: np.ndarray, fee_np: np.ndarray, ls_config: dict, n_groups: int) -> tuple[np.ndarray, np.ndarray]:
@@ -421,434 +328,6 @@ def _build_fee_vectors(group_result, fee_map, fee_uniform):
     return open_fv, close_fv, close_today_fv
 
 
-def _build_derived_group_payload(group_result, group_index: int, product_names: list[str], name: str,
-                                  use_closetoday: bool = False,
-                                  fee_map: dict | None = None,
-                                  fee_uniform: float = 0.0,
-                                  open_fv: np.ndarray | None = None,
-                                  close_fv: np.ndarray | None = None,
-                                  close_today_fv: np.ndarray | None = None,
-                                  fee_override: dict | None = None) -> tuple[dict, dict]:
-    from tools.products.product_utils import product_display_name
-    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group
-
-    valid_cols = getattr(group_result, 'valid_cols', None)
-    idx_list = getattr(group_result, 'index_list', None) or []
-    if valid_cols is None:
-        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
-
-    display_names = [product_display_name(product)['name'] for product in valid_cols]
-    selected = {str(name) for name in (product_names or [])}
-    selected_idx = [idx for idx, display_name in enumerate(display_names) if display_name in selected]
-    if not selected_idx:
-        raise ValueError('请至少选择一个有效品种')
-
-    if open_fv is None:
-        _open_fv, _close_fv, _close_today_fv = _build_fee_vectors(group_result, fee_map, fee_uniform)
-        if _open_fv is None or _close_fv is None or _close_today_fv is None:
-            raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
-        open_fv, close_fv, close_today_fv = _open_fv, _close_fv, _close_today_fv
-
-    # Apply fee_override: uniform override per fee type for this derived group
-    fo = fee_override or {}
-    if fo.get('open') is not None:
-        open_fv = np.full_like(open_fv, float(fo['open']))
-    if fo.get('close') is not None:
-        close_fv = np.full_like(close_fv, float(fo['close']))
-    if fo.get('close_today') is not None:
-        close_today_fv = np.full_like(close_today_fv, float(fo['close_today']))
-
-    assert close_fv is not None and close_today_fv is not None
-    sim = simulate_derived_group(
-        group_index=group_index,
-        selected_idx=selected_idx,
-        group_result=group_result,
-        open_fee_vec=open_fv,
-        close_fee_vec=close_fv,
-        close_today_fee_vec=close_today_fv,
-        rebalance_mode=getattr(group_result, 'rebalance_mode', 'buy_and_hold'),
-        use_closetoday=use_closetoday,
-    )
-
-    timestamps = [to_epoch_ms(_signal_time(d), use_utc=True) for d in idx_list]
-    metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
-
-    group = {
-        'name': name or f'第{group_index + 1}组精选',
-        'timestamps': timestamps,
-        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
-        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
-        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
-        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-        'parent_id': group_index,
-        'product_names': [display_names[idx] for idx in selected_idx],
-    }
-    return group, metric
-
-
-def _build_derived_groups_batch_payload(group_result, entries: list[dict],
-                                         use_closetoday: bool = False,
-                                         fee_map: dict | None = None,
-                                         fee_uniform: float = 0.0) -> list[dict]:
-    """一次 simulate_derived_groups_batch 调用，返回 [{success, group?, metric?, error?}, ...]。
-
-    同一 group_index 的条目合并为一次精选组交易簿模拟调用。
-    不同 group_index 的条目各自发送独立请求（此时回退到逐个 simulate_derived_group）。
-    """
-    from tools.products.product_utils import product_display_name
-    from tools.factors.tests.single_factor_test.group.core import simulate_derived_group, simulate_derived_groups_batch
-
-    valid_cols = getattr(group_result, 'valid_cols', None)
-    idx_list = getattr(group_result, 'index_list', None) or []
-    if valid_cols is None:
-        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
-
-    display_names = [product_display_name(product)['name'] for product in valid_cols]
-    _ofv, _cfv, _ctfv = _build_fee_vectors(group_result, fee_map, fee_uniform)
-    if _ofv is None or _cfv is None or _ctfv is None:
-        raise ValueError('当前分组结果缺少逐品种贡献，无法生成派生组')
-    open_fv: np.ndarray = _ofv
-    close_fv: np.ndarray = _cfv
-    close_today_fv: np.ndarray = _ctfv
-
-    # 按 group_index 分组
-    groups_by_gi: dict = {}
-    for i, entry in enumerate(entries):
-        gi = entry.get('group_index')
-        pn = entry.get('product_names') or []
-        nm = str(entry.get('name') or '').strip()
-        feo = entry.get('fee_override')
-        if gi is None:
-            continue
-        if not nm:
-            nm = f'第{int(gi) + 1}组精选'
-        selected_idx = [idx for idx, dn in enumerate(display_names) if dn in {str(n) for n in pn}]
-        if not selected_idx:
-            continue
-        groups_by_gi.setdefault(int(gi), []).append({
-            'orig_index': i,
-            'group_index': int(gi),
-            'name': nm,
-            'selected_idx': selected_idx,
-            'fee_override': feo if isinstance(feo, dict) else None,
-        })
-
-    # 结果数组，按原始顺序填充
-    results: list = [None] * len(entries)
-
-    rebalance_mode = getattr(group_result, 'rebalance_mode', 'buy_and_hold')
-    timestamps = [to_epoch_ms(_signal_time(d), use_utc=True) for d in idx_list]
-
-    for gi, items in groups_by_gi.items():
-        if len(items) == 1:
-            # 只有 1 个派生组 → 回退到逐个 API
-            item = items[0]
-            # Apply per-entry fee_override
-            item_open_fv = open_fv.copy()
-            item_close_fv = close_fv.copy()
-            item_ct_fv = close_today_fv.copy()
-            feo = item.get('fee_override')
-            if feo:
-                if feo.get('open') is not None:
-                    item_open_fv[:] = float(feo['open'])
-                if feo.get('close') is not None:
-                    item_close_fv[:] = float(feo['close'])
-                if feo.get('close_today') is not None:
-                    item_ct_fv[:] = float(feo['close_today'])
-            try:
-                sim = simulate_derived_group(
-                    group_index=gi,
-                    selected_idx=item['selected_idx'],
-                    group_result=group_result,
-                    open_fee_vec=item_open_fv,
-                    close_fee_vec=item_close_fv,
-                    close_today_fee_vec=item_ct_fv,
-                    rebalance_mode=rebalance_mode,
-                    use_closetoday=use_closetoday,
-                )
-                metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
-                results[item['orig_index']] = {
-                    'index': item['orig_index'],
-                    'success': True,
-                    'group': {
-                        'name': item['name'],
-                        'timestamps': timestamps,
-                        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
-                        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
-                        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
-                        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-                        'parent_id': gi,
-                        'product_names': [display_names[idx] for idx in item['selected_idx']],
-                    },
-                    'metric': metric,
-                }
-            except Exception as e:
-                results[item['orig_index']] = {'index': item['orig_index'], 'success': False, 'error': str(e)}
-        else:
-            # 多个派生组共享同一基础组 → 批量一次精选组交易簿模拟
-            # Apply each entry's fee_override
-            derivations = []
-            for item in items:
-                dd = {'selected_idx': item['selected_idx'], 'name': item['name']}
-                feo = item.get('fee_override')
-                if feo:
-                    dd['fee_override'] = feo
-                derivations.append(dd)
-            sims = simulate_derived_groups_batch(
-                group_index=gi,
-                derivations=derivations,
-                group_result=group_result,
-                open_fee_vec=open_fv,
-                close_fee_vec=close_fv,
-                close_today_fee_vec=close_today_fv,
-                rebalance_mode=rebalance_mode,
-                use_closetoday=use_closetoday,
-            )
-            for j, item in enumerate(items):
-                sim = sims[j]
-                metric = _compute_return_metrics(sim['net_returns'], index_like=idx_list, avg_turnover=None)
-                results[item['orig_index']] = {
-                    'index': item['orig_index'],
-                    'success': True,
-                    'group': {
-                        'name': item['name'],
-                        'timestamps': timestamps,
-                        'total_equity': _serialize_float_series(sim['total_equity'], default=0.0),
-                        'gross_returns': _serialize_float_series(sim['gross_returns'], default=0.0),
-                        'fee_costs': _serialize_float_series(sim['fee_costs'], default=0.0),
-                        'trade_notional_ratios': _serialize_float_series(sim['notional_ratios'], default=0.0),
-                        'parent_id': gi,
-                        'product_names': [display_names[idx] for idx in item['selected_idx']],
-                    },
-                    'metric': metric,
-                }
-
-    return results
-
-
-def _latest_group_result(tester):
-    factor = getattr(tester, 'last_group_factor', None)
-    if factor is None:
-        return None
-    result = tester.results.get(factor) if hasattr(tester, 'results') else None
-    return result.group_result if result is not None else None
-
-
-def _parse_group_fee_config(data, products: set | None = None):
-    """解析前端费率配置。
-
-    前端三种模式：
-    1. 不扣除费用 → fee=0, fee_map={}
-    2. 统一费率   → fee>0, fee_map={}
-    3. 按品种费率 → fee=0, fee_map 非空（来自前端 /get_fee_table 的 FeeData 全量，
-                   含用户 _feeModifications 覆盖 + 平今/平昨选择）
-
-    返回 (fee_uniform, fee_map, use_closetoday)，
-    其中 fee_map 仅在模式3时非空，key 格式保留 rate/fixed/spec 字段：
-    {open_rate, open_fixed, close_rate, close_fixed, close_today_rate,
-     close_today_fixed, close_yesterday_rate, close_yesterday_fixed,
-     multiplier, min_tick, min_trade_quantity, long_margin_ratio, short_margin_ratio}。
-    模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
-    """
-    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
-    fee_map_raw = data.get('fee_map', {}) or {}
-    use_closetoday = bool(data.get('use_closetoday', False))
-
-    # 模式1/2：不扣除或统一费率 → fee_map 保持空
-    if not fee_map_raw:
-        return fee_uniform, {}, use_closetoday
-
-    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖。
-    # ratio 与 fixed 分开保存；不要把固定费用折算成“有效费率”。
-    fee_map: dict[str, dict[str, float]] = {}
-    for code, rates in fee_map_raw.items():
-        code_upper = str(code).upper()
-        o = float(rates.get('open_ratio', rates.get('open_rate', 0)) or 0)
-        c = float(rates.get('close_ratio', rates.get('close_rate', 0)) or 0)
-        ct = float(rates.get('closetoday_ratio', rates.get('close_today_rate', 0)) or 0)
-        of = float(rates.get('open_fixed', 0) or 0)
-        cf = float(rates.get('close_fixed', 0) or 0)
-        ctf = float(rates.get('closetoday_fixed', rates.get('close_today_fixed', 0)) or 0)
-        fee_map[code_upper] = {
-            'open_rate': o,
-            'open_fixed': of,
-            'close_rate': c,
-            'close_fixed': cf,
-            'close_today_rate': ct,
-            'close_today_fixed': ctf,
-            'close_yesterday_rate': c,
-            'close_yesterday_fixed': cf,
-            'multiplier': float(rates.get('multiplier', 1) or 1),
-            'min_tick': float(rates.get('min_tick', 0) or 0),
-            'min_trade_quantity': float(rates.get('min_trade_quantity', rates.get('lot_size', 1)) or 1),
-            'long_margin_ratio': float(rates.get('long_margin_ratio', 1) or 1),
-            'short_margin_ratio': float(rates.get('short_margin_ratio', rates.get('long_margin_ratio', 1)) or 1),
-        }
-
-    return fee_uniform, fee_map, use_closetoday
-
-
-def _product_fee_rates_by_name(group_result) -> dict[str, dict[str, float]]:
-    """返回 {产品名: {open, close, close_today, close_yesterday, total}} 的费率字典。
-
-    费率向量已在回测阶段按前端选择的模式（不扣除/统一/按品种）设置，
-    此处直接使用，按产品名索引。
-    """
-    valid_cols = getattr(group_result, 'valid_cols', None)
-    open_fee_vec = getattr(group_result, 'open_fee_vec', None)
-    close_fee_vec = getattr(group_result, 'close_fee_vec', None)
-    close_today_fee_vec = getattr(group_result, 'close_today_fee_vec', None)
-    _cy_vec = getattr(group_result, 'close_yesterday_fee_vec', None)
-    close_yesterday_fee_vec = _cy_vec if _cy_vec is not None else close_fee_vec
-    if not _safe_bool(valid_cols) or open_fee_vec is None or close_fee_vec is None:
-        return {}
-    from tools.products.product_utils import product_display_name
-
-    open_rates = np.asarray(open_fee_vec, dtype=float)
-    close_rates = np.asarray(close_fee_vec, dtype=float)
-    close_today_rates = (
-        np.asarray(close_today_fee_vec, dtype=float)
-        if close_today_fee_vec is not None else close_rates
-    )
-    close_yesterday_rates = np.asarray(close_yesterday_fee_vec, dtype=float)
-    cols = valid_cols or []
-    if len(cols) != open_rates.shape[0] or len(cols) != close_rates.shape[0]:
-        return {}
-
-    rates = {}
-    for idx, product in enumerate(cols):
-        name = product_display_name(product)['name']
-        rates[name] = {
-            'open': float(open_rates[idx]),
-            'close': float(close_rates[idx]),
-            'close_today': float(close_today_rates[idx]),
-            'close_yesterday': float(close_yesterday_rates[idx]),
-            'total': float(open_rates[idx]) + float(close_rates[idx]),
-        }
-    return rates
-
-
-def _display_product_with_fee(product, fee_rates_by_name: dict[str, dict[str, float]]) -> dict[str, Any]:
-    from tools.products.product_utils import product_display_name
-
-    display: dict[str, Any] = product_display_name(product)
-    display['fee'] = fee_rates_by_name.get(display['name'])
-    return display
-
-
-def _build_flat_groups_from_payload(
-    payload_entry: dict,
-    *,
-    entry_index: int = 0,
-) -> tuple[list, list[dict] | None]:
-    """Build a flat list of _FactorGroupTestGroup from a single frontend payload entry.
-
-    Parses the frontend ``groups`` array (flat format) and converts each entry
-    into a ``_FactorGroupTestGroup`` instance.
-
-    Returns
-    -------
-    (groups, ls_configs) where groups is list[_FactorGroupTestGroup] and
-    ls_configs is parsed LS configs (or None).
-    """
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-
-    factor_alias = str(payload_entry.get('factor_alias') or '')
-    n_groups = int(payload_entry.get('n_groups', 5))
-    submission_id = str(payload_entry.get('submission_id') or '')
-    groups = payload_entry.get('groups')
-    group_names = payload_entry.get('group_names')
-
-    # Parse group names (for base groups without their own name)
-    if isinstance(groups, list) and groups:
-        n_groups_name, _ = _parse_groups_payload(groups)
-    else:
-        n_groups_name = _parse_group_names_payload(group_names)
-    if not n_groups_name:
-        n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
-
-    flat_groups: list = []
-
-    if isinstance(groups, list) and groups:
-        for item in groups:
-            if not isinstance(item, dict):
-                continue
-            has_parent = bool(item.get('parentId') or item.get('parent_id'))
-            if not has_parent:
-                # Base group (no parentId): one flat group per entry
-                try:
-                    gi = int(item.get('group_index', item.get('groupIndex', 0)))
-                except (TypeError, ValueError):
-                    continue
-                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
-                flat_groups.append(_FactorGroupTestGroup(
-                    tester_id=submission_id,
-                    factor_alias=factor_alias,
-                    n_groups=n_groups,
-                    group_index=gi,
-                    key=str(display_name),
-                    name=str(display_name),
-                    product_list=None,
-                    fee_map=item.get('fee_map') or item.get('feeMap'),
-                    fee_mode=item.get('fee_mode') or item.get('feeMode'),
-                    fee_rate=item.get('fee_rate', item.get('feeRate')),
-                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
-                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode'),
-                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode'),
-                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
-                    margin_mode=item.get('margin_mode') or item.get('marginMode'),
-                ))
-            else:
-                # Screened group (has parentId): one flat group with product_list
-                base_group = int(item.get('baseGroup', item.get('base_group',
-                    item.get('parentId', item.get('parent_id', 0)))))
-                product_names = _extract_product_names_from_group(item)
-                if not product_names:
-                    continue
-                display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'筛选_{base_group}'
-                flat_groups.append(_FactorGroupTestGroup(
-                    tester_id=submission_id,
-                    factor_alias=factor_alias,
-                    n_groups=n_groups,
-                    group_index=base_group,
-                    key=str(display_name),
-                    name=str(display_name),
-                    product_list=product_names,
-                    fee_map=item.get('fee_map') or item.get('feeMap'),
-                    fee_mode=item.get('fee_mode') or item.get('feeMode'),
-                    fee_rate=item.get('fee_rate', item.get('feeRate')),
-                    use_close_today=item.get('use_close_today', item.get('useCloseToday')),
-                    rebalance_mode=item.get('rebalance_mode') or item.get('rebalanceMode'),
-                    liquidity_mode=item.get('liquidity_mode') or item.get('liquidityMode'),
-                    liquidity_percent=item.get('liquidity_percent', item.get('liquidityPercent')),
-                    margin_mode=item.get('margin_mode') or item.get('marginMode'),
-                ))
-    else:
-        # No groups payload: create default base groups from group_names
-        for gi in range(n_groups):
-            display_name = n_groups_name.get(gi, f'Group {gi + 1}')
-            flat_groups.append(_FactorGroupTestGroup(
-                tester_id=submission_id,
-                factor_alias=factor_alias,
-                n_groups=n_groups,
-                group_index=gi,
-                key=str(display_name),
-                name=str(display_name),
-            ))
-
-    # Parse LS configs
-    raw_ls = payload_entry.get('ls_configs')
-    ls_configs = None
-    if isinstance(raw_ls, list) and raw_ls:
-        ls_configs = []
-        for raw in raw_ls:
-            if isinstance(raw, dict):
-                parsed = _parse_ls_config({'ls_config': raw}, n_groups)
-                if parsed['long'] and parsed['short']:
-                    ls_configs.append(parsed)
-
-    return flat_groups, ls_configs
-
 
 def _serialize_group_simulation_result(
     *,
@@ -867,19 +346,8 @@ def _serialize_group_simulation_result(
     group_result = simulation_result['group_result']
     n_total = group_result.returns_np.shape[1] if group_result is not None else n_groups
 
-    # ── Resolve group metadata: prefer flat_group_info, fallback to derived_info ──
-    if flat_group_info is not None and len(flat_group_info) > 0:
-        # New flat model: every group is a flat entry
-        n_base = sum(1 for fi in flat_group_info if not fi.get('product_names'))
-        derived_info = [
-            fi for fi in flat_group_info
-            if fi.get('product_names')
-        ]
-        # derived_info entries have base_group pointing to the base group index
-    else:
-        # Old model: fallback
-        n_base = getattr(group_result, 'n_base', n_groups) or n_groups
-        derived_info = getattr(group_result, 'derived_info', None) or []
+    # ── Resolve group metadata: flat model (all groups are flat entries) ──
+    result_group_names = getattr(group_result, 'group_names', None) or {}
 
     _gross = group_result.gross_returns_np if group_result is not None else None
     gross_np = _gross if _gross is not None else np.zeros((len(timestamps), n_total))
@@ -892,8 +360,15 @@ def _serialize_group_simulation_result(
     # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
     cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
     equity_np = np.where(equity_np <= 0, cap, equity_np)
-    result_group_names = getattr(group_result, 'group_names', None) or {}
     capital_warning = _build_zero_position_warning(group_result)
+
+    # Build flat_group_info lookup: {group_index: info_dict}
+    flat_info_by_idx: dict[int, dict] = {}
+    if flat_group_info:
+        for fi in flat_group_info:
+            gi = fi.get('group_index', -1)
+            if gi >= 0:
+                flat_info_by_idx[gi] = fi
 
     groups_data = []
     _progress(
@@ -905,16 +380,11 @@ def _serialize_group_simulation_result(
             f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
-        is_child = g >= n_base
         vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
         fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
-        group_key = _group_display_key(g, n_base, derived_info, result_group_names)
-        if is_child:
-            di = derived_info[g - n_base]
-            group_name = di.get('name', f'Group {g + 1}')
-        else:
-            group_name = group_key
+        group_key = _group_display_key(g, result_group_names)
+        group_name = group_key
         entry = {
             'key': group_key,
             'name': group_name,
@@ -929,12 +399,12 @@ def _serialize_group_simulation_result(
                 for v in group_result.trade_notional_ratio_np[:, g]
             ] if group_result is not None and group_result.trade_notional_ratio_np is not None else [],
         }
-        if is_child:
-            di = derived_info[g - n_base]
-            entry['parent_id'] = di['base_group']
-            entry['product_names'] = di['product_names']
-            if di.get('id'):
-                entry['_id'] = di['id']
+        # If this group has a product-level filter (screened subgroup), attach metadata
+        fi = flat_info_by_idx.get(g)
+        if fi and fi.get('product_names'):
+            entry['product_names'] = fi['product_names']
+            if fi.get('id'):
+                entry['_id'] = fi['id']
         groups_data.append(entry)
     _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
 
@@ -946,7 +416,7 @@ def _serialize_group_simulation_result(
                 f"simulation serialize metric {metric_idx}/{len(raw_metrics)} "
                 f"submission={submission_id} factor={factor_alias}"
             )
-            display_key = _metric_display_key(k, n_base, derived_info, result_group_names)
+            display_key = _metric_display_key(k, result_group_names)
             metrics[display_key] = {
                 mk: (None if mv is None or (isinstance(mv, float) and (math.isnan(mv) or math.isinf(mv))) else float(mv))
                 for mk, mv in v.items()
@@ -985,7 +455,6 @@ def _serialize_group_simulation_result(
         'groups': groups_data,
         'metrics': metrics,
         'n_groups': n_total,
-        'n_base': n_base,
         'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
         'capital_warning': capital_warning,
@@ -1044,6 +513,47 @@ def run_group_test():
 
     rebalance_mode = str(data.get('rebalance_mode', 'buy_and_hold') or 'buy_and_hold')
 
+
+def _parse_group_fee_config(data, products: set | None = None):
+    """解析前端费率配置。
+
+    前端三种模式：
+    1. 不扣除费用 → fee=0, fee_map={}
+    2. 统一费率   → fee>0, fee_map={}
+    3. 按品种费率 → fee=0, fee_map 非空（来自前端 /get_fee_table 的 FeeData 全量，
+                   含用户 _feeModifications 覆盖 + 平今/平昨选择）
+
+    返回 (fee_uniform, fee_map, use_closetoday)，
+    其中 fee_map 仅在模式3时非空，key 格式：{open, close, close_today, close_yesterday}，
+    值为单边费率（按金额比例）。
+    模式1/2 时 fee_map 为空字典，由调用方用 fee_uniform 的 half_fee 作为 fallback。
+    """
+    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
+    fee_map_raw = data.get('fee_map', {}) or {}
+    use_closetoday = bool(data.get('use_closetoday', False))
+
+    # 模式1/2：不扣除或统一费率 → fee_map 保持空
+    if not fee_map_raw:
+        return fee_uniform, {}, use_closetoday
+
+    # 模式3：按品种费率 → 前端已传全量 FeeData + 用户覆盖，
+    # 只需做字段名映射：open_ratio→open, close_ratio→close, closetoday_ratio→close_today/close_yesterday
+    fee_map: dict[str, dict[str, float]] = {}
+    for code, rates in fee_map_raw.items():
+        code_upper = str(code).upper()
+        o = float(rates.get('open_ratio', 0) or 0)
+        c = float(rates.get('close_ratio', 0) or 0)
+        ct = float(rates.get('closetoday_ratio', 0) or 0)
+        fee_map[code_upper] = {
+            'open': o,
+            'close': c,
+            'close_today': ct,
+            'close_yesterday': c,  # 平昨=平仓费率
+        }
+
+    return fee_uniform, fee_map, use_closetoday
+
+
     from tools.data.DataTime import DataTime
 
     # 精度统一：start/end 同精度
@@ -1059,7 +569,6 @@ def run_group_test():
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-    derived_groups = data.get('derived_groups', None)
     # 费率从第一个前端提交条目的 tester 解析
     first_entry = submitted_entries[0]
     try:
@@ -1231,7 +740,7 @@ def run_group_test():
         # Build flat_group_info list matching the group order in the result
         flat_info = [
             {
-                'base_group': g.group_index,
+                'group_index': g.group_index,
                 'key': g.key,
                 'name': g.name,
                 'id': g._id,
@@ -1559,15 +1068,9 @@ def get_group_snapshot():
             # ── 注入持仓金额 (refs #100) ──
             g_amounts = None
             if t_idx is not None and hold_np is not None and hold_np.shape[0] > t_idx:
-                # hold_np shape: (T, M, P)；M 可能 > n_groups（variant 扩展）
-                # 当 M > n_groups 时，产品金额可能分布在同一 base group 的多个 variant 中
-                # products_dict 的 key 是 base group index
-                # 简化处理：取 g 对应的 variant 金额；若 M == n_groups，直接用 g
+                # hold_np shape: (T, M, P)；M 可能 > n_groups（LS 扩展等）
                 if g < hold_np.shape[1]:
                     g_amounts = hold_np[t_idx, g, :]  # (P,) — 该组每产品持仓金额
-                elif hasattr(group_result, 'n_base') and group_result.n_base is not None:
-                    # 存在 variant 扩展：暂不处理（require further design）
-                    pass
                 else:
                     # fallback: 取 g 但可能 index error
                     pass
@@ -1635,9 +1138,6 @@ def get_group_snapshot():
         current_index = all_timestamps_ms.index(closest_ms)
 
         # ── 附加元信息供前端按 shortAlias 分层渲染 (refs #100) ──
-        snapshot_n_base = getattr(group_result, 'n_base', n_groups) or n_groups
-        snapshot_n_derived = getattr(group_result, 'n_derived', 0) or 0
-        snapshot_derived_info = getattr(group_result, 'derived_info', None) or []
         _raw_group_names = getattr(group_result, 'group_names', None) or {}
         snapshot_group_names = {}
         for k, v in _raw_group_names.items():
@@ -1653,9 +1153,6 @@ def get_group_snapshot():
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
-            'n_base': snapshot_n_base,
-            'n_derived': snapshot_n_derived,
-            'derived_info': snapshot_derived_info,
             'group_names': snapshot_group_names,
         })
     except Exception as e:
@@ -1704,63 +1201,6 @@ def get_group_detail():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
-
-@sft_bp.route('/create_derived_groups_batch', methods=['POST'])
-def create_derived_groups_batch():
-    """批量生成多个派生组（一次调用，后端一次交易簿模拟计算同基础组的所有派生组）。"""
-    data = request.get_json() or {}
-    submission_id = data.get('submission_id')
-    entries = data.get('entries') or []  # [{group_index, product_names, name}, ...]
-    use_closetoday = bool(data.get('use_closetoday', False))
-    if submission_id is None or not entries:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 entries'}), 400
-    try:
-        tester = runtime_state.get_factor_tester(submission_id, caller='create_derived_groups_batch')
-        group_result = _latest_group_result(tester)
-        if group_result is None:
-            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        fee_uniform, fee_map, _ = _parse_group_fee_config(data, getattr(tester, 'products', None))
-        results = _build_derived_groups_batch_payload(
-            group_result, entries,
-            use_closetoday=use_closetoday, fee_map=fee_map, fee_uniform=fee_uniform,
-        )
-        return jsonify({'success': True, 'results': results})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
-
-
-@sft_bp.route('/create_derived_group', methods=['POST'])
-def create_derived_group():
-    """Create a chart/metric payload for a user-defined product subset group."""
-    data = request.get_json() or {}
-    submission_id = data.get('submission_id')
-    group_index = data.get('group_index')
-    product_names = data.get('product_names') or []
-    name = str(data.get('name') or '').strip()
-    use_closetoday = bool(data.get('use_closetoday', False))
-    fee_override = data.get('fee_override')
-    if submission_id is None or group_index is None:
-        return jsonify({'success': False, 'error': '缺少 submission_id 或 group_index'}), 400
-    try:
-        tester = runtime_state.get_factor_tester(submission_id, caller='create_derived_group')
-        group_result = _latest_group_result(tester)
-        if group_result is None:
-            return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        # 从请求中解析费率
-        fee_uniform, fee_map, _ = _parse_group_fee_config(data, getattr(tester, 'products', None))
-        group, metric = _build_derived_group_payload(
-            group_result,
-            int(group_index),
-            [str(x) for x in product_names],
-            name or f'第{int(group_index) + 1}组精选',
-            use_closetoday=use_closetoday,
-            fee_map=fee_map,
-            fee_uniform=fee_uniform,
-            fee_override=fee_override,
-        )
-        return jsonify({'success': True, 'group': group, 'metric': metric})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})
 
 
 @sft_bp.route('/get_group_ranking_detail', methods=['POST'])
@@ -1825,7 +1265,7 @@ def get_tester_session_info():
                 result = tester.results.get(f) if hasattr(tester, 'results') else None
                 if result is not None and result.group_result is not None:
                     gr = result.group_result
-                    info['n_groups'] = getattr(gr, 'n_base', None)
+                    info['n_groups'] = gr.returns_np.shape[1] if hasattr(gr, 'returns_np') and gr.returns_np is not None else None
                     info['rebalance_mode'] = getattr(gr, 'rebalance_mode', None)
                     info['has_results'] = True
                 else:

@@ -125,9 +125,6 @@ def slice_group_run_result(
         multi_session_active=bool(group_result.multi_session_active),
         rebalance_mode=str(group_result.rebalance_mode),
         report_df=report_df,
-        n_base=new_group_count,
-        n_derived=0,
-        derived_info=[],
         group_names=new_group_names,
         hold_amounts_np=_take_group_axis(group_result.hold_amounts_np),
         position_quantities_np=_take_group_axis(group_result.position_quantities_np),
@@ -536,8 +533,7 @@ def _build_product_remap_matrix(
     """Pre-build signal-product → trade-product term-structure mapping.
 
     Uses a full active mask so the resulting matrix works for all membership_np
-    variants (different n_groups / derived specs) that share the same
-    (signal_products, signal_index).
+    configurations that share the same (signal_products, signal_index).
 
     Returns
     -------
@@ -811,109 +807,6 @@ def _resolve_group_trade_specs(
     )
 
 
-def _append_sifted_group_memberships(
-    factor: Factor,
-    signal_valid_cols: list,
-    membership_np: np.ndarray,
-    *,
-    n_original_groups: int,
-    sifted_groups: Optional[List[dict]],
-) -> tuple[np.ndarray, list[dict]]:
-    """Append sifted-group memberships (product-filtered copies of existing groups)."""
-    sifted_defs = sifted_groups or []
-    sifted_info: list[dict] = []
-    if not sifted_defs:
-        return membership_np, sifted_info
-
-    from tools.products.product_utils import product_display_name
-
-    T, _, P = membership_np.shape
-    display_names = [product_display_name(product)['name'] for product in signal_valid_cols]
-    display_name_to_idx = {name: idx for idx, name in enumerate(display_names)}
-    _group_progress(f"sifted groups start factor={factor.alias} count={len(sifted_defs)}")
-
-    def _build_sifted_pair(dd: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]] | None:
-        source_group = int(dd.get('baseGroup', dd.get('base_group', 0)))
-        if source_group < 0 or source_group >= n_original_groups:
-            return None
-        product_names = dd.get('productNames', dd.get('product_names', []))
-        if not product_names:
-            return None
-        product_names_str = [str(name) for name in product_names]
-        sel_idx = [
-            display_name_to_idx[name]
-            for name in product_names_str
-            if name in display_name_to_idx
-        ]
-        if not sel_idx:
-            # Try case-insensitive fallback
-            lower_to_name = {n.lower(): n for n in display_names}
-            sel_idx = [
-                display_name_to_idx[lower_to_name[ln]]
-                for name in product_names_str
-                if (ln := name.lower()) in lower_to_name
-            ]
-        if not sel_idx:
-            _group_progress(
-                f"[DEBUG] sifted pair skipped source_group={source_group} "
-                f"product_names={product_names_str[:5]}... "
-                f"display_names_sample={display_names[:5]}... "
-            )
-            return None
-        sel = np.asarray(sel_idx, dtype=int)
-        source_membership = membership_np[:, source_group, :][:, sel]
-        source_any = source_membership.any(axis=0)
-        source_total = source_membership.sum()
-        _group_progress(
-            f"[DEBUG] sifted pair source_group={source_group} sel_idx={sel_idx} "
-            f"sel_count={len(sel_idx)} source_any_per_product={source_any.tolist()} "
-            f"source_total_memberships={int(source_total)}"
-        )
-        display_name = dd.get('key') or dd.get('shortAlias') or dd.get('name') or f'第{source_group + 1}组筛选'
-
-        mask_1g = np.zeros((T, 1, P), dtype=bool)
-        mask_1g[:, 0, sel] = membership_np[:, source_group, :][:, sel]
-        return mask_1g, {
-            'source_group': source_group,
-            'key': display_name,
-            'name': display_name,
-            'id': dd.get('id'),
-            'product_names': [display_names[idx] for idx in sel_idx],
-            'fee_mode': dd.get('fee_mode', dd.get('feeMode')),
-            'fee_rate': dd.get('fee_rate', dd.get('feeRate')),
-            'fee_map': dd.get('fee_map', dd.get('feeMap')),
-            'use_close_today': dd.get('use_close_today', dd.get('useCloseToday')),
-            'rebalance_mode': dd.get('rebalance_mode', dd.get('rebalanceMode')),
-            'liquidity_mode': dd.get('liquidity_mode', dd.get('liquidityMode')),
-            'liquidity_percent': dd.get('liquidity_percent', dd.get('liquidityPercent')),
-            'margin_mode': dd.get('margin_mode', dd.get('marginMode')),
-        }
-
-    sifted_pairs = [
-        pair for pair in
-        (_build_sifted_pair(dd) for dd in sifted_defs if isinstance(dd, dict))
-        if pair is not None
-    ]
-    if sifted_pairs:
-        sifted_slices, sifted_meta = zip(*sifted_pairs)
-        membership_np = np.concatenate([membership_np, np.concatenate(list(sifted_slices), axis=1)], axis=1)
-        for si, ss in enumerate(sifted_slices):
-            ss_sum = ss.sum()
-            n_orig = membership_np.shape[1] - len(sifted_slices)
-            _group_progress(
-                f"[DEBUG] sifted group {si} (global idx={n_orig + si}) "
-                f"mask_1g total memberships={int(ss_sum)} "
-                f"first_5_products_sum={ss[:, 0, :5].sum()}"
-            )
-        _group_progress(
-            f"[DEBUG] after concat membership_np shape={membership_np.shape} "
-            f"last_group_sum={int(membership_np[:, -1, :].sum())}"
-        )
-        sifted_info.extend(list(sifted_meta))
-    _group_progress(f"sifted groups done factor={factor.alias} built={len(sifted_info)}")
-    return membership_np, sifted_info
-
-
 def build_flat_membership_from_groups(
     groups: list,
     *,
@@ -936,8 +829,7 @@ def build_flat_membership_from_groups(
     membership_np : (T, M_total, P) bool
         Concatenated membership across all groups.
     group_info : list[dict]
-        Per-global-group-index metadata dict (compatible with old ``derived_info``
-        shape: {base_group, name, id, product_names, ...}).
+        Per-global-group-index metadata dict: {group_index, name, id, product_names, ...}.
     """
     from tools.products.product_utils import product_display_name
 
@@ -997,7 +889,7 @@ def build_flat_membership_from_groups(
                 mask_1g[:, 0, sel] = source_row[:, sel]
             slices.append(mask_1g)
             group_info.append({
-                'base_group': group.group_index,
+                'group_index': group.group_index,
                 'key': group.key,
                 'name': group.name,
                 'id': group._id,
@@ -1016,7 +908,7 @@ def build_flat_membership_from_groups(
             mask_1g = source_row[:, np.newaxis, :].copy()  # (T, 1, P)
             slices.append(mask_1g)
             group_info.append({
-                'base_group': group.group_index,
+                'group_index': group.group_index,
                 'key': group.key,
                 'name': group.name,
                 'id': group._id,
@@ -1246,9 +1138,6 @@ def _simulate_group_from_preloaded(
         multi_session_active=multi_session_active,
         rebalance_mode=rebalance_mode,
         report_df=report_df.copy(),
-        n_base=group_count,
-        n_derived=0,
-        derived_info=[],
         group_names=n_names,
         hold_amounts_np=sim_result.get('prev_end_amounts_np'),
         position_quantities_np=sim_result.get('position_quantities_np'),
@@ -2204,243 +2093,3 @@ def _compute_buy_costs_per_group(
     )
     return buy, buy_fee, trade_notional_ratio
 
-
-def simulate_sifted_group(
-    group_index: int,
-    selected_idx: list[int],
-    group_result: GroupRunResult,
-    open_fee_vec: np.ndarray,
-    close_fee_vec: np.ndarray,
-    rebalance_mode: str = "buy_and_hold",
-    use_closetoday: bool = False,
-    close_today_fee_vec: np.ndarray | None = None,
-) -> dict:
-    """逐期模拟筛选组（source group 的品种子集），返回 net/gross/fee/cumulative 序列。
-
-    筛选组的 wealth 演化路径独立于源组：期初 wealth 初始为 1，
-    每期根据子集 mask 重新计算 target_amounts、fee、net returns。
-
-    底层复用 simulate_group_trading_book，引入 (T, 1, P) 的 membership matrix 后统一计算。
-
-    参数：
-        open_fee_vec、close_fee_vec、close_today_fee_vec 由外部调用方构建传入，
-        **不得**从 group_result 的属性中获取（group_result 的 fee 数据属于
-        上一次源组运行时的上下文，可能与当前请求的费率配置不一致）。
-    """
-    membership_np = getattr(group_result, 'membership_np', None)
-    period_returns_np = getattr(group_result, 'period_returns_np', None)
-    price_np = getattr(group_result, 'price_np', None)
-    open_fee_fixed_vec = getattr(group_result, 'open_fee_fixed_vec', None)
-    close_fee_fixed_vec = getattr(group_result, 'close_fee_fixed_vec', None)
-    close_today_fee_fixed_vec = getattr(group_result, 'close_today_fee_fixed_vec', None)
-    point_value_vec = getattr(group_result, 'point_value_vec', None)
-    min_tick_vec = getattr(group_result, 'min_tick_vec', None)
-    min_trade_quantity_vec = getattr(group_result, 'min_trade_quantity_vec', None)
-    margin_ratio_vec = getattr(group_result, 'margin_ratio_vec', None)
-    is_margin_traded_vec = getattr(group_result, 'is_margin_traded_vec', None)
-    initial_capital = float(getattr(group_result, 'initial_capital', 1.0) or 1.0)
-
-    if membership_np is None or period_returns_np is None or price_np is None:
-        raise ValueError('GroupRunResult 缺少 membership_np / period_returns_np / price_np')
-
-    sel = np.asarray(selected_idx, dtype=int)
-    P = len(sel)
-
-    # 裁剪到子集品种，构造 (T, 1, P) membership
-    mask_1g = membership_np[:, group_index, :][:, sel].reshape(
-        membership_np.shape[0], 1, P
-    )  # (T, 1, P)
-    returns = period_returns_np[:, sel]  # (T, P)
-    prices = price_np[:, sel]
-    open_fv = open_fee_vec[sel] if open_fee_vec is not None else np.zeros(P)
-    open_fixed_fv = open_fee_fixed_vec[sel] if isinstance(open_fee_fixed_vec, np.ndarray) else np.zeros(P, dtype=float)
-    close_fixed_fv = close_fee_fixed_vec[sel] if isinstance(close_fee_fixed_vec, np.ndarray) else np.zeros(P, dtype=float)
-    close_today_fixed_fv = (
-        close_today_fee_fixed_vec[sel]
-        if isinstance(close_today_fee_fixed_vec, np.ndarray)
-        else np.zeros(P, dtype=float)
-    )
-    point_fv = point_value_vec[sel] if isinstance(point_value_vec, np.ndarray) else np.ones(P, dtype=float)
-    tick_fv = min_tick_vec[sel] if isinstance(min_tick_vec, np.ndarray) else np.full(P, 0.01, dtype=float)
-    lot_fv = min_trade_quantity_vec[sel] if isinstance(min_trade_quantity_vec, np.ndarray) else np.ones(P, dtype=float)
-    margin_ratio_fv = margin_ratio_vec[sel] if isinstance(margin_ratio_vec, np.ndarray) else np.ones(P, dtype=float)
-    margin_flag_fv = is_margin_traded_vec[sel] if isinstance(is_margin_traded_vec, np.ndarray) else np.zeros(P, dtype=bool)
-    margin_mode = np.array(["margin" if np.any(margin_flag_fv) else "cash"], dtype=object)
-    # 根据 use_closetoday 选择平今或平昨
-    if use_closetoday and close_today_fee_vec is not None:
-        close_fv = close_today_fee_vec[sel]
-        # close_today_fee_vec passed as both close_fee_vec and close_today_fee_vec
-        effective_close_today = close_fv
-    else:
-        close_fv = close_fee_vec[sel] if close_fee_vec is not None else np.zeros(P)
-        effective_close_today = None
-
-    sim_result = simulate_group_trading_book(
-        membership_np=mask_1g,
-        returns_np=returns,
-        price_np=prices,
-        open_fee_rate_mat=open_fv.reshape(1, P),
-        close_fee_rate_mat=close_fv.reshape(1, P),
-        open_fee_fixed_mat=open_fixed_fv.reshape(1, P),
-        close_fee_fixed_mat=close_fixed_fv.reshape(1, P),
-        close_today_fee_rate_mat=effective_close_today.reshape(1, P) if effective_close_today is not None else None,
-        close_today_fee_fixed_mat=close_today_fixed_fv.reshape(1, P) if effective_close_today is not None else None,
-        point_value_vec=point_fv,
-        min_tick_vec=tick_fv,
-        min_trade_quantity_vec=lot_fv,
-        margin_ratio_mat=margin_ratio_fv.reshape(1, P),
-        is_margin_traded_vec=margin_flag_fv,
-        margin_modes=margin_mode,
-        rebalance_modes=np.array([rebalance_mode], dtype=object),
-        initial_capital=initial_capital,
-    )
-
-    # Flatten (T, 1) → (T,)
-    net_returns_arr = sim_result['net_returns_np'][:, 0]
-    gross_returns_arr = sim_result['gross_returns_np'][:, 0]
-    fee_costs_arr = sim_result['fee_costs_np'][:, 0]
-    notional_ratio_arr = sim_result['trade_notional_ratio_np'][:, 0]
-    total_equity_arr = sim_result['total_equity_np'][:, 0]
-
-    return {
-        'net_returns': net_returns_arr,
-        'gross_returns': gross_returns_arr,
-        'fee_costs': fee_costs_arr,
-        'notional_ratios': notional_ratio_arr,
-        'total_equity': total_equity_arr,
-    }
-
-
-def simulate_sifted_groups_batch(
-    group_index: int,
-    siftings: list[dict],
-    group_result: GroupRunResult,
-    open_fee_vec: np.ndarray,
-    close_fee_vec: np.ndarray,
-    rebalance_mode: str = "buy_and_hold",
-    use_closetoday: bool = False,
-    close_today_fee_vec: np.ndarray | None = None,
-) -> list[dict]:
-    """一次 simulate_group_trading_book 调用，批量计算同一源组的多个筛选组。
-
-    所有筛选组必须共享同一个 group_index（源组索引）。
-    每个筛选组的品种子集可能不同；取所有 selected_idx 的并集作为
-    P_all，构造 (T, N_sifted, P_all) membership 后一次传入 simulate_group_trading_book。
-
-    siftings: [{'selected_idx': [...], 'name': '...'}, ...]
-    返回: [{'net_returns': ..., 'gross_returns': ..., ...}, ...] (顺序与 siftings 相同)
-    """
-    membership_np = getattr(group_result, 'membership_np', None)
-    period_returns_np = getattr(group_result, 'period_returns_np', None)
-    price_np = getattr(group_result, 'price_np', None)
-    open_fee_fixed_vec = getattr(group_result, 'open_fee_fixed_vec', None)
-    close_fee_fixed_vec = getattr(group_result, 'close_fee_fixed_vec', None)
-    close_today_fee_fixed_vec = getattr(group_result, 'close_today_fee_fixed_vec', None)
-    point_value_vec = getattr(group_result, 'point_value_vec', None)
-    min_tick_vec = getattr(group_result, 'min_tick_vec', None)
-    min_trade_quantity_vec = getattr(group_result, 'min_trade_quantity_vec', None)
-    margin_ratio_vec = getattr(group_result, 'margin_ratio_vec', None)
-    is_margin_traded_vec = getattr(group_result, 'is_margin_traded_vec', None)
-    initial_capital = float(getattr(group_result, 'initial_capital', 1.0) or 1.0)
-
-    if membership_np is None or period_returns_np is None or price_np is None:
-        raise ValueError('GroupRunResult 缺少 membership_np / period_returns_np / price_np')
-
-    if not derivations:
-        return []
-
-    # 取所有派生组 selected_idx 的并集
-    all_idx_sets = [set(np.asarray(d['selected_idx'], dtype=int)) for d in derivations]
-    union_idx = sorted(set().union(*all_idx_sets))
-    union_arr = np.array(union_idx, dtype=int)
-    P_all = len(union_arr)
-
-    # 映射：原索引 → 并集中的位置
-    idx_to_pos = {idx: pos for pos, idx in enumerate(union_arr)}
-
-    # 构造 (T, N_derived, P_all) membership
-    base_membership = membership_np[:, group_index, :]  # (T, P_orig)
-    T = base_membership.shape[0]
-    N = len(derivations)
-    mask_batch = np.zeros((T, N, P_all), dtype=bool)
-
-    for di, d in enumerate(derivations):
-        sel = np.asarray(d['selected_idx'], dtype=int)
-        pos = [idx_to_pos[i] for i in sel]
-        mask_batch[:, di, pos] = base_membership[:, sel]
-
-    returns = period_returns_np[:, union_arr]  # (T, P_all)
-    prices = price_np[:, union_arr]
-    open_fv = open_fee_vec[union_arr] if open_fee_vec is not None else np.zeros(P_all)
-    open_fixed_fv = open_fee_fixed_vec[union_arr] if isinstance(open_fee_fixed_vec, np.ndarray) else np.zeros(P_all, dtype=float)
-    close_fixed_fv = close_fee_fixed_vec[union_arr] if isinstance(close_fee_fixed_vec, np.ndarray) else np.zeros(P_all, dtype=float)
-    close_today_fixed_fv = (
-        close_today_fee_fixed_vec[union_arr]
-        if isinstance(close_today_fee_fixed_vec, np.ndarray)
-        else np.zeros(P_all, dtype=float)
-    )
-    point_fv = point_value_vec[union_arr] if isinstance(point_value_vec, np.ndarray) else np.ones(P_all, dtype=float)
-    tick_fv = min_tick_vec[union_arr] if isinstance(min_tick_vec, np.ndarray) else np.full(P_all, 0.01, dtype=float)
-    lot_fv = min_trade_quantity_vec[union_arr] if isinstance(min_trade_quantity_vec, np.ndarray) else np.ones(P_all, dtype=float)
-    margin_ratio_fv = margin_ratio_vec[union_arr] if isinstance(margin_ratio_vec, np.ndarray) else np.ones(P_all, dtype=float)
-    margin_flag_fv = is_margin_traded_vec[union_arr] if isinstance(is_margin_traded_vec, np.ndarray) else np.zeros(P_all, dtype=bool)
-    margin_mode = np.array(["margin" if np.any(margin_flag_fv) else "cash"] * N, dtype=object)
-
-    if use_closetoday and close_today_fee_vec is not None:
-        close_fv = close_today_fee_vec[union_arr]
-        effective_close_today = close_fv
-    else:
-        close_fv = close_fee_vec[union_arr] if close_fee_vec is not None else np.zeros(P_all)
-        effective_close_today = None
-
-    # 构造 per-derivation fee 矩阵 (N, P_all)
-    # 每个 derivation 可能有独立的 fee_override
-    open_fee_mat = np.tile(open_fv, (N, 1))
-    close_fee_mat = np.tile(close_fv, (N, 1))
-    ct_fee_mat = np.tile(effective_close_today, (N, 1)) if effective_close_today is not None else None
-    open_fee_fixed_mat = np.tile(open_fixed_fv, (N, 1))
-    close_fee_fixed_mat = np.tile(close_fixed_fv, (N, 1))
-    ct_fee_fixed_mat = np.tile(close_today_fixed_fv, (N, 1)) if effective_close_today is not None else None
-
-    for di, d in enumerate(derivations):
-        feo = d.get('fee_override')
-        if feo and isinstance(feo, dict):
-            if feo.get('open') is not None:
-                open_fee_mat[di, :] = float(feo['open'])
-            if feo.get('close') is not None:
-                close_fee_mat[di, :] = float(feo['close'])
-            if ct_fee_mat is not None and feo.get('close_today') is not None:
-                ct_fee_mat[di, :] = float(feo['close_today'])
-
-    sim_result = simulate_group_trading_book(
-        membership_np=mask_batch,
-        returns_np=returns,
-        price_np=prices,
-        open_fee_rate_mat=open_fee_mat,
-        close_fee_rate_mat=close_fee_mat,
-        open_fee_fixed_mat=open_fee_fixed_mat,
-        close_fee_fixed_mat=close_fee_fixed_mat,
-        close_today_fee_rate_mat=ct_fee_mat,
-        close_today_fee_fixed_mat=ct_fee_fixed_mat,
-        point_value_vec=point_fv,
-        min_tick_vec=tick_fv,
-        min_trade_quantity_vec=lot_fv,
-        margin_ratio_mat=np.tile(margin_ratio_fv, (N, 1)),
-        is_margin_traded_vec=margin_flag_fv,
-        margin_modes=margin_mode,
-        rebalance_modes=np.array([rebalance_mode] * N, dtype=object),
-        initial_capital=initial_capital,
-    )
-
-    # 拆回每个派生组的结果
-    results = []
-    for di in range(N):
-        results.append({
-            'net_returns': sim_result['net_returns_np'][:, di],
-            'gross_returns': sim_result['gross_returns_np'][:, di],
-            'fee_costs': sim_result['fee_costs_np'][:, di],
-            'notional_ratios': sim_result['trade_notional_ratio_np'][:, di],
-            'total_equity': sim_result['total_equity_np'][:, di],
-        })
-
-    return results

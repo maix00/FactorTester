@@ -85,16 +85,18 @@ def build_snapshot_summary(snapshot: dict) -> dict:
     if group_settings:
         group_parts = []
         raw_groups = group_settings.get('groups') or []
-        base_groups = [group for group in raw_groups if not group.get('parentId')]
-        derived_groups = [group for group in raw_groups if group.get('parentId')]
+        flat_groups = [group for group in raw_groups if not group.get('parentId')]
+        screened_groups = [group for group in raw_groups if group.get('product_names') or group.get('productNames')]
         ls_configs = group_settings.get('lsConfigs') or []
-        if base_groups or derived_groups or ls_configs:
+        total_groups = len(flat_groups) + len(screened_groups)
+        if total_groups or ls_configs:
+            screen_note = f" · 含 {len(screened_groups)} 个品种筛选组" if screened_groups else ""
             group_parts.append(
-                f"基础组 {len(base_groups)} 个 · 派生组 {len(derived_groups)} 个 · Long-Short {len(ls_configs)} 个"
+                f"共 {total_groups} 组{screen_note} · Long-Short {len(ls_configs)} 个"
             )
             fee_labels = {'none': '无费率', 'uniform': '统一费率', 'per_product': '分品种费率', 'custom': '自定义费率'}
             rebalance_labels = {'hold': '组内持仓不动', 'daily': '每日调仓', 'signal': '信号频率调仓'}
-            for group in base_groups[:8]:
+            for group in flat_groups[:8]:
                 label = group.get('shortAlias') or group.get('name') or group.get('id') or '未命名组'
                 group_index = group.get('groupIndex', '未设置')
                 group_count_value = group.get('groupCount', '未设置')
@@ -109,11 +111,8 @@ def build_snapshot_summary(snapshot: dict) -> dict:
                 group_parts.append(
                     f"{label} · 第{group_index}/{group_count_value}组 · 因子 {factor_alias} · {fee_text} · {rebalance_text}"
                 )
-            if len(base_groups) > 8:
-                group_parts.append(f"…另 {len(base_groups) - 8} 个基础组")
-            for derived in derived_groups[:4]:
-                label = derived.get('shortAlias') or derived.get('name') or derived.get('id') or '未命名派生组'
-                group_parts.append(f"派生组 {label} · 来源 {derived.get('parentId') or '未设置'}")
+            if len(flat_groups) > 8:
+                group_parts.append(f"…另 {len(flat_groups) - 8} 个组")
             for ls_config in ls_configs[:4]:
                 label = ls_config.get('shortAlias') or ls_config.get('name') or ls_config.get('id') or '未命名 Long-Short'
                 group_parts.append(

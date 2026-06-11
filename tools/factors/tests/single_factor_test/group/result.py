@@ -31,10 +31,6 @@ class GroupRunResult:
     multi_session_active: bool = False
     rebalance_mode: str = ""
     report_df: pd.DataFrame = field(default_factory=pd.DataFrame)
-    # 派生组（精选组）元信息
-    n_base: int = 0
-    n_derived: int = 0
-    derived_info: Any = None  # [{base_group, name, id, product_names}, ...] | None
     group_names: Any = None  # {expanded_group_index: display_name}
     hold_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期实际持仓金额 (refs #100)
     position_quantities_np: np.ndarray | None = None  # (T, M, P) float — 每期合约手数/单位数

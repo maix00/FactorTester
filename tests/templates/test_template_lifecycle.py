@@ -122,7 +122,7 @@ def test_snapshot_summary_reads_new_group_settings_shape():
     summary = build_snapshot_summary(snapshot)
 
     assert "group_test" in summary
-    assert summary["group_test"][0] == "基础组 1 个 · 派生组 1 个 · Long-Short 1 个"
+    assert summary["group_test"][0] == "共 1 组 · Long-Short 1 个"
     assert any("A1" in item for item in summary["group_test"])
 
 
