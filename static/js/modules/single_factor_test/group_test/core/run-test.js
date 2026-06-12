@@ -230,12 +230,12 @@
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 透传 groups 原始数据，不做字段挑选 ──
-        var bulkPayload = {
+        // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
+        var bulkPayload = Object.assign({}, localRun.payload, {
             groups: allStoredGroups,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || ''
-        };
+        });
 
         try {
             // ── 多行并行进度条 ──
