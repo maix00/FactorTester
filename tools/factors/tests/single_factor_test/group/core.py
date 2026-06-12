@@ -1985,113 +1985,137 @@ def simulate_group_trading_book(
         contract_value_row = contract_value[np.newaxis, :]
         prev_notional = np.where(executable_row, quantities * contract_value_row, 0.0)
 
-        # Build initial targets per-group using each group's own rebalance mode.
-        # For all groups: always start with "each_period" for the initial allocation
-        # (even buy_and_hold/recycle need first-period full weighting).
-        # The hold/recycle logic below will freeze reuse after the first period.
-        target_notional = build_target_amounts(
-            membership_np[t],
-            prev_notional,
-            equity,
-            "each_period",
-            close_fee_vec=None,
+        # When membership is unchanged AND we are not in "each_period" mode
+        # (which requires per-period re-weighting), skip rebalancing entirely.
+        # Positions stay the same, fees are zero, only mark-to-market (equity
+        # update via gross_contrib) still runs below.
+        #
+        # This is especially important for forward-filled rows (when
+        # calendar_index unifies T across factors) where membership_np[t] is
+        # explicitly set to membership_np[t-1] by _build_group_membership_from_shared.
+        membership_unchanged = (
+            t > 0
+            and not np.any(rebalance_modes_arr == "each_period")
+            and bool(np.array_equal(membership_np[t], membership_np[t-1]))
         )
-        raw_quantities = np.divide(
-            target_notional,
-            contract_value_row,
-            out=np.zeros_like(target_notional, dtype=float),
-            where=np.isfinite(contract_value_row) & (contract_value_row > 0),
-        )
-        desired_quantities = np.floor(raw_quantities / lot_sizes_row) * lot_sizes_row
-        desired_quantities = np.where(membership_np[t] & executable_row, desired_quantities, 0.0)
-        desired_quantities[:, ~executable] = quantities[:, ~executable]
-
-        if has_percent_liquidity:
-            assert liquidity_capacity_arr is not None
-            base_capacity = np.where(
-                np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
-                liquidity_capacity_arr[t],
-                0.0,
-            )
-            base_capacity = np.where(executable, base_capacity, 0.0)
-            # liquidity_capacity_arr stores cross-sectional shares (sum=1 per row).
-            # Convert to absolute notional capacity per group for percent-restricted rows.
-            # Non-percent rows keep inf so they are not capped.
-            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
-            executable_capacity_t[percent_rows] = (
-                base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
-            )
-            target_amounts = apply_liquidity_execution(
+        if membership_unchanged:
+            desired_quantities = quantities.copy()
+            buy_qty = np.zeros((M, P), dtype=float)
+            sell_qty = np.zeros((M, P), dtype=float)
+            buy_notional = np.zeros((M, P), dtype=float)
+            sell_notional = np.zeros((M, P), dtype=float)
+            buy_fee = np.zeros((M, P), dtype=float)
+            sell_fee = np.zeros((M, P), dtype=float)
+            fee_amount = np.zeros((M, P), dtype=float)
+            position_notional = desired_quantities * contract_value_row
+        else:
+            # Build initial targets per-group using each group's own rebalance mode.
+            # For all groups: always start with "each_period" for the initial allocation
+            # (even buy_and_hold/recycle need first-period full weighting).
+            # The hold/recycle logic below will freeze reuse after the first period.
+            target_notional = build_target_amounts(
+                membership_np[t],
                 prev_notional,
-                target_notional,
                 equity,
-                executable_capacity_t,
-                open_rate_mat,
-                close_rate_mat,
+                "each_period",
+                close_fee_vec=None,
             )
             raw_quantities = np.divide(
-                target_amounts,
+                target_notional,
                 contract_value_row,
-                out=np.zeros_like(target_amounts, dtype=float),
+                out=np.zeros_like(target_notional, dtype=float),
                 where=np.isfinite(contract_value_row) & (contract_value_row > 0),
             )
             desired_quantities = np.floor(raw_quantities / lot_sizes_row) * lot_sizes_row
-            desired_quantities = np.where(executable_row, desired_quantities, quantities)
+            desired_quantities = np.where(membership_np[t] & executable_row, desired_quantities, 0.0)
+            desired_quantities[:, ~executable] = quantities[:, ~executable]
 
-        if bool(hold_rows.any()):
-            current_membership = membership_np[t]
-            current_positive = quantities > 0
-            staying_mask = current_membership & current_positive
-            entering_mask = current_membership & (~current_positive)
-            desired_quantities[hold_rows] = np.where(
-                staying_mask[hold_rows],
-                quantities[hold_rows],
-                desired_quantities[hold_rows],
-            )
+            if has_percent_liquidity:
+                assert liquidity_capacity_arr is not None
+                base_capacity = np.where(
+                    np.isfinite(liquidity_capacity_arr[t]) & (liquidity_capacity_arr[t] > 0),
+                    liquidity_capacity_arr[t],
+                    0.0,
+                )
+                base_capacity = np.where(executable, base_capacity, 0.0)
+                # liquidity_capacity_arr stores cross-sectional shares (sum=1 per row).
+                # Convert to absolute notional capacity per group for percent-restricted rows.
+                # Non-percent rows keep inf so they are not capped.
+                executable_capacity_t = np.full((M, P), np.inf, dtype=float)
+                executable_capacity_t[percent_rows] = (
+                    base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
+                )
+                target_amounts = apply_liquidity_execution(
+                    prev_notional,
+                    target_notional,
+                    equity,
+                    executable_capacity_t,
+                    open_rate_mat,
+                    close_rate_mat,
+                )
+                raw_quantities = np.divide(
+                    target_amounts,
+                    contract_value_row,
+                    out=np.zeros_like(target_amounts, dtype=float),
+                    where=np.isfinite(contract_value_row) & (contract_value_row > 0),
+                )
+                desired_quantities = np.floor(raw_quantities / lot_sizes_row) * lot_sizes_row
+                desired_quantities = np.where(executable_row, desired_quantities, quantities)
 
-            if bool(recycle_rows.any()):
-                has_existing_positions = np.any(current_positive, axis=1)
-                has_exiting_positions = np.any(current_positive & (~current_membership), axis=1)
-                freeze_entering_rows = recycle_rows & has_existing_positions & (~has_exiting_positions)
-                if bool(freeze_entering_rows.any()):
-                    desired_quantities[freeze_entering_rows] = np.where(
-                        entering_mask[freeze_entering_rows],
-                        0.0,
-                        desired_quantities[freeze_entering_rows],
-                    )
+            if bool(hold_rows.any()):
+                current_membership = membership_np[t]
+                current_positive = quantities > 0
+                staying_mask = current_membership & current_positive
+                entering_mask = current_membership & (~current_positive)
+                desired_quantities[hold_rows] = np.where(
+                    staying_mask[hold_rows],
+                    quantities[hold_rows],
+                    desired_quantities[hold_rows],
+                )
 
-        desired_quantities[:, ~executable] = quantities[:, ~executable]
+                if bool(recycle_rows.any()):
+                    has_existing_positions = np.any(current_positive, axis=1)
+                    has_exiting_positions = np.any(current_positive & (~current_membership), axis=1)
+                    freeze_entering_rows = recycle_rows & has_existing_positions & (~has_exiting_positions)
+                    if bool(freeze_entering_rows.any()):
+                        desired_quantities[freeze_entering_rows] = np.where(
+                            entering_mask[freeze_entering_rows],
+                            0.0,
+                            desired_quantities[freeze_entering_rows],
+                        )
 
-        for _ in range(16):
+            desired_quantities[:, ~executable] = quantities[:, ~executable]
+
+            for _ in range(16):
+                buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
+                sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
+                buy_notional = buy_qty * contract_value_row
+                sell_notional = sell_qty * contract_value_row
+                buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
+                sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
+                position_notional = desired_quantities * contract_value_row
+                occupied = np.nansum(np.where(use_margin, position_notional * margin_ratios, position_notional), axis=1)
+                required = occupied + np.nansum(buy_fee, axis=1) + np.nansum(sell_fee, axis=1)
+                over = required > equity + 1e-12
+                if not over.any():
+                    break
+                scale = np.divide(
+                    equity[over],
+                    required[over],
+                    out=np.zeros_like(equity[over]),
+                    where=required[over] > 0,
+                )
+                scaled = desired_quantities[over] * scale[:, np.newaxis]
+                desired_quantities[over] = np.floor(scaled / lot_sizes_row) * lot_sizes_row
+
             buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
             sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
             buy_notional = buy_qty * contract_value_row
             sell_notional = sell_qty * contract_value_row
             buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
             sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
+            fee_amount = buy_fee + sell_fee
             position_notional = desired_quantities * contract_value_row
-            occupied = np.nansum(np.where(use_margin, position_notional * margin_ratios, position_notional), axis=1)
-            required = occupied + np.nansum(buy_fee, axis=1) + np.nansum(sell_fee, axis=1)
-            over = required > equity + 1e-12
-            if not over.any():
-                break
-            scale = np.divide(
-                equity[over],
-                required[over],
-                out=np.zeros_like(equity[over]),
-                where=required[over] > 0,
-            )
-            scaled = desired_quantities[over] * scale[:, np.newaxis]
-            desired_quantities[over] = np.floor(scaled / lot_sizes_row) * lot_sizes_row
-
-        buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
-        sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
-        buy_notional = buy_qty * contract_value_row
-        sell_notional = sell_qty * contract_value_row
-        buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
-        sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
-        fee_amount = buy_fee + sell_fee
-        position_notional = desired_quantities * contract_value_row
         gross_contrib = np.where(
             equity[:, np.newaxis] > 0,
             position_notional / equity[:, np.newaxis] * returns_np[t][np.newaxis, :],
