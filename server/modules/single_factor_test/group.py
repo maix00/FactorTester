@@ -163,51 +163,6 @@ def _returns_to_cumulative(returns: np.ndarray) -> np.ndarray:
     return np.cumprod(1.0 + safe)
 
 
-def _normalize_weighted_legs(raw_legs, default_group: int) -> list[dict]:
-    if not isinstance(raw_legs, list) or not raw_legs:
-        raw_legs = [{'group': default_group, 'weight': 0.5}]
-    legs = []
-    for item in raw_legs:
-        try:
-            group = int(item.get('group') or 0)
-            weight = float(item.get('weight') or 0)
-        except (AttributeError, TypeError, ValueError):
-            continue
-        if weight > 0:
-            legs.append({'group': group, 'weight': weight})
-    total = sum(x['weight'] for x in legs)
-    if total > 0:
-        for leg in legs:
-            leg['weight'] = leg['weight'] / total * 0.5
-    return legs
-
-
-def _parse_ls_config(data: dict, n_groups: int) -> dict:
-    raw = data.get('ls_config') or {}
-    if not isinstance(raw, dict):
-        raw = {}
-    return {
-        'name': str(raw.get('name') or 'Long-Short').strip() or 'Long-Short',
-        'long': _normalize_weighted_legs(raw.get('long'), 0),
-        'short': _normalize_weighted_legs(raw.get('short'), n_groups - 1),
-    }
-
-
-def _parse_ls_configs(data: dict, n_groups: int) -> list[dict]:
-    """解析 LS configs 数组。只解析前端明确传入的 ls_configs，不传则返回空列表。"""
-    raw_configs = data.get('ls_configs')
-    if isinstance(raw_configs, list) and raw_configs:
-        configs = []
-        for raw in raw_configs:
-            if not isinstance(raw, dict):
-                continue
-            parsed = _parse_ls_config({'ls_config': raw}, n_groups)
-            if parsed['long'] and parsed['short']:
-                configs.append(parsed)
-        return configs
-    return []
-
-
 def _unique_group_key(name: str, used: set[str]) -> str:
     """去重：如果 name 已存在，追加 #2, #3..."""
     key = name or 'LS'
@@ -229,180 +184,6 @@ def _normalize_group_names(group_names) -> dict[int, str]:
         except (TypeError, ValueError):
             continue
     return normalized
-
-
-def _parse_group_names_payload(group_names) -> dict[int, str]:
-    """Parse frontend group names into a plain group-index -> display-name mapping."""
-    if not isinstance(group_names, dict):
-        return {}
-    n_groups_name: dict[int, str] = {}
-    for key, value in group_names.items():
-        try:
-            g = int(key)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(value, list) and value:
-            first = value[0]
-            if isinstance(first, dict):
-                display_name = first.get('key') or first.get('shortAlias') or first.get('name') or f'group_{g}'
-                n_groups_name[g] = str(display_name)
-            else:
-                n_groups_name[g] = str(first)
-        else:
-            n_groups_name[g] = str(value)
-    return n_groups_name
-
-
-def _parse_groups_payload(groups_payload) -> tuple[dict[int, str], dict[int, list[dict]] | None]:
-    """Parse flat frontend group payloads into group-name and config mappings."""
-    if not isinstance(groups_payload, list):
-        return {}, None
-    grouped: dict[int, list[dict]] = {}
-    names: dict[int, str] = {}
-    for item in groups_payload:
-        if not isinstance(item, dict):
-            continue
-        # 跳过有 parentId/parent_id 的条目（不在扁平化组中）
-        if item.get('parentId') or item.get('parent_id'):
-            continue
-        try:
-            g = int(item.get('group_index', item.get('groupIndex', 0)))
-        except (TypeError, ValueError):
-            continue
-        display_name = item.get('key') or item.get('shortAlias') or item.get('name') or f'group_{g}'
-        config = {
-            'name': str(display_name),
-            'key': str(display_name),
-            'fee_modifications': item.get('fee_modifications') or item.get('feeModifications') or None,
-            'fee_mode': item.get('fee_mode') or item.get('feeMode') or None,
-            'fee_rate': item.get('fee_rate', item.get('feeRate')),
-            'use_close_today': item.get('use_close_today', item.get('useCloseToday')),
-            'rebalance_mode': item.get('rebalance_mode') or item.get('rebalanceMode') or None,
-            'liquidity_mode': item.get('liquidity_mode') or item.get('liquidityMode') or None,
-            'liquidity_percent': item.get('liquidity_percent', item.get('liquidityPercent')),
-            'margin_mode': item.get('margin_mode') or item.get('marginMode') or None,
-        }
-        grouped.setdefault(g, []).append(config)
-        names.setdefault(g, str(display_name))
-    return names, grouped or None
-
-
-def _map_group_item(item: dict) -> dict:
-    """将前端 group payload item 映射为 _FactorGroupTestGroup 的可选字段。
-
-    前端字段名同时支持 camelCase 和 snake_case。
-    """
-    def _get(*keys):
-        for k in keys:
-            v = item.get(k)
-            if v is not None:
-                return v
-        return None
-
-    return {
-        'fee_modifications': _get('fee_modifications', 'feeModifications'),
-        'fee_mode': _get('fee_mode', 'feeMode'),
-        'fee_rate': _get('fee_rate', 'feeRate'),
-        'use_close_today': _get('use_close_today', 'useCloseToday'),
-        'rebalance_mode': _get('rebalance_mode', 'rebalanceMode'),
-        'liquidity_mode': _get('liquidity_mode', 'liquidityMode'),
-        'liquidity_percent': _get('liquidity_percent', 'liquidityPercent'),
-        'margin_mode': _get('margin_mode', 'marginMode'),
-    }
-
-
-def _product_list_from_group(item: dict) -> list[str] | None:
-    """从 group item 提取 product_list；None 表示不筛选（全量）。"""
-    pn = item.get('productNames')
-    if isinstance(pn, list) and pn:
-        return [str(n) for n in pn]
-    mask = item.get('productMask')
-    if isinstance(mask, dict):
-        return sorted([str(k) for k, v in mask.items() if v])
-    return None
-
-
-def _build_flat_groups_from_payload(
-    payload_entry: dict,
-    *,
-    entry_index: int = 0,
-) -> tuple[list, list[dict] | None]:
-    """将单个前端 submit entry 构建为 _FactorGroupTestGroup 列表。"""
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
-
-    factor_alias = str(payload_entry.get('factor_alias') or '')
-    n_groups = int(payload_entry.get('n_groups', 5))
-    submission_id = str(payload_entry.get('submission_id') or '')
-    groups = payload_entry.get('groups')
-    group_names = payload_entry.get('group_names')
-
-    # 解析 group name map（用于 group 没有自己的 key/name 时 fallback）
-    if isinstance(groups, list) and groups:
-        n_groups_name, _ = _parse_groups_payload(groups)
-    else:
-        n_groups_name = _parse_group_names_payload(group_names)
-    if not n_groups_name:
-        n_groups_name = {i: f"Group {i+1}" for i in range(n_groups)}
-
-    flat_groups: list = []
-
-    if isinstance(groups, list) and groups:
-        # 收集所有 valid group_index，用于校准 n_groups
-        group_indices: list[int] = []
-        pending: list[tuple] = []
-        for item in groups:
-            if not isinstance(item, dict):
-                continue
-            try:
-                gi = int(item.get('group_index', item.get('groupIndex', 0)))
-            except (TypeError, ValueError):
-                continue
-            group_indices.append(gi)
-            display_name = item.get('key') or item.get('shortAlias') or item.get('name') or n_groups_name.get(gi, f'group_{gi}')
-            extra = _map_group_item(item)
-            product_list = _product_list_from_group(item)  # None=全量, list=筛选
-            pending.append((gi, display_name, extra, product_list))
-
-        # 校准 n_groups：确保 membership 数组能容纳所有 group_index
-        if group_indices:
-            max_gi = max(group_indices)
-            n_groups = max(n_groups, max_gi + 1)
-
-        for gi, display_name, extra, product_list in pending:
-            flat_groups.append(_FactorGroupTestGroup(
-                tester_id=submission_id,
-                factor_alias=factor_alias,
-                n_groups=n_groups,
-                group_index=gi,
-                key=str(display_name),
-                name=str(display_name),
-                product_list=product_list,
-                **extra,
-            ))
-    else:
-        for gi in range(n_groups):
-            display_name = n_groups_name.get(gi, f'Group {gi + 1}')
-            flat_groups.append(_FactorGroupTestGroup(
-                tester_id=submission_id,
-                factor_alias=factor_alias,
-                n_groups=n_groups,
-                group_index=gi,
-                key=str(display_name),
-                name=str(display_name),
-            ))
-
-    # Parse LS configs
-    raw_ls = payload_entry.get('ls_configs')
-    ls_configs = None
-    if isinstance(raw_ls, list) and raw_ls:
-        ls_configs = []
-        for raw in raw_ls:
-            if isinstance(raw, dict):
-                parsed = _parse_ls_config({'ls_config': raw}, n_groups)
-                if parsed['long'] and parsed['short']:
-                    ls_configs.append(parsed)
-
-    return flat_groups, ls_configs
 
 
 def _group_display_key(group_idx: int, group_names=None) -> str:
@@ -607,55 +388,23 @@ def _serialize_group_simulation_result(
     }
 
 
-def _parse_group_fee_config(data, products: set | None = None):
-    """解析前端费率配置。
-
-    前端三种模式：
-    1. 不扣除费用 → fee=0
-    2. 统一费率   → fee>0
-    3. 按品种费率 → fee=0，fee_modifications 非空
-
-    返回 (fee_uniform, fee_modifications, use_closetoday)，
-    fee_modifications 为 list[FeeModification] 或空列表。
-    费率/费用覆盖在 _resolve_group_trade_specs 中由 fee_modifications 驱动。
-    """
-    fee_uniform = float(data.get('fee', 0.0) or 0.0) / 100.0
-    use_closetoday = bool(data.get('use_closetoday', False))
-
-    # ── Read fee_modifications (per-group, from frontend) ──
-    fee_modifications_raw = data.get('fee_modifications')
-    if not isinstance(fee_modifications_raw, list) or not fee_modifications_raw:
-        return fee_uniform, [], use_closetoday
-
-    from tools.products.transactions.fees import (
-        clean_modifications, sort_modifications,
-    )
-    fee_modifications = sort_modifications(clean_modifications(fee_modifications_raw))
-    return fee_uniform, fee_modifications, use_closetoday
-
-
 @sft_bp.route('/run_group_test', methods=['POST'])
 def run_group_test():
-    """批量并行运行多个分组测试提交条目，支持跨提交条目的 Long-Short。
+    """运行分组测试，接收扁平 groups + ls_configs + page_uuid。
     
     Request JSON:
     {
-        "entries": [
-            {"submission_id": "...", "factor_alias": "...", "n_groups": 5, "ls_configs": [...]},
-            ...
-        ],
-        "cross_entry_ls": [
-            {"name": "LS-A", "long": {"submission_id": "...", "factor_alias": "...", "group": 0},
-                          "short": {"submission_id": "...", "factor_alias": "...", "group": 4}},
-            ...
-        ],
-        "fee": 0.0001, "fee_modifications": [...], "use_closetoday": false,
+        "groups": [ {... group fields (name, groupIndex, factorAlias, testerId, feeMode, ...} ],
+        "ls_configs": [ {"name": "LS-1", "long": [...], "short": [...]}, ... ],
+        "page_uuid": "...",
         "start_date": "2024-01-01", "end_date": "2024-12-31",
-        "rebalance_mode": "buy_and_hold"
+        "initial_capital": 1000000,
     }
     
-    请求里的 `entries` / `cross_entry_ls` 不含 batch 语义；
-    后端内部按 submission entry / cross-entry LS 处理。
+    前端只传 groups + ls_configs + page_uuid。
+    factor_family_alias 从 page_uuid 对应的 page state 解析。
+    fee / rebalance / close-today 从 group 自身字段读取。
+    跨 tester LS 自动由 ls_configs legs 中不同 tester_id 的合并（build_overlap_batches）处理。
     """
     data = request.get_json(silent=True) or {}
     success, result = _run_group_test_core(data)
@@ -675,27 +424,29 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     - success=False：dict 包含 error 和 status 字段
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
+    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
 
-    submitted_entries = data.get('entries')
-    if not isinstance(submitted_entries, list) or not submitted_entries:
-        return False, {'success': False, 'error': 'entries 必须是非空数组', 'status': 400}
+    flat_groups_raw = data.get('groups')
+    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
+        return False, {'success': False, 'error': 'groups 必须是非空数组', 'status': 400}
+    flat_ls_configs = data.get('ls_configs') or []
+    if not isinstance(flat_ls_configs, list):
+        flat_ls_configs = []
 
     request_started = time.perf_counter()
-    cross_entry_ls_requests = data.get('cross_entry_ls') or []
     _progress(
-        f"group simulations request start entries={len(submitted_entries)} "
-        f"cross_entry_ls={len(cross_entry_ls_requests) if isinstance(cross_entry_ls_requests, list) else 0}"
+        f"group simulations request start groups={len(flat_groups_raw)} "
+        f"ls_configs={len(flat_ls_configs)}"
     )
 
-    rebalance_mode = 'buy_and_hold'  # per-group override resolved in _simulate_group_from_preloaded
+    rebalance_mode = 'buy_and_hold'
 
     from tools.data.DataTime import DataTime
 
-    # 精度统一：start/end 同精度
     precision = data.get("precision") or data.get("time_precision") or "exact"
     start_dt = DataTime.from_dict(data, precision=precision)
     end_data = dict(data)
-    # 将 start_xxx 映射为 end_xxx，from_dict 会取第一个有值的
     end_data["date"] = end_data.pop("end_date", end_data.pop("date", None))
     end_data["time"] = end_data.pop("end_time", end_data.pop("time", None))
     end_dt = DataTime.from_dict(end_data, precision=precision)
@@ -704,61 +455,97 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
     except ValueError as e:
         return False, {'success': False, 'error': str(e), 'status': 400}
-    # 费率从第一个前端提交条目的 tester 解析
-    first_entry = submitted_entries[0]
-    try:
-        sub_id = first_entry.get('submission_id')
-        tester0 = runtime_state.get_factor_tester(sub_id, caller='run_group_test')
-        fee_uniform, fee_modifications, use_closetoday = _parse_group_fee_config(data, getattr(tester0, 'products', None))
-    except Exception as e:
-        return False, {'success': False, 'error': f'费率解析失败: {e}', 'status': 400}
 
-    from tools.factors.tests.single_factor_test.group import _FactorGroupTestGroup
+    # ── Build _FactorGroupTestGroup from flat groups array ──
+    # Group by tester_id, then by factor_alias
+    tester_groups: dict[str, dict[str, list[dict]]] = {}  # tester_id → factor_alias → [group_dicts]
+    for g in flat_groups_raw:
+        if not isinstance(g, dict):
+            continue
+        tid = str(g.get('testerId') or g.get('tester_id') or '')
+        fa = str(g.get('factorAlias') or g.get('factor_alias') or '')
+        if not tid or not fa:
+            continue
+        tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
 
-    # ── Build flat groups from all submitted entries ──
+    # Determine n_groups per (tester_id, factor_alias) from max groupIndex
+    n_groups_by_triple: dict[tuple, int] = {}
+    for tid, by_fa in tester_groups.items():
+        for fa, gs in by_fa.items():
+            max_idx = 0
+            for g in gs:
+                gi = int(g.get('groupIndex', g.get('group_index', 0)))
+                max_idx = max(max_idx, gi)
+            n_groups_by_triple[(tid, fa)] = max(max_idx, len(gs))
+
+    # Build flat _FactorGroupTestGroup list
     all_flat_groups: list[_FactorGroupTestGroup] = []
-    sim_index_by_group: dict[int, int] = {}  # flat_group_position → simulation_index
+    sim_index_by_group: dict[int, int] = {}
     all_ls_configs_by_index: dict[int, list[dict] | None] = {}
-    # Also collect factor_aliases per submission for calendar building
     factor_aliases_by_submission: dict[str, list[str]] = {}
 
-    for idx, payload_entry in enumerate(submitted_entries):
-        if not isinstance(payload_entry, dict):
-            continue
-        submission_id = str(payload_entry.get('submission_id') or '')
-        flat_groups, ls_configs = _build_flat_groups_from_payload(
-            payload_entry, entry_index=idx,
-        )
-        offset = len(all_flat_groups)
-        for gi, _ in enumerate(flat_groups):
-            sim_index_by_group[offset + gi] = idx
-        all_flat_groups.extend(flat_groups)
-        all_ls_configs_by_index[idx] = ls_configs
-        factor_alias = str(payload_entry.get('factor_alias') or '')
-        if factor_alias:
-            factor_aliases_by_submission.setdefault(submission_id, [])
-            if factor_alias not in factor_aliases_by_submission[submission_id]:
-                factor_aliases_by_submission[submission_id].append(factor_alias)
+    sim_index = 0
+    for tid, by_fa in tester_groups.items():
+        for fa, gs in by_fa.items():
+            n_groups = n_groups_by_triple[(tid, fa)]
+            existing = factor_aliases_by_submission.get(tid) or []
+            if fa not in existing:
+                existing.append(fa)
+            factor_aliases_by_submission[tid] = existing
+            for g in gs:
+                gi = int(g.get('groupIndex', g.get('group_index', 0)))
+                name = str(g.get('name') or g.get('key') or f'{fa}_G{gi}')
+                fg = _FactorGroupTestGroup(
+                    tester_id=tid,
+                    factor_alias=fa,
+                    n_groups=n_groups,
+                    group_index=gi,
+                    key=name,
+                    name=name,
+                    product_list=g.get('productMask') or g.get('productList') or None,
+                    fee_mode=g.get('feeMode') or g.get('fee_mode') or None,
+                    fee_rate=g.get('feeRate') or g.get('fee_rate') or None,
+                    fee_modifications=g.get('feeModifications') or g.get('fee_modifications') or None,
+                    use_close_today=bool(g.get('useCloseToday') or g.get('use_closetoday')),
+                    rebalance_mode=g.get('rebalanceMode') or g.get('rebalance_mode') or None,
+                    liquidity_mode=g.get('liquidityMode') or g.get('liquidity_mode') or None,
+                    liquidity_percent=g.get('liquidityPercent') or g.get('liquidity_percent') or None,
+                    margin_mode=g.get('marginMode') or g.get('margin_mode') or None,
+                )
+                offset = len(all_flat_groups)
+                sim_index_by_group[offset] = sim_index
+                all_flat_groups.append(fg)
+            all_ls_configs_by_index[sim_index] = flat_ls_configs if flat_ls_configs else None  # all LS configs visible to this spec
+            sim_index += 1
 
     if not all_flat_groups:
         return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
 
+    # ── Resolve factor_family_alias from page_uuid ──
+    page_uuid = str(data.get('page_uuid') or '')
+    factor_family_alias = ''
+    if page_uuid:
+        try:
+            page_state = runtime_state.get_page_state(page_uuid)
+            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
+        except Exception:
+            pass
+
+    # ── Factor inputs & calendar ──
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
     requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
-    factor_family_alias = str(data.get('factor_family_alias') or '')
     group_factor_params_list = data.get('_group_factor_params_list')
     if not isinstance(group_factor_params_list, list):
         group_factor_params_list = None
     group_owner_username = data.get('_group_owner_username')
     group_owner_username = str(group_owner_username) if group_owner_username else None
-    _progress(
-        f"calendar resolve start submissions={len(factor_aliases_by_submission)} "
-        f"mode={'auto' if auto_group_calendar_freq else 'manual'} "
-        f"requested={requested_group_calendar_freq if requested_group_calendar_freq is not None else 'auto'}"
-    )
 
+    # Ensure testers and factors
+    tester0 = None
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
         tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_prepare_factors')
+        if tester0 is None:
+            tester0 = tester
         _ensure_tester_factors_for_group(
             tester,
             factor_aliases,
@@ -780,7 +567,6 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                 returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
             )
 
-    # 构建跨所有 tester 的统一 calendar_index。
     calendar_indices: list[pd.Index] = []
     all_factor_freqs: list[Any] = []
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
@@ -791,70 +577,48 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             continue
         tester_factor_freqs = tester.collect_group_factor_freqs(factor_aliases)
         all_factor_freqs.extend(tester_factor_freqs)
-        _progress(
-            f"calendar factors submission={submission_id} "
-            f"factors={len(factor_aliases)} factor_freqs={[str(freq) for freq in tester_factor_freqs]}"
-        )
     try:
         effective_group_calendar_freq = FactorTester.resolve_group_calendar_freq_from_factor_freqs(
             all_factor_freqs,
             'auto' if auto_group_calendar_freq else requested_group_calendar_freq,
         )
     except ValueError as exc:
-        return False, {
-            'success': False,
-            'error': str(exc),
-            'status': 400,
-        }
+        return False, {'success': False, 'error': str(exc), 'status': 400}
     _progress(
         f"calendar resolve done effective_freq={effective_group_calendar_freq} "
         f"factor_freq_count={len(all_factor_freqs)}"
     )
     for submission_id, factor_aliases in factor_aliases_by_submission.items():
         tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_calendar_build')
-        _progress(
-            f"calendar build start submission={submission_id} "
-            f"factors={len(factor_aliases)} freq={effective_group_calendar_freq}"
-        )
         tester_calendar = tester.build_group_calendar_index(
             factor_aliases,
             requested_calendar_freq=effective_group_calendar_freq,
         )
         if len(tester_calendar) > 0:
             calendar_indices.append(tester_calendar)
-            _progress(
-                f"calendar build submission={submission_id} "
-                f"points={len(tester_calendar)} factors={len(factor_aliases)} "
-                f"freq={effective_group_calendar_freq}"
-            )
-        else:
-            _progress(
-                f"calendar build submission={submission_id} empty "
-                f"factors={len(factor_aliases)} freq={effective_group_calendar_freq}"
-            )
-    global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices)
-    if len(global_calendar_index) > 0:
-        _progress(
-            f"calendar build global points={len(global_calendar_index)} "
-            f"submissions={len(calendar_indices)} freq={effective_group_calendar_freq} "
-            f"mode={'auto' if auto_group_calendar_freq else 'manual'}"
-        )
-    else:
-        _progress(
-            f"calendar build global empty submissions={len(calendar_indices)} "
-            f"freq={effective_group_calendar_freq}"
-        )
+    global_calendar_index = tester0.merge_group_calendar_indices(calendar_indices) if tester0 else pd.Index([])
 
-    # 构建前端提交条目→索引映射（供 cross-entry LS 反查）
-    entry_index_by_key: dict[str, int] = {}
-    for i, payload_entry in enumerate(submitted_entries):
-        key = f"{payload_entry.get('submission_id','')}|{payload_entry.get('factor_alias','')}|{int(payload_entry.get('n_groups', 5))}"
-        entry_index_by_key[key] = i
+    # ── Fee: resolve per-spec from group fields ──
+    # Default: uniform fee=0, no closetoday
+    fee_uniform = 0.0
+    fee_modifications = None
+    use_closetoday = False
+    # Scan groups for fee config (first non-none uniform or per_product wins)
+    for g in flat_groups_raw:
+        fm = g.get('feeMode') or g.get('fee_mode')
+        if fm == 'uniform':
+            fee_uniform = float(g.get('feeRate', g.get('fee_rate', 0.0025)) or 0.0025)
+            break
+        elif fm == 'per_product':
+            fee_uniform = 0.0
+            fee_modifications = g.get('feeModifications') or g.get('fee_modifications') or None
+            break
+    for g in flat_groups_raw:
+        if g.get('useCloseToday') or g.get('use_closetoday'):
+            use_closetoday = True
+            break
 
-    submission_results: list[dict | None] = [None] * len(submitted_entries)
-    errors = []
-    from tools.factors.tests.single_factor_test.group.group_tester import FactorGroupTester
-
+    # ── Run FactorGroupTester ──
     overlap_ratio = float(data.get('group_overlap_ratio', 0.35) or 0.35)
     containment_ratio = float(data.get('group_containment_ratio', 0.60) or 0.60)
     merge_cost_ratio = float(data.get('group_merge_cost_ratio', 1.15) or 1.15)
@@ -876,6 +640,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"containment_ratio={containment_ratio:.2f} merge_cost_ratio={merge_cost_ratio:.2f} "
         f"batches={group_tester.build_batch_labels()}"
     )
+    errors = []
     try:
         raw_results = group_tester.run(
             fee=fee_uniform,
@@ -892,11 +657,11 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         errors.append({'error': str(e)})
         raw_results = []
 
+    submission_results: list[dict | None] = [None] * sim_index
     for raw_result in raw_results:
         idx = int(raw_result.get('simulation_index', -1))
-        if idx < 0 or idx >= len(submitted_entries):
+        if idx < 0 or idx >= sim_index:
             continue
-        payload_entry = submitted_entries[idx]
         flat_info = raw_result.get('flat_group_info')
         serialized = _serialize_group_simulation_result(
             tester=raw_result['tester'],
@@ -904,7 +669,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             factor_alias=str(raw_result.get('factor_alias') or ''),
             n_groups=int(raw_result.get('n_groups', 5)),
             ls_configs=raw_result.get('ls_configs'),
-            rebalance_mode=str(payload_entry.get('rebalance_mode') or rebalance_mode),
+            rebalance_mode=rebalance_mode,
             simulation_result=raw_result,
             flat_group_info=flat_info if isinstance(flat_info, list) and flat_info else None,
         )
@@ -913,7 +678,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         serialized['n_groups_requested'] = int(raw_result.get('n_groups', 5))
         serialized['simulation_index'] = idx
         submission_results[idx] = serialized
-        _progress(f"group tester accepted index={idx + 1}/{len(submitted_entries)}")
+        _progress(f"group tester accepted index={idx + 1}/{sim_index}")
 
     valid_results = [r for r in submission_results if r is not None]
     _progress(f"submission parallel done valid={len(valid_results)} errors={len(errors)}")
@@ -927,103 +692,14 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             'status': 500,
         }
 
-    # ── 阶段 2：跨 tester LS 计算 ──
-    def _find_raw(br_dict: dict | None) -> dict | None:
-        return br_dict.get('_raw') if br_dict else None
+    # ── Per-entry LS configs are already computed inside each simulation result. ──
+    # Future: if ls_configs legs span different specs (cross-tester LS),
+    # build_overlap_batches merges those specs into one product_coverage_batch,
+    # so the LS computation happens naturally inside FactorGroupTester.run().
 
+    # ── Merge results ──
     cross_ls_groups: list[dict] = []
     cross_ls_metrics: dict = {}
-
-    if cross_entry_ls_requests:
-        _progress(f"cross-entry LS start count={len(cross_entry_ls_requests)}")
-        for cb_idx, cb in enumerate(cross_entry_ls_requests, start=1):
-            if not isinstance(cb, dict):
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} invalid config")
-                continue
-            long_info: dict = cb.get('long') or {}
-            short_info: dict = cb.get('short') or {}
-            ls_name = str(cb.get('name') or 'Long-Short').strip() or 'Long-Short'
-            _progress(f"cross-entry LS compute {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
-
-            long_n_groups = int(long_info.get('n_groups', long_info.get('group_count', 5)) or 5)
-            short_n_groups = int(short_info.get('n_groups', short_info.get('group_count', 5)) or 5)
-            long_key = f"{long_info.get('submission_id','')}|{long_info.get('factor_alias','')}|{long_n_groups}"
-            short_key = f"{short_info.get('submission_id','')}|{short_info.get('factor_alias','')}|{short_n_groups}"
-            long_entry_idx = entry_index_by_key.get(long_key)
-            short_entry_idx = entry_index_by_key.get(short_key)
-
-            if long_entry_idx is None or short_entry_idx is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing source entry")
-                continue
-
-            long_br = submission_results[long_entry_idx]
-            short_br = submission_results[short_entry_idx]
-            if long_br is None or short_br is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} failed source entry")
-                continue
-            long_raw = _find_raw(long_br)
-            short_raw = _find_raw(short_br)
-            if long_raw is None or short_raw is None:
-                _progress(f"cross-entry LS skip {cb_idx}/{len(cross_entry_ls_requests)} missing raw arrays")
-                continue
-
-            long_group = int(long_info.get('group', 0))
-            short_group = int(short_info.get('group', 0))
-            long_n = long_br.get('n_groups_requested', 5)
-            short_n = short_br.get('n_groups_requested', 5)
-
-            # 跨提交条目 LS：从不同 simulation entry 的 gross_np / fee_np 拼成 (T, 2) 数组
-            gross_long = long_raw['gross_np'][:, long_group] if long_group < long_raw['gross_np'].shape[1] else np.zeros(long_raw['gross_np'].shape[0])
-            fee_long = long_raw['fee_np'][:, long_group] if long_group < long_raw['fee_np'].shape[1] else np.zeros(long_raw['fee_np'].shape[0])
-            gross_short = short_raw['gross_np'][:, short_group] if short_group < short_raw['gross_np'].shape[1] else np.zeros(short_raw['gross_np'].shape[0])
-            fee_short = short_raw['fee_np'][:, short_group] if short_group < short_raw['fee_np'].shape[1] else np.zeros(short_raw['fee_np'].shape[0])
-
-            # 对齐时间轴：取较短的
-            min_len = min(len(gross_long), len(gross_short))
-            gross_long = gross_long[:min_len]
-            fee_long = fee_long[:min_len]
-            gross_short = gross_short[:min_len]
-            fee_short = fee_short[:min_len]
-
-            # 拼成 (T, 2) 并调用 _compute_weighted_ls_returns
-            gross_combined = np.column_stack([gross_long, gross_short])
-            fee_combined = np.column_stack([fee_long, fee_short])
-
-            ls_config = {
-                'name': ls_name,
-                'long': [{'group': 0, 'weight': 1.0}],
-                'short': [{'group': 1, 'weight': 1.0}],
-            }
-            r_ls, ls_cum_arr = _compute_weighted_ls_returns(gross_combined, fee_combined, ls_config, 2)
-
-            # 用第一个 source entry 的 report_df 和 idx_list 来计算 metrics（近似）
-            ref_raw = long_raw
-            ref_report = ref_raw['report_df']
-            ref_idx = ref_raw['idx_list']
-            timestamps = ref_raw['timestamps'][:min_len]
-            ls_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else None for v in ls_cum_arr]
-
-            ls_key = ls_name
-            cross_ls_groups.append({
-                'key': ls_key,
-                'name': ls_name,
-                'timestamps': timestamps,
-                'total_equity': ls_vals,
-                'gross_returns': _serialize_float_series(r_ls, default=0.0),
-                'fee_costs': [0.0] * len(r_ls),
-                'trade_notional_ratios': [0.0] * len(r_ls),
-                'is_ls': True,
-                'is_cross_entry': True,
-                'cross_ls_info': {
-                    'type': 'long_short',
-                    'long_batch': long_info,
-                    'short_batch': short_info,
-                },
-            })
-            cross_ls_metrics[ls_key] = _compute_ls_metrics(r_ls, ref_report, ref_idx)
-            _progress(f"cross-entry LS done {cb_idx}/{len(cross_entry_ls_requests)} name={ls_name}")
-
-    # ── 阶段 3：合并结果 ──
     _progress(
         f"simulation merge start valid={len(valid_results)} "
         f"cross_ls={len(cross_ls_groups)}"
@@ -1091,6 +767,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         f"group simulations request done groups={len(merged_groups)} metrics={len(merged_metrics)} "
         f"elapsed={time.perf_counter() - request_started:.2f}s"
     )
+    first_valid = valid_results[0] if valid_results else {}
     return True, {
         'success': True,
         'groups': merged_groups,
@@ -1099,10 +776,10 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         'multi_session_active': last_multi_session,
         'multi_session_entries': multi_session_entries,
         'rebalance_mode': last_rebalance,
-        'submission_id': submitted_entries[0].get('submission_id', ''),
-        'factor_alias': submitted_entries[0].get('factor_alias', ''),
-        'tester_alias': valid_results[0].get('tester_alias', '?') if valid_results else '?',
-        'tester_product_count': valid_results[0].get('tester_product_count', 0) if valid_results else 0,
+        'submission_id': first_valid.get('submission_id', ''),
+        'factor_alias': first_valid.get('factor_alias', ''),
+        'tester_alias': first_valid.get('tester_alias', '?') if valid_results else '?',
+        'tester_product_count': first_valid.get('tester_product_count', 0),
         'simulation_count': len(valid_results),
         'cross_entry_ls_count': len(cross_ls_groups),
         'errors': errors if errors else None,
@@ -1440,14 +1117,26 @@ def run_group_test_stream():
     data = request.get_json(silent=True) or {}
 
     # ── 在主线程中完成 data 校验 ──
-    submitted_entries = data.get('entries')
-    if not isinstance(submitted_entries, list) or not submitted_entries:
+    flat_groups_raw = data.get('groups')
+    if not isinstance(flat_groups_raw, list) or not flat_groups_raw:
         def _early_err():
-            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'entries 必须是非空数组'}, default=str)}\n\n"
+            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'groups 必须是非空数组'}, default=str)}\n\n"
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
-    factor_family_alias = str(data.get('factor_family_alias') or '')
+    # ── Resolve factor_family_alias from page_uuid ──
+    page_uuid = str(data.get('page_uuid') or '')
+    factor_family_alias = ''
+    if page_uuid:
+        try:
+            page_state = runtime_state.get_page_state(page_uuid)
+            factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
+        except Exception:
+            pass
+    # Allow override from request
+    req_family = data.get('factor_family_alias')
+    if req_family:
+        factor_family_alias = str(req_family)
     if factor_family_alias:
         try:
             factor_family = get_factor_family_instance(

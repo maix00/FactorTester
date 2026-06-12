@@ -373,11 +373,10 @@
             });
         }
 
-        // ── 3. 构建单个扁平 entry ──
+        // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
         var firstGroup = nonDerived[0];
-        var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode')) : GT.groupSettings.getFieldDefault('rebalanceMode');
         var localRun = prepareLocalRun();
         if (localRun.errors && localRun.errors.length) {
             if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }
@@ -385,52 +384,17 @@
             return;
         }
 
-        // ── 费率聚合 ──
-        var fee = 0;
-        var fee_modifications = [];
-        var hasPerProduct = false;
-        for (var fgi = 0; fgi < allStoredGroups.length; fgi++) {
-            var fg = allStoredGroups[fgi];
-            if (fg.parentId) continue;
-            if (fg.feeMode === 'per_product') hasPerProduct = true;
-            if (fg.feeMode === 'uniform' && fee === 0) {
-                fee = fg.feeRate != null ? fg.feeRate : 0.0025;
-            }
-        }
-        if (hasPerProduct && GT.fee) {
-            try {
-                await GT.fee.ensureFeeData();
-                fee_modifications = GT.fee.getModifications ? GT.fee.getModifications() : [];
-            } catch (err) {
-                console.error('[runBatch] ensureFeeData failed:', err);
-            }
-        }
-        var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
         if (statusSpan) {
             statusSpan.innerHTML = '分组测试运行中...';
             statusSpan.style.color = '#0078d4';
         }
 
-        // 解析 submission_id
-        var resolvedSubmissionId = await resolveSubmissionIdForGroup(firstGroup.testerId);
-        var n_groups = firstGroup.groupCount || nonDerived.length || 1;
-
+        // ── 透传 groups 原始数据，不做字段挑选 ──
         var bulkPayload = {
-            entries: [{
-                submission_id: resolvedSubmissionId || firstGroup.testerId,
-                factor_alias: firstGroup.factorAlias,
-                n_groups: n_groups,
-                groups: allStoredGroups,
-                ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : null
-            }],
-            factor_family_alias: window.factorFamilyAlias || '',
-            page_uuid: window._pageUuid || '',
-            fee: fee,
-            fee_modifications: fee_modifications,
-            use_closetoday: use_closetoday,
-            rebalance_mode: rebalance_mode
+            groups: allStoredGroups,
+            ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
+            page_uuid: window._pageUuid || ''
         };
-        Object.assign(bulkPayload, localRun.payload || {});
 
         try {
             // ── 多行并行进度条 ──
