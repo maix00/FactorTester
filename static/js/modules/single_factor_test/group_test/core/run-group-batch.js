@@ -71,7 +71,7 @@
 
         /** 计算阶段全局进度百分比，永不回退。
          *  按各阶段 total 加权分配进度条区域（非均匀）。
-         *  Cap 规则：某个阶段 total 超过其他所有总和 2 倍时，capped 为 2×其他总和。 */
+         *  Cap 规则：当阶段数 > 3 时，每个阶段最多占 35%，防止大 total 阶段（如 membership=1093320）挤压小阶段。 */
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
@@ -103,18 +103,40 @@
 
             // --- 加权计算 ---
             // 1) 计算原始权重 = 各 phase 的 total
-            // 2) 检测是否有 phase 需要 cap
             var sumAll = 0;
             for (var k = 0; k < phaseKeys.length; k++) {
                 sumAll += allTotals[phaseKeys[k]];
             }
+            // 2) 按比例 cap：phase 数 > 3 时每个 phase 最多占 35%
+            var maxShare = phaseKeys.length > 3 ? 0.35 : 1.0;
             var weights = {};
+            var overflow = 0;
             for (var w = 0; w < phaseKeys.length; w++) {
                 var pk = phaseKeys[w];
                 var t = allTotals[pk];
-                var sumOthers = sumAll - t;
-                // Cap: 如果 t > 2 * sumOthers，则 capped = 2 * sumOthers
-                weights[pk] = (sumOthers > 0 && t > 2 * sumOthers) ? 2 * sumOthers : t;
+                var rawPct = sumAll > 0 ? t / sumAll : 1 / phaseKeys.length;
+                if (rawPct > maxShare) {
+                    weights[pk] = maxShare * sumAll;
+                    overflow += (rawPct - maxShare) * sumAll;
+                } else {
+                    weights[pk] = t;
+                }
+            }
+            // 把溢出按比例分配给未 cap 的阶段
+            if (overflow > 1) {
+                var uncappedKeys = phaseKeys.filter(function(k) {
+                    return sumAll > 0 && (allTotals[k] / sumAll) <= maxShare + 0.001;
+                });
+                var uncappedWeightSum = 0;
+                for (var u = 0; u < uncappedKeys.length; u++) {
+                    uncappedWeightSum += weights[uncappedKeys[u]];
+                }
+                if (uncappedWeightSum > 0) {
+                    for (var d = 0; d < uncappedKeys.length; d++) {
+                        var uk = uncappedKeys[d];
+                        weights[uk] += overflow * (weights[uk] / uncappedWeightSum);
+                    }
+                }
             }
 
             // 3) 计算加权占比
@@ -167,9 +189,9 @@
                 var count = it.total > 0 ? (it.completed + '/' + it.total) : '--';
                 var status = it.done ? '✓ 已完成' : '◷ 进行中';
                 var color = it.done ? '#12a150' : '#0078d4';
-                return '<div style="display:grid;grid-template-columns:80px minmax(12ch,max-content) 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
+                return '<div style="display:grid;grid-template-columns:80px 100px 70px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;font-size:11px;">'
                     + '<span style="font-weight:600;color:#475467;">' + it.label + '</span>'
-                    + '<span style="color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">' + count + '</span>'
+                    + '<span style="color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;" title="' + count + '">' + count + '</span>'
                     + '<span style="color:' + color + ';white-space:nowrap;">' + status + '</span>'
                     + '<span style="color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + it.message + '">' + it.message + '</span>'
                     + '</div>';
@@ -207,13 +229,22 @@
             row.currentPhase = phase;
 
             var existing = row.phaseHistory[phase] || {};
-            var isNewDone = total > 0 && completed >= total;
-            // 保证不回退：completed/total 只增不减
+            var newCompleted = Math.max(existing.completed || 0, completed || 0);
+            var newTotal = Math.max(existing.total || 0, total || 0);
+            // 如果 phase 被重新进入（如 simulate 在多个 batch 中重复），done 必须重置
+            // done 只根据当前进度判断，不沿用上次的标记
+            var isNowDone = newTotal > 0 && newCompleted >= newTotal;
+            // 跳过类消息（total=0 表示"已有缓存跳过"）不覆盖已有的有意义消息
+            var skipLike = (total != null && total === 0) || (message && message.indexOf('跳过') >= 0);
+            var bestMessage = existing.message || '';
+            if (message && (!skipLike || !bestMessage)) {
+                bestMessage = message;
+            }
             row.phaseHistory[phase] = {
-                completed: Math.max(existing.completed || 0, completed || 0),
-                total: Math.max(existing.total || 0, total || 0),
-                message: message || existing.message || '',
-                done: !!(isNewDone || existing.done)
+                completed: newCompleted,
+                total: newTotal,
+                message: bestMessage,
+                done: isNowDone
             };
             _renderPhaseHistory(row);
         }

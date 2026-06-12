@@ -1344,9 +1344,9 @@ def ensure_group_factor_inputs(
     needs_factor_eval = not isinstance(r.table, pd.DataFrame) or r.table.empty
     needs_returns_eval = not isinstance(r.returns, pd.DataFrame) or r.returns.empty
     if not needs_factor_eval and not needs_returns_eval:
-        # 两个阶段都有缓存，直接标记为完成（从缓存跳过）
-        _emit_progress("factor_eval", "因子已有缓存，跳过", completed=1, total=1)
-        _emit_progress("returns_eval", "收益率已有缓存，跳过", completed=1, total=1)
+        # 两个阶段都有缓存，用 completed=0 避免覆盖真实计算记录
+        _emit_progress("factor_eval", "因子已有缓存，跳过", completed=0, total=0)
+        _emit_progress("returns_eval", "收益率已有缓存，跳过", completed=0, total=0)
         return
 
     from tools.factors.FactorTester import _active_tester
@@ -1392,8 +1392,8 @@ def ensure_group_factor_inputs(
             finally:
                 teardown_progress()
         else:
-            # 因子已有缓存，跳过计算
-            _emit_progress("factor_eval", "因子已有缓存，跳过", completed=1, total=1)
+            # 因子已有缓存，用 completed=0 避免覆盖真实计算记录
+            _emit_progress("factor_eval", "因子已有缓存，跳过", completed=0, total=0)
         if needs_returns_eval and returns_factor is not None:
             source_freq = cast(
                 DataFreq,
@@ -1424,8 +1424,8 @@ def ensure_group_factor_inputs(
             finally:
                 teardown_progress()
         else:
-            # 收益率已有缓存，跳过计算
-            _emit_progress("returns_eval", "收益率已有缓存，跳过", completed=1, total=1)
+            # 收益率已有缓存，用 completed=0 避免覆盖真实计算记录
+            _emit_progress("returns_eval", "收益率已有缓存，跳过", completed=0, total=0)
     finally:
         _active_tester.reset(token)
         if returns_factor is not None:
