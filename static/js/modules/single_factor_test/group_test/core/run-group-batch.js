@@ -67,13 +67,24 @@
             phaseOrder.push(phase);
         }
 
-        /** 计算阶段全局进度百分比，永不回退 */
+        /** 计算阶段全局进度百分比，永不回退。
+         *  只有阶段已注册（knownTotalPhases > 0 或 phaseOrder 非空）时才计算；
+         *  否则返回当前 pct，不更新进度条（等待 init 告知阶段列表）。 */
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
-            var numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
+            var numPhases = knownTotalPhases > 0 ? knownTotalPhases : phaseOrder.length;
+            // 还没有收到阶段列表，不计算进度
+            if (numPhases <= 0) return row.pct;
+
             var phaseIdx = phaseOrder.indexOf(phase);
-            if (phaseIdx < 0) phaseIdx = phaseOrder.length; // 尚未注册，先按尾部算
+            // 阶段尚未注册，先临时注册（等 init 时再正式对齐）
+            if (phaseIdx < 0) {
+                _registerPhase(phase);
+                phaseIdx = phaseOrder.indexOf(phase);
+                numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
+            }
+            if (phaseIdx < 0) return row.pct;
 
             var localPct = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
             var newPct = Math.round(((phaseIdx + localPct) / numPhases) * 100);
@@ -315,6 +326,7 @@
 
             syncRows: function(nextTotal) {
                 var existingKeys = Object.keys(coverageBatchRows);
+                // 只删除超出范围的旧行，保留范围内的行（含其 phaseHistory 和 pct）
                 for (var i = 0; i < existingKeys.length; i++) {
                     var idx = parseInt(existingKeys[i]);
                     if (idx >= nextTotal) {
@@ -326,6 +338,7 @@
                     }
                 }
                 totalCoverageBatches = nextTotal;
+                // 只创建缺失的行
                 for (var j = 0; j < nextTotal; j++) {
                     _ensureCoverageBatchRow(j, '');
                 }
@@ -342,7 +355,9 @@
                 if (n > 0) knownTotalPhases = n;
             },
 
-            /** 注册阶段列表（emit_start 告知） */
+            /** 注册阶段列表（emit_start 告知）。
+             *  多次调用安全（seenPhases 去重），且总是用后端告知的 phaseOrder
+             *  长度更新 knownTotalPhases。 */
             registerPhases: function(phases) {
                 if (!Array.isArray(phases)) return;
                 for (var pi = 0; pi < phases.length; pi++) {
@@ -350,7 +365,8 @@
                     if (!p || skipPhases[p] || seenPhases[p]) continue;
                     _registerPhase(p);
                 }
-                if (phaseOrder.length > 0 && knownTotalPhases <= 0) {
+                // 总是用最新的后端告知的阶段数覆盖（可能比动态发现的多）
+                if (phaseOrder.length > 0) {
                     knownTotalPhases = phaseOrder.length;
                 }
             },
