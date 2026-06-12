@@ -342,97 +342,41 @@
             }
         }
 
-        // ── 1. 按 batchKey 分组 ──
-        var batchKeyFn = GT.groupSettings.groups.batchKey;
-        var batchMap = {};
-        for (var i = 0; i < nonDerived.length; i++) {
-            var g = nonDerived[i];
-            var bk = batchKeyFn(g.testerId, g.factorAlias, g.groupCount);
-            if (!batchMap[bk]) {
-                batchMap[bk] = {
-                    key: bk,
-                    testerId: g.testerId,
-                    factorAlias: g.factorAlias,
-                    groupCount: g.groupCount,
-                    groups: []
-                };
-            }
-            batchMap[bk].groups.push(g);
+        // ── 1. 扁平化：收集所有 group + 构建 group_id → groupIndex 映射 ──
+        var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
+        // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
+        var groupIdToIndex = {};
+        for (var ai = 0; ai < allStoredGroups.length; ai++) {
+            var ag = allStoredGroups[ai];
+            if (!ag || !ag.id) continue;
+            var idx = Number(ag.groupIndex || (ag.parentId ? 0 : (ai + 1)));
+            groupIdToIndex[ag.id] = idx > 0 ? idx : ai + 1;
         }
-        var batches = [];
-        var bkKeys = Object.keys(batchMap);
-        bkKeys.sort(function(a, b) {
-            var sa = (batchMap[a].groups[0].shortAlias || '');
-            var sb = (batchMap[b].groups[0].shortAlias || '');
-            if (sa < sb) return -1;
-            if (sa > sb) return 1;
-            return 0;
-        });
-        for (var k = 0; k < bkKeys.length; k++) { batches.push(batchMap[bkKeys[k]]); }
 
-        // ── 2. 收集 LS configs ──
+        // ── 2. 构建 LS configs（用 groupIndex-1 作为 group 引用） ──
         var allLS = (GT.groupSettings.lsConfigs && GT.groupSettings.lsConfigs.getAll()) || [];
-        for (var bi = 0; bi < batches.length; bi++) {
-            var b = batches[bi];
-            b.groupIdToIndex = {};
-            var groupsByIndex = {};
-            for (var gi = 0; gi < b.groups.length; gi++) {
-                var originalIndex = Number(b.groups[gi].groupIndex || (gi + 1));
-                if (!groupsByIndex[originalIndex]) groupsByIndex[originalIndex] = [];
-                groupsByIndex[originalIndex].push(b.groups[gi]);
-            }
-            var expandedIndex = 1;
-            for (var baseIdx = 1; baseIdx <= Number(b.groupCount || b.groups.length || 0); baseIdx++) {
-                var variantsAtIndex = groupsByIndex[baseIdx] || [];
-                for (var vi = 0; vi < variantsAtIndex.length; vi++) {
-                    b.groupIdToIndex[variantsAtIndex[vi].id] = expandedIndex;
-                    expandedIndex += 1;
-                }
-            }
-            // 子组（有 parentId）：分配 expandedIndex，不改动字段名
-            var allGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
-            for (var ai = 0; ai < allGroups.length; ai++) {
-                var ag = allGroups[ai];
-                if (!ag || !ag.parentId) continue;
-                b.groupIdToIndex[ag.id] = expandedIndex;
-                expandedIndex += 1;
-            }
-            b.lsPayloads = [];
-        }
-        var crossBatchLS = [];
-
+        var flatLSConfigs = [];
         for (var li = 0; li < allLS.length; li++) {
             var ls = allLS[li];
-            var longBatch = null, shortBatch = null;
-            for (var bj = 0; bj < batches.length; bj++) {
-                if (batches[bj].groupIdToIndex[ls.longGroupId] !== undefined) longBatch = batches[bj];
-                if (batches[bj].groupIdToIndex[ls.shortGroupId] !== undefined) shortBatch = batches[bj];
-            }
-            if (!longBatch || !shortBatch) {
+            var longIdx = groupIdToIndex[ls.longGroupId];
+            var shortIdx = groupIdToIndex[ls.shortGroupId];
+            if (longIdx === undefined || shortIdx === undefined) {
                 console.warn('[runGroupTest] LS config ' + ls.id + ' references unknown group(s): long=' + ls.longGroupId + ' short=' + ls.shortGroupId);
                 continue;
             }
-            if (longBatch === shortBatch) {
-                var longIdx = longBatch.groupIdToIndex[ls.longGroupId];
-                var shortIdx = shortBatch.groupIdToIndex[ls.shortGroupId];
-                var sameBatchName = GT.panels.actions ? GT.panels.actions.lsDisplayName(ls) : (ls.name || 'Long-Short');
-                longBatch.lsPayloads.push({
-                    name: sameBatchName,
-                    key: sameBatchName,
-                    long: [{ group: longIdx - 1, weight: 1.0 }],
-                    short: [{ group: shortIdx - 1, weight: 1.0 }]
-                });
-            } else {
-                crossBatchLS.push(ls);
-            }
+            var lsName = GT.panels.actions ? GT.panels.actions.lsDisplayName(ls) : (ls.name || 'Long-Short');
+            flatLSConfigs.push({
+                name: lsName,
+                key: lsName,
+                long: [{ group: longIdx - 1, weight: 1.0 }],
+                short: [{ group: shortIdx - 1, weight: 1.0 }]
+            });
         }
 
-        // ── 3. 构建批量 payload ──
+        // ── 3. 构建单个扁平 entry ──
         if (runBtn) runBtn.disabled = true;
 
-        var totalBatches = batches.length + (crossBatchLS.length > 0 ? 1 : 0);
-
-        var firstGroup = batches[0] && batches[0].groups[0];
+        var firstGroup = nonDerived[0];
         var rebalance_mode = firstGroup ? (firstGroup.rebalanceMode || GT.groupSettings.getFieldDefault('rebalanceMode')) : GT.groupSettings.getFieldDefault('rebalanceMode');
         var localRun = prepareLocalRun();
         if (localRun.errors && localRun.errors.length) {
@@ -445,20 +389,16 @@
         var fee = 0;
         var fee_modifications = [];
         var hasPerProduct = false;
-        if (GT.groupSettings.groups) {
-            var allFeeGroups = GT.groupSettings.groups.getAll() || [];
-            for (var fgi = 0; fgi < allFeeGroups.length; fgi++) {
-                var fg = allFeeGroups[fgi];
-                if (fg.parentId) continue;
-                if (fg.feeMode === 'per_product') hasPerProduct = true;
-                if (fg.feeMode === 'uniform' && fee === 0) {
-                    fee = fg.feeRate != null ? fg.feeRate : 0.0025;
-                }
+        for (var fgi = 0; fgi < allStoredGroups.length; fgi++) {
+            var fg = allStoredGroups[fgi];
+            if (fg.parentId) continue;
+            if (fg.feeMode === 'per_product') hasPerProduct = true;
+            if (fg.feeMode === 'uniform' && fee === 0) {
+                fee = fg.feeRate != null ? fg.feeRate : 0.0025;
             }
         }
         if (hasPerProduct && GT.fee) {
             try {
-                // 仍然需要确保费率数据加载（_resolve_group_trade_specs 会从产品数据库取值）
                 await GT.fee.ensureFeeData();
                 fee_modifications = GT.fee.getModifications ? GT.fee.getModifications() : [];
             } catch (err) {
@@ -467,82 +407,22 @@
         }
         var use_closetoday = GT.fee ? GT.fee.useCloseToday() : false;
         if (statusSpan) {
-            statusSpan.innerHTML = '分组测试运行中...（共 ' + totalBatches + ' 批次）';
+            statusSpan.innerHTML = '分组测试运行中...';
             statusSpan.style.color = '#0078d4';
         }
 
-        // ── 构建 batch payloads：直接传 groupSettings 的原样数据 ──
-        var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
-        var resolvedSubmissionIds = {};
-        for (var rbi = 0; rbi < batches.length; rbi++) {
-            resolvedSubmissionIds[String(batches[rbi].testerId)] = await resolveSubmissionIdForGroup(batches[rbi].testerId);
-        }
-        var batchPayloads = [];
-        for (var bi = 0; bi < batches.length; bi++) {
-            var batch = batches[bi];
-            var resolvedBatchTesterId = resolvedSubmissionIds[String(batch.testerId)] || batch.testerId;
-            // 收集本 batch 涉及的所有 group id
-            var batchGroupIds = {};
-            for (var gi = 0; gi < batch.groups.length; gi++) {
-                if (batch.groups[gi] && batch.groups[gi].id) batchGroupIds[batch.groups[gi].id] = true;
-            }
-            // 筛选组：通过 parentId 找到指向本 batch 中某个 group 的筛选组
-            for (var si = 0; si < allStoredGroups.length; si++) {
-                var sg = allStoredGroups[si];
-                if (sg && sg.parentId && batchGroupIds[sg.parentId]) {
-                    batchGroupIds[sg.id] = true;
-                }
-            }
-            // 从存储中取出本 batch 涉及的所有 group（保持添加顺序）
-            var groupList = [];
-            for (var ai = 0; ai < allStoredGroups.length; ai++) {
-                if (batchGroupIds[allStoredGroups[ai].id]) groupList.push(allStoredGroups[ai]);
-            }
-            batchPayloads.push({
-                submission_id: resolvedBatchTesterId,
-                factor_alias: batch.factorAlias,
-                n_groups: batch.groupCount,
-                groups: groupList.length > 0 ? groupList : null,
-                ls_configs: batch.lsPayloads.length > 0 ? batch.lsPayloads : null
-            });
-        }
-
-        // ── 跨 batch LS ──
-        var crossBatchLSPayloads = [];
-        for (var ci = 0; ci < crossBatchLS.length; ci++) {
-            var cbLS = crossBatchLS[ci];
-            var cblLongBatch = null, cblShortBatch = null;
-            for (var bj = 0; bj < batches.length; bj++) {
-                if (batches[bj].groupIdToIndex[cbLS.longGroupId] !== undefined) cblLongBatch = batches[bj];
-                if (batches[bj].groupIdToIndex[cbLS.shortGroupId] !== undefined) cblShortBatch = batches[bj];
-            }
-            if (!cblLongBatch || !cblShortBatch) continue;
-
-            var cblLongIdx = cblLongBatch.groupIdToIndex[cbLS.longGroupId] - 1;
-            var cblShortIdx = cblShortBatch.groupIdToIndex[cbLS.shortGroupId] - 1;
-            var crossBatchName = GT.panels.actions ? GT.panels.actions.lsDisplayName(cbLS) : (cbLS.name || 'Long-Short');
-
-            crossBatchLSPayloads.push({
-                name: crossBatchName,
-                key: crossBatchName,
-                long: {
-                    submission_id: resolvedSubmissionIds[String(cblLongBatch.testerId)] || cblLongBatch.testerId,
-                    factor_alias: cblLongBatch.factorAlias,
-                    n_groups: cblLongBatch.groupCount,
-                    group: cblLongIdx
-                },
-                short: {
-                    submission_id: resolvedSubmissionIds[String(cblShortBatch.testerId)] || cblShortBatch.testerId,
-                    factor_alias: cblShortBatch.factorAlias,
-                    n_groups: cblShortBatch.groupCount,
-                    group: cblShortIdx
-                }
-            });
-        }
+        // 解析 submission_id
+        var resolvedSubmissionId = await resolveSubmissionIdForGroup(firstGroup.testerId);
+        var n_groups = firstGroup.groupCount || nonDerived.length || 1;
 
         var bulkPayload = {
-            batches: batchPayloads,
-            cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
+            batches: [{
+                submission_id: resolvedSubmissionId || firstGroup.testerId,
+                factor_alias: firstGroup.factorAlias,
+                n_groups: n_groups,
+                groups: allStoredGroups,
+                ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : null
+            }],
             factor_family_alias: window.factorFamilyAlias || '',
             page_uuid: window._pageUuid || '',
             fee: fee,
@@ -849,8 +729,7 @@
                     console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
                 }
                 if (event === 'start') {
-                    totalBatches = payload.total || 1;
-                    _syncBatchRows(totalBatches);
+                    _syncBatchRows(1);
                     _replayPendingGlobalProgress();
                 } else if (event === 'progress') {
                     var bi = payload.batch_index;
@@ -884,10 +763,11 @@
                 return;
             }
 
-            // 标记所有 batch 为 done
-            for (var bi = 0; bi < batches.length; bi++) {
-                var btch = batches[bi];
-                if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
+            // 标记所有 group 为 done
+            var doneGroups = allStoredGroups || [];
+            for (var bi = 0; bi < doneGroups.length; bi++) {
+                var btch = doneGroups[bi];
+                if (GT.panels && GT.panels.ui && !btch.parentId) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
             markProgressRowsDone(true, '分组测试完成');
 
@@ -898,9 +778,6 @@
 
             if (statusSpan) {
                 var doneMsg = '✓ ' + data.simulation_count + ' 组模拟完成';
-                if (data.cross_batch_ls_count) {
-                    doneMsg += '（含 ' + data.cross_batch_ls_count + ' 跨 Batch LS）';
-                }
                 statusSpan.innerHTML = doneMsg;
                 statusSpan.style.color = '#28a745';
             }
