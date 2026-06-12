@@ -325,10 +325,22 @@ class FactorGroupTester:
         return [[entry] for entry in component]
 
     def build_overlap_batches(self) -> list[list[GroupSimulationSpec]]:
-        """Cluster specs by overlap, then keep only cost-effective merged batches."""
+        """Cluster specs by product-coverage overlap; then merge batches that share an LS config.
+
+        LS-config-aware merging:
+          Each ``GroupSimulationSpec.spec`` may carry ``ls_configs`` (per-entry LS)
+          and/or ``cross_batch_ls_spec_indices`` (cross-entry LS, set of spec indices).
+          If an LS config's legs span multiple overlap-based batches, those batches
+          are merged so the LS computation can see all groups in one simulate call.
+
+        Future-proof: when an LS config leg references (simulation_index, group_index)
+        pairs directly, the same merging rule applies — any batch that contains at
+        least one of the referenced spec indices will be merged.
+        """
         if not self.specs:
             return []
 
+        # ── 1. Cluster by product-coverage overlap ──
         adjacency: dict[int, set[int]] = {idx: set() for idx in range(len(self.specs))}
         for (i, left), (j, right) in combinations(enumerate(self.specs), 2):
             if self._should_link_specs(left, right):
@@ -352,6 +364,68 @@ class FactorGroupTester:
                     visited.add(nxt)
                     stack.append(nxt)
             batches.extend(self._split_component_by_cost(component))
+
+        # ── 2. Collect LS config cross-batch constraints ──
+        # Build spec_index → batch_index mapping
+        spec_to_batch: dict[int, int] = {}
+        for bi, batch in enumerate(batches):
+            for entry in batch:
+                spec_to_batch[entry.simulation_index] = bi
+
+        # Gather all sets of spec indices that must stay together.
+        # (a) per-entry ls_configs: long/short groups are local to the entry —
+        #     they refer to groups within the same simulation_index, so no
+        #     cross-batch constraint is needed today.  We collect the entry's
+        #     own spec index as a single-element set anyway for future-proofing.
+        # (b) cross_batch_ls_spec_indices: explicit cross-entry LS constraints.
+        ls_spec_groups: list[set[int]] = []
+        for entry in self.specs:
+            ls_configs = (entry.spec or {}).get('ls_configs')
+            if isinstance(ls_configs, list) and ls_configs:
+                # Future: ls_configs legs may reference (sim_index, group) pairs.
+                # For now, all legs are within the same entry.
+                ls_spec_groups.append({entry.simulation_index})
+            cross_indices = (entry.spec or {}).get('cross_batch_ls_spec_indices')
+            if isinstance(cross_indices, (list, set)) and cross_indices:
+                group_set = set(cross_indices)
+                group_set.add(entry.simulation_index)
+                ls_spec_groups.append(group_set)
+
+        # ── 3. Merge batches connected by LS constraints ──
+        if ls_spec_groups:
+            # Union-Find over batch indices
+            batch_parent = {i: i for i in range(len(batches))}
+
+            def _find(x):
+                while batch_parent[x] != x:
+                    batch_parent[x] = batch_parent[batch_parent[x]]
+                    x = batch_parent[x]
+                return x
+
+            def _union(a, b):
+                ra, rb = _find(a), _find(b)
+                if ra != rb:
+                    batch_parent[ra] = rb
+
+            for group in ls_spec_groups:
+                batch_indices = set()
+                for si in group:
+                    bi = spec_to_batch.get(si)
+                    if bi is not None:
+                        batch_indices.add(bi)
+                if len(batch_indices) > 1:
+                    it = iter(batch_indices)
+                    first = next(it)
+                    for other in it:
+                        _union(first, other)
+
+            # Re-group
+            merged: dict[int, list[GroupSimulationSpec]] = {}
+            for bi, batch in enumerate(batches):
+                root = _find(bi)
+                merged.setdefault(root, []).extend(batch)
+            batches = list(merged.values())
+
         return batches
 
     def build_batch_labels(self) -> list[list[str]]:
