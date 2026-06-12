@@ -75,15 +75,23 @@ def _emit_progress(phase: str, message: str, **extra) -> None:
     cb = None
     with _group_progress_lock:
         cb = _group_progress_callback
+    bi = getattr(_batch_context, 'product_coverage_batch_index', -1)
+    bt = getattr(_batch_context, 'product_coverage_batch_total', 0)
+    has_cb = cb is not None
+    has_comp = 'completed' in extra
+    has_tot = 'total' in extra
+    print(
+        f"[GT-EMIT] phase={phase} cb={has_cb} bi={bi} bt={bt} "
+        f"has_comp={has_comp} has_tot={has_tot} msg={message[:100]}",
+        flush=True,
+    )
     if cb is not None:
         try:
             # 自动注入 batch 上下文
-            bi = getattr(_batch_context, 'product_coverage_batch_index', -1)
-            bt = getattr(_batch_context, 'product_coverage_batch_total', 0)
-            bl = getattr(_batch_context, 'product_coverage_batch_label', '')
             if bi >= 0:
                 extra.setdefault('product_coverage_batch_index', bi)
                 extra.setdefault('product_coverage_batch_total', bt)
+                bl = getattr(_batch_context, 'product_coverage_batch_label', '')
                 if bl:
                     extra.setdefault('product_coverage_batch_label', bl)
             cb(phase, message, extra)

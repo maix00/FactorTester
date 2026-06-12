@@ -9,7 +9,7 @@
 
 GROUP_TEST_PHASES = [
     {"key": "factor_eval",     "label": "因子计算"},
-    {"key": "returns_eval",    "label": "收益率"},
+    {"key": "returns_eval",    "label": "收益率计算"},
     {"key": "membership",      "label": "分组隶属"},
     {"key": "flat_membership", "label": "展开隶属"},
     {"key": "remap",           "label": "产品映射"},

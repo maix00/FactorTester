@@ -1195,13 +1195,16 @@ def run_group_test_stream():
             last_progress_by_batch: dict[int, dict[str, int]] = {}
 
             def _progress_bridge(phase: str, message: str, extra: dict):
+                import sys
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
 
+                branch = '???'
                 if phase == 'init':
+                    branch = 'init->emit_start'
                     # init 阶段：发送 start 事件，携带 phases 元数据
                     total_val = total or 0
                     _phases = extra.get('phases', [])
@@ -1215,6 +1218,7 @@ def run_group_test_stream():
                         **progress_extra,
                     )
                 elif has_progress_count:
+                    branch = 'has_count->emit_phase'
                     last_progress['completed'] = completed
                     last_progress['total'] = total
                     if product_coverage_batch_index is not None:
@@ -1229,20 +1233,32 @@ def run_group_test_stream():
                         **progress_extra,
                     )
                 elif phase == 'info':
+                    branch = 'info'
                     # info 是信息性消息，转换为当前批次的 progress 事件
                     batch_progress = None
                     if product_coverage_batch_index is not None:
                         batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
                     progress = batch_progress or last_progress
                     if progress['completed'] == 0 and progress['total'] == 0:
-                        return
-                    completed = progress['completed']
-                    total = progress['total']
-                    registry.emit_phase(
-                        phase, message=message,
-                        completed=completed, total=total,
-                        **progress_extra,
-                    )
+                        branch = 'info->dropped(zero_progress)'
+                    else:
+                        branch = 'info->emit_phase'
+                        completed = progress['completed']
+                        total = progress['total']
+                        registry.emit_phase(
+                            phase, message=message,
+                            completed=completed, total=total,
+                            **progress_extra,
+                        )
+                else:
+                    branch = 'NO_BRANCH_MATCHED'
+
+                print(
+                    f"[GT-BRIDGE] phase={phase} comp={completed} tot={total} "
+                    f"has_count={has_progress_count} bi={product_coverage_batch_index} "
+                    f"branch={branch} msg={message[:100]}",
+                    flush=True,
+                )
 
             register_group_progress(_progress_bridge)
 
