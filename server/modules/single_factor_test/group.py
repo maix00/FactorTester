@@ -1236,6 +1236,9 @@ def run_group_test_stream():
                             'completed': completed,
                             'total': total,
                         }
+                    # 剥离已显式传递的参数，避免与 emit_phase 的 keyword 参数冲突
+                    for k in ('completed', 'total', 'phase'):
+                        progress_extra.pop(k, None)
                     # 所有带进度计数的 phase 直接 emit（包括 factor_eval, returns_eval 等）
                     registry.emit_phase(
                         phase, message=message,
@@ -1255,6 +1258,8 @@ def run_group_test_stream():
                         branch = 'info->emit_phase'
                         completed = progress['completed']
                         total = progress['total']
+                        for k in ('completed', 'total', 'phase'):
+                            progress_extra.pop(k, None)
                         registry.emit_phase(
                             phase, message=message,
                             completed=completed, total=total,
