@@ -109,7 +109,6 @@
                 var addGroupBatchKey = this.getAttribute('data-batch-key');
                 var ids = H.addGroupBatchGroupIds(addGroupBatchKey);
                 if (ids.length === 0) return;
-                if (!confirm('确定删除此批次（共 ' + ids.length + ' 组）？')) return;
                 try {
                     for (var i = 0; i < ids.length; i++) {
                         GT.groupSettings.groups.remove(ids[i]);
@@ -123,7 +122,6 @@
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var bgId = this.getAttribute('data-bg-id');
-                if (!confirm('确定删除此基础组？')) return;
                 try { GT.groupSettings.groups.remove(bgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });
@@ -197,7 +195,6 @@
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 var dgId = this.getAttribute('data-dg-id');
-                if (!confirm('确定删除此派生组及其所有子节点？')) return;
                 try { GT.groupSettings.groups.remove(dgId); } catch (err) { alert('删除失败: ' + err.message); }
             });
         });

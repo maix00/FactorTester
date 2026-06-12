@@ -403,5 +403,77 @@
         _selectedEditIds: function() { return M.getEditIds(); },
     };
 
+    // ═══════════════════════════════════════════════════════════════
+    // 通用编辑操作（删除 / 复制）
+    // ═══════════════════════════════════════════════════════════════
+
+    // ── 批量删除 ──
+    M.registerEditAction({
+        name: 'delete',
+        label: '🗑 删除',
+        priority: 50,
+        condition: function(ctx) { return ctx.count > 0; },
+        buttonClass: 'btn-danger',
+        action: function(ctx, helpers) {
+            var ids = ctx.ids;
+            if (ids.length === 0) return;
+            try {
+                for (var i = 0; i < ids.length; i++) {
+                    GT.groupSettings.groups.remove(ids[i]);
+                }
+            } catch (err) { alert('删除失败: ' + err.message); }
+            helpers.exitEdit();
+        }
+    });
+
+    // ── 复制（派生组） ──
+    M.registerEditAction({
+        name: 'clone',
+        label: '📋 复制为派生组',
+        priority: 40,
+        condition: function(ctx) { return ctx.count > 0; },
+        action: function(ctx, helpers) {
+            var groups = GT.groupSettings.groups;
+            var ids = ctx.ids;
+            var created = [];
+            for (var i = 0; i < ids.length; i++) {
+                var src = groups.get(ids[i]);
+                if (!src) continue;
+                var parent = src.parentId ? groups.get(src.parentId) : src;
+                if (!parent) continue;
+                var clone = {
+                    name: '',
+                    parentId: src.id,
+                    groupCount: src.groupCount || (parent && parent.groupCount) || 1,
+                    groupIndex: src.groupIndex || (parent && parent.groupIndex) || 1,
+                    productMask: src.productMask ? JSON.parse(JSON.stringify(src.productMask)) : {},
+                };
+                ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
+                 'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
+                    if (src[key] !== undefined && src[key] !== null) {
+                        clone[key] = (typeof src[key] === 'object') ? JSON.parse(JSON.stringify(src[key])) : src[key];
+                    }
+                });
+                try {
+                    var newId = groups.add(clone);
+                    created.push(newId);
+                } catch (err) {
+                    alert('复制失败: ' + (err && err.message || err));
+                    break;
+                }
+            }
+            if (created.length > 0) {
+                // 选中新创建的派生组
+                var sel = GT.panels && GT.panels.list && GT.panels.list.selection;
+                if (sel) {
+                    sel.clear();
+                    for (var j = 0; j < created.length; j++) { sel.add(created[j]); }
+                }
+                if (GT.events && GT.events.emit) GT.events.emit('derivedGraphChanged');
+            }
+            helpers.exitEdit();
+        }
+    });
+
     GT.log('registry/tabs loaded');
 })();

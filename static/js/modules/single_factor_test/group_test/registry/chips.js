@@ -264,8 +264,14 @@
             name: 'builtin-derived-products',
             getChips: function(g) {
                 if (!g || !g.parentId) return [];
+                var mask = g.productMask;
+                // 空 mask 或 mask 为空对象 → 等于父级，不显示 chip
+                if (!mask || Object.keys(mask).length === 0) return [];
                 var products = _getDerivedProducts(g);
                 if (products.length === 0) return [];
+                // 与父级产品数一致 → mask 未产生实际差异，不显示 chip
+                var parentProducts = _getDerivedProducts(GT.groupSettings.groups.get(g.parentId));
+                if (parentProducts.length === products.length) return [];
                 var isExpanded = _expandedProducts[g.id] === true;
                 var tri = isExpanded ? '▾' : '▸';
                 return [{

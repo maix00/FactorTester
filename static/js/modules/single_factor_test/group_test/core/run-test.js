@@ -198,10 +198,23 @@
 
         // ── 1. 扁平化：收集所有 group + 构建 group_id → groupIndex 映射 ──
         var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
+        function _resolvedGroupForRun(group) {
+            var out = Object.assign({}, group || {});
+            if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
+                ['testerId', 'factorAlias', 'groupCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
+                    var resolved = GT.groupSettings.groups.resolveRootField(out, key);
+                    if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
+                });
+            }
+            out.splitCount = out.splitCount || out.groupCount;
+            delete out.groupCount;
+            return out;
+        }
+        var runGroups = allStoredGroups.map(_resolvedGroupForRun);
         // 构建全局 group_id → 1-based groupIndex 映射（groupIndex=0 视为1）
         var groupIdToIndex = {};
-        for (var ai = 0; ai < allStoredGroups.length; ai++) {
-            var ag = allStoredGroups[ai];
+        for (var ai = 0; ai < runGroups.length; ai++) {
+            var ag = runGroups[ai];
             if (!ag || !ag.id) continue;
             var idx = Number(ag.groupIndex || (ag.parentId ? 0 : (ai + 1)));
             groupIdToIndex[ag.id] = idx > 0 ? idx : ai + 1;
@@ -244,7 +257,8 @@
 
         // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
         var bulkPayload = Object.assign({}, localRun.payload, {
-            groups: allStoredGroups,
+            groups: runGroups,
+            expected_flat_group_count: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''

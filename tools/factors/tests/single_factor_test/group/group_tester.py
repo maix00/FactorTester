@@ -270,6 +270,41 @@ class FactorGroupTester:
                 )
             )
 
+        # ---------------------------------------------------------------
+        # Unified trim: when calendar_index is provided, each factor's
+        # shared_inputs covers the full calendar_index but may have
+        # leading/trailing rows where all factors are NaN.  Trim to the
+        # union of all factors' signal-present rows so downstream
+        # simulation does not waste time on useless bar rows.
+        # ---------------------------------------------------------------
+        if built_specs and calendar_index is not None and len(calendar_index) > 0:
+            T_full = len(calendar_index)
+            unified_mask = np.zeros(T_full, dtype=bool)
+            for spec in built_specs:
+                unified_mask |= spec.shared_inputs.signal_update_mask
+            unified_pos = np.flatnonzero(unified_mask)
+            if len(unified_pos) > 0:
+                unified_first = int(unified_pos[0])
+                unified_last = int(unified_pos[-1]) + 1
+            else:
+                unified_first, unified_last = 0, T_full
+
+            if unified_first > 0 or unified_last < T_full:
+                for spec in built_specs:
+                    si = spec.shared_inputs
+                    t0, t1 = unified_first, unified_last
+                    spec.signal_membership_np = spec.signal_membership_np[t0:t1]
+                    spec.base_membership_np = spec.base_membership_np[t0:t1]
+                    si.signal_update_mask = si.signal_update_mask[t0:t1]
+                    si.table_np = si.table_np[t0:t1]
+                    si.signal_returns_np = si.signal_returns_np[t0:t1]
+                    si.present_np = si.present_np[t0:t1]
+                    si.table_src = si.table_src.iloc[t0:t1]
+                    si.returns_src = si.returns_src.iloc[t0:t1]
+                    si.price_src = si.price_src.iloc[t0:t1]
+                    si.index_list = si.index_list[t0:t1]
+                    si.T = t1 - t0
+
         return cls(
             built_specs,
             overlap_ratio=overlap_ratio,
@@ -465,6 +500,7 @@ class FactorGroupTester:
 
         entry_trade_valid_cols: dict[int, list] = {}
         entry_trade_membership_np: dict[int, np.ndarray] = {}
+        seen_simulation_indices: set[int] = set()
 
         remap_total = len(batch)
         _emit_progress(
@@ -476,6 +512,12 @@ class FactorGroupTester:
             total=remap_total,
         )
         for remap_idx, entry in enumerate(batch, start=1):
+            if entry.simulation_index in seen_simulation_indices:
+                raise ValueError(
+                    f"批次 {batch_label} 中 simulation_index={entry.simulation_index} 出现多个分组规格，"
+                    "这会导致分组切片被覆盖。请按 tester/factor/n_groups 拆分 simulation_index。"
+                )
+            seen_simulation_indices.add(entry.simulation_index)
             key = _remap_key(entry)
             if key not in _remap_cache:
                 signal_to_trade, trade_products, _ = _build_product_remap_matrix(
@@ -522,6 +564,13 @@ class FactorGroupTester:
             entry_trade_membership_np[entry.simulation_index].shape[1]
             for entry in batch
         ))
+        expected_group_count = int(sum(len(entry.flat_group_info) for entry in batch))
+        if total_group_count != expected_group_count:
+            raise ValueError(
+                f"批次 {batch_index + 1} 分组数量不一致："
+                f"entry flat groups={expected_group_count}, "
+                f"trade membership groups={total_group_count}"
+            )
         merged_membership_np = np.zeros(
             (T, total_group_count, len(trade_product_names)), dtype=bool,
         )
@@ -533,6 +582,13 @@ class FactorGroupTester:
             si = entry.simulation_index
             local = entry_trade_membership_np[si]
             local_group_count = int(local.shape[1])
+            if local_group_count != len(entry.flat_group_info):
+                raise ValueError(
+                    f"批次 {batch_index + 1} 提交 {si} 分组数量不一致："
+                    f"flat groups={len(entry.flat_group_info)}, "
+                    f"trade membership groups={local_group_count}"
+                )
+            
             product_indices = np.asarray(
                 [trade_product_positions[getattr(product, "name", str(product))]
                  for product in entry_trade_valid_cols[si]],

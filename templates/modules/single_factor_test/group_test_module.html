@@ -118,9 +118,9 @@
     <div class="group-test-layer" id="gt-layer-tabs" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
 
         <!-- 2b-i. 统一 Tab 栏 + 操作按钮 -->
-        <div id="gt-tab-bar" style="display:flex;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
-            <div id="gt-tab-btns" style="display:flex;gap:6px;flex:1;"></div>
-            <div id="gt-tab-actions" style="display:flex;gap:6px;flex-shrink:0;"></div>
+        <div id="gt-tab-bar" style="display:flex;flex-wrap:wrap;padding:6px 12px;gap:6px;background:#fafbfc;border-bottom:1px solid #eef2f7;min-height:36px;align-items:center;">
+            <div id="gt-tab-btns" style="display:flex;flex-wrap:wrap;gap:6px;flex:1 1 360px;min-width:0;"></div>
+            <div id="gt-tab-actions" style="display:flex;flex-wrap:wrap;gap:6px;flex:0 1 auto;justify-content:flex-end;"></div>
         </div>
 
         <!-- 2b-ii. Panel 渲染容器（由 JS 动态填充） -->
@@ -837,6 +837,8 @@
         font-size: 12px;
         color: #475467;
         transition: all 0.12s;
+        white-space: nowrap;
+        flex: 0 0 auto;
     }
     #group_test_module .gt-tab:hover {
         border-color: #9cc7f2;

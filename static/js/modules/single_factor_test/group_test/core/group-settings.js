@@ -232,6 +232,9 @@
     function _groupsValidate(config) {
         var errors = [];
         var hasParent = !!(config.parentId);
+        var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
+        var effectiveGroupCount = config.groupCount;
+        var effectiveGroupIndex = config.groupIndex;
 
         if (!config || typeof config !== 'object') {
             return { valid: false, errors: ['config must be an object'] };
@@ -242,8 +245,11 @@
         }
 
         if (hasParent) {
-            if (_groupFindIndex(config.parentId) === -1) {
+            if (!parentNode) {
                 errors.push('parentId references a non-existent group: ' + config.parentId);
+            } else {
+                if (effectiveGroupCount == null) effectiveGroupCount = parentNode.groupCount;
+                if (effectiveGroupIndex == null) effectiveGroupIndex = parentNode.groupIndex;
             }
         }
 
@@ -257,15 +263,15 @@
             }
         }
 
-        if (typeof config.groupCount !== 'number' || config.groupCount < 1 || Math.floor(config.groupCount) !== config.groupCount) {
+        if (typeof effectiveGroupCount !== 'number' || effectiveGroupCount < 1 || Math.floor(effectiveGroupCount) !== effectiveGroupCount) {
             errors.push('groupCount must be a positive integer (≥ 1)');
         }
 
-        if (config.groupIndex !== undefined && config.groupIndex !== null) {
-            if (typeof config.groupIndex !== 'number' || config.groupIndex < 1 || Math.floor(config.groupIndex) !== config.groupIndex) {
+        if (effectiveGroupIndex !== undefined && effectiveGroupIndex !== null) {
+            if (typeof effectiveGroupIndex !== 'number' || effectiveGroupIndex < 1 || Math.floor(effectiveGroupIndex) !== effectiveGroupIndex) {
                 errors.push('groupIndex must be a positive integer (≥ 1)');
             }
-            if (config.groupCount && config.groupIndex > config.groupCount) {
+            if (effectiveGroupCount && effectiveGroupIndex > effectiveGroupCount) {
                 errors.push('groupIndex must not exceed groupCount');
             }
         }
@@ -338,11 +344,23 @@
     }
 
     function _fillGroupFromConfig(item, config, hasParent) {
+        var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
+        var inheritedKeys = hasParent ? {
+            testerId: true,
+            factorAlias: true,
+            groupCount: true,
+            groupIndex: true,
+            isAllGroups: true,
+            startDate: true,
+            endDate: true
+        } : {};
         for (var i = 0; i < FIELD_SCHEMA.length; i++) {
             var f = FIELD_SCHEMA[i];
             if (f.key === 'id' || f.key === 'name') continue;
             if (config.hasOwnProperty(f.key)) {
                 item[f.key] = (f.type === 'object') ? _deepCopy(config[f.key]) : config[f.key];
+            } else if (parentNode && inheritedKeys[f.key]) {
+                item[f.key] = (f.type === 'object') ? _deepCopy(parentNode[f.key]) : parentNode[f.key];
             } else {
                 item[f.key] = (f.type === 'object') ? _deepCopy(f.default) : f.default;
             }

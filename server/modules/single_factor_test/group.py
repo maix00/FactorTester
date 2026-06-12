@@ -91,6 +91,25 @@ def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
     return float(value)
 
 
+def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
+    """Parse legacy group-test fee payload into engine inputs.
+
+    ``fee`` is provided in percent units by the UI, while the engine expects a
+    ratio. Per-variety modifications are cleaned into FeeModification objects.
+    """
+    from tools.products.transactions.fees import clean_modifications
+
+    raw_fee = data.get('fee', 0)
+    fee_value = _safe_float(raw_fee)
+    fee_uniform = 0.0 if fee_value is None else float(fee_value) / 100.0
+    raw_modifications = data.get('fee_modifications') or data.get('feeModifications') or []
+    if not isinstance(raw_modifications, list):
+        raw_modifications = []
+    fee_modifications = clean_modifications(raw_modifications)
+    use_closetoday = bool(data.get('use_closetoday') or data.get('useCloseToday'))
+    return fee_uniform, fee_modifications, use_closetoday
+
+
 def _build_zero_position_warning(group_result: Any) -> str | None:
     """Explain when the first rebalance cannot open any position."""
     if group_result is None:
@@ -422,6 +441,19 @@ def run_group_test():
         return jsonify(result), status
 
 
+def _product_list_from_group_payload(group: dict) -> list[str] | None:
+    raw = group.get('productMask')
+    if raw is None:
+        raw = group.get('productList')
+    if isinstance(raw, dict):
+        selected = [str(name) for name, enabled in raw.items() if enabled]
+        return selected or None
+    if isinstance(raw, list):
+        selected = [str(name) for name in raw if name]
+        return selected or None
+    return None
+
+
 def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     """
     核心分组测试逻辑，可以被 /run_group_test (JSON) 和 /run_group_test_stream (SSE) 共享。
@@ -475,24 +507,27 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             continue
         tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
 
-    # Determine n_groups per (tester_id, factor_alias) from groupCount (frontend field)
-    n_groups_by_triple: dict[tuple, int] = {}
+    # Determine split count per (tester_id, factor_alias). Frontend payload
+    # uses camelCase ``splitCount``; backend internals use ``split_count``.
+    # means "the factor was split into N buckets"; it is distinct from the
+    # number of flat groups submitted in this request.
+    split_count_by_triple: dict[tuple, int] = {}
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
-            n_groups = None
+            split_count = None
             missing = []
             for g in gs:
-                gc = g.get('groupCount')
-                if gc is not None:
-                    n_groups = max(n_groups or 0, int(gc))
+                raw_split_count = g.get('splitCount')
+                if raw_split_count is not None:
+                    split_count = max(split_count or 0, int(raw_split_count))
                 else:
                     missing.append(g.get('name') or g.get('key') or g.get('groupIndex'))
-            if n_groups is None:
+            if split_count is None:
                 raise ValueError(
-                    f"缺少 groupCount: tester_id={tid} factor_alias={fa} "
+                    f"缺少 splitCount: tester_id={tid} factor_alias={fa} "
                     f"groups={missing}"
                 )
-            n_groups_by_triple[(tid, fa)] = n_groups
+            split_count_by_triple[(tid, fa)] = split_count
 
     # Build flat _FactorGroupTestGroup list
     all_flat_groups: list[_FactorGroupTestGroup] = []
@@ -503,7 +538,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     sim_index = 0
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
-            n_groups = n_groups_by_triple[(tid, fa)]
+            split_count = split_count_by_triple[(tid, fa)]
             existing = factor_aliases_by_submission.get(tid) or []
             if fa not in existing:
                 existing.append(fa)
@@ -511,20 +546,20 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             for g in gs:
                 # frontend groupIndex is 1-based → convert to 0-based
                 gi = int(g.get('groupIndex', 1)) - 1
-                if gi < 0 or gi >= n_groups:
+                if gi < 0 or gi >= split_count:
                     raise ValueError(
-                        f"groupIndex out of range: {gi + 1} (1-based) not in [1, {n_groups}], "
+                        f"groupIndex out of range: {gi + 1} (1-based) not in [1, {split_count}], "
                         f"tester_id={tid} factor_alias={fa}"
                     )
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
                     factor_alias=fa,
-                    n_groups=n_groups,
+                    n_groups=split_count,
                     group_index=gi,
                     key=name,
                     name=name,
-                    product_list=g.get('productMask') or g.get('productList') or None,
+                    product_list=_product_list_from_group_payload(g),
                     fee_mode=g.get('feeMode'),
                     fee_rate=g.get('feeRate'),
                     fee_modifications=g.get('feeModifications'),
@@ -542,6 +577,20 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
 
     if not all_flat_groups:
         return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
+    expected_flat_group_count = data.get('expected_flat_group_count')
+    try:
+        expected_flat_group_count = int(expected_flat_group_count)
+    except (TypeError, ValueError):
+        expected_flat_group_count = len(flat_groups_raw)
+    if expected_flat_group_count != len(all_flat_groups):
+        return False, {
+            'success': False,
+            'error': (
+                f'前端传回 {expected_flat_group_count} 个扁平组，但后端只解析出 '
+                f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少测试器/因子/组数继承字段。'
+            ),
+            'status': 400,
+        }
 
     # ── Resolve factor_family_alias from page_uuid ──
     page_uuid = str(data.get('page_uuid') or '')
@@ -682,6 +731,22 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     except Exception as e:
         errors.append({'error': str(e)})
         raw_results = []
+
+    simulated_flat_group_count = sum(
+        len(item.get('flat_group_info') or [])
+        for item in raw_results
+        if isinstance(item, dict)
+    )
+    if simulated_flat_group_count != len(all_flat_groups):
+        return False, {
+            'success': False,
+            'error': (
+                f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
+                f'进入 simulate 的分组为 {simulated_flat_group_count} 个。'
+            ),
+            'simulation_errors': errors,
+            'status': 500,
+        }
 
     submission_results: list[dict | None] = [None] * sim_index
     for raw_result in raw_results:

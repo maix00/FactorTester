@@ -436,6 +436,12 @@
         var chips = H.deriveOverrideChips(node);
         var prodExpanded = REG && REG._expandedProducts && REG._expandedProducts[node.id] === true;
         var hasKids = node.children && node.children.length > 0;
+        var ownMask = node.productMask || {};
+        var ownMaskKeys = Object.keys(ownMask).filter(function(k) { return ownMask[k]; });
+        var parentProducts = node.parentId && GT.groupSettings.groups
+            ? H.nodeProducts(GT.groupSettings.groups.get(node.parentId))
+            : [];
+        var showProductChip = ownMaskKeys.length > 0 && (!parentProducts.length || products.length !== parentProducts.length);
 
         var nodeSelected = SEL && SEL.isSelected(node.id);
         var rowStyle = 'display:flex;align-items:center;flex-wrap:wrap;padding:4px 6px;border-radius:6px;border-bottom:1px solid #f0f0f0;font-size:12px;gap:2px 6px;';
@@ -465,12 +471,14 @@
             }
             h += '</span>';
         }
-        var tri = prodExpanded ? '▾' : '▸';
-        h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
+        if (showProductChip) {
+            var tri = prodExpanded ? '▾' : '▸';
+            h += '<span class="unified-dg-product-chip" data-dg-id="' + H.escapeHTML(node.id) + '" style="display:inline-flex;align-items:center;cursor:pointer;background:#c7d2fe;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;color:#312e81;margin-right:8px;flex-shrink:0;">📋 ' + products.length + '品种 ' + tri + '</span>';
+        }
         h += '<button class="unified-dg-del-btn" data-dg-id="' + H.escapeHTML(node.id) + '" style="margin-left:4px;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;">✕</button>';
         h += '</div>';
 
-        if (prodExpanded && products.length > 0) {
+        if (showProductChip && prodExpanded && products.length > 0) {
             h += '<div class="unified-dg-product-list" style="margin-left:' + (indent + 34) + 'px;padding:4px 8px;border-left:2px solid #c7d2fe;font-size:11px;">';
             for (var pi = 0; pi < products.length; pi++) {
                 var pn = products[pi].name;
