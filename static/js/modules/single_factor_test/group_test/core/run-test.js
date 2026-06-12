@@ -172,172 +172,28 @@
     };
 
     // ════════════════════════════════════════════════════════════════
-    //  加载默认分组
-    // ════════════════════════════════════════════════════════════════
-
-    runTest.loadDefaultGroups = async function() {
-        var statusSpan = document.getElementById('group_test_status');
-        var runBtn = document.getElementById('run_group_test_btn');
-        var defaultBtn = document.getElementById('load_default_groups_btn');
-
-        var submissions = window.submissions || [];
-        var factorList = window.factorList || [];
-
-        if (!submissions.length) {
-            alert('暂无测试器，请先在产品类别筛选模块提交产品');
-            return;
-        }
-        if (!factorList.length) {
-            alert('暂无可用的因子列表，请先在 IC 测试模块运行 IC 测试');
-            return;
-        }
-
-        if (!GT.groupSettings.groups || !GT.groupSettings.lsConfigs) {
-            alert('数据模型未就绪，请刷新页面');
-            return;
-        }
-
-        var groups = GT.groupSettings.groups;
-        var lsConfigs = GT.groupSettings.lsConfigs;
-
-        var existingBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; });
-        var existingLS = lsConfigs.getAll() || [];
-
-        if (existingBase.length > 0 || existingLS.length > 0) {
-            var confirmMsg = '当前已有 ' + existingBase.length + ' 个基础组和 ' + existingLS.length + ' 个 LS 组。\n';
-            confirmMsg += '加载默认分组将清空所有现有分组，确定继续？';
-            if (!confirm(confirmMsg)) return;
-        }
-
-        (groups.getAll() || []).forEach(function(g) { groups.remove(g.id); });
-        (lsConfigs.getAll() || []).forEach(function(ls) { lsConfigs.remove(ls.id); });
-
-        if (defaultBtn) defaultBtn.disabled = true;
-        if (runBtn) runBtn.disabled = true;
-        if (statusSpan) {
-            statusSpan.innerHTML = '正在加载默认分组...';
-            statusSpan.style.color = '#0078d4';
-        }
-
-        var GROUPS_PER_FACTOR = 5;
-        var totalCreated = 0;
-        var batchLetterMap = {};
-        var nextLetterCode = 65;
-
-        var markProgressRowsDone = function() {};
-        try {
-            for (var si = 0; si < submissions.length; si++) {
-                var sub = submissions[si];
-                var testerId = String(sub.id);
-                for (var fi = 0; fi < factorList.length; fi++) {
-                    var factor = factorList[fi];
-                    var factorAlias = factor.alias || factor.name || '';
-
-                    var bk = GT.groupSettings.addGroupBatch.key(testerId, factorAlias, GROUPS_PER_FACTOR);
-                    var letter = batchLetterMap[bk];
-                    if (!letter) {
-                        letter = String.fromCharCode(nextLetterCode);
-                        nextLetterCode++;
-                        batchLetterMap[bk] = letter;
-                    }
-
-                    // groupAddBatch: ensure batch exists for this tester+factor combo (refs #100)
-                    var batchObj = GT.groupSettings.addGroupBatch.ensure(testerId, factorAlias, GROUPS_PER_FACTOR);
-
-                    var createdIds = [];
-                    for (var gi = 1; gi <= GROUPS_PER_FACTOR; gi++) {
-                        try {
-                            var id = groups.add({
-                                name: factorAlias + ' · G' + gi + ' (' + (sub.product_group || sub.label || testerId) + ')',
-                                testerId: testerId,
-                                factorAlias: factorAlias,
-                                groupCount: GROUPS_PER_FACTOR,
-                                groupIndex: gi,
-                                isAllGroups: false,
-                                shortAlias: letter + gi,
-                                feeMode: 'none',
-                                useCloseToday: false,
-                                rebalanceMode: 'each_period'
-                            });
-                            createdIds.push({ id: id, index: gi });
-                        } catch (e) {
-                            console.error('创建分组失败 (' + factorAlias + ' G' + gi + '):', e);
-                        }
-                    }
-
-                    if (createdIds.length >= 5) {
-                        var longItem = createdIds[0];
-                        var shortItem = createdIds[4];
-                        try {
-                            lsConfigs.add({
-                                name: factorAlias + ' · 多空',
-                                longGroupId: longItem.id,
-                                shortGroupId: shortItem.id
-                            });
-                        } catch (e) {
-                            console.error('创建 LS 组失败 (' + factorAlias + '):', e);
-                        }
-                    }
-
-                    totalCreated++;
-                    if (statusSpan) {
-                        statusSpan.innerHTML = '加载中... ' + totalCreated + ' 个因子分组';
-                    }
-                }
-            }
-
-            if (statusSpan) {
-                var totalBase = (groups.getAll() || []).filter(function(g) { return !g.parentId; }).length;
-                var totalLS = (lsConfigs.getAll() || []).length;
-                statusSpan.innerHTML = '✓ 已加载 ' + totalBase + ' 个基础组 + ' + totalLS + ' 个 LS 组';
-                statusSpan.style.color = '#28a745';
-            }
-
-            if (GT.tabs && GT.tabs.mountTab) {
-                GT.tabs.mountTab('list');
-            }
-        } catch (e) {
-            console.error('加载默认分组失败:', e);
-            if (statusSpan) {
-                statusSpan.innerHTML = '✗ 加载失败: ' + (e.message || '未知错误');
-                statusSpan.style.color = '#d40000';
-            }
-        } finally {
-            if (defaultBtn) defaultBtn.disabled = false;
-            if (runBtn) runBtn.disabled = false;
-        }
-    };
-
-    // ════════════════════════════════════════════════════════════════
     //  运行分组测试（批量）
     // ════════════════════════════════════════════════════════════════
 
     runTest.runGroupTest = async function() {
         var statusSpan = document.getElementById('group_test_status');
         var runBtn = document.getElementById('run_group_test_btn');
-        var defaultBtn = document.getElementById('load_default_groups_btn');
 
         var REG = window.GT_CONFIG_REGISTRY;
         if (REG && typeof REG.hasDirty === 'function' && REG.hasDirty() && typeof REG.commitDirty === 'function') {
             REG.commitDirty();
         }
 
-        // ── 0. 没有分组则自动加载默认分组 ──
+        // ── 0. 检查是否有分组 ──
         var allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
         var nonDerived = allBase.filter(function(g) { return !g.parentId; });
         if (nonDerived.length === 0) {
             if (statusSpan) {
-                statusSpan.innerHTML = '⏳ 无现有分组，正在加载默认分组...';
-                statusSpan.style.color = '#0078d4';
+                statusSpan.innerHTML = '✗ 未定义分组，请先在「分组组合设置」中添加分组';
+                statusSpan.style.color = '#d40000';
             }
-            await runTest.loadDefaultGroups();
-            allBase = (GT.groupSettings.groups && GT.groupSettings.groups.getAll()) || [];
-            nonDerived = allBase.filter(function(g) { return !g.parentId; });
-            if (nonDerived.length === 0) {
-                if (statusSpan) {
-                    statusSpan.innerHTML = '✗ 无法加载默认分组';
-                    statusSpan.style.color = '#d40000';
-                }
+            return;
+        }
                 return;
             }
         }
@@ -376,7 +232,6 @@
         // ── 3. 构建 payload ──
         if (runBtn) runBtn.disabled = true;
 
-        var firstGroup = nonDerived[0];
         var localRun = prepareLocalRun();
         if (localRun.errors && localRun.errors.length) {
             if (statusSpan) { statusSpan.innerHTML = '✗ ' + localRun.errors[0]; statusSpan.style.color = '#d40000'; }

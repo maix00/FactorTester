@@ -161,22 +161,6 @@
             });
             runBtn.style.display = '';
         }
-        var defaultBtn = document.getElementById('load_default_groups_btn');
-        if (defaultBtn) {
-            defaultBtn.addEventListener('click', function() {
-                console.log('[GT] load_default_groups_btn clicked');
-                if (GT.core && GT.core.runTest && typeof GT.core.runTest.loadDefaultGroups === 'function') {
-                    try {
-                        GT.core.runTest.loadDefaultGroups();
-                    } catch(e) {
-                        console.error('[GT] loadDefaultGroups error:', e);
-                    }
-                } else {
-                    console.warn('[GT] loadDefaultGroups not available');
-                }
-            });
-            defaultBtn.style.display = '';
-        }
         var rebalanceSelect = document.getElementById('rebalance_mode');
         if (rebalanceSelect) rebalanceSelect.addEventListener('change', function() {
             if (GT.panels && GT.panels.actions && typeof GT.panels.actions.updateRebalanceModeDescription === 'function') {
