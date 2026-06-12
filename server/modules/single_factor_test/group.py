@@ -479,17 +479,19 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     n_groups_by_triple: dict[tuple, int] = {}
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
-            n_groups = 0
+            n_groups = None
+            missing = []
             for g in gs:
-                gc = int(g.get('groupCount', g.get('group_count', 0)))
-                n_groups = max(n_groups, gc)
-            if n_groups <= 0:
-                # fallback: derive from max groupIndex or len
-                max_idx = 0
-                for g in gs:
-                    gi = int(g.get('groupIndex', g.get('group_index', 0)))
-                    max_idx = max(max_idx, gi)
-                n_groups = max(max_idx, len(gs))
+                gc = g.get('groupCount', g.get('group_count'))
+                if gc is not None:
+                    n_groups = max(n_groups or 0, int(gc))
+                else:
+                    missing.append(g.get('name') or g.get('key') or g.get('groupIndex'))
+            if n_groups is None:
+                raise ValueError(
+                    f"缺少 groupCount: tester_id={tid} factor_alias={fa} "
+                    f"groups={missing}"
+                )
             n_groups_by_triple[(tid, fa)] = n_groups
 
     # Build flat _FactorGroupTestGroup list
