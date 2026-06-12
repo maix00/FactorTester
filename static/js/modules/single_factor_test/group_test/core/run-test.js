@@ -559,6 +559,8 @@
                     var pct = Math.min(100, Math.round(completed / total * 100));
                     row.fillEl.style.width = pct + '%';
                     row.textEl.textContent = completed + '/' + total;
+                } else if (total === 0 && completed === 0) {
+                    row.textEl.textContent = '0/0';
                 }
                 // 根据阶段改变颜色
                 if (phase === 'simulate') {
@@ -581,7 +583,9 @@
             }
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
+                if (event !== 'result' && event !== 'error') {
+                    console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
+                }
                 if (event === 'start') {
                     totalBatches = payload.total || 1;
                     // 预创建所有 batch 行
