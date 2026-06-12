@@ -229,12 +229,22 @@ class FactorGroupTester:
             if factor is None:
                 continue
 
-            si_membership_np, si_flat_info = build_flat_membership_from_groups(
-                spec_groups,
-                shared_inputs_by_triple=shared_inputs_by_triple,
-                signal_valid_cols_by_triple=signal_valid_cols_by_triple,
-                memberships_by_triple=memberships_by_triple,
-            )
+            try:
+                si_membership_np, si_flat_info = build_flat_membership_from_groups(
+                    spec_groups,
+                    shared_inputs_by_triple=shared_inputs_by_triple,
+                    signal_valid_cols_by_triple=signal_valid_cols_by_triple,
+                    memberships_by_triple=memberships_by_triple,
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"build_flat_membership_from_groups failed: si={si} triple={triple} "
+                    f"n_groups={n_groups} factor_alias={factor_alias} "
+                    f"base_membership.shape={base_membership.shape} "
+                    f"spec_groups_count={len(spec_groups)} "
+                    f"group_indices={[g.group_index for g in spec_groups]} "
+                    f"| {type(e).__name__}: {e}"
+                ) from e
             group_name_map = {
                 local_idx: str(group.name or group.key or f"group_{local_idx}")
                 for local_idx, group in enumerate(spec_groups)
