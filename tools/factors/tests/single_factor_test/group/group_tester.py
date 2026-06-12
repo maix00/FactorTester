@@ -474,11 +474,17 @@ class FactorGroupTester:
                 )
                 _remap_cache[key] = (signal_to_trade, list(trade_products))
             signal_to_trade, trade_cols = _remap_cache[key]
-            trade_membership_np = _remap_membership_to_trade(
-                entry.signal_membership_np,
-                signal_to_trade,
-                len(trade_cols),
-            )
+            try:
+                trade_membership_np = _remap_membership_to_trade(
+                    entry.signal_membership_np,
+                    signal_to_trade,
+                    len(trade_cols),
+                )
+            except IndexError as e:
+                raise IndexError(
+                    f"remap index error: si={si} signal_membership_np.shape={entry.signal_membership_np.shape} "
+                    f"signal_to_trade.shape={signal_to_trade.shape} trade_cols={len(trade_cols)} | {e}"
+                ) from e
             si = entry.simulation_index
             entry_trade_valid_cols[si] = trade_cols
             entry_trade_membership_np[si] = trade_membership_np
@@ -522,11 +528,19 @@ class FactorGroupTester:
                  for product in entry_trade_valid_cols[si]],
                 dtype=int,
             )
-            merged_membership_np[
-                :,
-                group_offset:group_offset + local_group_count,
-                product_indices,
-            ] = local
+            try:
+                merged_membership_np[
+                    :,
+                    group_offset:group_offset + local_group_count,
+                    product_indices,
+                ] = local
+            except IndexError as e:
+                raise IndexError(
+                    f"merge index error: T={T} total_groups={total_group_count} P={len(trade_product_names)} "
+                    f"group_offset={group_offset} local_group_count={local_group_count} "
+                    f"local_shape={local.shape} product_indices={product_indices.tolist()} "
+                    f"merged_shape={merged_membership_np.shape} si={si} | {e}"
+                ) from e
             group_slices[si] = list(range(group_offset, group_offset + local_group_count))
             for local_group_idx in range(local_group_count):
                 group_label = entry.group_name_map.get(local_group_idx, f"group_{local_group_idx}")
@@ -685,9 +699,10 @@ class FactorGroupTester:
                            completed=1, total=1)
 
             _emit_progress("simulate", f"批次 {batch_label} 开始模拟", completed=0, total=1)
-            _, _, _, merged_group_result = _simulate_group_from_preloaded(
-            first_factor,
-            membership_np=plan.merged_membership_np,
+            try:
+                _, _, _, merged_group_result = _simulate_group_from_preloaded(
+                first_factor,
+                membership_np=plan.merged_membership_np,
             returns_filled=returns_filled,
             price_np=np.asarray(plan.merged_price_np, dtype=float),
             valid_cols=spec_bundle.valid_cols,
@@ -714,6 +729,14 @@ class FactorGroupTester:
             is_margin_traded_vec=spec_bundle.is_margin_traded_vec,
             positions_by_variety_code_lower=spec_bundle.positions_by_variety_code_lower,
         )
+            except IndexError as e:
+                raise IndexError(
+                    f"simulate index error: group_count={group_count} "
+                    f"merged_membership_np.shape={plan.merged_membership_np.shape} "
+                    f"returns_filled.shape={returns_filled.shape} "
+                    f"plan.merged_price_np.shape={plan.merged_price_np.shape if plan.merged_price_np is not None else None} "
+                    f"P={len(spec_bundle.valid_cols)} | {e}"
+                ) from e
 
             out: list[dict[str, Any]] = []
             for simulation_index, group_indices in plan.group_slices.items():
@@ -721,7 +744,14 @@ class FactorGroupTester:
                 factor = entry.tester.resolve_factor(entry.factor_alias)
                 if factor is None:
                     raise ValueError(f"未找到因子 {entry.factor_alias}")
-                sliced_result = slice_group_run_result(merged_group_result, group_indices)
+                try:
+                    sliced_result = slice_group_run_result(merged_group_result, group_indices)
+                except IndexError as e:
+                    raise IndexError(
+                        f"slice index error: simulation_index={simulation_index} group_indices={group_indices} "
+                        f"merged_group_result.returns_np.shape={merged_group_result.returns_np.shape} "
+                        f"plan.group_slices={plan.group_slices} | {e}"
+                    ) from e
                 entry.tester._get_result(factor).group_result = sliced_result
                 returns_dict, report_df, cum_np, idx_list = materialize_group_outputs_from_result(sliced_result)
                 out.append({

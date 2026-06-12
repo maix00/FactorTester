@@ -37,7 +37,7 @@
             case 'trade_data':  return 'linear-gradient(90deg,#2196f3,#64b5f6)';
             case 'membership':  return 'linear-gradient(90deg,#9c27b0,#ce93d8)';
             case 'liquidity':   return 'linear-gradient(90deg,#00bcd4,#4dd0e1)';
-            case 'serialize':   return 'linear-gradient(90deg,#795548,#a1887f)';
+            case 'serialize':   return 'linear-gradient(90deg,#6366f1,#a5b4fc)';
             case 'batch':       return 'linear-gradient(90deg,#607d8b,#90a4ae)';
             default:            return 'linear-gradient(90deg,#4caf50,#81c784)';
         }
