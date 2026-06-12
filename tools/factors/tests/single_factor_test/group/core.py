@@ -450,7 +450,9 @@ def _prepare_group_shared_inputs(
     # missing signals naturally carry forward their last membership via the
     # nan-handling in _build_group_membership_from_shared (forward-fill).
     if calendar_index is not None and len(calendar_index) > 0:
-        pass  # no trim — keep full common_index (= calendar_index)
+        # no trim — keep full common_index (= calendar_index)
+        trim_start = 0
+        trim_end = len(_all_nan)
     else:
         valid_positions = np.flatnonzero(_valid_signal_rows)
         _first_valid = int(valid_positions[0])
