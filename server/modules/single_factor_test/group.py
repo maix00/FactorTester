@@ -469,8 +469,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     for g in flat_groups_raw:
         if not isinstance(g, dict):
             continue
-        tid = str(g.get('testerId') or g.get('tester_id') or '')
-        fa = str(g.get('factorAlias') or g.get('factor_alias') or '')
+        tid = str(g.get('testerId', ''))
+        fa = str(g.get('factorAlias', ''))
         if not tid or not fa:
             continue
         tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
@@ -482,7 +482,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             n_groups = None
             missing = []
             for g in gs:
-                gc = g.get('groupCount', g.get('group_count'))
+                gc = g.get('groupCount')
                 if gc is not None:
                     n_groups = max(n_groups or 0, int(gc))
                 else:
@@ -509,7 +509,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                 existing.append(fa)
             factor_aliases_by_submission[tid] = existing
             for g in gs:
-                gi = int(g.get('groupIndex', g.get('group_index', 0)))
+                gi = int(g.get('groupIndex', 0))
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
@@ -519,14 +519,14 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                     key=name,
                     name=name,
                     product_list=g.get('productMask') or g.get('productList') or None,
-                    fee_mode=g.get('feeMode') or g.get('fee_mode') or None,
-                    fee_rate=g.get('feeRate') or g.get('fee_rate') or None,
-                    fee_modifications=g.get('feeModifications') or g.get('fee_modifications') or None,
-                    use_close_today=bool(g.get('useCloseToday') or g.get('use_closetoday')),
-                    rebalance_mode=g.get('rebalanceMode') or g.get('rebalance_mode') or None,
-                    liquidity_mode=g.get('liquidityMode') or g.get('liquidity_mode') or None,
-                    liquidity_percent=g.get('liquidityPercent') or g.get('liquidity_percent') or None,
-                    margin_mode=g.get('marginMode') or g.get('margin_mode') or None,
+                    fee_mode=g.get('feeMode'),
+                    fee_rate=g.get('feeRate'),
+                    fee_modifications=g.get('feeModifications'),
+                    use_close_today=bool(g.get('useCloseToday')),
+                    rebalance_mode=g.get('rebalanceMode'),
+                    liquidity_mode=g.get('liquidityMode'),
+                    liquidity_percent=g.get('liquidityPercent'),
+                    margin_mode=g.get('marginMode'),
                 )
                 offset = len(all_flat_groups)
                 sim_index_by_group[offset] = sim_index
