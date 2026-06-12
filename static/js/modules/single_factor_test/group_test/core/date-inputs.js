@@ -13,7 +13,7 @@
     var dateInputs = {};
 
     // ---------- 显示日期修正提示 ----------
-    dates.showDateHint = function(input, message) {
+    dateInputs.showDateHint = function(input, message) {
         var container = input.closest('div');
         if (!container) return;
         var hint = container.querySelector('.date-hint');
@@ -28,7 +28,7 @@
     };
 
     // ---------- 日期输入框验证（blur 时自动修正超出范围的日期） ----------
-    dates.bindDateValidation = function() {
+    dateInputs.bindDateValidation = function() {
         ['start', 'end'].forEach(function(prefix) {
             var yearEl  = document.getElementById('group_' + prefix + '_year');
             var monthEl = document.getElementById('group_' + prefix + '_month');
@@ -75,7 +75,7 @@
     };
 
     // ---------- 组合年月日为日期字符串（自动修正超出月末的日期） ----------
-    dates.buildValidDate = function(year, month, day) {
+    dateInputs.buildValidDate = function(year, month, day) {
         var y = parseInt(year, 10);
         var m = parseInt(month, 10);
         var d = parseInt(day, 10);
@@ -85,7 +85,7 @@
         return y + '-' + (m < 10 ? '0' + m : m) + '-' + (clampedDay < 10 ? '0' + clampedDay : clampedDay);
     };
 
-    dates.formatAdaptiveTime = function(timestamp, stepMs) {
+    dateInputs.formatAdaptiveTime = function(timestamp, stepMs) {
         var d = new Date(timestamp);
         if (isNaN(d.getTime())) return String(timestamp);
         var y = d.getFullYear();
@@ -99,7 +99,7 @@
         return y + '-' + mo + '-' + day;
     };
 
-    dates.buildContinuousTimeAxis = function(rows, timestampGetter) {
+    dateInputs.buildContinuousTimeAxis = function(rows, timestampGetter) {
         var timestamps = (rows || []).map(function(row) { return timestampGetter(row); });
         var n = timestamps.length;
         var stepMs = null;
@@ -109,7 +109,7 @@
                 stepMs = d;
             }
         }
-        var labels = timestamps.map(function(ts) { return dates.formatAdaptiveTime(ts, stepMs); });
+        var labels = timestamps.map(function(ts) { return dateInputs.formatAdaptiveTime(ts, stepMs); });
         var labelEvery = Math.max(1, Math.floor(n / 10));
         return {
             labels: labels,
@@ -123,7 +123,7 @@
     };
 
     // ---------- 读取分组时间范围输入（完整版：含时分和模式） ----------
-    dates.readGroupTimeRangeInput = function() {
+    dateInputs.readGroupTimeRangeInput = function() {
         var sy = document.getElementById('group_start_year');
         var sm = document.getElementById('group_start_month');
         var sd = document.getElementById('group_start_day');
@@ -153,8 +153,8 @@
         var tz = (precision === 'exact' && tzEl) ? tzEl.value : null;
 
         return {
-            startDate: hasStartDate ? dates.buildValidDate(sy.value, sm.value, sd.value) : null,
-            endDate: hasEndDate ? dates.buildValidDate(ey.value, em.value, ed.value) : null,
+            startDate: hasStartDate ? dateInputs.buildValidDate(sy.value, sm.value, sd.value) : null,
+            endDate: hasEndDate ? dateInputs.buildValidDate(ey.value, em.value, ed.value) : null,
             startHour: startHour,
             startMinute: startMinute,
             endHour: endHour,
@@ -162,20 +162,20 @@
             precision: precision,
             tz: tz,
             // 派生：完整时间字符串 (YYYY-MM-DD HH:MM)
-            startDt: hasStartDate ? dates.buildValidDate(sy.value, sm.value, sd.value) + (startHour ? ' ' + startHour + ':' + (startMinute || '00') : '') : null,
-            endDt: hasEndDate ? dates.buildValidDate(ey.value, em.value, ed.value) + (endHour ? ' ' + endHour + ':' + (endMinute || '00') : '') : null,
+            startDt: hasStartDate ? dateInputs.buildValidDate(sy.value, sm.value, sd.value) + (startHour ? ' ' + startHour + ':' + (startMinute || '00') : '') : null,
+            endDt: hasEndDate ? dateInputs.buildValidDate(ey.value, em.value, ed.value) + (endHour ? ' ' + endHour + ':' + (endMinute || '00') : '') : null,
         };
     };
 
     // ---------- 读取旧版时间范围（仅年月日，向后兼容） ----------
-    dates.readGroupDateOnlyInput = function() {
-        var tr = dates.readGroupTimeRangeInput();
+    dateInputs.readGroupDateOnlyInput = function() {
+        var tr = dateInputs.readGroupTimeRangeInput();
         return { startDate: tr.startDate, endDate: tr.endDate };
     };
 
     // ---------- 解析分组运行时间范围（含新模式字段） ----------
-    dates.resolveGroupRunTimeRange = function(savedStartDate, savedEndDate) {
-        var explicit = dates.readGroupTimeRangeInput();
+    dateInputs.resolveGroupRunTimeRange = function(savedStartDate, savedEndDate) {
+        var explicit = dateInputs.readGroupTimeRangeInput();
         var startDate = explicit.startDate || savedStartDate || null;
         var endDate = explicit.endDate || savedEndDate || null;
         return {
@@ -195,7 +195,7 @@
     };
 
     // ---------- 绑定时间精度切换：时分自动禁用/启用 ----------
-    dates.bindTimePrecisionSwitch = function() {
+    dateInputs.bindTimePrecisionSwitch = function() {
         var radios = document.querySelectorAll('input[name="group_time_precision"]');
         if (!radios.length) return;
 
@@ -233,8 +233,8 @@
     // ---------- 解析运行时间范围（含 submission 日期 fallback） ----------
     // savedStartDate/savedEndDate: 分组对象保存的日期
     // fallbackTesterId: 当以上都没有时，从 window.submissions 按 testerId 查找日期
-    dates.resolveGroupRunTimeRangeWithFallback = function(savedStartDate, savedEndDate, fallbackTesterId) {
-        var resolved = dates.resolveGroupRunTimeRange(savedStartDate, savedEndDate);
+    dateInputs.resolveGroupRunTimeRangeWithFallback = function(savedStartDate, savedEndDate, fallbackTesterId) {
+        var resolved = dateInputs.resolveGroupRunTimeRange(savedStartDate, savedEndDate);
         if (resolved.startDate && resolved.endDate) return resolved;
         // Fallback: 从全局 submissions 列表中按 testerId 查找
         if (fallbackTesterId && window.submissions) {
