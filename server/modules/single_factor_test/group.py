@@ -1196,6 +1196,16 @@ def run_group_test_stream():
 
             def _progress_bridge(phase: str, message: str, extra: dict):
                 import sys
+                # 最早期诊断：入口处直接打印原始 extra
+                _raw_comp = extra.get('completed', '<MISSING>')
+                _raw_tot = extra.get('total', '<MISSING>')
+                _raw_tb = extra.get('total_batches', '<MISSING>')
+                print(
+                    f"[GT-BRIDGE-ENTRY] phase={phase} comp={_raw_comp} tot={_raw_tot} "
+                    f"total_batches={_raw_tb} extra_keys={list(extra.keys())[:15]} "
+                    f"msg={message[:80]}",
+                    flush=True,
+                )
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
