@@ -7,7 +7,7 @@
     }
 
     function dates() {
-        return (GT.core && GT.core.dates) || {};
+        return (GT.core && GT.core.dateInputs) || {};
     }
 
     function cache() {

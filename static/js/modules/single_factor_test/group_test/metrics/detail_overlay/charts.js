@@ -1,6 +1,6 @@
 /**
  * Highcharts chart renderers for group detail overlay and ranking.
- * Depends on GT.metrics.detailOverlay.format.* and GT.core.dates.
+ * Depends on GT.metrics.detailOverlay.format.* and GT.core.dateInputs.
  */
 (function() {
     var GT = window.GroupTest;
@@ -9,7 +9,7 @@
     if (!F) throw new Error('detailOverlay/format.js must be loaded first');
 
     function buildContinuousTimeAxis(rows, accessor) {
-        return GT.core.dates.buildContinuousTimeAxis(rows, accessor);
+        return GT.core.dateInputs.buildContinuousTimeAxis(rows, accessor);
     }
 
     function getRobustAxisBounds(values) {

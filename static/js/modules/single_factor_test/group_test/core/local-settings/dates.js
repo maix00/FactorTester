@@ -3,12 +3,12 @@
  */
 (function() {
     var GT = window.GroupTest;
-    if (!GT || !GT.localSettings || !GT.core || !GT.core.dates) {
+    if (!GT || !GT.localSettings || !GT.core || !GT.core.dateInputs) {
         console.warn('[GT local-settings/dates] dependencies missing');
         return;
     }
 
-    var dates = GT.core.dates;
+    var dates = GT.core.dateInputs;
 
     function collect() {
         return dates.readGroupTimeRangeInput();

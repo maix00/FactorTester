@@ -1,16 +1,16 @@
 /**
- * core/dates.js — 分组测试日期工具函数
+ * core/date-inputs.js — 日期输入框 DOM 读写与验证
  *
  * 从 app.js 解耦提取。无外部依赖（仅依赖 window.DateUtils 和 DOM）。
- * 挂载到 GT.core.dates 命名空间。
+ * 挂载到 GT.core.dateInputs 命名空间。
  */
 (function(){
     var GT = window.GroupTest;
-    if (!GT) { console.warn('[GT core/dates] bootstrap missing'); return; }
+    if (!GT) { console.warn('[GT core/date-inputs] bootstrap missing'); return; }
     GT.core = GT.core || {};
-    if (GT.core.dates) { console.warn('[GT core/dates] already loaded'); return; }
+    if (GT.core.dateInputs) { console.warn('[GT core/date-inputs] already loaded'); return; }
 
-    var dates = {};
+    var dateInputs = {};
 
     // ---------- 显示日期修正提示 ----------
     dates.showDateHint = function(input, message) {
@@ -247,5 +247,5 @@
         return resolved;
     };
 
-    GT.core.dates = dates;
+    GT.core.dateInputs = dateInputs;
 })();

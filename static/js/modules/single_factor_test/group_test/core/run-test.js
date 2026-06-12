@@ -5,7 +5,7 @@
  *   - 运行分组测试（单次/批量/全因子）
  *   - 加载默认分组
  *   - 派生组生成/删除
- *   - 工具函数：postGroupTest, postBatchGroupTest, clearResults
+ *   - 工具函数：postBatchGroupTest, clearResults
  *
  * 挂载到 GT.core.runTest。
  */
@@ -160,19 +160,8 @@
         });
     };
 
-    /**
-     * 单次分组测试 POST
-     */
-    runTest.postGroupTest = function(payload) {
-        return fetch('/run_group_test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(function(res) { return res.json(); });
-    };
-
     // ════════════════════════════════════════════════════════════════
-    //  运行分组测试（批量）
+    //  运行分组测试
     // ════════════════════════════════════════════════════════════════
 
     runTest.runGroupTest = async function() {
