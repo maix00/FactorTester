@@ -1200,6 +1200,9 @@ def run_group_test_stream():
                 total = extra.get('total', extra.get('total_batches'))
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
+                if phase == 'init':
+                    _log.info("_progress_bridge init: extra keys=%s phases=%s", 
+                              list(extra.keys()), extra.get('phases'))
                 if has_progress_count:
                     last_progress['completed'] = completed
                     last_progress['total'] = total
