@@ -501,7 +501,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             factor_aliases_by_submission[tid] = existing
             for g in gs:
                 gi = int(g.get('groupIndex', g.get('group_index', 0)))
-                name = str(g.get('name') or g.get('key') or f'{fa}_G{gi}')
+                name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
                     factor_alias=fa,

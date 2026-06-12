@@ -89,8 +89,11 @@
 
         // 0) 注入后端 metrics_meta（替换前端硬编码）
         if (data.metrics_meta) {
+            console.log('[GroupTest] metrics_meta from backend:', Object.keys(data.metrics_meta.cn || {}).length, 'metrics');
             GT.metrics = GT.metrics || {};
             GT.metrics.meta = data.metrics_meta;
+        } else {
+            console.warn('[GroupTest] No metrics_meta in result data');
         }
 
         // 1) 更新策略面板

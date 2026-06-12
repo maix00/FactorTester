@@ -323,6 +323,7 @@
                     _registerPhase(phases[pi]);
                 }
                 knownTotalPhases = phases.length;
+                console.log('[batchMgr] registerPhases:', JSON.stringify(phases), 'knownTotalPhases:', knownTotalPhases);
             },
 
             /** 设置阶段标签（后端告知，替换默认） */
@@ -332,6 +333,7 @@
                 for (var i = 0; i < keys.length; i++) {
                     phaseLabels[keys[i]] = labels[keys[i]];
                 }
+                console.log('[batchMgr] setPhaseLabels:', JSON.stringify(phaseLabels));
             },
 
             /** 阶段标签 */
