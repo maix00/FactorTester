@@ -530,6 +530,10 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             factor_family_alias = str(getattr(page_state, 'factor_family_alias', '') or '')
         except Exception:
             pass
+    # Allow override from request (same as SSE handler)
+    req_family = data.get('factor_family_alias')
+    if req_family:
+        factor_family_alias = str(req_family)
 
     # ── Factor inputs & calendar ──
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
