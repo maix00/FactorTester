@@ -51,6 +51,8 @@
         var progressContainer = opts.progressContainer;
         var phaseLabels = Object.assign({ init: '准备' }, opts.phaseLabels || {});
         var skipPhases = { info: true, product_coverage_batch: true, init: true };
+        // 不在下拉历史中显示的阶段（但仍参与进度条更新）
+        var hideInHistory = { batch: true };
 
         var phaseOrder = [];           // 有序 phase key 列表
         var seenPhases = {};           // 去重
@@ -145,7 +147,7 @@
             for (var j = 0; j < phaseOrder.length; j++) {
                 var p = phaseOrder[j];
                 var h = row.phaseHistory[p];
-                if (!h) continue;
+                if (!h || hideInHistory[p]) continue;
                 // 只显示已完成的阶段 + 当前进行中的阶段（未开始的跳过）
                 if (!h.done && p !== row.currentPhase) continue;
                 items.push({
@@ -185,6 +187,16 @@
                     cur.message = message || cur.message || '';
                     _renderPhaseHistory(row);
                 }
+                return;
+            }
+
+            // 隐藏阶段：不记录历史，但标记前一个阶段完成
+            if (hideInHistory[phase]) {
+                if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
+                    row.phaseHistory[row.currentPhase].done = true;
+                }
+                row.currentPhase = phase;
+                _renderPhaseHistory(row);
                 return;
             }
 
