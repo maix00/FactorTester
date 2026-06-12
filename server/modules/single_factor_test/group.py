@@ -509,7 +509,13 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                 existing.append(fa)
             factor_aliases_by_submission[tid] = existing
             for g in gs:
-                gi = int(g.get('groupIndex', 0))
+                # frontend groupIndex is 1-based → convert to 0-based
+                gi = int(g.get('groupIndex', 1)) - 1
+                if gi < 0 or gi >= n_groups:
+                    raise ValueError(
+                        f"groupIndex out of range: {gi + 1} (1-based) not in [1, {n_groups}], "
+                        f"tester_id={tid} factor_alias={fa}"
+                    )
                 name = str(g.get('shortAlias') or g.get('name') or g.get('key') or f'{fa}_G{gi}')
                 fg = _FactorGroupTestGroup(
                     tester_id=tid,
