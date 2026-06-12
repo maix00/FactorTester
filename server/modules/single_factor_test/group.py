@@ -1200,9 +1200,6 @@ def run_group_test_stream():
                 total = extra.get('total', extra.get('total_batches'))
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
-                if phase == 'init':
-                    _log.info("_progress_bridge init: extra keys=%s phases=%s", 
-                              list(extra.keys()), extra.get('phases'))
                 if has_progress_count:
                     last_progress['completed'] = completed
                     last_progress['total'] = total
@@ -1227,10 +1224,12 @@ def run_group_test_stream():
                 progress_extra.pop('completed', None)
                 progress_extra.pop('total', None)
                 if phase == 'init':
+                    # 从 progress_extra 中移除 phases，避免与显式参数冲突
+                    _phases = progress_extra.pop('phases', extra.get('phases', []))
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
                         phase='product_coverage_batch',
-                        phases=extra.get('phases', []),
+                        phases=_phases,
                         **progress_extra,
                     )
                 else:

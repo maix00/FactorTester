@@ -49,7 +49,6 @@ class SSEProgressEmitter:
         payload: Dict[str, Any] = {"total": total, "groups": groups, "phase": phase}
         if phases:
             payload["phases"] = phases
-        print(f"[SSE emit_start] phases={'YES' if phases else 'NO'} len={len(phases) if phases else 0} payload_phases={'phases' in payload}")
         payload.update(extra)
         self._q.put(self._event("start", payload))
 

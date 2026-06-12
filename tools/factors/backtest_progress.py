@@ -64,7 +64,6 @@ class BacktestProgressRegistry:
     def emit_start(self, *, total: int, groups: int = 0, phase: str = "init", **extra) -> None:
         self._started = True
         cb = self._before
-        print(f"[BacktestProgress] emit_start total={total} groups={groups} phase={phase} extra_keys={list(extra.keys())} phases_in_extra={'phases' in extra}")
         if cb is not None:
             try:
                 cb(total, groups, phase, extra)
