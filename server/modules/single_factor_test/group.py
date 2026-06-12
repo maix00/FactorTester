@@ -475,15 +475,22 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             continue
         tester_groups.setdefault(tid, {}).setdefault(fa, []).append(g)
 
-    # Determine n_groups per (tester_id, factor_alias) from max groupIndex
+    # Determine n_groups per (tester_id, factor_alias) from groupCount (frontend field)
     n_groups_by_triple: dict[tuple, int] = {}
     for tid, by_fa in tester_groups.items():
         for fa, gs in by_fa.items():
-            max_idx = 0
+            n_groups = 0
             for g in gs:
-                gi = int(g.get('groupIndex', g.get('group_index', 0)))
-                max_idx = max(max_idx, gi)
-            n_groups_by_triple[(tid, fa)] = max(max_idx, len(gs))
+                gc = int(g.get('groupCount', g.get('group_count', 0)))
+                n_groups = max(n_groups, gc)
+            if n_groups <= 0:
+                # fallback: derive from max groupIndex or len
+                max_idx = 0
+                for g in gs:
+                    gi = int(g.get('groupIndex', g.get('group_index', 0)))
+                    max_idx = max(max_idx, gi)
+                n_groups = max(max_idx, len(gs))
+            n_groups_by_triple[(tid, fa)] = n_groups
 
     # Build flat _FactorGroupTestGroup list
     all_flat_groups: list[_FactorGroupTestGroup] = []
