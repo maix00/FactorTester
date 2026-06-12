@@ -5,15 +5,52 @@ import numpy as np
 import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
+from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
 from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
+from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
 from tools.factors.tests.single_factor_test.group.detail import build_group_detail
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_epoch_ms
+from server.services.factor_registry import get_factor_family_instance
 
 _log = logging.getLogger(__name__)
+
+
+def _ensure_tester_factors_for_group(
+    tester: Any,
+    factor_aliases: list[str],
+    factor_family_alias: str | None,
+    *,
+    params_list: list | None = None,
+    username: str | None = None,
+) -> None:
+    """Ensure direct group runs can resolve factors even when IC has not run."""
+    missing_aliases = [
+        str(alias) for alias in factor_aliases
+        if alias and tester.resolve_factor(str(alias)) is None
+    ]
+    if not missing_aliases:
+        return
+    if not factor_family_alias:
+        return
+
+    factor_family = get_factor_family_instance(str(factor_family_alias), username=username)
+    if params_list is None:
+        params_list = runtime_state.get_session_params(str(factor_family_alias), factor_family)
+    factors = factor_family.get_factors(params_list=params_list)
+    existing_by_alias = {getattr(f, 'alias', ''): i for i, f in enumerate(getattr(tester, 'factors', []))}
+    for factor in factors:
+        alias = getattr(factor, 'alias', '')
+        if not alias:
+            continue
+        if alias in existing_by_alias:
+            tester.factors[existing_by_alias[alias]] = factor
+        else:
+            tester.factors.append(factor)
+            existing_by_alias[alias] = len(tester.factors) - 1
 
 
 def _progress(message: str) -> None:
@@ -466,14 +503,14 @@ def _serialize_group_simulation_result(
         f"simulation serialize groups start submission={submission_id} "
         f"factor={factor_alias} total_groups={n_total}"
     )
-    _core_emit_progress("serialize", f"serialize groups start total={n_total}",
+    _core_emit_progress("serialize", f"开始序列化分组结果，共 {n_total} 组",
                         completed=0, total=n_total)
     for g in range(n_total):
         _progress(
             f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
-        _core_emit_progress("serialize", f"serialize group {g+1}/{n_total}",
+        _core_emit_progress("serialize", f"序列化分组 {g+1}/{n_total}",
                             completed=g + 1, total=n_total)
         vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
@@ -502,7 +539,7 @@ def _serialize_group_simulation_result(
                 entry['_id'] = fi['id']
         groups_data.append(entry)
     _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
-    _core_emit_progress("serialize", f"serialize groups done total={n_total}",
+    _core_emit_progress("serialize", f"分组结果序列化完成，共 {n_total} 组",
                         completed=n_total, total=n_total)
 
     metrics: dict = {}
@@ -708,11 +745,40 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
 
     auto_group_calendar_freq = bool(data.get('auto_group_calendar_freq', True))
     requested_group_calendar_freq = None if auto_group_calendar_freq else data.get('group_calendar_freq')
+    factor_family_alias = str(data.get('factor_family_alias') or '')
+    group_factor_params_list = data.get('_group_factor_params_list')
+    if not isinstance(group_factor_params_list, list):
+        group_factor_params_list = None
+    group_owner_username = data.get('_group_owner_username')
+    group_owner_username = str(group_owner_username) if group_owner_username else None
     _progress(
         f"calendar resolve start submissions={len(factor_aliases_by_submission)} "
         f"mode={'auto' if auto_group_calendar_freq else 'manual'} "
         f"requested={requested_group_calendar_freq if requested_group_calendar_freq is not None else 'auto'}"
     )
+
+    for submission_id, factor_aliases in factor_aliases_by_submission.items():
+        tester = runtime_state.get_factor_tester(submission_id, caller='run_group_test_prepare_factors')
+        _ensure_tester_factors_for_group(
+            tester,
+            factor_aliases,
+            factor_family_alias,
+            params_list=group_factor_params_list,
+            username=group_owner_username,
+        )
+        for factor_alias in factor_aliases:
+            factor = tester.resolve_factor(str(factor_alias))
+            if factor is None:
+                return False, {
+                    'success': False,
+                    'error': f'未找到因子 {factor_alias}。请确认当前因子参数已保存，或刷新页面后重试。',
+                    'status': 400,
+                }
+            ensure_group_factor_inputs(
+                tester,
+                factor,
+                returns_col=FactorNextPeriodReturns.NEXT_OPEN_TO_OPEN_ADJUSTED,
+            )
 
     # 构建跨所有 tester 的统一 calendar_index。
     calendar_indices: list[pd.Index] = []
@@ -831,30 +897,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         if idx < 0 or idx >= len(submitted_entries):
             continue
         payload_entry = submitted_entries[idx]
-        # Collect flat_group_info for this simulation_index
-        si_groups = [
-            g for gi, g in enumerate(all_flat_groups)
-            if sim_index_by_group.get(gi) == idx
-        ]
-        # Build flat_group_info list matching the group order in the result
-        flat_info = [
-            {
-                'group_index': g.group_index,
-                'key': g.key,
-                'name': g.name,
-                'id': g._id,
-                'product_names': g.product_list,
-                'fee_mode': g.fee_mode,
-                'fee_rate': g.fee_rate,
-                'fee_modifications': g.fee_modifications,
-                'use_close_today': g.use_close_today,
-                'rebalance_mode': g.rebalance_mode,
-                'liquidity_mode': g.liquidity_mode,
-                'liquidity_percent': g.liquidity_percent,
-                'margin_mode': g.margin_mode,
-            }
-            for g in si_groups
-        ]
+        flat_info = raw_result.get('flat_group_info')
         serialized = _serialize_group_simulation_result(
             tester=raw_result['tester'],
             submission_id=str(raw_result.get('submission_id') or ''),
@@ -863,7 +906,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             ls_configs=raw_result.get('ls_configs'),
             rebalance_mode=str(payload_entry.get('rebalance_mode') or rebalance_mode),
             simulation_result=raw_result,
-            flat_group_info=flat_info if flat_info else None,
+            flat_group_info=flat_info if isinstance(flat_info, list) and flat_info else None,
         )
         serialized['submission_id'] = str(raw_result.get('submission_id') or '')
         serialized['factor_alias'] = str(raw_result.get('factor_alias') or '')
@@ -1404,6 +1447,25 @@ def run_group_test_stream():
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
+    factor_family_alias = str(data.get('factor_family_alias') or '')
+    if factor_family_alias:
+        try:
+            factor_family = get_factor_family_instance(
+                factor_family_alias,
+                username=runtime_state.current_user(),
+            )
+            data = dict(data)
+            data['_group_owner_username'] = runtime_state.current_user()
+            data['_group_factor_params_list'] = runtime_state.get_session_params(
+                factor_family_alias,
+                factor_family,
+            )
+        except Exception as exc:
+            def _early_factor_err():
+                yield f"event: error\ndata: {_json.dumps({'success': False, 'error': f'准备分组测试因子参数失败: {exc}'}, default=str)}\n\n"
+            return Response(_early_factor_err(), mimetype='text/event-stream',
+                            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
     emitter = SSEProgressEmitter()
     registry = BacktestProgressRegistry()
 
@@ -1428,21 +1490,48 @@ def run_group_test_stream():
     def _compute_and_emit():
         try:
             # ── 将 registry 桥接到 core.py 的全局注册 ──
+            last_progress = {'completed': 0, 'total': 0}
+            last_progress_by_batch: dict[int, dict[str, int]] = {}
+
             def _progress_bridge(phase: str, message: str, extra: dict):
-                if phase == 'info':
+                progress_extra = dict(extra)
+                completed = extra.get('completed')
+                total = extra.get('total', extra.get('total_batches'))
+                batch_index = extra.get('batch_index')
+                has_progress_count = completed is not None and total is not None
+                if has_progress_count:
+                    last_progress['completed'] = completed
+                    last_progress['total'] = total
+                    if batch_index is not None:
+                        last_progress_by_batch[int(batch_index)] = {
+                            'completed': completed,
+                            'total': total,
+                        }
+                elif phase == 'info':
+                    batch_progress = None
+                    if batch_index is not None:
+                        batch_progress = last_progress_by_batch.get(int(batch_index))
+                    progress = batch_progress or last_progress
+                    completed = progress['completed']
+                    total = progress['total']
+                    progress_extra['completed'] = completed
+                    progress_extra['total'] = total
+                elif phase != 'init':
                     return
-                completed = extra.get('completed', 0)
-                total = extra.get('total', extra.get('total_batches', 0))
+                completed = completed or 0
+                total = total or 0
+                progress_extra.pop('completed', None)
+                progress_extra.pop('total', None)
                 if phase == 'init':
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
-                        phase='batch', **extra,
+                        phase='batch', **progress_extra,
                     )
                 else:
                     registry.emit_phase(
                         phase, message=message,
                         completed=completed, total=total,
-                        **extra,
+                        **progress_extra,
                     )
 
             register_group_progress(_progress_bridge)

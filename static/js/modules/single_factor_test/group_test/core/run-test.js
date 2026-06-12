@@ -28,6 +28,60 @@
             : { payload: {}, errors: ['本地运行设置未就绪'], structureKeyParts: [] };
     }
 
+    async function resolveSubmissionIdForGroup(submissionId) {
+        var targetId = String(submissionId || '');
+        if (!targetId) return targetId;
+        try {
+            var subs = Array.isArray(window.submissions) ? window.submissions : [];
+            var pageUuid = encodeURIComponent(window._pageUuid || '');
+            var resp = await fetch('/api/list_submissions?page_uuid=' + pageUuid);
+            var data = await resp.json();
+            if (!data.success || !Array.isArray(data.submissions) || data.submissions.length === 0) {
+                return targetId;
+            }
+
+            for (var j = 0; j < data.submissions.length; j++) {
+                if (String(data.submissions[j].id) === targetId) return String(data.submissions[j].id);
+            }
+
+            var localSub = null;
+            for (var k = 0; k < subs.length; k++) {
+                if (String(subs[k].id) === targetId) {
+                    localSub = subs[k];
+                    break;
+                }
+            }
+            var rawLocalPaths = localSub && (localSub.paths || localSub.selected_paths);
+            var localPaths = Array.isArray(rawLocalPaths) ? rawLocalPaths.map(String) : [];
+            if (localPaths.length > 0) {
+                var pathSet = {};
+                localPaths.forEach(function(p) { pathSet[p] = true; });
+                for (var m = 0; m < data.submissions.length; m++) {
+                    var remotePaths = (data.submissions[m].selected_paths || []).map(String);
+                    if (remotePaths.length !== localPaths.length) continue;
+                    var same = true;
+                    for (var rp = 0; rp < remotePaths.length; rp++) {
+                        if (!pathSet[remotePaths[rp]]) {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (same) {
+                        console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[m].id));
+                        return String(data.submissions[m].id);
+                    }
+                }
+            }
+            if (targetId.indexOf('tpl-') === 0 && data.submissions.length === 1) {
+                console.log('[runGroupTest] resolved submission id:', targetId, '->', String(data.submissions[0].id));
+                return String(data.submissions[0].id);
+            }
+        } catch (e) {
+            console.warn('resolveSubmissionIdForGroup failed:', e);
+        }
+        return targetId;
+    }
+
     // ════════════════════════════════════════════════════════════════
     //  工具函数
     // ════════════════════════════════════════════════════════════════
@@ -170,6 +224,7 @@
         var batchLetterMap = {};
         var nextLetterCode = 65;
 
+        var markProgressRowsDone = function() {};
         try {
             for (var si = 0; si < submissions.length; si++) {
                 var sub = submissions[si];
@@ -418,9 +473,14 @@
 
         // ── 构建 batch payloads：直接传 groupSettings 的原样数据 ──
         var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
+        var resolvedSubmissionIds = {};
+        for (var rbi = 0; rbi < batches.length; rbi++) {
+            resolvedSubmissionIds[String(batches[rbi].testerId)] = await resolveSubmissionIdForGroup(batches[rbi].testerId);
+        }
         var batchPayloads = [];
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
+            var resolvedBatchTesterId = resolvedSubmissionIds[String(batch.testerId)] || batch.testerId;
             // 收集本 batch 涉及的所有 group id
             var batchGroupIds = {};
             for (var gi = 0; gi < batch.groups.length; gi++) {
@@ -439,7 +499,7 @@
                 if (batchGroupIds[allStoredGroups[ai].id]) groupList.push(allStoredGroups[ai]);
             }
             batchPayloads.push({
-                submission_id: batch.testerId,
+                submission_id: resolvedBatchTesterId,
                 factor_alias: batch.factorAlias,
                 n_groups: batch.groupCount,
                 groups: groupList.length > 0 ? groupList : null,
@@ -466,13 +526,13 @@
                 name: crossBatchName,
                 key: crossBatchName,
                 long: {
-                    submission_id: cblLongBatch.testerId,
+                    submission_id: resolvedSubmissionIds[String(cblLongBatch.testerId)] || cblLongBatch.testerId,
                     factor_alias: cblLongBatch.factorAlias,
                     n_groups: cblLongBatch.groupCount,
                     group: cblLongIdx
                 },
                 short: {
-                    submission_id: cblShortBatch.testerId,
+                    submission_id: resolvedSubmissionIds[String(cblShortBatch.testerId)] || cblShortBatch.testerId,
                     factor_alias: cblShortBatch.factorAlias,
                     n_groups: cblShortBatch.groupCount,
                     group: cblShortIdx
@@ -483,6 +543,8 @@
         var bulkPayload = {
             batches: batchPayloads,
             cross_batch_ls: crossBatchLSPayloads.length > 0 ? crossBatchLSPayloads : null,
+            factor_family_alias: window.factorFamilyAlias || '',
+            page_uuid: window._pageUuid || '',
             fee: fee,
             fee_modifications: fee_modifications,
             use_closetoday: use_closetoday,
@@ -498,66 +560,235 @@
                 progressContainer = document.createElement('div');
                 progressContainer.id = progressContainerId;
                 progressContainer.className = 'gt-progress-container';
-                progressContainer.style.cssText = 'margin:8px 0;padding:8px;background:#f9f9f9;border-radius:8px;border:1px solid #e0e0e0;';
+                progressContainer.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:8px;background:#f9f9f9;border-radius:8px;border:1px solid #e0e0e0;';
                 var chartContainer = document.getElementById('group_chart_container');
                 var insertParent = chartContainer ? chartContainer.parentNode : (runBtn ? runBtn.parentNode : document.body);
                 var insertBefore = chartContainer || (runBtn ? runBtn.nextSibling : null);
                 insertParent.insertBefore(progressContainer, insertBefore);
             }
+            progressContainer.innerHTML = '';
 
             // 阶段中文映射
             var phaseLabels = {
-                batch: '批次', membership: '隶属度', trade_data: '交易数据',
-                simulate: '模拟中', liquidity: '流动性', serialize: '序列化',
-                remap: '重映射', flat_membership: '展平', info: ''
+                factor_eval: '因子计算',
+                returns_eval: '收益计算',
+                membership: '隶属度',
+                flat_membership: '展平',
+                remap: '重映射',
+                trade_data: '交易数据',
+                liquidity: '流动性',
+                simulate: '模拟中',
+                serialize: '序列化',
+                batch: '批次',
+                info: ''
             };
-            var phaseOrder = ['trade_data','membership','liquidity','simulate'];  // 按阶段更新
-            var batchRows = {};     // batchIndex → { rowEl, fillEl, textEl, phaseEl }
+            var nonTimelinePhases = { batch: true, info: true };
+            var phaseOrder = Object.keys(phaseLabels).filter(function(phase) {
+                return !nonTimelinePhases[phase];
+            });
+            var batchRows = {};     // batchIndex → { rowEl, fillEl, textEl, phaseEl, messageEl }
             var totalBatches = 0;
+            var pendingGlobalProgress = [];
+
+            function _phaseProgressPct(phase, completed, total) {
+                if (total <= 0) return null;
+                if (phase && phaseLabels[phase] === undefined && !nonTimelinePhases[phase]) {
+                    phaseLabels[phase] = phase;
+                    phaseOrder.push(phase);
+                }
+                var localPct = Math.max(0, Math.min(1, completed / total));
+                var phaseIdx = phaseOrder.indexOf(phase);
+                if (phaseIdx >= 0) {
+                    return Math.round(((phaseIdx + localPct) / phaseOrder.length) * 100);
+                }
+                return null;
+            }
+
+            function _escapeProgressHtml(value) {
+                return String(value == null ? '' : value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function _renderPhaseHistory(row) {
+                if (!row.historyEl) return;
+                var phases = Object.keys(row.phaseHistory || {});
+                if (!phases.length) {
+                    row.historyEl.innerHTML = '<div style="color:#98a2b3;">暂无阶段记录</div>';
+                    return;
+                }
+                phases.sort(function(a, b) {
+                    var ai = phaseOrder.indexOf(a);
+                    var bi = phaseOrder.indexOf(b);
+                    if (ai < 0) ai = 999;
+                    if (bi < 0) bi = 999;
+                    return ai - bi;
+                });
+                var html = phases.map(function(phase) {
+                    var item = row.phaseHistory[phase] || {};
+                    var label = _escapeProgressHtml(phaseLabels[phase] || phase);
+                    var status = item.done ? '已完成' : '进行中';
+                    var count = item.total > 0 ? (item.completed + '/' + item.total) : '--';
+                    var msg = _escapeProgressHtml(item.message || '');
+                    return '<div style="display:grid;grid-template-columns:80px minmax(12ch,max-content) 54px minmax(0,1fr);gap:8px;align-items:center;padding:2px 0;">'
+                        + '<span style="font-weight:600;color:#475467;">' + label + '</span>'
+                        + '<span style="color:#667085;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">' + count + '</span>'
+                        + '<span style="color:' + (item.done ? '#12a150' : '#0078d4') + ';white-space:nowrap;">' + status + '</span>'
+                        + '<span style="color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + msg + '">' + msg + '</span>'
+                        + '</div>';
+                }).join('');
+                row.historyEl.innerHTML = html;
+            }
+
+            function _recordPhaseProgress(row, phase, completed, total, message) {
+                if (!phase) return;
+                if (phase === 'info') {
+                    if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
+                        var currentItem = row.phaseHistory[row.currentPhase];
+                        var preserveCurrentCount = total > 0 && currentItem.total > total;
+                        if (!preserveCurrentCount) {
+                            currentItem.completed = completed || currentItem.completed || 0;
+                            currentItem.total = total || currentItem.total || 0;
+                        }
+                        row.phaseHistory[row.currentPhase].message = message || row.phaseHistory[row.currentPhase].message || '';
+                        _renderPhaseHistory(row);
+                    }
+                    return;
+                }
+                if (nonTimelinePhases[phase]) return;
+                if (row.currentPhase && row.currentPhase !== phase && row.phaseHistory[row.currentPhase]) {
+                    row.phaseHistory[row.currentPhase].done = true;
+                }
+                row.currentPhase = phase;
+                var isDone = total > 0 && completed >= total;
+                var existing = row.phaseHistory[phase] || {};
+                var preserveCount = total > 0 && existing.total > total;
+                row.phaseHistory[phase] = {
+                    completed: preserveCount ? existing.completed : (completed || 0),
+                    total: preserveCount ? existing.total : (total || 0),
+                    message: message || existing.message || '',
+                    done: !!(isDone || existing.done)
+                };
+                _renderPhaseHistory(row);
+            }
+
+            markProgressRowsDone = function(done, message) {
+                var keys = Object.keys(batchRows);
+                for (var i = 0; i < keys.length; i++) {
+                    var row = batchRows[keys[i]];
+                    if (!row) continue;
+                    if (row.currentPhase && row.phaseHistory[row.currentPhase]) {
+                        row.phaseHistory[row.currentPhase].done = !!done;
+                        if (message) row.phaseHistory[row.currentPhase].message = message;
+                    }
+                    if (done) {
+                        row.pct = 100;
+                        row.fillEl.style.width = '100%';
+                        row.phaseEl.textContent = '完成';
+                    } else {
+                        row.phaseEl.textContent = '失败';
+                        row.fillEl.style.background = 'linear-gradient(90deg,#d92d20,#f97066)';
+                    }
+                    if (message && row.messageEl) {
+                        row.messageEl.textContent = message;
+                        row.messageEl.title = message;
+                    }
+                    _renderPhaseHistory(row);
+                }
+            };
 
             function _ensureBatchRow(batchIndex, batchLabel, batchTotal) {
-                if (batchRows[batchIndex]) return batchRows[batchIndex];
+                if (batchRows[batchIndex]) {
+                    var existingLabel = batchRows[batchIndex].labelEl;
+                    if (existingLabel) {
+                        existingLabel.textContent = batchLabel || ('Batch ' + (batchIndex + 1));
+                    }
+                    return batchRows[batchIndex];
+                }
                 var row = document.createElement('div');
                 row.style.cssText = 'margin-bottom:6px;';
+                var line = document.createElement('div');
+                line.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
+                row.appendChild(line);
                 // 标签
                 var label = document.createElement('span');
-                label.style.cssText = 'display:inline-block;width:70px;font-size:12px;font-weight:600;color:#333;vertical-align:middle;';
+                label.style.cssText = 'flex:0 0 70px;font-size:12px;font-weight:600;color:#333;white-space:nowrap;';
                 label.textContent = batchLabel || ('Batch ' + (batchIndex + 1));
-                row.appendChild(label);
+                line.appendChild(label);
                 // 阶段标签
                 var phaseSpan = document.createElement('span');
-                phaseSpan.style.cssText = 'display:inline-block;width:65px;font-size:11px;color:#888;vertical-align:middle;';
+                phaseSpan.style.cssText = 'flex:0 0 65px;font-size:11px;color:#888;white-space:nowrap;';
                 phaseSpan.textContent = '准备中';
-                row.appendChild(phaseSpan);
+                line.appendChild(phaseSpan);
                 // 进度条
                 var barWrap = document.createElement('span');
-                barWrap.style.cssText = 'display:inline-block;width:calc(100% - 250px);vertical-align:middle;';
+                barWrap.style.cssText = 'flex:1 1 auto;min-width:120px;';
                 var bar = document.createElement('span');
                 bar.style.cssText = 'display:block;background:#e0e0e0;border-radius:4px;height:8px;overflow:hidden;';
                 var fill = document.createElement('span');
                 fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:4px;';
                 bar.appendChild(fill);
                 barWrap.appendChild(bar);
-                row.appendChild(barWrap);
+                line.appendChild(barWrap);
                 // 数字
                 var text = document.createElement('span');
-                text.style.cssText = 'display:inline-block;width:100px;font-size:11px;color:#666;text-align:right;vertical-align:middle;';
+                text.style.cssText = 'flex:0 0 100px;font-size:11px;color:#666;text-align:right;white-space:nowrap;';
                 text.textContent = '0/0';
-                row.appendChild(text);
+                line.appendChild(text);
+                var toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.style.cssText = 'flex:0 0 24px;width:24px;height:22px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid #d0d5dd;border-radius:4px;background:#fff;color:#475467;font-size:12px;cursor:pointer;line-height:1;';
+                toggle.textContent = '▾';
+                line.appendChild(toggle);
+
+                var message = document.createElement('div');
+                message.style.cssText = 'margin-left:151px;margin-right:140px;margin-top:2px;font-size:11px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                message.textContent = '';
+                row.appendChild(message);
+                var history = document.createElement('div');
+                history.style.cssText = 'display:none;margin-left:151px;margin-right:140px;margin-top:4px;padding:6px 8px;background:#fff;border:1px solid #eaecf0;border-radius:6px;font-size:11px;';
+                row.appendChild(history);
+                toggle.addEventListener('click', function() {
+                    var open = history.style.display === 'none';
+                    history.style.display = open ? 'block' : 'none';
+                    toggle.textContent = open ? '▴' : '▾';
+                });
 
                 progressContainer.appendChild(row);
-                batchRows[batchIndex] = { rowEl: row, fillEl: fill, textEl: text, phaseEl: phaseSpan };
+                batchRows[batchIndex] = {
+                    rowEl: row,
+                    labelEl: label,
+                    fillEl: fill,
+                    textEl: text,
+                    phaseEl: phaseSpan,
+                    messageEl: message,
+                    historyEl: history,
+                    phaseHistory: {},
+                    currentPhase: '',
+                    pct: 0
+                };
                 return batchRows[batchIndex];
             }
 
             function _updateBatchRow(batchIndex, phase, completed, total, message) {
                 var row = _ensureBatchRow(batchIndex, '', 0);
-                if (phase && row.phaseEl && phaseLabels[phase] !== undefined) {
+                _recordPhaseProgress(row, phase, completed, total, message);
+                if (phase && !nonTimelinePhases[phase] && row.phaseEl) {
                     row.phaseEl.textContent = phaseLabels[phase] || phase;
                 }
+                if (message && row.messageEl) {
+                    row.messageEl.textContent = message;
+                    row.messageEl.title = message;
+                }
                 if (total > 0) {
-                    var pct = Math.min(100, Math.round(completed / total * 100));
-                    row.fillEl.style.width = pct + '%';
+                    var pct = _phaseProgressPct(phase, completed, total);
+                    if (pct !== null) {
+                        row.pct = Math.max(row.pct || 0, pct);
+                        row.fillEl.style.width = row.pct + '%';
+                    }
                     row.textEl.textContent = completed + '/' + total;
                 } else if (total === 0 && completed === 0) {
                     row.textEl.textContent = '0/0';
@@ -582,20 +813,56 @@
                 }
             }
 
+            function _syncBatchRows(nextTotal) {
+                var existingKeys = Object.keys(batchRows);
+                for (var i = 0; i < existingKeys.length; i++) {
+                    var idx = parseInt(existingKeys[i]);
+                    if (idx >= nextTotal) {
+                        var oldRow = batchRows[idx];
+                        if (oldRow && oldRow.rowEl && oldRow.rowEl.parentNode) {
+                            oldRow.rowEl.parentNode.removeChild(oldRow.rowEl);
+                        }
+                        delete batchRows[idx];
+                    }
+                }
+                for (var bi = 0; bi < nextTotal; bi++) {
+                    _ensureBatchRow(bi, 'Batch ' + (bi + 1), nextTotal);
+                }
+            }
+
+            function _replayPendingGlobalProgress() {
+                if (!pendingGlobalProgress.length || !Object.keys(batchRows).length) return;
+                var pending = pendingGlobalProgress;
+                pendingGlobalProgress = [];
+                for (var p = 0; p < pending.length; p++) {
+                    _updateGlobalProgress(
+                        pending[p].phase,
+                        pending[p].completed,
+                        pending[p].total,
+                        pending[p].message
+                    );
+                }
+            }
+
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
                 if (event !== 'result' && event !== 'error') {
                     console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
                 }
                 if (event === 'start') {
                     totalBatches = payload.total || 1;
-                    // 预创建所有 batch 行
-                    for (var bi = 0; bi < totalBatches; bi++) {
-                        _ensureBatchRow(bi, 'Batch ' + (bi + 1), totalBatches);
-                    }
+                    _syncBatchRows(totalBatches);
+                    _replayPendingGlobalProgress();
                 } else if (event === 'progress') {
                     var bi = payload.batch_index;
                     if (bi !== undefined && bi >= 0) {
                         _updateBatchRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message);
+                    } else if (!Object.keys(batchRows).length) {
+                        pendingGlobalProgress.push({
+                            phase: payload.phase,
+                            completed: payload.completed || 0,
+                            total: payload.total || 0,
+                            message: payload.message
+                        });
                     } else {
                         _updateGlobalProgress(payload.phase, payload.completed || 0, payload.total || 0, payload.message);
                     }
@@ -606,6 +873,7 @@
                 var errorText = data.needs_ic_test && !!document.getElementById('ic_test_module')
                     ? '当前测试器还没有 IC 测试结果。请先在 IC 测试模块运行一次 IC 测试。'
                     : data.error;
+                markProgressRowsDone(false, errorText || '分组测试失败');
                 if (statusSpan) {
                     statusSpan.innerHTML = '✗ 分组测试失败: ' + errorText;
                     statusSpan.style.color = '#d40000';
@@ -621,6 +889,7 @@
                 var btch = batches[bi];
                 if (GT.panels && GT.panels.ui) GT.panels.ui.markGroupFactorStatus(btch.testerId, btch.factorAlias, 'done');
             }
+            markProgressRowsDone(true, '分组测试完成');
 
             // 渲染结果
             if (GT.results && GT.results.renderer && GT.results.renderer.applyGroupTestResult) {
@@ -637,13 +906,12 @@
             }
         } catch (e) {
             console.error('[runGroupTest] error:', e);
+            markProgressRowsDone(false, e.message || '未知错误');
             if (statusSpan) {
                 statusSpan.innerHTML = '✗ ' + (e.message || '未知错误');
                 statusSpan.style.color = '#d40000';
             }
         } finally {
-            var _pb = document.getElementById('gt-batch-progress');
-            if (_pb) _pb.remove();
             if (runBtn) {
                 runBtn.disabled = false;
                 runBtn.style.display = '';

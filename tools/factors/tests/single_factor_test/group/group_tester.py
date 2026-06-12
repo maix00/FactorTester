@@ -138,6 +138,21 @@ class FactorGroupTester:
                 continue
             tester_by_id.setdefault(group.tester_id, (tester, []))[1].append(group)
 
+        flat_groups = [
+            group for group in flat_groups
+            if group.tester_id in tester_by_id
+        ]
+        if not flat_groups:
+            raise ValueError("没有找到可用于分组测试的测试器，请刷新提交列表后重试。")
+
+        _emit_progress(
+            "init",
+            f"分组测试准备开始，分组 {len(flat_groups)} 个",
+            total_batches=max(1, len(flat_groups)),
+            total_entries=len(flat_groups),
+            total_groups=len(flat_groups),
+        )
+
         if progress_hook is not None:
             progress_hook(
                 f"group tester prepare testers={len(tester_by_id)} groups={len(flat_groups)}"
@@ -185,30 +200,31 @@ class FactorGroupTester:
                     signal_valid_cols_by_triple[triple] = shared_inputs.signal_valid_cols
                     memberships_by_triple[triple] = membership_np
 
-        # ── Build flat membership for all groups ──
-        flat_membership_np, flat_group_info = build_flat_membership_from_groups(
-            flat_groups,
-            shared_inputs_by_triple=shared_inputs_by_triple,
-            signal_valid_cols_by_triple=signal_valid_cols_by_triple,
-            memberships_by_triple=memberships_by_triple,
-        )
+        missing_triples = sorted({
+            group.triple_key
+            for group in flat_groups
+            if group.triple_key not in shared_inputs_by_triple
+        })
+        if missing_triples:
+            raise ValueError(
+                "部分分组未能准备因子数据，请刷新提交列表后重试。"
+                f"缺失三元组: {missing_triples}"
+            )
 
-        # ── Build GroupSimulationSpec per simulation_index ──
-        # Determine the first shared input for each triple to use as the spec's shared_inputs
-        # Also build group_name_map
+        # ── Build GroupSimulationSpec per (simulation_index, triple) ──
+        # Each spec must stay on a single factor/tester signal axis. Different
+        # factors may have different valid product columns, so they are merged
+        # later on the trade axis by BatchExecutionPlan.
         built_specs: list[GroupSimulationSpec] = []
-        # Group flat_group_info by simulation_index
-        groups_by_sim_index: dict[int, list[tuple[int, _FactorGroupTestGroup]]] = {}
+        groups_by_spec_key: dict[tuple[int, tuple], list[_FactorGroupTestGroup]] = {}
         for flat_idx, group in enumerate(flat_groups):
             si = spec_index_by_group.get(flat_idx, flat_idx)
-            groups_by_sim_index.setdefault(si, []).append((flat_idx, group))
+            groups_by_spec_key.setdefault((si, group.triple_key), []).append(group)
 
-        # For each simulation_index, slice the flat membership and build a spec
-        for si, indexed_groups in groups_by_sim_index.items():
-            first_group = indexed_groups[0][1]
+        for (si, triple), spec_groups in groups_by_spec_key.items():
+            first_group = spec_groups[0]
             factor_alias = first_group.factor_alias
             n_groups = first_group.n_groups
-            triple = first_group.triple_key
             shared = shared_inputs_by_triple.get(triple)
             base_membership = memberships_by_triple.get(triple)
             if shared is None or base_membership is None:
@@ -218,18 +234,16 @@ class FactorGroupTester:
             if factor is None:
                 continue
 
-            # group_name_map: global_group_index → display_name
-            group_name_map: dict[int, str] = {}
-            si_flat_info: list[dict] = []
-            global_indices: list[int] = []
-            for flat_idx, group in indexed_groups:
-                global_indices.append(flat_idx)
-                info = flat_group_info[flat_idx]
-                si_flat_info.append(info)
-                group_name_map[flat_idx] = str(group.name or group.key or f"group_{flat_idx}")
-
-            # Slice the flat membership to only this simulation_index's groups
-            si_membership_np = flat_membership_np[:, global_indices, :]
+            si_membership_np, si_flat_info = build_flat_membership_from_groups(
+                spec_groups,
+                shared_inputs_by_triple=shared_inputs_by_triple,
+                signal_valid_cols_by_triple=signal_valid_cols_by_triple,
+                memberships_by_triple=memberships_by_triple,
+            )
+            group_name_map = {
+                local_idx: str(group.name or group.key or f"group_{local_idx}")
+                for local_idx, group in enumerate(spec_groups)
+            }
 
             built_specs.append(
                 GroupSimulationSpec(
@@ -351,11 +365,14 @@ class FactorGroupTester:
         batch: list[GroupSimulationSpec],
         *,
         batch_index: int,
+        batch_total: int | None = None,
     ) -> BatchExecutionPlan:
         if not batch:
             raise ValueError("batch must not be empty")
         index_list = batch[0].shared_inputs.index_list
         T = len(index_list)
+        batch_total_value = int(batch_total or 0)
+        batch_label = f"{batch_index + 1}/{batch_total_value}" if batch_total_value > 0 else str(batch_index + 1)
 
         # ── Step 1: deduplicate (signal_valid_cols, signal_index) combos,
         #           build product remap matrix once per unique key ──
@@ -370,7 +387,16 @@ class FactorGroupTester:
         entry_trade_valid_cols: dict[int, list] = {}
         entry_trade_membership_np: dict[int, np.ndarray] = {}
 
-        for entry in batch:
+        remap_total = len(batch)
+        _emit_progress(
+            "remap",
+            f"批次 {batch_label} 开始产品重映射，提交 {remap_total} 个",
+            batch_index=batch_index,
+            batch_total=batch_total_value,
+            completed=0,
+            total=remap_total,
+        )
+        for remap_idx, entry in enumerate(batch, start=1):
             key = _remap_key(entry)
             if key not in _remap_cache:
                 signal_to_trade, trade_products, _ = _build_product_remap_matrix(
@@ -387,6 +413,14 @@ class FactorGroupTester:
             si = entry.simulation_index
             entry_trade_valid_cols[si] = trade_cols
             entry_trade_membership_np[si] = trade_membership_np
+            _emit_progress(
+                "remap",
+                f"批次 {batch_label} 产品重映射 {remap_idx}/{remap_total}",
+                batch_index=batch_index,
+                batch_total=batch_total_value,
+                completed=remap_idx,
+                total=remap_total,
+            )
 
         # ── Step 2: merge all trade products into unified axis ──
         trade_product_names = sorted({
@@ -450,9 +484,11 @@ class FactorGroupTester:
         )
 
     def build_batch_execution_plans(self) -> list[BatchExecutionPlan]:
+        batches = self.build_overlap_batches()
+        batch_total = len(batches)
         return [
-            self.build_batch_execution_plan(batch, batch_index=batch_index)
-            for batch_index, batch in enumerate(self.build_overlap_batches())
+            self.build_batch_execution_plan(batch, batch_index=batch_index, batch_total=batch_total)
+            for batch_index, batch in enumerate(batches)
         ]
 
     def enrich_batch_execution_plan(
@@ -475,7 +511,7 @@ class FactorGroupTester:
 
         total_entries = len(plan.entries)
         for entry_idx, entry in enumerate(plan.entries, start=1):
-            _emit_progress("trade_data", f"加载交易数据 {entry_idx}/{total_entries} factor={entry.factor_alias}",
+            _emit_progress("trade_data", f"加载交易数据 {entry_idx}/{total_entries}",
                            completed=entry_idx - 1, total=total_entries)
             factor = entry.tester.resolve_factor(entry.factor_alias)
             if factor is None:
@@ -546,7 +582,7 @@ class FactorGroupTester:
         batch_label = f"{batch_index + 1}/{batch_total}"
         set_batch_context(batch_index, batch_total, batch_label)
         try:
-            _emit_progress("trade_data", f"batch {batch_label} 加载交易数据",
+            _emit_progress("trade_data", f"批次 {batch_label} 加载交易数据",
                            completed=0, total=1)
             plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications, use_closetoday=use_closetoday)
             first_entry = plan.entries[0]
@@ -576,10 +612,10 @@ class FactorGroupTester:
                 for flat_pos, info in enumerate(entry.flat_group_info):
                     group_configs[local_to_global.get(flat_pos, flat_pos)] = dict(info)
 
-            _emit_progress("trade_data", f"batch {batch_label} 交易数据就绪 groups={group_count} products={len(spec_bundle.valid_cols)}",
+            _emit_progress("trade_data", f"批次 {batch_label} 交易数据就绪，分组 {group_count} 个，品种 {len(spec_bundle.valid_cols)} 个",
                            completed=1, total=1)
 
-            _emit_progress("simulate", f"batch {batch_label} 模拟中", completed=0, total=1)
+            _emit_progress("simulate", f"批次 {batch_label} 开始模拟", completed=0, total=1)
             _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,
             membership_np=plan.merged_membership_np,
@@ -630,6 +666,7 @@ class FactorGroupTester:
                     "cum_np": cum_np,
                     "idx_list": idx_list,
                     "group_result": sliced_result,
+                    "flat_group_info": entry.flat_group_info,
                     "ls_configs": entry.spec.get("ls_configs"),
                     "tester": entry.tester,
                 })
@@ -651,14 +688,21 @@ class FactorGroupTester:
         progress_hook: Optional[Callable[[str], None]] = None,
         max_workers: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        plans = self.build_batch_execution_plans()
-        batches = [plan.entries for plan in plans]
+        batches = self.build_overlap_batches()
         total_entries = len(self.specs)
-        total_groups = sum(len(plan.group_owner) for plan in plans)
+        total_groups = sum(
+            self._flattened_group_count(entry)
+            for batch in batches
+            for entry in batch
+        )
         total_batches = len(batches)
 
-        _emit_progress("init", f"run start batches={total_batches} entries={total_entries} overlap={self.overlap_ratio:.2f}",
+        _emit_progress("init", f"分组测试开始，批次 {total_batches} 个，提交 {total_entries} 个，重叠阈值 {self.overlap_ratio:.2f}",
                        total_batches=total_batches, total_entries=total_entries, total_groups=total_groups)
+        plans = [
+            self.build_batch_execution_plan(batch, batch_index=batch_index, batch_total=total_batches)
+            for batch_index, batch in enumerate(batches)
+        ]
         if progress_hook is not None:
             progress_hook(
                 f"group tester run start specs={len(self.specs)} batches={len(batches)} overlap_ratio={self.overlap_ratio:.2f}"
@@ -676,7 +720,7 @@ class FactorGroupTester:
             nonlocal batches_completed
             plan = plans[batch_idx]
             batch_label = f"{batch_idx + 1}/{total_batches}"
-            _emit_progress("batch", f"batch {batch_label} start entries={len(batch)} groups={len(plan.group_owner)} products={len(plan.trade_product_names)}",
+            _emit_progress("batch", f"批次 {batch_label} 开始，提交 {len(batch)} 个，分组 {len(plan.group_owner)} 个，交易品种 {len(plan.trade_product_names)} 个",
                            batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch),
                            completed=batches_completed, total=total_batches)
             if progress_hook is not None:
@@ -698,7 +742,7 @@ class FactorGroupTester:
                 rebalance_mode=rebalance_mode,
             )
             batches_completed += 1
-            _emit_progress("batch", f"batch {batch_label} done entries={len(batch)}",
+            _emit_progress("batch", f"批次 {batch_label} 完成，提交 {len(batch)} 个",
                            batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch),
                            completed=batches_completed, total=total_batches)
             if progress_hook is not None:
@@ -716,6 +760,6 @@ class FactorGroupTester:
                 results.extend(future.result())
 
         results.sort(key=lambda item: int(item.get("simulation_index", 0)))
-        _emit_progress("batch", f"all batches done batches={total_batches} entries_done={len(results)}",
+        _emit_progress("batch", f"全部批次完成，批次 {total_batches} 个，完成提交 {len(results)} 个",
                        completed=total_batches, total=total_batches)
         return results

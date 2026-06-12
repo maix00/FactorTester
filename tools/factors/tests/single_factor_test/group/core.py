@@ -35,6 +35,8 @@ def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     """注册结构化进度回调。回调签名为 callback(phase: str, message: str, extra: dict)。
 
     phase 取值：
+    - factor_eval — 计算因子值
+    - returns_eval — 计算收益率
     - membership  — 计算分组隶属度
     - remap       — 产品重新映射
     - trade_data  — 加载交易数据（returns + prices + specs）
@@ -308,6 +310,13 @@ def _prepare_group_shared_inputs(
     end_date = end_dt.ts if end_dt is not None and end_dt.is_set else tester.end_date
 
     r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
+    if r is None or r.table.empty or r.returns.empty:
+        ensure_group_factor_inputs(
+            tester,
+            factor,
+            returns_col=returns_col,
+        )
+        r = tester._get_result(factor) if hasattr(tester, '_get_result') else None
     if r is None or r.returns.empty:
         raise ValueError(f"{factor.alias}: returns 未计算，请先运行 IC 测试")
     raw_returns = r.returns
@@ -517,7 +526,7 @@ def _build_group_membership_from_shared(
     index_list = shared.index_list
     signal_valid_cols = shared.signal_valid_cols
 
-    _emit_progress("membership", f"membership start factor={factor.alias}",
+    _emit_progress("membership", "开始计算分组隶属度",
                    completed=0, total=T)
     _last_report = 0
     for t in tqdm(range(T), desc="Computing memberships: " + factor.alias):
@@ -573,10 +582,10 @@ def _build_group_membership_from_shared(
         pct = int(t / T * 10)
         if pct > _last_report or t == T - 1:
             _last_report = pct
-            _emit_progress("membership", f"membership {t+1}/{T}",
+            _emit_progress("membership", f"计算分组隶属度 {t+1}/{T}",
                            completed=t + 1, total=T)
 
-    _emit_progress("membership", f"membership done factor={factor.alias}",
+    _emit_progress("membership", "分组隶属度计算完成",
                    completed=T, total=T)
     return membership_np
 
@@ -592,7 +601,7 @@ def _build_group_memberships_from_shared(
     memberships = []
     total = len(group_counts)
     for i, group_count in enumerate(group_counts):
-        _emit_progress("membership", f"membership {i+1}/{total} build n_groups={group_count} factor={factor.alias}",
+        _emit_progress("membership", f"构建分组隶属度 {i+1}/{total}，组数 {group_count}",
                        completed=i, total=total)
         memberships.append(
             _build_group_membership_from_shared(
@@ -602,7 +611,7 @@ def _build_group_memberships_from_shared(
                 rebalance_mode=rebalance_mode,
             )
         )
-    _emit_progress("membership", f"membership all done factor={factor.alias}",
+    _emit_progress("membership", "全部分组隶属度构建完成",
                    completed=total, total=total)
     return memberships
 
@@ -1026,7 +1035,7 @@ def build_flat_membership_from_groups(
                 'liquidity_percent': group.liquidity_percent,
                 'margin_mode': group.margin_mode,
             })
-        _emit_progress("flat_membership", f"flat membership {gi+1}/{len(groups)}",
+        _emit_progress("flat_membership", f"展开分组隶属度 {gi+1}/{len(groups)}",
                        completed=gi + 1, total=len(groups))
 
     membership_np = np.concatenate(slices, axis=1)  # (T, M_total, P)
@@ -1142,7 +1151,7 @@ def _simulate_group_from_preloaded(
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
     trade_present_np = np.isfinite(price_np) & (price_np > 0)
     data_has_bar = trade_present_np if np.any(~trade_present_np) else None
-    _emit_progress("simulate", f"simulate start factor={factor.alias}", completed=0, total=1)
+    _emit_progress("simulate", "开始模拟", completed=0, total=1)
     sim_result = simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_filled,
@@ -1164,7 +1173,7 @@ def _simulate_group_from_preloaded(
         rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
     )
-    _emit_progress("simulate", f"simulate done factor={factor.alias}", completed=1, total=1)
+    _emit_progress("simulate", "模拟完成", completed=1, total=1)
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
@@ -1298,6 +1307,107 @@ def get_factor_table_for_group(tester: Any, factor: Factor) -> pd.DataFrame:
 
     # 最后兜底：重新计算
     return factor.evaluate(tester.products)
+
+
+def ensure_group_factor_inputs(
+    tester: Any,
+    factor: Factor,
+    *,
+    returns_col: FactorNextPeriodReturns,
+) -> None:
+    """Compute factor exposures and forward returns needed by group testing.
+
+    Group testing can run without a prior IC test. In that case this function
+    fills the tester-scoped FactorRunResult with the same minimum inputs that
+    the group pipeline expects: factor table and next-period returns.
+    """
+    if not hasattr(tester, "_get_result"):
+        return
+
+    r = tester._get_result(factor)
+    needs_factor_eval = not isinstance(r.table, pd.DataFrame) or r.table.empty
+    needs_returns_eval = not isinstance(r.returns, pd.DataFrame) or r.returns.empty
+    if not needs_factor_eval and not needs_returns_eval:
+        return
+
+    from tools.factors.FactorTester import _active_tester
+    from tools.factors.eval_progress import count_nodes, setup as setup_progress, teardown as teardown_progress
+
+    return_freq = cast(
+        DataFreq,
+        r.return_freq
+        if getattr(r, "return_freq", None) is not None
+        else (factor.freq if getattr(factor, "freq", None) is not None else DataFreq.MIN1),
+    )
+    returns_factor = None
+    if needs_returns_eval:
+        shift = 0 if returns_col.value.name.startswith("OPEN") else 1
+        returns_factor = NextReturns().get_factor(
+            SC=returns_col.value,
+            RF=return_freq.value,
+            S=shift,
+            **{'$F': return_freq.value, '$Rev': '0'},
+        )
+
+    token = _active_tester.set(tester)
+    try:
+        if needs_factor_eval:
+            factor_nodes = count_nodes(factor._expr)
+            _emit_progress(
+                "factor_eval",
+                f"计算因子 {0}/{factor_nodes}",
+                completed=0,
+                total=factor_nodes,
+            )
+            setup_progress(
+                factor_nodes,
+                lambda completed, total: _emit_progress(
+                    "factor_eval",
+                    f"计算因子 {completed}/{total}",
+                    completed=completed,
+                    total=total,
+                ),
+            )
+            try:
+                factor.evaluate(tester.products)
+            finally:
+                teardown_progress()
+        if needs_returns_eval and returns_factor is not None:
+            source_freq = cast(
+                DataFreq,
+                factor._source_freq
+                if getattr(factor, "_source_freq", None) is not None
+                else (factor.freq if getattr(factor, "freq", None) is not None else DataFreq.MIN1),
+            )
+            returns_nodes = count_nodes(returns_factor._expr)
+            _emit_progress(
+                "returns_eval",
+                f"计算收益 {0}/{returns_nodes}",
+                completed=0,
+                total=returns_nodes,
+            )
+            setup_progress(
+                returns_nodes,
+                lambda completed, total: _emit_progress(
+                    "returns_eval",
+                    f"计算收益 {completed}/{total}",
+                    completed=completed,
+                    total=total,
+                ),
+            )
+            try:
+                returns_table = returns_factor.evaluate(tester.products, freq=source_freq)
+                r.returns = cast(pd.DataFrame, returns_table.copy(deep=False))
+                r.return_freq = return_freq
+            finally:
+                teardown_progress()
+    finally:
+        _active_tester.reset(token)
+        if returns_factor is not None:
+            if hasattr(tester, "discard_result"):
+                tester.discard_result(returns_factor)
+            else:
+                returns_factor.clear()
 
 
 def _is_roll_mapped_product(product: Any) -> bool:
@@ -1453,7 +1563,7 @@ def _build_normalized_liquidity_capacity(
     P = len(products)
     raw = np.zeros((T, P), dtype=float)
 
-    _emit_progress("liquidity", f"liquidity capacity start T={T} P={P}", completed=0, total=P)
+    _emit_progress("liquidity", f"开始计算流动性容量，时间点 {T} 个，品种 {P} 个", completed=0, total=P)
     for pi, product in enumerate(tqdm(products, desc="Build liquidity capacity", total=P)):
         try:
             dm = getattr(product, freq.name)
@@ -1491,7 +1601,7 @@ def _build_normalized_liquidity_capacity(
         finally:
             # 每 10 个产品或末个产品发射一次
             if pi % max(1, P // 10) == 0 or pi == P - 1:
-                _emit_progress("liquidity", f"liquidity capacity {pi+1}/{P}",
+                _emit_progress("liquidity", f"计算流动性容量 {pi+1}/{P}",
                                completed=pi + 1, total=P)
 
     row_sum = np.nansum(raw, axis=1)
@@ -1503,7 +1613,7 @@ def _build_normalized_liquidity_capacity(
         out=np.zeros_like(raw, dtype=float),
         where=row_sum[:, np.newaxis] > 0,
     )
-    _emit_progress("liquidity", "liquidity capacity done", completed=P, total=P)
+    _emit_progress("liquidity", "流动性容量计算完成", completed=P, total=P)
     return capacity
 
 
@@ -1823,14 +1933,14 @@ def simulate_group_trading_book(
             rounded[no_tick] = np.round(px[no_tick], 2)
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
 
-    _emit_progress("simulate", f"trading book simulation T={T}", completed=0, total=T)
+    _emit_progress("simulate", f"开始交易账本模拟，时间点 {T} 个", completed=0, total=T)
     _last_sim_report = -1
     for t in tqdm(range(T), desc="Trading book simulation"):
         # 每 5% 或每 500 步发射一次进度（避免过于频繁的 SSE 推送）
         pct = int(t / max(T, 1) * 20)  # 0..20
         if pct > _last_sim_report or t == T - 1:
             _last_sim_report = pct
-            _emit_progress("simulate", f"trading book {t+1}/{T}", completed=t + 1, total=T)
+            _emit_progress("simulate", f"交易账本模拟 {t+1}/{T}", completed=t + 1, total=T)
         price_t = _round_price(prices[t])
         valuated = np.isfinite(price_t) & (price_t > 0)
         executable = valuated if tradable_mask_arr is None else (valuated & tradable_mask_arr[t])
@@ -2165,4 +2275,3 @@ def _compute_buy_costs_per_group(
         where=wealth_before_trade > 0,
     )
     return buy, buy_fee, trade_notional_ratio
-
