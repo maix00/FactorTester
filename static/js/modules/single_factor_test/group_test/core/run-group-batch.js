@@ -47,7 +47,6 @@
         var phaseOrder = [];
         var knownTotalPhases = 0;       // emit_start 告知的总阶段数，优先使用
         var seenPhases = {};            // phase → true（已注册到 phaseOrder）
-
         function _registerPhase(phase) {
             if (!phase || nonTimelinePhases[phase] || seenPhases[phase]) return;
             seenPhases[phase] = true;
@@ -196,7 +195,7 @@
             });
 
             progressContainer.appendChild(row);
-            coverageBatchRows[coverageBatchIndex] = {
+            var newRow = {
                 rowEl: row,
                 labelEl: label,
                 fillEl: fill,
@@ -208,7 +207,9 @@
                 currentPhase: '',
                 pct: 0
             };
-            return coverageBatchRows[coverageBatchIndex];
+            coverageBatchRows[coverageBatchIndex] = newRow;
+
+            return newRow;
         }
 
         function _updateCoverageBatchRow(coverageBatchIndex, phase, completed, total, message) {
@@ -314,34 +315,6 @@
             /** 设置后端告知的总阶段数（优先于动态发现） */
             setTotalPhases: function(n) {
                 if (n > 0) knownTotalPhases = n;
-            },
-
-            /** 将 init 之前已完成的 phase 直接写入所有行的 phaseHistory */
-            writePrePhases: function(prePhases) {
-                if (!Array.isArray(prePhases)) return;
-                var indices = Object.keys(coverageBatchRows).map(Number);
-                for (var p = 0; p < prePhases.length; p++) {
-                    var pp = prePhases[p];
-                    if (!pp.phase || nonTimelinePhases[pp.phase]) continue;
-                    _registerPhase(pp.phase);
-                    for (var i = 0; i < indices.length; i++) {
-                        var row = coverageBatchRows[indices[i]];
-                        row.phaseHistory[pp.phase] = row.phaseHistory[pp.phase] || {};
-                        var existing = row.phaseHistory[pp.phase];
-                        // 保留更大的 total（避免被后续小值覆盖）
-                        var preserveCount = pp.total > 0 && existing.total > pp.total;
-                        row.phaseHistory[pp.phase] = {
-                            completed: preserveCount ? existing.completed : (pp.completed || 0),
-                            total: preserveCount ? existing.total : (pp.total || 0),
-                            message: pp.message || existing.message || '',
-                            done: (pp.total > 0 && pp.completed >= pp.total) || !!(existing.done)
-                        };
-                    }
-                }
-                // 重渲染所有行
-                for (var j = 0; j < indices.length; j++) {
-                    _renderPhaseHistory(coverageBatchRows[indices[j]]);
-                }
             },
 
             /** 预注册阶段列表（后端 emit_start 告知的完整 phase 顺序） */

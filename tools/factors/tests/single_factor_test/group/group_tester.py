@@ -146,13 +146,7 @@ class FactorGroupTester:
         if not flat_groups:
             raise ValueError("没有找到可用于分组测试的测试器，请刷新提交列表后重试。")
 
-        _emit_progress(
-            "init",
-            f"分组测试准备开始，分组 {len(flat_groups)} 个",
-            total_batches=max(1, len(flat_groups)),
-            total_entries=len(flat_groups),
-            total_groups=len(flat_groups),
-        )
+        _emit_progress("info", f"分组测试准备开始，分组 {len(flat_groups)} 个")
 
         if progress_hook is not None:
             progress_hook(

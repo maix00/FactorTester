@@ -283,17 +283,6 @@
                         batchMgr.setPhaseLabels(labelMap);
                     }
                     // 回放缓存的无 batch_index 全局进度
-                    if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
-                        var pending = pendingGlobalProgress;
-                        pendingGlobalProgress = [];
-                        for (var p = 0; p < pending.length; p++) {
-                            batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message);
-                        }
-                    }
-                    // 将后端 pre_phases 直接写入各行 phaseHistory（init 之前已完成的阶段）
-                    if (payload.pre_phases && payload.pre_phases.length) {
-                        batchMgr.writePrePhases(payload.pre_phases);
-                    }
                 } else if (event === 'progress') {
                     var bi = payload.product_coverage_batch_index;
                     if (bi !== undefined && bi >= 0) {

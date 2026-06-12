@@ -1193,18 +1193,25 @@ def run_group_test_stream():
             # ── 将 registry 桥接到 core.py 的全局注册 ──
             last_progress = {'completed': 0, 'total': 0}
             last_progress_by_batch: dict[int, dict[str, int]] = {}
-            # 缓存在 init 之前到达的 phase（factor_eval, returns_eval 等）
-            # 它们会在 init 时作为 pre_phases 推给前端
-            pre_init_phases: list[dict] = []
 
             def _progress_bridge(phase: str, message: str, extra: dict):
-                nonlocal pre_init_phases
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
-                if has_progress_count:
+
+                if phase == 'init':
+                    # init 阶段：发送 start 事件，携带 phases 元数据
+                    total_val = total or 0
+                    _phases = extra.get('phases', [])
+                    registry.emit_start(
+                        total=total_val, groups=extra.get('total_groups', 0),
+                        phase='product_coverage_batch',
+                        phases=_phases,
+                        **progress_extra,
+                    )
+                elif has_progress_count:
                     last_progress['completed'] = completed
                     last_progress['total'] = total
                     if product_coverage_batch_index is not None:
@@ -1212,43 +1219,22 @@ def run_group_test_stream():
                             'completed': completed,
                             'total': total,
                         }
-                    # 缓存 init 之前的 phase，以便注入 start 事件
-                    if phase not in ('init', 'info', 'product_coverage_batch'):
-                        pre_init_phases.append({
-                            'phase': phase,
-                            'completed': completed,
-                            'total': total,
-                            'message': message,
-                        })
+                    # 所有带进度计数的 phase 直接 emit（包括 factor_eval, returns_eval 等）
+                    registry.emit_phase(
+                        phase, message=message,
+                        completed=completed, total=total,
+                        **progress_extra,
+                    )
                 elif phase == 'info':
+                    # info 是信息性消息，转换为当前批次的 progress 事件
                     batch_progress = None
                     if product_coverage_batch_index is not None:
                         batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
                     progress = batch_progress or last_progress
+                    if progress['completed'] == 0 and progress['total'] == 0:
+                        return
                     completed = progress['completed']
                     total = progress['total']
-                    progress_extra['completed'] = completed
-                    progress_extra['total'] = total
-                elif phase != 'init':
-                    return
-                completed = completed or 0
-                total = total or 0
-                progress_extra.pop('completed', None)
-                progress_extra.pop('total', None)
-                if phase == 'init':
-                    # 从 progress_extra 中移除 phases，避免与显式参数冲突
-                    _phases = progress_extra.pop('phases', extra.get('phases', []))
-                    # 将 pre_init_phases 快照传入 start 事件
-                    _pre_phases = pre_init_phases
-                    pre_init_phases = []
-                    registry.emit_start(
-                        total=total, groups=extra.get('total_groups', 0),
-                        phase='product_coverage_batch',
-                        phases=_phases,
-                        pre_phases=_pre_phases,
-                        **progress_extra,
-                    )
-                else:
                     registry.emit_phase(
                         phase, message=message,
                         completed=completed, total=total,
