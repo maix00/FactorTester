@@ -329,7 +329,7 @@ class FactorGroupTester:
 
         LS-config-aware merging:
           Each ``GroupSimulationSpec.spec`` may carry ``ls_configs`` (per-entry LS)
-          and/or ``cross_batch_ls_spec_indices`` (cross-entry LS, set of spec indices).
+          and/or ``ls_spec_indices`` (spec indices that share an LS config).
           If an LS config's legs span multiple overlap-based batches, those batches
           are merged so the LS computation can see all groups in one simulate call.
 
@@ -365,7 +365,7 @@ class FactorGroupTester:
                     stack.append(nxt)
             batches.extend(self._split_component_by_cost(component))
 
-        # ── 2. Collect LS config cross-batch constraints ──
+        # ── 2. Collect LS config shared-spec constraints ──
         # Build spec_index → batch_index mapping
         spec_to_batch: dict[int, int] = {}
         for bi, batch in enumerate(batches):
@@ -375,9 +375,9 @@ class FactorGroupTester:
         # Gather all sets of spec indices that must stay together.
         # (a) per-entry ls_configs: long/short groups are local to the entry —
         #     they refer to groups within the same simulation_index, so no
-        #     cross-batch constraint is needed today.  We collect the entry's
+        #     product-coverage constraint is needed today.  We collect the entry's
         #     own spec index as a single-element set anyway for future-proofing.
-        # (b) cross_batch_ls_spec_indices: explicit cross-entry LS constraints.
+        # (b) ls_spec_indices: explicit spec-level LS sharing constraints.
         ls_spec_groups: list[set[int]] = []
         for entry in self.specs:
             ls_configs = (entry.spec or {}).get('ls_configs')
@@ -385,7 +385,7 @@ class FactorGroupTester:
                 # Future: ls_configs legs may reference (sim_index, group) pairs.
                 # For now, all legs are within the same entry.
                 ls_spec_groups.append({entry.simulation_index})
-            cross_indices = (entry.spec or {}).get('cross_batch_ls_spec_indices')
+            cross_indices = (entry.spec or {}).get('ls_spec_indices')
             if isinstance(cross_indices, (list, set)) and cross_indices:
                 group_set = set(cross_indices)
                 group_set.add(entry.simulation_index)

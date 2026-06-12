@@ -640,11 +640,11 @@ def run_group_test():
     
     Request JSON:
     {
-        "batches": [
+        "entries": [
             {"submission_id": "...", "factor_alias": "...", "n_groups": 5, "ls_configs": [...]},
             ...
         ],
-        "cross_batch_ls": [
+        "cross_entry_ls": [
             {"name": "LS-A", "long": {"submission_id": "...", "factor_alias": "...", "group": 0},
                           "short": {"submission_id": "...", "factor_alias": "...", "group": 4}},
             ...
@@ -654,7 +654,7 @@ def run_group_test():
         "rebalance_mode": "buy_and_hold"
     }
     
-    请求里的 `batches` / `cross_batch_ls` 仍保留原字段名；
+    请求里的 `entries` / `cross_entry_ls` 不含 batch 语义；
     后端内部按 submission entry / cross-entry LS 处理。
     """
     data = request.get_json(silent=True) or {}
@@ -676,12 +676,12 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    submitted_entries = data.get('batches')
+    submitted_entries = data.get('entries')
     if not isinstance(submitted_entries, list) or not submitted_entries:
-        return False, {'success': False, 'error': 'batches 必须是非空数组', 'status': 400}
+        return False, {'success': False, 'error': 'entries 必须是非空数组', 'status': 400}
 
     request_started = time.perf_counter()
-    cross_entry_ls_requests = data.get('cross_batch_ls') or []
+    cross_entry_ls_requests = data.get('cross_entry_ls') or []
     _progress(
         f"group simulations request start entries={len(submitted_entries)} "
         f"cross_entry_ls={len(cross_entry_ls_requests) if isinstance(cross_entry_ls_requests, list) else 0}"
@@ -1013,7 +1013,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
                 'fee_costs': [0.0] * len(r_ls),
                 'trade_notional_ratios': [0.0] * len(r_ls),
                 'is_ls': True,
-                'is_cross_batch': True,
+                'is_cross_entry': True,
                 'cross_ls_info': {
                     'type': 'long_short',
                     'long_batch': long_info,
@@ -1104,7 +1104,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         'tester_alias': valid_results[0].get('tester_alias', '?') if valid_results else '?',
         'tester_product_count': valid_results[0].get('tester_product_count', 0) if valid_results else 0,
         'simulation_count': len(valid_results),
-        'cross_batch_ls_count': len(cross_ls_groups),
+        'cross_entry_ls_count': len(cross_ls_groups),
         'errors': errors if errors else None,
     }
 
@@ -1440,10 +1440,10 @@ def run_group_test_stream():
     data = request.get_json(silent=True) or {}
 
     # ── 在主线程中完成 data 校验 ──
-    submitted_entries = data.get('batches')
+    submitted_entries = data.get('entries')
     if not isinstance(submitted_entries, list) or not submitted_entries:
         def _early_err():
-            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'batches 必须是非空数组'}, default=str)}\n\n"
+            yield f"event: error\ndata: {_json.dumps({'success': False, 'error': 'entries 必须是非空数组'}, default=str)}\n\n"
         return Response(_early_err(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 

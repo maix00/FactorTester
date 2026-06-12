@@ -416,7 +416,7 @@
         var n_groups = firstGroup.groupCount || nonDerived.length || 1;
 
         var bulkPayload = {
-            batches: [{
+            entries: [{
                 submission_id: resolvedSubmissionId || firstGroup.testerId,
                 factor_alias: firstGroup.factorAlias,
                 n_groups: n_groups,
