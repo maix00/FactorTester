@@ -757,8 +757,15 @@ class FactorGroupTester:
         progress_hook: Optional[Callable[[str], None]] = None,
         max_workers: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        batches = self.build_overlap_batches()
         total_entries = len(self.specs)
+
+        # Emit init as early as possible so frontend can create progress rows
+        # before heavy batch building begins.
+        _emit_progress("init", f"分组测试开始，准备构建批次...",
+                       total_batches=0, total_entries=total_entries, total_groups=0,
+                       phases=GROUP_TEST_PHASES)
+
+        batches = self.build_overlap_batches()
         total_groups = sum(
             self._flattened_group_count(entry)
             for batch in batches
