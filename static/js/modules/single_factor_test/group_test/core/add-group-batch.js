@@ -1,16 +1,20 @@
 /**
- * core/batches.js — groupAddBatch registry
+ * core/add-group-batch.js — addGroupBatch registry (UI list grouping)
  *
- * 管理 groupAddBatch 对象：{ number, name, submission_id, factor, n_groups }。
+ * 管理 addGroupBatch 对象：{ number, name, submission_id, factor, n_groups }。
  * key = "testerId|factorAlias|groupCount"，三元组唯一对应一个 batch。
  *
  * 核心函数：
- *   _batchEnsure(testerId, factorAlias, nGroups) → 存在则返回已有，否则创建
- *   _batchForGroup(group) → 沿 parentId 找根节点，按三元组匹配 batch
- *   _batchGet(testerId, factorAlias, nGroups) → 按三元组查询
- *   _batchGetAll() → 全部 batch
+ *   _addGroupBatchEnsure(testerId, factorAlias, nGroups) → 存在则返回已有，否则创建
+ *   _addGroupBatchForGroup(group) → 沿 parentId 找根节点，按三元组匹配 batch
+ *   _addGroupBatchGet(testerId, factorAlias, nGroups) → 按三元组查询
+ *   _addGroupBatchGetAll() → 全部 batch
  *
- * 挂载到 GT.groupSettings.api.batch。
+ * 挂载到 GT.groupSettings.addGroupBatch。
+ *
+ * 与 run-group-batch.js 的区别：
+ *   - addGroupBatch = UI 列表分组（前端显示用）
+ *   - productCoverageBatch = 后端计算批次（与后端 product_coverage_batch_index 一一对应）
  */
 (function() {
     var GT = window.GroupTest;
@@ -22,14 +26,11 @@
 
     var _batches = {};  // key: "testerId|factorAlias|groupCount" → {number, name, submission_id, factor, n_groups}
 
-    // 引用 group-settings 的闭包变量（通过闭包引用，而非传入）
-    // _resolveRoot, _groupGetRaw 通过 api 获取
-
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
 
-    function _batchKey(testerId, factorAlias, nGroups) {
+    function _addGroupBatchKey(testerId, factorAlias, nGroups) {
         return (testerId || '') + '|' + (factorAlias || '') + '|' + (nGroups || 0);
     }
 
@@ -59,15 +60,11 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // groupAddBatch CRUD
+    // addGroupBatch CRUD
     // ═══════════════════════════════════════════════════════════════
 
-    /**
-     * Ensure a groupAddBatch exists for the given tester/factor/nGroups.
-     * 如果三元组匹配的 batch 已存在，直接返回；否则创建新 batch。
-     */
-    function _batchEnsure(submissionId, factorAlias, nGroups) {
-        var key = _batchKey(submissionId, factorAlias, nGroups);
+    function _addGroupBatchEnsure(submissionId, factorAlias, nGroups) {
+        var key = _addGroupBatchKey(submissionId, factorAlias, nGroups);
         if (_batches[key]) return _batches[key];
         var num = Object.keys(_batches).length + 1;
         var letter = '';
@@ -83,28 +80,26 @@
         return _batches[key];
     }
 
-    /** Get batch by key components (or by root-like object with testerId/factorAlias/groupCount). */
-    function _batchGet(testerId, factorAlias, nGroups) {
+    function _addGroupBatchGet(testerId, factorAlias, nGroups) {
         if (typeof testerId === 'object' && testerId !== null) {
             var g = testerId;
-            return _batches[_batchKey(g.testerId, g.factorAlias, g.groupCount)] || null;
+            return _batches[_addGroupBatchKey(g.testerId, g.factorAlias, g.groupCount)] || null;
         }
-        return _batches[_batchKey(testerId, factorAlias, nGroups)] || null;
+        return _batches[_addGroupBatchKey(testerId, factorAlias, nGroups)] || null;
     }
 
-    function _batchGetAll() {
+    function _addGroupBatchGetAll() {
         return Object.keys(_batches).map(function(k) { return _batches[k]; });
     }
 
-    /** For any group node, walk parentId chain to root, then find batch via root's key. */
-    function _batchForGroup(group) {
+    function _addGroupBatchForGroup(group) {
         if (!group) return null;
         var root = group.parentId ? _resolveRoot(group) : group;
         if (!root) return null;
-        return _batchGet(root.testerId, root.factorAlias, root.groupCount);
+        return _addGroupBatchGet(root.testerId, root.factorAlias, root.groupCount);
     }
 
-    function _batchUpdate(number, patch) {
+    function _addGroupBatchUpdate(number, patch) {
         var keys = Object.keys(_batches);
         for (var i = 0; i < keys.length; i++) {
             if (_batches[keys[i]].number === number) {
@@ -116,7 +111,7 @@
         return null;
     }
 
-    function _batchRemove(number) {
+    function _addGroupBatchRemove(number) {
         var keys = Object.keys(_batches);
         for (var i = 0; i < keys.length; i++) {
             if (_batches[keys[i]].number === number) {
@@ -126,25 +121,25 @@
         }
     }
 
-    function _batchReset() {
+    function _addGroupBatchReset() {
         _batches = {};
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Export to GT.groupSettings.batch
+    // Export to GT.groupSettings.addGroupBatch
     // ═══════════════════════════════════════════════════════════════
 
     GT.groupSettings = GT.groupSettings || {};
-    GT.groupSettings.batch = {
-        get: _batchGet,
-        getAll: _batchGetAll,
-        ensure: _batchEnsure,
-        create: _batchEnsure,        // alias
-        update: _batchUpdate,
-        remove: _batchRemove,
-        forGroup: _batchForGroup,
-        batchKey: _batchKey,
-        _reset: _batchReset,
+    GT.groupSettings.addGroupBatch = {
+        key: _addGroupBatchKey,
+        get: _addGroupBatchGet,
+        getAll: _addGroupBatchGetAll,
+        ensure: _addGroupBatchEnsure,
+        create: _addGroupBatchEnsure,        // alias
+        update: _addGroupBatchUpdate,
+        remove: _addGroupBatchRemove,
+        forGroup: _addGroupBatchForGroup,
+        _reset: _addGroupBatchReset,
     };
 
 })();

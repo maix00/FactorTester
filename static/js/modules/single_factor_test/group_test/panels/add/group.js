@@ -19,7 +19,7 @@
 
     // ── Delegated utilities ──
 
-    var _batchKey = GT.groupSettings.groups.batchKey;
+    var _addGroupBatchKey = GT.groupSettings.addGroupBatch.key;
 
     /** Column-letter name: 1→A, 2→B, ... 26→Z, 27→AA, 28→AB, ... */
     function _colLetter(n) {
@@ -39,18 +39,18 @@
 
         for (var i = 0; i < factorAliases.length; i++) {
             var alias = factorAliases[i];
-            var comboKey = _batchKey(testerId, alias, groupCount);
+            var comboKey = _addGroupBatchKey(testerId, alias, groupCount);
             if (comboMap[comboKey] !== undefined) continue;
 
             // Check existing groups for this combo
             var hasExisting = false;
             for (var j = 0; j < existing.length; j++) {
-                var k = _batchKey(existing[j].testerId, existing[j].factorAlias, existing[j].groupCount);
+                var k = _addGroupBatchKey(existing[j].testerId, existing[j].factorAlias, existing[j].groupCount);
                 if (k === comboKey) { hasExisting = true; break; }
             }
             if (hasExisting) {
                 for (var ej = 0; ej < existing.length; ej++) {
-                    var ek = _batchKey(existing[ej].testerId, existing[ej].factorAlias, existing[ej].groupCount);
+                    var ek = _addGroupBatchKey(existing[ej].testerId, existing[ej].factorAlias, existing[ej].groupCount);
                     if (ek === comboKey && existing[ej].shortAlias) {
                         var letterMatch = existing[ej].shortAlias.match(/^([A-Z]+)/);
                         if (letterMatch) {
@@ -66,7 +66,7 @@
                 // New comboKey: assign a brand-new letter
                 var usedLetters = {};
                 for (var ej2 = 0; ej2 < existing.length; ej2++) {
-                    var ek2 = _batchKey(existing[ej2].testerId, existing[ej2].factorAlias, existing[ej2].groupCount);
+                    var ek2 = _addGroupBatchKey(existing[ej2].testerId, existing[ej2].factorAlias, existing[ej2].groupCount);
                     if (ek2 && existing[ej2].shortAlias) {
                         var lm = existing[ej2].shortAlias.match(/^([A-Z]+)/);
                         if (lm) usedLetters[lm[1]] = true;
@@ -385,7 +385,7 @@
 
         for (var fi = 0; fi < factors.length; fi++) {
             var alias = factors[fi];
-            var comboKey = _batchKey(testerId, alias, groupCount);
+            var comboKey = _addGroupBatchKey(testerId, alias, groupCount);
             var letter = comboLetters[comboKey] || 'A';
 
             var REG = window.GT_CONFIG_REGISTRY;

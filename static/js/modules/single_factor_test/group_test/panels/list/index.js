@@ -83,7 +83,7 @@
             fullRender: fullRender,
             expandedBatches: _expandedBatches,
             lsSectionExpanded: _lsSectionExpanded,
-            getBatchMap: d.H.getBatchMap,
+            getAddGroupBatchMap: d.H.getAddGroupBatchMap,
         });
     }
 

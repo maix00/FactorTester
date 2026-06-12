@@ -1497,20 +1497,20 @@ def run_group_test_stream():
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
-                batch_index = extra.get('batch_index')
+                product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
                 if has_progress_count:
                     last_progress['completed'] = completed
                     last_progress['total'] = total
-                    if batch_index is not None:
-                        last_progress_by_batch[int(batch_index)] = {
+                    if product_coverage_batch_index is not None:
+                        last_progress_by_batch[int(product_coverage_batch_index)] = {
                             'completed': completed,
                             'total': total,
                         }
                 elif phase == 'info':
                     batch_progress = None
-                    if batch_index is not None:
-                        batch_progress = last_progress_by_batch.get(int(batch_index))
+                    if product_coverage_batch_index is not None:
+                        batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
                     progress = batch_progress or last_progress
                     completed = progress['completed']
                     total = progress['total']
@@ -1525,7 +1525,7 @@ def run_group_test_stream():
                 if phase == 'init':
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
-                        phase='batch', **progress_extra,
+                        phase='product_coverage_batch', **progress_extra,
                     )
                 else:
                     registry.emit_phase(

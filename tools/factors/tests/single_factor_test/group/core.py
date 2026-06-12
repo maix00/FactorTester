@@ -26,7 +26,7 @@ from tools.products import lookup_contract_product
 _group_progress_lock = threading.Lock()
 _group_progress_callback: Callable[[str, str, dict], None] | None = None
 
-# 并行 batch 上下文：每个线程设置自己的 batch_index / batch_total，
+# 并行 batch 上下文：每个线程设置自己的 product_coverage_batch_index / product_coverage_batch_total，
 # _emit_progress 自动将其注入 extra，让前端能区分不同 batch 的进度。
 _batch_context = threading.local()
 
@@ -41,7 +41,7 @@ def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     - remap       — 产品重新映射
     - trade_data  — 加载交易数据（returns + prices + specs）
     - simulate    — 交易模拟中
-    - batch       — batch 级进度
+    - product_coverage_batch — product coverage batch 级进度
     - flat_membership — 展平隶属度
     - serialize   — 结果序列化
     - info        — 一般信息
@@ -57,18 +57,18 @@ def unregister_group_progress() -> None:
         _group_progress_callback = None
 
 
-def set_batch_context(batch_index: int, batch_total: int, batch_label: str = "") -> None:
+def set_batch_context(product_coverage_batch_index: int, product_coverage_batch_total: int, product_coverage_batch_label: str = "") -> None:
     """设置当前线程的 batch 上下文，_emit_progress 会自动附加到 extra。"""
-    _batch_context.batch_index = batch_index
-    _batch_context.batch_total = batch_total
-    _batch_context.batch_label = batch_label
+    _batch_context.product_coverage_batch_index = product_coverage_batch_index
+    _batch_context.product_coverage_batch_total = product_coverage_batch_total
+    _batch_context.product_coverage_batch_label = product_coverage_batch_label
 
 
 def clear_batch_context() -> None:
     """清除当前线程的 batch 上下文。"""
-    _batch_context.batch_index = -1
-    _batch_context.batch_total = 0
-    _batch_context.batch_label = ""
+    _batch_context.product_coverage_batch_index = -1
+    _batch_context.product_coverage_batch_total = 0
+    _batch_context.product_coverage_batch_label = ""
 
 
 def _emit_progress(phase: str, message: str, **extra) -> None:
@@ -78,14 +78,14 @@ def _emit_progress(phase: str, message: str, **extra) -> None:
     if cb is not None:
         try:
             # 自动注入 batch 上下文
-            bi = getattr(_batch_context, 'batch_index', -1)
-            bt = getattr(_batch_context, 'batch_total', 0)
-            bl = getattr(_batch_context, 'batch_label', '')
+            bi = getattr(_batch_context, 'product_coverage_batch_index', -1)
+            bt = getattr(_batch_context, 'product_coverage_batch_total', 0)
+            bl = getattr(_batch_context, 'product_coverage_batch_label', '')
             if bi >= 0:
-                extra.setdefault('batch_index', bi)
-                extra.setdefault('batch_total', bt)
+                extra.setdefault('product_coverage_batch_index', bi)
+                extra.setdefault('product_coverage_batch_total', bt)
                 if bl:
-                    extra.setdefault('batch_label', bl)
+                    extra.setdefault('product_coverage_batch_label', bl)
             cb(phase, message, extra)
         except Exception:
             pass

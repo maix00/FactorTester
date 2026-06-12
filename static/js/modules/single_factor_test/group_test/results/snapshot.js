@@ -217,8 +217,8 @@
 
             if (item) {
                 // Get batch number via groupAddBatch.forGroup (walks parentId chain to root)
-                var bobj = GT.groupSettings.batch && GT.groupSettings.batch.forGroup
-                    ? GT.groupSettings.batch.forGroup(item)
+                var bobj = GT.groupSettings.addGroupBatch && GT.groupSettings.addGroupBatch.forGroup
+                    ? GT.groupSettings.addGroupBatch.forGroup(item)
                     : null;
                 groupMeta[idx] = {
                     batchNumber: bobj ? bobj.number : null,

@@ -501,12 +501,8 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Group utilities — batchKey, displayKey, serialize
+    // Group utilities — displayKey, serialize
     // ═══════════════════════════════════════════════════════════════
-
-    function _groupsBatchKey(testerId, factorAlias, groupCount) {
-        return String(testerId) + '|' + factorAlias + '|' + groupCount;
-    }
 
     function _groupsExtractLetter(shortAlias) {
         if (!shortAlias) return null;
@@ -575,7 +571,6 @@
         remove: _groupsRemove,
         list: _groupsList,
         validate: _groupsValidate,
-        batchKey: _groupsBatchKey,
         extractLetter: _groupsExtractLetter,
         displayKey: _groupsDisplayKey,
         effectiveProductNames: _groupsEffectiveProductNames,

@@ -277,7 +277,7 @@
                 + '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span></div>'
                 + '<div style="padding:16px;text-align:center;color:#888;font-size:12px;">暂无分组组合</div>';
         }
-        var batches = H.buildBatches(items);
+        var batches = H.buildAddGroupBatches(items);
         var h = '';
         h += '<div class="unified-section-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;margin-bottom:4px;border-bottom:2px solid #e2e8f0;">';
         h += '<span style="font-size:14px;font-weight:700;color:#1e293b;">📦 分组组合</span>';
