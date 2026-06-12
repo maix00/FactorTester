@@ -68,30 +68,73 @@
         }
 
         /** 计算阶段全局进度百分比，永不回退。
-         *  只有阶段已注册（knownTotalPhases > 0 或 phaseOrder 非空）时才计算；
-         *  否则返回当前 pct，不更新进度条（等待 init 告知阶段列表）。 */
+         *  按各阶段 total 加权分配进度条区域（非均匀）。
+         *  Cap 规则：某个阶段 total 超过其他所有总和 2 倍时，capped 为 2×其他总和。 */
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
-            var numPhases = knownTotalPhases > 0 ? knownTotalPhases : phaseOrder.length;
-            // 还没有收到阶段列表，不计算进度
-            if (numPhases <= 0) return row.pct;
-
-            var phaseIdx = phaseOrder.indexOf(phase);
-            // 阶段尚未注册，先临时注册（等 init 时再正式对齐）
-            if (phaseIdx < 0) {
-                _registerPhase(phase);
-                phaseIdx = phaseOrder.indexOf(phase);
-                numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
+            // 动态记录该 phase 的 total（取最大值）
+            if (total > 0) {
+                var prev = row._phaseTotalMax[phase] || 0;
+                if (total > prev) row._phaseTotalMax[phase] = total;
             }
-            if (phaseIdx < 0) return row.pct;
 
-            var localPct = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
-            var newPct = Math.round(((phaseIdx + localPct) / numPhases) * 100);
-            // 永不回退
-            if (newPct > (row.pct || 0)) {
-                row.pct = newPct;
+            var allTotals = row._phaseTotalMax;
+            var phaseKeys = Object.keys(allTotals);
+            // 需要至少 2 个阶段才有加权意义
+            if (phaseKeys.length < 2) {
+                // 回退到均匀分配
+                var numPhases = knownTotalPhases > 0 ? knownTotalPhases : phaseOrder.length;
+                if (numPhases <= 0) return row.pct;
+                var phaseIdx = phaseOrder.indexOf(phase);
+                if (phaseIdx < 0) {
+                    _registerPhase(phase);
+                    phaseIdx = phaseOrder.indexOf(phase);
+                    numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
+                }
+                if (phaseIdx < 0) return row.pct;
+                var localPct = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+                var newPct = Math.round(((phaseIdx + localPct) / numPhases) * 100);
+                if (newPct > (row.pct || 0)) row.pct = newPct;
+                return row.pct;
             }
+
+            // --- 加权计算 ---
+            // 1) 计算原始权重 = 各 phase 的 total
+            // 2) 检测是否有 phase 需要 cap
+            var sumAll = 0;
+            for (var k = 0; k < phaseKeys.length; k++) {
+                sumAll += allTotals[phaseKeys[k]];
+            }
+            var weights = {};
+            for (var w = 0; w < phaseKeys.length; w++) {
+                var pk = phaseKeys[w];
+                var t = allTotals[pk];
+                var sumOthers = sumAll - t;
+                // Cap: 如果 t > 2 * sumOthers，则 capped = 2 * sumOthers
+                weights[pk] = (sumOthers > 0 && t > 2 * sumOthers) ? 2 * sumOthers : t;
+            }
+
+            // 3) 计算加权占比
+            var weightSum = 0;
+            var wKeys = Object.keys(weights);
+            for (var ws = 0; ws < wKeys.length; ws++) {
+                weightSum += weights[wKeys[ws]];
+            }
+            if (weightSum <= 0) return row.pct;
+
+            // 4) 计算当前 phase 之前的累计权重占比 + 当前 phase 内进度
+            var cumWeightBefore = 0;
+            for (var j = 0; j < phaseOrder.length; j++) {
+                var pj = phaseOrder[j];
+                if (pj === phase) break;
+                if (weights[pj] !== undefined) cumWeightBefore += weights[pj];
+            }
+            var curWeight = weights[phase] || 0;
+            var localFrac = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
+            var weightedPct = Math.round(((cumWeightBefore + curWeight * localFrac) / weightSum) * 100);
+
+            if (weightedPct > (row.pct || 0)) row.pct = weightedPct;
             return row.pct;
         }
 
@@ -103,6 +146,8 @@
                 var p = phaseOrder[j];
                 var h = row.phaseHistory[p];
                 if (!h) continue;
+                // 只显示已完成的阶段 + 当前进行中的阶段（未开始的跳过）
+                if (!h.done && p !== row.currentPhase) continue;
                 items.push({
                     phase: p,
                     label: _escapeProgressHtml(phaseLabels[p] || p),
@@ -243,7 +288,8 @@
                 historyEl: historyEl,
                 phaseHistory: {},
                 currentPhase: '',
-                pct: 0
+                pct: 0,
+                _phaseTotalMax: {}   // phase -> max total seen（用于加权进度条）
             };
             coverageBatchRows[index] = newRow;
             return newRow;
@@ -314,6 +360,10 @@
                         row.phaseEl.textContent = '✓';
                         row.phaseEl.style.color = '#12a150';
                         row.textEl.textContent = '完成';
+                        // 完成后隐藏消息行，只保留左侧标签 + 进度条 + 计数
+                        if (row.messageEl) {
+                            row.messageEl.style.display = 'none';
+                        }
                     } else {
                         row.phaseEl.textContent = '✗';
                         row.phaseEl.style.color = '#d92d20';
@@ -322,6 +372,7 @@
                     if (message && row.messageEl) {
                         row.messageEl.textContent = message;
                         row.messageEl.title = message;
+                        row.messageEl.style.display = '';
                     }
                     _renderPhaseHistory(row);
                     // 自动展开失败的历史
