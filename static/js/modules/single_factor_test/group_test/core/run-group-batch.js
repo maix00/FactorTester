@@ -41,12 +41,16 @@
     function createProductCoverageBatchManager(opts) {
         var progressContainer = opts.progressContainer;
         var phaseLabels = opts.phaseLabels || {
+            init: '准备',
             factor_eval: '因子计算',
             returns_eval: '收益率',
             membership: '分组隶属',
+            flat_membership: '展开隶属',
             remap: '产品映射',
             trade_data: '交易数据',
+            liquidity: '流动性容量',
             simulate: '模拟中',
+            batch: '批次结果',
             serialize: '序列化',
             product_coverage_batch: '批次',
             info: ''
