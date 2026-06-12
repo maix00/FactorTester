@@ -28,7 +28,7 @@ from tools.factors.tests.single_factor_test.group.core import (
     clear_batch_context,
     slice_group_run_result,
 )
-from tools.factors.tests.single_factor_test.group.phases import GROUP_TEST_PHASES
+from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES
 
 
 @dataclass(slots=True)

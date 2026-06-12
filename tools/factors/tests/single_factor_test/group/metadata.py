@@ -1,14 +1,10 @@
 """
-分组测试阶段元数据 — 单一数据源 (Single Source of Truth)
+分组测试元数据 — 单一数据源 (Single Source of Truth)
 
-所有阶段的 key、中文标签、执行顺序统一在此定义。
-后端在 emit_start 时通过 _emit_progress("init") 携带该列表，
-前端据此注册阶段顺序和标签，无需硬编码。
-
-用法：
-    from tools.factors.tests.single_factor_test.group.phases import GROUP_TEST_PHASES
-    # GROUP_TEST_PHASES 是一个 list[dict]，每项 {"key": str, "label": str}
+阶段顺序、中文标签、指标名称等统一在此定义。
 """
+
+# ── 阶段元数据 ──
 
 GROUP_TEST_PHASES = [
     {"key": "factor_eval",     "label": "因子计算"},
