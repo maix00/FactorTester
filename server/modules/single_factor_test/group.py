@@ -1193,8 +1193,12 @@ def run_group_test_stream():
             # ── 将 registry 桥接到 core.py 的全局注册 ──
             last_progress = {'completed': 0, 'total': 0}
             last_progress_by_batch: dict[int, dict[str, int]] = {}
+            # 缓存在 init 之前到达的 phase（factor_eval, returns_eval 等）
+            # 它们会在 init 时作为 pre_phases 推给前端
+            pre_init_phases: list[dict] = []
 
             def _progress_bridge(phase: str, message: str, extra: dict):
+                nonlocal pre_init_phases
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
@@ -1208,6 +1212,14 @@ def run_group_test_stream():
                             'completed': completed,
                             'total': total,
                         }
+                    # 缓存 init 之前的 phase，以便注入 start 事件
+                    if phase not in ('init', 'info', 'product_coverage_batch'):
+                        pre_init_phases.append({
+                            'phase': phase,
+                            'completed': completed,
+                            'total': total,
+                            'message': message,
+                        })
                 elif phase == 'info':
                     batch_progress = None
                     if product_coverage_batch_index is not None:
@@ -1226,10 +1238,14 @@ def run_group_test_stream():
                 if phase == 'init':
                     # 从 progress_extra 中移除 phases，避免与显式参数冲突
                     _phases = progress_extra.pop('phases', extra.get('phases', []))
+                    # 将 pre_init_phases 快照传入 start 事件
+                    _pre_phases = pre_init_phases
+                    pre_init_phases = []
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
                         phase='product_coverage_batch',
                         phases=_phases,
+                        pre_phases=_pre_phases,
                         **progress_extra,
                     )
                 else:

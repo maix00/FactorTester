@@ -265,9 +265,6 @@
             };
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                if (event !== 'result' && event !== 'error') {
-                    console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
-                }
                 if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
                     batchMgr.syncRows(newTotal);
@@ -292,6 +289,10 @@
                         for (var p = 0; p < pending.length; p++) {
                             batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message);
                         }
+                    }
+                    // 将后端 pre_phases 直接写入各行 phaseHistory（init 之前已完成的阶段）
+                    if (payload.pre_phases && payload.pre_phases.length) {
+                        batchMgr.writePrePhases(payload.pre_phases);
                     }
                 } else if (event === 'progress') {
                     var bi = payload.product_coverage_batch_index;
