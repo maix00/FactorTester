@@ -55,10 +55,21 @@
             product_coverage_batch: '批次',
             info: ''
         };
-        var nonTimelinePhases = { product_coverage_batch: true, info: true };
-        var phaseOrder = Object.keys(phaseLabels).filter(function(phase) {
-            return !nonTimelinePhases[phase];
-        });
+        var nonTimelinePhases = { product_coverage_batch: true, info: true, init: true };
+
+        // phaseOrder: 动态发现，按首次出现顺序排列
+        var phaseOrder = [];
+        var knownTotalPhases = 0;       // emit_start 告知的总阶段数，优先使用
+        var seenPhases = {};            // phase → true（已注册到 phaseOrder）
+
+        function _registerPhase(phase) {
+            if (!phase || nonTimelinePhases[phase] || seenPhases[phase]) return;
+            seenPhases[phase] = true;
+            if (phaseLabels[phase] === undefined) {
+                phaseLabels[phase] = phase;
+            }
+            phaseOrder.push(phase);
+        }
 
         var coverageBatchRows = {};     // coverageBatchIndex → { rowEl, fillEl, textEl, phaseEl, messageEl, ... }
         var totalCoverageBatches = 0;
@@ -67,14 +78,12 @@
 
         function _phaseProgressPct(phase, completed, total) {
             if (total <= 0) return null;
-            if (phase && phaseLabels[phase] === undefined && !nonTimelinePhases[phase]) {
-                phaseLabels[phase] = phase;
-                phaseOrder.push(phase);
-            }
+            _registerPhase(phase);
+            var numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
             var localPct = Math.max(0, Math.min(1, completed / total));
             var phaseIdx = phaseOrder.indexOf(phase);
             if (phaseIdx >= 0) {
-                return Math.round(((phaseIdx + localPct) / phaseOrder.length) * 100);
+                return Math.round(((phaseIdx + localPct) / numPhases) * 100);
             }
             return null;
         }
@@ -315,6 +324,20 @@
 
             /** 获取批次数 */
             getTotal: function() { return totalCoverageBatches; },
+
+            /** 设置后端告知的总阶段数（优先于动态发现） */
+            setTotalPhases: function(n) {
+                if (n > 0) knownTotalPhases = n;
+            },
+
+            /** 预注册阶段列表（后端 emit_start 告知的完整 phase 顺序） */
+            registerPhases: function(phases) {
+                if (!Array.isArray(phases)) return;
+                for (var pi = 0; pi < phases.length; pi++) {
+                    _registerPhase(phases[pi]);
+                }
+                knownTotalPhases = phases.length;
+            },
 
             /** 阶段标签 */
             getPhaseLabels: function() { return phaseLabels; },
