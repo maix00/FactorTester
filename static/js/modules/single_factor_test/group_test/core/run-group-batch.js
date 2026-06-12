@@ -70,95 +70,33 @@
         }
 
         /** 计算阶段全局进度百分比，永不回退。
-         *  按各阶段 total 加权分配进度条区域（非均匀）。
-         *  Cap 规则：当阶段数 > 3 时，每个阶段最多占 35%，防止大 total 阶段（如 membership=1093320）挤压小阶段。 */
+         *  均匀分配：每个非隐藏阶段占据相等的进度条宽度。
+         *  阶段内按 completed/total 线性填充。 */
         function _computePct(row, phase, completed, total) {
             if (phase === 'info' || skipPhases[phase]) return row.pct;
 
-            // 动态记录该 phase 的 total（取最大值）
-            if (total > 0) {
-                var prev = row._phaseTotalMax[phase] || 0;
-                if (total > prev) row._phaseTotalMax[phase] = total;
-            }
-
-            var allTotals = row._phaseTotalMax;
-            var phaseKeys = Object.keys(allTotals);
-            // 需要至少 2 个阶段才有加权意义
-            if (phaseKeys.length < 2) {
-                // 回退到均匀分配
-                var numPhases = knownTotalPhases > 0 ? knownTotalPhases : phaseOrder.length;
-                if (numPhases <= 0) return row.pct;
-                var phaseIdx = phaseOrder.indexOf(phase);
-                if (phaseIdx < 0) {
-                    _registerPhase(phase);
-                    phaseIdx = phaseOrder.indexOf(phase);
-                    numPhases = knownTotalPhases > 0 ? knownTotalPhases : Math.max(1, phaseOrder.length);
-                }
-                if (phaseIdx < 0) return row.pct;
-                var localPct = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
-                var newPct = Math.round(((phaseIdx + localPct) / numPhases) * 100);
-                if (newPct > (row.pct || 0)) row.pct = newPct;
-                return row.pct;
-            }
-
-            // --- 加权计算 ---
-            // 1) 计算原始权重 = 各 phase 的 total
-            var sumAll = 0;
-            for (var k = 0; k < phaseKeys.length; k++) {
-                sumAll += allTotals[phaseKeys[k]];
-            }
-            // 2) 按比例 cap：phase 数 > 3 时每个 phase 最多占 35%
-            var maxShare = phaseKeys.length > 3 ? 0.35 : 1.0;
-            var weights = {};
-            var overflow = 0;
-            for (var w = 0; w < phaseKeys.length; w++) {
-                var pk = phaseKeys[w];
-                var t = allTotals[pk];
-                var rawPct = sumAll > 0 ? t / sumAll : 1 / phaseKeys.length;
-                if (rawPct > maxShare) {
-                    weights[pk] = maxShare * sumAll;
-                    overflow += (rawPct - maxShare) * sumAll;
-                } else {
-                    weights[pk] = t;
+            // 非隐藏阶段列表（按 phaseOrder）
+            var visiblePhases = [];
+            for (var i = 0; i < phaseOrder.length; i++) {
+                if (!skipPhases[phaseOrder[i]] && !hideInHistory[phaseOrder[i]]) {
+                    visiblePhases.push(phaseOrder[i]);
                 }
             }
-            // 把溢出按比例分配给未 cap 的阶段
-            if (overflow > 1) {
-                var uncappedKeys = phaseKeys.filter(function(k) {
-                    return sumAll > 0 && (allTotals[k] / sumAll) <= maxShare + 0.001;
-                });
-                var uncappedWeightSum = 0;
-                for (var u = 0; u < uncappedKeys.length; u++) {
-                    uncappedWeightSum += weights[uncappedKeys[u]];
-                }
-                if (uncappedWeightSum > 0) {
-                    for (var d = 0; d < uncappedKeys.length; d++) {
-                        var uk = uncappedKeys[d];
-                        weights[uk] += overflow * (weights[uk] / uncappedWeightSum);
-                    }
-                }
+            // 如果当前 phase 不在列表中（动态发现），追加
+            if (visiblePhases.indexOf(phase) < 0 && !skipPhases[phase] && !hideInHistory[phase]) {
+                visiblePhases.push(phase);
             }
+            var numPhases = visiblePhases.length;
+            if (numPhases <= 0) return row.pct;
 
-            // 3) 计算加权占比
-            var weightSum = 0;
-            var wKeys = Object.keys(weights);
-            for (var ws = 0; ws < wKeys.length; ws++) {
-                weightSum += weights[wKeys[ws]];
-            }
-            if (weightSum <= 0) return row.pct;
+            var phaseIdx = visiblePhases.indexOf(phase);
+            if (phaseIdx < 0) return row.pct;
 
-            // 4) 计算当前 phase 之前的累计权重占比 + 当前 phase 内进度
-            var cumWeightBefore = 0;
-            for (var j = 0; j < phaseOrder.length; j++) {
-                var pj = phaseOrder[j];
-                if (pj === phase) break;
-                if (weights[pj] !== undefined) cumWeightBefore += weights[pj];
-            }
-            var curWeight = weights[phase] || 0;
+            // 每个阶段占 1/numPhases 的宽度
+            var segmentWidth = 100 / numPhases;
             var localFrac = total > 0 ? Math.max(0, Math.min(1, completed / total)) : 0;
-            var weightedPct = Math.round(((cumWeightBefore + curWeight * localFrac) / weightSum) * 100);
-
-            if (weightedPct > (row.pct || 0)) row.pct = weightedPct;
+            var newPct = Math.round((phaseIdx + localFrac) * segmentWidth);
+            if (newPct > (row.pct || 0)) row.pct = newPct;
             return row.pct;
         }
 
