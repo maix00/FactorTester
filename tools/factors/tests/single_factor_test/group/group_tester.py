@@ -772,7 +772,19 @@ class FactorGroupTester:
         total_batches = len(batches)
 
         _emit_progress("init", f"分组测试开始，批次 {total_batches} 个，提交 {total_entries} 个，重叠阈值 {self.overlap_ratio:.2f}",
-                       total_batches=total_batches, total_entries=total_entries, total_groups=total_groups)
+                       total_batches=total_batches, total_entries=total_entries, total_groups=total_groups,
+                       phases=[
+                           {"key": "factor_eval", "label": "因子计算"},
+                           {"key": "returns_eval", "label": "收益率"},
+                           {"key": "membership", "label": "分组隶属"},
+                           {"key": "flat_membership", "label": "展开隶属"},
+                           {"key": "remap", "label": "产品映射"},
+                           {"key": "trade_data", "label": "交易数据"},
+                           {"key": "liquidity", "label": "流动性容量"},
+                           {"key": "simulate", "label": "模拟中"},
+                           {"key": "batch", "label": "批次结果"},
+                           {"key": "serialize", "label": "序列化"},
+                       ])
         plans = [
             self.build_batch_execution_plan(batch, batch_index=batch_index, batch_total=total_batches)
             for batch_index, batch in enumerate(batches)

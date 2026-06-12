@@ -40,21 +40,7 @@
      */
     function createProductCoverageBatchManager(opts) {
         var progressContainer = opts.progressContainer;
-        var phaseLabels = opts.phaseLabels || {
-            init: '准备',
-            factor_eval: '因子计算',
-            returns_eval: '收益率',
-            membership: '分组隶属',
-            flat_membership: '展开隶属',
-            remap: '产品映射',
-            trade_data: '交易数据',
-            liquidity: '流动性容量',
-            simulate: '模拟中',
-            batch: '批次结果',
-            serialize: '序列化',
-            product_coverage_batch: '批次',
-            info: ''
-        };
+        var phaseLabels = Object.assign({ product_coverage_batch: '批次', info: '', init: '准备' }, opts.phaseLabels || {});
         var nonTimelinePhases = { product_coverage_batch: true, info: true, init: true };
 
         // phaseOrder: 动态发现，按首次出现顺序排列
@@ -337,6 +323,15 @@
                     _registerPhase(phases[pi]);
                 }
                 knownTotalPhases = phases.length;
+            },
+
+            /** 设置阶段标签（后端告知，替换默认） */
+            setPhaseLabels: function(labels) {
+                if (!labels || typeof labels !== 'object') return;
+                var keys = Object.keys(labels);
+                for (var i = 0; i < keys.length; i++) {
+                    phaseLabels[keys[i]] = labels[keys[i]];
+                }
             },
 
             /** 阶段标签 */

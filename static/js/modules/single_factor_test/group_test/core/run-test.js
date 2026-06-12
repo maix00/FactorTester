@@ -271,6 +271,20 @@
                 if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
                     batchMgr.syncRows(newTotal);
+                    // 后端告知的 phases：[{key, label}, ...]
+                    if (payload.phases && payload.phases.length) {
+                        var phaseKeys = [];
+                        var labelMap = {};
+                        for (var pi = 0; pi < payload.phases.length; pi++) {
+                            var pitem = payload.phases[pi];
+                            if (pitem.key) {
+                                phaseKeys.push(pitem.key);
+                                if (pitem.label) labelMap[pitem.key] = pitem.label;
+                            }
+                        }
+                        batchMgr.registerPhases(phaseKeys);
+                        batchMgr.setPhaseLabels(labelMap);
+                    }
                     // 回放缓存的无 batch_index 全局进度
                     if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
                         var pending = pendingGlobalProgress;

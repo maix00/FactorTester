@@ -1218,7 +1218,9 @@ def run_group_test_stream():
                 if phase == 'init':
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),
-                        phase='product_coverage_batch', **progress_extra,
+                        phase='product_coverage_batch',
+                        phases=extra.get('phases', []),
+                        **progress_extra,
                     )
                 else:
                     registry.emit_phase(
