@@ -444,19 +444,27 @@ def _prepare_group_shared_inputs(
     _valid_signal_rows = signal_update_mask & (~_all_nan)
     if not _valid_signal_rows.any():
         raise ValueError(f"{factor.alias}: 因子值序列全部为 NaN，无法进行分组测试。")
-    valid_positions = np.flatnonzero(_valid_signal_rows)
-    _first_valid = int(valid_positions[0])
-    _last_valid = int(valid_positions[-1])
-    trim_start = _first_valid
-    trim_end = _last_valid + 1
-    if trim_start > 0 or trim_end < len(_all_nan):
-        signal_update_mask = signal_update_mask[trim_start:trim_end]
-        table_np = table_np[trim_start:trim_end]
-        signal_returns_np = signal_returns_np[trim_start:trim_end]
-        table_src = table_src.iloc[trim_start:trim_end]
-        returns_src = returns_src.iloc[trim_start:trim_end]
-        price_src = price_src.iloc[trim_start:trim_end]
-        print(f"[INFO] {factor.alias}: 截断首尾全 NaN 行 {trim_start} 行首 + {len(_all_nan) - trim_end} 行尾")
+
+    # When a calendar_index is provided, keep the full alignment index to ensure
+    # all factors in the same batch share the same T dimension.  Factors with
+    # missing signals naturally carry forward their last membership via the
+    # nan-handling in _build_group_membership_from_shared (forward-fill).
+    if calendar_index is not None and len(calendar_index) > 0:
+        pass  # no trim — keep full common_index (= calendar_index)
+    else:
+        valid_positions = np.flatnonzero(_valid_signal_rows)
+        _first_valid = int(valid_positions[0])
+        _last_valid = int(valid_positions[-1])
+        trim_start = _first_valid
+        trim_end = _last_valid + 1
+        if trim_start > 0 or trim_end < len(_all_nan):
+            signal_update_mask = signal_update_mask[trim_start:trim_end]
+            table_np = table_np[trim_start:trim_end]
+            signal_returns_np = signal_returns_np[trim_start:trim_end]
+            table_src = table_src.iloc[trim_start:trim_end]
+            returns_src = returns_src.iloc[trim_start:trim_end]
+            price_src = price_src.iloc[trim_start:trim_end]
+            print(f"[INFO] {factor.alias}: 截断首尾全 NaN 行 {trim_start} 行首 + {len(_all_nan) - trim_end} 行尾")
 
     _all_nan_mid = np.all(np.isnan(table_np), axis=1)
     _all_nan_mid = _all_nan_mid & signal_update_mask
