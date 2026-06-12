@@ -10,6 +10,7 @@ from tools.factors.tests.single_factor_test.group.core import infer_periods_per_
 from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
 from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
 from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
 import server.services.runtime_state as runtime_state
@@ -55,6 +56,11 @@ def _ensure_tester_factors_for_group(
 
 def _progress(message: str) -> None:
     print(f"[GroupTest] {message}", flush=True)
+
+
+def _get_metrics_meta() -> dict:
+    """Return the single-source metrics metadata for frontend rendering."""
+    return GROUP_TEST_METRICS_META
 
 
 def _safe_float(v):
@@ -369,6 +375,7 @@ def _serialize_group_simulation_result(
         'success': True,
         'groups': groups_data,
         'metrics': metrics,
+        'metrics_meta': _get_metrics_meta(),
         'n_groups': n_total,
         'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
@@ -776,6 +783,7 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         'success': True,
         'groups': merged_groups,
         'metrics': merged_metrics,
+        'metrics_meta': _get_metrics_meta(),
         'n_groups': last_n_groups,
         'multi_session_active': last_multi_session,
         'multi_session_entries': multi_session_entries,

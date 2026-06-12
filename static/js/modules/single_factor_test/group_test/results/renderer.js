@@ -87,6 +87,12 @@
             n_groups: data.n_groups,
         });
 
+        // 0) 注入后端 metrics_meta（替换前端硬编码）
+        if (data.metrics_meta) {
+            GT.metrics = GT.metrics || {};
+            GT.metrics.meta = data.metrics_meta;
+        }
+
         // 1) 更新策略面板
         if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.update === 'function') {
             GT.results.strategyPanel.update(data.multi_session_active, data.rebalance_mode, data.multi_session_entries);
