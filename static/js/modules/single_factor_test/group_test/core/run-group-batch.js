@@ -301,6 +301,10 @@
                     }
                 }
                 totalCoverageBatches = nextTotal;
+                // 立即创建所有行，这样后续 progress 事件可以直接更新
+                for (var j = 0; j < nextTotal; j++) {
+                    _ensureCoverageBatchRow(j, '', 0);
+                }
             },
 
             /** 获取某行数据 */

@@ -283,6 +283,13 @@
                         batchMgr.setPhaseLabels(labelMap);
                     }
                     // 回放缓存的无 batch_index 全局进度
+                    if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
+                        var pending = pendingGlobalProgress;
+                        pendingGlobalProgress = [];
+                        for (var p = 0; p < pending.length; p++) {
+                            batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message);
+                        }
+                    }
                 } else if (event === 'progress') {
                     var bi = payload.product_coverage_batch_index;
                     if (bi !== undefined && bi >= 0) {
