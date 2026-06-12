@@ -38,14 +38,15 @@ class GroupRebalanceStrategy:
 
         if self.mode in ("buy_and_hold", "recycle"):
             current_positive = state.quantities > 0
-            staying_mask = membership & current_positive
+            current_positive_f = current_positive.astype(float)
+            staying_mask = (membership > 0) & current_positive
             # 保留已有持仓
             desired = np.where(staying_mask, state.quantities, desired)
             if self.mode == "recycle":
                 # recycle: 已有持仓没退出 → 不新开仓
-                entering_mask = membership & (~current_positive)
+                entering_mask = (membership > 0) & (~current_positive)
                 has_existing = np.any(current_positive, axis=1)
-                has_exiting = np.any(current_positive & (~membership), axis=1)
+                has_exiting = np.any(current_positive & (membership == 0), axis=1)
                 freeze = has_existing & (~has_exiting)
                 desired[freeze] = np.where(entering_mask[freeze], 0.0, desired[freeze])
 
