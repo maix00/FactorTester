@@ -234,7 +234,8 @@
         var bulkPayload = Object.assign({}, localRun.payload, {
             groups: allStoredGroups,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
-            page_uuid: window._pageUuid || ''
+            page_uuid: window._pageUuid || '',
+            factor_family_alias: window.factorFamilyAlias || ''
         });
 
         try {
