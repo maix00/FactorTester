@@ -194,9 +194,6 @@
             }
             return;
         }
-                return;
-            }
-        }
 
         // ── 1. 扁平化：收集所有 group + 构建 group_id → groupIndex 映射 ──
         var allStoredGroups = (GT.groupSettings.groups && GT.groupSettings.groups.getAll) ? GT.groupSettings.groups.getAll() : [];
