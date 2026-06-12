@@ -24,6 +24,8 @@ from tools.factors.tests.single_factor_test.group.core import (
     _resolve_group_trade_specs,
     _simulate_group_from_preloaded,
     materialize_group_outputs_from_result,
+    set_batch_context,
+    clear_batch_context,
     slice_group_run_result,
 )
 
@@ -471,7 +473,10 @@ class FactorGroupTester:
         if plan.entry_trade_valid_cols is None:
             raise ValueError("BatchExecutionPlan has no entry_trade_valid_cols (build_batch_execution_plan must be called first)")
 
+        total_entries = len(plan.entries)
         for entry_idx, entry in enumerate(plan.entries, start=1):
+            _emit_progress("trade_data", f"加载交易数据 {entry_idx}/{total_entries} factor={entry.factor_alias}",
+                           completed=entry_idx - 1, total=total_entries)
             factor = entry.tester.resolve_factor(entry.factor_alias)
             if factor is None:
                 raise ValueError(f"未找到因子 {entry.factor_alias}")
@@ -530,41 +535,52 @@ class FactorGroupTester:
         self,
         plan: BatchExecutionPlan,
         *,
+        batch_index: int,
+        batch_total: int,
         fee: float,
         fee_modifications: list | None = None,
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
     ) -> list[dict[str, Any]]:
-        plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications, use_closetoday=use_closetoday)
-        first_entry = plan.entries[0]
-        first_factor = first_entry.tester.resolve_factor(first_entry.factor_alias)
-        if first_factor is None or plan.merged_returns_np is None or plan.merged_price_np is None or plan.merged_spec_bundle is None:
-            raise ValueError("merged batch plan is incomplete")
-        spec_bundle = plan.merged_spec_bundle
-        returns_raw = np.asarray(plan.merged_returns_np, dtype=float)
-        returns_filled = np.where(np.isnan(returns_raw) | np.isinf(returns_raw) | (returns_raw <= -1.0), 0.0, returns_raw)
-        group_name_map = {
-            idx: str(owner.get("group_name") or f"group_{idx}")
-            for idx, owner in enumerate(plan.group_owner)
-        }
-        entries_by_simulation_index = {entry.simulation_index: entry for entry in plan.entries}
-
-        # Build per-group configs: one config dict per global group index.
-        # Each entry contributes its groups via flat_group_info.
-        group_count = plan.merged_membership_np.shape[1]
-        group_configs: list[dict] = [{} for _ in range(group_count)]
-        for simulation_index, group_indices in plan.group_slices.items():
-            entry = entries_by_simulation_index[simulation_index]
-            local_to_global = {
-                local_idx: global_idx
-                for local_idx, global_idx in enumerate(group_indices)
+        batch_label = f"{batch_index + 1}/{batch_total}"
+        set_batch_context(batch_index, batch_total, batch_label)
+        try:
+            _emit_progress("trade_data", f"batch {batch_label} 加载交易数据",
+                           completed=0, total=1)
+            plan = self.enrich_batch_execution_plan(plan, fee=fee, fee_modifications=fee_modifications, use_closetoday=use_closetoday)
+            first_entry = plan.entries[0]
+            first_factor = first_entry.tester.resolve_factor(first_entry.factor_alias)
+            if first_factor is None or plan.merged_returns_np is None or plan.merged_price_np is None or plan.merged_spec_bundle is None:
+                raise ValueError("merged batch plan is incomplete")
+            spec_bundle = plan.merged_spec_bundle
+            returns_raw = np.asarray(plan.merged_returns_np, dtype=float)
+            returns_filled = np.where(np.isnan(returns_raw) | np.isinf(returns_raw) | (returns_raw <= -1.0), 0.0, returns_raw)
+            group_name_map = {
+                idx: str(owner.get("group_name") or f"group_{idx}")
+                for idx, owner in enumerate(plan.group_owner)
             }
-            # Use flat_group_info to populate configs
-            for flat_pos, info in enumerate(entry.flat_group_info):
-                group_configs[local_to_global.get(flat_pos, flat_pos)] = dict(info)
+            entries_by_simulation_index = {entry.simulation_index: entry for entry in plan.entries}
 
-        _, _, _, merged_group_result = _simulate_group_from_preloaded(
+            # Build per-group configs: one config dict per global group index.
+            # Each entry contributes its groups via flat_group_info.
+            group_count = plan.merged_membership_np.shape[1]
+            group_configs: list[dict] = [{} for _ in range(group_count)]
+            for simulation_index, group_indices in plan.group_slices.items():
+                entry = entries_by_simulation_index[simulation_index]
+                local_to_global = {
+                    local_idx: global_idx
+                    for local_idx, global_idx in enumerate(group_indices)
+                }
+                # Use flat_group_info to populate configs
+                for flat_pos, info in enumerate(entry.flat_group_info):
+                    group_configs[local_to_global.get(flat_pos, flat_pos)] = dict(info)
+
+            _emit_progress("trade_data", f"batch {batch_label} 交易数据就绪 groups={group_count} products={len(spec_bundle.valid_cols)}",
+                           completed=1, total=1)
+
+            _emit_progress("simulate", f"batch {batch_label} 模拟中", completed=0, total=1)
+            _, _, _, merged_group_result = _simulate_group_from_preloaded(
             first_factor,
             membership_np=plan.merged_membership_np,
             returns_filled=returns_filled,
@@ -594,30 +610,32 @@ class FactorGroupTester:
             positions_by_variety_code_lower=spec_bundle.positions_by_variety_code_lower,
         )
 
-        out: list[dict[str, Any]] = []
-        for simulation_index, group_indices in plan.group_slices.items():
-            entry = entries_by_simulation_index[simulation_index]
-            factor = entry.tester.resolve_factor(entry.factor_alias)
-            if factor is None:
-                raise ValueError(f"未找到因子 {entry.factor_alias}")
-            sliced_result = slice_group_run_result(merged_group_result, group_indices)
-            entry.tester._get_result(factor).group_result = sliced_result
-            returns_dict, report_df, cum_np, idx_list = materialize_group_outputs_from_result(sliced_result)
-            out.append({
-                "simulation_index": entry.simulation_index,
-                "submission_id": entry.submission_id,
-                "factor_alias": entry.factor_alias,
-                "n_groups": entry.n_groups,
-                "factor": factor,
-                "returns_dict": returns_dict,
-                "report_df": report_df,
-                "cum_np": cum_np,
-                "idx_list": idx_list,
-                "group_result": sliced_result,
-                "ls_configs": entry.spec.get("ls_configs"),
-                "tester": entry.tester,
-            })
-        return out
+            out: list[dict[str, Any]] = []
+            for simulation_index, group_indices in plan.group_slices.items():
+                entry = entries_by_simulation_index[simulation_index]
+                factor = entry.tester.resolve_factor(entry.factor_alias)
+                if factor is None:
+                    raise ValueError(f"未找到因子 {entry.factor_alias}")
+                sliced_result = slice_group_run_result(merged_group_result, group_indices)
+                entry.tester._get_result(factor).group_result = sliced_result
+                returns_dict, report_df, cum_np, idx_list = materialize_group_outputs_from_result(sliced_result)
+                out.append({
+                    "simulation_index": entry.simulation_index,
+                    "submission_id": entry.submission_id,
+                    "factor_alias": entry.factor_alias,
+                    "n_groups": entry.n_groups,
+                    "factor": factor,
+                    "returns_dict": returns_dict,
+                    "report_df": report_df,
+                    "cum_np": cum_np,
+                    "idx_list": idx_list,
+                    "group_result": sliced_result,
+                    "ls_configs": entry.spec.get("ls_configs"),
+                    "tester": entry.tester,
+                })
+            return out
+        finally:
+            clear_batch_context()
 
     def run(
         self,
@@ -659,7 +677,8 @@ class FactorGroupTester:
             plan = plans[batch_idx]
             batch_label = f"{batch_idx + 1}/{total_batches}"
             _emit_progress("batch", f"batch {batch_label} start entries={len(batch)} groups={len(plan.group_owner)} products={len(plan.trade_product_names)}",
-                           batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch))
+                           batch_index=batch_idx, batch_total=total_batches, batch_entries=len(batch),
+                           completed=batches_completed, total=total_batches)
             if progress_hook is not None:
                 progress_hook(
                     f"group tester batch start {batch_idx + 1}/{total_batches} size={len(batch)}"
@@ -670,6 +689,8 @@ class FactorGroupTester:
                 )
             out = self._run_merged_batch(
                 plan,
+                batch_index=batch_idx,
+                batch_total=total_batches,
                 fee=fee,
                 fee_modifications=fee_modifications,
                 use_closetoday=use_closetoday,

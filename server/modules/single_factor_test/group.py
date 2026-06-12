@@ -6,6 +6,7 @@ import pandas as pd
 from flask import request, jsonify
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
+from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
 from tools.factors.tests.single_factor_test.group.detail import build_group_detail
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
@@ -465,11 +466,15 @@ def _serialize_group_simulation_result(
         f"simulation serialize groups start submission={submission_id} "
         f"factor={factor_alias} total_groups={n_total}"
     )
+    _core_emit_progress("serialize", f"serialize groups start total={n_total}",
+                        completed=0, total=n_total)
     for g in range(n_total):
         _progress(
             f"simulation serialize group {g + 1}/{n_total} "
             f"submission={submission_id} factor={factor_alias}"
         )
+        _core_emit_progress("serialize", f"serialize group {g+1}/{n_total}",
+                            completed=g + 1, total=n_total)
         vals = [round(float(v), 2) if not (math.isnan(v) or math.isinf(v)) else None for v in equity_np[:, g]]
         gross_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in gross_np[:, g]]
         fee_vals = [round(float(v), 8) if not (math.isnan(v) or math.isinf(v)) else 0.0 for v in fee_np[:, g]]
@@ -497,6 +502,8 @@ def _serialize_group_simulation_result(
                 entry['_id'] = fi['id']
         groups_data.append(entry)
     _progress(f"simulation serialize groups done submission={submission_id} factor={factor_alias}")
+    _core_emit_progress("serialize", f"serialize groups done total={n_total}",
+                        completed=n_total, total=n_total)
 
     metrics: dict = {}
     if not report_df.empty:
@@ -1422,8 +1429,10 @@ def run_group_test_stream():
         try:
             # ── 将 registry 桥接到 core.py 的全局注册 ──
             def _progress_bridge(phase: str, message: str, extra: dict):
+                if phase == 'info':
+                    return
                 completed = extra.get('completed', 0)
-                total = extra.get('total', 0)
+                total = extra.get('total', extra.get('total_batches', 0))
                 if phase == 'init':
                     registry.emit_start(
                         total=total, groups=extra.get('total_groups', 0),

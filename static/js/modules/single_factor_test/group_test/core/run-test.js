@@ -491,45 +491,109 @@
         Object.assign(bulkPayload, localRun.payload || {});
 
         try {
-            // ── 确定性进度条 ──
-            var progressBarId = 'gt-batch-progress';
-            var progressBar = document.getElementById(progressBarId);
-            if (!progressBar) {
-                progressBar = document.createElement('div');
-                progressBar.id = progressBarId;
-                progressBar.className = 'gt-progress-container';
-                progressBar.innerHTML =
-                    '<div class="gt-progress-bar" style="background:#e0e0e0;border-radius:6px;height:12px;overflow:hidden;margin-bottom:4px;">' +
-                    '<div id="' + progressBarId + '-fill" class="gt-progress-fill" style="width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:6px;"></div>' +
-                    '</div>' +
-                    '<span id="' + progressBarId + '-text" class="gt-progress-text" style="font-size:13px;color:#666;">准备中...</span>';
+            // ── 多行并行进度条 ──
+            var progressContainerId = 'gt-batch-progress';
+            var progressContainer = document.getElementById(progressContainerId);
+            if (!progressContainer) {
+                progressContainer = document.createElement('div');
+                progressContainer.id = progressContainerId;
+                progressContainer.className = 'gt-progress-container';
+                progressContainer.style.cssText = 'margin:8px 0;padding:8px;background:#f9f9f9;border-radius:8px;border:1px solid #e0e0e0;';
                 var chartContainer = document.getElementById('group_chart_container');
                 var insertParent = chartContainer ? chartContainer.parentNode : (runBtn ? runBtn.parentNode : document.body);
                 var insertBefore = chartContainer || (runBtn ? runBtn.nextSibling : null);
-                insertParent.insertBefore(progressBar, insertBefore);
+                insertParent.insertBefore(progressContainer, insertBefore);
+            }
+
+            // 阶段中文映射
+            var phaseLabels = {
+                batch: '批次', membership: '隶属度', trade_data: '交易数据',
+                simulate: '模拟中', liquidity: '流动性', serialize: '序列化',
+                remap: '重映射', flat_membership: '展平', info: ''
+            };
+            var phaseOrder = ['trade_data','membership','liquidity','simulate'];  // 按阶段更新
+            var batchRows = {};     // batchIndex → { rowEl, fillEl, textEl, phaseEl }
+            var totalBatches = 0;
+
+            function _ensureBatchRow(batchIndex, batchLabel, batchTotal) {
+                if (batchRows[batchIndex]) return batchRows[batchIndex];
+                var row = document.createElement('div');
+                row.style.cssText = 'margin-bottom:6px;';
+                // 标签
+                var label = document.createElement('span');
+                label.style.cssText = 'display:inline-block;width:70px;font-size:12px;font-weight:600;color:#333;vertical-align:middle;';
+                label.textContent = batchLabel || ('Batch ' + (batchIndex + 1));
+                row.appendChild(label);
+                // 阶段标签
+                var phaseSpan = document.createElement('span');
+                phaseSpan.style.cssText = 'display:inline-block;width:65px;font-size:11px;color:#888;vertical-align:middle;';
+                phaseSpan.textContent = '准备中';
+                row.appendChild(phaseSpan);
+                // 进度条
+                var barWrap = document.createElement('span');
+                barWrap.style.cssText = 'display:inline-block;width:calc(100% - 250px);vertical-align:middle;';
+                var bar = document.createElement('span');
+                bar.style.cssText = 'display:block;background:#e0e0e0;border-radius:4px;height:8px;overflow:hidden;';
+                var fill = document.createElement('span');
+                fill.style.cssText = 'display:block;width:0%;height:100%;background:linear-gradient(90deg,#4caf50,#81c784);transition:width 0.3s;border-radius:4px;';
+                bar.appendChild(fill);
+                barWrap.appendChild(bar);
+                row.appendChild(barWrap);
+                // 数字
+                var text = document.createElement('span');
+                text.style.cssText = 'display:inline-block;width:100px;font-size:11px;color:#666;text-align:right;vertical-align:middle;';
+                text.textContent = '0/0';
+                row.appendChild(text);
+
+                progressContainer.appendChild(row);
+                batchRows[batchIndex] = { rowEl: row, fillEl: fill, textEl: text, phaseEl: phaseSpan };
+                return batchRows[batchIndex];
+            }
+
+            function _updateBatchRow(batchIndex, phase, completed, total, message) {
+                var row = _ensureBatchRow(batchIndex, '', 0);
+                if (phase && row.phaseEl && phaseLabels[phase] !== undefined) {
+                    row.phaseEl.textContent = phaseLabels[phase] || phase;
+                }
+                if (total > 0) {
+                    var pct = Math.min(100, Math.round(completed / total * 100));
+                    row.fillEl.style.width = pct + '%';
+                    row.textEl.textContent = completed + '/' + total;
+                }
+                // 根据阶段改变颜色
+                if (phase === 'simulate') {
+                    row.fillEl.style.background = 'linear-gradient(90deg,#ff9800,#ffc107)';
+                } else if (phase === 'trade_data') {
+                    row.fillEl.style.background = 'linear-gradient(90deg,#2196f3,#64b5f6)';
+                } else if (phase === 'membership') {
+                    row.fillEl.style.background = 'linear-gradient(90deg,#9c27b0,#ce93d8)';
+                } else {
+                    row.fillEl.style.background = 'linear-gradient(90deg,#4caf50,#81c784)';
+                }
+            }
+
+            function _updateGlobalProgress(phase, completed, total, message) {
+                // 更新所有行（用于没有 batch_index 的全局进度）
+                var keys = Object.keys(batchRows);
+                for (var k = 0; k < keys.length; k++) {
+                    _updateBatchRow(parseInt(keys[k]), phase, completed, total, message);
+                }
             }
 
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
-                var fill = document.getElementById(progressBarId + '-fill');
-                var text = document.getElementById(progressBarId + '-text');
+                console.log('[SSE frontend] event:', event, 'payload:', JSON.stringify(payload));
                 if (event === 'start') {
-                    if (fill) fill.style.width = '0%';
-                    if (text) text.textContent = '0/' + (payload.total || 1) + ' 批次';
+                    totalBatches = payload.total || 1;
+                    // 预创建所有 batch 行
+                    for (var bi = 0; bi < totalBatches; bi++) {
+                        _ensureBatchRow(bi, 'Batch ' + (bi + 1), totalBatches);
+                    }
                 } else if (event === 'progress') {
-                    var pct = payload.total > 0 ? (payload.completed / payload.total * 100) : 0;
-                    if (fill) fill.style.width = pct + '%';
-                    if (text) {
-                        var phaseLabel = '';
-                        if (payload.phase === 'batch') {
-                            phaseLabel = '批次 ';
-                        } else if (payload.phase === 'membership') {
-                            phaseLabel = '隶属度 ';
-                        } else if (payload.phase === 'trade_data') {
-                            phaseLabel = '交易数据 ';
-                        } else if (payload.phase === 'simulate') {
-                            phaseLabel = '模拟 ';
-                        }
-                        text.textContent = phaseLabel + (payload.completed || 0) + '/' + (payload.total || 1);
+                    var bi = payload.batch_index;
+                    if (bi !== undefined && bi >= 0) {
+                        _updateBatchRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message);
+                    } else {
+                        _updateGlobalProgress(payload.phase, payload.completed || 0, payload.total || 0, payload.message);
                     }
                 }
             });

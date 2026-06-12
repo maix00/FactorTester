@@ -26,6 +26,10 @@ from tools.products import lookup_contract_product
 _group_progress_lock = threading.Lock()
 _group_progress_callback: Callable[[str, str, dict], None] | None = None
 
+# 并行 batch 上下文：每个线程设置自己的 batch_index / batch_total，
+# _emit_progress 自动将其注入 extra，让前端能区分不同 batch 的进度。
+_batch_context = threading.local()
+
 
 def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     """注册结构化进度回调。回调签名为 callback(phase: str, message: str, extra: dict)。
@@ -36,6 +40,8 @@ def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     - trade_data  — 加载交易数据（returns + prices + specs）
     - simulate    — 交易模拟中
     - batch       — batch 级进度
+    - flat_membership — 展平隶属度
+    - serialize   — 结果序列化
     - info        — 一般信息
     """
     global _group_progress_callback
@@ -49,12 +55,35 @@ def unregister_group_progress() -> None:
         _group_progress_callback = None
 
 
+def set_batch_context(batch_index: int, batch_total: int, batch_label: str = "") -> None:
+    """设置当前线程的 batch 上下文，_emit_progress 会自动附加到 extra。"""
+    _batch_context.batch_index = batch_index
+    _batch_context.batch_total = batch_total
+    _batch_context.batch_label = batch_label
+
+
+def clear_batch_context() -> None:
+    """清除当前线程的 batch 上下文。"""
+    _batch_context.batch_index = -1
+    _batch_context.batch_total = 0
+    _batch_context.batch_label = ""
+
+
 def _emit_progress(phase: str, message: str, **extra) -> None:
     cb = None
     with _group_progress_lock:
         cb = _group_progress_callback
     if cb is not None:
         try:
+            # 自动注入 batch 上下文
+            bi = getattr(_batch_context, 'batch_index', -1)
+            bt = getattr(_batch_context, 'batch_total', 0)
+            bl = getattr(_batch_context, 'batch_label', '')
+            if bi >= 0:
+                extra.setdefault('batch_index', bi)
+                extra.setdefault('batch_total', bt)
+                if bl:
+                    extra.setdefault('batch_label', bl)
             cb(phase, message, extra)
         except Exception:
             pass
@@ -102,11 +131,6 @@ class GroupTradeSpecBundle:
     is_margin_traded_vec: np.ndarray
     variety_codes_lower: list[str]
     positions_by_variety_code_lower: dict[str, list[int]]
-
-
-def _group_progress(message: str) -> None:
-    print(f"[GroupCore] {message}", flush=True)
-    _emit_progress("info", message)
 
 
 def slice_group_run_result(
@@ -493,9 +517,9 @@ def _build_group_membership_from_shared(
     index_list = shared.index_list
     signal_valid_cols = shared.signal_valid_cols
 
-    _group_progress(
-        f"group membership start factor={factor.alias} T={T} groups={group_count} products={P}"
-    )
+    _emit_progress("membership", f"membership start factor={factor.alias}",
+                   completed=0, total=T)
+    _last_report = 0
     for t in tqdm(range(T), desc="Computing memberships: " + factor.alias):
         if t > 0 and not bool(signal_update_mask[t]):
             membership_np[t] = current_members
@@ -544,7 +568,16 @@ def _build_group_membership_from_shared(
             )
 
         membership_np[t] = current_members
-    _group_progress(f"group membership done factor={factor.alias}")
+
+        # 每 10% 发射一次进度
+        pct = int(t / T * 10)
+        if pct > _last_report or t == T - 1:
+            _last_report = pct
+            _emit_progress("membership", f"membership {t+1}/{T}",
+                           completed=t + 1, total=T)
+
+    _emit_progress("membership", f"membership done factor={factor.alias}",
+                   completed=T, total=T)
     return membership_np
 
 
@@ -556,15 +589,22 @@ def _build_group_memberships_from_shared(
     rebalance_mode: str,
 ) -> list[np.ndarray]:
     """Build several base-group memberships from the same shared inputs."""
-    return [
-        _build_group_membership_from_shared(
-            factor,
-            shared,
-            group_count=int(group_count),
-            rebalance_mode=rebalance_mode,
+    memberships = []
+    total = len(group_counts)
+    for i, group_count in enumerate(group_counts):
+        _emit_progress("membership", f"membership {i+1}/{total} build n_groups={group_count} factor={factor.alias}",
+                       completed=i, total=total)
+        memberships.append(
+            _build_group_membership_from_shared(
+                factor,
+                shared,
+                group_count=int(group_count),
+                rebalance_mode=rebalance_mode,
+            )
         )
-        for group_count in group_counts
-    ]
+    _emit_progress("membership", f"membership all done factor={factor.alias}",
+                   completed=total, total=total)
+    return memberships
 
 
 def _build_product_remap_matrix(
@@ -594,9 +634,6 @@ def _build_product_remap_matrix(
     trade_pos_by_key: dict[tuple[str, str], int] = {}
     signal_to_trade = np.full((T, P_signal), -1, dtype=int)
 
-    _group_progress(
-        f"build product remap matrix start T={T} signal_products={P_signal}"
-    )
     for pi, product in enumerate(tqdm(
         signal_products,
         desc="Build product remap matrix",
@@ -606,9 +643,6 @@ def _build_product_remap_matrix(
             product, signal_days, full_mask,
             trade_products, trade_pos_by_key,
         )
-    _group_progress(
-        f"build product remap matrix done trade_products={len(trade_products)}"
-    )
     return signal_to_trade, trade_products, trade_pos_by_key
 
 
@@ -656,7 +690,6 @@ def _load_group_trade_returns(
     end_dt: Optional[Any] = None,    # DataTime
     index_list: list,
 ) -> np.ndarray:
-    _group_progress(f"trade returns evaluate start factor={factor.alias}")
     trade_returns_src = _evaluate_trade_returns_for_group(
         tester,
         factor,
@@ -665,7 +698,6 @@ def _load_group_trade_returns(
         source_freq,
         effective_return_freq,
     )
-    _group_progress(f"trade returns evaluate done factor={factor.alias}")
     trade_returns_src.index = DataIndex(trade_returns_src.index).signal_index
     di = DataIndex(trade_returns_src.index)
     mask = di.slice_by_datatime(start_dt, end_dt)
@@ -686,7 +718,6 @@ def _load_group_trade_prices(
 ) -> np.ndarray:
     from tools.factors.expr import ColumnRef
 
-    _group_progress(f"trade prices evaluate start factor={factor.alias}")
     raw_trade_prices = ColumnRef(price_col).evaluate(
         products=trade_valid_cols,
         freq=source_freq,
@@ -699,7 +730,6 @@ def _load_group_trade_prices(
     trade_price_src = cast(pd.DataFrame, trade_price_src[mask])
     trade_price_src = trade_price_src.reindex(index=index_list, columns=trade_valid_cols)
     price_np = trade_price_src[trade_valid_cols].to_numpy(dtype=float)
-    _group_progress(f"trade prices evaluate done factor={factor.alias}")
     return price_np
 
 
@@ -925,7 +955,7 @@ def build_flat_membership_from_groups(
     T = first_shared.T
     P = len(first_valid_cols)
 
-    _group_progress(f"flat membership build start groups={len(groups)} T={T} P={P}")
+
 
     slices: list[np.ndarray] = []
     group_info: list[dict] = []
@@ -996,17 +1026,10 @@ def build_flat_membership_from_groups(
                 'liquidity_percent': group.liquidity_percent,
                 'margin_mode': group.margin_mode,
             })
-        _group_progress(
-            f"flat membership group {gi}/{len(groups)} "
-            f"key={group.key} screened={group.is_screened} "
-            f"mask_sum={int(slices[-1].sum())}"
-        )
+        _emit_progress("flat_membership", f"flat membership {gi+1}/{len(groups)}",
+                       completed=gi + 1, total=len(groups))
 
     membership_np = np.concatenate(slices, axis=1)  # (T, M_total, P)
-    _group_progress(
-        f"flat membership build done shape={membership_np.shape} "
-        f"total_memberships={int(membership_np.sum())}"
-    )
     return membership_np, group_info
 
 
@@ -1079,7 +1102,6 @@ def _simulate_group_from_preloaded(
             rebalance_modes_list[g_idx] = drm
 
     margin_ratio_mat = np.tile(long_margin_ratio_vec, (group_count, 1))
-    _group_progress(f"group fee matrix start factor={factor.alias} groups={group_count} products={P}")
     open_ratio_mat = np.tile(open_ratio_vec, (group_count, 1))
     close_ratio_mat = np.tile(close_ratio_vec, (group_count, 1))
     close_today_ratio_mat = np.tile(close_today_ratio_vec, (group_count, 1))
@@ -1100,7 +1122,7 @@ def _simulate_group_from_preloaded(
             close_ratio_mat[g_idx, :] = float(fee_override['close'])
         if 'close_today' in fee_override and fee_override['close_today'] is not None:
             close_today_ratio_mat[g_idx, :] = float(fee_override['close_today'])
-    _group_progress(f"group fee matrix done factor={factor.alias}")
+
 
     # Build per-product effective close matrices using use_closetoday_vec
     use_closetoday_brd = use_closetoday_vec[np.newaxis, :]  # (1, P) -> broadcast across groups
@@ -1120,7 +1142,7 @@ def _simulate_group_from_preloaded(
         raise ValueError(f"rebalance_mode must be one of {sorted(_VALID_MODES)}, got {rebalance_mode!r}")
     trade_present_np = np.isfinite(price_np) & (price_np > 0)
     data_has_bar = trade_present_np if np.any(~trade_present_np) else None
-    _group_progress(f"simulate trading book start factor={factor.alias} T={len(index_list)} groups={group_count} products={P} rebalance={rebalance_mode}")
+    _emit_progress("simulate", f"simulate start factor={factor.alias}", completed=0, total=1)
     sim_result = simulate_group_trading_book(
         membership_np=membership_np,
         returns_np=returns_filled,
@@ -1142,7 +1164,7 @@ def _simulate_group_from_preloaded(
         rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
     )
-    _group_progress(f"simulate trading book done factor={factor.alias}")
+    _emit_progress("simulate", f"simulate done factor={factor.alias}", completed=1, total=1)
     group_returns_np = sim_result['net_returns_np']
     group_gross_returns_np = sim_result['gross_returns_np']
     group_product_gross_contrib_np = sim_result['product_gross_contrib_np']
@@ -1431,7 +1453,7 @@ def _build_normalized_liquidity_capacity(
     P = len(products)
     raw = np.zeros((T, P), dtype=float)
 
-    _group_progress(f"liquidity capacity start T={T} products={P}")
+    _emit_progress("liquidity", f"liquidity capacity start T={T} P={P}", completed=0, total=P)
     for pi, product in enumerate(tqdm(products, desc="Build liquidity capacity", total=P)):
         try:
             dm = getattr(product, freq.name)
@@ -1465,11 +1487,15 @@ def _build_normalized_liquidity_capacity(
             left = np.concatenate([[0], right[:-1]])
             raw[:, pi] = cum[right] - cum[left]
         except Exception:
-            continue
+            pass
+        finally:
+            # 每 10 个产品或末个产品发射一次
+            if pi % max(1, P // 10) == 0 or pi == P - 1:
+                _emit_progress("liquidity", f"liquidity capacity {pi+1}/{P}",
+                               completed=pi + 1, total=P)
 
     row_sum = np.nansum(raw, axis=1)
     if not np.any(row_sum > 0):
-        _group_progress("liquidity capacity skipped no positive liquidity")
         return None
     capacity = np.divide(
         raw,
@@ -1477,7 +1503,7 @@ def _build_normalized_liquidity_capacity(
         out=np.zeros_like(raw, dtype=float),
         where=row_sum[:, np.newaxis] > 0,
     )
-    _group_progress("liquidity capacity done")
+    _emit_progress("liquidity", "liquidity capacity done", completed=P, total=P)
     return capacity
 
 
@@ -1797,8 +1823,14 @@ def simulate_group_trading_book(
             rounded[no_tick] = np.round(px[no_tick], 2)
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
 
-    _group_progress(f"trading book simulation start T={T} groups={M} products={P}")
+    _emit_progress("simulate", f"trading book simulation T={T}", completed=0, total=T)
+    _last_sim_report = -1
     for t in tqdm(range(T), desc="Trading book simulation"):
+        # 每 5% 或每 500 步发射一次进度（避免过于频繁的 SSE 推送）
+        pct = int(t / max(T, 1) * 20)  # 0..20
+        if pct > _last_sim_report or t == T - 1:
+            _last_sim_report = pct
+            _emit_progress("simulate", f"trading book {t+1}/{T}", completed=t + 1, total=T)
         price_t = _round_price(prices[t])
         valuated = np.isfinite(price_t) & (price_t > 0)
         executable = valuated if tradable_mask_arr is None else (valuated & tradable_mask_arr[t])
@@ -1819,15 +1851,6 @@ def simulate_group_trading_book(
             "each_period",
             close_fee_vec=None,
         )
-        if t == 0 and M > 5:
-            for g in range(5, M):
-                _group_progress(
-                    f"[DEBUG] t=0 g={g} membership_sum={int(membership_np[t, g].sum())} "
-                    f"target_notional_sum={float(target_notional[g].sum()):.4f} "
-                    f"equity={float(equity[g]):.2f} "
-                    f"price_has_value={bool(np.isfinite(prices[t]).any())} "
-                    f"contract_value_has_value={bool(np.isfinite(contract_value).any())}"
-                )
         raw_quantities = np.divide(
             target_notional,
             contract_value_row,
@@ -1875,14 +1898,6 @@ def simulate_group_trading_book(
             current_positive = quantities > 0
             staying_mask = current_membership & current_positive
             entering_mask = current_membership & (~current_positive)
-            if t == 0:
-                for g in range(M):
-                    if hold_rows[g]:
-                        _group_progress(
-                            f"[DEBUG] t=0 hold_rows g={g} desired_before={float(desired_quantities[g].sum()):.4f} "
-                            f"staying_any={bool(staying_mask[g].any())} "
-                            f"entering_any={bool(entering_mask[g].any())}"
-                        )
             desired_quantities[hold_rows] = np.where(
                 staying_mask[hold_rows],
                 quantities[hold_rows],
@@ -1981,7 +1996,6 @@ def simulate_group_trading_book(
         quantities = desired_quantities
         equity = end_equity
 
-    _group_progress("trading book simulation done")
     return {
         'net_returns_np': net_returns_np,
         'gross_returns_np': gross_returns_np,
