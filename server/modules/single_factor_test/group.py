@@ -1205,6 +1205,9 @@ def run_group_test_stream():
                     # init 阶段：发送 start 事件，携带 phases 元数据
                     total_val = total or 0
                     _phases = extra.get('phases', [])
+                    # 从 extra 中剥离已显式传递的 kwarg，避免与 emit_start 的显式参数冲突
+                    for k in ('total', 'groups', 'phase', 'phases'):
+                        progress_extra.pop(k, None)
                     registry.emit_start(
                         total=total_val, groups=extra.get('total_groups', 0),
                         phase='product_coverage_batch',
