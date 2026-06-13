@@ -1094,6 +1094,7 @@ def get_group_snapshot():
         return jsonify({
             'success': True,
             'groups': groups_detail,
+            'flat_count': n_groups,
             'timestamp_ms': closest_ms,
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,

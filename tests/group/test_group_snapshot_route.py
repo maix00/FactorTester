@@ -49,5 +49,6 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     payload = resp.get_json()
     assert resp.status_code == 200
     assert payload['success'] is True
+    assert payload['flat_count'] == 1
     assert payload['groups'][0]['products'][0]['name'] == product
     assert payload['groups'][0]['products'][0]['fee']['total'] == 0.03
