@@ -64,6 +64,86 @@ class BatchExecutionPlan:
     entry_trade_valid_cols: dict[int, list] | None = None
     entry_trade_membership_np: dict[int, np.ndarray] | None = None
 
+    @property
+    def batch_group_count(self) -> int:
+        """Flattened group count on the merged batch axis."""
+        return int(self.merged_membership_np.shape[1])
+
+    def validate_matrix_view(self) -> None:
+        """Assert that merged and per-entry matrices are losslessly aligned."""
+        if self.merged_membership_np.ndim != 3:
+            raise ValueError(
+                f"merged_membership_np must be 3D, got shape={self.merged_membership_np.shape}"
+            )
+        if self.entry_trade_valid_cols is None or self.entry_trade_membership_np is None:
+            raise ValueError("BatchExecutionPlan is missing entry trade axis data")
+        if self.batch_group_count != len(self.group_owner):
+            raise ValueError(
+                f"batch_group_count mismatch: merged={self.batch_group_count}, "
+                f"group_owner={len(self.group_owner)}"
+            )
+        if self.batch_group_count != sum(len(indices) for indices in self.group_slices.values()):
+            raise ValueError(
+                "group_slices do not cover the full merged batch axis"
+            )
+        if self.merged_membership_np.shape[2] != len(self.trade_product_names):
+            raise ValueError(
+                f"trade product axis mismatch: merged={self.merged_membership_np.shape[2]}, "
+                f"trade_product_names={len(self.trade_product_names)}"
+            )
+
+        global_trade_positions = {
+            name: idx for idx, name in enumerate(self.trade_product_names)
+        }
+        for entry in self.entries:
+            si = entry.simulation_index
+            group_indices = self.group_slices.get(si)
+            local_trade_cols = self.entry_trade_valid_cols.get(si)
+            local_membership = self.entry_trade_membership_np.get(si)
+            if group_indices is None:
+                raise ValueError(f"missing group_slices for simulation_index={si}")
+            if local_trade_cols is None or local_membership is None:
+                raise ValueError(f"missing trade axis data for simulation_index={si}")
+            if local_membership.shape[1] != len(group_indices):
+                raise ValueError(
+                    f"local flat count mismatch for simulation_index={si}: "
+                    f"local={local_membership.shape[1]}, slices={len(group_indices)}"
+                )
+            if local_membership.shape[2] != len(local_trade_cols):
+                raise ValueError(
+                    f"local product count mismatch for simulation_index={si}: "
+                    f"local={local_membership.shape[2]}, cols={len(local_trade_cols)}"
+                )
+            reconstructed = np.zeros(
+                (local_membership.shape[0], local_membership.shape[1], len(self.trade_product_names)),
+                dtype=bool,
+            )
+            local_trade_positions = []
+            for product in local_trade_cols:
+                product_name = getattr(product, "name", str(product))
+                if product_name not in global_trade_positions:
+                    raise ValueError(
+                        f"trade product {product_name!r} missing from merged trade axis"
+                    )
+                local_trade_positions.append(global_trade_positions[product_name])
+            reconstructed[:, :, local_trade_positions] = local_membership
+            merged_slice = self.merged_membership_np[:, group_indices, :]
+            if not np.array_equal(merged_slice, reconstructed):
+                raise ValueError(
+                    f"merged membership mismatch for simulation_index={si}"
+                )
+
+    def build_matrix_view(self) -> dict[str, Any]:
+        """Return a front-end friendly summary of the merged batch matrix."""
+        return {
+            "batch_index": self.batch_index,
+            "batch_group_count": self.batch_group_count,
+            "trade_product_count": len(self.trade_product_names),
+            "trade_product_names": list(self.trade_product_names),
+            "group_owner": list(self.group_owner),
+            "group_slices": {int(k): list(v) for k, v in self.group_slices.items()},
+        }
+
 
 class FactorGroupTester:
     """Coordinate grouped backtests across one or more FactorTester instances.
@@ -620,7 +700,7 @@ class FactorGroupTester:
                 })
             group_offset += local_flat_count
 
-        return BatchExecutionPlan(
+        plan = BatchExecutionPlan(
             batch_index=batch_index,
             entries=list(batch),
             trade_product_names=trade_product_names,
@@ -631,6 +711,8 @@ class FactorGroupTester:
             entry_trade_valid_cols=entry_trade_valid_cols,
             entry_trade_membership_np=entry_trade_membership_np,
         )
+        plan.validate_matrix_view()
+        return plan
 
     def build_batch_execution_plans(self) -> list[BatchExecutionPlan]:
         batches = self.build_overlap_batches()
