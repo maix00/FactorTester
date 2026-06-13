@@ -9,7 +9,11 @@ from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
 from tools.factors.tests.single_factor_test.group.core import _emit_progress as _core_emit_progress
 from tools.factors.tests.single_factor_test.group.core import ensure_group_factor_inputs
-from tools.factors.tests.single_factor_test.group.detail import build_group_detail
+from tools.factors.tests.single_factor_test.group.detail import (
+    build_group_detail,
+    _build_product_fee_rates,
+    _display_with_fee as _display_product_with_fee,
+)
 from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
 from . import sft_bp
@@ -108,6 +112,18 @@ def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
     fee_modifications = clean_modifications(raw_modifications)
     use_closetoday = bool(data.get('use_closetoday') or data.get('useCloseToday'))
     return fee_uniform, fee_modifications, use_closetoday
+
+
+def _product_fee_rates_by_name(group_result: Any) -> dict[str, dict[str, float]]:
+    """Build per-product fee rows from a group result."""
+    if group_result is None:
+        return {}
+    return _build_product_fee_rates(
+        getattr(group_result, 'valid_cols', None),
+        getattr(group_result, 'open_ratio_vec', None),
+        getattr(group_result, 'close_ratio_vec', None),
+        getattr(group_result, 'close_today_ratio_vec', None),
+    )
 
 
 def _latest_group_result(tester: Any):
