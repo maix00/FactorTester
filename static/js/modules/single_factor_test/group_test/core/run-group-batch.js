@@ -277,14 +277,6 @@
         }
 
         function _updateCoverageBatchRow(index, phase, completed, total, message) {
-            console.log('[GT-BATCH] updateRow | idx=' + index
-                + ' | phase=' + phase
-                + ' | completed=' + completed
-                + ' | total=' + total
-                + ' | phaseOrder_len=' + phaseOrder.length
-                + ' | knownTotalPhases=' + knownTotalPhases
-                + ' | skip=' + !!skipPhases[phase]
-                + ' | msg=' + (message || '').substring(0, 80));
             var row = _ensureCoverageBatchRow(index, '');
 
             _registerPhase(phase);
@@ -309,7 +301,6 @@
             if (total > 0) {
                 row.textEl.textContent = completed + '/' + total;
             }
-            console.log('[GT-BATCH] updateRow_done | idx=' + index + ' | newPct=' + row.pct + ' | phaseOrder=' + JSON.stringify(phaseOrder));
         }
 
         // ---- Public API ----

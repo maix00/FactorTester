@@ -110,6 +110,29 @@ def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
     return fee_uniform, fee_modifications, use_closetoday
 
 
+def _latest_group_result(tester: Any):
+    """Return the latest available GroupRunResult from a tester."""
+    if tester is None:
+        return None
+
+    results = getattr(tester, 'results', None)
+    if not isinstance(results, dict) or not results:
+        return None
+
+    last_factor = getattr(tester, 'last_group_factor', None)
+    if last_factor is not None:
+        last_result = results.get(last_factor)
+        if last_result is not None and getattr(last_result, 'group_result', None) is not None:
+            return last_result.group_result
+
+    for _factor, result in reversed(list(results.items())):
+        group_result = getattr(result, 'group_result', None)
+        if group_result is not None:
+            return group_result
+
+    return None
+
+
 def _build_zero_position_warning(group_result: Any) -> str | None:
     """Explain when the first rebalance cannot open any position."""
     if group_result is None:
@@ -577,16 +600,16 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
 
     if not all_flat_groups:
         return False, {'success': False, 'error': '没有有效的分组配置', 'status': 400}
-    expected_flat_group_count = data.get('expected_flat_group_count')
+    expected_flat_count = data.get('flatCount')
     try:
-        expected_flat_group_count = int(expected_flat_group_count)
+        expected_flat_count = int(expected_flat_count)
     except (TypeError, ValueError):
-        expected_flat_group_count = len(flat_groups_raw)
-    if expected_flat_group_count != len(all_flat_groups):
+        expected_flat_count = len(flat_groups_raw)
+    if expected_flat_count != len(all_flat_groups):
         return False, {
             'success': False,
             'error': (
-                f'前端传回 {expected_flat_group_count} 个扁平组，但后端只解析出 '
+                f'前端传回 {expected_flat_count} 个扁平组，但后端只解析出 '
                 f'{len(all_flat_groups)} 个有效分组。请检查派生组是否缺少测试器/因子/组数继承字段。'
             ),
             'status': 400,
@@ -732,17 +755,17 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
         errors.append({'error': str(e)})
         raw_results = []
 
-    simulated_flat_group_count = sum(
+    simulated_flat_count = sum(
         len(item.get('flat_group_info') or [])
         for item in raw_results
         if isinstance(item, dict)
     )
-    if simulated_flat_group_count != len(all_flat_groups):
+    if simulated_flat_count != len(all_flat_groups):
         return False, {
             'success': False,
             'error': (
                 f'分组数量不一致：前端传回 {len(all_flat_groups)} 个有效分组，'
-                f'进入 simulate 的分组为 {simulated_flat_group_count} 个。'
+                f'进入 simulate 的分组为 {simulated_flat_count} 个。'
             ),
             'simulation_errors': errors,
             'status': 500,
@@ -1275,26 +1298,12 @@ def run_group_test_stream():
             last_progress_by_batch: dict[int, dict[str, int]] = {}
 
             def _progress_bridge(phase: str, message: str, extra: dict):
-                import sys
-                # 最早期诊断：入口处直接打印原始 extra
-                _raw_comp = extra.get('completed', '<MISSING>')
-                _raw_tot = extra.get('total', '<MISSING>')
-                _raw_tb = extra.get('total_batches', '<MISSING>')
-                print(
-                    f"[GT-BRIDGE-ENTRY] phase={phase} comp={_raw_comp} tot={_raw_tot} "
-                    f"total_batches={_raw_tb} extra_keys={list(extra.keys())[:15]} "
-                    f"msg={message[:80]}",
-                    flush=True,
-                )
                 progress_extra = dict(extra)
                 completed = extra.get('completed')
                 total = extra.get('total', extra.get('total_batches'))
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
-
-                branch = '???'
                 if phase == 'init':
-                    branch = 'init->emit_start'
                     # init 阶段：发送 start 事件，携带 phases 元数据
                     total_val = total or 0
                     _phases = extra.get('phases', [])
@@ -1308,7 +1317,6 @@ def run_group_test_stream():
                         **progress_extra,
                     )
                 elif has_progress_count:
-                    branch = 'has_count->emit_phase'
                     last_progress['completed'] = completed
                     last_progress['total'] = total
                     if product_coverage_batch_index is not None:
@@ -1326,16 +1334,12 @@ def run_group_test_stream():
                         **progress_extra,
                     )
                 elif phase == 'info':
-                    branch = 'info'
                     # info 是信息性消息，转换为当前批次的 progress 事件
                     batch_progress = None
                     if product_coverage_batch_index is not None:
                         batch_progress = last_progress_by_batch.get(int(product_coverage_batch_index))
                     progress = batch_progress or last_progress
-                    if progress['completed'] == 0 and progress['total'] == 0:
-                        branch = 'info->dropped(zero_progress)'
-                    else:
-                        branch = 'info->emit_phase'
+                    if progress['completed'] != 0 or progress['total'] != 0:
                         completed = progress['completed']
                         total = progress['total']
                         for k in ('completed', 'total', 'phase'):
@@ -1345,15 +1349,6 @@ def run_group_test_stream():
                             completed=completed, total=total,
                             **progress_extra,
                         )
-                else:
-                    branch = 'NO_BRANCH_MATCHED'
-
-                print(
-                    f"[GT-BRIDGE] phase={phase} comp={completed} tot={total} "
-                    f"has_count={has_progress_count} bi={product_coverage_batch_index} "
-                    f"branch={branch} msg={message[:100]}",
-                    flush=True,
-                )
 
             register_group_progress(_progress_bridge)
 

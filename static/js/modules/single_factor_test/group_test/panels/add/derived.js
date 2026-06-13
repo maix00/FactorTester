@@ -89,7 +89,7 @@
             name: resolvedName,
             parentId: parentId,
             productMask: productMask,
-            groupCount: (parentNode && parentNode.groupCount) || 1,
+            splitCount: (parentNode && parentNode.splitCount) || 1,
         };
         ['feeMode', 'feeRate', 'feeMap', 'feeSensitivity', 'useCloseToday',
          'rebalanceMode', 'liquidityMode', 'liquidityPercent'].forEach(function(key) {
@@ -128,12 +128,14 @@
                 return _buildDerivedDraftFromState(ctx);
             },
             onSubmit: _submitDerived,
-            submitLabel: '创建派生组'
+            submitLabel: '<i class="fas fa-code-branch"></i>',
+            submitTitle: '创建派生组'
         });
 
         M.registerEditAction({
             name: 'create-derived',
-            label: '🌳 创建派生组',
+            label: '<i class="fas fa-code-branch"></i>',
+            title: '创建派生组',
             priority: 10,
             condition: function(ctx) {
                 return ctx && ctx.count === 1;

@@ -160,12 +160,12 @@
                 }
 
                 // 3) Group index / count — child always inherits from root
-                var groupCount, groupIndex;
-                groupCount = isChild ? resolveRoot('groupCount') : g.groupCount;
+                var splitCount, groupIndex;
+                splitCount = isChild ? resolveRoot('splitCount') : g.splitCount;
                 groupIndex = isChild ? resolveRoot('groupIndex') : g.groupIndex;
-                if (groupCount) {
+                if (splitCount) {
                     var gi = groupIndex || 1;
-                    chips.push({ label: 'group-index', html: gi + '/' + groupCount, style: CHIP_STYLE_PLAIN });
+                    chips.push({ label: 'group-index', html: gi + '/' + splitCount, style: CHIP_STYLE_PLAIN });
                 }
 
                 return chips;
@@ -207,6 +207,24 @@
     function _filterProducts(products, mask) {
         if (!mask || Object.keys(mask).length === 0) return products;
         return products.filter(function(p) { return p && mask[p.name]; });
+    }
+
+    function _productNames(products) {
+        return (products || []).map(function(p) {
+            return p && p.name ? String(p.name) : '';
+        }).filter(function(name) {
+            return !!name;
+        });
+    }
+
+    function _sameProductNames(left, right) {
+        var a = _productNames(left);
+        var b = _productNames(right);
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) return false;
+        }
+        return true;
     }
 
     function _getDerivedProducts(node, seen) {
@@ -271,7 +289,7 @@
                 if (products.length === 0) return [];
                 // 与父级产品数一致 → mask 未产生实际差异，不显示 chip
                 var parentProducts = _getDerivedProducts(GT.groupSettings.groups.get(g.parentId));
-                if (parentProducts.length === products.length) return [];
+                if (_sameProductNames(parentProducts, products)) return [];
                 var isExpanded = _expandedProducts[g.id] === true;
                 var tri = isExpanded ? '▾' : '▸';
                 return [{

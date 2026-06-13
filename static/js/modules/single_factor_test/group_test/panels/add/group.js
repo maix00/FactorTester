@@ -1,7 +1,7 @@
 /**
  * panels/add/group.js — Add-flow panel: "新建分组" (category-2)
  *
- * Renders tester selector → groupIndex/groupCount (side-by-side) → allGroups
+ * Renders tester selector → groupIndex/splitCount (side-by-side) → allGroups
  * checkbox → factor selector → submit handled by app.js
  */
 (function() {
@@ -32,25 +32,25 @@
         return s;
     }
 
-    function _preComputeComboLetters(testerId, factorAliases, groupCount) {
+    function _preComputeComboLetters(testerId, factorAliases, splitCount) {
         var comboMap = {};
         var existing = GT.groupSettings.groups.getAll();
         var subs = window.submissions || [];
 
         for (var i = 0; i < factorAliases.length; i++) {
             var alias = factorAliases[i];
-            var comboKey = _addGroupBatchKey(testerId, alias, groupCount);
+            var comboKey = _addGroupBatchKey(testerId, alias, splitCount);
             if (comboMap[comboKey] !== undefined) continue;
 
             // Check existing groups for this combo
             var hasExisting = false;
             for (var j = 0; j < existing.length; j++) {
-                var k = _addGroupBatchKey(existing[j].testerId, existing[j].factorAlias, existing[j].groupCount);
+                var k = _addGroupBatchKey(existing[j].testerId, existing[j].factorAlias, existing[j].splitCount);
                 if (k === comboKey) { hasExisting = true; break; }
             }
             if (hasExisting) {
                 for (var ej = 0; ej < existing.length; ej++) {
-                    var ek = _addGroupBatchKey(existing[ej].testerId, existing[ej].factorAlias, existing[ej].groupCount);
+                    var ek = _addGroupBatchKey(existing[ej].testerId, existing[ej].factorAlias, existing[ej].splitCount);
                     if (ek === comboKey && existing[ej].shortAlias) {
                         var letterMatch = existing[ej].shortAlias.match(/^([A-Z]+)/);
                         if (letterMatch) {
@@ -66,7 +66,7 @@
                 // New comboKey: assign a brand-new letter
                 var usedLetters = {};
                 for (var ej2 = 0; ej2 < existing.length; ej2++) {
-                    var ek2 = _addGroupBatchKey(existing[ej2].testerId, existing[ej2].factorAlias, existing[ej2].groupCount);
+                    var ek2 = _addGroupBatchKey(existing[ej2].testerId, existing[ej2].factorAlias, existing[ej2].splitCount);
                     if (ek2 && existing[ej2].shortAlias) {
                         var lm = existing[ej2].shortAlias.match(/^([A-Z]+)/);
                         if (lm) usedLetters[lm[1]] = true;
@@ -85,7 +85,7 @@
         return comboMap;
     }
 
-    function _makeNames(testerId, factorAlias, groupCount, groupIndex, letter) {
+    function _makeNames(testerId, factorAlias, splitCount, groupIndex, letter) {
         var subs = window.submissions || [];
         var testerLabel = '';
         for (var i = 0; i < subs.length; i++) {
@@ -95,16 +95,16 @@
             }
         }
         if (!testerLabel) testerLabel = '测试器' + testerId;
-        var fullName = testerLabel + '_' + factorAlias + '_' + groupCount + '组_' + '第' + groupIndex + '组';
+        var fullName = testerLabel + '_' + factorAlias + '_' + splitCount + '组_' + '第' + groupIndex + '组';
         var shortAlias = letter + groupIndex;
 
         var allGroups = GT.groupSettings.groups.getAll();
-        var comboKey = String(testerId) + '|' + factorAlias + '|' + groupCount;
+        var comboKey = String(testerId) + '|' + factorAlias + '|' + splitCount;
         var sameIndexCount = 0;
         var usedSuffixes = {};
         for (var ai = 0; ai < allGroups.length; ai++) {
             var g = allGroups[ai];
-            var gk = String(g.testerId) + '|' + g.factorAlias + '|' + g.groupCount;
+            var gk = String(g.testerId) + '|' + g.factorAlias + '|' + g.splitCount;
             if (gk !== comboKey) continue;
             if (g.groupIndex === groupIndex) { sameIndexCount++; }
             var sa = g.shortAlias;
@@ -180,7 +180,7 @@
         // ── Group params (compact row) ──
         html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">';
         html += '<span style="font-size:13px;font-weight:600;color:#333;">分组</span>';
-        html += '<input type="number" id="add-group-count" value="' + (draft.groupCount || 5) + '" min="1" step="1"'
+        html += '<input type="number" id="add-group-count" value="' + (draft.splitCount || 5) + '" min="1" step="1"'
             + ' style="width:70px;padding:5px 8px;border:1px solid #d0d5dd;border-radius:4px;font-size:13px;text-align:center;"'
             + ' title="分组数量">';
         html += '<span style="font-size:13px;color:#555;">组，只建第</span>';
@@ -210,7 +210,7 @@
                 }
             }
             html += '<div style="margin-bottom:12px;padding:8px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;font-size:12px;color:#0369a1;">';
-            html += '已选：<b>' + escapeHTML(testerLabel || draft.testerId) + '</b> · ' + (draft.groupCount || 5) + '组';
+            html += '已选：<b>' + escapeHTML(testerLabel || draft.testerId) + '</b> · ' + (draft.splitCount || 5) + '组';
             if (draft.allGroups) html += ' · 所有分组';
             else html += ' · 第 <b>' + (draft.groupIndex || 1) + '</b> 组';
             html += '</div>';
@@ -274,11 +274,11 @@
         if (gcInput) {
             gcInput.addEventListener('input', function() {
                 var v = parseInt(this.value, 10);
-                if (v >= 1) GT.tabs.updateAddDraft({ groupCount: v });
+                if (v >= 1) GT.tabs.updateAddDraft({ splitCount: v });
             });
             gcInput.addEventListener('blur', function() {
                 var v = parseInt(this.value, 10);
-                if (isNaN(v) || v < 1) { this.value = 2; GT.tabs.updateAddDraft({ groupCount: 2 }); }
+                if (isNaN(v) || v < 1) { this.value = 2; GT.tabs.updateAddDraft({ splitCount: 2 }); }
             });
         }
 
@@ -361,14 +361,14 @@
     function submitAddBatches(draft) {
         if (!draft || !draft.testerId) { alert('请先选择测试器'); return; }
         var testerId = draft.testerId;
-        var groupCount = draft.groupCount;
+        var splitCount = draft.splitCount;
         var allGroups = draft.allGroups;
         var groupIndex = draft.groupIndex;
         var factors = draft.selectedFactors || [];
 
         if (factors.length === 0) { alert('请至少选择一个因子'); return; }
 
-        var comboLetters = _preComputeComboLetters(testerId, factors, groupCount);
+        var comboLetters = _preComputeComboLetters(testerId, factors, splitCount);
 
         var added = 0;
 
@@ -385,7 +385,7 @@
 
         for (var fi = 0; fi < factors.length; fi++) {
             var alias = factors[fi];
-            var comboKey = _addGroupBatchKey(testerId, alias, groupCount);
+            var comboKey = _addGroupBatchKey(testerId, alias, splitCount);
             var letter = comboLetters[comboKey] || 'A';
 
             var REG = window.GT_CONFIG_REGISTRY;
@@ -403,15 +403,15 @@
             var liquidityMode = (REG && REG.hasDirty()) ? REG.getDirty('liquidityMode', draft.liquidityMode || GS.getFieldDefault('liquidityMode')) : (draft.liquidityMode || GS.getFieldDefault('liquidityMode'));
             var liquidityPercent = (REG && REG.hasDirty()) ? REG.getDirty('liquidityPercent', draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent')) : (draft.liquidityPercent != null ? draft.liquidityPercent : GS.getFieldDefault('liquidityPercent'));
             if (allGroups) {
-                for (var gi = 1; gi <= groupCount; gi++) {
-                    var names = _makeNames(testerId, alias, groupCount, gi, letter);
+                for (var gi = 1; gi <= splitCount; gi++) {
+                    var names = _makeNames(testerId, alias, splitCount, gi, letter);
                     try {
                         GT.groupSettings.groups.add({
                             name: names.name,
                             shortAlias: names.shortAlias,
                             testerId: testerId,
                             factorAlias: alias,
-                            groupCount: groupCount,
+                            splitCount: splitCount,
                             groupIndex: gi,
                             isAllGroups: false,
                             feeMode: feeMode,
@@ -427,14 +427,14 @@
                     } catch (err) { /* skip dup */ }
                 }
             } else {
-                var names2 = _makeNames(testerId, alias, groupCount, groupIndex, letter);
+                var names2 = _makeNames(testerId, alias, splitCount, groupIndex, letter);
                 try {
                     GT.groupSettings.groups.add({
                         name: names2.name,
                         shortAlias: names2.shortAlias,
                         testerId: testerId,
                         factorAlias: alias,
-                        groupCount: groupCount,
+                        splitCount: splitCount,
                         groupIndex: groupIndex,
                         isAllGroups: false,
                         feeMode: feeMode,
@@ -498,7 +498,7 @@
                 return {
                     addFlow: 'group',
                     testerId: null,
-                    groupCount: 5,
+                    splitCount: 5,
                     allGroups: true,
                     groupIndex: 1,
                     selectedFactors: [],

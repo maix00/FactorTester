@@ -560,19 +560,19 @@ class FactorGroupTester:
             for idx, product_name in enumerate(trade_product_names)
         }
 
-        total_group_count = int(sum(
+        batch_flat_count = int(sum(
             entry_trade_membership_np[entry.simulation_index].shape[1]
             for entry in batch
         ))
-        expected_group_count = int(sum(len(entry.flat_group_info) for entry in batch))
-        if total_group_count != expected_group_count:
+        expected_flat_count = int(sum(len(entry.flat_group_info) for entry in batch))
+        if batch_flat_count != expected_flat_count:
             raise ValueError(
-                f"批次 {batch_index + 1} 分组数量不一致："
-                f"entry flat groups={expected_group_count}, "
-                f"trade membership groups={total_group_count}"
+                f"批次 {batch_index + 1} 扁平组数量不一致："
+                f"entry flat groups={expected_flat_count}, "
+                f"trade membership batch_flat_count={batch_flat_count}"
             )
         merged_membership_np = np.zeros(
-            (T, total_group_count, len(trade_product_names)), dtype=bool,
+            (T, batch_flat_count, len(trade_product_names)), dtype=bool,
         )
         group_owner: list[dict[str, Any]] = []
         group_slices: dict[int, list[int]] = {}
@@ -581,12 +581,12 @@ class FactorGroupTester:
         for entry in batch:
             si = entry.simulation_index
             local = entry_trade_membership_np[si]
-            local_group_count = int(local.shape[1])
-            if local_group_count != len(entry.flat_group_info):
+            local_flat_count = int(local.shape[1])
+            if local_flat_count != len(entry.flat_group_info):
                 raise ValueError(
-                    f"批次 {batch_index + 1} 提交 {si} 分组数量不一致："
+                    f"批次 {batch_index + 1} 提交 {si} 扁平组数量不一致："
                     f"flat groups={len(entry.flat_group_info)}, "
-                    f"trade membership groups={local_group_count}"
+                    f"trade membership flat_count={local_flat_count}"
                 )
             
             product_indices = np.asarray(
@@ -597,18 +597,18 @@ class FactorGroupTester:
             try:
                 merged_membership_np[
                     :,
-                    group_offset:group_offset + local_group_count,
+                    group_offset:group_offset + local_flat_count,
                     product_indices,
                 ] = local
             except IndexError as e:
                 raise IndexError(
-                    f"merge index error: T={T} total_groups={total_group_count} P={len(trade_product_names)} "
-                    f"group_offset={group_offset} local_group_count={local_group_count} "
+                    f"merge index error: T={T} batch_flat_count={batch_flat_count} P={len(trade_product_names)} "
+                    f"group_offset={group_offset} local_flat_count={local_flat_count} "
                     f"local_shape={local.shape} product_indices={product_indices.tolist()} "
                     f"merged_shape={merged_membership_np.shape} si={si} | {e}"
                 ) from e
-            group_slices[si] = list(range(group_offset, group_offset + local_group_count))
-            for local_group_idx in range(local_group_count):
+            group_slices[si] = list(range(group_offset, group_offset + local_flat_count))
+            for local_group_idx in range(local_flat_count):
                 group_label = entry.group_name_map.get(local_group_idx, f"group_{local_group_idx}")
                 group_owner.append({
                     "simulation_index": si,
@@ -618,7 +618,7 @@ class FactorGroupTester:
                     "group_index": local_group_idx,
                     "group_name": group_label,
                 })
-            group_offset += local_group_count
+            group_offset += local_flat_count
 
         return BatchExecutionPlan(
             batch_index=batch_index,
@@ -749,8 +749,8 @@ class FactorGroupTester:
 
             # Build per-group configs: one config dict per global group index.
             # Each entry contributes its groups via flat_group_info.
-            group_count = plan.merged_membership_np.shape[1]
-            group_configs: list[dict] = [{} for _ in range(group_count)]
+            batch_flat_count = plan.merged_membership_np.shape[1]
+            group_configs: list[dict] = [{} for _ in range(batch_flat_count)]
             for simulation_index, group_indices in plan.group_slices.items():
                 entry = entries_by_simulation_index[simulation_index]
                 local_to_global = {
@@ -761,7 +761,7 @@ class FactorGroupTester:
                 for flat_pos, info in enumerate(entry.flat_group_info):
                     group_configs[local_to_global.get(flat_pos, flat_pos)] = dict(info)
 
-            _emit_progress("trade_data", f"批次 {batch_label} 交易数据就绪，分组 {group_count} 个，品种 {len(spec_bundle.valid_cols)} 个",
+            _emit_progress("trade_data", f"批次 {batch_label} 交易数据就绪，扁平组 {batch_flat_count} 个，品种 {len(spec_bundle.valid_cols)} 个",
                            completed=1, total=1)
 
             _emit_progress("simulate", f"批次 {batch_label} 开始模拟", completed=0, total=1)
@@ -797,7 +797,7 @@ class FactorGroupTester:
         )
             except IndexError as e:
                 raise IndexError(
-                    f"simulate index error: group_count={group_count} "
+                    f"simulate index error: batch_flat_count={batch_flat_count} "
                     f"merged_membership_np.shape={plan.merged_membership_np.shape} "
                     f"returns_filled.shape={returns_filled.shape} "
                     f"plan.merged_price_np.shape={plan.merged_price_np.shape if plan.merged_price_np is not None else None} "

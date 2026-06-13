@@ -49,20 +49,12 @@ def register_group_progress(callback: Callable[[str, str, dict], None]) -> None:
     global _group_progress_callback
     with _group_progress_lock:
         _group_progress_callback = callback
-        import traceback, threading
-        print(
-            f"[GT-REGISTER] callback={callback.__name__ if hasattr(callback, '__name__') else callback} "
-            f"thread={threading.current_thread().name} id_cb={id(callback)}",
-            flush=True,
-        )
 
 
 def unregister_group_progress() -> None:
     global _group_progress_callback
     with _group_progress_lock:
         _group_progress_callback = None
-        import threading
-        print(f"[GT-UNREGISTER] thread={threading.current_thread().name}", flush=True)
 
 
 def set_batch_context(product_coverage_batch_index: int, product_coverage_batch_total: int, product_coverage_batch_label: str = "") -> None:
@@ -85,14 +77,6 @@ def _emit_progress(phase: str, message: str, **extra) -> None:
         cb = _group_progress_callback
     bi = getattr(_batch_context, 'product_coverage_batch_index', -1)
     bt = getattr(_batch_context, 'product_coverage_batch_total', 0)
-    has_cb = cb is not None
-    has_comp = 'completed' in extra
-    has_tot = 'total' in extra
-    print(
-        f"[GT-EMIT] phase={phase} cb={has_cb} cb_id={id(cb) if cb else 'N/A'} bi={bi} bt={bt} "
-        f"has_comp={has_comp} has_tot={has_tot} msg={message[:100]}",
-        flush=True,
-    )
     if cb is not None:
         try:
             # 自动注入 batch 上下文

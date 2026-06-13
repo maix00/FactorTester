@@ -314,7 +314,7 @@
             }
             h += '<span style="font-weight:600;">' + H.escapeHTML(batch.factorAlias) + '</span>';
             h += '<span style="color:#555;">' + H.escapeHTML(testerLabel) + '</span>';
-            h += '<span style="color:#888;font-size:11px;">' + batch.groupCount + '组</span>';
+            h += '<span style="color:#888;font-size:11px;">' + batch.splitCount + '组</span>';
             h += '</span>';
             h += '<button class="unified-batch-del-btn" data-batch-key="' + H.escapeHTML(batchId) + '" style="margin-left:auto;padding:1px 5px;font-size:11px;border:1px solid #fca5a5;border-radius:3px;background:#fef2f2;color:#dc2626;cursor:pointer;flex-shrink:0;">✕</button>';
             h += '</div>';

@@ -2,7 +2,7 @@
  * core/add-group-batch.js — addGroupBatch registry (UI list grouping)
  *
  * 管理 addGroupBatch 对象：{ number, name, submission_id, factor, n_groups }。
- * key = "testerId|factorAlias|groupCount"，三元组唯一对应一个 batch。
+ * key = "testerId|factorAlias|splitCount"，三元组唯一对应一个 batch。
  *
  * 核心函数：
  *   _addGroupBatchEnsure(testerId, factorAlias, nGroups) → 存在则返回已有，否则创建
@@ -24,7 +24,7 @@
     // State
     // ═══════════════════════════════════════════════════════════════
 
-    var _batches = {};  // key: "testerId|factorAlias|groupCount" → {number, name, submission_id, factor, n_groups}
+    var _batches = {};  // key: "testerId|factorAlias|splitCount" → {number, name, submission_id, factor, n_groups}
 
     // ═══════════════════════════════════════════════════════════════
     // Helpers
@@ -83,7 +83,7 @@
     function _addGroupBatchGet(testerId, factorAlias, nGroups) {
         if (typeof testerId === 'object' && testerId !== null) {
             var g = testerId;
-            return _batches[_addGroupBatchKey(g.testerId, g.factorAlias, g.groupCount)] || null;
+            return _batches[_addGroupBatchKey(g.testerId, g.factorAlias, g.splitCount)] || null;
         }
         return _batches[_addGroupBatchKey(testerId, factorAlias, nGroups)] || null;
     }
@@ -96,7 +96,7 @@
         if (!group) return null;
         var root = group.parentId ? _resolveRoot(group) : group;
         if (!root) return null;
-        return _addGroupBatchGet(root.testerId, root.factorAlias, root.groupCount);
+        return _addGroupBatchGet(root.testerId, root.factorAlias, root.splitCount);
     }
 
     function _addGroupBatchUpdate(number, patch) {

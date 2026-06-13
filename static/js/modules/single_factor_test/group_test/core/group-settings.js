@@ -141,9 +141,9 @@
         // ── Tester / factor scoping (root only; child inherit from parent chain) ──
         { key: 'testerId',    type: 'string',  default: '' },
         { key: 'factorAlias', type: 'string',  default: '' },
-        { key: 'groupCount',  type: 'number',  default: 5,
+        { key: 'splitCount',  type: 'number',  default: 5,
           validate: function(v) {
-              if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'groupCount must be a positive integer (≥ 1)';
+              if (typeof v !== 'number' || v < 1 || Math.floor(v) !== v) return 'splitCount must be a positive integer (≥ 1)';
               return null;
           } },
         { key: 'groupIndex',  type: 'number',  default: 1,
@@ -233,7 +233,7 @@
         var errors = [];
         var hasParent = !!(config.parentId);
         var parentNode = hasParent ? _groupGetRaw(config.parentId) : null;
-        var effectiveGroupCount = config.groupCount;
+        var effectiveSplitCount = config.splitCount;
         var effectiveGroupIndex = config.groupIndex;
 
         if (!config || typeof config !== 'object') {
@@ -248,7 +248,7 @@
             if (!parentNode) {
                 errors.push('parentId references a non-existent group: ' + config.parentId);
             } else {
-                if (effectiveGroupCount == null) effectiveGroupCount = parentNode.groupCount;
+                if (effectiveSplitCount == null) effectiveSplitCount = parentNode.splitCount;
                 if (effectiveGroupIndex == null) effectiveGroupIndex = parentNode.groupIndex;
             }
         }
@@ -263,16 +263,16 @@
             }
         }
 
-        if (typeof effectiveGroupCount !== 'number' || effectiveGroupCount < 1 || Math.floor(effectiveGroupCount) !== effectiveGroupCount) {
-            errors.push('groupCount must be a positive integer (≥ 1)');
+        if (typeof effectiveSplitCount !== 'number' || effectiveSplitCount < 1 || Math.floor(effectiveSplitCount) !== effectiveSplitCount) {
+            errors.push('splitCount must be a positive integer (≥ 1)');
         }
 
         if (effectiveGroupIndex !== undefined && effectiveGroupIndex !== null) {
             if (typeof effectiveGroupIndex !== 'number' || effectiveGroupIndex < 1 || Math.floor(effectiveGroupIndex) !== effectiveGroupIndex) {
                 errors.push('groupIndex must be a positive integer (≥ 1)');
             }
-            if (effectiveGroupCount && effectiveGroupIndex > effectiveGroupCount) {
-                errors.push('groupIndex must not exceed groupCount');
+            if (effectiveSplitCount && effectiveGroupIndex > effectiveSplitCount) {
+                errors.push('groupIndex must not exceed splitCount');
             }
         }
 
@@ -348,7 +348,7 @@
         var inheritedKeys = hasParent ? {
             testerId: true,
             factorAlias: true,
-            groupCount: true,
+            splitCount: true,
             groupIndex: true,
             isAllGroups: true,
             startDate: true,
@@ -402,7 +402,7 @@
         if (!result.valid) { throw new Error('Validation failed: ' + result.errors.join('; ')); }
 
         var needsRegen = false;
-        if (!_groupItems[idx].parentId && 'groupCount' in patch && patch.groupCount !== _groupItems[idx].groupCount) {
+        if (!_groupItems[idx].parentId && 'splitCount' in patch && patch.splitCount !== _groupItems[idx].splitCount) {
             needsRegen = true;
         }
 
@@ -892,7 +892,7 @@
         baseGroups.slice(0, 8).forEach(function(group) {
             var alias = group.shortAlias || group.name || group.id || '未命名组';
             var indexText = group.groupIndex != null ? group.groupIndex : '未设置';
-            var countText = group.groupCount != null ? group.groupCount : '未设置';
+            var countText = group.splitCount != null ? group.splitCount : '未设置';
             var feeText = group.feeMode || api.getFieldDefault('feeMode');
             var rebalanceText = group.rebalanceMode || api.getFieldDefault('rebalanceMode');
             lines.push(alias + ' · 第' + indexText + '/' + countText + '组 · 因子 ' + (group.factorAlias || '未设置')

@@ -64,34 +64,20 @@ class BacktestProgressRegistry:
     def emit_start(self, *, total: int, groups: int = 0, phase: str = "init", **extra) -> None:
         self._started = True
         cb = self._before
-        print(
-            f"[GT-REG] emit_start total={total} groups={groups} phase={phase} "
-            f"cb={cb is not None} extra_keys={list(extra.keys())[:10]}",
-            flush=True,
-        )
         if cb is not None:
             try:
                 cb(total, groups, phase, extra)
             except Exception as e:
-                import traceback
-                print(f"[GT-REG] emit_start ERROR: {e}", flush=True)
-                traceback.print_exc()
+                pass
 
     def emit_phase(self, phase: str, *, message: str = "",
                    completed: int = 0, total: int = 0, **extra) -> None:
         cb = self._phase
-        print(
-            f"[GT-REG] emit_phase phase={phase} completed={completed} total={total} "
-            f"cb={cb is not None} extra_keys={list(extra.keys())[:10]} msg={message[:80]}",
-            flush=True,
-        )
         if cb is not None:
             try:
                 cb(phase, message, completed, total, extra)
             except Exception as e:
-                import traceback
-                print(f"[GT-REG] emit_phase ERROR: {e}", flush=True)
-                traceback.print_exc()
+                pass
 
     def emit_result(self, data: Dict[str, Any]) -> None:
         cb = self._after

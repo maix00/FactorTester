@@ -142,18 +142,6 @@
                     } else if (line.startsWith('data: ')) {
                         try {
                             var payload = JSON.parse(line.slice(6));
-                            // 诊断：SSE 事件摘要
-                            var _diagKeys = Object.keys(payload);
-                            var _diagPhase = payload.phase != null ? payload.phase : 'N/A';
-                            var _diagComp = payload.completed != null ? payload.completed : 'N/A';
-                            var _diagTot = payload.total != null ? payload.total : 'N/A';
-                            var _diagBi = payload.product_coverage_batch_index != null ? payload.product_coverage_batch_index : 'N/A';
-                            console.log('[GT-SSE] recv | event=' + lastEvent
-                                + ' | phase=' + _diagPhase
-                                + ' | completed=' + _diagComp
-                                + ' | total=' + _diagTot
-                                + ' | bi=' + _diagBi
-                                + ' | keys=' + _diagKeys.join(','));
                             if (onEvent) {
                                 onEvent(lastEvent, payload);
                             }
@@ -201,13 +189,11 @@
         function _resolvedGroupForRun(group) {
             var out = Object.assign({}, group || {});
             if (out.parentId && GT.groupSettings.groups && typeof GT.groupSettings.groups.resolveRootField === 'function') {
-                ['testerId', 'factorAlias', 'groupCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
+                ['testerId', 'factorAlias', 'splitCount', 'groupIndex', 'isAllGroups', 'startDate', 'endDate'].forEach(function(key) {
                     var resolved = GT.groupSettings.groups.resolveRootField(out, key);
                     if (resolved !== undefined && resolved !== null && resolved !== '') out[key] = resolved;
                 });
             }
-            out.splitCount = out.splitCount || out.groupCount;
-            delete out.groupCount;
             return out;
         }
         var runGroups = allStoredGroups.map(_resolvedGroupForRun);
@@ -258,7 +244,7 @@
         // ── 合并 localSettings payload（start_date/end_date/precision/tz/initial_capital 等）──
         var bulkPayload = Object.assign({}, localRun.payload, {
             groups: runGroups,
-            expected_flat_group_count: runGroups.length,
+            flatCount: runGroups.length,
             ls_configs: flatLSConfigs.length > 0 ? flatLSConfigs : [],
             page_uuid: window._pageUuid || '',
             factor_family_alias: window.factorFamilyAlias || ''
@@ -293,12 +279,6 @@
             var data = await runTest.postBatchGroupTest(bulkPayload, function(event, payload) {
                 if (event === 'start') {
                     var newTotal = payload.product_coverage_batch_total || payload.total || 1;
-                    console.log('[GT-UI] start | newTotal=' + newTotal
-                        + ' | pcb_total=' + payload.product_coverage_batch_total
-                        + ' | payload.total=' + payload.total
-                        + ' | phases_len=' + (payload.phases ? payload.phases.length : 0)
-                        + ' | pendingGlobalProgress=' + pendingGlobalProgress.length
-                        + ' | rows_before=' + batchMgr.getIndices().length);
                     batchMgr.syncRows(newTotal);
                     // 后端告知的 phases：[{key, label}, ...]
                     if (payload.phases && payload.phases.length) {
@@ -313,14 +293,11 @@
                         }
                         batchMgr.registerPhases(phaseKeys);
                         batchMgr.setPhaseLabels(labelMap);
-                        console.log('[GT-UI] phases_registered | order=' + JSON.stringify(batchMgr._debug_phaseOrder)
-                            + ' | knownTotalPhases=' + batchMgr._debug_knownTotalPhases);
                     }
                     // 回放缓存的无 batch_index 全局进度
                     if (pendingGlobalProgress.length && batchMgr.getIndices().length) {
                         var pending = pendingGlobalProgress;
                         pendingGlobalProgress = [];
-                        console.log('[GT-UI] replay_pending | count=' + pending.length);
                         for (var p = 0; p < pending.length; p++) {
                             batchMgr.updateAllRows(pending[p].phase, pending[p].completed, pending[p].total, pending[p].message);
                         }
@@ -329,12 +306,6 @@
                     var bi = payload.product_coverage_batch_index;
                     var _hasRows = batchMgr.getIndices().length > 0;
                     var _willPending = (!_hasRows && (bi === undefined || bi < 0));
-                    console.log('[GT-UI] progress | phase=' + payload.phase
-                        + ' | completed=' + payload.completed
-                        + ' | total=' + payload.total
-                        + ' | bi=' + bi
-                        + ' | rows=' + _hasRows
-                        + ' | willPending=' + _willPending);
                     if (bi !== undefined && bi >= 0) {
                         batchMgr.updateRow(bi, payload.phase, payload.completed || 0, payload.total || 0, payload.message);
                     } else if (!_hasRows) {

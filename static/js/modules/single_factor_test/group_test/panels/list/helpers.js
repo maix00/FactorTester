@@ -194,8 +194,8 @@
     }
 
     /** Get addGroupBatchKey from addGroupBatch registry */
-    function addGroupBatchKey(testerId, factorAlias, groupCount) {
-        return GT.groupSettings.addGroupBatch.key(testerId, factorAlias, groupCount);
+    function addGroupBatchKey(testerId, factorAlias, splitCount) {
+        return GT.groupSettings.addGroupBatch.key(testerId, factorAlias, splitCount);
     }
 
     /** Group base items into addGroupBatches (UI list display groups) */
@@ -205,9 +205,9 @@
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             if (item.parentId) continue;
-            var key = addGroupBatchKey(item.testerId, item.factorAlias, item.groupCount);
+            var key = addGroupBatchKey(item.testerId, item.factorAlias, item.splitCount);
             if (!_addGroupBatchMap[key]) {
-                _addGroupBatchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, groupCount: item.groupCount, items: [] };
+                _addGroupBatchMap[key] = { key: key, testerId: item.testerId, factorAlias: item.factorAlias, splitCount: item.splitCount, items: [] };
             }
             _addGroupBatchMap[key].items.push(item);
         }
@@ -231,7 +231,7 @@
         var ids = [];
         for (var i = 0; i < items.length; i++) {
             if (items[i].parentId) continue;
-            if (addGroupBatchKey(items[i].testerId, items[i].factorAlias, items[i].groupCount) === addGroupBatchKeyVal) {
+            if (addGroupBatchKey(items[i].testerId, items[i].factorAlias, items[i].splitCount) === addGroupBatchKeyVal) {
                 ids.push(items[i].id);
             }
         }
