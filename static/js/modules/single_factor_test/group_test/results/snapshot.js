@@ -2,7 +2,7 @@
  * Group snapshot drawer — "图上每个分组的每期每组产品信息"
  *
  * 点击图表上任一时间点时，展示该时刻所有分组（可见的图线上各组）
- * 的完整产品持仓。当前只渲染单一仓位矩阵，便于按 flatCount 统一查看。
+ * 的完整产品持仓。当前只渲染单一仓位矩阵，并复用分组列表的展开态。
  *
  * Exposes GT.results.snapshot with:
  *   - fetchGroupSnapshot(timestampMs)
@@ -266,7 +266,8 @@
         html += '<table class="snapshot-matrix-table"><thead><tr>';
         html += '<th style="min-width:80px;">产品</th>';
         colGroups.forEach(function(cg) {
-            html += '<th>' + _escape(cg.label)
+            var labelHtml = cg.labelHtml || _escape(cg.label);
+            html += '<th>' + labelHtml
                 + ' <span style="font-weight:normal;color:#888;font-size:11px;">(' + cg.group.count + ')</span></th>';
         });
         html += '</tr></thead><tbody>';
@@ -307,7 +308,7 @@
 
     /**
      * 渲染分组持仓快照。当前只保留一个矩阵链路：
-     * 后端返回的 flat_count 决定展示多少列，前端直接按列生成单一矩阵。
+     * 当前按列表展开态决定展示哪些列，前端直接按列生成单一矩阵。
      */
     function renderGroupSnapshot(data, timestampMs) {
         if (!data || !data.groups) return;
@@ -315,7 +316,7 @@
         var timeStr = _fmtTs(timestampMs);
         document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + timeStr;
 
-        var groups = Array.isArray(data.groups) ? data.groups.slice(0, data.flat_count || data.groups.length) : [];
+        var groups = Array.isArray(data.groups) ? data.groups : [];
         var bodyEl = document.getElementById('snapshot_body');
         var statsEl = document.getElementById('snapshot_flow_stats');
         if (!bodyEl) return;
@@ -325,13 +326,48 @@
             return;
         }
 
-        var colGroups = groups.map(function(group, index) {
+        var layout = null;
+        var listIndex = GT.panels && GT.panels.list && GT.panels.list.index;
+        if (listIndex && typeof listIndex.getSnapshotMatrixColumns === 'function') {
+            try {
+                layout = listIndex.getSnapshotMatrixColumns() || [];
+            } catch (e) {
+                console.warn('[snapshot] getSnapshotMatrixColumns failed, fallback to raw groups:', e);
+            }
+        }
+        if (layout == null) {
+            layout = groups.map(function(group, index) {
+                return {
+                    sourceIndex: index,
+                    group: group,
+                    depth: 0,
+                    hasChildren: false,
+                    expanded: true,
+                    label: group.shortAlias || group.name || group.key || ('Group ' + (index + 1)),
+                };
+            });
+        }
+
+        if (!layout.length) {
+            bodyEl.innerHTML = '<div class="snapshot-empty-tab">暂无分组数据</div>';
+            if (statsEl) statsEl.innerHTML = '';
+            return;
+        }
+
+        var colGroups = layout.map(function(entry, index) {
+            var sourceIndex = (entry.sourceIndex != null) ? entry.sourceIndex : index;
+            var group = groups[sourceIndex] || entry.group || groups[index];
+            var label = entry.label || (group && (group.shortAlias || group.name || group.key)) || ('Group ' + (index + 1));
+            var prefix = '';
+            for (var i = 0; i < (entry.depth || 0); i++) prefix += '&nbsp;&nbsp;';
+            var icon = entry.hasChildren ? (entry.expanded ? '▾' : '▸') + ' ' : '';
             return {
                 group: group,
-                label: group.shortAlias || group.name || group.key || ('Group ' + (index + 1))
+                label: label,
+                labelHtml: '<span style="white-space:nowrap;">' + prefix + icon + _escape(label) + '</span>',
             };
-        });
-        var allProducts = _batchProducts(groups);
+        }).filter(function(cg) { return !!cg.group; });
+        var allProducts = _batchProducts(colGroups.map(function(cg) { return cg.group; }));
         var matrixHtml = _renderMatrixTable(colGroups, allProducts, '仓位矩阵');
         bodyEl.innerHTML = matrixHtml;
 

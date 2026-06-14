@@ -8,7 +8,6 @@ document.registerElement('snapshot_body');
 document.registerElement('snapshot_flow_stats');
 
 GT.results.snapshot.renderGroupSnapshot({
-  flat_count: 2,
   groups: [
     {
       name: 'Group A',
