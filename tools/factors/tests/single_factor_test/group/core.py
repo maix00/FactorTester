@@ -12,8 +12,10 @@ from tqdm import tqdm
 
 from Settings import factor_info_path
 from tools.data.DataColumn import DataColumn
+from tools.data.DataCurrency import CurrencyConversionContext, normalize_currency, require_product_currency_vector
 from tools.data.DataFreq import DataFreq
 from tools.data.DataIndex import DataIndex
+from tools.data.DataMoneyMinorUnits import minor_units_to_major, major_floor_to_minor_units, major_to_minor_units
 from tools.factors import Factor
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.NextReturns import NextReturns
@@ -216,6 +218,9 @@ def slice_group_run_result(
         min_trade_quantity_vec=None if group_result.min_trade_quantity_vec is None else np.asarray(group_result.min_trade_quantity_vec).copy(),
         margin_ratio_vec=None if group_result.margin_ratio_vec is None else np.asarray(group_result.margin_ratio_vec).copy(),
         is_margin_traded_vec=None if group_result.is_margin_traded_vec is None else np.asarray(group_result.is_margin_traded_vec).copy(),
+        base_currency=str(getattr(group_result, "base_currency", "CNY") or "CNY"),
+        product_currency_vec=None if getattr(group_result, "product_currency_vec", None) is None else np.asarray(group_result.product_currency_vec).copy(),
+        currency_conversion_fee_rate=float(getattr(group_result, "currency_conversion_fee_rate", 0.0) or 0.0),
         liquidity_capacity_np=_take_group_axis(group_result.liquidity_capacity_np),
         liquidity_modes=list(group_result.liquidity_modes) if group_result.liquidity_modes is not None else None,
         liquidity_percents=list(group_result.liquidity_percents) if group_result.liquidity_percents is not None else None,
@@ -1079,6 +1084,9 @@ def _simulate_group_from_preloaded(
     rebalance_mode: str,
     initial_capital: float,
     multi_session_active: bool,
+    base_currency: str = "CNY",
+    currency_conversion_fee_rate: float = 0.0,
+    product_currency_vec: np.ndarray | list[str] | None = None,
     start_dt: Optional[Any] = None,  # DataTime
     end_dt: Optional[Any] = None,    # DataTime
     source_freq: DataFreq,
@@ -1098,6 +1106,12 @@ def _simulate_group_from_preloaded(
     liquidity_capacity_np: np.ndarray | None = None
     group_count = membership_np.shape[1]
     P = len(valid_cols)
+    base_currency = normalize_currency(base_currency)
+    product_currency_vec = require_product_currency_vector(
+        valid_cols,
+        explicit=product_currency_vec,
+        default=None,
+    )
 
     def _liquidity_mode_from_spec(spec: dict | None) -> str:
         if not isinstance(spec, dict):
@@ -1198,6 +1212,10 @@ def _simulate_group_from_preloaded(
         margin_modes=group_margin_modes,
         rebalance_modes=np.asarray(rebalance_modes_list, dtype=object),
         initial_capital=initial_capital,
+        base_currency=base_currency,
+        product_currency_vec=product_currency_vec,
+        currency_conversion_fee_rate=currency_conversion_fee_rate,
+        time_index=index_list,
     )
     _emit_progress("simulate", "模拟完成", completed=1, total=1)
     group_returns_np = sim_result['net_returns_np']
@@ -1286,6 +1304,9 @@ def _simulate_group_from_preloaded(
         min_trade_quantity_vec=min_trade_quantity_vec,
         margin_ratio_vec=long_margin_ratio_vec,
         is_margin_traded_vec=is_margin_traded_vec,
+        base_currency=base_currency,
+        product_currency_vec=np.asarray(product_currency_vec, dtype=object),
+        currency_conversion_fee_rate=float(currency_conversion_fee_rate or 0.0),
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=list(group_liquidity_modes) if group_liquidity_modes is not None else None,
         liquidity_percents=list(group_liquidity_percents) if group_liquidity_percents is not None else None,
@@ -1949,6 +1970,10 @@ def simulate_group_trading_book(
     margin_modes: np.ndarray | list[str],
     rebalance_modes: np.ndarray | list[str],
     initial_capital: float = 100000000.0,
+    base_currency: str = "CNY",
+    product_currency_vec: np.ndarray | list[str] | None = None,
+    currency_conversion_fee_rate: float = 0.0,
+    time_index: list | None = None,
 ) -> dict:
     """Simulate grouped trading with quantities, fees, cash, margin, and per-period tradability."""
     T, M, P = membership_np.shape
@@ -1993,6 +2018,18 @@ def simulate_group_trading_book(
     percent_rows = liquidity_modes_arr == "percent"
     has_percent_liquidity = liquidity_capacity_arr is not None and bool(percent_rows.any())
     percent_scale = np.clip(liquidity_percents_arr, 0.0, 100.0) / 100.0
+    base_currency = normalize_currency(base_currency)
+    product_currency_arr = require_product_currency_vector(
+        list(range(P)),
+        explicit=product_currency_vec,
+        default=None,
+    )
+    currency_context = CurrencyConversionContext(
+        base_currency=base_currency,
+        conversion_fee_rate=currency_conversion_fee_rate,
+    )
+    currency_conversion_fee_rate = currency_context.conversion_fee_rate
+    time_index = list(time_index) if time_index is not None else list(range(T))
 
     net_returns_np = np.zeros((T, M), dtype=float)
     gross_returns_np = np.zeros((T, M), dtype=float)
@@ -2000,19 +2037,19 @@ def simulate_group_trading_book(
     product_fee_contrib_np = np.zeros((T, M, P), dtype=float)
     fee_costs_np = np.zeros((T, M), dtype=float)
     trade_notional_ratio_np = np.zeros((T, M), dtype=float)
-    target_amounts_np = np.zeros((T, M, P), dtype=float)
-    target_amounts_before_floor_np = np.zeros((T, M, P), dtype=float)
-    prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
+    target_amounts_np = np.zeros((T, M, P), dtype=np.int64)
+    target_amounts_before_floor_np = np.zeros((T, M, P), dtype=np.int64)
+    prev_end_amounts_np = np.zeros((T, M, P), dtype=np.int64)
     position_quantities_np = np.zeros((T, M, P), dtype=float)
-    margin_occupied_np = np.zeros((T, M), dtype=float)
-    pre_rebalance_total_equity_np = np.zeros((T, M), dtype=float)
-    post_rebalance_total_equity_np = np.zeros((T, M), dtype=float)
-    total_equity_np = np.zeros((T, M), dtype=float)
-    pre_rebalance_cash_np = np.zeros((T, M), dtype=float)
-    post_rebalance_cash_np = np.zeros((T, M), dtype=float)
-    cash_np = np.zeros((T, M), dtype=float)
-    buy_fee_amount_np = np.zeros((T, M), dtype=float)
-    sell_fee_amount_np = np.zeros((T, M), dtype=float)
+    margin_occupied_np = np.zeros((T, M), dtype=np.int64)
+    pre_rebalance_total_equity_np = np.zeros((T, M), dtype=np.int64)
+    post_rebalance_total_equity_np = np.zeros((T, M), dtype=np.int64)
+    total_equity_np = np.zeros((T, M), dtype=np.int64)
+    pre_rebalance_cash_np = np.zeros((T, M), dtype=np.int64)
+    post_rebalance_cash_np = np.zeros((T, M), dtype=np.int64)
+    cash_np = np.zeros((T, M), dtype=np.int64)
+    buy_fee_amount_np = np.zeros((T, M), dtype=np.int64)
+    sell_fee_amount_np = np.zeros((T, M), dtype=np.int64)
     liquidity_capacity_amounts_np = np.zeros((T, M, P), dtype=float)
     one_lot_margin_np = np.zeros((T, M, P), dtype=float)
     one_lot_fee_np = np.zeros((T, M, P), dtype=float)
@@ -2020,7 +2057,16 @@ def simulate_group_trading_book(
     if not np.isfinite(initial_capital) or initial_capital <= 0:
         raise ValueError(f"initial_capital must be positive, got {initial_capital!r}")
 
-    equity = np.full(M, float(initial_capital), dtype=float)
+    def _floor_minor_units(value: Any) -> np.ndarray:
+        return major_floor_to_minor_units(value)
+
+    def _round_minor_units(value: Any) -> np.ndarray:
+        return major_to_minor_units(value)
+
+    def _from_minor_units(minor_units: Any) -> np.ndarray:
+        return minor_units_to_major(minor_units)
+
+    equity = np.full(M, float(_from_minor_units(_round_minor_units(initial_capital))), dtype=float)
     quantities = np.zeros((M, P), dtype=float)
 
     def _round_price(raw_price: np.ndarray) -> np.ndarray:
@@ -2033,123 +2079,6 @@ def simulate_group_trading_book(
         if no_tick.any():
             rounded[no_tick] = np.round(px[no_tick], 2)
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
-
-    def _row_required_capital(
-        current_row: np.ndarray,
-        candidate_row: np.ndarray,
-        contract_value_row: np.ndarray,
-        open_rate_row: np.ndarray,
-        close_rate_row: np.ndarray,
-        open_fixed_row: np.ndarray,
-        close_fixed_row: np.ndarray,
-        margin_ratio_row: np.ndarray,
-        margin_flag_row: np.ndarray,
-        margin_mode: str,
-    ) -> float:
-        buy_qty = np.clip(candidate_row - current_row, 0.0, None)
-        sell_qty = np.clip(current_row - candidate_row, 0.0, None)
-        buy_notional = buy_qty * contract_value_row
-        sell_notional = sell_qty * contract_value_row
-        buy_fee = buy_notional * open_rate_row + buy_qty * open_fixed_row
-        sell_fee = sell_notional * close_rate_row + sell_qty * close_fixed_row
-        position_notional = candidate_row * contract_value_row
-        use_margin_row = (margin_mode == "margin") & margin_flag_row
-        occupied = np.nansum(np.where(use_margin_row, position_notional * margin_ratio_row, position_notional))
-        return float(occupied + np.nansum(buy_fee) + np.nansum(sell_fee))
-
-    def _pack_openable_quantities(
-        row_idx: int,
-        current_row: np.ndarray,
-        target_row: np.ndarray,
-        contract_value_row_1d: np.ndarray,
-        executable_capacity_row: np.ndarray | None = None,
-    ) -> np.ndarray:
-        lot_row = lot_sizes.copy()
-        lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
-        target_row = np.where(np.isfinite(target_row), target_row, 0.0)
-        buy_target = np.clip(target_row - current_row, 0.0, None)
-        sell_target = np.clip(current_row - target_row, 0.0, None)
-        buy_qty = np.floor(np.divide(
-            buy_target,
-            lot_row,
-            out=np.zeros_like(buy_target, dtype=float),
-            where=lot_row > 0,
-        )) * lot_row
-        sell_qty = np.floor(np.divide(
-            sell_target,
-            lot_row,
-            out=np.zeros_like(sell_target, dtype=float),
-            where=lot_row > 0,
-        )) * lot_row
-        candidate = current_row - sell_qty + buy_qty
-        open_rate_row = open_rate_mat[row_idx]
-        close_rate_row = close_rate_mat[row_idx]
-        open_fixed_row = open_fixed_mat[row_idx]
-        close_fixed_row = close_fixed_mat[row_idx]
-        margin_ratio_row = margin_ratios
-        margin_flag_row = margin_flags
-        margin_mode = margin_modes_arr[row_idx]
-        current_required = _row_required_capital(
-            current_row,
-            candidate,
-            contract_value_row_1d,
-            open_rate_row,
-            close_rate_row,
-            open_fixed_row,
-            close_fixed_row,
-            margin_ratio_row,
-            margin_flag_row,
-            margin_mode,
-        )
-        budget = float(equity[row_idx])
-        capacity_row = executable_capacity_row  # (P,) or None
-        if not np.any(np.isfinite(buy_target) & (buy_target > 0)):
-            return candidate
-
-        while True:
-            best_idx = -1
-            best_score = -np.inf
-            best_required = None
-            for p_idx in range(P):
-                if not executable[p_idx] or not membership_np[t, row_idx, p_idx]:
-                    continue
-                if not np.isfinite(contract_value_row_1d[p_idx]) or contract_value_row_1d[p_idx] <= 0:
-                    continue
-                if lot_row[p_idx] <= 0:
-                    continue
-                proposed = candidate.copy()
-                proposed[p_idx] += lot_row[p_idx]
-                # Check liquidity cap: the buy notional (or total notional) for
-                # this product must not exceed its per-product capacity.
-                if capacity_row is not None and np.isfinite(capacity_row[p_idx]):
-                    buy_notional = (proposed[p_idx] - current_row[p_idx]) * contract_value_row_1d[p_idx]
-                    if buy_notional > capacity_row[p_idx] + 1e-12:
-                        continue
-                proposed_required = _row_required_capital(
-                    current_row,
-                    proposed,
-                    contract_value_row_1d,
-                    open_rate_row,
-                    close_rate_row,
-                    open_fixed_row,
-                    close_fixed_row,
-                    margin_ratio_row,
-                    margin_flag_row,
-                    margin_mode,
-                )
-                if proposed_required > budget + 1e-12:
-                    continue
-                current_error = abs(float(target_row[p_idx] - candidate[p_idx]))
-                proposed_error = abs(float(target_row[p_idx] - proposed[p_idx]))
-                score = current_error - proposed_error
-                if score > best_score + 1e-12 or (abs(score - best_score) <= 1e-12 and (best_required is None or proposed_required < best_required)):
-                    best_idx = p_idx
-                    best_score = score
-                    best_required = proposed_required
-            if best_idx < 0:
-                break
-            candidate[best_idx] += lot_row[best_idx]
-        return candidate
 
     _emit_progress("simulate", f"开始交易账本模拟，时间点 {T} 个", completed=0, total=T)
     _last_sim_report = -1
@@ -2165,15 +2094,31 @@ def simulate_group_trading_book(
         executable_row = executable[np.newaxis, :]
         contract_value = price_t * point_values
         contract_value = np.where(valuated & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
+        contract_value_base = contract_value.copy()
+        for p_idx in range(P):
+            contract_value_base[p_idx] = float(currency_context.to_base(contract_value[p_idx], product_currency_arr[p_idx], time_index[t]))
         contract_value_row = contract_value[np.newaxis, :]
-        prev_notional = np.where(executable_row, quantities * contract_value_row, 0.0)
+        contract_value_base_row = contract_value_base[np.newaxis, :]
+        lot_row = lot_sizes.copy()
+        lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
+        contract_value_minor_units = _round_minor_units(contract_value_base)
+        one_lot_margin_mat = np.where(
+            use_margin,
+            lot_row * contract_value_base * margin_ratios,
+            lot_row * contract_value_base,
+        )
+        one_lot_margin_display_mat = one_lot_margin_mat
+        one_lot_fee_display_mat = lot_row * contract_value * open_rate_mat + lot_row * open_fixed_mat
+        prev_notional = np.where(executable_row, quantities * contract_value_base_row, 0.0)
         pre_rebalance_total = equity.copy()
         pre_rebalance_occupied = np.where(
             use_margin,
             prev_notional * margin_ratios,
             prev_notional,
         )
-        pre_rebalance_cash = equity - np.nansum(pre_rebalance_occupied, axis=1)
+        pre_rebalance_cash = _from_minor_units(
+            _floor_minor_units(equity) - _floor_minor_units(np.nansum(pre_rebalance_occupied, axis=1))
+        )
 
         # When membership is unchanged AND we are not in "each_period" mode
         # (which requires per-period re-weighting), skip rebalancing entirely.
@@ -2211,23 +2156,13 @@ def simulate_group_trading_book(
                     liquidity_capacity_arr[t],
                     0.0,
                 )
+                for p_idx in range(P):
+                    base_capacity[p_idx] = float(currency_context.to_base(base_capacity[p_idx], product_currency_arr[p_idx], time_index[t]))
                 base_capacity = np.where(executable, base_capacity, 0.0)
                 executable_capacity_t[percent_rows] = (
                     base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
                 )
             liquidity_capacity_amounts_np[t] = executable_capacity_t.copy()
-
-            lot_row = lot_sizes.copy()
-            lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
-
-            # ── 一手开仓全花销 ──
-            one_lot_margin_mat = np.where(
-                use_margin,
-                lot_row * contract_value * margin_ratios,
-                lot_row * contract_value,
-            )
-            one_lot_open_fee_mat = lot_row * contract_value * open_rate_mat + lot_row * open_fixed_mat
-            one_lot_full_cost_mat = one_lot_margin_mat + one_lot_open_fee_mat
 
             curr_mask_all = membership_np[t]
             prev_mask_all = quantities > 0
@@ -2238,7 +2173,7 @@ def simulate_group_trading_book(
                 sell_mask: np.ndarray,
             ) -> tuple[np.ndarray, np.ndarray]:
                 result = quantities_in.copy()
-                released = np.zeros(M, dtype=float)
+                released_minor_units = np.zeros(M, dtype=np.int64)
                 for row_idx in range(M):
                     if not sell_mask[row_idx].any():
                         continue
@@ -2249,43 +2184,85 @@ def simulate_group_trading_book(
                             continue
                         if not executable[p_idx]:
                             continue
-                        cv = contract_value[p_idx]
-                        if not np.isfinite(cv) or cv <= 0:
+                        cv_minor_units = int(contract_value_minor_units[p_idx])
+                        if cv_minor_units <= 0:
                             continue
                         qty = result[row_idx, p_idx]
                         lot = lot_row[p_idx]
                         max_lots = max(1, int(np.round(qty / lot, 10)))
                         capacity = executable_capacity_t[row_idx, p_idx]
                         if np.isfinite(capacity):
-                            max_lots_by_cap = int(np.round(capacity / (lot * cv), 10))
+                            capacity_minor_units = int(_floor_minor_units(capacity))
+                            max_lots_by_cap = int(capacity_minor_units // max(1, int(round(lot * cv_minor_units))))
                             max_lots = min(max_lots, max_lots_by_cap)
                         if max_lots <= 0:
                             continue
                         sell_qty = float(max_lots) * lot
-                        sell_notional = sell_qty * cv
+                        sell_notional_minor_units = int(round(sell_qty * cv_minor_units))
                         if use_margin[row_idx, p_idx]:
-                            cash_released = sell_notional * margin_ratios[row_idx, p_idx]
+                            cash_released_minor_units = int(np.floor(sell_notional_minor_units * margin_ratios[row_idx, p_idx] + 1e-9))
                         else:
-                            cash_released = sell_notional
-                        close_fee_here = sell_notional * close_rate_mat[row_idx, p_idx] + sell_qty * close_fixed_mat[row_idx, p_idx]
-                        released[row_idx] += max(0.0, cash_released - close_fee_here)
+                            cash_released_minor_units = sell_notional_minor_units
+                        close_fee_here_minor_units = int(_round_minor_units(
+                            (sell_notional_minor_units / 100.0) * close_rate_mat[row_idx, p_idx]
+                            + float(currency_context.to_base(sell_qty * close_fixed_mat[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
+                        ))
+                        released_minor_units[row_idx] += max(0, cash_released_minor_units - close_fee_here_minor_units)
                         result[row_idx, p_idx] -= sell_qty
-                return result, released
+                return result, released_minor_units
 
             # ── 函数B：等额现金分配买入 ──
+            def _buy_cost_minor_units(row_idx: int, p_idx: int, lots: int) -> int:
+                if lots <= 0:
+                    return 0
+                qty = float(lots) * lot_row[p_idx]
+                notional_minor_units = int(_round_minor_units(qty * contract_value_base[p_idx]))
+                if use_margin[row_idx, p_idx]:
+                    margin_minor_units = int(_round_minor_units((notional_minor_units / 100.0) * margin_ratios[row_idx, p_idx]))
+                else:
+                    margin_minor_units = notional_minor_units
+                fee_minor_units = int(_round_minor_units(
+                    (notional_minor_units / 100.0) * open_rate_mat[row_idx, p_idx]
+                    + float(currency_context.to_base(qty * open_fixed_mat[row_idx, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True))
+                ))
+                return max(0, margin_minor_units + fee_minor_units)
+
+            def _max_lots_by_cash(row_idx: int, p_idx: int, cash_limit_minor_units: int) -> tuple[int, int]:
+                if cash_limit_minor_units <= 0:
+                    return 0, 0
+                one_lot_cost = _buy_cost_minor_units(row_idx, p_idx, 1)
+                if one_lot_cost <= 0 or one_lot_cost > cash_limit_minor_units:
+                    return 0, one_lot_cost
+                hi = max(1, cash_limit_minor_units // one_lot_cost + 2)
+                while _buy_cost_minor_units(row_idx, p_idx, hi) <= cash_limit_minor_units:
+                    hi *= 2
+                lo = 1
+                best_lots = 1
+                best_cost = one_lot_cost
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    mid_cost = _buy_cost_minor_units(row_idx, p_idx, mid)
+                    if mid_cost <= cash_limit_minor_units:
+                        best_lots = mid
+                        best_cost = mid_cost
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                return int(best_lots), int(best_cost)
+
             def _buy_equal_alloc(
                 quantities_in: np.ndarray,
                 buy_mask: np.ndarray,
-                available_cash: np.ndarray,
+                available_cash_minor_units: np.ndarray,
             ) -> np.ndarray:
                 result = quantities_in.copy()
-                cash = available_cash.copy()
+                cash_minor_units = np.asarray(available_cash_minor_units, dtype=np.int64).copy()
 
                 MAX_ITERATIONS = 100
                 for _iter in range(MAX_ITERATIONS):
                     changed_any = False
                     for row_idx in range(M):
-                        if cash[row_idx] <= 1e-12:
+                        if cash_minor_units[row_idx] <= 0:
                             continue
 
                         eligible_indices = []
@@ -2294,55 +2271,80 @@ def simulate_group_trading_book(
                                 continue
                             if not executable[p_idx]:
                                 continue
-                            cv = contract_value[p_idx]
-                            if not np.isfinite(cv) or cv <= 0:
+                            cv_minor_units = int(contract_value_minor_units[p_idx])
+                            if cv_minor_units <= 0:
                                 continue
                             if not np.isfinite(lot_row[p_idx]) or lot_row[p_idx] <= 0:
                                 continue
-                            cost = one_lot_full_cost_mat[row_idx, p_idx]
-                            if not np.isfinite(cost) or cost <= 0:
+                            one_lot_cost_minor_units = _buy_cost_minor_units(row_idx, p_idx, 1)
+                            if one_lot_cost_minor_units <= 0:
                                 continue
                             capacity = executable_capacity_t[row_idx, p_idx]
                             max_lots_by_cap = None
                             if np.isfinite(capacity):
-                                max_by_cap = int(np.round(capacity / (lot_row[p_idx] * cv), 10))
+                                capacity_minor_units = int(_floor_minor_units(capacity))
+                                max_by_cap, _ = _max_lots_by_cash(row_idx, p_idx, capacity_minor_units)
                                 if max_by_cap <= 0:
                                     continue
                                 max_lots_by_cap = max_by_cap
-                            eligible_indices.append((p_idx, max_lots_by_cap))
+                            eligible_indices.append((p_idx, one_lot_cost_minor_units, max_lots_by_cap))
 
                         if not eligible_indices:
                             continue
 
                         n_eligible = len(eligible_indices)
-                        per_cash = cash[row_idx] / n_eligible
+                        per_cash_minor_units = cash_minor_units[row_idx] // n_eligible
 
-                        total_remaining = 0.0
-                        for p_idx, max_lots_by_cap in eligible_indices:
-                            cv = contract_value[p_idx]
-                            cost = one_lot_full_cost_mat[row_idx, p_idx]
-                            max_lots_by_cash = int(np.round(per_cash / cost, 10))
+                        spent_minor_units = 0
+                        for p_idx, _one_lot_cost_minor_units, max_lots_by_cap in eligible_indices:
+                            max_lots_by_cash, spent_here_minor_units = _max_lots_by_cash(row_idx, p_idx, int(per_cash_minor_units))
                             max_lots = max_lots_by_cash
                             if max_lots_by_cap is not None:
                                 max_lots = min(max_lots, max_lots_by_cap)
+                                spent_here_minor_units = _buy_cost_minor_units(row_idx, p_idx, max_lots)
                             if max_lots <= 0:
-                                total_remaining += per_cash
                                 continue
 
                             buy_qty_p = float(max_lots) * lot_row[p_idx]
-                            spent_notional = buy_qty_p * cv
-                            buy_fee_p = spent_notional * open_rate_mat[row_idx, p_idx] + buy_qty_p * open_fixed_mat[row_idx, p_idx]
-                            total_spent = spent_notional * (margin_ratios[row_idx, p_idx] if use_margin[row_idx, p_idx] else 1.0) + buy_fee_p
-
-                            leftover = per_cash - total_spent
-                            total_remaining += max(0.0, leftover)
 
                             result[row_idx, p_idx] += buy_qty_p
                             if np.isfinite(executable_capacity_t[row_idx, p_idx]):
-                                executable_capacity_t[row_idx, p_idx] -= spent_notional
+                                executable_capacity_t[row_idx, p_idx] = max(
+                                    0.0,
+                                    executable_capacity_t[row_idx, p_idx] - (spent_here_minor_units / 100.0),
+                                )
+                            spent_minor_units += spent_here_minor_units
+                            cash_minor_units[row_idx] -= spent_here_minor_units
                             changed_any = True
 
-                        cash[row_idx] = total_remaining
+                        if spent_minor_units <= 0:
+                            best_idx = -1
+                            best_cost = None
+                            best_qty = None
+                            for p_idx, _one_lot_cost_minor_units, max_lots_by_cap in eligible_indices:
+                                if max_lots_by_cap is not None and max_lots_by_cap <= 0:
+                                    continue
+                                extra_cost_minor_units = _buy_cost_minor_units(row_idx, p_idx, 1)
+                                if extra_cost_minor_units <= 0 or extra_cost_minor_units > cash_minor_units[row_idx]:
+                                    continue
+                                current_qty = result[row_idx, p_idx]
+                                if (
+                                    best_qty is None
+                                    or current_qty < best_qty - 1e-12
+                                    or (abs(current_qty - best_qty) <= 1e-12 and (best_cost is None or extra_cost_minor_units < best_cost))
+                                ):
+                                    best_idx = p_idx
+                                    best_cost = extra_cost_minor_units
+                                    best_qty = current_qty
+                            if best_idx >= 0 and best_cost is not None:
+                                result[row_idx, best_idx] += lot_row[best_idx]
+                                if np.isfinite(executable_capacity_t[row_idx, best_idx]):
+                                    executable_capacity_t[row_idx, best_idx] = max(
+                                        0.0,
+                                        executable_capacity_t[row_idx, best_idx] - (best_cost / 100.0),
+                                    )
+                                cash_minor_units[row_idx] -= best_cost
+                                changed_any = True
 
                     if not changed_any:
                         break
@@ -2367,25 +2369,21 @@ def simulate_group_trading_book(
             quantities_old = quantities.copy()
 
             # 执行卖出
-            quantities, cash_released = _sell_positions(quantities, sell_mask)
+            quantities, cash_released_minor_units = _sell_positions(quantities, sell_mask)
 
             # 可用现金
             # each_period：全卖了，所有资产都是现金 → available_cash = equity
             # buy_and_hold/recycle：staying 未卖，其保证金仍锁定 → available_cash = (equity - staying_occupied) + cash_released
-            if hold_rows.any() or recycle_rows.any():
-                staying_notional = quantities * contract_value_row * staying_mask.astype(float)
-                staying_occupied = np.where(
-                    use_margin,
-                    staying_notional * margin_ratios,
-                    staying_notional,
+            available_cash_minor_units = _floor_minor_units(equity)
+            hold_like_rows = hold_rows | recycle_rows
+            if hold_like_rows.any():
+                available_cash_minor_units[hold_like_rows] = np.maximum(
+                    0,
+                    _floor_minor_units(pre_rebalance_cash[hold_like_rows]) + cash_released_minor_units[hold_like_rows],
                 )
-                staying_occupied_total = np.nansum(staying_occupied, axis=1)
-                available_cash = np.maximum(0.0, equity - staying_occupied_total) + cash_released
-            else:
-                available_cash = equity.copy()
 
             # 执行买入
-            quantities = _buy_equal_alloc(quantities, buy_mask, available_cash)
+            quantities = _buy_equal_alloc(quantities, buy_mask, available_cash_minor_units)
 
             # recycle_rows with same_position_set: 冻结 entering
             # 跳过初始周期（prev_mask_all 全 False，entering == curr）
@@ -2407,16 +2405,25 @@ def simulate_group_trading_book(
             quantities[:, ~executable] = quantities_old[:, ~executable]
 
             desired_quantities = quantities
-            target_amounts_before_floor = quantities * contract_value_row
+            target_amounts_before_floor = quantities * contract_value_base_row
 
             buy_qty = np.clip(desired_quantities - quantities_old, 0.0, None)
             sell_qty = np.clip(quantities_old - desired_quantities, 0.0, None)
-            buy_notional = buy_qty * contract_value_row
-            sell_notional = sell_qty * contract_value_row
-            buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
-            sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
+            buy_notional_minor_units = _round_minor_units(buy_qty * contract_value_base_row)
+            sell_notional_minor_units = _round_minor_units(sell_qty * contract_value_base_row)
+            buy_notional = _from_minor_units(buy_notional_minor_units)
+            sell_notional = _from_minor_units(sell_notional_minor_units)
+            buy_fixed_base = np.zeros_like(buy_qty, dtype=float)
+            sell_fixed_base = np.zeros_like(sell_qty, dtype=float)
+            for p_idx in range(P):
+                buy_fixed_base[:, p_idx] = currency_context.to_base(buy_qty[:, p_idx] * open_fixed_mat[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
+                sell_fixed_base[:, p_idx] = currency_context.to_base(sell_qty[:, p_idx] * close_fixed_mat[:, p_idx], product_currency_arr[p_idx], time_index[t], applies_fee=True)
+            buy_fee_minor_units = _round_minor_units(buy_notional * open_rate_mat + buy_fixed_base)
+            sell_fee_minor_units = _round_minor_units(sell_notional * close_rate_mat + sell_fixed_base)
+            buy_fee = _from_minor_units(buy_fee_minor_units)
+            sell_fee = _from_minor_units(sell_fee_minor_units)
             fee_amount = buy_fee + sell_fee
-            position_notional = desired_quantities * contract_value_row
+            position_notional = _from_minor_units(_round_minor_units(desired_quantities * contract_value_base_row))
         gross_contrib = np.where(
             equity[:, np.newaxis] > 0,
             position_notional / equity[:, np.newaxis] * returns_np[t][np.newaxis, :],
@@ -2430,24 +2437,29 @@ def simulate_group_trading_book(
             out=np.zeros(M, dtype=float),
             where=equity > 0,
         )
-        total_fee_amount = np.nansum(fee_amount, axis=1)
-        post_rebalance_total = equity - total_fee_amount
+        total_fee_amount = _from_minor_units(_round_minor_units(np.nansum(fee_amount, axis=1)))
+        post_rebalance_total = _from_minor_units(_floor_minor_units(equity) - _round_minor_units(total_fee_amount))
         start_occupied = np.where(
             use_margin,
             position_notional * margin_ratios,
             position_notional,
         )
-        post_rebalance_cash = post_rebalance_total - np.nansum(start_occupied, axis=1)
+        post_rebalance_cash = _from_minor_units(
+            _floor_minor_units(post_rebalance_total) - _floor_minor_units(np.nansum(start_occupied, axis=1))
+        )
         net = gross - fee_ratio
-        end_equity = equity * (1.0 + net)
+        end_equity = _from_minor_units(_round_minor_units(equity * (1.0 + net)))
         end_price = price_t * (1.0 + returns_np[t])
-        end_notional = desired_quantities * end_price[np.newaxis, :] * point_values_row
+        end_contract_value_base = end_price * point_values
+        for p_idx in range(P):
+            end_contract_value_base[p_idx] = float(currency_context.to_base(end_contract_value_base[p_idx], product_currency_arr[p_idx], time_index[t]))
+        end_notional = _from_minor_units(_round_minor_units(desired_quantities * end_contract_value_base[np.newaxis, :]))
         end_occupied = np.where(
             use_margin,
             end_notional * margin_ratios,
             end_notional,
         )
-        end_occupied = np.nansum(end_occupied, axis=1)
+        end_occupied = _from_minor_units(_floor_minor_units(np.nansum(end_occupied, axis=1)))
 
         net_returns_np[t] = net
         gross_returns_np[t] = gross
@@ -2464,38 +2476,24 @@ def simulate_group_trading_book(
             out=np.zeros(M, dtype=float),
             where=equity > 0,
         )
-        target_amounts_np[t] = position_notional
-        target_amounts_before_floor_np[t] = target_amounts_before_floor
-        prev_end_amounts_np[t] = end_notional
+        target_amounts_np[t] = _round_minor_units(position_notional)
+        target_amounts_before_floor_np[t] = _round_minor_units(target_amounts_before_floor)
+        prev_end_amounts_np[t] = _round_minor_units(end_notional)
         position_quantities_np[t] = desired_quantities
-        margin_occupied_np[t] = end_occupied
-        pre_rebalance_total_equity_np[t] = pre_rebalance_total
-        post_rebalance_total_equity_np[t] = post_rebalance_total
-        total_equity_np[t] = end_equity
-        pre_rebalance_cash_np[t] = pre_rebalance_cash
-        post_rebalance_cash_np[t] = post_rebalance_cash
-        cash_np[t] = end_equity - end_occupied
-        buy_fee_amount_np[t] = np.nansum(buy_fee, axis=1)
-        sell_fee_amount_np[t] = np.nansum(sell_fee, axis=1)
+        margin_occupied_np[t] = _round_minor_units(end_occupied)
+        pre_rebalance_total_equity_np[t] = _round_minor_units(pre_rebalance_total)
+        post_rebalance_total_equity_np[t] = _round_minor_units(post_rebalance_total)
+        total_equity_np[t] = _round_minor_units(end_equity)
+        pre_rebalance_cash_np[t] = _round_minor_units(pre_rebalance_cash)
+        post_rebalance_cash_np[t] = _round_minor_units(post_rebalance_cash)
+        cash_np[t] = _floor_minor_units(end_equity) - _floor_minor_units(end_occupied)
+        buy_fee_amount_np[t] = _round_minor_units(np.nansum(buy_fee, axis=1))
+        sell_fee_amount_np[t] = _round_minor_units(np.nansum(sell_fee, axis=1))
 
-        # Per-product per-group one-lot cost: uses exactly the same parameters
-        # as _pack_openable_quantities / _row_required_capital inside simulate.
-        # contract_value = price_t * point_values  (same as line ~2112)
-        # one_lot_notional = contract_value * lot_size  (same as used in floor)
-        # one_lot_margin = one_lot_notional * (margin_ratio if use_margin else 1.0)
-        # one_lot_fee   = one_lot_notional * open_rate + lot_size * open_fixed
-        # Broadcasting: contract_value (P,) * lot_sizes (P,) → one_lot_notional (P,)
-        #   one_lot_margin: (P,) * (M, P) → (M, P)
-        #   one_lot_fee:    (P,) * (M, P) + (P,) * (M, P) → (M, P)
-        one_lot_notional = contract_value * lot_sizes  # (P,)
-        one_lot_margin_row = np.where(
-            use_margin,
-            one_lot_notional * margin_ratios,
-            one_lot_notional,
-        )  # (M, P)
-        one_lot_fee_row = one_lot_notional * np.asarray(open_rate_mat, dtype=float) + lot_sizes * np.asarray(open_fixed_mat, dtype=float)  # (M, P)
-        one_lot_margin_np[t] = one_lot_margin_row
-        one_lot_fee_np[t] = one_lot_fee_row
+        # Display-only one-lot estimates stay unrounded; real execution uses
+        # whole-order minor_units costs in _buy_cost_minor_units.
+        one_lot_margin_np[t] = one_lot_margin_display_mat
+        one_lot_fee_np[t] = one_lot_fee_display_mat
 
         quantities = desired_quantities
         equity = end_equity
@@ -2524,6 +2522,9 @@ def simulate_group_trading_book(
         'liquidity_capacity_amounts_np': liquidity_capacity_amounts_np,
         'one_lot_margin_np': one_lot_margin_np,
         'one_lot_fee_np': one_lot_fee_np,
+        'base_currency': base_currency,
+        'product_currency_vec': product_currency_arr,
+        'currency_conversion_fee_rate': currency_conversion_fee_rate,
     }
 
 

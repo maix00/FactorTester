@@ -809,6 +809,8 @@ class FactorGroupTester:
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
+        base_currency: str = "CNY",
+        currency_conversion_fee_rate: float = 0.0,
     ) -> list[dict[str, Any]]:
         batch_label = f"{batch_index + 1}/{batch_total}"
         set_batch_context(batch_index, batch_total, batch_label)
@@ -861,6 +863,8 @@ class FactorGroupTester:
             rebalance_mode=rebalance_mode,
             initial_capital=initial_capital,
             multi_session_active=any(bool(entry.shared_inputs.multi_session_active) for entry in plan.entries),
+            base_currency=base_currency,
+            currency_conversion_fee_rate=currency_conversion_fee_rate,
             start_dt=self.start_dt,
             end_dt=self.end_dt,
             source_freq=first_entry.shared_inputs.source_freq,
@@ -929,6 +933,8 @@ class FactorGroupTester:
         use_closetoday: bool,
         initial_capital: float,
         rebalance_mode: str,
+        base_currency: str = "CNY",
+        currency_conversion_fee_rate: float = 0.0,
         start_dt: Optional[Any] = None,  # DataTime
         end_dt: Optional[Any] = None,    # DataTime
         calendar_index: Optional[pd.Index],
@@ -988,6 +994,8 @@ class FactorGroupTester:
                 fee_modifications=fee_modifications,
                 use_closetoday=use_closetoday,
                 initial_capital=initial_capital,
+                base_currency=base_currency,
+                currency_conversion_fee_rate=currency_conversion_fee_rate,
                 rebalance_mode=rebalance_mode,
             )
             batches_completed += 1

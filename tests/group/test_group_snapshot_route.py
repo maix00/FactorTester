@@ -13,6 +13,14 @@ from sources.LocalCNFutures import CNFutures as cn_futures_module
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
+def _minor_units(values):
+    return np.rint(np.asarray(values, dtype=float) * 100.0).astype(np.int64)
+
+
+def _cny_vec(count: int):
+    return np.full(count, 'CNY', dtype=object)
+
+
 def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     app = Flask(__name__)
     app.config['TESTING'] = True
@@ -36,8 +44,9 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
         close_today_ratio_vec=np.array([0.03], dtype=float),
         index_list=[idx],
         group_names={0: '第一组'},
-        hold_amounts_np=np.array([[[100.0]]], dtype=float),
+        hold_amounts_np=_minor_units([[[100.0]]]),
         position_quantities_np=np.array([[[1.0]]], dtype=float),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -85,7 +94,7 @@ def test_group_snapshot_includes_capital_warning_when_first_period_cannot_open_p
         close_today_ratio_vec=np.array([0.0], dtype=float),
         index_list=[idx],
         group_names={0: '第一组'},
-        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
+        hold_amounts_np=np.zeros((1, 1, 1), dtype=np.int64),
         position_quantities_np=np.zeros((1, 1, 1), dtype=float),
         price_np=np.array([[1000.0]], dtype=float),
         point_value_vec=np.array([100.0], dtype=float),
@@ -93,7 +102,8 @@ def test_group_snapshot_includes_capital_warning_when_first_period_cannot_open_p
         margin_ratio_vec=np.array([1.0], dtype=float),
         is_margin_traded_vec=np.array([False], dtype=bool),
         initial_capital=1000.0,
-        post_rebalance_cash_np=np.array([[50.0]], dtype=float),
+        post_rebalance_cash_np=_minor_units([[50.0]]),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -138,8 +148,8 @@ def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch
         close_today_ratio_vec=np.array([0.0], dtype=float),
         index_list=[idx],
         group_names={0: '第一组'},
-        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
-        target_amounts_before_floor_np=np.array([[[50.0]]], dtype=float),
+        hold_amounts_np=np.zeros((1, 1, 1), dtype=np.int64),
+        target_amounts_before_floor_np=_minor_units([[[50.0]]]),
         position_quantities_np=np.zeros((1, 1, 1), dtype=float),
         price_np=np.array([[100.0]], dtype=float),
         point_value_vec=np.array([1.0], dtype=float),
@@ -147,7 +157,8 @@ def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch
         margin_ratio_vec=np.array([1.0], dtype=float),
         is_margin_traded_vec=np.array([False], dtype=bool),
         initial_capital=1000.0,
-        post_rebalance_cash_np=np.array([[50.0]], dtype=float),
+        post_rebalance_cash_np=_minor_units([[50.0]]),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -162,7 +173,7 @@ def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch
     payload = resp.get_json()
     cell = payload['matrices'][0]['cells'][0][0]
     assert cell['selected'] is True
-    assert '剩余现金 50 元' in (cell['open_reason'] or '')
+    assert '剩余现金 CNY 50.00' in (cell['open_reason'] or '')
 
 
 def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):
@@ -188,11 +199,12 @@ def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):
         close_today_ratio_vec=np.zeros(8, dtype=float),
         index_list=[idx],
         group_names={i: f'第{i + 1}组' for i in range(7)},
-        hold_amounts_np=np.zeros((1, 7, 8), dtype=float),
+        hold_amounts_np=np.zeros((1, 7, 8), dtype=np.int64),
         position_quantities_np=np.zeros((1, 7, 8), dtype=float),
+        product_currency_vec=_cny_vec(8),
     )
     group_result.membership_np[0, 6, 7] = True
-    group_result.hold_amounts_np[0, 6, 7] = 100.0
+    group_result.hold_amounts_np[0, 6, 7] = 10000
     group_result.position_quantities_np[0, 6, 7] = 1.0
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -233,8 +245,9 @@ def test_group_snapshot_response_is_strict_json_when_positions_have_nonfinite_va
         close_today_ratio_vec=np.zeros(2, dtype=float),
         index_list=[idx],
         group_names={0: '第一组'},
-        hold_amounts_np=np.array([[[np.nan, np.inf]]], dtype=float),
+        hold_amounts_np=np.array([[[0, 0]]], dtype=np.int64),
         position_quantities_np=np.array([[[np.nan, -np.inf]]], dtype=float),
+        product_currency_vec=_cny_vec(2),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -278,10 +291,11 @@ def test_group_snapshot_rebuilds_per_product_amounts_from_quantities_and_prices(
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx0, idx1],
         group_names={0: 'A1'},
-        hold_amounts_np=np.array([[[3000.0]], [[3300.0]]], dtype=float),
+        hold_amounts_np=_minor_units([[[3000.0]], [[3300.0]]]),
         position_quantities_np=np.array([[[3.0]], [[3.0]]], dtype=float),
         price_np=np.array([[100.0], [110.0]], dtype=float),
         point_value_vec=np.array([10.0], dtype=float),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -335,19 +349,20 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         close_today_ratio_vec=np.zeros(len(products), dtype=float),
         index_list=[idx0, idx1],
         group_names={0: 'A1'},
-        hold_amounts_np=amounts,
+        hold_amounts_np=_minor_units(amounts),
         position_quantities_np=positions,
-        prev_end_amounts_np=prev_end,
+        prev_end_amounts_np=_minor_units(prev_end),
         price_np=np.array([[100.0] * len(products), [110.0] * len(products)], dtype=float),
         point_value_vec=np.ones(len(products), dtype=float),
-        pre_rebalance_total_equity_np=np.array([[1000.0], [1250.0]], dtype=float),
-        post_rebalance_total_equity_np=np.array([[990.0], [1240.0]], dtype=float),
-        total_equity_np=np.array([[1200.0], [1300.0]], dtype=float),
-        pre_rebalance_cash_np=np.array([[1000.0], [950.0]], dtype=float),
-        post_rebalance_cash_np=np.array([[500.0], [920.0]], dtype=float),
-        cash_np=np.array([[1000.0], [900.0]], dtype=float),
-        buy_fee_amount_np=np.array([[8.0], [7.0]], dtype=float),
-        sell_fee_amount_np=np.array([[2.0], [3.0]], dtype=float),
+        pre_rebalance_total_equity_np=_minor_units([[1000.0], [1250.0]]),
+        post_rebalance_total_equity_np=_minor_units([[990.0], [1240.0]]),
+        total_equity_np=_minor_units([[1200.0], [1300.0]]),
+        pre_rebalance_cash_np=_minor_units([[1000.0], [950.0]]),
+        post_rebalance_cash_np=_minor_units([[500.0], [920.0]]),
+        cash_np=_minor_units([[1000.0], [900.0]]),
+        buy_fee_amount_np=_minor_units([[8.0], [7.0]]),
+        sell_fee_amount_np=_minor_units([[2.0], [3.0]]),
+        product_currency_vec=_cny_vec(len(products)),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -438,8 +453,9 @@ def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx],
         group_names={0: 'A1'},
-        hold_amounts_np=np.array([[[100.0]]], dtype=float),
+        hold_amounts_np=_minor_units([[[100.0]]]),
         position_quantities_np=np.array([[[1.0]]], dtype=float),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -478,10 +494,11 @@ def test_group_snapshot_rebuilds_zero_hold_amounts_from_simulated_positions(monk
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx],
         group_names={0: 'A1'},
-        hold_amounts_np=np.array([[[3000.0]]], dtype=float),
+        hold_amounts_np=_minor_units([[[3000.0]]]),
         position_quantities_np=np.array([[[3.0]]], dtype=float),
         price_np=np.array([[100.0]], dtype=float),
         point_value_vec=np.array([10.0], dtype=float),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -521,8 +538,9 @@ def test_group_snapshot_reports_neighbor_change_timestamps(monkeypatch):
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx0, idx1, idx2],
         group_names={0: 'A1'},
-        hold_amounts_np=np.array([[[100.0]], [[100.0]], [[0.0]]], dtype=float),
+        hold_amounts_np=_minor_units([[[100.0]], [[100.0]], [[0.0]]]),
         position_quantities_np=np.array([[[1.0]], [[1.0]], [[0.0]]], dtype=float),
+        product_currency_vec=_cny_vec(1),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 

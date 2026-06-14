@@ -35,19 +35,19 @@ class GroupRunResult:
     rebalance_mode: str = ""
     report_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     group_names: Any = None  # {expanded_group_index: display_name}
-    hold_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期实际持仓金额 (refs #100)
-    target_amounts_before_floor_np: np.ndarray | None = None  # (T, M, P) float — 每期调仓前目标持仓金额
-    prev_end_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期期初持仓金额(上期末) (refs #110)
+    hold_amounts_np: np.ndarray | None = None  # (T, M, P) int64 minor units in base currency — 每期实际持仓金额
+    target_amounts_before_floor_np: np.ndarray | None = None  # (T, M, P) int64 minor units in base currency
+    prev_end_amounts_np: np.ndarray | None = None  # (T, M, P) int64 minor units in base currency
     position_quantities_np: np.ndarray | None = None  # (T, M, P) float — 每期合约手数/单位数
-    margin_occupied_np: np.ndarray | None = None  # (T, M) float — 每期保证金占用
-    pre_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) float — 本期调仓前总权益
-    post_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) float — 本期调仓后、收益前总权益
-    total_equity_np: np.ndarray | None = None  # (T, M) float — 每期末总权益
-    pre_rebalance_cash_np: np.ndarray | None = None  # (T, M) float — 本期调仓前可用现金
-    post_rebalance_cash_np: np.ndarray | None = None  # (T, M) float — 本期调仓后、收益前可用现金
-    cash_np: np.ndarray | None = None  # (T, M) float — 每期末可用现金
-    buy_fee_amount_np: np.ndarray | None = None  # (T, M) float — 本期期初调仓买入费用金额
-    sell_fee_amount_np: np.ndarray | None = None  # (T, M) float — 本期期初调仓卖出费用金额
+    margin_occupied_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    pre_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    post_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    total_equity_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    pre_rebalance_cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    post_rebalance_cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    cash_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    buy_fee_amount_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
+    sell_fee_amount_np: np.ndarray | None = None  # (T, M) int64 minor units in base currency
     initial_capital: float | None = None
     price_np: np.ndarray | None = None
     point_value_vec: np.ndarray | None = None
@@ -55,11 +55,14 @@ class GroupRunResult:
     min_trade_quantity_vec: np.ndarray | None = None
     margin_ratio_vec: np.ndarray | None = None
     is_margin_traded_vec: np.ndarray | None = None
+    base_currency: str = "CNY"
+    product_currency_vec: np.ndarray | None = None
+    currency_conversion_fee_rate: float = 0.0
     liquidity_capacity_np: np.ndarray | None = None  # (T, M, P) float — 每期每品种成交额限额(元) (refs #110)
     liquidity_modes: list | None = None  # [str] per-group
     liquidity_percents: list | None = None  # [float] per-group
-    one_lot_margin_np: np.ndarray | None = None  # (T, M, P) float — 每期一手保证金 (refs #110)
-    one_lot_fee_np: np.ndarray | None = None  # (T, M, P) float — 每期一手手续费 (refs #110)
+    one_lot_margin_np: np.ndarray | None = None  # (T, M, P) float product currency — 一手保证金展示估算
+    one_lot_fee_np: np.ndarray | None = None  # (T, M, P) float product currency — 一手手续费展示估算
 
     def get_products_by_group(self) -> dict:
         """Lazy builder: {group_idx: {idx_entry: [product_names]}}."""

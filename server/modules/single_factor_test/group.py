@@ -4,6 +4,8 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from flask import request, jsonify
+from tools.data.DataCurrency import normalize_currency, require_product_currency_vector
+from tools.data.DataMoneyMinorUnits import minor_units_to_major
 from tools.factors.FactorTester import FactorTester, _active_tester, _signal_time
 from tools.factors.Parameters import FactorNextPeriodReturns
 from tools.factors.tests.single_factor_test.group.core import infer_periods_per_year
@@ -97,6 +99,17 @@ def _parse_initial_capital(raw: Any, default: float = 100000000.0) -> float:
     return float(value)
 
 
+def _parse_currency_code(raw: Any, default: str = "CNY") -> str:
+    return normalize_currency(raw, default)
+
+
+def _parse_nonnegative_rate(raw: Any, default: float = 0.0) -> float:
+    value = _safe_float(default if raw in (None, '') else raw)
+    if value is None or value < 0:
+        raise ValueError(f'换汇佣金率必须是非负数，收到: {raw!r}')
+    return float(value)
+
+
 def _parse_group_fee_config(data: dict) -> tuple[float, list, bool]:
     """Parse legacy group-test fee payload into engine inputs.
 
@@ -182,6 +195,30 @@ def _snapshot_actual_quantity(
     return qty, amt
 
 
+def _money_minor_units_to_major_value(value: Any) -> float | None:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    return float(minor_units_to_major(numeric))
+
+
+def _money_minor_units_row_to_major(row: Any | None) -> Any | None:
+    if row is None:
+        return None
+    return minor_units_to_major(row)
+
+
+def _format_money_2(value: Any) -> str:
+    numeric = _safe_float(value)
+    if numeric is None:
+        numeric = 0.0
+    return f"{float(numeric):,.2f}"
+
+
+def _format_money_with_currency(value: Any, currency: str) -> str:
+    return f"{normalize_currency(currency)} {_format_money_2(value)}"
+
+
 
 
 
@@ -240,6 +277,12 @@ def _build_snapshot_matrix(
     liquidity_capacity_np = getattr(group_result, 'liquidity_capacity_np', None)
     liquidity_modes = getattr(group_result, 'liquidity_modes', None) or []
     liquidity_percents = getattr(group_result, 'liquidity_percents', None) or []
+    base_currency = str(getattr(group_result, 'base_currency', None) or 'CNY').upper()
+    product_currency_vec = require_product_currency_vector(
+        list(valid_cols or []),
+        explicit=getattr(group_result, 'product_currency_vec', None),
+        default=None,
+    )
     if positions is None and amounts is None:
         return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
 
@@ -295,12 +338,12 @@ def _build_snapshot_matrix(
 
     def _group_index_map(index: int) -> tuple[Any, Any, Any, Any, Any, Any]:
         cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
-        cur_amt = amounts[t_idx, index] if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
+        cur_amt = _money_minor_units_row_to_major(amounts[t_idx, index]) if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
         prev_pos = positions[prev_t_idx, index] if positions is not None and prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
         prev_amt = (
-            prev_end_amounts[t_idx, index]
+            _money_minor_units_row_to_major(prev_end_amounts[t_idx, index])
             if prev_end_amounts is not None and t_idx is not None and t_idx < prev_end_amounts.shape[0]
-            else amounts[prev_t_idx, index] if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0]
+            else _money_minor_units_row_to_major(amounts[prev_t_idx, index]) if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0]
             else None
         )
         cur_mem = memberships[t_idx, index] if memberships is not None and t_idx is not None and t_idx < memberships.shape[0] else None
@@ -329,6 +372,7 @@ def _build_snapshot_matrix(
             raw_name = product_row['raw_name']
             row_key = product_row['row_key']
             resolved_product = product_row['resolved_product']
+            product_currency = str(product_currency_vec[p_idx]).upper()
             cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
             prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
             if row_key not in group_rows:
@@ -346,6 +390,7 @@ def _build_snapshot_matrix(
                     'planned_amount': 0.0,
                     'one_lot_margin': 0.0,
                     'one_lot_fee': 0.0,
+                    'currency': product_currency,
                     'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
                 }
                 if row_key not in row_order:
@@ -366,7 +411,7 @@ def _build_snapshot_matrix(
                 group_rows[row_key]['prev_membership'] = bool(group_rows[row_key]['prev_membership'] or bool(prev_mem[p_idx]))
             target_amount_value = None
             if target_before_floor is not None and t_idx is not None and t_idx < target_before_floor.shape[0] and g_idx < target_before_floor.shape[1] and p_idx < target_before_floor.shape[2]:
-                target_amount_value = _safe_float(target_before_floor[t_idx, g_idx, p_idx])
+                target_amount_value = _money_minor_units_to_major_value(target_before_floor[t_idx, g_idx, p_idx])
             if target_amount_value is not None:
                 group_rows[row_key]['target_budget_amount'] += float(target_amount_value)
             # planned_qty/planned_amount come directly from simulate arrays, NOT recomputed:
@@ -377,7 +422,7 @@ def _build_snapshot_matrix(
                 sim_planned_qty = _safe_float(positions[t_idx, g_idx, p_idx]) or 0.0
                 group_rows[row_key]['planned_qty'] += float(sim_planned_qty)
             if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] and g_idx < amounts.shape[1] and p_idx < amounts.shape[2]:
-                sim_planned_amount = _safe_float(amounts[t_idx, g_idx, p_idx]) or 0.0
+                sim_planned_amount = _money_minor_units_to_major_value(amounts[t_idx, g_idx, p_idx]) or 0.0
                 group_rows[row_key]['planned_amount'] += float(sim_planned_amount)
             # one_lot_margin / one_lot_fee: read directly from simulate-computed arrays
             # (same values used inside _pack_openable_quantities / _row_required_capital).
@@ -416,7 +461,7 @@ def _build_snapshot_matrix(
     def _matrix_value(matrix: Any, g_idx: int) -> float | None:
         if matrix is None or t_idx is None or t_idx >= matrix.shape[0] or g_idx >= matrix.shape[1]:
             return None
-        return _safe_float(matrix[t_idx, g_idx])
+        return _money_minor_units_to_major_value(matrix[t_idx, g_idx])
 
     def _append_amount_row(
         row_key: str,
@@ -436,7 +481,7 @@ def _build_snapshot_matrix(
             pre_rebalance_amount = _matrix_value(pre_rebalance_matrix, g_idx)
             post_rebalance_amount = _matrix_value(post_rebalance_matrix, g_idx)
             if prev_t_idx is not None and prev_t_idx < end_matrix.shape[0] and g_idx < end_matrix.shape[1]:
-                previous_end_amount = _safe_float(end_matrix[prev_t_idx, g_idx])
+                previous_end_amount = _money_minor_units_to_major_value(end_matrix[prev_t_idx, g_idx])
                 if pre_rebalance_amount is None:
                     pre_rebalance_amount = previous_end_amount
                 if post_rebalance_amount is None:
@@ -461,17 +506,18 @@ def _build_snapshot_matrix(
             amount_cells.append({
                 'status': status,
                 'product': display,
+                'currency': base_currency,
                 'quantity': None,
-                'amount': round(float(end_amount), 6),
-                'pre_rebalance_amount': round(float(pre_rebalance_amount), 6),
-                'post_rebalance_amount': round(float(post_rebalance_amount), 6),
-                'end_amount': round(float(end_amount), 6),
-                'buy_fee_amount': round(float(buy_fee_amount), 6),
-                'sell_fee_amount': round(float(sell_fee_amount), 6),
-                'fee_amount': round(float(buy_fee_amount + sell_fee_amount), 6),
+                'amount': round(float(end_amount), 2),
+                'pre_rebalance_amount': round(float(pre_rebalance_amount), 2),
+                'post_rebalance_amount': round(float(post_rebalance_amount), 2),
+                'end_amount': round(float(end_amount), 2),
+                'buy_fee_amount': round(float(buy_fee_amount), 2),
+                'sell_fee_amount': round(float(sell_fee_amount), 2),
+                'fee_amount': round(float(buy_fee_amount + sell_fee_amount), 2),
                 'previous_quantity': None,
                 'delta_quantity': None,
-                'delta_amount': round(float(delta_amount), 6),
+                'delta_amount': round(float(delta_amount), 2),
                 'change_direction': direction,
                 'pending_exit': False,
                 'source_names': [],
@@ -533,25 +579,35 @@ def _build_snapshot_matrix(
             if post_rebalance_cash_np is not None and t_idx is not None:
                 try:
                     if 0 <= t_idx < post_rebalance_cash_np.shape[0] and 0 <= g_idx < post_rebalance_cash_np.shape[1]:
-                        remaining_cash = _safe_float(post_rebalance_cash_np[t_idx, g_idx])
+                        remaining_cash = _money_minor_units_to_major_value(post_rebalance_cash_np[t_idx, g_idx])
                 except Exception:
                     remaining_cash = None
             if desired_now and not cur_active:
                 # selected but not opened — diagnose with per-lot budget + simulate data
                 reasons = []
                 if remaining_cash is not None:
-                    reasons.append(f"剩余现金 {int(round(float(remaining_cash))):,} 元")
+                    reasons.append(f"剩余现金 {_format_money_with_currency(remaining_cash, base_currency)}")
                 if one_lot_required_cash > 0:
-                    reasons.append(f"一手预算 {int(round(float(one_lot_required_cash))):,} 元（保证金 {int(round(float(one_lot_margin))):,} + 手续费 {int(round(float(one_lot_fee))):,}）")
+                    reasons.append(
+                        f"一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}"
+                        f"（保证金 {_format_money_with_currency(one_lot_margin, base_currency)}"
+                        f" + 手续费 {_format_money_with_currency(one_lot_fee, base_currency)}）"
+                    )
                 if target_budget_amount > 0:
-                    reasons.append(f"目标预算 {int(round(float(target_budget_amount))):,} 元")
+                    reasons.append(f"目标预算 {_format_money_with_currency(target_budget_amount, base_currency)}")
                 if planned_qty < 1e-12 and target_budget_amount > 0 and remaining_cash is not None:
                     if remaining_cash >= target_budget_amount and one_lot_required_cash > target_budget_amount:
-                        reasons.append(f"目标预算 {int(round(float(target_budget_amount))):,} < 一手预算 {int(round(float(one_lot_required_cash))):,}，不足以开1手")
+                        reasons.append(
+                            f"目标预算 {_format_money_with_currency(target_budget_amount, base_currency)}"
+                            f" < 一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}，不足以开1手"
+                        )
                     elif remaining_cash >= one_lot_required_cash:
-                        reasons.append(f"流动性限额限制：目标预算 {int(round(float(target_budget_amount))):,} → floor后0手")
+                        reasons.append(f"流动性限额限制：目标预算 {_format_money_with_currency(target_budget_amount, base_currency)} → floor后0手")
                     else:
-                        reasons.append(f"剩余现金 {int(round(float(remaining_cash))):,} < 一手预算 {int(round(float(one_lot_required_cash))):,}，资金不足")
+                        reasons.append(
+                            f"剩余现金 {_format_money_with_currency(remaining_cash, base_currency)}"
+                            f" < 一手估算 {_format_money_with_currency(one_lot_required_cash, base_currency)}，资金不足"
+                        )
                 open_reason = '；'.join(reasons) if reasons else '资金不足以开仓'
 
             if desired_now and not cur_active:
@@ -600,19 +656,20 @@ def _build_snapshot_matrix(
             row_cells.append({
                 'status': status,
                 'product': row_display,
+                'currency': row['currency'],
                 'quantity': round(float(row['current_qty']), 6),
-                'amount': round(float(row['current_amount']), 6),
+                'amount': round(float(row['current_amount']), 2),
                 'previous_quantity': round(float(row['prev_qty']), 6),
-                'previous_amount': round(float(row['prev_amount']), 6),
+                'previous_amount': round(float(row['prev_amount']), 2),
                 'delta_quantity': round(float(delta_qty), 6),
-                'delta_amount': round(float(delta_amount), 6),
+                'delta_amount': round(float(delta_amount), 2),
                 'change_direction': change_direction,
                 'pending_exit': status == 'pending_exit',
                 'selected': bool(desired_now and not cur_active),
                 'open_reason': open_reason,
                 'planned_qty': round(float(planned_qty), 6),
-                'planned_amount': round(float(planned_amount), 6),
-                'target_budget_amount': round(float(target_budget_amount), 6),
+                'planned_amount': round(float(planned_amount), 2),
+                'target_budget_amount': round(float(target_budget_amount), 2),
                 'one_lot_margin': round(float(one_lot_margin), 2),
                 'one_lot_fee': round(float(one_lot_fee), 2),
                 'one_lot_required_cash': round(float(one_lot_required_cash), 2),
@@ -723,6 +780,7 @@ def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None
     margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
     margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
     initial_capital = getattr(group_result, 'initial_capital', None)
+    base_currency = normalize_currency(getattr(group_result, 'base_currency', None), 'CNY')
     if quantities is None or membership is None or prices is None:
         return None
     if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0 or getattr(prices, 'size', 0) == 0:
@@ -838,24 +896,24 @@ def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None
         return None
 
     first = blocked_groups[0]
-    capital_text = f"{initial_capital_value:,.0f}"
-    budget_text = f"{first['budget_per_product']:,.0f}"
+    capital_text = _format_money_with_currency(initial_capital_value, base_currency)
+    budget_text = _format_money_with_currency(first['budget_per_product'], base_currency)
     if first.get('diagnostic_type') == 'missing_trade_spec' or first.get('cheapest_required_capital') is None:
         warning = (
             f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
-            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text} 元，"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text}，"
             f"但当前结果里缺少完整的合约价值或费率字段，无法精确反推首手需求；"
             f"从实际持仓看，目标仓位已经被压成 0。"
-            f"当前初始金额为 {capital_text} 元。"
+            f"当前初始金额为 {capital_text}。"
         )
     else:
-        required_text = f"{first['cheapest_required_capital']:,.0f}"
+        required_text = _format_money_with_currency(first['cheapest_required_capital'], base_currency)
         warning = (
             f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
-            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text} 元，"
-            f"但 {first['group_name']} 里最便宜的品种 {first['cheapest_product_name']} 的一手资金需求约 {required_text} 元，"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text}，"
+            f"但 {first['group_name']} 里最便宜的品种 {first['cheapest_product_name']} 的一手资金需求约 {required_text}，"
             f"因此目标仓位在最小手数上被压成 0。"
-            f"当前初始金额为 {capital_text} 元。"
+            f"当前初始金额为 {capital_text}。"
         )
     return {
         'warning': warning,
@@ -1020,7 +1078,7 @@ def _serialize_group_simulation_result(
 
     # 用模拟中实盘总权益（市值+现金），而非 cumsum(returns)
     _equity = group_result.total_equity_np if group_result is not None else None
-    equity_np = _equity if _equity is not None else np.zeros((len(timestamps), n_total))
+    equity_np = minor_units_to_major(_equity) if _equity is not None else np.zeros((len(timestamps), n_total))
     # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
     cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
     equity_np = np.where(equity_np <= 0, cap, equity_np)
@@ -1128,6 +1186,7 @@ def _serialize_group_simulation_result(
         'metrics_meta': _get_metrics_meta(),
         'n_groups': n_total,
         'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
+        'base_currency': str(getattr(group_result, 'base_currency', None) or 'CNY').upper() if group_result is not None else 'CNY',
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
         'capital_warning': capital_warning,
         'capital_diagnostics': capital_diagnostics,
@@ -1224,6 +1283,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
 
     try:
         initial_capital = _parse_initial_capital(data.get('initial_capital'))
+        base_currency = _parse_currency_code(data.get('base_currency'))
+        currency_conversion_fee_rate = _parse_nonnegative_rate(data.get('currency_conversion_fee_rate'), 0.0)
     except ValueError as e:
         return False, {'success': False, 'error': str(e), 'status': 400}
 
@@ -1455,6 +1516,8 @@ def _run_group_test_core(data: dict) -> tuple[bool, dict]:
             use_closetoday=use_closetoday,
             initial_capital=initial_capital,
             rebalance_mode=rebalance_mode,
+            base_currency=base_currency,
+            currency_conversion_fee_rate=currency_conversion_fee_rate,
             start_dt=start_dt,
             end_dt=end_dt,
             calendar_index=global_calendar_index if len(global_calendar_index) > 0 else None,
@@ -1980,7 +2043,7 @@ def run_group_test_stream():
                 product_coverage_batch_index = extra.get('product_coverage_batch_index')
                 has_progress_count = completed is not None and total is not None
                 if phase == 'init':
-                    # init 阶段：发送 start 事件，携带 phases 元数据
+                    # init 阶段：发送 start 事件，携带 phases数据
                     total_val = total or 0
                     _phases = extra.get('phases', [])
                     # 从 extra 中剥离已显式传递的 kwarg，避免与 emit_start 的显式参数冲突
