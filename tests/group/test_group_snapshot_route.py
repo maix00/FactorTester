@@ -57,6 +57,7 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     assert payload['matrices'][0]['key'] == 'raw'
     assert payload['matrices'][0]['rows'][0]['name'] == product
     assert payload['matrices'][0]['cells'][0][0]['status'] == 'entering'
+    assert payload['matrices'][0]['columns'][0]['count_label'] == '持仓品种数'
     assert payload['summary']['total_prod_count'] == 1
 
 
@@ -148,6 +149,50 @@ def test_group_snapshot_response_is_strict_json_when_positions_have_nonfinite_va
     assert payload['success'] is True
     assert payload['matrices'][0]['cells'][0][0]['quantity'] == 0.0
     assert payload['matrices'][0]['cells'][1][0]['amount'] == 0.0
+
+
+def test_group_snapshot_rebuilds_per_product_amounts_from_quantities_and_prices(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx0 = pd.Timestamp('2026-01-01 09:30:00')
+    idx1 = pd.Timestamp('2026-01-01 09:31:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((2, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((2, 1), dtype=float),
+        gross_returns_np=np.zeros((2, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((2, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((2, 1, 1), dtype=float),
+        returns_np=np.zeros((2, 1), dtype=float),
+        period_returns_np=np.zeros((2, 1), dtype=float),
+        membership_np=np.array([[[True]], [[True]]], dtype=bool),
+        products_by_group={},
+        valid_cols=['P0'],
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        index_list=[idx0, idx1],
+        group_names={0: 'A1'},
+        hold_amounts_np=np.zeros((2, 1, 1), dtype=float),
+        position_quantities_np=np.array([[[3.0]], [[3.0]]], dtype=float),
+        price_np=np.array([[100.0], [110.0]], dtype=float),
+        point_value_vec=np.array([10.0], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx1.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    cell = payload['matrices'][0]['cells'][0][0]
+    assert cell['quantity'] == 3.0
+    assert cell['amount'] == 3300.0
 
 
 def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeypatch):

@@ -414,16 +414,18 @@
         var html = '';
         html += '<div class="snapshot-batch-section">';
         html += '<div class="snapshot-batch-header">仓位矩阵 · ' + _escape(matrix.label || matrix.key || '默认') + '</div>';
-        html += '<div class="snapshot-semantics-note">本矩阵按标题所示期间展示。产品金额变化为本期调仓前旧持仓估值到调仓后新持仓金额的变化；总资产/现金变化为调仓后到期末的持有期间变化，期末指下一次调仓前。</div>';
+        html += '<div class="snapshot-semantics-note">本矩阵按标题所示期间展示。表头数字表示该组该时刻的持仓品种数。产品金额变化为本期调仓前旧持仓估值到调仓后新持仓金额的变化；总资产/现金变化为调仓后到期末的持有期间变化，期末指下一次调仓前。</div>';
         html += '<div class="snapshot-matrix-scroll">';
         html += '<table class="snapshot-matrix-table"><thead><tr>';
         html += '<th class="snapshot-prod-name-cell">产品</th>';
         (matrix.columns || []).forEach(function(col) {
             var label = col.label || col.name || '';
             var count = col.count !== undefined && col.count !== null ? Number(col.count) : null;
+            var countLabel = col.count_label || '持仓品种数';
             html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
             if (count !== null && isFinite(count)) {
                 html += '<div class="snapshot-col-count">' + count + '</div>';
+                html += '<div class="snapshot-col-count-label">' + _escape(countLabel) + '</div>';
             }
             html += '</th>';
         });

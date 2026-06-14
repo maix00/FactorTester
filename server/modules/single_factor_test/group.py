@@ -156,7 +156,15 @@ def _cn_futures_contract_parent(product_ref: Any):
         return None
 
 
-def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product_idx: int, eps: float = 1e-12) -> tuple[float, float]:
+def _snapshot_actual_quantity(
+    position_row: Any,
+    amount_row: Any | None,
+    product_idx: int,
+    *,
+    price_value: float | None = None,
+    point_value: float = 1.0,
+    eps: float = 1e-12,
+) -> tuple[float, float]:
     qty = 0.0
     amt = 0.0
     if position_row is not None and product_idx < len(position_row):
@@ -165,6 +173,10 @@ def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product
     if amount_row is not None and product_idx < len(amount_row):
         amt_value = _safe_float(amount_row[product_idx])
         amt = 0.0 if amt_value is None else amt_value
+    if abs(qty) > eps and price_value is not None:
+        price = _safe_float(price_value)
+        if price is not None and price > 0:
+            amt = qty * price * (point_value if point_value > 0 else 1.0)
     if abs(qty) <= eps:
         qty = 0.0
     if abs(amt) <= eps:
@@ -260,6 +272,8 @@ def _build_snapshot_matrix(
     positions = getattr(group_result, 'position_quantities_np', None)
     amounts = getattr(group_result, 'hold_amounts_np', None)
     fallback_amounts = _snapshot_amounts_from_simulated_positions(group_result)
+    prices = getattr(group_result, 'price_np', None)
+    point_values = getattr(group_result, 'point_value_vec', None)
     if amounts is None:
         amounts = fallback_amounts
     elif fallback_amounts is not None:
@@ -358,8 +372,15 @@ def _build_snapshot_matrix(
             raw_name = product_row['raw_name']
             row_key = product_row['row_key']
             resolved_product = product_row['resolved_product']
-            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
-            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
+            cur_price = None
+            if prices is not None and t_idx is not None and t_idx < prices.shape[0] and p_idx < prices.shape[1]:
+                cur_price = _safe_float(prices[t_idx, p_idx])
+            cur_point_value = 1.0
+            if point_values is not None and p_idx < len(point_values):
+                pv = _safe_float(point_values[p_idx])
+                cur_point_value = 1.0 if pv is None or pv <= 0 else pv
+            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx, price_value=cur_price, point_value=cur_point_value)
+            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx, price_value=cur_price, point_value=cur_point_value)
             if row_key not in group_rows:
                 group_rows[row_key] = {
                     'name': row_key,
@@ -402,6 +423,7 @@ def _build_snapshot_matrix(
             'label': label,
             'index': g_idx,
             'count': current_active,
+            'count_label': '持仓品种数',
         })
 
     cells = []

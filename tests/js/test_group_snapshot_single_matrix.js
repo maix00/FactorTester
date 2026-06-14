@@ -72,6 +72,7 @@ assert.match(title, /至/);
 assert.match(body, /仓位矩阵/);
 assert.match(body, /Group A/);
 assert.match(body, /Group B/);
+assert.match(body, /持仓品种数/);
 assert.match(body, /IF/);
 assert.match(body, /IC/);
 assert.match(body, /总资产/);
