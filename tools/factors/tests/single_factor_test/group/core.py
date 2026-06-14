@@ -1689,8 +1689,9 @@ def build_target_amounts(
     margin_factor : (M, P) or None
         Per-product capital multiplier (default 1.0). For margin-traded products
         this equals the margin ratio; for cash products it is 1.0.
-        Used to compute the actual capital released on exits (sell_amounts use
-        prev * margin_factor instead of prev).
+        NOTE: This is NOT used for sell_amounts — selling a position always
+        releases the full notional value. margin_factor only affects the
+        simulated "occupied capital" calculation, not the actual cash flows.
     """
     curr_mask = np.asarray(curr_mask_all, dtype=bool)
     prev_amounts = np.asarray(prev_end_amounts, dtype=float)
@@ -1698,11 +1699,6 @@ def build_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float) if close_fee_vec is not None else None
     if close_fees is not None and close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast to (group_count, P)
-    mf = (
-        np.asarray(margin_factor, dtype=float)
-        if margin_factor is not None
-        else np.ones_like(prev_amounts, dtype=float)
-    )
 
     def _equal_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
         counts_local = mask.sum(axis=1).astype(float)
@@ -1733,8 +1729,9 @@ def build_target_amounts(
     exiting = prev_mask & (~curr_mask)
     entering = curr_mask & (~prev_mask)
     n_entering = np.nansum(entering, axis=1).astype(float)
-    # Gross released capital: margin products release only margin_ratio * notional
-    sell_amounts = np.nansum(prev_amounts * exiting.astype(float) * mf, axis=1)
+    # Full nominal released: selling a position returns the full notional
+    # value (not just the margin deposit). 保证金解除对应的是完整名义值。
+    sell_amounts = np.nansum(prev_amounts * exiting.astype(float), axis=1)
 
     # Subtract close fee from released capital — the actual cash available
     # after selling is sell_amounts * (1 - close_fee) per exiting product.
@@ -1858,7 +1855,8 @@ def apply_liquidity_execution(
     When ``use_margin`` and ``margin_ratios`` are provided (both (M, P)
     arrays), the cash calculation accounts for margin-occupied capital:
     - cash_before = wealth - sum(prev * margin_factor)
-    - buy cash needed = buy * margin_factor * (1 + open_fee)
+    - buy cash needed = sum(buy * margin_factor) + sum(buy * open_fee)
+    (保证金和手续费是分开独立的：保证金=名义值×保证金比例，手续费=名义值×费率+固定费用)
     where margin_factor = margin_ratio if use_margin else 1.0.
     """
     prev = np.asarray(prev_end_amounts, dtype=float)
@@ -1891,7 +1889,7 @@ def apply_liquidity_execution(
     # cash_before: actual free cash accounting for margin-occupied positions
     prev_occupied = np.nansum(prev * margin_factor, axis=1)
     cash_before = np.maximum(0.0, wealth - prev_occupied)
-    cash_after_sell = np.maximum(0.0, cash_before + np.nansum(sell_exec * margin_factor, axis=1) - sell_fee)
+    cash_after_sell = np.maximum(0.0, cash_before + np.nansum(sell_exec, axis=1) - sell_fee)
 
     buy_capacity = np.minimum(desired_buy, caps)
     buy_capacity = np.where(np.isfinite(buy_capacity) & (buy_capacity > 0), buy_capacity, 0.0)
@@ -1904,8 +1902,12 @@ def apply_liquidity_execution(
         buy_exec[rows] = buy_capacity[rows] * (buy_budget[rows] / buy_capacity_sum[rows])[:, np.newaxis]
 
     # Do not allow open fees + margin to push cash negative.  The cash required
-    # to buy one unit of notional is margin_factor * (1 + open_fee).
-    buy_cash_need = np.nansum(buy_exec * margin_factor * (1.0 + open_fee_mat), axis=1)
+    # to buy one unit of notional is margin_factor (保证金占用) + open_fee (手续费).
+    # 这两个是分开独立的：保证金=名义值×保证金比例，手续费=名义值×费率+固定费用
+    buy_cash_need = (
+        np.nansum(buy_exec * margin_factor, axis=1)
+        + np.nansum(buy_exec * open_fee_mat, axis=1)
+    )
     over = buy_cash_need > np.maximum(cash_after_sell, 0.0) + 1e-12
     if over.any():
         scale = np.divide(
