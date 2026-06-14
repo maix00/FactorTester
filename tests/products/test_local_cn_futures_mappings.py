@@ -50,20 +50,13 @@ def test_local_cn_futures_wind_mapping_is_bidirectional_for_registered_products(
     assert checked_contracts > 0
 
 
-def test_all_registered_local_cn_futures_products_support_contract_uid_fallback(monkeypatch):
-    products = _defined_cn_futures_products()
+def test_local_cn_futures_contract_to_product_requires_wind_mapping(monkeypatch):
+    product = cn_futures_module.CNFutures('IF.CFE')
 
     def fake_maps(path=None):
-        return ({}, {})
+        return ({}, {product.alias: ['CFFEX|F|IF|2605']})
 
     monkeypatch.setattr(cn_futures_module, '_cn_futures_contract_maps', fake_maps)
 
-    checked_aliases = set()
-    for product in products:
-        if product.alias in checked_aliases:
-            continue
-        checked_aliases.add(product.alias)
-        exchange_short = product.alias.split('.', 1)[1]
-        exchange_raw = cn_futures_module.exchange_map_reversed.get(exchange_short, exchange_short)
-        contract_uid = f'{exchange_raw}|F|{product.code}|2605'
-        assert cn_futures_module.CNFutures.get_contract_parent(contract_uid) is cn_futures_module.CNFutures.get_by_product_name(product.alias)
+    assert cn_futures_module.CNFutures.get_contract_parent('CFFEX|F|IF|2605') is None
+    assert cn_futures_module.CNFutures.get_contracts_for_product(product.alias) == ['CFFEX|F|IF|2605']

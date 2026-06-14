@@ -436,18 +436,11 @@ def resolve_term_structure_product(contract_or_uid: Any, term_structure_paths: O
     if not contract_uid:
         return None
 
-    def _local_cn_futures_parent():
-        try:
-            from sources.LocalCNFutures.CNFutures import CNFutures
-            return CNFutures.get_contract_parent(str(contract_uid))
-        except Exception:
-            return None
-
     candidate = contract_or_uid if not isinstance(contract_or_uid, str) else None
     if candidate is None:
         candidate = _get_registered_contract(contract_uid) or _get_registered_product(contract_uid)
     if candidate is None:
-        return _local_cn_futures_parent()
+        return None
     try:
         if candidate is not None and not bool(getattr(candidate, 'is_term_contract', lambda: False)()):
             return candidate
@@ -463,5 +456,5 @@ def resolve_term_structure_product(contract_or_uid: Any, term_structure_paths: O
 
     product_name = lookup_contract_product(str(contract_uid), paths)
     if not product_name:
-        return _local_cn_futures_parent()
-    return _get_registered_product(product_name) or _local_cn_futures_parent()
+        return None
+    return _get_registered_product(product_name)

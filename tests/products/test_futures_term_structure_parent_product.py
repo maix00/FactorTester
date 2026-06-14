@@ -46,8 +46,8 @@ def test_cn_futures_contract_parent_product_uses_cn_futures_mapping(monkeypatch)
     assert cn_futures_module.CNFutures.get_contracts_for_product(parent.name) == [contract.name]
 
 
-def test_cn_futures_contract_parent_product_falls_back_to_contract_name(monkeypatch):
-    parent = cn_futures_module.CNFutures('UNIT.CFE')
+def test_cn_futures_contract_parent_product_returns_none_without_wind_mapping(monkeypatch):
+    cn_futures_module.CNFutures('UNIT.CFE')
     uid_contract = cn_futures_module.CNFuturesContract('CFFEX|F|UNIT|2406')
 
     def fake_maps(path=None):
@@ -55,19 +55,6 @@ def test_cn_futures_contract_parent_product_falls_back_to_contract_name(monkeypa
 
     monkeypatch.setattr(cn_futures_module, '_cn_futures_contract_maps', fake_maps)
 
-    assert uid_contract.parent_product is parent
-    assert cn_futures_module.CNFutures.get_contract_parent('CFFEX|F|UNIT|2406') is parent
-    assert cn_futures_module.CNFutures.get_contract_parent('UNIT2406.CFE') is parent
-
-
-def test_cn_futures_contract_parent_product_falls_back_to_registered_czce_parent(monkeypatch):
-    parent = cn_futures_module.CNFutures('SM.CZC')
-
-    def fake_maps(path=None):
-        return ({}, {})
-
-    monkeypatch.setattr(cn_futures_module, '_cn_futures_contract_maps', fake_maps)
-
-    assert cn_futures_module.CNFutures.get_contract_parent('CZCE|F|SM|2605') is parent
-    assert cn_futures_module.CNFuturesContract('CZCE|F|SM|2605').parent_product is parent
-    assert ats.resolve_term_structure_product('CZCE|F|SM|2605') is parent
+    assert uid_contract.parent_product is None
+    assert cn_futures_module.CNFutures.get_contract_parent('CFFEX|F|UNIT|2406') is None
+    assert cn_futures_module.CNFutures.get_contract_parent('UNIT2406.CFE') is None

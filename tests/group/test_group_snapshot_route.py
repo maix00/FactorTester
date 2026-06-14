@@ -218,6 +218,11 @@ def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch
     app.register_blueprint(sft_bp)
 
     cn_futures_module.CNFutures('SM.CZC')
+    monkeypatch.setattr(
+        cn_futures_module,
+        '_cn_futures_contract_maps',
+        lambda path=None: ({'CZCE|F|SM|2605': 'SM.CZC'}, {'SM.CZC': ['CZCE|F|SM|2605']}),
+    )
     idx = pd.Timestamp('2026-01-01 09:30:00')
     group_result = GroupRunResult(
         fee_costs_np=np.zeros((1, 1), dtype=float),

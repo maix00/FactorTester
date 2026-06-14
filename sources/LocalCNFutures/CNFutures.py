@@ -129,25 +129,6 @@ def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
     return f"{reverse_exchange.get(exchange, exchange)}|F|{product_month[:first_digit]}|{product_month[first_digit:]}"
 
 
-def _infer_product_name_from_contract(contract_name: str) -> Optional[str]:
-    if not contract_name:
-        return None
-
-    raw = str(contract_name)
-    if '|F|' in raw:
-        parts = raw.split('|')
-        if len(parts) >= 4 and parts[1] == 'F':
-            exchange_short = exchange_map.get(parts[0], parts[0])
-            return f"{parts[2]}.{exchange_short}" if parts[2] and exchange_short else None
-
-    if '.' not in raw:
-        return None
-    product_month, exchange_short = raw.split('.', 1)
-    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
-    product_code = product_month[:first_digit]
-    return f"{product_code}.{exchange_short}" if product_code and exchange_short else None
-
-
 def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str], Dict[str, List[str]]]:
     path = path or contract_mapping_path
     if path not in _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH:
@@ -219,17 +200,9 @@ class CNFutures(Futures):
 
     @classmethod
     def get_contract_parent(cls, contract_uid: str, mapping_path: Optional[str] = None) -> Optional["CNFutures"]:
-        product_name = None
-        try:
-            contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
-            product_name = contract_to_product.get(str(contract_uid))
-        except Exception:
-            product_name = None
-        parent = cls.get_by_product_name(product_name) if product_name else None
-        if parent is not None:
-            return parent
-        inferred_product_name = _infer_product_name_from_contract(str(contract_uid))
-        return cls.get_by_product_name(inferred_product_name) if inferred_product_name else None
+        contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
+        product_name = contract_to_product.get(str(contract_uid))
+        return cls.get_by_product_name(product_name) if product_name else None
 
     @classmethod
     def get_contracts_for_product(cls, product_name: str, mapping_path: Optional[str] = None) -> List[str]:

@@ -145,6 +145,17 @@ def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, f
     return display
 
 
+def _cn_futures_contract_parent(product_ref: Any):
+    contract_uid = getattr(product_ref, 'name', None) or str(product_ref)
+    if not contract_uid:
+        return None
+    try:
+        from sources.LocalCNFutures.CNFutures import CNFutures
+        return CNFutures.get_contract_parent(str(contract_uid))
+    except Exception:
+        return None
+
+
 def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product_idx: int, eps: float = 1e-12) -> tuple[float, float]:
     qty = 0.0
     amt = 0.0
@@ -206,6 +217,8 @@ def _build_snapshot_matrix(
                 resolved = None
             if resolved is None:
                 resolved = resolve_term_structure_product(product_ref)
+            if resolved is None:
+                resolved = _cn_futures_contract_parent(product_ref)
             if resolved is not None:
                 return resolved
         return product_ref
