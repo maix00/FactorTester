@@ -122,6 +122,13 @@
         var isIntraday = timeline.length >= 2 && (timeline[1] - timeline[0]) < 86400000;
         var series = buildSeries(groups, timeline);
         var initialCapital = options.initialCapital || 100000000;
+        var baseCurrency = String(options.baseCurrency || 'CNY').toUpperCase();
+        function formatMoney(value) {
+            if (window.MoneyDisplay && window.MoneyDisplay.formatMajor) {
+                return window.MoneyDisplay.formatMajor(value, { currency: baseCurrency, decimals: 2 });
+            }
+            return Number(value).toFixed(2) + ' ' + baseCurrency;
+        }
 
         function openSnapshotAt(ts) {
             if (typeof options.onSnapshot === 'function') options.onSnapshot(ts);
@@ -146,8 +153,7 @@
                     : { day: '%Y-%m-%d', week: '%Y-%m-%d', month: '%Y-%m' },
             },
             yAxis: [{
-                // Left axis: total equity in yuan
-                title: { text: '总权益 (元)' },
+                title: { text: '总权益 (' + baseCurrency + ')' },
                 crosshair: false,
                 labels: {
                     formatter: function() {
@@ -187,9 +193,8 @@
                     var s = '<b>' + dateStr + '</b>';
                     this.points.forEach(function(p) {
                         if (p.y === null || p.y === undefined) return;
-                        var equity = p.y.toFixed(2);
                         var pct = (((p.y / initialCapital) - 1) * 100).toFixed(2);
-                        s += '<br/>' + p.series.name + ': ' + equity + ' 元 &nbsp;(' + pct + '%)';
+                        s += '<br/>' + p.series.name + ': ' + formatMoney(p.y) + ' &nbsp;(' + pct + '%)';
                     });
                     return s;
                 },

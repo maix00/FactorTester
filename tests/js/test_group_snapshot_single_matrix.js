@@ -1,6 +1,8 @@
 const { assert, resetGroupTest, load } = require('./group_test_harness');
+const path = require('path');
 
 const GT = resetGroupTest();
+require(path.resolve(__dirname, '../../static/js/modules/shared/money_display.js'));
 load('results/snapshot.js');
 
 document.registerElement('snapshot_title');
@@ -34,12 +36,12 @@ GT.results.snapshot.renderGroupSnapshot({
           { status: 'increasing', product: { name: '现金', desc: 'Cash' }, quantity: null, amount: 1200, pre_rebalance_amount: 1000, post_rebalance_amount: 980, end_amount: 1200, buy_fee_amount: 12, sell_fee_amount: 8, delta_quantity: null, delta_amount: 220, change_direction: 'increase' },
         ],
         [
-          { status: 'selected', selected: true, open_reason: '剩余现金约 1,000 元，小于一手总成本约 10,000 元', planned_qty: 0, planned_amount: 0, one_lot_margin: 8000, one_lot_required_cash: 10000, target_budget_amount: 1000, product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 0, amount: 0, delta_quantity: 0, delta_amount: 0, change_direction: 'flat' },
-          { status: 'entering', selected: false, product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
+          { status: 'selected', selected: true, currency: 'CNY', open_reason: '剩余现金约 CNY 1,000.00，小于一手总成本约 CNY 10,000.00', planned_qty: 0, planned_amount: 0, one_lot_margin: 8000, one_lot_required_cash: 10000, target_budget_amount: 1000, product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 0, amount: 0, delta_quantity: 0, delta_amount: 0, change_direction: 'flat' },
+          { status: 'entering', selected: false, currency: 'CNY', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
         ],
         [
           { status: 'absent' },
-          { status: 'pending_exit', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500, delta_quantity: -2, delta_amount: -2500, change_direction: 'decrease' },
+          { status: 'pending_exit', currency: 'CNY', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500, delta_quantity: -2, delta_amount: -2500, change_direction: 'decrease' },
         ],
       ],
     },
@@ -63,7 +65,7 @@ GT.results.snapshot.renderGroupSnapshot({
   has_next: false,
   all_timestamps_ms: [1710000000000, 1710000060000],
   display_timezone: 'Asia/Shanghai',
-  capital_warning: '首期有 1 个组未能开出任何仓位。按等权分配后，每个活跃品种可分到的预算约 1,000 元，但第一组里最便宜的品种 TEST 的一手资金需求约 10,000 元，因此目标仓位在最小手数上被压成 0。当前初始金额为 1,000 元。',
+  capital_warning: '首期有 1 个组未能开出任何仓位。按等权分配后，每个活跃品种可分到的预算约 CNY 1,000.00，但第一组里最便宜的品种 TEST 的一手资金需求约 CNY 10,000.00，因此目标仓位在最小手数上被压成 0。当前初始金额为 CNY 1,000.00。',
   summary: { avg_turnover: 12.3, total_changed: 4, total_prod_count: 2 },
 }, 1710000000000);
 
@@ -83,17 +85,17 @@ const toggle = document.getElementById('snapshot_matrix_toggle').innerHTML;
 assert.match(toggle, /全产品/);
 assert.match(toggle, /期限折叠/);
 assert.match(body, /已选中/);
-assert.match(body, /可开 0 手/);
-assert.match(body, /单手成本 10000\.00/);
-assert.match(body, /保证金 8000\.00/);
-assert.match(body, /剩余现金约 1,000 元，小于一手总成本约 10,000 元/);
+assert.match(body, /一手估算 CNY\s*10,000\.00（保证金 CNY\s*8,000\.00 \+ 手续费 CNY\s*0\.00）/);
+assert.match(body, /计划开 0 手/);
+assert.match(body, /目标预算 CNY\s*1,000\.00/);
+assert.match(body, /剩余现金约 CNY 1,000\.00，小于一手总成本约 CNY 10,000\.00/);
 assert.match(body, /变化 \+1/);
 assert.match(body, /变化 -2/);
 assert.match(body, /金额 \+60\.00/);
 assert.match(body, /金额 -20\.00/);
-assert.match(body, /调仓前 1250\.00/);
-assert.match(body, /调仓后 1240\.00/);
-assert.match(body, /期末 1300\.00/);
+assert.match(body, /调仓前 1,250\.00/);
+assert.match(body, /调仓后 1,240\.00/);
+assert.match(body, /期末 1,300\.00/);
 assert.match(body, /买入费 7\.00/);
 assert.match(body, /卖出费 3\.00/);
 assert.match(body, /买入费 7\.00<\/div><div class="snapshot-summary-fees">卖出费 3\.00/);

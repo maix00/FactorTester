@@ -280,11 +280,15 @@
         return null;
     }
 
-    function _formatAmount(v) {
+    function _formatAmount(v, currency) {
+        if (window.MoneyDisplay && window.MoneyDisplay.formatMajor) {
+            return window.MoneyDisplay.formatMajor(v, { currency: currency, decimals: 2 });
+        }
         if (v === null || v === undefined || v === '') return '';
         var num = Number(v);
         if (!isFinite(num)) return '';
-        return Math.abs(num) >= 1 ? num.toFixed(2) : num.toFixed(6);
+        var suffix = currency ? ' ' + String(currency).toUpperCase() : '';
+        return num.toFixed(2) + suffix;
     }
 
     function _formatSigned(v) {
@@ -306,10 +310,13 @@
         return (rounded > 0 ? '+' : '') + String(rounded);
     }
 
-    function _formatSignedAmount(v) {
+    function _formatSignedAmount(v, currency) {
+        if (window.MoneyDisplay && window.MoneyDisplay.formatSignedMajor) {
+            return window.MoneyDisplay.formatSignedMajor(v, { currency: currency, decimals: 2 });
+        }
         var num = Number(v);
         if (!isFinite(num) || Math.abs(num) <= 1e-12) return '0.00';
-        return (num > 0 ? '+' : '') + _formatAmount(num);
+        return (num > 0 ? '+' : '') + _formatAmount(num, currency);
     }
 
     function _renderProduct(p) {
@@ -352,42 +359,43 @@
             parts.push('<div class="snapshot-selected-hint">已选中</div>');
         }
         var meta = [];
+        var currency = cell.currency || '';
         if (cell.selected) {
             if (cell.one_lot_required_cash !== null && cell.one_lot_required_cash !== undefined) {
-                meta.push('一手预算 ' + _formatAmount(cell.one_lot_required_cash) + '（保证金 ' + _formatAmount(cell.one_lot_margin || 0) + ' + 手续费 ' + _formatAmount(cell.one_lot_fee || 0) + '）');
+                meta.push('一手估算 ' + _formatAmount(cell.one_lot_required_cash, currency) + '（保证金 ' + _formatAmount(cell.one_lot_margin || 0, currency) + ' + 手续费 ' + _formatAmount(cell.one_lot_fee || 0, currency) + '）');
             }
             if (cell.planned_qty !== null && cell.planned_qty !== undefined) {
                 meta.push('计划开 ' + _formatQuantity(cell.planned_qty) + ' 手');
             }
             if (cell.planned_amount !== null && cell.planned_amount !== undefined) {
-                meta.push('计划金额 ' + _formatAmount(cell.planned_amount));
+                meta.push('计划金额 ' + _formatAmount(cell.planned_amount, currency));
             }
             if (cell.target_budget_amount !== null && cell.target_budget_amount !== undefined) {
-                meta.push('目标预算 ' + _formatAmount(cell.target_budget_amount));
+                meta.push('目标预算 ' + _formatAmount(cell.target_budget_amount, currency));
             }
             if (cell.liquidity_cap_amount !== null && cell.liquidity_cap_amount !== undefined) {
-                meta.push('成交额限额 ' + _formatAmount(cell.liquidity_cap_amount));
+                meta.push('成交额限额 ' + _formatAmount(cell.liquidity_cap_amount, currency));
             }
         }
         if (cell.quantity !== null && cell.quantity !== undefined && (Math.abs(Number(cell.quantity)) > 1e-12 || Math.abs(Number(cell.amount || 0)) > 1e-12)) {
             meta.push('持仓 ' + _formatQuantity(cell.quantity));
-            if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
+            if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount, currency));
         } else if (cell.pre_rebalance_amount !== null && cell.pre_rebalance_amount !== undefined
             && cell.post_rebalance_amount !== null && cell.post_rebalance_amount !== undefined
             && cell.end_amount !== null && cell.end_amount !== undefined) {
             parts.push('<div class="snapshot-summary-amounts">'
-                + '<div>调仓前 ' + _formatAmount(cell.pre_rebalance_amount) + '</div>'
-                + '<div>调仓后 ' + _formatAmount(cell.post_rebalance_amount) + '</div>'
-                + '<div>期末 ' + _formatAmount(cell.end_amount) + '</div>'
+                + '<div>调仓前 ' + _formatAmount(cell.pre_rebalance_amount, currency) + '</div>'
+                + '<div>调仓后 ' + _formatAmount(cell.post_rebalance_amount, currency) + '</div>'
+                + '<div>期末 ' + _formatAmount(cell.end_amount, currency) + '</div>'
                 + '</div>');
             if (cell.buy_fee_amount !== null && cell.buy_fee_amount !== undefined) {
-                parts.push('<div class="snapshot-summary-fees">买入费 ' + _formatAmount(cell.buy_fee_amount) + '</div>');
+                parts.push('<div class="snapshot-summary-fees">买入费 ' + _formatAmount(cell.buy_fee_amount, currency) + '</div>');
             }
             if (cell.sell_fee_amount !== null && cell.sell_fee_amount !== undefined) {
-                parts.push('<div class="snapshot-summary-fees">卖出费 ' + _formatAmount(cell.sell_fee_amount) + '</div>');
+                parts.push('<div class="snapshot-summary-fees">卖出费 ' + _formatAmount(cell.sell_fee_amount, currency) + '</div>');
             }
         } else if (cell.amount !== null && cell.amount !== undefined) {
-            meta.push('金额 ' + _formatAmount(cell.amount));
+            meta.push('金额 ' + _formatAmount(cell.amount, currency));
         }
         if (cell.open_reason) {
             meta.push(cell.open_reason);
@@ -404,7 +412,7 @@
             deltaParts.push('变化 ' + _formatSignedQuantity(cell.delta_quantity));
         }
         if (cell.delta_amount !== null && cell.delta_amount !== undefined) {
-            deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount));
+            deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount, currency));
         }
         if (deltaParts.length) {
             var direction = cell.change_direction || 'flat';

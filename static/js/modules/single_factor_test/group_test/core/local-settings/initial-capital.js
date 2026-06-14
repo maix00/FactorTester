@@ -12,38 +12,101 @@
         return document.getElementById('group_initial_capital');
     }
 
+    function getCurrencyInput() {
+        return document.getElementById('group_base_currency');
+    }
+
+    function getConversionFeeInput() {
+        return document.getElementById('group_currency_conversion_fee_rate');
+    }
+
     function normalize(value) {
         var num = Number(value);
         if (!isFinite(num) || num <= 0) return null;
         return num;
     }
 
-    function collect() {
+    function normalizeCurrency(value) {
+        var text = String(value || 'CNY').trim().toUpperCase();
+        return text || 'CNY';
+    }
+
+    function normalizeRate(value) {
+        var num = Number(value);
+        if (!isFinite(num) || num < 0) return null;
+        return num;
+    }
+
+    function ensureExtraControls() {
         var input = getInput();
-        return { initialCapital: normalize(input && input.value) };
+        if (!input || getCurrencyInput()) return;
+        var container = input.parentNode;
+        if (!container) return;
+
+        var currency = document.createElement('input');
+        currency.id = 'group_base_currency';
+        currency.type = 'text';
+        currency.value = 'CNY';
+        currency.placeholder = '基础货币';
+        currency.style.cssText = 'width:80px;margin-left:8px;padding:4px 6px;';
+        container.appendChild(currency);
+
+        var fee = document.createElement('input');
+        fee.id = 'group_currency_conversion_fee_rate';
+        fee.type = 'number';
+        fee.min = '0';
+        fee.step = '0.000001';
+        fee.value = '0';
+        fee.placeholder = '换汇佣金率';
+        fee.style.cssText = 'width:120px;margin-left:8px;padding:4px 6px;';
+        container.appendChild(fee);
+    }
+
+    function collect() {
+        ensureExtraControls();
+        var input = getInput();
+        var currencyInput = getCurrencyInput();
+        var conversionFeeInput = getConversionFeeInput();
+        return {
+            initialCapital: normalize(input && input.value),
+            baseCurrency: normalizeCurrency(currencyInput && currencyInput.value),
+            currencyConversionFeeRate: normalizeRate(conversionFeeInput && conversionFeeInput.value)
+        };
     }
 
     function apply(data) {
+        ensureExtraControls();
         var input = getInput();
         if (!input) return;
         var value = normalize(data && data.initialCapital);
         if (value !== null) input.value = String(value);
+        var currencyInput = getCurrencyInput();
+        if (currencyInput) currencyInput.value = normalizeCurrency(data && data.baseCurrency);
+        var conversionFeeInput = getConversionFeeInput();
+        var feeRate = normalizeRate(data && data.currencyConversionFeeRate);
+        if (conversionFeeInput && feeRate !== null) conversionFeeInput.value = String(feeRate);
     }
 
     function summarize(data) {
         var value = normalize(data && data.initialCapital);
         if (value === null) return null;
-        return '初始金额: ' + String(value);
+        return '初始金额: ' + String(value) + ' ' + normalizeCurrency(data && data.baseCurrency);
     }
 
     function validateRunPayload(fields) {
         var value = normalize(fields.initialCapital);
         if (value === null) return ['请设置有效的初始金额'];
+        if (!normalizeCurrency(fields.baseCurrency)) return ['请设置基础货币'];
+        if (normalizeRate(fields.currencyConversionFeeRate) === null) return ['请设置有效的换汇佣金率'];
         return [];
     }
 
     function getStructureKeyParts(fields) {
-        return [String(normalize(fields.initialCapital) || '')];
+        return [
+            String(normalize(fields.initialCapital) || ''),
+            normalizeCurrency(fields.baseCurrency),
+            String(normalizeRate(fields.currencyConversionFeeRate) || 0)
+        ];
     }
 
     GT.localSettings.register({
@@ -52,9 +115,12 @@
         tabLabel: '初始金额',
         collect: collect,
         apply: apply,
-        runFields: ['initialCapital'],
+        bind: ensureExtraControls,
+        runFields: ['initialCapital', 'baseCurrency', 'currencyConversionFeeRate'],
         runPayload: [
             { field: 'initialCapital', key: 'initial_capital' },
+            { field: 'baseCurrency', key: 'base_currency' },
+            { field: 'currencyConversionFeeRate', key: 'currency_conversion_fee_rate' },
         ],
         validateRunPayload: validateRunPayload,
         getStructureKeyParts: getStructureKeyParts,

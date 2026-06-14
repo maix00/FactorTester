@@ -24,8 +24,11 @@
     var getLastGrossData = function() { var c = cache(); return c ? c.getLastGrossData() : null; };
     var getLastMetrics   = function() { var c = cache(); return c ? c.getLastMetrics() : null; };
     var _lastInitialCapital = 100000000;
+    var _lastBaseCurrency = 'CNY';
     function setLastInitialCapital(v) { if (typeof v === 'number' && v > 0) _lastInitialCapital = v; }
     function getLastInitialCapital() { return _lastInitialCapital; }
+    function setLastBaseCurrency(v) { _lastBaseCurrency = String(v || 'CNY').toUpperCase(); }
+    function getLastBaseCurrency() { return _lastBaseCurrency; }
 
 
     // ════════════════════════════════════════════════════════════════
@@ -39,6 +42,7 @@
         if (GT.results && GT.results.chart && GT.results.chart.groups && typeof GT.results.chart.groups.draw === 'function') {
             GT.results.chart.groups.draw(groups, {
                 initialCapital: getLastInitialCapital(),
+                baseCurrency: getLastBaseCurrency(),
                 onSnapshot: function(t) {
                     return GT.results.snapshot ? GT.results.snapshot.fetchGroupSnapshot(t) : null;
                 },
@@ -112,6 +116,7 @@
         setLastGrossData(data.groups);
         setLastMetrics(data.metrics);
         setLastInitialCapital(data.initial_capital);
+        setLastBaseCurrency(data.base_currency);
 
         // 3) 画图 + 指标表
         renderer.drawGroupChart(data.groups);
