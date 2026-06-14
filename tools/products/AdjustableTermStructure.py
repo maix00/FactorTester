@@ -81,6 +81,20 @@ class AdjustableContractMixin:
     def is_term_contract(self) -> bool:
         return True
 
+    def get_parent_product(self, term_structure_paths: Optional[list[str]] = None):
+        """Return the parent Futures product for this contract-like object, if resolvable."""
+        if getattr(self, '_parent_product_loaded', False):
+            return getattr(self, '_parent_product_cache', None)
+        parent = resolve_term_structure_product(self, term_structure_paths=term_structure_paths)
+        setattr(self, '_parent_product_cache', parent)
+        setattr(self, '_parent_product_loaded', True)
+        return parent
+
+    @property
+    def parent_product(self):
+        """Lazy parent Futures product resolved from the term-structure registry."""
+        return self.get_parent_product()
+
 
 class AdjustableProductMixin:
     """Base mixin for products that support adjustment/term-structure style helpers."""
@@ -334,6 +348,32 @@ class AdjustableProductMixin:
 
 # {path: {contract_uid: product_name}}
 _contract_product_cache: dict = {}
+_registered_term_products_by_name: dict[str, Any] = {}
+_registered_term_contracts_by_name: dict[str, Any] = {}
+_registered_term_paths: list[str] = []
+
+
+def register_term_structure_product(product: Any) -> None:
+    """Register one term-structure product for fast contract -> product lookup."""
+    product_name = getattr(product, 'name', None)
+    if product_name:
+        _registered_term_products_by_name[str(product_name)] = product
+    getter = getattr(product, 'get_term_structure_path', None)
+    if not callable(getter):
+        return
+    try:
+        path = getter()
+    except Exception:
+        return
+    if path and path not in _registered_term_paths:
+        _registered_term_paths.append(path)
+
+
+def register_term_structure_contract(contract: Any) -> None:
+    """Register one term-structure contract for fast parent lookup."""
+    contract_name = getattr(contract, 'name', None)
+    if contract_name:
+        _registered_term_contracts_by_name[str(contract_name)] = contract
 
 
 def get_contract_product_map(path: str) -> dict:
@@ -369,3 +409,52 @@ def lookup_contract_product(contract_uid: str, term_structure_paths: list) -> Op
         if contract_uid in mapping:
             return mapping[contract_uid]
     return None
+
+
+def _collect_term_structure_paths() -> list[str]:
+    return list(_registered_term_paths)
+
+
+def _get_registered_product(product_name: str):
+    if not product_name:
+        return None
+    return _registered_term_products_by_name.get(str(product_name))
+
+
+def _get_registered_contract(contract_name: str):
+    if not contract_name:
+        return None
+    return _registered_term_contracts_by_name.get(str(contract_name))
+
+
+def resolve_term_structure_product(contract_or_uid: Any, term_structure_paths: Optional[list[str]] = None):
+    """Resolve a contract-like object or uid to its parent Futures product instance."""
+    if contract_or_uid is None:
+        return None
+
+    contract_uid = getattr(contract_or_uid, 'name', None) or str(contract_or_uid)
+    if not contract_uid:
+        return None
+
+    candidate = contract_or_uid if not isinstance(contract_or_uid, str) else None
+    if candidate is None:
+        candidate = _get_registered_contract(contract_uid) or _get_registered_product(contract_uid)
+    if candidate is None:
+        return None
+    try:
+        if candidate is not None and not bool(getattr(candidate, 'is_term_contract', lambda: False)()):
+            return candidate
+    except Exception:
+        if candidate is not None:
+            return candidate
+
+    paths = list(term_structure_paths or [])
+    if not paths:
+        paths = _collect_term_structure_paths()
+    if not paths:
+        return None
+
+    product_name = lookup_contract_product(str(contract_uid), paths)
+    if not product_name:
+        return None
+    return _get_registered_product(product_name)

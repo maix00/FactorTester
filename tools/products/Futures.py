@@ -18,6 +18,8 @@ from tools.products.AdjustableTermStructure import (
     AdjustableContractMixin,
     AdjustableProductMixin,
     TermStructureStore,
+    register_term_structure_contract,
+    register_term_structure_product,
 )
 
 
@@ -29,7 +31,9 @@ class FuturesTermStructureStore(TermStructureStore):
 class FuturesContract(AdjustableContractMixin, Product):
     """具体期货合约。一个 FuturesContract 对应一个具体到期日的合约代码，如 'IF2412.CFE'。"""
     def __init__(self, name: str, point_value: Optional[int] = None, currency: Optional[str] = None, *args, **kwargs):
-        super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+        if not hasattr(self, '_initialized'):
+            super().__init__(name, point_value, currency, is_margin_traded=True, *args, **kwargs)
+            register_term_structure_contract(self)
 
 
 class Futures(AdjustableProductMixin, Product):
@@ -58,6 +62,7 @@ class Futures(AdjustableProductMixin, Product):
             self.term_structure_path = term_structure_path
             self.roller_info: Optional[pd.DataFrame] = None
             self.contract_class = contract_class
+            register_term_structure_product(self)
 
     def _ensure_roller_info(self):
         """

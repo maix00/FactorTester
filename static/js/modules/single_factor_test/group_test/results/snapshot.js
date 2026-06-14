@@ -180,212 +180,149 @@
 
     // ──────────── 辅助渲染函数 ────────────
 
-    /** 收集所有组的全部产品（去重），返回 [{name, desc, ...}] */
-    function _batchProducts(groupList) {
-        var seen = {};
-        var prods = [];
-        groupList.forEach(function(g) {
-            (g.products || []).forEach(function(p) {
-                var key = (typeof p === 'string') ? p : p.name;
-                if (!seen[key]) {
-                    seen[key] = true;
-                    prods.push((typeof p === 'string') ? {name: p, desc: p} : p);
-                }
-            });
-        });
-        return prods;
-    }
+    var _snapshotPayload = null;
+    var _snapshotMatrixKey = 'raw';
 
-    /**
-     * 判断产品在组中的状态
-     * @returns {string} 'holding' | 'entering' | 'exiting' | 'pending_exit' | null
-     */
-    function _productStatusInGroup(productName, group) {
-        var inList = (group.products_in || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
-        var outList = (group.products_out || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
-        var holdingList = (group.products || []).map(function(p) { return (typeof p === 'string') ? p : p.name; });
-
-        if (inList.indexOf(productName) !== -1) return 'entering';
-
-        var prodObj = _findProductObj(productName, group);
-        if (typeof prodObj === 'object' && prodObj && prodObj.pending_exit) {
-            return 'pending_exit';
+    function _matrixByKey(key) {
+        var matrices = _snapshotPayload && Array.isArray(_snapshotPayload.matrices) ? _snapshotPayload.matrices : [];
+        if (!matrices.length) return null;
+        for (var i = 0; i < matrices.length; i++) {
+            if (matrices[i] && matrices[i].key === key) return matrices[i];
         }
-
-        if (outList.indexOf(productName) !== -1) return 'exiting';
-        if (holdingList.indexOf(productName) !== -1) return 'holding';
-        return null;
+        return matrices[0];
     }
 
-    /**
-     * 查找产品对象（可能为 string 或 {name,desc,fee,amount}）
-     */
-    function _findProductObj(productName, group) {
-        var prods = group.products || [];
-        for (var i = 0; i < prods.length; i++) {
-            var name = (typeof prods[i] === 'string') ? prods[i] : prods[i].name;
-            if (name === productName) return prods[i];
-        }
-        return productName;
+    function _formatAmount(v) {
+        if (v === null || v === undefined || v === '') return '';
+        var num = Number(v);
+        if (!isFinite(num)) return '';
+        return Math.abs(num) >= 1 ? num.toFixed(2) : num.toFixed(6);
     }
 
-    /** 渲染单个产品标签（带费率、描述和持仓金额） */
     function _renderProduct(p) {
-        if (!p) return '';
-        if (typeof p === 'string') return _escape(p);
-        var name = _escape(p.name);
-        var desc = '';
-        if (p.desc && p.desc !== p.name) {
-            desc = ' <span class="snapshot-product-desc">' +
-                _escape(p.desc) + '</span>';
-        }
+        if (!p) return '—';
+        if (typeof p === 'string') return '<span class="snapshot-product-name">' + _escape(p) + '</span>';
+        var name = _escape(p.name || '');
+        var desc = p.desc && p.desc !== p.name ? ' <span class="snapshot-product-desc">' + _escape(p.desc) + '</span>' : '';
         var feeHtml = '';
         if (p.fee) {
-            var fee = p.fee;
             var parts = [];
-            if (fee.open_ratio !== undefined) parts.push('开' + (fee.open_ratio * 100).toFixed(3) + '%');
-            if (fee.close_ratio !== undefined) parts.push('平' + (fee.close_ratio * 100).toFixed(3) + '%');
+            if (p.fee.open_ratio !== undefined) parts.push('开' + (Number(p.fee.open_ratio) * 100).toFixed(3) + '%');
+            if (p.fee.close_ratio !== undefined) parts.push('平' + (Number(p.fee.close_ratio) * 100).toFixed(3) + '%');
             if (parts.length) feeHtml = ' <span class="snapshot-product-fee">[' + parts.join(' ') + ']</span>';
         }
-        var amtHtml = '';
-        if (p.amount !== null && p.amount !== undefined) {
-            var amtStr = p.amount >= 1 ? p.amount.toFixed(2) : p.amount.toFixed(6);
-            amtHtml = ' <span class="snapshot-product-amount" title="持仓金额">' + amtStr + '</span>';
+        var sourceHtml = '';
+        if (Array.isArray(p.source_names) && p.source_names.length > 1) {
+            sourceHtml = ' <span class="snapshot-product-source">(' + _escape(p.source_names.join(' / ')) + ')</span>';
         }
-        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + '</span>' + amtHtml;
+        return '<span class="snapshot-product-name" title="' + name + '">' + name + desc + feeHtml + sourceHtml + '</span>';
     }
 
-    /**
-     * 渲染一个矩阵 table。
-     * colGroups: [{group, label}] — label 用于表头显示（shortAlias）。
-     */
-    function _renderMatrixTable(colGroups, allProducts, sectionLabel) {
+    function _renderMatrixCell(cell) {
+        if (!cell || cell.status === 'absent') return '<span class="snapshot-cell-empty">—</span>';
+        var parts = [];
+        parts.push(_renderProduct(cell.product));
+        var meta = [];
+        if (cell.quantity !== null && cell.quantity !== undefined) meta.push('持仓 ' + Number(cell.quantity).toFixed(6));
+        if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
+        if (meta.length) parts.push('<div class="snapshot-cell-meta">' + meta.join(' · ') + '</div>');
+        return parts.join('');
+    }
+
+    function _renderMatrixToggle() {
+        var toggleEl = document.getElementById('snapshot_matrix_toggle');
+        if (!toggleEl) return;
+        var matrices = _snapshotPayload && Array.isArray(_snapshotPayload.matrices) ? _snapshotPayload.matrices : [];
+        if (matrices.length <= 1) {
+            toggleEl.innerHTML = '';
+            return;
+        }
+        var html = '<div class="snapshot-matrix-switch" role="tablist">';
+        matrices.forEach(function(matrix) {
+            var active = matrix.key === _snapshotMatrixKey ? ' active' : '';
+            html += '<button type="button" class="snapshot-matrix-switch-btn' + active + '" data-matrix-key="' + _escape(matrix.key) + '">' + _escape(matrix.label || matrix.key) + '</button>';
+        });
+        html += '</div>';
+        toggleEl.innerHTML = html;
+        var buttons = toggleEl.querySelectorAll ? toggleEl.querySelectorAll('.snapshot-matrix-switch-btn') : [];
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].onclick = function(evt) {
+                var key = evt.currentTarget.getAttribute('data-matrix-key');
+                if (!key) return;
+                _snapshotMatrixKey = key;
+                renderGroupSnapshot(_snapshotPayload, _snapshotPayload.timestamp_ms);
+            };
+        }
+    }
+
+    function _renderSnapshotMatrix(matrix) {
+        if (!matrix) return '<div class="snapshot-empty-tab">暂无分组数据</div>';
         var html = '';
         html += '<div class="snapshot-batch-section">';
-        html += '<div class="snapshot-batch-header">' + _escape(sectionLabel) + '</div>';
+        html += '<div class="snapshot-batch-header">仓位矩阵 · ' + _escape(matrix.label || matrix.key || '默认') + '</div>';
+        html += '<div class="snapshot-matrix-scroll">';
         html += '<table class="snapshot-matrix-table"><thead><tr>';
-        html += '<th style="min-width:80px;">产品</th>';
-        colGroups.forEach(function(cg) {
-            var labelHtml = cg.labelHtml || _escape(cg.label);
-            html += '<th>' + labelHtml
-                + ' <span style="font-weight:normal;color:#888;font-size:11px;">(' + cg.group.count + ')</span></th>';
+        html += '<th class="snapshot-prod-name-cell">产品</th>';
+        (matrix.columns || []).forEach(function(col) {
+            var label = col.label || col.name || '';
+            var count = col.count !== undefined && col.count !== null ? Number(col.count) : null;
+            html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
+            if (count !== null && isFinite(count)) {
+                html += '<div class="snapshot-col-count">' + count + '</div>';
+            }
+            html += '</th>';
         });
         html += '</tr></thead><tbody>';
 
-        allProducts.forEach(function(prodObj) {
-            var prodName = (typeof prodObj === 'string') ? prodObj : prodObj.name;
+        (matrix.rows || []).forEach(function(row, rowIndex) {
             html += '<tr>';
-            html += '<td class="snapshot-prod-name-cell">' + _renderProduct(prodObj) + '</td>';
-            colGroups.forEach(function(cg) {
-                var status = _productStatusInGroup(prodName, cg.group);
-                var cellContent;
-                var cellClass = 'snapshot-cell-';
-
-                if (status === 'entering') {
-                    cellContent = _renderProduct(_findProductObj(prodName, cg.group));
-                    cellClass += 'entering';
-                } else if (status === 'pending_exit') {
-                    cellContent = _renderProduct(_findProductObj(prodName, cg.group));
-                    cellClass += 'pending-exit';
-                } else if (status === 'exiting') {
-                    cellContent = _renderProduct(prodObj);
-                    cellClass += 'exiting';
-                } else if (status === 'holding') {
-                    cellContent = _renderProduct(_findProductObj(prodName, cg.group));
-                    cellClass += 'holding';
-                } else {
-                    cellContent = '—';
-                    cellClass += 'absent';
-                }
-                html += '<td class="' + cellClass + '">' + cellContent + '</td>';
+            html += '<td class="snapshot-prod-name-cell">' + _renderProduct(row) + '</td>';
+            (matrix.cells && matrix.cells[rowIndex] ? matrix.cells[rowIndex] : []).forEach(function(cell) {
+                var status = cell && cell.status ? cell.status : 'absent';
+                html += '<td class="snapshot-cell-' + status + '">' + _renderMatrixCell(cell) + '</td>';
             });
             html += '</tr>';
         });
 
-        html += '</tbody></table></div>';
+        html += '</tbody></table></div></div>';
         return html;
     }
 
-    /**
-     * 渲染分组持仓快照。当前只保留一个矩阵链路：
-     * 当前按列表展开态决定展示哪些列，前端直接按列生成单一矩阵。
-     */
     function renderGroupSnapshot(data, timestampMs) {
-        if (!data || !data.groups) return;
+        if (!data || !Array.isArray(data.matrices)) return;
+
+        _snapshotPayload = data;
+        if (!_snapshotMatrixKey || !_matrixByKey(_snapshotMatrixKey)) {
+            _snapshotMatrixKey = data.default_matrix_key || (data.matrices[0] && data.matrices[0].key) || 'raw';
+        }
 
         var timeStr = _fmtTs(timestampMs);
         document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + timeStr;
 
-        var groups = Array.isArray(data.groups) ? data.groups : [];
         var bodyEl = document.getElementById('snapshot_body');
         var statsEl = document.getElementById('snapshot_flow_stats');
         if (!bodyEl) return;
-        if (groups.length === 0) {
+
+        var matrix = _matrixByKey(_snapshotMatrixKey);
+        if (!matrix) {
             bodyEl.innerHTML = '<div class="snapshot-empty-tab">暂无分组数据</div>';
             if (statsEl) statsEl.innerHTML = '';
+            _renderMatrixToggle();
             return;
         }
 
-        var layout = null;
-        var listIndex = GT.panels && GT.panels.list && GT.panels.list.index;
-        if (listIndex && typeof listIndex.getSnapshotMatrixColumns === 'function') {
-            try {
-                layout = listIndex.getSnapshotMatrixColumns() || [];
-            } catch (e) {
-                console.warn('[snapshot] getSnapshotMatrixColumns failed, fallback to raw groups:', e);
-            }
-        }
-        if (layout == null) {
-            layout = groups.map(function(group, index) {
-                return {
-                    sourceIndex: index,
-                    group: group,
-                    depth: 0,
-                    hasChildren: false,
-                    expanded: true,
-                    label: group.shortAlias || group.name || group.key || ('Group ' + (index + 1)),
-                };
-            });
-        }
+        bodyEl.innerHTML = _renderSnapshotMatrix(matrix);
 
-        if (!layout.length) {
-            bodyEl.innerHTML = '<div class="snapshot-empty-tab">暂无分组数据</div>';
-            if (statsEl) statsEl.innerHTML = '';
-            return;
-        }
-
-        var colGroups = layout.map(function(entry, index) {
-            var sourceIndex = (entry.sourceIndex != null) ? entry.sourceIndex : index;
-            var group = groups[sourceIndex] || entry.group || groups[index];
-            var label = entry.label || (group && (group.shortAlias || group.name || group.key)) || ('Group ' + (index + 1));
-            var prefix = '';
-            for (var i = 0; i < (entry.depth || 0); i++) prefix += '&nbsp;&nbsp;';
-            var icon = entry.hasChildren ? (entry.expanded ? '▾' : '▸') + ' ' : '';
-            return {
-                group: group,
-                label: label,
-                labelHtml: '<span style="white-space:nowrap;">' + prefix + icon + _escape(label) + '</span>',
-            };
-        }).filter(function(cg) { return !!cg.group; });
-        var allProducts = _batchProducts(colGroups.map(function(cg) { return cg.group; }));
-        var matrixHtml = _renderMatrixTable(colGroups, allProducts, '仓位矩阵');
-        bodyEl.innerHTML = matrixHtml;
-
-        // ── 总体统计 ──
-        var totalChanged = 0, totalProdCount = 0;
-        groups.forEach(function(g) {
-            totalChanged += (g.products_in || []).length + (g.products_out || []).length;
-            totalProdCount += g.count;
-        });
-        var avgTurnover = totalProdCount > 0 ? (totalChanged / (2.0 * totalProdCount) * 100).toFixed(1) : '0.0';
         if (statsEl) {
+            var summary = data.summary || {};
+            var totalChanged = summary.total_changed !== undefined ? summary.total_changed : 0;
+            var totalProdCount = summary.total_prod_count !== undefined ? summary.total_prod_count : 0;
+            var avgTurnover = summary.avg_turnover !== undefined ? summary.avg_turnover : 0;
             var statsHtml = '<b>📊 总体流动统计：</b> 换手率 ≈ ' + avgTurnover + '%';
             statsHtml += ' &nbsp;|&nbsp; 总进出 = ' + totalChanged + ' 品种';
-            if (!data.has_prev) {
-                statsHtml += ' &nbsp;<span style="color:#888;">（首期，无对比基准）</span>';
-            }
             statsEl.innerHTML = statsHtml;
         }
+        _renderMatrixToggle();
     }
 
     // ---------- 导出 ----------

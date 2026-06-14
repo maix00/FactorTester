@@ -490,7 +490,10 @@
                 <button id="snapshot-next-btn" class="snapshot-nav-btn" title="下一个时点">后一个 ▶</button>
                 <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
-            <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <div id="snapshot_matrix_toggle"></div>
+                <button id="group-snapshot-drawer-close" class="snapshot-close-btn">✕</button>
+            </div>
         </div>
         <div id="snapshot_flow_stats" class="snapshot-flow-stats"></div>
         <div id="group-snapshot-drawer-body">
@@ -889,6 +892,10 @@
         font-size: 12px;
         table-layout: fixed;
     }
+    #group_test_module .snapshot-matrix-scroll {
+        width: 100%;
+        overflow: auto;
+    }
     #group_test_module .snapshot-matrix-table th {
         position: sticky;
         top: 0;
@@ -904,10 +911,11 @@
     #group_test_module .snapshot-matrix-table td {
         padding: 4px 8px;
         border-bottom: 1px solid #edf0f4;
-        white-space: nowrap;
+        white-space: normal;
         overflow: hidden;
         text-overflow: ellipsis;
         vertical-align: middle;
+        word-break: break-word;
     }
     #group_test_module .snapshot-prod-name-cell {
         font-weight: 500;
@@ -976,6 +984,42 @@
         color: #aaa;
         font-size: 10px;
     }
+    #group_test_module .snapshot-product-source,
+    #group_test_module .snapshot-cell-meta {
+        color: #667085;
+        font-size: 11px;
+    }
+    #group_test_module .snapshot-cell-meta {
+        margin-top: 2px;
+        line-height: 1.35;
+    }
+    #group_test_module .snapshot-cell-empty {
+        color: #98a2b3;
+    }
+    #group_test_module .snapshot-matrix-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        background: #fff;
+    }
+    #group_test_module .snapshot-matrix-switch-btn {
+        border: 0;
+        background: transparent;
+        color: #475467;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-matrix-switch-btn.active {
+        background: #e7f1ff;
+        color: #0f4c81;
+        font-weight: 600;
+    }
     #group_test_module .snapshot-batch-section {
         margin-bottom: 20px;
         border: 1px solid #e5e7eb;
@@ -1010,6 +1054,37 @@
         color: #555;
         background: #f9fafb;
         border-bottom: 1px solid #e5e7eb;
+    }
+    #group_test_module #group-snapshot-drawer-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #fff;
+    }
+    #group_test_module .snapshot-nav-btn,
+    #group_test_module .snapshot-close-btn {
+        border: 1px solid #d0d5dd;
+        background: #fff;
+        color: #344054;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #group_test_module .snapshot-close-btn {
+        background: #fff5f5;
+        border-color: #fecaca;
+        color: #b42318;
+    }
+    #group_test_module .snapshot-title {
+        font-size: 14px;
+        color: #101828;
+        white-space: nowrap;
     }
 </style>
 

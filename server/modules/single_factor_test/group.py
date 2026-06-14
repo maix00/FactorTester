@@ -16,6 +16,8 @@ from tools.factors.tests.single_factor_test.group.detail import (
 )
 from tools.factors.tests.single_factor_test.group.metadata import GROUP_TEST_PHASES, GROUP_TEST_METRICS_META
 from tools.factors.tests.single_factor_test.group.monotonicity import build_group_ranking_detail
+from tools.products.AdjustableTermStructure import resolve_term_structure_product
+from tools.products.Product import Product
 from . import sft_bp
 import server.services.runtime_state as runtime_state
 from server.modules.shared.price_data_helpers import to_epoch_ms
@@ -124,6 +126,225 @@ def _product_fee_rates_by_name(group_result: Any) -> dict[str, dict[str, float]]
         getattr(group_result, 'close_ratio_vec', None),
         getattr(group_result, 'close_today_ratio_vec', None),
     )
+
+
+def _registered_product(product_name: str):
+    if not product_name:
+        return None
+    return resolve_term_structure_product(product_name)
+
+
+def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]], *, collapsed_from: str | None = None) -> dict[str, Any]:
+    raw_name = getattr(product_ref, 'name', str(product_ref) if product_ref is not None else '')
+    product = product_ref if isinstance(product_ref, Product) else _registered_product(raw_name) if product_ref else None
+    name = getattr(product, 'name', None) if product is not None else raw_name
+    display = _display_product_with_fee(product if product is not None else name, fee_rates)
+    if collapsed_from and collapsed_from != name:
+        display['source_name'] = collapsed_from
+    return display
+
+
+def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product_idx: int, eps: float = 1e-12) -> tuple[float, float]:
+    qty = 0.0
+    amt = 0.0
+    if position_row is not None and product_idx < len(position_row):
+        try:
+            qty = float(position_row[product_idx])
+        except (TypeError, ValueError):
+            qty = 0.0
+    if amount_row is not None and product_idx < len(amount_row):
+        try:
+            amt = float(amount_row[product_idx])
+        except (TypeError, ValueError):
+            amt = 0.0
+    if abs(qty) <= eps:
+        qty = 0.0
+    if abs(amt) <= eps:
+        amt = 0.0
+    return qty, amt
+
+
+def _build_snapshot_matrix(
+    *,
+    matrix_key: str,
+    matrix_label: str,
+    group_result: Any,
+    valid_cols: list[Any],
+    fee_rates_by_name: dict[str, dict[str, float]],
+    t_idx: int | None,
+    prev_t_idx: int | None,
+    collapse_term_structure: bool = False,
+) -> dict[str, Any]:
+    positions = getattr(group_result, 'position_quantities_np', None)
+    amounts = getattr(group_result, 'hold_amounts_np', None)
+    memberships = getattr(group_result, 'membership_np', None)
+    if positions is None and amounts is None:
+        return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
+
+    current_products = list(valid_cols or [])
+    row_order: list[str] = []
+    row_meta: dict[str, dict[str, Any]] = {}
+    per_group: list[dict[str, dict[str, Any]]] = []
+
+    def _product_name(product_ref: Any) -> str:
+        return getattr(product_ref, 'name', str(product_ref))
+
+    def _resolved_product(product_ref: Any):
+        if collapse_term_structure:
+            resolved = None
+            try:
+                resolved = getattr(product_ref, 'parent_product', None)
+                if callable(resolved):
+                    resolved = resolved()
+            except Exception:
+                resolved = None
+            if resolved is None:
+                resolved = resolve_term_structure_product(product_ref)
+            if resolved is not None:
+                return resolved
+        return product_ref
+
+    def _row_key(raw_product: Any) -> str:
+        resolved = _resolved_product(raw_product)
+        return _product_name(resolved if resolved is not None else raw_product)
+
+    def _row_display(product_ref: Any, sources: list[str]) -> dict[str, Any]:
+        display = _snapshot_product_display(product_ref, fee_rates_by_name, collapsed_from=sources[0] if sources else None)
+        if collapse_term_structure and len(sources) > 1:
+            display['source_names'] = sources
+        return display
+
+    def _group_index_map(index: int) -> tuple[Any, Any]:
+        cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
+        cur_amt = amounts[t_idx, index] if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
+        prev_pos = positions[prev_t_idx, index] if positions is not None and prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
+        prev_amt = amounts[prev_t_idx, index] if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0] else None
+        cur_mem = memberships[t_idx, index] if memberships is not None and t_idx is not None and t_idx < memberships.shape[0] else None
+        prev_mem = memberships[prev_t_idx, index] if memberships is not None and prev_t_idx is not None and prev_t_idx < memberships.shape[0] else None
+        return (cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem)
+
+    group_count = 0
+    for matrix in (positions, amounts, memberships):
+        if matrix is not None and getattr(matrix, 'ndim', 0) >= 2:
+            group_count = int(matrix.shape[1])
+            break
+
+    for g_idx in range(group_count):
+        cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem = _group_index_map(g_idx)
+        group_rows: dict[str, dict[str, Any]] = {}
+        for p_idx, raw_product in enumerate(current_products):
+            raw_name = _product_name(raw_product)
+            row_key = _row_key(raw_product)
+            resolved_product = _resolved_product(raw_product) if collapse_term_structure else raw_product
+            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
+            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
+            if row_key not in group_rows:
+                group_rows[row_key] = {
+                    'name': row_key,
+                    'source_names': [raw_name],
+                    'current_qty': 0.0,
+                    'current_amount': 0.0,
+                    'prev_qty': 0.0,
+                    'prev_amount': 0.0,
+                    'current_membership': False,
+                    'prev_membership': False,
+                    'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
+                }
+                if row_key not in row_order:
+                    row_order.append(row_key)
+                    row_meta[row_key] = group_rows[row_key]['display']
+            else:
+                if raw_name not in group_rows[row_key]['source_names']:
+                    group_rows[row_key]['source_names'].append(raw_name)
+                    group_rows[row_key]['display'] = _row_display(resolved_product if resolved_product is not None else raw_product, group_rows[row_key]['source_names'])
+                    row_meta[row_key] = group_rows[row_key]['display']
+            group_rows[row_key]['current_qty'] += cur_qty
+            group_rows[row_key]['current_amount'] += cur_amount
+            group_rows[row_key]['prev_qty'] += prev_qty
+            group_rows[row_key]['prev_amount'] += prev_amount
+            if cur_mem is not None and p_idx < len(cur_mem):
+                group_rows[row_key]['current_membership'] = bool(group_rows[row_key]['current_membership'] or bool(cur_mem[p_idx]))
+            if prev_mem is not None and p_idx < len(prev_mem):
+                group_rows[row_key]['prev_membership'] = bool(group_rows[row_key]['prev_membership'] or bool(prev_mem[p_idx]))
+        per_group.append(group_rows)
+
+    columns = []
+    for g_idx in range(len(per_group)):
+        current_active = 0
+        for row_key, row in per_group[g_idx].items():
+            if abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12:
+                current_active += 1
+        columns.append({
+            'name': f'Group {g_idx + 1}',
+            'label': f'Group {g_idx + 1}',
+            'count': current_active,
+        })
+
+    cells = []
+    for row_key in row_order:
+        row_cells = []
+        row_display = row_meta.get(row_key) or _snapshot_product_display(row_key)
+        for g_idx in range(len(per_group)):
+            row = per_group[g_idx].get(row_key)
+            if not row:
+                row_cells.append({'status': 'absent', 'product': None, 'quantity': 0.0, 'amount': 0.0, 'pending_exit': False})
+                continue
+            cur_active = abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12
+            prev_active = abs(row['prev_qty']) > 1e-12 or abs(row['prev_amount']) > 1e-12
+            desired_now = bool(row['current_membership'])
+            desired_prev = bool(row['prev_membership'])
+            if cur_active and not prev_active:
+                status = 'entering'
+            elif prev_active and not cur_active:
+                status = 'exiting'
+            elif cur_active and prev_active and not desired_now and desired_prev:
+                status = 'pending_exit'
+            elif cur_active:
+                status = 'holding'
+            else:
+                status = 'absent'
+            row_cells.append({
+                'status': status,
+                'product': row_display,
+                'quantity': round(float(row['current_qty']), 6),
+                'amount': round(float(row['current_amount']), 6),
+                'pending_exit': status == 'pending_exit',
+                'source_names': row.get('source_names', []),
+            })
+        cells.append(row_cells)
+
+    return {
+        'key': matrix_key,
+        'label': matrix_label,
+        'columns': columns,
+        'rows': [row_meta[k] for k in row_order],
+        'cells': cells,
+    }
+
+
+def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates_by_name: dict[str, dict[str, float]], t_idx: int | None, prev_t_idx: int | None) -> list[dict[str, Any]]:
+    return [
+        _build_snapshot_matrix(
+            matrix_key='raw',
+            matrix_label='全产品',
+            group_result=group_result,
+            valid_cols=valid_cols,
+            fee_rates_by_name=fee_rates_by_name,
+            t_idx=t_idx,
+            prev_t_idx=prev_t_idx,
+            collapse_term_structure=False,
+        ),
+        _build_snapshot_matrix(
+            matrix_key='collapsed',
+            matrix_label='期限折叠',
+            group_result=group_result,
+            valid_cols=valid_cols,
+            fee_rates_by_name=fee_rates_by_name,
+            t_idx=t_idx,
+            prev_t_idx=prev_t_idx,
+            collapse_term_structure=True,
+        ),
+    ]
 
 
 def _latest_group_result(tester: Any):
@@ -944,19 +1165,12 @@ def get_group_snapshot():
         tester = runtime_state.get_factor_tester(submission_id, caller='get_group_snapshot')
 
         group_result = _latest_group_result(tester)
-        products_dict = group_result.get_products_by_group() if group_result is not None else None
         valid_cols_raw = group_result.valid_cols if group_result is not None else None
-        if not products_dict or not _safe_bool(valid_cols_raw):
+        index_list = list(getattr(group_result, 'index_list', []) or [])
+        if group_result is None or not _safe_bool(valid_cols_raw) or not index_list:
             return jsonify({'success': False, 'error': '未找到最近的分组测试结果，请先运行分组测试'}), 400
-        valid_cols = valid_cols_raw
 
-        # 找到最接近的时刻
-        # products_dict: {group_idx: {index_entry: [product_names]}}
-        # index_entry 可能是 Timestamp 或 tuple
-        first_group = next(iter(products_dict.values()))
-        time_entries = list(first_group.keys())
-        if not time_entries:
-            return jsonify({'success': False, 'error': '未找到匹配的时间点'}), 404
+        time_entries = index_list
 
         def _epoch_seconds(value):
             ts = _signal_time(value)
@@ -986,93 +1200,39 @@ def get_group_snapshot():
         # (ts_epoch, idx_entry) 对列表，供 all_timestamps_ms 构建和前/后导航使用
         all_times = list(zip(time_epochs, time_entries))
 
-        n_groups = len(products_dict)
         fee_rates_by_name = _product_fee_rates_by_name(group_result)
-
-        # ── 持仓金额数据 (refs #100) ──
+        positions = getattr(group_result, 'position_quantities_np', None)
         hold_np = getattr(group_result, 'hold_amounts_np', None)
         t_idx = None
-        assert group_result is not None, "group_result should not be None here"
-        if hold_np is not None and group_result.index_list:
+        if index_list:
             try:
-                t_idx = group_result.index_list.index(best_idx_entry)
-            except (ValueError, AttributeError):
+                t_idx = index_list.index(best_idx_entry)
+            except ValueError:
                 t_idx = None
+        prev_t_idx = None
+        if prev_entry is not None:
+            try:
+                prev_t_idx = index_list.index(prev_entry)
+            except ValueError:
+                prev_t_idx = None
 
-        # 构建 valid_cols → position 映射（hold_np 的 P 轴与 valid_cols 对齐）
-        valid_cols_list = group_result.valid_cols if group_result.valid_cols else []
-        col_to_pos = {col: i for i, col in enumerate(valid_cols_list)} if valid_cols_list else {}
+        valid_cols_list = list(group_result.valid_cols) if group_result.valid_cols else []
+        matrices = _build_snapshot_matrices(group_result, valid_cols_list, fee_rates_by_name, t_idx, prev_t_idx)
 
-        groups_detail = []
-        for g in range(n_groups):
-            current_raw = products_dict[g].get(best_idx_entry, [])
-            current_display = [_display_product_with_fee(x, fee_rates_by_name) for x in current_raw]
-            # 按 name 排序
-            current_display.sort(key=lambda d: d['name'])
-
-            # ── 注入持仓金额 (refs #100) ──
-            g_amounts = None
-            if t_idx is not None and hold_np is not None and hold_np.shape[0] > t_idx:
-                # hold_np shape: (T, M, P)；M 可能 > n_groups（LS 扩展等）
-                if g < hold_np.shape[1]:
-                    g_amounts = hold_np[t_idx, g, :]  # (P,) — 该组每产品持仓金额
-                else:
-                    # fallback: 取 g 但可能 index error
-                    pass
-
-            total_amount = float(np.nansum(g_amounts)) if g_amounts is not None and current_raw else 0.0
-
-            # 注入 amount/weight/pending_exit 到每个产品
-            if g_amounts is not None and col_to_pos and total_amount > 0:
-                for d in current_display:
-                    pname = d.get('name', '')
-                    pos = col_to_pos.get(pname)
-                    if pos is not None and pos < len(g_amounts):
-                        amt = float(g_amounts[pos])
-                        d['amount'] = round(amt, 6)
-                        d['weight'] = round(amt / total_amount, 6) if total_amount > 0 else 0.0
-                        # pending_exit: 在 membership 中但 amount ≈ 0（低于组资产的万分之一）
-                        d['pending_exit'] = amt < total_amount * 0.0001
-            elif current_raw:
-                # 无金额数据时，amount 留空
-                for d in current_display:
-                    d['amount'] = None
-                    d['weight'] = None
-                    d['pending_exit'] = False
-
-            if prev_entry is not None:
-                prev_raw = products_dict[g].get(prev_entry, [])
-                prev_display = [_display_product_with_fee(x, fee_rates_by_name) for x in prev_raw]
-                prev_names = set(d['name'] for d in prev_display)
-                curr_names = set(d['name'] for d in current_display)
-
-                in_names = sorted(curr_names - prev_names)
-                out_names = sorted(prev_names - curr_names)
-
-                # 新进/退出：从 current_display / prev_display 中查找完整信息
-                _name_map = {d['name']: d for d in current_display}
-                _prev_name_map = {d['name']: d for d in prev_display}
-                products_in = [_name_map[n] for n in in_names]
-                products_out = [_prev_name_map[n] for n in out_names]
-
-                prev_count = len(prev_raw)
-                curr_count = len(current_raw)
-                avg_count = (prev_count + curr_count) / 2.0
-                changed = len(in_names) + len(out_names)
-                turnover_rate = round(changed / (2.0 * avg_count), 4) if avg_count > 0 else 0.0
-            else:
-                products_in = []
-                products_out = []
-                turnover_rate = 0.0
-
-            groups_detail.append({
-                'name': f'Group {g+1}',
-                'products': current_display,
-                'products_in': products_in,
-                'products_out': products_out,
-                'turnover_rate': turnover_rate,
-                'count': len(current_display),
-            })
+        # 统计当前真实持仓变动，作为顶部摘要
+        active_matrix = matrices[0] if matrices else {'columns': []}
+        total_changed = 0
+        total_prod_count = 0
+        for g_idx in range(len(active_matrix.get('columns', []))):
+            col = active_matrix['columns'][g_idx]
+            total_prod_count += int(col.get('count', 0) or 0)
+            if t_idx is not None and positions is not None and t_idx < positions.shape[0] and g_idx < positions.shape[1]:
+                cur_pos = positions[t_idx, g_idx]
+                prev_pos = positions[prev_t_idx, g_idx] if prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
+                current_active = int(np.sum(np.abs(cur_pos) > 1e-12))
+                prev_active = int(np.sum(np.abs(prev_pos) > 1e-12)) if prev_pos is not None else 0
+                total_changed += abs(current_active - prev_active)
+        avg_turnover = total_changed / max(total_prod_count, 1) * 100.0 if total_prod_count > 0 else 0.0
 
         # 所有时间点（epoch 毫秒），用于前/后导航
         all_timestamps_ms = sorted(set(
@@ -1093,12 +1253,18 @@ def get_group_snapshot():
 
         return jsonify({
             'success': True,
-            'groups': groups_detail,
+            'matrices': matrices,
+            'default_matrix_key': 'raw',
             'timestamp_ms': closest_ms,
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
             'group_names': snapshot_group_names,
+            'summary': {
+                'avg_turnover': round(avg_turnover, 1),
+                'total_changed': int(total_changed),
+                'total_prod_count': int(total_prod_count),
+            },
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()})

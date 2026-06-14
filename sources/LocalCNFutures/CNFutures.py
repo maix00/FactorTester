@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 import pandas as pd
 import os
 from pathlib import Path
@@ -73,6 +73,10 @@ highest_version_col_name = '最高版本'
 enddate_col_name = '标准合约终止交易日'
 
 name_code_version_dict = {}
+contract_mapping_path = os.path.join(DATA_DIR, 'wind_mapping.parquet')
+_CNFUTURES_BY_NAME: Dict[str, "CNFutures"] = {}
+_CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH: Dict[str, Dict[str, str]] = {}
+_CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH: Dict[str, Dict[str, List[str]]] = {}
 
 
 def _infer_unique_version(code: str, exchange_short: Optional[str] = None) -> Optional[str]:
@@ -94,10 +98,96 @@ def get_by_code_and_version(code: str, version: Optional[str], name: str) -> str
         }
     return name_code_version_dict[name].get((code, version))
 
+
+def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
+    contract = row.get('CONTRACT')
+    if not isinstance(contract, str):
+        return None
+    if not contract.endswith('CZC'):
+        return contract
+    enddate = row.get('ENDDATE')
+    if pd.isna(enddate):
+        return None
+    digits = ''.join(filter(str.isdigit, contract))
+    if len(digits) == 4:
+        return contract
+    if len(digits) != 3:
+        return None
+
+    end_str = pd.Timestamp(enddate).strftime('%Y%m%d')
+    next_two = str(int(end_str[2:4]) + 1).zfill(2)
+    decade = end_str[2] if digits[0] == end_str[3] else (next_two[0] if digits[0] == next_two[-1] else None)
+    return contract.replace(digits, decade + digits) if decade else None
+
+
+def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
+    if not contract or '.' not in contract:
+        return None
+    product_month, exchange = contract.split('.')
+    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
+    reverse_exchange = {v: k for k, v in exchange_map.items()}
+    return f"{reverse_exchange.get(exchange, exchange)}|F|{product_month[:first_digit]}|{product_month[first_digit:]}"
+
+
+def _infer_product_name_from_contract(contract_name: str) -> Optional[str]:
+    if not contract_name:
+        return None
+
+    raw = str(contract_name)
+    if '|F|' in raw:
+        parts = raw.split('|')
+        if len(parts) >= 4 and parts[1] == 'F':
+            exchange_short = exchange_map.get(parts[0], parts[0])
+            return f"{parts[2]}.{exchange_short}" if parts[2] and exchange_short else None
+
+    if '.' not in raw:
+        return None
+    product_month, exchange_short = raw.split('.', 1)
+    first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
+    product_code = product_month[:first_digit]
+    return f"{product_code}.{exchange_short}" if product_code and exchange_short else None
+
+
+def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str], Dict[str, List[str]]]:
+    path = path or contract_mapping_path
+    if path not in _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH:
+        mapping = (
+            pd.read_parquet(path)
+            .rename(columns={'S_INFO_WINDCODE': 'PRODUCT', 'FS_MAPPING_WINDCODE': 'CONTRACT'})
+        )
+        mapping = mapping.dropna(subset=['PRODUCT', 'CONTRACT'])
+        mapping['CONTRACT_PATCHED'] = mapping.apply(_patch_czc_contract_decade, axis=1)
+        mapping['CONTRACT_UID'] = mapping['CONTRACT_PATCHED'].apply(_contract_to_uid)
+        mapping = mapping.dropna(subset=['CONTRACT_UID'])
+        mapping = mapping[['PRODUCT', 'CONTRACT_UID']].drop_duplicates()
+
+        contract_to_product = {
+            str(row.CONTRACT_UID): str(row.PRODUCT)
+            for row in mapping.itertuples(index=False)
+        }
+        product_to_contracts: Dict[str, List[str]] = {}
+        for row in mapping.itertuples(index=False):
+            product_to_contracts.setdefault(str(row.PRODUCT), []).append(str(row.CONTRACT_UID))
+
+        _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH[path] = contract_to_product
+        _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH[path] = product_to_contracts
+    return (
+        _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH[path],
+        _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH[path],
+    )
+
 class CNFuturesContract(FuturesContract):
     """中国期货单个合约（固定计价货币 CNY，时区 Asia/Shanghai）。"""
     def __init__(self, name: str, point_value: Optional[int] = None):
         super().__init__(name, point_value, 'CNY', timezone='Asia/Shanghai')
+
+    def get_parent_product(self, term_structure_paths: Optional[list[str]] = None):
+        if getattr(self, '_parent_product_loaded', False):
+            return getattr(self, '_parent_product_cache', None)
+        parent = CNFutures.get_contract_parent(self.name)
+        setattr(self, '_parent_product_cache', parent)
+        setattr(self, '_parent_product_loaded', True)
+        return parent
 
 class CNFutures(Futures):
     """中国期货主力品种，附带行业分类、细分行业分类、日夜盘时段分类及中文品种名称。"""
@@ -120,6 +210,27 @@ class CNFutures(Futures):
         exchange_short = self.alias.split('.')[1] if '.' in self.alias else None
         self.version = name.split('@')[1] if '@' in name else _infer_unique_version(self.code, exchange_short)
         self.desc = get_by_code_and_version(self.code, self.version, variety_col_name) or self.alias
+        _CNFUTURES_BY_NAME[self.name] = self
+        _CNFUTURES_BY_NAME[self.alias] = self
+
+    @classmethod
+    def get_by_product_name(cls, product_name: str) -> Optional["CNFutures"]:
+        return _CNFUTURES_BY_NAME.get(str(product_name))
+
+    @classmethod
+    def get_contract_parent(cls, contract_uid: str, mapping_path: Optional[str] = None) -> Optional["CNFutures"]:
+        contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
+        product_name = contract_to_product.get(str(contract_uid))
+        parent = cls.get_by_product_name(product_name) if product_name else None
+        if parent is not None:
+            return parent
+        inferred_product_name = _infer_product_name_from_contract(str(contract_uid))
+        return cls.get_by_product_name(inferred_product_name) if inferred_product_name else None
+
+    @classmethod
+    def get_contracts_for_product(cls, product_name: str, mapping_path: Optional[str] = None) -> List[str]:
+        _, product_to_contracts = _cn_futures_contract_maps(mapping_path)
+        return list(product_to_contracts.get(str(product_name), []))
 
     def get_roller_info_path(self) -> str:
         if not hasattr(self, '_ROLLER_INFO_PATH_CACHED'):
