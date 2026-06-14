@@ -8,7 +8,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from types import SimpleNamespace
+import pandas as pd
+from tools import DataFreq
+from tools.data.DataTime import DataTime
 from tools.factors.tests.single_factor_test.group.core import simulate_group_trading_book
+from tools.factors.tests.single_factor_test.group.core import _simulate_group_from_preloaded
 
 
 def simulate_groups(
@@ -233,6 +238,41 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         initial_capital=1.0,
     )
     np.testing.assert_allclose(result_margin["margin_occupied_np"][0, 0], 0.11)
+
+
+def test_group_run_result_hold_amounts_use_simulated_target_not_end_valuation():
+    _, _, _, group_result = _simulate_group_from_preloaded(
+        SimpleNamespace(alias='unit-factor'),
+        membership_np=np.ones((1, 1, 1), dtype=bool),
+        returns_filled=np.array([[0.10]], dtype=float),
+        price_np=np.array([[100.0]], dtype=float),
+        valid_cols=['P0'],
+        index_list=[pd.Timestamp('2026-01-01')],
+        n_names={0: 'A1'},
+        group_configs=[{}],
+        use_closetoday_vec=np.array([False], dtype=bool),
+        rebalance_mode='each_period',
+        initial_capital=1000.0,
+        multi_session_active=False,
+        start_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
+        end_dt=DataTime(ts=pd.Timestamp('2026-01-01'), precision='day'),
+        source_freq=DataFreq.DAY,
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        open_fixed_vec=np.zeros(1, dtype=float),
+        close_fixed_vec=np.zeros(1, dtype=float),
+        close_today_fixed_vec=np.zeros(1, dtype=float),
+        point_value_vec=np.ones(1, dtype=float),
+        min_tick_vec=np.ones(1, dtype=float),
+        min_trade_quantity_vec=np.ones(1, dtype=float),
+        long_margin_ratio_vec=np.ones(1, dtype=float),
+        is_margin_traded_vec=np.array([False], dtype=bool),
+        positions_by_variety_code_lower={},
+    )
+
+    np.testing.assert_allclose(group_result.position_quantities_np[0, 0, 0], 10.0)
+    np.testing.assert_allclose(group_result.hold_amounts_np[0, 0, 0], 1000.0)
 
 
 def test_trading_book_charges_fixed_fee_per_contract_without_rewriting_rate():

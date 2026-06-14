@@ -1247,7 +1247,7 @@ def _simulate_group_from_preloaded(
         rebalance_mode=rebalance_mode,
         report_df=report_df.copy(),
         group_names=n_names,
-        hold_amounts_np=sim_result.get('prev_end_amounts_np'),
+        hold_amounts_np=sim_result.get('target_amounts_np'),
         position_quantities_np=sim_result.get('position_quantities_np'),
         margin_occupied_np=sim_result.get('margin_occupied_np'),
         total_equity_np=sim_result.get('total_equity_np'),

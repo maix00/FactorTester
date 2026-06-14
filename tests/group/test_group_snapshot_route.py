@@ -185,6 +185,8 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         group_names={0: 'A1'},
         hold_amounts_np=amounts,
         position_quantities_np=positions,
+        total_equity_np=np.array([[1200.0], [1300.0]], dtype=float),
+        cash_np=np.array([[1000.0], [900.0]], dtype=float),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -210,6 +212,14 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     assert cells[3][0]['delta_quantity'] == -1.0
     assert cells[4][0]['status'] == 'exiting'
     assert cells[4][0]['delta_quantity'] == -1.0
+    assert payload['matrices'][0]['rows'][-2]['name'] == '总资产'
+    assert cells[-2][0]['status'] == 'increasing'
+    assert cells[-2][0]['amount'] == 1300.0
+    assert cells[-2][0]['delta_amount'] == 100.0
+    assert payload['matrices'][0]['rows'][-1]['name'] == '现金'
+    assert cells[-1][0]['status'] == 'decreasing'
+    assert cells[-1][0]['amount'] == 900.0
+    assert cells[-1][0]['delta_amount'] == -100.0
 
 
 def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch):

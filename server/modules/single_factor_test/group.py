@@ -195,6 +195,8 @@ def _build_snapshot_matrix(
     positions = getattr(group_result, 'position_quantities_np', None)
     amounts = getattr(group_result, 'hold_amounts_np', None)
     memberships = getattr(group_result, 'membership_np', None)
+    total_equity_np = getattr(group_result, 'total_equity_np', None)
+    cash_np = getattr(group_result, 'cash_np', None)
     if positions is None and amounts is None:
         return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
 
@@ -364,11 +366,55 @@ def _build_snapshot_matrix(
             })
         cells.append(row_cells)
 
+    def _append_amount_row(row_key: str, display: dict[str, Any], matrix: Any) -> None:
+        if matrix is None or t_idx is None or t_idx >= matrix.shape[0]:
+            return
+        amount_cells = []
+        for g_idx in range(len(per_group)):
+            current_amount = _safe_float(matrix[t_idx, g_idx]) if g_idx < matrix.shape[1] else None
+            previous_amount = None
+            if prev_t_idx is not None and prev_t_idx < matrix.shape[0] and g_idx < matrix.shape[1]:
+                previous_amount = _safe_float(matrix[prev_t_idx, g_idx])
+            current_amount = 0.0 if current_amount is None else current_amount
+            previous_amount = 0.0 if previous_amount is None else previous_amount
+            delta_amount = current_amount - previous_amount
+            if delta_amount > 1e-12:
+                status = 'increasing'
+                direction = 'increase'
+            elif delta_amount < -1e-12:
+                status = 'decreasing'
+                direction = 'decrease'
+            else:
+                status = 'holding'
+                direction = 'flat'
+            amount_cells.append({
+                'status': status,
+                'product': display,
+                'quantity': None,
+                'amount': round(float(current_amount), 6),
+                'previous_quantity': None,
+                'previous_amount': round(float(previous_amount), 6),
+                'delta_quantity': None,
+                'delta_amount': round(float(delta_amount), 6),
+                'change_direction': direction,
+                'pending_exit': False,
+                'source_names': [],
+            })
+        row_meta[row_key] = display
+        cells.append(amount_cells)
+
+    _append_amount_row('__total_equity__', {'name': '总资产', 'desc': 'Total Equity'}, total_equity_np)
+    _append_amount_row('__cash__', {'name': '现金', 'desc': 'Cash'}, cash_np)
+
     return {
         'key': matrix_key,
         'label': matrix_label,
         'columns': columns,
-        'rows': [row_meta[k] for k in row_order],
+        'rows': [row_meta[k] for k in row_order] + [
+            row_meta[k]
+            for k in ('__total_equity__', '__cash__')
+            if k in row_meta
+        ],
         'cells': cells,
     }
 
