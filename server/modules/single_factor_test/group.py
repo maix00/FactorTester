@@ -266,14 +266,20 @@ def _build_snapshot_matrix(
     fee_rates_by_name: dict[str, dict[str, float]],
     t_idx: int | None,
     prev_t_idx: int | None,
+    capital_diagnostics: dict[str, Any] | None = None,
     group_names: Any = None,
     collapse_term_structure: bool = False,
 ) -> dict[str, Any]:
     positions = getattr(group_result, 'position_quantities_np', None)
     amounts = getattr(group_result, 'hold_amounts_np', None)
+    target_before_floor = getattr(group_result, 'target_amounts_before_floor_np', None)
     fallback_amounts = _snapshot_amounts_from_simulated_positions(group_result)
     prices = getattr(group_result, 'price_np', None)
     point_values = getattr(group_result, 'point_value_vec', None)
+    open_ratios = getattr(group_result, 'open_ratio_vec', None)
+    open_fixed = getattr(group_result, 'open_fixed_vec', None)
+    margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
+    margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
     if amounts is None:
         amounts = fallback_amounts
     elif fallback_amounts is not None:
@@ -294,6 +300,9 @@ def _build_snapshot_matrix(
     post_rebalance_cash_np = getattr(group_result, 'post_rebalance_cash_np', None)
     buy_fee_amount_np = getattr(group_result, 'buy_fee_amount_np', None)
     sell_fee_amount_np = getattr(group_result, 'sell_fee_amount_np', None)
+    liquidity_capacity_np = getattr(group_result, 'liquidity_capacity_np', None)
+    liquidity_modes = getattr(group_result, 'liquidity_modes', None) or []
+    liquidity_percents = getattr(group_result, 'liquidity_percents', None) or []
     if positions is None and amounts is None:
         return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
 
@@ -358,6 +367,14 @@ def _build_snapshot_matrix(
         prev_mem = memberships[prev_t_idx, index] if memberships is not None and prev_t_idx is not None and prev_t_idx < memberships.shape[0] else None
         return (cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem)
 
+    diagnostics_by_group: dict[int, dict[str, Any]] = {}
+    if isinstance(capital_diagnostics, dict):
+        for item in capital_diagnostics.get('blocked_groups', []) or []:
+            try:
+                diagnostics_by_group[int(item.get('group_index'))] = item
+            except (TypeError, ValueError, AttributeError):
+                continue
+
     group_count = 0
     for matrix in (positions, amounts, memberships):
         if matrix is not None and getattr(matrix, 'ndim', 0) >= 2:
@@ -391,6 +408,13 @@ def _build_snapshot_matrix(
                     'prev_amount': 0.0,
                     'current_membership': False,
                     'prev_membership': False,
+                    'target_budget_amount': 0.0,
+                    'planned_qty': 0.0,
+                    'planned_amount': 0.0,
+                    'planned_cost': 0.0,
+                    'one_lot_margin': 0.0,
+                    'one_lot_fee': 0.0,
+                    'one_lot_required_cash': 0.0,
                     'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
                 }
                 if row_key not in row_order:
@@ -409,21 +433,50 @@ def _build_snapshot_matrix(
                 group_rows[row_key]['current_membership'] = bool(group_rows[row_key]['current_membership'] or bool(cur_mem[p_idx]))
             if prev_mem is not None and p_idx < len(prev_mem):
                 group_rows[row_key]['prev_membership'] = bool(group_rows[row_key]['prev_membership'] or bool(prev_mem[p_idx]))
+            target_amount_value = None
+            if target_before_floor is not None and t_idx is not None and t_idx < target_before_floor.shape[0] and g_idx < target_before_floor.shape[1] and p_idx < target_before_floor.shape[2]:
+                target_amount_value = _safe_float(target_before_floor[t_idx, g_idx, p_idx])
+            if target_amount_value is not None and cur_price is not None and cur_point_value > 0:
+                contract_value = cur_price * cur_point_value
+                if contract_value > 0:
+                    lot_size = _safe_float(getattr(group_result, 'min_trade_quantity_vec', None)[p_idx]) if getattr(group_result, 'min_trade_quantity_vec', None) is not None and p_idx < len(getattr(group_result, 'min_trade_quantity_vec', None)) else 1.0
+                    if lot_size is None or lot_size <= 0:
+                        lot_size = 1.0
+                    group_rows[row_key]['target_budget_amount'] += float(target_amount_value)
+                    margin_ratio_value = _safe_float(margin_ratios[p_idx]) if margin_ratios is not None and p_idx < len(margin_ratios) else 1.0
+                    if margin_ratio_value is None or margin_ratio_value <= 0:
+                        margin_ratio_value = 1.0
+                    use_margin_flag = bool(margin_flags[p_idx]) if margin_flags is not None and p_idx < len(margin_flags) else False
+                    one_lot_notional = contract_value * float(lot_size)
+                    one_lot_margin = one_lot_notional * (margin_ratio_value if use_margin_flag else 1.0)
+                    one_lot_fee = one_lot_notional * (_safe_float(open_ratios[p_idx]) or 0.0) + float(lot_size) * (_safe_float(open_fixed[p_idx]) or 0.0)
+                    group_rows[row_key]['one_lot_margin'] += float(one_lot_margin)
+                    group_rows[row_key]['one_lot_fee'] += float(one_lot_fee)
+                    one_lot_required_cash = float(one_lot_margin + one_lot_fee)
+                    group_rows[row_key]['one_lot_required_cash'] += one_lot_required_cash
+                    affordable_lots = float(np.floor(float(target_amount_value) / one_lot_required_cash)) if one_lot_required_cash > 0 else 0.0
+                    openable_qty = float(np.floor(affordable_lots / lot_size) * lot_size) if lot_size > 0 else float(affordable_lots)
+                    group_rows[row_key]['planned_amount'] += float(openable_qty) * float(contract_value)
+                    group_rows[row_key]['planned_cost'] += float(openable_qty) * float(one_lot_required_cash)
+                    group_rows[row_key]['planned_qty'] += float(openable_qty)
         per_group.append(group_rows)
 
     columns = []
     for g_idx in range(len(per_group)):
         current_active = 0
+        selected_count = 0
         for row_key, row in per_group[g_idx].items():
             if abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12:
                 current_active += 1
+            if bool(row.get('current_membership')):
+                selected_count += 1
         label = _snapshot_group_label(g_idx, group_names)
         columns.append({
             'name': label,
             'label': label,
             'index': g_idx,
-            'count': current_active,
-            'count_label': '持仓品种数',
+            'count': selected_count,
+            'count_label': '持仓品种数(xxx)',
         })
 
     cells = []
@@ -522,7 +575,15 @@ def _build_snapshot_matrix(
         for g_idx in range(len(per_group)):
             row = per_group[g_idx].get(row_key)
             if not row:
-                row_cells.append({'status': 'absent', 'product': None, 'quantity': 0.0, 'amount': 0.0, 'pending_exit': False})
+                row_cells.append({
+                    'status': 'absent',
+                    'product': None,
+                    'quantity': 0.0,
+                    'amount': 0.0,
+                    'pending_exit': False,
+                    'selected': False,
+                    'open_reason': None,
+                })
                 continue
             cur_active = abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12
             prev_active = abs(row['prev_qty']) > 1e-12 or abs(row['prev_amount']) > 1e-12
@@ -530,7 +591,39 @@ def _build_snapshot_matrix(
             desired_prev = bool(row['prev_membership'])
             delta_qty = row['current_qty'] - row['prev_qty']
             delta_amount = row['current_amount'] - row['prev_amount']
-            if cur_active and not prev_active:
+            diag = diagnostics_by_group.get(g_idx)
+            open_reason = None
+            planned_qty = row.get('planned_qty') or 0.0
+            planned_amount = row.get('planned_amount') or 0.0
+            planned_cost = row.get('planned_cost') or 0.0
+            target_budget_amount = row.get('target_budget_amount') or 0.0
+            one_lot_margin = row.get('one_lot_margin') or 0.0
+            one_lot_fee = row.get('one_lot_fee') or 0.0
+            one_lot_required_cash = row.get('one_lot_required_cash') or 0.0
+            remaining_cash = None
+            if post_rebalance_cash_np is not None:
+                try:
+                    if 0 <= t_idx < post_rebalance_cash_np.shape[0] and 0 <= g_idx < post_rebalance_cash_np.shape[1]:
+                        remaining_cash = _safe_float(post_rebalance_cash_np[t_idx, g_idx])
+                except Exception:
+                    remaining_cash = None
+            if desired_now and not cur_active:
+                if remaining_cash is not None and one_lot_required_cash > 0 and remaining_cash + 1e-12 < one_lot_required_cash:
+                    open_reason = (
+                        f"剩余现金约 {int(round(float(remaining_cash))):,} 元，小于一手总成本约 {int(round(float(one_lot_required_cash))):,} 元"
+                    )
+                elif remaining_cash is not None and one_lot_margin > 0 and remaining_cash + 1e-12 < one_lot_margin:
+                    open_reason = (
+                        f"剩余现金约 {int(round(float(remaining_cash))):,} 元，小于一手保证金约 {int(round(float(one_lot_margin))):,} 元"
+                    )
+                elif remaining_cash is not None:
+                    open_reason = f"剩余现金约 {int(round(float(remaining_cash))):,} 元"
+                else:
+                    open_reason = '剩余现金不足以覆盖一手总成本'
+
+            if desired_now and not cur_active:
+                status = 'selected'
+            elif cur_active and not prev_active:
                 status = 'entering'
             elif prev_active and not cur_active:
                 status = 'exiting'
@@ -550,6 +643,21 @@ def _build_snapshot_matrix(
                 change_direction = 'decrease'
             else:
                 change_direction = 'flat'
+            # Compute per-product liquidity cap amount for this time step
+            liquidity_cap_amount = None
+            if liquidity_capacity_np is not None and liquidity_modes and liquidity_percents:
+                try:
+                    if (0 <= g_idx < len(liquidity_modes) and
+                        liquidity_modes[g_idx] == 'percent' and
+                        0 <= t_idx < liquidity_capacity_np.shape[0] and
+                        0 <= g_idx < liquidity_capacity_np.shape[1] and
+                        0 <= p_idx < liquidity_capacity_np.shape[2]):
+                        raw_cap = _safe_float(liquidity_capacity_np[t_idx, g_idx, p_idx])
+                        if raw_cap is not None and np.isfinite(raw_cap) and raw_cap > 0:
+                            liquidity_cap_amount = round(float(raw_cap), 2)
+                except Exception:
+                    pass
+
             row_cells.append({
                 'status': status,
                 'product': row_display,
@@ -561,6 +669,16 @@ def _build_snapshot_matrix(
                 'delta_amount': round(float(delta_amount), 6),
                 'change_direction': change_direction,
                 'pending_exit': status == 'pending_exit',
+                'selected': bool(desired_now and not cur_active),
+                'open_reason': open_reason,
+                'planned_qty': round(float(planned_qty), 6),
+                'planned_amount': round(float(planned_amount), 6),
+                'planned_cost': round(float(planned_cost), 6),
+                'target_budget_amount': round(float(target_budget_amount), 6),
+                'one_lot_margin': round(float(one_lot_margin), 6),
+                'one_lot_fee': round(float(one_lot_fee), 6),
+                'one_lot_required_cash': round(float(one_lot_required_cash), 6),
+                'liquidity_cap_amount': liquidity_cap_amount,
                 'source_names': row.get('source_names', []),
             })
         cells.append(row_cells)
@@ -574,7 +692,7 @@ def _build_snapshot_matrix(
     }
 
 
-def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates_by_name: dict[str, dict[str, float]], t_idx: int | None, prev_t_idx: int | None) -> list[dict[str, Any]]:
+def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates_by_name: dict[str, dict[str, float]], t_idx: int | None, prev_t_idx: int | None, capital_diagnostics: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     group_names = getattr(group_result, 'group_names', None) or {}
     return [
         _build_snapshot_matrix(
@@ -585,6 +703,7 @@ def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates
             fee_rates_by_name=fee_rates_by_name,
             t_idx=t_idx,
             prev_t_idx=prev_t_idx,
+            capital_diagnostics=capital_diagnostics,
             group_names=group_names,
             collapse_term_structure=False,
         ),
@@ -596,6 +715,7 @@ def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates
             fee_rates_by_name=fee_rates_by_name,
             t_idx=t_idx,
             prev_t_idx=prev_t_idx,
+            capital_diagnostics=capital_diagnostics,
             group_names=group_names,
             collapse_term_structure=True,
         ),
@@ -647,27 +767,164 @@ def _latest_group_result(tester: Any):
 
 def _build_zero_position_warning(group_result: Any) -> str | None:
     """Explain when the first rebalance cannot open any position."""
+    diagnostics = _build_zero_position_diagnostics(group_result)
+    return diagnostics['warning'] if diagnostics else None
+
+
+def _build_zero_position_diagnostics(group_result: Any) -> dict[str, Any] | None:
+    """Return a compact explanation when the first rebalance opens no positions."""
     if group_result is None:
         return None
     quantities = getattr(group_result, 'position_quantities_np', None)
     membership = getattr(group_result, 'membership_np', None)
+    prices = getattr(group_result, 'price_np', None)
+    point_values = getattr(group_result, 'point_value_vec', None)
+    lot_sizes = getattr(group_result, 'min_trade_quantity_vec', None)
+    open_ratios = getattr(group_result, 'open_ratio_vec', None)
+    open_fixed = getattr(group_result, 'open_fixed_vec', None)
+    margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
+    margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
     initial_capital = getattr(group_result, 'initial_capital', None)
-    if quantities is None or membership is None:
+    if quantities is None or membership is None or prices is None:
         return None
-    if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0:
+    if getattr(quantities, 'size', 0) == 0 or getattr(membership, 'size', 0) == 0 or getattr(prices, 'size', 0) == 0:
         return None
+    initial_capital_value = _safe_float(initial_capital)
+    if initial_capital_value is None:
+        return None
+
+    def _coerce_1d(values: Any, length: int, default: float = 0.0, *, dtype=float) -> np.ndarray:
+        arr = np.asarray(values if values is not None else [], dtype=dtype).reshape(-1)
+        if arr.size == length:
+            return arr
+        out = np.full(length, default, dtype=dtype)
+        if arr.size > 0:
+            limit = min(arr.size, length)
+            out[:limit] = arr[:limit]
+        return out
+
     first_membership = np.asarray(membership[0], dtype=bool)
     first_quantities = np.asarray(quantities[0], dtype=float)
-    wants_position = first_membership.any(axis=1)
-    has_position = np.any(np.abs(first_quantities) > 1e-12, axis=1)
-    blocked = np.where(wants_position & (~has_position))[0]
-    if blocked.size == 0:
+    if first_membership.ndim != 2 or first_quantities.ndim != 2:
         return None
-    capital_text = f"{float(initial_capital):,.0f}" if isinstance(initial_capital, (int, float)) else "当前值"
-    return (
-        f"首期有 {int(blocked.size)} 个组未能开出任何仓位。"
-        f"这通常是初始金额 {capital_text} 仍不足以覆盖合约乘数、最小交易手数、手续费或保证金造成的。"
-    )
+
+    group_count, product_count = first_membership.shape
+    price_row = np.asarray(prices[0], dtype=float).reshape(-1)
+    if price_row.size != product_count:
+        price_row = _coerce_1d(price_row, product_count, default=np.nan)
+
+    point_values_row = _coerce_1d(point_values, product_count, default=1.0)
+    lot_sizes_row = _coerce_1d(lot_sizes, product_count, default=1.0)
+    open_ratio_row = _coerce_1d(open_ratios, product_count, default=0.0)
+    open_fixed_row = _coerce_1d(open_fixed, product_count, default=0.0)
+    margin_ratio_row = _coerce_1d(margin_ratios, product_count, default=1.0)
+    margin_flag_row = _coerce_1d(margin_flags, product_count, default=False, dtype=bool)
+    valid_cols = list(getattr(group_result, 'valid_cols', None) or [])
+    group_names = getattr(group_result, 'group_names', None) or {}
+
+    def _group_name(group_index: int) -> str:
+        raw = group_names.get(group_index, group_index)
+        try:
+            return str(raw)
+        except Exception:
+            return f'第{group_index + 1}组'
+
+    blocked_groups: list[dict[str, Any]] = []
+    for g_idx in range(group_count):
+        wants_position = first_membership[g_idx]
+        if not wants_position.any():
+            continue
+        has_position = np.any(np.abs(first_quantities[g_idx]) > 1e-12)
+        if has_position:
+            continue
+
+        active_products = np.where(wants_position)[0]
+        if active_products.size == 0:
+            continue
+        budget_per_product = initial_capital_value / float(active_products.size)
+        candidates: list[dict[str, Any]] = []
+        for p_idx in active_products:
+            price_value = _safe_float(price_row[p_idx]) if p_idx < price_row.size else None
+            point_value = _safe_float(point_values_row[p_idx]) if p_idx < point_values_row.size else None
+            lot_size = _safe_float(lot_sizes_row[p_idx]) if p_idx < lot_sizes_row.size else None
+            open_ratio = _safe_float(open_ratio_row[p_idx]) if p_idx < open_ratio_row.size else 0.0
+            open_fee_fixed = _safe_float(open_fixed_row[p_idx]) if p_idx < open_fixed_row.size else 0.0
+            margin_ratio = _safe_float(margin_ratio_row[p_idx]) if p_idx < margin_ratio_row.size else None
+            if price_value is None or point_value is None or lot_size is None:
+                continue
+            contract_value = price_value * point_value * lot_size
+            if not math.isfinite(contract_value) or contract_value <= 0:
+                continue
+            occupied = contract_value * (margin_ratio if bool(margin_flag_row[p_idx]) and margin_ratio is not None else 1.0)
+            fee = contract_value * float(open_ratio or 0.0) + lot_size * float(open_fee_fixed or 0.0)
+            required = occupied + fee
+            candidates.append({
+                'product_index': int(p_idx),
+                'product_name': valid_cols[p_idx] if p_idx < len(valid_cols) else f'#{p_idx}',
+                'required_capital': float(required),
+                'contract_value': float(contract_value),
+                'occupied_capital': float(occupied),
+                'fee_capital': float(fee),
+                'diagnostic_type': 'estimated',
+            })
+
+        if not candidates:
+            blocked_groups.append({
+                'group_index': int(g_idx),
+                'group_name': _group_name(g_idx),
+                'active_count': int(active_products.size),
+                'budget_per_product': float(budget_per_product),
+                'cheapest_product_name': None,
+                'cheapest_required_capital': None,
+                'cheapest_occupied_capital': None,
+                'cheapest_fee_capital': None,
+                'diagnostic_type': 'missing_trade_spec',
+            })
+            continue
+
+        cheapest = min(candidates, key=lambda item: item['required_capital'])
+        if budget_per_product + 1e-12 < cheapest['required_capital']:
+            blocked_groups.append({
+                'group_index': int(g_idx),
+                'group_name': _group_name(g_idx),
+                'active_count': int(active_products.size),
+                'budget_per_product': float(budget_per_product),
+                'cheapest_product_name': cheapest['product_name'],
+                'cheapest_required_capital': float(cheapest['required_capital']),
+                'cheapest_occupied_capital': float(cheapest['occupied_capital']),
+                'cheapest_fee_capital': float(cheapest['fee_capital']),
+                'diagnostic_type': 'capital_shortage',
+            })
+
+    if not blocked_groups:
+        return None
+
+    first = blocked_groups[0]
+    capital_text = f"{initial_capital_value:,.0f}"
+    budget_text = f"{first['budget_per_product']:,.0f}"
+    if first.get('diagnostic_type') == 'missing_trade_spec' or first.get('cheapest_required_capital') is None:
+        warning = (
+            f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text} 元，"
+            f"但当前结果里缺少完整的合约价值或费率字段，无法精确反推首手需求；"
+            f"从实际持仓看，目标仓位已经被压成 0。"
+            f"当前初始金额为 {capital_text} 元。"
+        )
+    else:
+        required_text = f"{first['cheapest_required_capital']:,.0f}"
+        warning = (
+            f"首期有 {len(blocked_groups)} 个组未能开出任何仓位。"
+            f"按等权分配后，每个活跃品种可分到的预算约 {budget_text} 元，"
+            f"但 {first['group_name']} 里最便宜的品种 {first['cheapest_product_name']} 的一手资金需求约 {required_text} 元，"
+            f"因此目标仓位在最小手数上被压成 0。"
+            f"当前初始金额为 {capital_text} 元。"
+        )
+    return {
+        'warning': warning,
+        'initial_capital': float(initial_capital_value),
+        'blocked_group_count': int(len(blocked_groups)),
+        'blocked_groups': blocked_groups,
+    }
 
 
 def _compute_return_metrics(r_array: np.ndarray, index_like=None, avg_turnover=None) -> dict:
@@ -829,7 +1086,8 @@ def _serialize_group_simulation_result(
     # 兜底：总权益为 0 的一律用 initial_capital 填充（首行无数据等边界情况）
     cap = float(getattr(group_result, 'initial_capital', None) or 100000000.0)
     equity_np = np.where(equity_np <= 0, cap, equity_np)
-    capital_warning = _build_zero_position_warning(group_result)
+    capital_diagnostics = _build_zero_position_diagnostics(group_result)
+    capital_warning = capital_diagnostics['warning'] if capital_diagnostics else None
 
     # Build flat_group_info lookup: {group_index: info_dict}
     flat_info_by_idx: dict[int, dict] = {}
@@ -934,6 +1192,7 @@ def _serialize_group_simulation_result(
         'initial_capital': float(group_result.initial_capital) if group_result is not None and getattr(group_result, 'initial_capital', None) is not None else None,
         'multi_session_active': bool(group_result.multi_session_active) if group_result is not None else False,
         'capital_warning': capital_warning,
+        'capital_diagnostics': capital_diagnostics,
         'rebalance_mode': rebalance_mode,
         'submission_id': submission_id,
         'factor_alias': factor_alias,
@@ -1478,6 +1737,7 @@ def get_group_snapshot():
         fee_rates_by_name = _product_fee_rates_by_name(group_result)
         positions = getattr(group_result, 'position_quantities_np', None)
         hold_np = getattr(group_result, 'hold_amounts_np', None)
+        capital_diagnostics = _build_zero_position_diagnostics(group_result)
         t_idx = None
         if index_list:
             try:
@@ -1492,7 +1752,7 @@ def get_group_snapshot():
                 prev_t_idx = None
 
         valid_cols_list = list(group_result.valid_cols) if group_result.valid_cols else []
-        matrices = _build_snapshot_matrices(group_result, valid_cols_list, fee_rates_by_name, t_idx, prev_t_idx)
+        matrices = _build_snapshot_matrices(group_result, valid_cols_list, fee_rates_by_name, t_idx, prev_t_idx, capital_diagnostics)
 
         # 统计当前真实持仓变动，作为顶部摘要
         active_matrix = matrices[0] if matrices else {'columns': []}
@@ -1554,6 +1814,8 @@ def get_group_snapshot():
             'has_prev_change': prev_change_ms is not None,
             'has_next_change': next_change_ms is not None,
             'group_names': snapshot_group_names,
+            'capital_warning': capital_diagnostics['warning'] if capital_diagnostics else None,
+            'capital_diagnostics': capital_diagnostics,
             'summary': {
                 'avg_turnover': round(avg_turnover, 1),
                 'total_changed': int(total_changed),

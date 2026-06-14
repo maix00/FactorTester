@@ -370,6 +370,34 @@ def test_trading_book_initial_capital_changes_affordability():
     np.testing.assert_allclose(result_large["gross_returns_np"][0, 0], 0.10)
 
 
+def test_trading_book_allocates_integer_lots_by_weight_when_budget_is_tight():
+    membership = np.ones((1, 1, 3), dtype=bool)
+    returns = np.zeros((1, 3), dtype=float)
+    price = np.array([[100.0, 100.0, 100.0]], dtype=float)
+    fee = np.zeros((1, 3), dtype=float)
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=returns,
+        price_np=price,
+        open_fee_mat=fee,
+        close_fee_mat=fee,
+        open_fixed_mat=fee,
+        close_fixed_mat=fee,
+        point_value_vec=np.array([1.0, 1.0, 1.0]),
+        min_tick_vec=np.array([0.01, 0.01, 0.01]),
+        min_trade_quantity_vec=np.array([1.0, 1.0, 1.0]),
+        margin_ratio_mat=np.ones((1, 3), dtype=float),
+        is_margin_traded_vec=np.array([False, False, False]),
+        margin_modes=np.array(["cash"], dtype=object),
+        rebalance_modes=np.array(["each_period"], dtype=object),
+        initial_capital=250.0,
+    )
+
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0], [1.0, 1.0, 0.0])
+    np.testing.assert_allclose(result["trade_notional_ratio_np"][0, 0], 0.8, atol=1e-12)
+
+
 def test_simulate_each_period_percent_liquidity_caps_execution_only():
     """Percent liquidity caps execution after the normal equal-weight target."""
     T, N, P = 1, 1, 2
@@ -667,27 +695,34 @@ def test_simulate_recycle_vs_buy_and_hold_expanding():
     np.testing.assert_allclose(net_r[1], 0.02, atol=1e-12)
 
 
-def test_recycle_expansion_does_not_compound_unfunded_new_member_returns():
-    membership = np.ones((5, 1, 2), dtype=bool)
-    membership[0, 0, 1] = False
-    returns = np.array([
-        [0.0, 0.0],
-        [0.0, 1.0],
-        [0.0, 1.0],
-        [0.0, 1.0],
-        [0.0, 1.0],
-    ], dtype=float)
+def test_recycle_allows_new_member_when_idle_cash_exists():
+    membership = np.zeros((2, 1, 2), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, 0] = True
+    membership[1, 0, 1] = True
+
+    returns = np.zeros((2, 2), dtype=float)
+    price = np.array([[10.0, 10.0], [10.0, 10.0]], dtype=float)
     fee = np.zeros((1, 2), dtype=float)
 
     result = simulate_groups(
         membership_np=membership,
         returns_np=returns,
+        price_np=price,
         open_fee_mat=fee,
         close_fee_mat=fee,
-        rebalance_mode='recycle',
+        point_value_vec=np.array([1.0, 1.0]),
+        min_tick_vec=np.array([1.0, 1.0]),
+        min_trade_quantity_vec=np.array([1.0, 1.0]),
+        margin_ratio_mat=np.array([[0.1, 0.1]]),
+        is_margin_traded_vec=np.array([True, True]),
+        margin_modes=np.array(["margin"], dtype=object),
+        rebalance_modes=np.array(["recycle"], dtype=object),
+        initial_capital=1000.0,
     )
 
-    np.testing.assert_allclose(result['net_returns_np'][:, 0], 0.0, atol=1e-12)
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 100.0)
+    assert result["position_quantities_np"][1, 0, 1] > 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════

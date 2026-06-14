@@ -97,7 +97,15 @@
 
         // 1) 更新策略面板
         if (GT.results && GT.results.strategyPanel && typeof GT.results.strategyPanel.update === 'function') {
-            GT.results.strategyPanel.update(data.multi_session_active, data.rebalance_mode, data.multi_session_entries);
+            GT.results.strategyPanel.update(
+                data.multi_session_active,
+                data.rebalance_mode,
+                data.multi_session_entries,
+                {
+                    capital_warning: data.capital_warning,
+                    capital_diagnostics: data.capital_diagnostics,
+                }
+            );
         }
 
         // 2) 持久化到 cache

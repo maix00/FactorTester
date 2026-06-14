@@ -34,8 +34,8 @@ GT.results.snapshot.renderGroupSnapshot({
           { status: 'increasing', product: { name: '现金', desc: 'Cash' }, quantity: null, amount: 1200, pre_rebalance_amount: 1000, post_rebalance_amount: 980, end_amount: 1200, buy_fee_amount: 12, sell_fee_amount: 8, delta_quantity: null, delta_amount: 220, change_direction: 'increase' },
         ],
         [
-          { status: 'increasing', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 2, amount: 10000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
-          { status: 'entering', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
+          { status: 'selected', selected: true, open_reason: '剩余现金约 1,000 元，小于一手总成本约 10,000 元', planned_qty: 0, planned_amount: 0, one_lot_margin: 8000, one_lot_required_cash: 10000, target_budget_amount: 1000, product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 0, amount: 0, delta_quantity: 0, delta_amount: 0, change_direction: 'flat' },
+          { status: 'entering', selected: false, product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
         ],
         [
           { status: 'absent' },
@@ -63,16 +63,18 @@ GT.results.snapshot.renderGroupSnapshot({
   has_next: false,
   all_timestamps_ms: [1710000000000, 1710000060000],
   display_timezone: 'Asia/Shanghai',
+  capital_warning: '首期有 1 个组未能开出任何仓位。按等权分配后，每个活跃品种可分到的预算约 1,000 元，但第一组里最便宜的品种 TEST 的一手资金需求约 10,000 元，因此目标仓位在最小手数上被压成 0。当前初始金额为 1,000 元。',
   summary: { avg_turnover: 12.3, total_changed: 4, total_prod_count: 2 },
 }, 1710000000000);
 
 const body = document.getElementById('snapshot_body').innerHTML;
+const stats = document.getElementById('snapshot_flow_stats').innerHTML;
 const title = document.getElementById('snapshot_title').innerHTML;
 assert.match(title, /至/);
 assert.match(body, /仓位矩阵/);
 assert.match(body, /Group A/);
 assert.match(body, /Group B/);
-assert.match(body, /持仓品种数/);
+assert.match(body, /持仓品种数\(xxx\)/);
 assert.match(body, /IF/);
 assert.match(body, /IC/);
 assert.match(body, /总资产/);
@@ -80,8 +82,11 @@ assert.match(body, /现金/);
 const toggle = document.getElementById('snapshot_matrix_toggle').innerHTML;
 assert.match(toggle, /全产品/);
 assert.match(toggle, /期限折叠/);
-assert.match(body, /持仓 2/);
-assert.match(body, /金额 10000\.00/);
+assert.match(body, /已选中/);
+assert.match(body, /可开 0 手/);
+assert.match(body, /单手成本 10000\.00/);
+assert.match(body, /保证金 8000\.00/);
+assert.match(body, /剩余现金约 1,000 元，小于一手总成本约 10,000 元/);
 assert.match(body, /变化 \+1/);
 assert.match(body, /变化 -2/);
 assert.match(body, /金额 \+60\.00/);
@@ -98,5 +103,9 @@ assert.match(body, /新增/);
 assert.match(body, /增加/);
 assert.match(body, /减少/);
 assert.match(body, /待卖/);
+assert.match(body, /已选中/);
+assert.match(body, /持仓品种数\(xxx\)/);
+assert.match(stats, /一手资金需求/);
+assert.match(stats, /总体流动统计/);
 
 console.log('PASS: group snapshot renders matrix toggle and matrix table');

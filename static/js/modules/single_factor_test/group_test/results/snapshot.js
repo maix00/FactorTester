@@ -342,13 +342,34 @@
             exiting: '退出',
             pending_exit: '待卖',
             holding: '持有',
+            selected: '选中',
         };
         if (statusLabels[cell.status]) {
             parts.push('<div class="snapshot-status-label">' + statusLabels[cell.status] + '</div>');
         }
         parts.push(_renderProduct(cell.product));
+        if (cell.selected) {
+            parts.push('<div class="snapshot-selected-hint">已选中</div>');
+        }
         var meta = [];
-        if (cell.quantity !== null && cell.quantity !== undefined) {
+        if (cell.selected) {
+            if (cell.planned_qty !== null && cell.planned_qty !== undefined) {
+                meta.push('可开 ' + _formatQuantity(cell.planned_qty) + ' 手');
+            }
+            if (cell.planned_amount !== null && cell.planned_amount !== undefined) {
+                meta.push('计划金额 ' + _formatAmount(cell.planned_amount));
+            }
+            if (cell.one_lot_required_cash !== null && cell.one_lot_required_cash !== undefined) {
+                meta.push('单手成本 ' + _formatAmount(cell.one_lot_required_cash));
+            }
+            if (cell.one_lot_margin !== null && cell.one_lot_margin !== undefined) {
+                meta.push('保证金 ' + _formatAmount(cell.one_lot_margin));
+            }
+            if (cell.liquidity_cap_amount !== null && cell.liquidity_cap_amount !== undefined) {
+                meta.push('成交额限额 ' + _formatAmount(cell.liquidity_cap_amount));
+            }
+        }
+        if (cell.quantity !== null && cell.quantity !== undefined && (Math.abs(Number(cell.quantity)) > 1e-12 || Math.abs(Number(cell.amount || 0)) > 1e-12)) {
             meta.push('持仓 ' + _formatQuantity(cell.quantity));
             if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
         } else if (cell.pre_rebalance_amount !== null && cell.pre_rebalance_amount !== undefined
@@ -368,7 +389,16 @@
         } else if (cell.amount !== null && cell.amount !== undefined) {
             meta.push('金额 ' + _formatAmount(cell.amount));
         }
-        if (meta.length) parts.push('<div class="snapshot-cell-meta">' + meta.join(' · ') + '</div>');
+        if (cell.open_reason) {
+            meta.push(cell.open_reason);
+        }
+        if (meta.length) {
+            parts.push('<div class="snapshot-cell-meta">');
+            meta.forEach(function(line) {
+                parts.push('<div>' + _escape(line) + '</div>');
+            });
+            parts.push('</div>');
+        }
         var deltaParts = [];
         if (cell.delta_quantity !== null && cell.delta_quantity !== undefined) {
             deltaParts.push('变化 ' + _formatSignedQuantity(cell.delta_quantity));
@@ -414,14 +444,14 @@
         var html = '';
         html += '<div class="snapshot-batch-section">';
         html += '<div class="snapshot-batch-header">仓位矩阵 · ' + _escape(matrix.label || matrix.key || '默认') + '</div>';
-        html += '<div class="snapshot-semantics-note">本矩阵按标题所示期间展示。表头数字表示该组该时刻的持仓品种数。产品金额变化为本期调仓前旧持仓估值到调仓后新持仓金额的变化；总资产/现金变化为调仓后到期末的持有期间变化，期末指下一次调仓前。</div>';
+        html += '<div class="snapshot-semantics-note">本矩阵按标题所示期间展示。表头数字表示该组该时刻被选中的品种数；单元格里“选中”表示 membership 已命中，但可能因为最小手数、资金、保证金或流动性限制未实际开仓。单元格中的“分配开仓”“一手保证金”“一手总需求”都指本期调仓前的计划值；产品金额变化为本期调仓前旧持仓估值到调仓后新持仓金额的变化；总资产/现金变化为调仓后到期末的持有期间变化，期末指下一次调仓前。</div>';
         html += '<div class="snapshot-matrix-scroll">';
         html += '<table class="snapshot-matrix-table"><thead><tr>';
         html += '<th class="snapshot-prod-name-cell">产品</th>';
         (matrix.columns || []).forEach(function(col) {
             var label = col.label || col.name || '';
             var count = col.count !== undefined && col.count !== null ? Number(col.count) : null;
-            var countLabel = col.count_label || '持仓品种数';
+            var countLabel = col.count_label || '持仓品种数(xxx)';
             html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
             if (count !== null && isFinite(count)) {
                 html += '<div class="snapshot-col-count">' + count + '</div>';
@@ -482,8 +512,15 @@
             var totalChanged = summary.total_changed !== undefined ? summary.total_changed : 0;
             var totalProdCount = summary.total_prod_count !== undefined ? summary.total_prod_count : 0;
             var avgTurnover = summary.avg_turnover !== undefined ? summary.avg_turnover : 0;
-            var statsHtml = '<b>📊 总体流动统计：</b> 换手率 ≈ ' + avgTurnover + '%';
+            var statsHtml = '';
+            if (data.capital_warning) {
+                statsHtml += '<div style="margin-bottom:8px;padding:8px 10px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:6px;line-height:1.5;">'
+                    + '⚠️ ' + _escape(data.capital_warning)
+                    + '</div>';
+            }
+            statsHtml += '<div><b>📊 总体流动统计：</b> 换手率 ≈ ' + avgTurnover + '%';
             statsHtml += ' &nbsp;|&nbsp; 总进出 = ' + totalChanged + ' 品种';
+            statsHtml += '</div>';
             statsEl.innerHTML = statsHtml;
         }
         _renderMatrixToggle();

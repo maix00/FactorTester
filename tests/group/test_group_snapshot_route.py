@@ -57,8 +57,112 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     assert payload['matrices'][0]['key'] == 'raw'
     assert payload['matrices'][0]['rows'][0]['name'] == product
     assert payload['matrices'][0]['cells'][0][0]['status'] == 'entering'
-    assert payload['matrices'][0]['columns'][0]['count_label'] == '持仓品种数'
+    assert payload['matrices'][0]['columns'][0]['count_label'] == '持仓品种数(xxx)'
     assert payload['summary']['total_prod_count'] == 1
+
+
+def test_group_snapshot_includes_capital_warning_when_first_period_cannot_open_positions(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx = pd.Timestamp('2026-01-01 09:30:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((1, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((1, 1), dtype=float),
+        gross_returns_np=np.zeros((1, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        returns_np=np.zeros((1, 1), dtype=float),
+        period_returns_np=np.zeros((1, 1), dtype=float),
+        membership_np=np.array([[[True]]], dtype=bool),
+        products_by_group={0: {idx: ['TEST|N:1m|$F:1m|$Rev']}},
+        valid_cols=['TEST|N:1m|$F:1m|$Rev'],
+        open_ratio_vec=np.array([0.0], dtype=float),
+        open_fixed_vec=np.array([0.0], dtype=float),
+        close_ratio_vec=np.array([0.0], dtype=float),
+        close_fixed_vec=np.array([0.0], dtype=float),
+        close_today_ratio_vec=np.array([0.0], dtype=float),
+        index_list=[idx],
+        group_names={0: '第一组'},
+        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
+        position_quantities_np=np.zeros((1, 1, 1), dtype=float),
+        price_np=np.array([[1000.0]], dtype=float),
+        point_value_vec=np.array([100.0], dtype=float),
+        min_trade_quantity_vec=np.array([1.0], dtype=float),
+        margin_ratio_vec=np.array([1.0], dtype=float),
+        is_margin_traded_vec=np.array([False], dtype=bool),
+        initial_capital=1000.0,
+        post_rebalance_cash_np=np.array([[50.0]], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    assert resp.status_code == 200
+    assert payload['success'] is True
+    assert payload['capital_warning']
+    assert '一手资金需求' in payload['capital_warning']
+    assert payload['capital_diagnostics']['blocked_group_count'] == 1
+    assert payload['capital_diagnostics']['blocked_groups'][0]['cheapest_product_name'] == 'TEST|N:1m|$F:1m|$Rev'
+
+
+def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx = pd.Timestamp('2026-01-01 09:30:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((1, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((1, 1), dtype=float),
+        gross_returns_np=np.zeros((1, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        returns_np=np.zeros((1, 1), dtype=float),
+        period_returns_np=np.zeros((1, 1), dtype=float),
+        membership_np=np.array([[[True]]], dtype=bool),
+        products_by_group={0: {idx: ['TEST|N:1m|$F:1m|$Rev']}},
+        valid_cols=['TEST|N:1m|$F:1m|$Rev'],
+        open_ratio_vec=np.array([0.0], dtype=float),
+        open_fixed_vec=np.array([0.0], dtype=float),
+        close_ratio_vec=np.array([0.0], dtype=float),
+        close_fixed_vec=np.array([0.0], dtype=float),
+        close_today_ratio_vec=np.array([0.0], dtype=float),
+        index_list=[idx],
+        group_names={0: '第一组'},
+        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
+        target_amounts_before_floor_np=np.array([[[50.0]]], dtype=float),
+        position_quantities_np=np.zeros((1, 1, 1), dtype=float),
+        price_np=np.array([[100.0]], dtype=float),
+        point_value_vec=np.array([1.0], dtype=float),
+        min_trade_quantity_vec=np.array([1.0], dtype=float),
+        margin_ratio_vec=np.array([1.0], dtype=float),
+        is_margin_traded_vec=np.array([False], dtype=bool),
+        initial_capital=1000.0,
+        post_rebalance_cash_np=np.array([[50.0]], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    cell = payload['matrices'][0]['cells'][0][0]
+    assert cell['selected'] is True
+    assert '剩余现金约 50 元' in (cell['open_reason'] or '')
 
 
 def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):

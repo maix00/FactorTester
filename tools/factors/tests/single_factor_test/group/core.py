@@ -197,6 +197,7 @@ def slice_group_run_result(
         report_df=report_df,
         group_names=new_group_names,
         hold_amounts_np=_take_group_axis(group_result.hold_amounts_np),
+        target_amounts_before_floor_np=_take_group_axis(group_result.target_amounts_before_floor_np),
         position_quantities_np=_take_group_axis(group_result.position_quantities_np),
         margin_occupied_np=_take_group_axis(group_result.margin_occupied_np),
         pre_rebalance_total_equity_np=_take_group_axis(group_result.pre_rebalance_total_equity_np),
@@ -214,6 +215,9 @@ def slice_group_run_result(
         min_trade_quantity_vec=None if group_result.min_trade_quantity_vec is None else np.asarray(group_result.min_trade_quantity_vec).copy(),
         margin_ratio_vec=None if group_result.margin_ratio_vec is None else np.asarray(group_result.margin_ratio_vec).copy(),
         is_margin_traded_vec=None if group_result.is_margin_traded_vec is None else np.asarray(group_result.is_margin_traded_vec).copy(),
+        liquidity_capacity_np=_take_group_axis(group_result.liquidity_capacity_np),
+        liquidity_modes=list(group_result.liquidity_modes) if group_result.liquidity_modes is not None else None,
+        liquidity_percents=list(group_result.liquidity_percents) if group_result.liquidity_percents is not None else None,
     )
 
 
@@ -1257,6 +1261,7 @@ def _simulate_group_from_preloaded(
         report_df=report_df.copy(),
         group_names=n_names,
         hold_amounts_np=sim_result.get('target_amounts_np'),
+        target_amounts_before_floor_np=sim_result.get('target_amounts_before_floor_np'),
         position_quantities_np=sim_result.get('position_quantities_np'),
         margin_occupied_np=sim_result.get('margin_occupied_np'),
         pre_rebalance_total_equity_np=sim_result.get('pre_rebalance_total_equity_np'),
@@ -1277,6 +1282,9 @@ def _simulate_group_from_preloaded(
         min_trade_quantity_vec=min_trade_quantity_vec,
         margin_ratio_vec=long_margin_ratio_vec,
         is_margin_traded_vec=is_margin_traded_vec,
+        liquidity_capacity_np=liquidity_capacity_np,
+        liquidity_modes=list(group_liquidity_modes) if group_liquidity_modes is not None else None,
+        liquidity_percents=list(group_liquidity_percents) if group_liquidity_percents is not None else None,
     )
     returns_dict, report_df_out, cumulative_returns_np, _ = materialize_group_outputs_from_result(group_result)
     return returns_dict, report_df_out, cumulative_returns_np, group_result
@@ -1944,6 +1952,7 @@ def simulate_group_trading_book(
     fee_costs_np = np.zeros((T, M), dtype=float)
     trade_notional_ratio_np = np.zeros((T, M), dtype=float)
     target_amounts_np = np.zeros((T, M, P), dtype=float)
+    target_amounts_before_floor_np = np.zeros((T, M, P), dtype=float)
     prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
     position_quantities_np = np.zeros((T, M, P), dtype=float)
     margin_occupied_np = np.zeros((T, M), dtype=float)
@@ -1955,6 +1964,7 @@ def simulate_group_trading_book(
     cash_np = np.zeros((T, M), dtype=float)
     buy_fee_amount_np = np.zeros((T, M), dtype=float)
     sell_fee_amount_np = np.zeros((T, M), dtype=float)
+    liquidity_capacity_amounts_np = np.zeros((T, M, P), dtype=float)
 
     if not np.isfinite(initial_capital) or initial_capital <= 0:
         raise ValueError(f"initial_capital must be positive, got {initial_capital!r}")
@@ -1972,6 +1982,115 @@ def simulate_group_trading_book(
         if no_tick.any():
             rounded[no_tick] = np.round(px[no_tick], 2)
         return np.where(np.isfinite(rounded) & (rounded > 0), rounded, np.nan)
+
+    def _row_required_capital(
+        current_row: np.ndarray,
+        candidate_row: np.ndarray,
+        contract_value_row: np.ndarray,
+        open_rate_row: np.ndarray,
+        close_rate_row: np.ndarray,
+        open_fixed_row: np.ndarray,
+        close_fixed_row: np.ndarray,
+        margin_ratio_row: np.ndarray,
+        margin_flag_row: np.ndarray,
+        margin_mode: str,
+    ) -> float:
+        buy_qty = np.clip(candidate_row - current_row, 0.0, None)
+        sell_qty = np.clip(current_row - candidate_row, 0.0, None)
+        buy_notional = buy_qty * contract_value_row
+        sell_notional = sell_qty * contract_value_row
+        buy_fee = buy_notional * open_rate_row + buy_qty * open_fixed_row
+        sell_fee = sell_notional * close_rate_row + sell_qty * close_fixed_row
+        position_notional = candidate_row * contract_value_row
+        use_margin_row = (margin_mode == "margin") & margin_flag_row
+        occupied = np.nansum(np.where(use_margin_row, position_notional * margin_ratio_row, position_notional))
+        return float(occupied + np.nansum(buy_fee) + np.nansum(sell_fee))
+
+    def _pack_openable_quantities(
+        row_idx: int,
+        current_row: np.ndarray,
+        target_row: np.ndarray,
+        contract_value_row_1d: np.ndarray,
+    ) -> np.ndarray:
+        lot_row = lot_sizes.copy()
+        lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
+        target_row = np.where(np.isfinite(target_row), target_row, 0.0)
+        buy_target = np.clip(target_row - current_row, 0.0, None)
+        sell_target = np.clip(current_row - target_row, 0.0, None)
+        buy_qty = np.floor(np.divide(
+            buy_target,
+            lot_row,
+            out=np.zeros_like(buy_target, dtype=float),
+            where=lot_row > 0,
+        )) * lot_row
+        sell_qty = np.floor(np.divide(
+            sell_target,
+            lot_row,
+            out=np.zeros_like(sell_target, dtype=float),
+            where=lot_row > 0,
+        )) * lot_row
+        candidate = current_row - sell_qty + buy_qty
+        open_rate_row = open_rate_mat[row_idx]
+        close_rate_row = close_rate_mat[row_idx]
+        open_fixed_row = open_fixed_mat[row_idx]
+        close_fixed_row = close_fixed_mat[row_idx]
+        margin_ratio_row = margin_ratios
+        margin_flag_row = margin_flags
+        margin_mode = margin_modes_arr[row_idx]
+        current_required = _row_required_capital(
+            current_row,
+            candidate,
+            contract_value_row_1d,
+            open_rate_row,
+            close_rate_row,
+            open_fixed_row,
+            close_fixed_row,
+            margin_ratio_row,
+            margin_flag_row,
+            margin_mode,
+        )
+        budget = float(equity[row_idx])
+        if not np.any(np.isfinite(buy_target) & (buy_target > 0)):
+            return candidate
+
+        while True:
+            best_idx = -1
+            best_score = -np.inf
+            best_required = None
+            for p_idx in range(P):
+                if not executable[p_idx] or not membership_np[t, row_idx, p_idx]:
+                    continue
+                if not np.isfinite(contract_value_row_1d[p_idx]) or contract_value_row_1d[p_idx] <= 0:
+                    continue
+                if lot_row[p_idx] <= 0:
+                    continue
+                proposed = candidate.copy()
+                proposed[p_idx] += lot_row[p_idx]
+                proposed_required = _row_required_capital(
+                    current_row,
+                    proposed,
+                    contract_value_row_1d,
+                    open_rate_row,
+                    close_rate_row,
+                    open_fixed_row,
+                    close_fixed_row,
+                    margin_ratio_row,
+                    margin_flag_row,
+                    margin_mode,
+                )
+                if proposed_required > budget + 1e-12:
+                    continue
+                current_error = abs(float(target_row[p_idx] - candidate[p_idx]))
+                proposed_error = abs(float(target_row[p_idx] - proposed[p_idx]))
+                score = current_error - proposed_error
+                if score > best_score + 1e-12 or (abs(score - best_score) <= 1e-12 and (best_required is None or proposed_required < best_required)):
+                    best_idx = p_idx
+                    best_score = score
+                    best_required = proposed_required
+            if best_idx < 0:
+                break
+            candidate[best_idx] += lot_row[best_idx]
+        return candidate
 
     _emit_progress("simulate", f"开始交易账本模拟，时间点 {T} 个", completed=0, total=T)
     _last_sim_report = -1
@@ -2012,6 +2131,8 @@ def simulate_group_trading_book(
         )
         if membership_unchanged:
             desired_quantities = quantities.copy()
+            target_amounts_before_floor = desired_quantities * contract_value_row
+            continuous_quantities = desired_quantities.copy()
             buy_qty = np.zeros((M, P), dtype=float)
             sell_qty = np.zeros((M, P), dtype=float)
             buy_notional = np.zeros((M, P), dtype=float)
@@ -2020,6 +2141,7 @@ def simulate_group_trading_book(
             sell_fee = np.zeros((M, P), dtype=float)
             fee_amount = np.zeros((M, P), dtype=float)
             position_notional = desired_quantities * contract_value_row
+            liquidity_capacity_amounts_np[t] = np.full((M, P), np.inf, dtype=float)
         else:
             # Build initial targets per-group using each group's own rebalance mode.
             # For all groups: always start with "each_period" for the initial allocation
@@ -2032,16 +2154,20 @@ def simulate_group_trading_book(
                 "each_period",
                 close_fee_vec=None,
             )
+            target_amounts_before_floor = target_notional.copy()
             raw_quantities = np.divide(
                 target_notional,
                 contract_value_row,
                 out=np.zeros_like(target_notional, dtype=float),
                 where=np.isfinite(contract_value_row) & (contract_value_row > 0),
             )
-            desired_quantities = np.floor(raw_quantities / lot_sizes_row) * lot_sizes_row
-            desired_quantities = np.where(membership_np[t] & executable_row, desired_quantities, 0.0)
+            allocation_targets = raw_quantities.copy()
+            buy_target = np.clip(allocation_targets - quantities, 0.0, None)
+            sell_target = np.clip(quantities - allocation_targets, 0.0, None)
+            desired_quantities = quantities - np.floor(sell_target / lot_sizes_row) * lot_sizes_row + np.floor(buy_target / lot_sizes_row) * lot_sizes_row
             desired_quantities[:, ~executable] = quantities[:, ~executable]
 
+            executable_capacity_t = np.full((M, P), np.inf, dtype=float)
             if has_percent_liquidity:
                 assert liquidity_capacity_arr is not None
                 base_capacity = np.where(
@@ -2050,29 +2176,33 @@ def simulate_group_trading_book(
                     0.0,
                 )
                 base_capacity = np.where(executable, base_capacity, 0.0)
-                # liquidity_capacity_arr stores cross-sectional shares (sum=1 per row).
-                # Convert to absolute notional capacity per group for percent-restricted rows.
-                # Non-percent rows keep inf so they are not capped.
-                executable_capacity_t = np.full((M, P), np.inf, dtype=float)
                 executable_capacity_t[percent_rows] = (
                     base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
                 )
-                target_amounts = apply_liquidity_execution(
-                    prev_notional,
-                    target_notional,
-                    equity,
-                    executable_capacity_t,
-                    open_rate_mat,
-                    close_rate_mat,
-                )
-                raw_quantities = np.divide(
-                    target_amounts,
-                    contract_value_row,
-                    out=np.zeros_like(target_amounts, dtype=float),
-                    where=np.isfinite(contract_value_row) & (contract_value_row > 0),
-                )
-                desired_quantities = np.floor(raw_quantities / lot_sizes_row) * lot_sizes_row
-                desired_quantities = np.where(executable_row, desired_quantities, quantities)
+
+            # Store per-product liquidity capacity amounts (成交额限额) before apply
+            liquidity_capacity_amounts_np[t] = executable_capacity_t.copy()
+
+            target_amounts = apply_liquidity_execution(
+                prev_notional,
+                target_notional,
+                equity,
+                executable_capacity_t,
+                open_rate_mat,
+                close_rate_mat,
+            )
+            raw_quantities = np.divide(
+                target_amounts,
+                contract_value_row,
+                out=np.zeros_like(target_amounts, dtype=float),
+                where=np.isfinite(contract_value_row) & (contract_value_row > 0),
+            )
+            target_amounts_before_floor = target_amounts.copy()
+            allocation_targets = raw_quantities.copy()
+            buy_target = np.clip(allocation_targets - quantities, 0.0, None)
+            sell_target = np.clip(quantities - allocation_targets, 0.0, None)
+            desired_quantities = quantities - np.floor(sell_target / lot_sizes_row) * lot_sizes_row + np.floor(buy_target / lot_sizes_row) * lot_sizes_row
+            desired_quantities[:, ~executable] = quantities[:, ~executable]
 
             if bool(hold_rows.any()):
                 current_membership = membership_np[t]
@@ -2086,9 +2216,8 @@ def simulate_group_trading_book(
                 )
 
                 if bool(recycle_rows.any()):
-                    has_existing_positions = np.any(current_positive, axis=1)
-                    has_exiting_positions = np.any(current_positive & (~current_membership), axis=1)
-                    freeze_entering_rows = recycle_rows & has_existing_positions & (~has_exiting_positions)
+                    same_position_set = np.all(current_positive == current_membership, axis=1)
+                    freeze_entering_rows = recycle_rows & same_position_set
                     if bool(freeze_entering_rows.any()):
                         desired_quantities[freeze_entering_rows] = np.where(
                             entering_mask[freeze_entering_rows],
@@ -2118,7 +2247,28 @@ def simulate_group_trading_book(
                     where=required[over] > 0,
                 )
                 scaled = desired_quantities[over] * scale[:, np.newaxis]
-                desired_quantities[over] = np.floor(scaled / lot_sizes_row) * lot_sizes_row
+                over_rows = np.where(over)[0]
+                for idx_in_over, row_idx in enumerate(over_rows):
+                    allocation_targets[row_idx] = scaled[idx_in_over]
+                    desired_quantities[row_idx] = _pack_openable_quantities(
+                        row_idx=row_idx,
+                        current_row=quantities[row_idx],
+                        target_row=scaled[idx_in_over],
+                        contract_value_row_1d=contract_value_row[0],
+                    )
+
+            zero_rows = np.nansum(np.abs(desired_quantities - quantities), axis=1) <= 1e-12
+            positive_buy_rows = np.nansum(np.clip(allocation_targets - quantities, 0.0, None), axis=1) > 1e-12
+            no_sell_rows = np.nansum(np.clip(quantities - allocation_targets, 0.0, None), axis=1) <= 1e-12
+            recover_rows = zero_rows & positive_buy_rows & no_sell_rows
+            if recover_rows.any():
+                for row_idx in np.where(recover_rows)[0]:
+                    desired_quantities[row_idx] = _pack_openable_quantities(
+                        row_idx=row_idx,
+                        current_row=quantities[row_idx],
+                        target_row=allocation_targets[row_idx],
+                        contract_value_row_1d=contract_value_row[0],
+                    )
 
             buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
             sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
@@ -2176,6 +2326,7 @@ def simulate_group_trading_book(
             where=equity > 0,
         )
         target_amounts_np[t] = position_notional
+        target_amounts_before_floor_np[t] = target_amounts_before_floor
         prev_end_amounts_np[t] = end_notional
         position_quantities_np[t] = desired_quantities
         margin_occupied_np[t] = end_occupied
@@ -2200,6 +2351,7 @@ def simulate_group_trading_book(
         'trade_notional_ratio_np': trade_notional_ratio_np,
         'multi_session_triggered': 0,
         'target_amounts_np': target_amounts_np,
+        'target_amounts_before_floor_np': target_amounts_before_floor_np,
         'prev_end_amounts_np': prev_end_amounts_np,
         'position_quantities_np': position_quantities_np,
         'margin_occupied_np': margin_occupied_np,
@@ -2211,6 +2363,7 @@ def simulate_group_trading_book(
         'cash_np': cash_np,
         'buy_fee_amount_np': buy_fee_amount_np,
         'sell_fee_amount_np': sell_fee_amount_np,
+        'liquidity_capacity_amounts_np': liquidity_capacity_amounts_np,
     }
 
 
