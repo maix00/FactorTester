@@ -149,15 +149,11 @@ def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product
     qty = 0.0
     amt = 0.0
     if position_row is not None and product_idx < len(position_row):
-        try:
-            qty = float(position_row[product_idx])
-        except (TypeError, ValueError):
-            qty = 0.0
+        qty_value = _safe_float(position_row[product_idx])
+        qty = 0.0 if qty_value is None else qty_value
     if amount_row is not None and product_idx < len(amount_row):
-        try:
-            amt = float(amount_row[product_idx])
-        except (TypeError, ValueError):
-            amt = 0.0
+        amt_value = _safe_float(amount_row[product_idx])
+        amt = 0.0 if amt_value is None else amt_value
     if abs(qty) <= eps:
         qty = 0.0
     if abs(amt) <= eps:

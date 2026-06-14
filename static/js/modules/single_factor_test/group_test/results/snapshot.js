@@ -98,7 +98,7 @@
                 try {
                     data = text ? JSON.parse(text) : {};
                 } catch (e) {
-                    throw new Error('快照接口返回了非 JSON 响应: ' + text.slice(0, 300));
+                    throw new Error('快照接口返回的内容不是标准 JSON: ' + text.slice(0, 300));
                 }
                 if (!res.ok && data && !data.error) {
                     data.error = 'HTTP ' + res.status;

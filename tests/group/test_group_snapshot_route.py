@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import json
 
 import numpy as np
 import pandas as pd
@@ -102,3 +103,47 @@ def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):
     assert payload['success'] is True
     assert len(payload['matrices'][0]['columns']) == 7
     assert payload['matrices'][0]['cells'][7][6]['status'] == 'entering'
+
+
+def test_group_snapshot_response_is_strict_json_when_positions_have_nonfinite_values(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx = pd.Timestamp('2026-01-01 09:30:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((1, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((1, 1), dtype=float),
+        gross_returns_np=np.zeros((1, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((1, 1, 2), dtype=float),
+        product_fee_contrib_np=np.zeros((1, 1, 2), dtype=float),
+        returns_np=np.zeros((1, 1), dtype=float),
+        period_returns_np=np.zeros((1, 1), dtype=float),
+        membership_np=np.array([[[True, True]]], dtype=bool),
+        products_by_group={},
+        valid_cols=['P_NAN', 'P_INF'],
+        open_ratio_vec=np.zeros(2, dtype=float),
+        close_ratio_vec=np.zeros(2, dtype=float),
+        close_today_ratio_vec=np.zeros(2, dtype=float),
+        index_list=[idx],
+        group_names={0: '第一组'},
+        hold_amounts_np=np.array([[[np.nan, np.inf]]], dtype=float),
+        position_quantities_np=np.array([[[np.nan, -np.inf]]], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx.timestamp() * 1000),
+    })
+
+    raw = resp.get_data(as_text=True)
+    assert 'NaN' not in raw
+    assert 'Infinity' not in raw
+    payload = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    assert payload['success'] is True
+    assert payload['matrices'][0]['cells'][0][0]['quantity'] == 0.0
+    assert payload['matrices'][0]['cells'][1][0]['amount'] == 0.0
