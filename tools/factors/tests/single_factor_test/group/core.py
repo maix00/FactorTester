@@ -1672,6 +1672,7 @@ def build_target_amounts(
     rebalance_mode: str,
     close_fee_vec: np.ndarray | None = None,
     close_fee_already_paid: bool = False,
+    margin_factor: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build next-period target holdings for all groups with vectorized operations.
 
@@ -1685,6 +1686,11 @@ def build_target_amounts(
         For each-period full rebalancing, treat ``wealth_before_trade`` as the
         post-sell-fee available wealth.  This is used by the simulator after it
         has computed the sell leg first.
+    margin_factor : (M, P) or None
+        Per-product capital multiplier (default 1.0). For margin-traded products
+        this equals the margin ratio; for cash products it is 1.0.
+        Used to compute the actual capital released on exits (sell_amounts use
+        prev * margin_factor instead of prev).
     """
     curr_mask = np.asarray(curr_mask_all, dtype=bool)
     prev_amounts = np.asarray(prev_end_amounts, dtype=float)
@@ -1692,6 +1698,11 @@ def build_target_amounts(
     close_fees = np.asarray(close_fee_vec, dtype=float) if close_fee_vec is not None else None
     if close_fees is not None and close_fees.ndim == 1:
         close_fees = close_fees[np.newaxis, :]  # (1, P) → broadcast to (group_count, P)
+    mf = (
+        np.asarray(margin_factor, dtype=float)
+        if margin_factor is not None
+        else np.ones_like(prev_amounts, dtype=float)
+    )
 
     def _equal_alloc(mask: np.ndarray, capital: np.ndarray) -> np.ndarray:
         counts_local = mask.sum(axis=1).astype(float)
@@ -1722,8 +1733,8 @@ def build_target_amounts(
     exiting = prev_mask & (~curr_mask)
     entering = curr_mask & (~prev_mask)
     n_entering = np.nansum(entering, axis=1).astype(float)
-    # Gross released amount (before close fee)
-    sell_amounts = np.nansum(prev_amounts * exiting.astype(float), axis=1)
+    # Gross released capital: margin products release only margin_ratio * notional
+    sell_amounts = np.nansum(prev_amounts * exiting.astype(float) * mf, axis=1)
 
     # Subtract close fee from released capital — the actual cash available
     # after selling is sell_amounts * (1 - close_fee) per exiting product.
@@ -1733,6 +1744,7 @@ def build_target_amounts(
     else:
         released = sell_amounts
 
+    # Staying positions keep their nominal amounts (targets are nominal)
     targets = prev_amounts * staying.astype(float)
     rows_with_released = (n_entering > 0) & (released > 0)
     if rows_with_released.any():
@@ -1834,12 +1846,20 @@ def apply_liquidity_execution(
     capacity_amounts: np.ndarray,
     open_fee_mat: np.ndarray,
     close_fee_mat: np.ndarray,
+    use_margin: np.ndarray | None = None,
+    margin_ratios: np.ndarray | None = None,
 ) -> np.ndarray:
     """Convert ideal targets to executable targets under per-product notional caps.
 
     Capacity is expressed in the same normalized notional unit as wealth
     (initial wealth = 1).  Sells are capped first; remaining cash funds buys
     by executable capacity weights, so unfilled cash stays idle.
+
+    When ``use_margin`` and ``margin_ratios`` are provided (both (M, P)
+    arrays), the cash calculation accounts for margin-occupied capital:
+    - cash_before = wealth - sum(prev * margin_factor)
+    - buy cash needed = buy * margin_factor * (1 + open_fee)
+    where margin_factor = margin_ratio if use_margin else 1.0.
     """
     prev = np.asarray(prev_end_amounts, dtype=float)
     ideal = np.asarray(ideal_target_amounts, dtype=float)
@@ -1849,6 +1869,18 @@ def apply_liquidity_execution(
         caps = caps[np.newaxis, :]
     caps = np.where(np.isfinite(caps) & (caps >= 0), caps, np.inf)
 
+    use_m = (
+        np.asarray(use_margin, dtype=bool)
+        if use_margin is not None
+        else np.zeros_like(prev, dtype=bool)
+    )
+    mr = (
+        np.asarray(margin_ratios, dtype=float)
+        if margin_ratios is not None
+        else np.ones_like(prev, dtype=float)
+    )
+    margin_factor = np.where(use_m, mr, 1.0)  # (M, P)
+
     delta = ideal - prev
     desired_sell = np.clip(-delta, 0.0, None)
     desired_buy = np.clip(delta, 0.0, None)
@@ -1856,8 +1888,10 @@ def apply_liquidity_execution(
     sell_exec = np.minimum(desired_sell, caps)
     after_sell = prev - sell_exec
     sell_fee = np.nansum(sell_exec * close_fee_mat, axis=1)
-    cash_before = np.maximum(0.0, wealth - np.nansum(prev, axis=1))
-    cash_after_sell = np.maximum(0.0, cash_before + np.nansum(sell_exec, axis=1) - sell_fee)
+    # cash_before: actual free cash accounting for margin-occupied positions
+    prev_occupied = np.nansum(prev * margin_factor, axis=1)
+    cash_before = np.maximum(0.0, wealth - prev_occupied)
+    cash_after_sell = np.maximum(0.0, cash_before + np.nansum(sell_exec * margin_factor, axis=1) - sell_fee)
 
     buy_capacity = np.minimum(desired_buy, caps)
     buy_capacity = np.where(np.isfinite(buy_capacity) & (buy_capacity > 0), buy_capacity, 0.0)
@@ -1869,9 +1903,9 @@ def apply_liquidity_execution(
     if rows.any():
         buy_exec[rows] = buy_capacity[rows] * (buy_budget[rows] / buy_capacity_sum[rows])[:, np.newaxis]
 
-    # Do not allow open fees to push total wealth negative.  If fees are large,
-    # scale the buy leg down once more using the effective cash requirement.
-    buy_cash_need = np.nansum(buy_exec * (1.0 + open_fee_mat), axis=1)
+    # Do not allow open fees + margin to push cash negative.  The cash required
+    # to buy one unit of notional is margin_factor * (1 + open_fee).
+    buy_cash_need = np.nansum(buy_exec * margin_factor * (1.0 + open_fee_mat), axis=1)
     over = buy_cash_need > np.maximum(cash_after_sell, 0.0) + 1e-12
     if over.any():
         scale = np.divide(
@@ -2019,6 +2053,7 @@ def simulate_group_trading_book(
         current_row: np.ndarray,
         target_row: np.ndarray,
         contract_value_row_1d: np.ndarray,
+        executable_capacity_row: np.ndarray | None = None,
     ) -> np.ndarray:
         lot_row = lot_sizes.copy()
         lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
@@ -2058,6 +2093,7 @@ def simulate_group_trading_book(
             margin_mode,
         )
         budget = float(equity[row_idx])
+        capacity_row = executable_capacity_row  # (P,) or None
         if not np.any(np.isfinite(buy_target) & (buy_target > 0)):
             return candidate
 
@@ -2074,6 +2110,12 @@ def simulate_group_trading_book(
                     continue
                 proposed = candidate.copy()
                 proposed[p_idx] += lot_row[p_idx]
+                # Check liquidity cap: the buy notional (or total notional) for
+                # this product must not exceed its per-product capacity.
+                if capacity_row is not None and np.isfinite(capacity_row[p_idx]):
+                    buy_notional = (proposed[p_idx] - current_row[p_idx]) * contract_value_row_1d[p_idx]
+                    if buy_notional > capacity_row[p_idx] + 1e-12:
+                        continue
                 proposed_required = _row_required_capital(
                     current_row,
                     proposed,
@@ -2161,6 +2203,7 @@ def simulate_group_trading_book(
                 equity,
                 "each_period",
                 close_fee_vec=None,
+                margin_factor=np.where(use_margin, margin_ratios, 1.0),
             )
             target_amounts_before_floor = target_notional.copy()
             raw_quantities = np.divide(
@@ -2198,6 +2241,8 @@ def simulate_group_trading_book(
                 executable_capacity_t,
                 open_rate_mat,
                 close_rate_mat,
+                use_margin=use_margin,
+                margin_ratios=margin_ratios,
             )
             raw_quantities = np.divide(
                 target_amounts,
@@ -2263,6 +2308,7 @@ def simulate_group_trading_book(
                         current_row=quantities[row_idx],
                         target_row=scaled[idx_in_over],
                         contract_value_row_1d=contract_value_row[0],
+                        executable_capacity_row=executable_capacity_t[row_idx],
                     )
 
             zero_rows = np.nansum(np.abs(desired_quantities - quantities), axis=1) <= 1e-12
@@ -2276,6 +2322,7 @@ def simulate_group_trading_book(
                         current_row=quantities[row_idx],
                         target_row=allocation_targets[row_idx],
                         contract_value_row_1d=contract_value_row[0],
+                        executable_capacity_row=executable_capacity_t[row_idx],
                     )
 
             buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
