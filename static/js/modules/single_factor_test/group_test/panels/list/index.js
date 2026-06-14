@@ -100,10 +100,8 @@
 
         for (var bi = 0; bi < batches.length; bi++) {
             var batch = batches[bi];
-            var batchExpanded = batches.length === 1 ? true : (_expandedBatches[batch.key] === true);
-            if (!batchExpanded) continue;
             for (var ri = 0; ri < batch.items.length; ri++) {
-                walk(batch.items[ri], 0, batch.key, batchExpanded);
+                walk(batch.items[ri], 0, batch.key, batches.length === 1 ? true : (_expandedBatches[batch.key] === true));
             }
         }
 
