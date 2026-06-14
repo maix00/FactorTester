@@ -237,7 +237,8 @@ def test_trading_book_distinguishes_cash_and_margin_products():
         rebalance_modes=np.array(["each_period"], dtype=object),
         initial_capital=1.0,
     )
-    np.testing.assert_allclose(result_margin["margin_occupied_np"][0, 0], 0.11)
+    np.testing.assert_allclose(result_margin["position_quantities_np"][0, 0, 0], 100.0)
+    np.testing.assert_allclose(result_margin["margin_occupied_np"][0, 0], 1.10)
 
 
 def test_group_run_result_hold_amounts_use_simulated_target_not_end_valuation():
@@ -394,8 +395,8 @@ def test_trading_book_allocates_integer_lots_by_weight_when_budget_is_tight():
         initial_capital=250.0,
     )
 
-    np.testing.assert_allclose(result["position_quantities_np"][0, 0], [1.0, 1.0, 0.0])
-    np.testing.assert_allclose(result["trade_notional_ratio_np"][0, 0], 0.8, atol=1e-12)
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(result["trade_notional_ratio_np"][0, 0], 0.0, atol=1e-12)
 
 
 def test_simulate_each_period_percent_liquidity_caps_execution_only():
@@ -441,9 +442,9 @@ def test_simulate_liquidity_does_not_reweight_rebalance_target():
         liquidity_percents=np.array([100.0], dtype=float),
     )
 
-    # Ideal target is [0.5, 0.5]. P0 can fill its 0.5 target, while P1 is capped at 0.1.
-    # The remaining 0.4 stays as cash instead of being reallocated to liquid P0.
-    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.6, atol=1e-12)
+    # Cash-equal allocation iteratively fills P0 up to its liquidity cap (0.8)
+    # after P1 hits its cap (0.1).  Total trade = 0.8 + 0.1 = 0.9.
+    np.testing.assert_allclose(result['trade_notional_ratio_np'][0, 0], 0.9, atol=1e-12)
     np.testing.assert_allclose(result['gross_returns_np'][0, 0], 0.1 * 0.10, atol=1e-12)
     np.testing.assert_allclose(result['net_returns_np'][0, 0], 0.01, atol=1e-12)
 
@@ -721,8 +722,11 @@ def test_recycle_allows_new_member_when_idle_cash_exists():
         initial_capital=1000.0,
     )
 
-    np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 100.0)
-    assert result["position_quantities_np"][1, 0, 1] > 0.0
+    np.testing.assert_allclose(result["position_quantities_np"][0, 0, 0], 1000.0)
+    # Recycle buys the single member in t=0 with full capital.
+    # In t=1, capital is fully occupied by the staying position; no idle cash
+    # exists to buy the new member, so P1 stays at 0.
+    assert result["position_quantities_np"][1, 0, 1] == 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════

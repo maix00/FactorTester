@@ -2202,18 +2202,7 @@ def simulate_group_trading_book(
             position_notional = desired_quantities * contract_value_row
             liquidity_capacity_amounts_np[t] = np.full((M, P), np.inf, dtype=float)
         else:
-            # Build initial targets per-group using each group's own rebalance mode.
-            # For all groups: always start with "each_period" for the initial allocation
-            # (even buy_and_hold/recycle need first-period full weighting).
-            # The hold/recycle logic below will freeze reuse after the first period.
-            target_notional = build_target_amounts(
-                membership_np[t],
-                prev_notional,
-                equity,
-                "each_period",
-                close_fee_vec=None,
-                margin_factor=np.where(use_margin, margin_ratios, 1.0),
-            )
+            # ── 可执行品种 ──
             executable_capacity_t = np.full((M, P), np.inf, dtype=float)
             if has_percent_liquidity:
                 assert liquidity_capacity_arr is not None
@@ -2226,111 +2215,202 @@ def simulate_group_trading_book(
                 executable_capacity_t[percent_rows] = (
                     base_capacity[np.newaxis, :] * equity[percent_rows, np.newaxis] * percent_scale[percent_rows, np.newaxis]
                 )
-
-            # Store per-product liquidity capacity amounts (成交额限额) before apply
             liquidity_capacity_amounts_np[t] = executable_capacity_t.copy()
 
-            target_amounts = apply_liquidity_execution(
-                prev_notional,
-                target_notional,
-                equity,
-                executable_capacity_t,
-                open_rate_mat,
-                close_rate_mat,
-                use_margin=use_margin,
-                margin_ratios=margin_ratios,
-            )
-            raw_quantities = np.divide(
-                target_amounts,
-                contract_value_row,
-                out=np.zeros_like(target_amounts, dtype=float),
-                where=np.isfinite(contract_value_row) & (contract_value_row > 0),
-            )
-            target_amounts_before_floor = target_amounts.copy()
-            allocation_targets = raw_quantities.copy()
-            buy_target = np.clip(allocation_targets - quantities, 0.0, None)
-            sell_target = np.clip(quantities - allocation_targets, 0.0, None)
-            desired_quantities = quantities - np.floor(sell_target / lot_sizes_row) * lot_sizes_row + np.floor(buy_target / lot_sizes_row) * lot_sizes_row
-            desired_quantities[:, ~executable] = quantities[:, ~executable]
+            lot_row = lot_sizes.copy()
+            lot_row = np.where(np.isfinite(lot_row) & (lot_row > 0), lot_row, 1.0)
 
-            if bool(hold_rows.any()):
-                current_membership = membership_np[t]
+            # ── 一手开仓全花销 ──
+            one_lot_margin_mat = np.where(
+                use_margin,
+                lot_row * contract_value * margin_ratios,
+                lot_row * contract_value,
+            )
+            one_lot_open_fee_mat = lot_row * contract_value * open_rate_mat + lot_row * open_fixed_mat
+            one_lot_full_cost_mat = one_lot_margin_mat + one_lot_open_fee_mat
+
+            curr_mask_all = membership_np[t]
+            prev_mask_all = quantities > 0
+
+            # ── 函数A：卖出 ──
+            def _sell_positions(
+                quantities_in: np.ndarray,
+                sell_mask: np.ndarray,
+            ) -> tuple[np.ndarray, np.ndarray]:
+                result = quantities_in.copy()
+                released = np.zeros(M, dtype=float)
+                for row_idx in range(M):
+                    if not sell_mask[row_idx].any():
+                        continue
+                    for p_idx in range(P):
+                        if not sell_mask[row_idx, p_idx]:
+                            continue
+                        if result[row_idx, p_idx] <= 0:
+                            continue
+                        if not executable[p_idx]:
+                            continue
+                        cv = contract_value[p_idx]
+                        if not np.isfinite(cv) or cv <= 0:
+                            continue
+                        qty = result[row_idx, p_idx]
+                        lot = lot_row[p_idx]
+                        max_lots = max(1, int(np.round(qty / lot, 10)))
+                        capacity = executable_capacity_t[row_idx, p_idx]
+                        if np.isfinite(capacity):
+                            max_lots_by_cap = int(np.round(capacity / (lot * cv), 10))
+                            max_lots = min(max_lots, max_lots_by_cap)
+                        if max_lots <= 0:
+                            continue
+                        sell_qty = float(max_lots) * lot
+                        sell_notional = sell_qty * cv
+                        if use_margin[row_idx, p_idx]:
+                            cash_released = sell_notional * margin_ratios[row_idx, p_idx]
+                        else:
+                            cash_released = sell_notional
+                        close_fee_here = sell_notional * close_rate_mat[row_idx, p_idx] + sell_qty * close_fixed_mat[row_idx, p_idx]
+                        released[row_idx] += max(0.0, cash_released - close_fee_here)
+                        result[row_idx, p_idx] -= sell_qty
+                return result, released
+
+            # ── 函数B：等额现金分配买入 ──
+            def _buy_equal_alloc(
+                quantities_in: np.ndarray,
+                buy_mask: np.ndarray,
+                available_cash: np.ndarray,
+            ) -> np.ndarray:
+                result = quantities_in.copy()
+                cash = available_cash.copy()
+
+                MAX_ITERATIONS = 100
+                for _iter in range(MAX_ITERATIONS):
+                    changed_any = False
+                    for row_idx in range(M):
+                        if cash[row_idx] <= 1e-12:
+                            continue
+
+                        eligible_indices = []
+                        for p_idx in range(P):
+                            if not buy_mask[row_idx, p_idx]:
+                                continue
+                            if not executable[p_idx]:
+                                continue
+                            cv = contract_value[p_idx]
+                            if not np.isfinite(cv) or cv <= 0:
+                                continue
+                            if not np.isfinite(lot_row[p_idx]) or lot_row[p_idx] <= 0:
+                                continue
+                            cost = one_lot_full_cost_mat[row_idx, p_idx]
+                            if not np.isfinite(cost) or cost <= 0:
+                                continue
+                            capacity = executable_capacity_t[row_idx, p_idx]
+                            max_lots_by_cap = None
+                            if np.isfinite(capacity):
+                                max_by_cap = int(np.round(capacity / (lot_row[p_idx] * cv), 10))
+                                if max_by_cap <= 0:
+                                    continue
+                                max_lots_by_cap = max_by_cap
+                            eligible_indices.append((p_idx, max_lots_by_cap))
+
+                        if not eligible_indices:
+                            continue
+
+                        n_eligible = len(eligible_indices)
+                        per_cash = cash[row_idx] / n_eligible
+
+                        total_remaining = 0.0
+                        for p_idx, max_lots_by_cap in eligible_indices:
+                            cv = contract_value[p_idx]
+                            cost = one_lot_full_cost_mat[row_idx, p_idx]
+                            max_lots_by_cash = int(np.round(per_cash / cost, 10))
+                            max_lots = max_lots_by_cash
+                            if max_lots_by_cap is not None:
+                                max_lots = min(max_lots, max_lots_by_cap)
+                            if max_lots <= 0:
+                                total_remaining += per_cash
+                                continue
+
+                            buy_qty_p = float(max_lots) * lot_row[p_idx]
+                            spent_notional = buy_qty_p * cv
+                            buy_fee_p = spent_notional * open_rate_mat[row_idx, p_idx] + buy_qty_p * open_fixed_mat[row_idx, p_idx]
+                            total_spent = spent_notional * (margin_ratios[row_idx, p_idx] if use_margin[row_idx, p_idx] else 1.0) + buy_fee_p
+
+                            leftover = per_cash - total_spent
+                            total_remaining += max(0.0, leftover)
+
+                            result[row_idx, p_idx] += buy_qty_p
+                            if np.isfinite(executable_capacity_t[row_idx, p_idx]):
+                                executable_capacity_t[row_idx, p_idx] -= spent_notional
+                            changed_any = True
+
+                        cash[row_idx] = total_remaining
+
+                    if not changed_any:
+                        break
+
+                return result
+
+            # ── 确定卖/买掩码 ──
+            # each_period: 全部卖出 + 全部买入（完整重平衡）
+            # buy_and_hold / recycle: 只卖 exiting + 只买 entering
+            staying_mask = curr_mask_all & prev_mask_all
+            exiting_mask = prev_mask_all & (~curr_mask_all)
+            entering_mask = curr_mask_all & (~prev_mask_all)
+
+            is_each_period = rebalance_modes_arr == "each_period"
+
+            # 卖
+            sell_mask = np.where(is_each_period[:, np.newaxis], prev_mask_all, exiting_mask)
+            # 买
+            buy_mask = np.where(is_each_period[:, np.newaxis], curr_mask_all, entering_mask)
+
+            # 保存原始持仓
+            quantities_old = quantities.copy()
+
+            # 执行卖出
+            quantities, cash_released = _sell_positions(quantities, sell_mask)
+
+            # 可用现金
+            # each_period：全卖了，所有资产都是现金 → available_cash = equity
+            # buy_and_hold/recycle：staying 未卖，其保证金仍锁定 → available_cash = (equity - staying_occupied) + cash_released
+            if hold_rows.any() or recycle_rows.any():
+                staying_notional = quantities * contract_value_row * staying_mask.astype(float)
+                staying_occupied = np.where(
+                    use_margin,
+                    staying_notional * margin_ratios,
+                    staying_notional,
+                )
+                staying_occupied_total = np.nansum(staying_occupied, axis=1)
+                available_cash = np.maximum(0.0, equity - staying_occupied_total) + cash_released
+            else:
+                available_cash = equity.copy()
+
+            # 执行买入
+            quantities = _buy_equal_alloc(quantities, buy_mask, available_cash)
+
+            # recycle_rows with same_position_set: 冻结 entering
+            # 跳过初始周期（prev_mask_all 全 False，entering == curr）
+            if bool(recycle_rows.any()):
                 current_positive = quantities > 0
-                staying_mask = current_membership & current_positive
-                entering_mask = current_membership & (~current_positive)
-                desired_quantities[hold_rows] = np.where(
-                    staying_mask[hold_rows],
-                    quantities[hold_rows],
-                    desired_quantities[hold_rows],
-                )
-
-                if bool(recycle_rows.any()):
-                    same_position_set = np.all(current_positive == current_membership, axis=1)
-                    freeze_entering_rows = recycle_rows & same_position_set
-                    if bool(freeze_entering_rows.any()):
-                        desired_quantities[freeze_entering_rows] = np.where(
-                            entering_mask[freeze_entering_rows],
-                            0.0,
-                            desired_quantities[freeze_entering_rows],
-                        )
-
-            desired_quantities[:, ~executable] = quantities[:, ~executable]
-
-            # --- 整手离散空间下的现金约束 ---
-            # floor 到整手后离散量化可能导致 required > equity。
-            # 不需要循环逐步逼近：一次性按比例缩水 + 重新 floor。
-            def _compute_row_required(desired_row, current_row, row_idx):
-                dq = np.asarray(desired_row, dtype=float)
-                cq = np.asarray(current_row, dtype=float)
-                bq = np.clip(dq - cq, 0.0, None)
-                sq = np.clip(cq - dq, 0.0, None)
-                bn = bq * contract_value_row[0]
-                sn = sq * contract_value_row[0]
-                bf = bn * open_rate_mat[row_idx] + bq * open_fixed_mat[row_idx]
-                sf = sn * close_rate_mat[row_idx] + sq * close_fixed_mat[row_idx]
-                pn = dq * contract_value_row[0]
-                occ = np.nansum(np.where(use_margin[row_idx], pn * margin_ratios[row_idx], pn))
-                return float(occ + np.nansum(bf) + np.nansum(sf))
-
-            needed_row = np.array([_compute_row_required(desired_quantities[i], quantities[i], i) for i in range(M)])
-            over = needed_row > equity + 1e-12
-            if over.any():
-                scale = np.divide(
-                    equity[over],
-                    needed_row[over],
-                    out=np.zeros(np.count_nonzero(over)),
-                    where=needed_row[over] > 0,
-                )
-                scaled = desired_quantities[over] * scale[:, np.newaxis]
-                over_rows = np.where(over)[0]
-                for idx_in_over, row_idx in enumerate(over_rows):
-                    allocation_targets[row_idx] = scaled[idx_in_over]
-                    desired_quantities[row_idx] = _pack_openable_quantities(
-                        row_idx=row_idx,
-                        current_row=quantities[row_idx],
-                        target_row=scaled[idx_in_over],
-                        contract_value_row_1d=contract_value_row[0],
-                        executable_capacity_row=executable_capacity_t[row_idx],
+                same_position_set = np.all(current_positive == curr_mask_all, axis=1)
+                freeze_entering_rows = recycle_rows & same_position_set
+                # 初始建仓时不冻结（entering 就是 curr，即首次买入）
+                is_initial_period = ~np.any(prev_mask_all, axis=1)
+                freeze_entering_rows[is_initial_period] = False
+                if bool(freeze_entering_rows.any()):
+                    quantities[freeze_entering_rows] = np.where(
+                        entering_mask[freeze_entering_rows],
+                        0.0,
+                        quantities[freeze_entering_rows],
                     )
 
-            # 余钱凑手：仅当 rescale 没改动本行时才尝试 pack
-            # （与原来 recover 语义一致：budget 不紧时用闲钱凑更多手）
-            zero_rows = np.nansum(np.abs(desired_quantities - quantities), axis=1) <= 1e-12
-            positive_buy_rows = np.nansum(np.clip(allocation_targets - quantities, 0.0, None), axis=1) > 1e-12
-            no_sell_rows = np.nansum(np.clip(quantities - allocation_targets, 0.0, None), axis=1) <= 1e-12
-            recover_rows = zero_rows & positive_buy_rows & no_sell_rows
-            if recover_rows.any():
-                for row_idx in np.where(recover_rows)[0]:
-                    desired_quantities[row_idx] = _pack_openable_quantities(
-                        row_idx=row_idx,
-                        current_row=quantities[row_idx],
-                        target_row=allocation_targets[row_idx],
-                        contract_value_row_1d=contract_value_row[0],
-                        executable_capacity_row=executable_capacity_t[row_idx],
-                    )
+            # 不可执行品种恢复原持仓
+            quantities[:, ~executable] = quantities_old[:, ~executable]
 
-            buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
-            sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
+            desired_quantities = quantities
+            target_amounts_before_floor = quantities * contract_value_row
+
+            buy_qty = np.clip(desired_quantities - quantities_old, 0.0, None)
+            sell_qty = np.clip(quantities_old - desired_quantities, 0.0, None)
             buy_notional = buy_qty * contract_value_row
             sell_notional = sell_qty * contract_value_row
             buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
