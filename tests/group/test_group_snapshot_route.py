@@ -187,8 +187,14 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         position_quantities_np=positions,
         price_np=np.ones((2, len(products)), dtype=float) * 100.0,
         point_value_vec=np.ones(len(products), dtype=float),
+        pre_rebalance_total_equity_np=np.array([[1000.0], [1250.0]], dtype=float),
+        post_rebalance_total_equity_np=np.array([[990.0], [1240.0]], dtype=float),
         total_equity_np=np.array([[1200.0], [1300.0]], dtype=float),
+        pre_rebalance_cash_np=np.array([[1000.0], [950.0]], dtype=float),
+        post_rebalance_cash_np=np.array([[500.0], [920.0]], dtype=float),
         cash_np=np.array([[1000.0], [900.0]], dtype=float),
+        buy_fee_amount_np=np.array([[8.0], [7.0]], dtype=float),
+        sell_fee_amount_np=np.array([[2.0], [3.0]], dtype=float),
     )
     tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
 
@@ -206,11 +212,23 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     assert payload['matrices'][0]['rows'][0]['name'] == '总资产'
     assert cells[0][0]['status'] == 'increasing'
     assert cells[0][0]['amount'] == 1300.0
-    assert cells[0][0]['delta_amount'] == 100.0
+    assert cells[0][0]['pre_rebalance_amount'] == 1250.0
+    assert cells[0][0]['post_rebalance_amount'] == 1240.0
+    assert cells[0][0]['end_amount'] == 1300.0
+    assert cells[0][0]['buy_fee_amount'] == 7.0
+    assert cells[0][0]['sell_fee_amount'] == 3.0
+    assert cells[0][0]['fee_amount'] == 10.0
+    assert cells[0][0]['delta_amount'] == 60.0
     assert payload['matrices'][0]['rows'][1]['name'] == '现金'
     assert cells[1][0]['status'] == 'decreasing'
     assert cells[1][0]['amount'] == 900.0
-    assert cells[1][0]['delta_amount'] == -100.0
+    assert cells[1][0]['pre_rebalance_amount'] == 950.0
+    assert cells[1][0]['post_rebalance_amount'] == 920.0
+    assert cells[1][0]['end_amount'] == 900.0
+    assert cells[1][0]['buy_fee_amount'] == 7.0
+    assert cells[1][0]['sell_fee_amount'] == 3.0
+    assert cells[1][0]['fee_amount'] == 10.0
+    assert cells[1][0]['delta_amount'] == -20.0
     assert cells[2][0]['status'] == 'entering'
     assert cells[2][0]['delta_quantity'] == 1.0
     assert cells[3][0]['status'] == 'increasing'

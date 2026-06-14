@@ -38,8 +38,14 @@ class GroupRunResult:
     hold_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期实际持仓金额 (refs #100)
     position_quantities_np: np.ndarray | None = None  # (T, M, P) float — 每期合约手数/单位数
     margin_occupied_np: np.ndarray | None = None  # (T, M) float — 每期保证金占用
+    pre_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) float — 本期调仓前总权益
+    post_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) float — 本期调仓后、收益前总权益
     total_equity_np: np.ndarray | None = None  # (T, M) float — 每期末总权益
+    pre_rebalance_cash_np: np.ndarray | None = None  # (T, M) float — 本期调仓前可用现金
+    post_rebalance_cash_np: np.ndarray | None = None  # (T, M) float — 本期调仓后、收益前可用现金
     cash_np: np.ndarray | None = None  # (T, M) float — 每期末可用现金
+    buy_fee_amount_np: np.ndarray | None = None  # (T, M) float — 本期期初调仓买入费用金额
+    sell_fee_amount_np: np.ndarray | None = None  # (T, M) float — 本期期初调仓卖出费用金额
     initial_capital: float | None = None
     price_np: np.ndarray | None = None
     point_value_vec: np.ndarray | None = None

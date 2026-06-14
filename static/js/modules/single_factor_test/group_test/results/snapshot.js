@@ -252,6 +252,12 @@
         return matrices[0];
     }
 
+    function _nextTimestampMs(ts) {
+        var idx = _snapshotTimestamps.indexOf(ts);
+        if (idx >= 0 && idx + 1 < _snapshotTimestamps.length) return _snapshotTimestamps[idx + 1];
+        return null;
+    }
+
     function _formatAmount(v) {
         if (v === null || v === undefined || v === '') return '';
         var num = Number(v);
@@ -319,8 +325,24 @@
         }
         parts.push(_renderProduct(cell.product));
         var meta = [];
-        if (cell.quantity !== null && cell.quantity !== undefined) meta.push('持仓 ' + _formatQuantity(cell.quantity));
-        if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
+        if (cell.quantity !== null && cell.quantity !== undefined) {
+            meta.push('持仓 ' + _formatQuantity(cell.quantity));
+            if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
+        } else if (cell.pre_rebalance_amount !== null && cell.pre_rebalance_amount !== undefined
+            && cell.post_rebalance_amount !== null && cell.post_rebalance_amount !== undefined
+            && cell.end_amount !== null && cell.end_amount !== undefined) {
+            parts.push('<div class="snapshot-summary-amounts">'
+                + '<div>调仓前 ' + _formatAmount(cell.pre_rebalance_amount) + '</div>'
+                + '<div>调仓后 ' + _formatAmount(cell.post_rebalance_amount) + '</div>'
+                + '<div>期末(下次调仓前) ' + _formatAmount(cell.end_amount) + '</div>'
+                + '</div>');
+            var feeParts = [];
+            if (cell.buy_fee_amount !== null && cell.buy_fee_amount !== undefined) feeParts.push('买入费 ' + _formatAmount(cell.buy_fee_amount));
+            if (cell.sell_fee_amount !== null && cell.sell_fee_amount !== undefined) feeParts.push('卖出费 ' + _formatAmount(cell.sell_fee_amount));
+            if (feeParts.length) parts.push('<div class="snapshot-summary-fees">' + feeParts.join(' · ') + '</div>');
+        } else if (cell.amount !== null && cell.amount !== undefined) {
+            meta.push('金额 ' + _formatAmount(cell.amount));
+        }
         if (meta.length) parts.push('<div class="snapshot-cell-meta">' + meta.join(' · ') + '</div>');
         var deltaParts = [];
         if (cell.delta_quantity !== null && cell.delta_quantity !== undefined) {
@@ -367,6 +389,7 @@
         var html = '';
         html += '<div class="snapshot-batch-section">';
         html += '<div class="snapshot-batch-header">仓位矩阵 · ' + _escape(matrix.label || matrix.key || '默认') + '</div>';
+        html += '<div class="snapshot-semantics-note">产品持仓为本期间调仓后的实际持仓；现金和总资产显示调仓前、调仓后、期末(下次调仓前)、调仓费用与持有期间变化。</div>';
         html += '<div class="snapshot-matrix-scroll">';
         html += '<table class="snapshot-matrix-table"><thead><tr>';
         html += '<th class="snapshot-prod-name-cell">产品</th>';
@@ -400,12 +423,17 @@
         if (!data || !Array.isArray(data.matrices)) return;
 
         _snapshotPayload = data;
+        if (Array.isArray(data.all_timestamps_ms)) {
+            _snapshotTimestamps = data.all_timestamps_ms;
+        }
         if (!_snapshotMatrixKey || !_matrixByKey(_snapshotMatrixKey)) {
             _snapshotMatrixKey = data.default_matrix_key || (data.matrices[0] && data.matrices[0].key) || 'raw';
         }
 
         var timeStr = _fmtTs(timestampMs);
-        document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + timeStr;
+        var nextTs = _nextTimestampMs(timestampMs);
+        var titlePeriod = nextTs ? (timeStr + ' 至 ' + _fmtTs(nextTs)) : (timeStr + ' 起');
+        document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + titlePeriod;
 
         var bodyEl = document.getElementById('snapshot_body');
         var statsEl = document.getElementById('snapshot_flow_stats');

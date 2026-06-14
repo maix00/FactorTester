@@ -199,8 +199,14 @@ def slice_group_run_result(
         hold_amounts_np=_take_group_axis(group_result.hold_amounts_np),
         position_quantities_np=_take_group_axis(group_result.position_quantities_np),
         margin_occupied_np=_take_group_axis(group_result.margin_occupied_np),
+        pre_rebalance_total_equity_np=_take_group_axis(group_result.pre_rebalance_total_equity_np),
+        post_rebalance_total_equity_np=_take_group_axis(group_result.post_rebalance_total_equity_np),
         total_equity_np=_take_group_axis(group_result.total_equity_np),
+        pre_rebalance_cash_np=_take_group_axis(group_result.pre_rebalance_cash_np),
+        post_rebalance_cash_np=_take_group_axis(group_result.post_rebalance_cash_np),
         cash_np=_take_group_axis(group_result.cash_np),
+        buy_fee_amount_np=_take_group_axis(group_result.buy_fee_amount_np),
+        sell_fee_amount_np=_take_group_axis(group_result.sell_fee_amount_np),
         initial_capital=group_result.initial_capital,
         price_np=None if group_result.price_np is None else np.asarray(group_result.price_np).copy(),
         point_value_vec=None if group_result.point_value_vec is None else np.asarray(group_result.point_value_vec).copy(),
@@ -1250,8 +1256,14 @@ def _simulate_group_from_preloaded(
         hold_amounts_np=sim_result.get('target_amounts_np'),
         position_quantities_np=sim_result.get('position_quantities_np'),
         margin_occupied_np=sim_result.get('margin_occupied_np'),
+        pre_rebalance_total_equity_np=sim_result.get('pre_rebalance_total_equity_np'),
+        post_rebalance_total_equity_np=sim_result.get('post_rebalance_total_equity_np'),
         total_equity_np=sim_result.get('total_equity_np'),
+        pre_rebalance_cash_np=sim_result.get('pre_rebalance_cash_np'),
+        post_rebalance_cash_np=sim_result.get('post_rebalance_cash_np'),
         cash_np=sim_result.get('cash_np'),
+        buy_fee_amount_np=sim_result.get('buy_fee_amount_np'),
+        sell_fee_amount_np=sim_result.get('sell_fee_amount_np'),
         initial_capital=float(initial_capital),
         price_np=price_np,
         open_fixed_vec=open_fixed_vec,
@@ -1932,8 +1944,14 @@ def simulate_group_trading_book(
     prev_end_amounts_np = np.zeros((T, M, P), dtype=float)
     position_quantities_np = np.zeros((T, M, P), dtype=float)
     margin_occupied_np = np.zeros((T, M), dtype=float)
+    pre_rebalance_total_equity_np = np.zeros((T, M), dtype=float)
+    post_rebalance_total_equity_np = np.zeros((T, M), dtype=float)
     total_equity_np = np.zeros((T, M), dtype=float)
+    pre_rebalance_cash_np = np.zeros((T, M), dtype=float)
+    post_rebalance_cash_np = np.zeros((T, M), dtype=float)
     cash_np = np.zeros((T, M), dtype=float)
+    buy_fee_amount_np = np.zeros((T, M), dtype=float)
+    sell_fee_amount_np = np.zeros((T, M), dtype=float)
 
     if not np.isfinite(initial_capital) or initial_capital <= 0:
         raise ValueError(f"initial_capital must be positive, got {initial_capital!r}")
@@ -1968,6 +1986,13 @@ def simulate_group_trading_book(
         contract_value = np.where(valuated & np.isfinite(contract_value) & (contract_value > 0), contract_value, np.nan)
         contract_value_row = contract_value[np.newaxis, :]
         prev_notional = np.where(executable_row, quantities * contract_value_row, 0.0)
+        pre_rebalance_total = equity.copy()
+        pre_rebalance_occupied = np.where(
+            use_margin,
+            prev_notional * margin_ratios,
+            prev_notional,
+        )
+        pre_rebalance_cash = equity - np.nansum(pre_rebalance_occupied, axis=1)
 
         # When membership is unchanged AND we are not in "each_period" mode
         # (which requires per-period re-weighting), skip rebalancing entirely.
@@ -2113,6 +2138,14 @@ def simulate_group_trading_book(
             out=np.zeros(M, dtype=float),
             where=equity > 0,
         )
+        total_fee_amount = np.nansum(fee_amount, axis=1)
+        post_rebalance_total = equity - total_fee_amount
+        start_occupied = np.where(
+            use_margin,
+            position_notional * margin_ratios,
+            position_notional,
+        )
+        post_rebalance_cash = post_rebalance_total - np.nansum(start_occupied, axis=1)
         net = gross - fee_ratio
         end_equity = equity * (1.0 + net)
         end_price = price_t * (1.0 + returns_np[t])
@@ -2143,8 +2176,14 @@ def simulate_group_trading_book(
         prev_end_amounts_np[t] = end_notional
         position_quantities_np[t] = desired_quantities
         margin_occupied_np[t] = end_occupied
+        pre_rebalance_total_equity_np[t] = pre_rebalance_total
+        post_rebalance_total_equity_np[t] = post_rebalance_total
         total_equity_np[t] = end_equity
+        pre_rebalance_cash_np[t] = pre_rebalance_cash
+        post_rebalance_cash_np[t] = post_rebalance_cash
         cash_np[t] = end_equity - end_occupied
+        buy_fee_amount_np[t] = np.nansum(buy_fee, axis=1)
+        sell_fee_amount_np[t] = np.nansum(sell_fee, axis=1)
 
         quantities = desired_quantities
         equity = end_equity
@@ -2161,8 +2200,14 @@ def simulate_group_trading_book(
         'prev_end_amounts_np': prev_end_amounts_np,
         'position_quantities_np': position_quantities_np,
         'margin_occupied_np': margin_occupied_np,
+        'pre_rebalance_total_equity_np': pre_rebalance_total_equity_np,
+        'post_rebalance_total_equity_np': post_rebalance_total_equity_np,
         'total_equity_np': total_equity_np,
+        'pre_rebalance_cash_np': pre_rebalance_cash_np,
+        'post_rebalance_cash_np': post_rebalance_cash_np,
         'cash_np': cash_np,
+        'buy_fee_amount_np': buy_fee_amount_np,
+        'sell_fee_amount_np': sell_fee_amount_np,
     }
 
 

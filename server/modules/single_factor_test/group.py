@@ -232,6 +232,12 @@ def _build_snapshot_matrix(
     memberships = getattr(group_result, 'membership_np', None)
     total_equity_np = getattr(group_result, 'total_equity_np', None)
     cash_np = getattr(group_result, 'cash_np', None)
+    pre_rebalance_total_equity_np = getattr(group_result, 'pre_rebalance_total_equity_np', None)
+    post_rebalance_total_equity_np = getattr(group_result, 'post_rebalance_total_equity_np', None)
+    pre_rebalance_cash_np = getattr(group_result, 'pre_rebalance_cash_np', None)
+    post_rebalance_cash_np = getattr(group_result, 'post_rebalance_cash_np', None)
+    buy_fee_amount_np = getattr(group_result, 'buy_fee_amount_np', None)
+    sell_fee_amount_np = getattr(group_result, 'sell_fee_amount_np', None)
     if positions is None and amounts is None:
         return {'key': matrix_key, 'label': matrix_label, 'columns': [], 'rows': [], 'cells': []}
 
@@ -355,18 +361,42 @@ def _build_snapshot_matrix(
     summary_cells = []
     summary_keys = []
 
-    def _append_amount_row(row_key: str, display: dict[str, Any], matrix: Any) -> None:
-        if matrix is None or t_idx is None or t_idx >= matrix.shape[0]:
+    def _matrix_value(matrix: Any, g_idx: int) -> float | None:
+        if matrix is None or t_idx is None or t_idx >= matrix.shape[0] or g_idx >= matrix.shape[1]:
+            return None
+        return _safe_float(matrix[t_idx, g_idx])
+
+    def _append_amount_row(
+        row_key: str,
+        display: dict[str, Any],
+        end_matrix: Any,
+        *,
+        pre_rebalance_matrix: Any | None = None,
+        post_rebalance_matrix: Any | None = None,
+        buy_fee_matrix: Any | None = None,
+        sell_fee_matrix: Any | None = None,
+    ) -> None:
+        if end_matrix is None or t_idx is None or t_idx >= end_matrix.shape[0]:
             return
         amount_cells = []
         for g_idx in range(len(per_group)):
-            current_amount = _safe_float(matrix[t_idx, g_idx]) if g_idx < matrix.shape[1] else None
-            previous_amount = None
-            if prev_t_idx is not None and prev_t_idx < matrix.shape[0] and g_idx < matrix.shape[1]:
-                previous_amount = _safe_float(matrix[prev_t_idx, g_idx])
-            current_amount = 0.0 if current_amount is None else current_amount
-            previous_amount = 0.0 if previous_amount is None else previous_amount
-            delta_amount = current_amount - previous_amount
+            end_amount = _matrix_value(end_matrix, g_idx)
+            pre_rebalance_amount = _matrix_value(pre_rebalance_matrix, g_idx)
+            post_rebalance_amount = _matrix_value(post_rebalance_matrix, g_idx)
+            if prev_t_idx is not None and prev_t_idx < end_matrix.shape[0] and g_idx < end_matrix.shape[1]:
+                previous_end_amount = _safe_float(end_matrix[prev_t_idx, g_idx])
+                if pre_rebalance_amount is None:
+                    pre_rebalance_amount = previous_end_amount
+                if post_rebalance_amount is None:
+                    post_rebalance_amount = previous_end_amount
+            end_amount = 0.0 if end_amount is None else end_amount
+            pre_rebalance_amount = end_amount if pre_rebalance_amount is None else pre_rebalance_amount
+            post_rebalance_amount = pre_rebalance_amount if post_rebalance_amount is None else post_rebalance_amount
+            buy_fee_amount = _matrix_value(buy_fee_matrix, g_idx)
+            sell_fee_amount = _matrix_value(sell_fee_matrix, g_idx)
+            buy_fee_amount = 0.0 if buy_fee_amount is None else buy_fee_amount
+            sell_fee_amount = 0.0 if sell_fee_amount is None else sell_fee_amount
+            delta_amount = end_amount - post_rebalance_amount
             if delta_amount > 1e-12:
                 status = 'increasing'
                 direction = 'increase'
@@ -380,9 +410,14 @@ def _build_snapshot_matrix(
                 'status': status,
                 'product': display,
                 'quantity': None,
-                'amount': round(float(current_amount), 6),
+                'amount': round(float(end_amount), 6),
+                'pre_rebalance_amount': round(float(pre_rebalance_amount), 6),
+                'post_rebalance_amount': round(float(post_rebalance_amount), 6),
+                'end_amount': round(float(end_amount), 6),
+                'buy_fee_amount': round(float(buy_fee_amount), 6),
+                'sell_fee_amount': round(float(sell_fee_amount), 6),
+                'fee_amount': round(float(buy_fee_amount + sell_fee_amount), 6),
                 'previous_quantity': None,
-                'previous_amount': round(float(previous_amount), 6),
                 'delta_quantity': None,
                 'delta_amount': round(float(delta_amount), 6),
                 'change_direction': direction,
@@ -393,8 +428,24 @@ def _build_snapshot_matrix(
         summary_keys.append(row_key)
         summary_cells.append(amount_cells)
 
-    _append_amount_row('__total_equity__', {'name': '总资产', 'desc': 'Total Equity'}, total_equity_np)
-    _append_amount_row('__cash__', {'name': '现金', 'desc': 'Cash'}, cash_np)
+    _append_amount_row(
+        '__total_equity__',
+        {'name': '总资产', 'desc': '调仓前/调仓后/期末'},
+        total_equity_np,
+        pre_rebalance_matrix=pre_rebalance_total_equity_np,
+        post_rebalance_matrix=post_rebalance_total_equity_np,
+        buy_fee_matrix=buy_fee_amount_np,
+        sell_fee_matrix=sell_fee_amount_np,
+    )
+    _append_amount_row(
+        '__cash__',
+        {'name': '现金', 'desc': '调仓前/调仓后/期末'},
+        cash_np,
+        pre_rebalance_matrix=pre_rebalance_cash_np,
+        post_rebalance_matrix=post_rebalance_cash_np,
+        buy_fee_matrix=buy_fee_amount_np,
+        sell_fee_matrix=sell_fee_amount_np,
+    )
 
     for row_key in row_order:
         row_cells = []

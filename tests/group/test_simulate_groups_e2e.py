@@ -718,6 +718,33 @@ def test_simulate_close_today_overrides_close_fee():
     np.testing.assert_allclose(net[1], -0.025, atol=1e-12)
 
 
+def test_simulate_exposes_rebalance_cash_equity_and_fee_amounts():
+    membership = np.zeros((2, 1, 2), dtype=bool)
+    membership[0, 0, 0] = True
+    membership[1, 0, 1] = True
+
+    result = simulate_groups(
+        membership_np=membership,
+        returns_np=np.zeros((2, 2), dtype=float),
+        open_fee_mat=np.full((1, 2), 0.01, dtype=float),
+        close_fee_mat=np.full((1, 2), 0.02, dtype=float),
+        rebalance_mode='each_period',
+        price_np=np.full((2, 2), 100.0, dtype=float),
+        min_tick_vec=np.ones(2, dtype=float),
+        min_trade_quantity_vec=np.ones(2, dtype=float),
+        initial_capital=1000.0,
+    )
+
+    np.testing.assert_allclose(result['pre_rebalance_total_equity_np'][:, 0], [1000.0, 991.0], atol=1e-12)
+    np.testing.assert_allclose(result['pre_rebalance_cash_np'][:, 0], [1000.0, 91.0], atol=1e-12)
+    np.testing.assert_allclose(result['post_rebalance_total_equity_np'][:, 0], [991.0, 964.0], atol=1e-12)
+    np.testing.assert_allclose(result['post_rebalance_cash_np'][:, 0], [91.0, 64.0], atol=1e-12)
+    np.testing.assert_allclose(result['total_equity_np'][:, 0], [991.0, 964.0], atol=1e-12)
+    np.testing.assert_allclose(result['cash_np'][:, 0], [91.0, 64.0], atol=1e-12)
+    np.testing.assert_allclose(result['buy_fee_amount_np'][:, 0], [9.0, 9.0], atol=1e-12)
+    np.testing.assert_allclose(result['sell_fee_amount_np'][:, 0], [0.0, 18.0], atol=1e-12)
+
+
 def test_empty_group_keeps_untradable_holding_in_multi_session():
     """An empty current group should not liquidate holdings whose product has no bar."""
     membership = np.zeros((2, 1, 1), dtype=bool)
