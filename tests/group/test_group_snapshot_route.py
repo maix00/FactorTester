@@ -185,6 +185,8 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         group_names={0: 'A1'},
         hold_amounts_np=amounts,
         position_quantities_np=positions,
+        price_np=np.ones((2, len(products)), dtype=float) * 100.0,
+        point_value_vec=np.ones(len(products), dtype=float),
         total_equity_np=np.array([[1200.0], [1300.0]], dtype=float),
         cash_np=np.array([[1000.0], [900.0]], dtype=float),
     )
@@ -201,25 +203,25 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     payload = resp.get_json()
     cells = payload['matrices'][0]['cells']
     assert payload['matrices'][0]['columns'][0]['label'] == 'A1'
-    assert cells[0][0]['status'] == 'entering'
-    assert cells[0][0]['delta_quantity'] == 1.0
-    assert cells[1][0]['status'] == 'increasing'
-    assert cells[1][0]['delta_quantity'] == 1.0
-    assert cells[2][0]['status'] == 'decreasing'
-    assert cells[2][0]['delta_quantity'] == -2.0
-    assert cells[3][0]['status'] == 'pending_exit'
-    assert cells[3][0]['quantity'] == 1.0
-    assert cells[3][0]['delta_quantity'] == -1.0
-    assert cells[4][0]['status'] == 'exiting'
-    assert cells[4][0]['delta_quantity'] == -1.0
-    assert payload['matrices'][0]['rows'][-2]['name'] == '总资产'
-    assert cells[-2][0]['status'] == 'increasing'
-    assert cells[-2][0]['amount'] == 1300.0
-    assert cells[-2][0]['delta_amount'] == 100.0
-    assert payload['matrices'][0]['rows'][-1]['name'] == '现金'
-    assert cells[-1][0]['status'] == 'decreasing'
-    assert cells[-1][0]['amount'] == 900.0
-    assert cells[-1][0]['delta_amount'] == -100.0
+    assert payload['matrices'][0]['rows'][0]['name'] == '总资产'
+    assert cells[0][0]['status'] == 'increasing'
+    assert cells[0][0]['amount'] == 1300.0
+    assert cells[0][0]['delta_amount'] == 100.0
+    assert payload['matrices'][0]['rows'][1]['name'] == '现金'
+    assert cells[1][0]['status'] == 'decreasing'
+    assert cells[1][0]['amount'] == 900.0
+    assert cells[1][0]['delta_amount'] == -100.0
+    assert cells[2][0]['status'] == 'entering'
+    assert cells[2][0]['delta_quantity'] == 1.0
+    assert cells[3][0]['status'] == 'increasing'
+    assert cells[3][0]['delta_quantity'] == 1.0
+    assert cells[4][0]['status'] == 'decreasing'
+    assert cells[4][0]['delta_quantity'] == -2.0
+    assert cells[5][0]['status'] == 'pending_exit'
+    assert cells[5][0]['quantity'] == 1.0
+    assert cells[5][0]['delta_quantity'] == -1.0
+    assert cells[6][0]['status'] == 'exiting'
+    assert cells[6][0]['delta_quantity'] == -1.0
 
 
 def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch):
@@ -266,3 +268,87 @@ def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch
     payload = resp.get_json()
     collapsed = next(matrix for matrix in payload['matrices'] if matrix['key'] == 'collapsed')
     assert collapsed['rows'][0]['name'] == 'SM.CZC'
+
+
+def test_group_snapshot_rebuilds_zero_hold_amounts_from_simulated_positions(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx = pd.Timestamp('2026-01-01 09:30:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((1, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((1, 1), dtype=float),
+        gross_returns_np=np.zeros((1, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        returns_np=np.zeros((1, 1), dtype=float),
+        period_returns_np=np.zeros((1, 1), dtype=float),
+        membership_np=np.array([[[True]]], dtype=bool),
+        products_by_group={},
+        valid_cols=['P0'],
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        index_list=[idx],
+        group_names={0: 'A1'},
+        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
+        position_quantities_np=np.array([[[3.0]]], dtype=float),
+        price_np=np.array([[100.0]], dtype=float),
+        point_value_vec=np.array([10.0], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    assert payload['matrices'][0]['cells'][0][0]['amount'] == 3000.0
+
+
+def test_group_snapshot_reports_neighbor_change_timestamps(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx0 = pd.Timestamp('2026-01-01 09:30:00')
+    idx1 = pd.Timestamp('2026-01-01 09:31:00')
+    idx2 = pd.Timestamp('2026-01-01 09:32:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((3, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((3, 1), dtype=float),
+        gross_returns_np=np.zeros((3, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((3, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((3, 1, 1), dtype=float),
+        returns_np=np.zeros((3, 1), dtype=float),
+        period_returns_np=np.zeros((3, 1), dtype=float),
+        membership_np=np.array([[[True]], [[True]], [[False]]], dtype=bool),
+        products_by_group={},
+        valid_cols=['P0'],
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        index_list=[idx0, idx1, idx2],
+        group_names={0: 'A1'},
+        hold_amounts_np=np.array([[[100.0]], [[100.0]], [[0.0]]], dtype=float),
+        position_quantities_np=np.array([[[1.0]], [[1.0]], [[0.0]]], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx1.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    assert payload['has_prev_change'] is False
+    assert payload['has_next_change'] is True
+    assert payload['next_change_timestamp_ms'] == int(idx2.timestamp() * 1000)

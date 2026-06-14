@@ -22,6 +22,8 @@
     // ---------- 快照导航状态 ----------
     var _snapshotTimestamps = [];  // 所有可用时间点（epoch ms）
     var _snapshotCurrentMs = null; // 当前显示的时间点
+    var _snapshotPrevChangeMs = null;
+    var _snapshotNextChangeMs = null;
 
     function _selection() {
         return GT.panels && GT.panels.list && GT.panels.list.selection;
@@ -69,8 +71,11 @@
         // 加载中：禁用导航按钮并显示加载提示
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
-        if (prevBtn) { prevBtn.disabled = true; prevBtn.textContent = '⏳ 加载中...'; prevBtn.style.opacity = '0.6'; }
-        if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = '⏳ 加载中...'; nextBtn.style.opacity = '0.6'; }
+        var prevChangeBtn = document.getElementById('snapshot-prev-change-btn');
+        var nextChangeBtn = document.getElementById('snapshot-next-change-btn');
+        [prevBtn, nextBtn, prevChangeBtn, nextChangeBtn].forEach(function(btn) {
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 加载中...'; btn.style.opacity = '0.6'; }
+        });
         document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 加载中';
         document.getElementById('snapshot_body').innerHTML = '<div class="snapshot-empty-tab">正在加载持仓快照...</div>';
         document.getElementById('snapshot_flow_stats').innerHTML = '';
@@ -117,6 +122,8 @@
             }
             _snapshotTimestamps = data.all_timestamps_ms || [];
             _snapshotCurrentMs = data.timestamp_ms;
+            _snapshotPrevChangeMs = data.prev_change_timestamp_ms || null;
+            _snapshotNextChangeMs = data.next_change_timestamp_ms || null;
 
             try {
                 renderGroupSnapshot(data, data.timestamp_ms);
@@ -143,23 +150,37 @@
     function _updateSnapshotNavButtons(data) {
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
-        if (!prevBtn || !nextBtn) return;
+        var prevChangeBtn = document.getElementById('snapshot-prev-change-btn');
+        var nextChangeBtn = document.getElementById('snapshot-next-change-btn');
 
-        prevBtn.textContent = '◀ 前一个';
-        nextBtn.textContent = '后一个 ▶';
+        if (prevBtn) prevBtn.textContent = '◀ 前一时刻';
+        if (nextBtn) nextBtn.textContent = '后一时刻 ▶';
+        if (prevChangeBtn) prevChangeBtn.textContent = '◀ 前一变化';
+        if (nextChangeBtn) nextChangeBtn.textContent = '后一变化 ▶';
 
         if (!data) {
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
-            prevBtn.style.opacity = '0.4';
-            nextBtn.style.opacity = '0.4';
+            [prevBtn, nextBtn, prevChangeBtn, nextChangeBtn].forEach(function(btn) {
+                if (btn) { btn.disabled = true; btn.style.opacity = '0.4'; }
+            });
             return;
         }
 
-        prevBtn.disabled = !data.has_prev;
-        nextBtn.disabled = !data.has_next;
-        prevBtn.style.opacity = data.has_prev ? '1' : '0.4';
-        nextBtn.style.opacity = data.has_next ? '1' : '0.4';
+        if (prevBtn) {
+            prevBtn.disabled = !data.has_prev;
+            prevBtn.style.opacity = data.has_prev ? '1' : '0.4';
+        }
+        if (nextBtn) {
+            nextBtn.disabled = !data.has_next;
+            nextBtn.style.opacity = data.has_next ? '1' : '0.4';
+        }
+        if (prevChangeBtn) {
+            prevChangeBtn.disabled = !data.has_prev_change;
+            prevChangeBtn.style.opacity = data.has_prev_change ? '1' : '0.4';
+        }
+        if (nextChangeBtn) {
+            nextChangeBtn.disabled = !data.has_next_change;
+            nextChangeBtn.style.opacity = data.has_next_change ? '1' : '0.4';
+        }
     }
 
     /** 导航到上一个/下一个时点 */
@@ -170,6 +191,12 @@
         var newIdx = idx + (direction === 'next' ? 1 : -1);
         if (newIdx < 0 || newIdx >= _snapshotTimestamps.length) return;
         fetchGroupSnapshot(_snapshotTimestamps[newIdx]);
+    }
+
+    function navigateSnapshotChange(direction) {
+        var target = direction === 'next' ? _snapshotNextChangeMs : _snapshotPrevChangeMs;
+        if (target === null || target === undefined) return;
+        fetchGroupSnapshot(target);
     }
 
     function openSnapshotDrawer() {
@@ -188,9 +215,13 @@
         var closeBtn = document.getElementById('group-snapshot-drawer-close');
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
+        var prevChangeBtn = document.getElementById('snapshot-prev-change-btn');
+        var nextChangeBtn = document.getElementById('snapshot-next-change-btn');
         if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
         if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
         if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });
+        if (prevChangeBtn) prevChangeBtn.addEventListener('click', function() { navigateSnapshotChange('prev'); });
+        if (nextChangeBtn) nextChangeBtn.addEventListener('click', function() { navigateSnapshotChange('next'); });
         if (overlay) overlay.addEventListener('click', function(e) {
             if (e.target === overlay) closeSnapshotDrawer();
         });
@@ -234,6 +265,19 @@
         return (num > 0 ? '+' : '') + num.toFixed(6);
     }
 
+    function _formatQuantity(v) {
+        var num = Number(v);
+        if (!isFinite(num)) return '';
+        return String(Math.round(num));
+    }
+
+    function _formatSignedQuantity(v) {
+        var num = Number(v);
+        if (!isFinite(num) || Math.abs(num) <= 1e-12) return '0';
+        var rounded = Math.round(num);
+        return (rounded > 0 ? '+' : '') + String(rounded);
+    }
+
     function _formatSignedAmount(v) {
         var num = Number(v);
         if (!isFinite(num) || Math.abs(num) <= 1e-12) return '0.00';
@@ -262,14 +306,25 @@
     function _renderMatrixCell(cell) {
         if (!cell || cell.status === 'absent') return '<span class="snapshot-cell-empty">—</span>';
         var parts = [];
+        var statusLabels = {
+            entering: '新增',
+            increasing: '增加',
+            decreasing: '减少',
+            exiting: '退出',
+            pending_exit: '待卖',
+            holding: '持有',
+        };
+        if (statusLabels[cell.status]) {
+            parts.push('<div class="snapshot-status-label">' + statusLabels[cell.status] + '</div>');
+        }
         parts.push(_renderProduct(cell.product));
         var meta = [];
-        if (cell.quantity !== null && cell.quantity !== undefined) meta.push('持仓 ' + Number(cell.quantity).toFixed(6));
+        if (cell.quantity !== null && cell.quantity !== undefined) meta.push('持仓 ' + _formatQuantity(cell.quantity));
         if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
         if (meta.length) parts.push('<div class="snapshot-cell-meta">' + meta.join(' · ') + '</div>');
         var deltaParts = [];
         if (cell.delta_quantity !== null && cell.delta_quantity !== undefined) {
-            deltaParts.push('变化 ' + _formatSigned(cell.delta_quantity));
+            deltaParts.push('变化 ' + _formatSignedQuantity(cell.delta_quantity));
         }
         if (cell.delta_amount !== null && cell.delta_amount !== undefined) {
             deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount));

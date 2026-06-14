@@ -486,8 +486,10 @@
     <div id="group-snapshot-drawer">
         <div id="group-snapshot-drawer-header">
             <div style="display:flex;align-items:center;gap:8px;">
-                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="上一个时点">◀ 前一个</button>
-                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="下一个时点">后一个 ▶</button>
+                <button id="snapshot-prev-btn" class="snapshot-nav-btn" title="前一时刻">◀ 前一时刻</button>
+                <button id="snapshot-next-btn" class="snapshot-nav-btn" title="后一时刻">后一时刻 ▶</button>
+                <button id="snapshot-prev-change-btn" class="snapshot-nav-btn" title="前一个持仓发生变化的时刻">◀ 前一变化</button>
+                <button id="snapshot-next-change-btn" class="snapshot-nav-btn" title="后一个持仓发生变化的时刻">后一变化 ▶</button>
                 <strong id="snapshot_title" class="snapshot-title">📋 分组持仓快照</strong>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -1016,6 +1018,16 @@
         font-size: 11px;
         line-height: 1.35;
         font-weight: 600;
+    }
+    #group_test_module .snapshot-status-label {
+        display: inline-block;
+        margin-bottom: 3px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(255,255,255,0.72);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.25;
     }
     #group_test_module .snapshot-delta-increase {
         color: #15803d;

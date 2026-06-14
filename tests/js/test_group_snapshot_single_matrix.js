@@ -19,20 +19,12 @@ GT.results.snapshot.renderGroupSnapshot({
         { name: 'Group B', label: 'Group B', count: 2 },
       ],
       rows: [
-        { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } },
-        { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } },
         { name: '总资产', desc: 'Total Equity' },
         { name: '现金', desc: 'Cash' },
+        { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } },
+        { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } },
       ],
       cells: [
-        [
-          { status: 'increasing', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 2, amount: 10000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
-          { status: 'entering', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
-        ],
-        [
-          { status: 'absent' },
-          { status: 'pending_exit', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500, delta_quantity: -2, delta_amount: -2500, change_direction: 'decrease' },
-        ],
         [
           { status: 'increasing', product: { name: '总资产', desc: 'Total Equity' }, quantity: null, amount: 1300, delta_quantity: null, delta_amount: 100, change_direction: 'increase' },
           { status: 'decreasing', product: { name: '总资产', desc: 'Total Equity' }, quantity: null, amount: 1100, delta_quantity: null, delta_amount: -50, change_direction: 'decrease' },
@@ -40,6 +32,14 @@ GT.results.snapshot.renderGroupSnapshot({
         [
           { status: 'decreasing', product: { name: '现金', desc: 'Cash' }, quantity: null, amount: 900, delta_quantity: null, delta_amount: -100, change_direction: 'decrease' },
           { status: 'increasing', product: { name: '现金', desc: 'Cash' }, quantity: null, amount: 1200, delta_quantity: null, delta_amount: 200, change_direction: 'increase' },
+        ],
+        [
+          { status: 'increasing', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 2, amount: 10000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
+          { status: 'entering', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
+        ],
+        [
+          { status: 'absent' },
+          { status: 'pending_exit', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500, delta_quantity: -2, delta_amount: -2500, change_direction: 'decrease' },
         ],
       ],
     },
@@ -75,11 +75,15 @@ assert.match(body, /现金/);
 const toggle = document.getElementById('snapshot_matrix_toggle').innerHTML;
 assert.match(toggle, /全产品/);
 assert.match(toggle, /期限折叠/);
-assert.match(body, /持仓 2\.000000/);
+assert.match(body, /持仓 2/);
 assert.match(body, /金额 10000\.00/);
-assert.match(body, /变化 \+1\.000000/);
-assert.match(body, /变化 -2\.000000/);
+assert.match(body, /变化 \+1/);
+assert.match(body, /变化 -2/);
 assert.match(body, /金额 \+100\.00/);
 assert.match(body, /金额 -100\.00/);
+assert.match(body, /新增/);
+assert.match(body, /增加/);
+assert.match(body, /减少/);
+assert.match(body, /待卖/);
 
 console.log('PASS: group snapshot renders matrix toggle and matrix table');

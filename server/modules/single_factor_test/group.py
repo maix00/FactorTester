@@ -172,6 +172,30 @@ def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product
     return qty, amt
 
 
+def _snapshot_amounts_from_simulated_positions(group_result: Any):
+    positions = getattr(group_result, 'position_quantities_np', None)
+    prices = getattr(group_result, 'price_np', None)
+    if positions is None or prices is None:
+        return None
+    try:
+        position_arr = np.asarray(positions, dtype=float)
+        price_arr = np.asarray(prices, dtype=float)
+        if position_arr.ndim != 3 or price_arr.ndim != 2:
+            return None
+        if position_arr.shape[0] != price_arr.shape[0] or position_arr.shape[2] != price_arr.shape[1]:
+            return None
+        point_values = getattr(group_result, 'point_value_vec', None)
+        if point_values is None:
+            point_values_arr = np.ones(price_arr.shape[1], dtype=float)
+        else:
+            point_values_arr = np.asarray(point_values, dtype=float).reshape(price_arr.shape[1])
+            point_values_arr = np.where(np.isfinite(point_values_arr) & (point_values_arr > 0), point_values_arr, 1.0)
+        amount_arr = position_arr * price_arr[:, np.newaxis, :] * point_values_arr[np.newaxis, np.newaxis, :]
+        return np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)
+    except Exception:
+        return None
+
+
 def _snapshot_group_label(group_idx: int, group_names: Any) -> str:
     if isinstance(group_names, dict):
         for key in (group_idx, str(group_idx)):
@@ -194,6 +218,17 @@ def _build_snapshot_matrix(
 ) -> dict[str, Any]:
     positions = getattr(group_result, 'position_quantities_np', None)
     amounts = getattr(group_result, 'hold_amounts_np', None)
+    fallback_amounts = _snapshot_amounts_from_simulated_positions(group_result)
+    if amounts is None:
+        amounts = fallback_amounts
+    elif fallback_amounts is not None:
+        try:
+            amount_arr = np.asarray(amounts, dtype=float)
+            position_arr = np.asarray(positions, dtype=float) if positions is not None else None
+            if position_arr is not None and np.any(np.abs(position_arr) > 1e-12) and not np.any(np.abs(np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)) > 1e-12):
+                amounts = fallback_amounts
+        except Exception:
+            pass
     memberships = getattr(group_result, 'membership_np', None)
     total_equity_np = getattr(group_result, 'total_equity_np', None)
     cash_np = getattr(group_result, 'cash_np', None)
@@ -317,6 +352,50 @@ def _build_snapshot_matrix(
         })
 
     cells = []
+    summary_cells = []
+    summary_keys = []
+
+    def _append_amount_row(row_key: str, display: dict[str, Any], matrix: Any) -> None:
+        if matrix is None or t_idx is None or t_idx >= matrix.shape[0]:
+            return
+        amount_cells = []
+        for g_idx in range(len(per_group)):
+            current_amount = _safe_float(matrix[t_idx, g_idx]) if g_idx < matrix.shape[1] else None
+            previous_amount = None
+            if prev_t_idx is not None and prev_t_idx < matrix.shape[0] and g_idx < matrix.shape[1]:
+                previous_amount = _safe_float(matrix[prev_t_idx, g_idx])
+            current_amount = 0.0 if current_amount is None else current_amount
+            previous_amount = 0.0 if previous_amount is None else previous_amount
+            delta_amount = current_amount - previous_amount
+            if delta_amount > 1e-12:
+                status = 'increasing'
+                direction = 'increase'
+            elif delta_amount < -1e-12:
+                status = 'decreasing'
+                direction = 'decrease'
+            else:
+                status = 'holding'
+                direction = 'flat'
+            amount_cells.append({
+                'status': status,
+                'product': display,
+                'quantity': None,
+                'amount': round(float(current_amount), 6),
+                'previous_quantity': None,
+                'previous_amount': round(float(previous_amount), 6),
+                'delta_quantity': None,
+                'delta_amount': round(float(delta_amount), 6),
+                'change_direction': direction,
+                'pending_exit': False,
+                'source_names': [],
+            })
+        row_meta[row_key] = display
+        summary_keys.append(row_key)
+        summary_cells.append(amount_cells)
+
+    _append_amount_row('__total_equity__', {'name': '总资产', 'desc': 'Total Equity'}, total_equity_np)
+    _append_amount_row('__cash__', {'name': '现金', 'desc': 'Cash'}, cash_np)
+
     for row_key in row_order:
         row_cells = []
         row_display = row_meta.get(row_key) or _snapshot_product_display(row_key)
@@ -366,56 +445,12 @@ def _build_snapshot_matrix(
             })
         cells.append(row_cells)
 
-    def _append_amount_row(row_key: str, display: dict[str, Any], matrix: Any) -> None:
-        if matrix is None or t_idx is None or t_idx >= matrix.shape[0]:
-            return
-        amount_cells = []
-        for g_idx in range(len(per_group)):
-            current_amount = _safe_float(matrix[t_idx, g_idx]) if g_idx < matrix.shape[1] else None
-            previous_amount = None
-            if prev_t_idx is not None and prev_t_idx < matrix.shape[0] and g_idx < matrix.shape[1]:
-                previous_amount = _safe_float(matrix[prev_t_idx, g_idx])
-            current_amount = 0.0 if current_amount is None else current_amount
-            previous_amount = 0.0 if previous_amount is None else previous_amount
-            delta_amount = current_amount - previous_amount
-            if delta_amount > 1e-12:
-                status = 'increasing'
-                direction = 'increase'
-            elif delta_amount < -1e-12:
-                status = 'decreasing'
-                direction = 'decrease'
-            else:
-                status = 'holding'
-                direction = 'flat'
-            amount_cells.append({
-                'status': status,
-                'product': display,
-                'quantity': None,
-                'amount': round(float(current_amount), 6),
-                'previous_quantity': None,
-                'previous_amount': round(float(previous_amount), 6),
-                'delta_quantity': None,
-                'delta_amount': round(float(delta_amount), 6),
-                'change_direction': direction,
-                'pending_exit': False,
-                'source_names': [],
-            })
-        row_meta[row_key] = display
-        cells.append(amount_cells)
-
-    _append_amount_row('__total_equity__', {'name': '总资产', 'desc': 'Total Equity'}, total_equity_np)
-    _append_amount_row('__cash__', {'name': '现金', 'desc': 'Cash'}, cash_np)
-
     return {
         'key': matrix_key,
         'label': matrix_label,
         'columns': columns,
-        'rows': [row_meta[k] for k in row_order] + [
-            row_meta[k]
-            for k in ('__total_equity__', '__cash__')
-            if k in row_meta
-        ],
-        'cells': cells,
+        'rows': [row_meta[k] for k in summary_keys] + [row_meta[k] for k in row_order],
+        'cells': summary_cells + cells,
     }
 
 
@@ -445,6 +480,26 @@ def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates
             collapse_term_structure=True,
         ),
     ]
+
+
+def _snapshot_change_indices(group_result: Any) -> list[int]:
+    positions = getattr(group_result, 'position_quantities_np', None)
+    memberships = getattr(group_result, 'membership_np', None)
+    source = positions if positions is not None else memberships
+    if source is None:
+        return []
+    try:
+        arr = np.asarray(source)
+        if arr.ndim != 3 or arr.shape[0] < 2:
+            return []
+        if arr.dtype == np.bool_:
+            changed = np.any(arr[1:] != arr[:-1], axis=(1, 2))
+        else:
+            arr = np.nan_to_num(np.asarray(arr, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
+            changed = np.any(np.abs(arr[1:] - arr[:-1]) > 1e-12, axis=(1, 2))
+        return [idx + 1 for idx, value in enumerate(changed) if bool(value)]
+    except Exception:
+        return []
 
 
 def _latest_group_result(tester: Any):
@@ -1341,6 +1396,19 @@ def get_group_snapshot():
         # 用最接近的 all_timestamps_ms 条目（而非前端传来的不精确 timestamp_ms）
         closest_ms = min(all_timestamps_ms, key=lambda x: abs(x - int(timestamp_ms)))
         current_index = all_timestamps_ms.index(closest_ms)
+        change_indices = _snapshot_change_indices(group_result)
+        change_timestamps_ms = [
+            int(time_epochs[idx] * 1000)
+            for idx in change_indices
+            if 0 <= idx < len(time_epochs)
+        ]
+        prev_change_ms = None
+        next_change_ms = None
+        for change_ms in change_timestamps_ms:
+            if change_ms < closest_ms:
+                prev_change_ms = change_ms
+            elif change_ms > closest_ms and next_change_ms is None:
+                next_change_ms = change_ms
 
         # ── 附加元信息供前端按 shortAlias 分层渲染 (refs #100) ──
         _raw_group_names = getattr(group_result, 'group_names', None) or {}
@@ -1359,6 +1427,11 @@ def get_group_snapshot():
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
+            'change_timestamps_ms': change_timestamps_ms,
+            'prev_change_timestamp_ms': prev_change_ms,
+            'next_change_timestamp_ms': next_change_ms,
+            'has_prev_change': prev_change_ms is not None,
+            'has_next_change': next_change_ms is not None,
             'group_names': snapshot_group_names,
             'summary': {
                 'avg_turnover': round(avg_turnover, 1),
