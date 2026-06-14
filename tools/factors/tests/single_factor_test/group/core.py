@@ -2214,19 +2214,6 @@ def simulate_group_trading_book(
                 close_fee_vec=None,
                 margin_factor=np.where(use_margin, margin_ratios, 1.0),
             )
-            target_amounts_before_floor = target_notional.copy()
-            raw_quantities = np.divide(
-                target_notional,
-                contract_value_row,
-                out=np.zeros_like(target_notional, dtype=float),
-                where=np.isfinite(contract_value_row) & (contract_value_row > 0),
-            )
-            allocation_targets = raw_quantities.copy()
-            buy_target = np.clip(allocation_targets - quantities, 0.0, None)
-            sell_target = np.clip(quantities - allocation_targets, 0.0, None)
-            desired_quantities = quantities - np.floor(sell_target / lot_sizes_row) * lot_sizes_row + np.floor(buy_target / lot_sizes_row) * lot_sizes_row
-            desired_quantities[:, ~executable] = quantities[:, ~executable]
-
             executable_capacity_t = np.full((M, P), np.inf, dtype=float)
             if has_percent_liquidity:
                 assert liquidity_capacity_arr is not None
@@ -2289,24 +2276,30 @@ def simulate_group_trading_book(
 
             desired_quantities[:, ~executable] = quantities[:, ~executable]
 
-            for _ in range(16):
-                buy_qty = np.clip(desired_quantities - quantities, 0.0, None)
-                sell_qty = np.clip(quantities - desired_quantities, 0.0, None)
-                buy_notional = buy_qty * contract_value_row
-                sell_notional = sell_qty * contract_value_row
-                buy_fee = buy_notional * open_rate_mat + buy_qty * open_fixed_mat
-                sell_fee = sell_notional * close_rate_mat + sell_qty * close_fixed_mat
-                position_notional = desired_quantities * contract_value_row
-                occupied = np.nansum(np.where(use_margin, position_notional * margin_ratios, position_notional), axis=1)
-                required = occupied + np.nansum(buy_fee, axis=1) + np.nansum(sell_fee, axis=1)
-                over = required > equity + 1e-12
-                if not over.any():
-                    break
+            # --- 整手离散空间下的现金约束 ---
+            # floor 到整手后离散量化可能导致 required > equity。
+            # 不需要循环逐步逼近：一次性按比例缩水 + 重新 floor。
+            def _compute_row_required(desired_row, current_row, row_idx):
+                dq = np.asarray(desired_row, dtype=float)
+                cq = np.asarray(current_row, dtype=float)
+                bq = np.clip(dq - cq, 0.0, None)
+                sq = np.clip(cq - dq, 0.0, None)
+                bn = bq * contract_value_row[0]
+                sn = sq * contract_value_row[0]
+                bf = bn * open_rate_mat[row_idx] + bq * open_fixed_mat[row_idx]
+                sf = sn * close_rate_mat[row_idx] + sq * close_fixed_mat[row_idx]
+                pn = dq * contract_value_row[0]
+                occ = np.nansum(np.where(use_margin[row_idx], pn * margin_ratios[row_idx], pn))
+                return float(occ + np.nansum(bf) + np.nansum(sf))
+
+            needed_row = np.array([_compute_row_required(desired_quantities[i], quantities[i], i) for i in range(M)])
+            over = needed_row > equity + 1e-12
+            if over.any():
                 scale = np.divide(
                     equity[over],
-                    required[over],
-                    out=np.zeros_like(equity[over]),
-                    where=required[over] > 0,
+                    needed_row[over],
+                    out=np.zeros(np.count_nonzero(over)),
+                    where=needed_row[over] > 0,
                 )
                 scaled = desired_quantities[over] * scale[:, np.newaxis]
                 over_rows = np.where(over)[0]
@@ -2320,6 +2313,8 @@ def simulate_group_trading_book(
                         executable_capacity_row=executable_capacity_t[row_idx],
                     )
 
+            # 余钱凑手：仅当 rescale 没改动本行时才尝试 pack
+            # （与原来 recover 语义一致：budget 不紧时用闲钱凑更多手）
             zero_rows = np.nansum(np.abs(desired_quantities - quantities), axis=1) <= 1e-12
             positive_buy_rows = np.nansum(np.clip(allocation_targets - quantities, 0.0, None), axis=1) > 1e-12
             no_sell_rows = np.nansum(np.clip(quantities - allocation_targets, 0.0, None), axis=1) <= 1e-12
