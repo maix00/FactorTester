@@ -359,11 +359,8 @@
             if (cell.planned_amount !== null && cell.planned_amount !== undefined) {
                 meta.push('计划金额 ' + _formatAmount(cell.planned_amount));
             }
-            if (cell.one_lot_required_cash !== null && cell.one_lot_required_cash !== undefined) {
-                meta.push('单手成本 ' + _formatAmount(cell.one_lot_required_cash));
-            }
-            if (cell.one_lot_margin !== null && cell.one_lot_margin !== undefined) {
-                meta.push('保证金 ' + _formatAmount(cell.one_lot_margin));
+            if (cell.target_budget_amount !== null && cell.target_budget_amount !== undefined) {
+                meta.push('目标预算 ' + _formatAmount(cell.target_budget_amount));
             }
             if (cell.liquidity_cap_amount !== null && cell.liquidity_cap_amount !== undefined) {
                 meta.push('成交额限额 ' + _formatAmount(cell.liquidity_cap_amount));

@@ -160,11 +160,13 @@ def _snapshot_actual_quantity(
     position_row: Any,
     amount_row: Any | None,
     product_idx: int,
-    *,
-    price_value: float | None = None,
-    point_value: float = 1.0,
     eps: float = 1e-12,
 ) -> tuple[float, float]:
+    """Read quantity and amount directly from simulate's pre-computed arrays.
+
+    NEVER recompute amount from price — amount comes from hold_amounts_np
+    (= position_notional in simulate, already using the correct open_price).
+    """
     qty = 0.0
     amt = 0.0
     if position_row is not None and product_idx < len(position_row):
@@ -173,10 +175,6 @@ def _snapshot_actual_quantity(
     if amount_row is not None and product_idx < len(amount_row):
         amt_value = _safe_float(amount_row[product_idx])
         amt = 0.0 if amt_value is None else amt_value
-    if abs(qty) > eps and price_value is not None:
-        price = _safe_float(price_value)
-        if price is not None and price > 0:
-            amt = qty * price * (point_value if point_value > 0 else 1.0)
     if abs(qty) <= eps:
         qty = 0.0
     if abs(amt) <= eps:
@@ -184,55 +182,7 @@ def _snapshot_actual_quantity(
     return qty, amt
 
 
-def _snapshot_amounts_from_simulated_positions(group_result: Any):
-    positions = getattr(group_result, 'position_quantities_np', None)
-    prices = getattr(group_result, 'price_np', None)
-    if positions is None or prices is None:
-        return None
-    try:
-        position_arr = np.asarray(positions, dtype=float)
-        price_arr = np.asarray(prices, dtype=float)
-        if position_arr.ndim != 3 or price_arr.ndim != 2:
-            return None
-        if position_arr.shape[0] != price_arr.shape[0] or position_arr.shape[2] != price_arr.shape[1]:
-            return None
-        point_values = getattr(group_result, 'point_value_vec', None)
-        if point_values is None:
-            point_values_arr = np.ones(price_arr.shape[1], dtype=float)
-        else:
-            point_values_arr = np.asarray(point_values, dtype=float).reshape(price_arr.shape[1])
-            point_values_arr = np.where(np.isfinite(point_values_arr) & (point_values_arr > 0), point_values_arr, 1.0)
-        amount_arr = position_arr * price_arr[:, np.newaxis, :] * point_values_arr[np.newaxis, np.newaxis, :]
-        return np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)
-    except Exception:
-        return None
 
-
-def _snapshot_pre_rebalance_amounts_from_simulated_positions(group_result: Any):
-    positions = getattr(group_result, 'position_quantities_np', None)
-    prices = getattr(group_result, 'price_np', None)
-    if positions is None or prices is None:
-        return None
-    try:
-        position_arr = np.asarray(positions, dtype=float)
-        price_arr = np.asarray(prices, dtype=float)
-        if position_arr.ndim != 3 or price_arr.ndim != 2:
-            return None
-        if position_arr.shape[0] != price_arr.shape[0] or position_arr.shape[2] != price_arr.shape[1]:
-            return None
-        prev_positions = np.zeros_like(position_arr, dtype=float)
-        if position_arr.shape[0] > 1:
-            prev_positions[1:] = position_arr[:-1]
-        point_values = getattr(group_result, 'point_value_vec', None)
-        if point_values is None:
-            point_values_arr = np.ones(price_arr.shape[1], dtype=float)
-        else:
-            point_values_arr = np.asarray(point_values, dtype=float).reshape(price_arr.shape[1])
-            point_values_arr = np.where(np.isfinite(point_values_arr) & (point_values_arr > 0), point_values_arr, 1.0)
-        amount_arr = prev_positions * price_arr[:, np.newaxis, :] * point_values_arr[np.newaxis, np.newaxis, :]
-        return np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)
-    except Exception:
-        return None
 
 
 def _snapshot_group_label(group_idx: int, group_names: Any) -> str:
@@ -273,25 +223,8 @@ def _build_snapshot_matrix(
     positions = getattr(group_result, 'position_quantities_np', None)
     amounts = getattr(group_result, 'hold_amounts_np', None)
     target_before_floor = getattr(group_result, 'target_amounts_before_floor_np', None)
-    fallback_amounts = _snapshot_amounts_from_simulated_positions(group_result)
-    prices = getattr(group_result, 'price_np', None)
-    point_values = getattr(group_result, 'point_value_vec', None)
-    open_ratios = getattr(group_result, 'open_ratio_vec', None)
-    open_fixed = getattr(group_result, 'open_fixed_vec', None)
-    margin_ratios = getattr(group_result, 'margin_ratio_vec', None)
-    margin_flags = getattr(group_result, 'is_margin_traded_vec', None)
-    if amounts is None:
-        amounts = fallback_amounts
-    elif fallback_amounts is not None:
-        try:
-            amount_arr = np.asarray(amounts, dtype=float)
-            position_arr = np.asarray(positions, dtype=float) if positions is not None else None
-            if position_arr is not None and np.any(np.abs(position_arr) > 1e-12) and not np.any(np.abs(np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)) > 1e-12):
-                amounts = fallback_amounts
-        except Exception:
-            pass
+    prev_end_amounts = getattr(group_result, 'prev_end_amounts_np', None)
     memberships = getattr(group_result, 'membership_np', None)
-    pre_rebalance_amounts = _snapshot_pre_rebalance_amounts_from_simulated_positions(group_result)
     total_equity_np = getattr(group_result, 'total_equity_np', None)
     cash_np = getattr(group_result, 'cash_np', None)
     pre_rebalance_total_equity_np = getattr(group_result, 'pre_rebalance_total_equity_np', None)
@@ -342,7 +275,8 @@ def _build_snapshot_matrix(
         return display
 
     product_rows = []
-    for raw_product in current_products:
+    raw_name_to_p_idx: dict[str, int] = {}
+    for p_idx, raw_product in enumerate(current_products):
         raw_name = _product_name(raw_product)
         resolved_product = _resolved_product(raw_product) if collapse_term_structure else raw_product
         row_key = _product_name(resolved_product if resolved_product is not None else raw_product)
@@ -351,15 +285,17 @@ def _build_snapshot_matrix(
             'raw_name': raw_name,
             'resolved_product': resolved_product,
             'row_key': row_key,
+            'p_idx': p_idx,
         })
+        raw_name_to_p_idx[raw_name] = p_idx
 
-    def _group_index_map(index: int) -> tuple[Any, Any]:
+    def _group_index_map(index: int) -> tuple[Any, Any, Any, Any, Any, Any]:
         cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
         cur_amt = amounts[t_idx, index] if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
         prev_pos = positions[prev_t_idx, index] if positions is not None and prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
         prev_amt = (
-            pre_rebalance_amounts[t_idx, index]
-            if pre_rebalance_amounts is not None and t_idx is not None and t_idx < pre_rebalance_amounts.shape[0]
+            prev_end_amounts[t_idx, index]
+            if prev_end_amounts is not None and t_idx is not None and t_idx < prev_end_amounts.shape[0]
             else amounts[prev_t_idx, index] if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0]
             else None
         )
@@ -389,15 +325,8 @@ def _build_snapshot_matrix(
             raw_name = product_row['raw_name']
             row_key = product_row['row_key']
             resolved_product = product_row['resolved_product']
-            cur_price = None
-            if prices is not None and t_idx is not None and t_idx < prices.shape[0] and p_idx < prices.shape[1]:
-                cur_price = _safe_float(prices[t_idx, p_idx])
-            cur_point_value = 1.0
-            if point_values is not None and p_idx < len(point_values):
-                pv = _safe_float(point_values[p_idx])
-                cur_point_value = 1.0 if pv is None or pv <= 0 else pv
-            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx, price_value=cur_price, point_value=cur_point_value)
-            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx, price_value=cur_price, point_value=cur_point_value)
+            cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
+            prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
             if row_key not in group_rows:
                 group_rows[row_key] = {
                     'name': row_key,
@@ -411,10 +340,6 @@ def _build_snapshot_matrix(
                     'target_budget_amount': 0.0,
                     'planned_qty': 0.0,
                     'planned_amount': 0.0,
-                    'planned_cost': 0.0,
-                    'one_lot_margin': 0.0,
-                    'one_lot_fee': 0.0,
-                    'one_lot_required_cash': 0.0,
                     'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
                 }
                 if row_key not in row_order:
@@ -436,29 +361,18 @@ def _build_snapshot_matrix(
             target_amount_value = None
             if target_before_floor is not None and t_idx is not None and t_idx < target_before_floor.shape[0] and g_idx < target_before_floor.shape[1] and p_idx < target_before_floor.shape[2]:
                 target_amount_value = _safe_float(target_before_floor[t_idx, g_idx, p_idx])
-            if target_amount_value is not None and cur_price is not None and cur_point_value > 0:
-                contract_value = cur_price * cur_point_value
-                if contract_value > 0:
-                    lot_size = _safe_float(getattr(group_result, 'min_trade_quantity_vec', None)[p_idx]) if getattr(group_result, 'min_trade_quantity_vec', None) is not None and p_idx < len(getattr(group_result, 'min_trade_quantity_vec', None)) else 1.0
-                    if lot_size is None or lot_size <= 0:
-                        lot_size = 1.0
-                    group_rows[row_key]['target_budget_amount'] += float(target_amount_value)
-                    margin_ratio_value = _safe_float(margin_ratios[p_idx]) if margin_ratios is not None and p_idx < len(margin_ratios) else 1.0
-                    if margin_ratio_value is None or margin_ratio_value <= 0:
-                        margin_ratio_value = 1.0
-                    use_margin_flag = bool(margin_flags[p_idx]) if margin_flags is not None and p_idx < len(margin_flags) else False
-                    one_lot_notional = contract_value * float(lot_size)
-                    one_lot_margin = one_lot_notional * (margin_ratio_value if use_margin_flag else 1.0)
-                    one_lot_fee = one_lot_notional * (_safe_float(open_ratios[p_idx]) or 0.0) + float(lot_size) * (_safe_float(open_fixed[p_idx]) or 0.0)
-                    group_rows[row_key]['one_lot_margin'] += float(one_lot_margin)
-                    group_rows[row_key]['one_lot_fee'] += float(one_lot_fee)
-                    one_lot_required_cash = float(one_lot_margin + one_lot_fee)
-                    group_rows[row_key]['one_lot_required_cash'] += one_lot_required_cash
-                    affordable_lots = float(np.floor(float(target_amount_value) / one_lot_required_cash)) if one_lot_required_cash > 0 else 0.0
-                    openable_qty = float(np.floor(affordable_lots / lot_size) * lot_size) if lot_size > 0 else float(affordable_lots)
-                    group_rows[row_key]['planned_amount'] += float(openable_qty) * float(contract_value)
-                    group_rows[row_key]['planned_cost'] += float(openable_qty) * float(one_lot_required_cash)
-                    group_rows[row_key]['planned_qty'] += float(openable_qty)
+            if target_amount_value is not None:
+                group_rows[row_key]['target_budget_amount'] += float(target_amount_value)
+            # planned_qty/planned_amount come directly from simulate arrays, NOT recomputed:
+            # - position_quantities_np = desired_quantities (after full pipeline:
+            #   liquidity cap → floor → cash packing)
+            # - hold_amounts_np = position_notional (= desired_quantities × open_price contract value)
+            if positions is not None and t_idx is not None and t_idx < positions.shape[0] and g_idx < positions.shape[1] and p_idx < positions.shape[2]:
+                sim_planned_qty = _safe_float(positions[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['planned_qty'] += float(sim_planned_qty)
+            if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] and g_idx < amounts.shape[1] and p_idx < amounts.shape[2]:
+                sim_planned_amount = _safe_float(amounts[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['planned_amount'] += float(sim_planned_amount)
         per_group.append(group_rows)
 
     columns = []
@@ -595,31 +509,27 @@ def _build_snapshot_matrix(
             open_reason = None
             planned_qty = row.get('planned_qty') or 0.0
             planned_amount = row.get('planned_amount') or 0.0
-            planned_cost = row.get('planned_cost') or 0.0
             target_budget_amount = row.get('target_budget_amount') or 0.0
-            one_lot_margin = row.get('one_lot_margin') or 0.0
-            one_lot_fee = row.get('one_lot_fee') or 0.0
-            one_lot_required_cash = row.get('one_lot_required_cash') or 0.0
             remaining_cash = None
-            if post_rebalance_cash_np is not None:
+            if post_rebalance_cash_np is not None and t_idx is not None:
                 try:
                     if 0 <= t_idx < post_rebalance_cash_np.shape[0] and 0 <= g_idx < post_rebalance_cash_np.shape[1]:
                         remaining_cash = _safe_float(post_rebalance_cash_np[t_idx, g_idx])
                 except Exception:
                     remaining_cash = None
             if desired_now and not cur_active:
-                if remaining_cash is not None and one_lot_required_cash > 0 and remaining_cash + 1e-12 < one_lot_required_cash:
-                    open_reason = (
-                        f"剩余现金约 {int(round(float(remaining_cash))):,} 元，小于一手总成本约 {int(round(float(one_lot_required_cash))):,} 元"
-                    )
-                elif remaining_cash is not None and one_lot_margin > 0 and remaining_cash + 1e-12 < one_lot_margin:
-                    open_reason = (
-                        f"剩余现金约 {int(round(float(remaining_cash))):,} 元，小于一手保证金约 {int(round(float(one_lot_margin))):,} 元"
-                    )
+                # selected but not opened — diagnose using simulate data
+                reasons = []
+                if remaining_cash is not None and remaining_cash < 1.0:
+                    reasons.append(f"剩余现金约 {int(round(float(remaining_cash))):,} 元")
+                if planned_qty < 1e-12 and target_budget_amount > 0:
+                    reasons.append(f"计划金额 {int(round(float(target_budget_amount))):,} 元，可开0手(流动性限额/保证金不足)")
+                if reasons:
+                    open_reason = '；'.join(reasons)
                 elif remaining_cash is not None:
                     open_reason = f"剩余现金约 {int(round(float(remaining_cash))):,} 元"
                 else:
-                    open_reason = '剩余现金不足以覆盖一手总成本'
+                    open_reason = '资金不足以开仓'
 
             if desired_now and not cur_active:
                 status = 'selected'
@@ -647,12 +557,18 @@ def _build_snapshot_matrix(
             liquidity_cap_amount = None
             if liquidity_capacity_np is not None and liquidity_modes and liquidity_percents:
                 try:
-                    if (0 <= g_idx < len(liquidity_modes) and
-                        liquidity_modes[g_idx] == 'percent' and
-                        0 <= t_idx < liquidity_capacity_np.shape[0] and
-                        0 <= g_idx < liquidity_capacity_np.shape[1] and
-                        0 <= p_idx < liquidity_capacity_np.shape[2]):
-                        raw_cap = _safe_float(liquidity_capacity_np[t_idx, g_idx, p_idx])
+                    # Use the first source product's p_idx to look up liquidity cap
+                    source_names = row.get('source_names', [])
+                    first_name = source_names[0] if source_names else row_key
+                    first_p_idx = raw_name_to_p_idx.get(first_name)
+                    if (first_p_idx is not None
+                        and 0 <= g_idx < len(liquidity_modes)
+                        and liquidity_modes[g_idx] == 'percent'
+                        and t_idx is not None
+                        and 0 <= t_idx < liquidity_capacity_np.shape[0]
+                        and 0 <= g_idx < liquidity_capacity_np.shape[1]
+                        and 0 <= first_p_idx < liquidity_capacity_np.shape[2]):
+                        raw_cap = _safe_float(liquidity_capacity_np[t_idx, g_idx, first_p_idx])
                         if raw_cap is not None and np.isfinite(raw_cap) and raw_cap > 0:
                             liquidity_cap_amount = round(float(raw_cap), 2)
                 except Exception:
@@ -673,11 +589,7 @@ def _build_snapshot_matrix(
                 'open_reason': open_reason,
                 'planned_qty': round(float(planned_qty), 6),
                 'planned_amount': round(float(planned_amount), 6),
-                'planned_cost': round(float(planned_cost), 6),
                 'target_budget_amount': round(float(target_budget_amount), 6),
-                'one_lot_margin': round(float(one_lot_margin), 6),
-                'one_lot_fee': round(float(one_lot_fee), 6),
-                'one_lot_required_cash': round(float(one_lot_required_cash), 6),
                 'liquidity_cap_amount': liquidity_cap_amount,
                 'source_names': row.get('source_names', []),
             })

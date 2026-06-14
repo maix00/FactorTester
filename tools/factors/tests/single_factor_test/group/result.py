@@ -37,6 +37,7 @@ class GroupRunResult:
     group_names: Any = None  # {expanded_group_index: display_name}
     hold_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期实际持仓金额 (refs #100)
     target_amounts_before_floor_np: np.ndarray | None = None  # (T, M, P) float — 每期调仓前目标持仓金额
+    prev_end_amounts_np: np.ndarray | None = None  # (T, M, P) float — 每期期初持仓金额(上期末) (refs #110)
     position_quantities_np: np.ndarray | None = None  # (T, M, P) float — 每期合约手数/单位数
     margin_occupied_np: np.ndarray | None = None  # (T, M) float — 每期保证金占用
     pre_rebalance_total_equity_np: np.ndarray | None = None  # (T, M) float — 本期调仓前总权益
