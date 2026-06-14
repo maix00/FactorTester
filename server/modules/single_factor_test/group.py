@@ -161,6 +161,14 @@ def _snapshot_actual_quantity(position_row: Any, amount_row: Any | None, product
     return qty, amt
 
 
+def _snapshot_group_label(group_idx: int, group_names: Any) -> str:
+    if isinstance(group_names, dict):
+        for key in (group_idx, str(group_idx)):
+            if key in group_names and group_names[key]:
+                return str(group_names[key])
+    return f'Group {group_idx + 1}'
+
+
 def _build_snapshot_matrix(
     *,
     matrix_key: str,
@@ -170,6 +178,7 @@ def _build_snapshot_matrix(
     fee_rates_by_name: dict[str, dict[str, float]],
     t_idx: int | None,
     prev_t_idx: int | None,
+    group_names: Any = None,
     collapse_term_structure: bool = False,
 ) -> dict[str, Any]:
     positions = getattr(group_result, 'position_quantities_np', None)
@@ -284,9 +293,11 @@ def _build_snapshot_matrix(
         for row_key, row in per_group[g_idx].items():
             if abs(row['current_qty']) > 1e-12 or abs(row['current_amount']) > 1e-12:
                 current_active += 1
+        label = _snapshot_group_label(g_idx, group_names)
         columns.append({
-            'name': f'Group {g_idx + 1}',
-            'label': f'Group {g_idx + 1}',
+            'name': label,
+            'label': label,
+            'index': g_idx,
             'count': current_active,
         })
 
@@ -303,21 +314,38 @@ def _build_snapshot_matrix(
             prev_active = abs(row['prev_qty']) > 1e-12 or abs(row['prev_amount']) > 1e-12
             desired_now = bool(row['current_membership'])
             desired_prev = bool(row['prev_membership'])
+            delta_qty = row['current_qty'] - row['prev_qty']
+            delta_amount = row['current_amount'] - row['prev_amount']
             if cur_active and not prev_active:
                 status = 'entering'
             elif prev_active and not cur_active:
                 status = 'exiting'
-            elif cur_active and prev_active and not desired_now and desired_prev:
+            elif cur_active and not desired_now and (desired_prev or prev_active):
                 status = 'pending_exit'
+            elif cur_active and prev_active and delta_qty > 1e-12:
+                status = 'increasing'
+            elif cur_active and prev_active and delta_qty < -1e-12:
+                status = 'decreasing'
             elif cur_active:
                 status = 'holding'
             else:
                 status = 'absent'
+            if delta_qty > 1e-12 or delta_amount > 1e-12:
+                change_direction = 'increase'
+            elif delta_qty < -1e-12 or delta_amount < -1e-12:
+                change_direction = 'decrease'
+            else:
+                change_direction = 'flat'
             row_cells.append({
                 'status': status,
                 'product': row_display,
                 'quantity': round(float(row['current_qty']), 6),
                 'amount': round(float(row['current_amount']), 6),
+                'previous_quantity': round(float(row['prev_qty']), 6),
+                'previous_amount': round(float(row['prev_amount']), 6),
+                'delta_quantity': round(float(delta_qty), 6),
+                'delta_amount': round(float(delta_amount), 6),
+                'change_direction': change_direction,
                 'pending_exit': status == 'pending_exit',
                 'source_names': row.get('source_names', []),
             })
@@ -333,6 +361,7 @@ def _build_snapshot_matrix(
 
 
 def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates_by_name: dict[str, dict[str, float]], t_idx: int | None, prev_t_idx: int | None) -> list[dict[str, Any]]:
+    group_names = getattr(group_result, 'group_names', None) or {}
     return [
         _build_snapshot_matrix(
             matrix_key='raw',
@@ -342,6 +371,7 @@ def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates
             fee_rates_by_name=fee_rates_by_name,
             t_idx=t_idx,
             prev_t_idx=prev_t_idx,
+            group_names=group_names,
             collapse_term_structure=False,
         ),
         _build_snapshot_matrix(
@@ -352,6 +382,7 @@ def _build_snapshot_matrices(group_result: Any, valid_cols: list[str], fee_rates
             fee_rates_by_name=fee_rates_by_name,
             t_idx=t_idx,
             prev_t_idx=prev_t_idx,
+            group_names=group_names,
             collapse_term_structure=True,
         ),
     ]

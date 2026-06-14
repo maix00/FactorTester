@@ -935,6 +935,10 @@
         color: #1a7d36;
         background: #e6f7ed;
     }
+    #group_test_module .snapshot-cell-increasing {
+        color: #1a7d36;
+        background: #f0fdf4;
+    }
     #group_test_module .snapshot-cell-entering .snapshot-product-name {
         color: #1a7d36;
         font-weight: 500;
@@ -942,6 +946,10 @@
     #group_test_module .snapshot-cell-exiting {
         color: #b91c1c;
         background: #fef2f2;
+    }
+    #group_test_module .snapshot-cell-decreasing {
+        color: #b91c1c;
+        background: #fff5f5;
     }
     #group_test_module .snapshot-cell-absent {
         color: #c8cdd3;
@@ -955,6 +963,16 @@
     }
     #group_test_module .snapshot-cell-exiting::before {
         content: '- ';
+        color: #b91c1c;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-cell-increasing::before {
+        content: '↑ ';
+        color: #1a7d36;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-cell-decreasing::before {
+        content: '↓ ';
         color: #b91c1c;
         font-weight: 600;
     }
@@ -992,6 +1010,22 @@
     #group_test_module .snapshot-cell-meta {
         margin-top: 2px;
         line-height: 1.35;
+    }
+    #group_test_module .snapshot-cell-delta {
+        margin-top: 2px;
+        font-size: 11px;
+        line-height: 1.35;
+        font-weight: 600;
+    }
+    #group_test_module .snapshot-delta-increase {
+        color: #15803d;
+    }
+    #group_test_module .snapshot-delta-decrease {
+        color: #b91c1c;
+    }
+    #group_test_module .snapshot-delta-flat {
+        color: #667085;
+        font-weight: 500;
     }
     #group_test_module .snapshot-cell-empty {
         color: #98a2b3;

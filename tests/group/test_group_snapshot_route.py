@@ -9,6 +9,7 @@ from flask import Flask
 
 from server.modules.single_factor_test import group as group_routes
 from server.modules.single_factor_test import sft_bp
+from sources.LocalCNFutures import CNFutures as cn_futures_module
 from tools.factors.tests.single_factor_test.group.result import GroupRunResult
 
 
@@ -147,3 +148,106 @@ def test_group_snapshot_response_is_strict_json_when_positions_have_nonfinite_va
     assert payload['success'] is True
     assert payload['matrices'][0]['cells'][0][0]['quantity'] == 0.0
     assert payload['matrices'][0]['cells'][1][0]['amount'] == 0.0
+
+
+def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    idx0 = pd.Timestamp('2026-01-01 09:30:00')
+    idx1 = pd.Timestamp('2026-01-01 09:31:00')
+    products = ['P_NEW', 'P_INC', 'P_DEC', 'P_PENDING', 'P_EXIT']
+    memberships = np.array([
+        [[False, True, True, True, True]],
+        [[True, True, True, False, False]],
+    ], dtype=bool)
+    positions = np.array([
+        [[0.0, 1.0, 3.0, 2.0, 1.0]],
+        [[1.0, 2.0, 1.0, 1.0, 0.0]],
+    ], dtype=float)
+    amounts = positions * 100.0
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((2, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((2, 1), dtype=float),
+        gross_returns_np=np.zeros((2, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((2, 1, len(products)), dtype=float),
+        product_fee_contrib_np=np.zeros((2, 1, len(products)), dtype=float),
+        returns_np=np.zeros((2, 1), dtype=float),
+        period_returns_np=np.zeros((2, 1), dtype=float),
+        membership_np=memberships,
+        products_by_group={},
+        valid_cols=products,
+        open_ratio_vec=np.zeros(len(products), dtype=float),
+        close_ratio_vec=np.zeros(len(products), dtype=float),
+        close_today_ratio_vec=np.zeros(len(products), dtype=float),
+        index_list=[idx0, idx1],
+        group_names={0: 'A1'},
+        hold_amounts_np=amounts,
+        position_quantities_np=positions,
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx1.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    cells = payload['matrices'][0]['cells']
+    assert payload['matrices'][0]['columns'][0]['label'] == 'A1'
+    assert cells[0][0]['status'] == 'entering'
+    assert cells[0][0]['delta_quantity'] == 1.0
+    assert cells[1][0]['status'] == 'increasing'
+    assert cells[1][0]['delta_quantity'] == 1.0
+    assert cells[2][0]['status'] == 'decreasing'
+    assert cells[2][0]['delta_quantity'] == -2.0
+    assert cells[3][0]['status'] == 'pending_exit'
+    assert cells[3][0]['quantity'] == 1.0
+    assert cells[3][0]['delta_quantity'] == -1.0
+    assert cells[4][0]['status'] == 'exiting'
+    assert cells[4][0]['delta_quantity'] == -1.0
+
+
+def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch):
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.register_blueprint(sft_bp)
+
+    cn_futures_module.CNFutures('SM.CZC')
+    idx = pd.Timestamp('2026-01-01 09:30:00')
+    group_result = GroupRunResult(
+        fee_costs_np=np.zeros((1, 1), dtype=float),
+        trade_notional_ratio_np=np.zeros((1, 1), dtype=float),
+        gross_returns_np=np.zeros((1, 1), dtype=float),
+        product_gross_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        product_fee_contrib_np=np.zeros((1, 1, 1), dtype=float),
+        returns_np=np.zeros((1, 1), dtype=float),
+        period_returns_np=np.zeros((1, 1), dtype=float),
+        membership_np=np.array([[[True]]], dtype=bool),
+        products_by_group={},
+        valid_cols=['CZCE|F|SM|2605'],
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        index_list=[idx],
+        group_names={0: 'A1'},
+        hold_amounts_np=np.array([[[100.0]]], dtype=float),
+        position_quantities_np=np.array([[[1.0]]], dtype=float),
+    )
+    tester = SimpleNamespace(results={'group': SimpleNamespace(group_result=group_result)}, last_group_factor='group')
+
+    monkeypatch.setattr(group_routes.runtime_state, 'get_factor_tester', lambda *args, **kwargs: tester)
+
+    client = app.test_client()
+    resp = client.post('/get_group_snapshot', json={
+        'submission_id': 'sub-1',
+        'timestamp_ms': int(idx.timestamp() * 1000),
+    })
+
+    payload = resp.get_json()
+    collapsed = next(matrix for matrix in payload['matrices'] if matrix['key'] == 'collapsed')
+    assert collapsed['rows'][0]['name'] == 'SM.CZC'

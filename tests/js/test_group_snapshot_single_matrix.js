@@ -24,12 +24,12 @@ GT.results.snapshot.renderGroupSnapshot({
       ],
       cells: [
         [
-          { status: 'holding', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 2, amount: 10000 },
-          { status: 'entering', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000 },
+          { status: 'increasing', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 2, amount: 10000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
+          { status: 'entering', product: { name: 'IF', desc: '沪深300', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 1, amount: 5000, delta_quantity: 1, delta_amount: 5000, change_direction: 'increase' },
         ],
         [
           { status: 'absent' },
-          { status: 'pending_exit', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500 },
+          { status: 'pending_exit', product: { name: 'IC', desc: '中证500', fee: { open_ratio: 0.001, close_ratio: 0.002 } }, quantity: 3, amount: 7500, delta_quantity: -2, delta_amount: -2500, change_direction: 'decrease' },
         ],
       ],
     },
@@ -65,5 +65,7 @@ assert.match(toggle, /全产品/);
 assert.match(toggle, /期限折叠/);
 assert.match(body, /持仓 2\.000000/);
 assert.match(body, /金额 10000\.00/);
+assert.match(body, /变化 \+1\.000000/);
+assert.match(body, /变化 -2\.000000/);
 
 console.log('PASS: group snapshot renders matrix toggle and matrix table');

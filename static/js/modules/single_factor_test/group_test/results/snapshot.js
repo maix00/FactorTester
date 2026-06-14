@@ -228,6 +228,18 @@
         return Math.abs(num) >= 1 ? num.toFixed(2) : num.toFixed(6);
     }
 
+    function _formatSigned(v) {
+        var num = Number(v);
+        if (!isFinite(num) || Math.abs(num) <= 1e-12) return '0.000000';
+        return (num > 0 ? '+' : '') + num.toFixed(6);
+    }
+
+    function _formatSignedAmount(v) {
+        var num = Number(v);
+        if (!isFinite(num) || Math.abs(num) <= 1e-12) return '0.00';
+        return (num > 0 ? '+' : '') + _formatAmount(num);
+    }
+
     function _renderProduct(p) {
         if (!p) return '—';
         if (typeof p === 'string') return '<span class="snapshot-product-name">' + _escape(p) + '</span>';
@@ -255,6 +267,17 @@
         if (cell.quantity !== null && cell.quantity !== undefined) meta.push('持仓 ' + Number(cell.quantity).toFixed(6));
         if (cell.amount !== null && cell.amount !== undefined) meta.push('金额 ' + _formatAmount(cell.amount));
         if (meta.length) parts.push('<div class="snapshot-cell-meta">' + meta.join(' · ') + '</div>');
+        var deltaParts = [];
+        if (cell.delta_quantity !== null && cell.delta_quantity !== undefined) {
+            deltaParts.push('变化 ' + _formatSigned(cell.delta_quantity));
+        }
+        if (cell.delta_amount !== null && cell.delta_amount !== undefined) {
+            deltaParts.push('金额 ' + _formatSignedAmount(cell.delta_amount));
+        }
+        if (deltaParts.length) {
+            var direction = cell.change_direction || 'flat';
+            parts.push('<div class="snapshot-cell-delta snapshot-delta-' + _escape(direction) + '">' + deltaParts.join(' · ') + '</div>');
+        }
         return parts.join('');
     }
 
@@ -308,7 +331,8 @@
             html += '<td class="snapshot-prod-name-cell">' + _renderProduct(row) + '</td>';
             (matrix.cells && matrix.cells[rowIndex] ? matrix.cells[rowIndex] : []).forEach(function(cell) {
                 var status = cell && cell.status ? cell.status : 'absent';
-                html += '<td class="snapshot-cell-' + status + '">' + _renderMatrixCell(cell) + '</td>';
+                var direction = cell && cell.change_direction ? cell.change_direction : 'flat';
+                html += '<td class="snapshot-cell-' + status + ' snapshot-change-' + _escape(direction) + '">' + _renderMatrixCell(cell) + '</td>';
             });
             html += '</tr>';
         });

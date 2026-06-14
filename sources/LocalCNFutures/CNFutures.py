@@ -121,7 +121,7 @@ def _patch_czc_contract_decade(row: pd.Series) -> Optional[str]:
 
 
 def _contract_to_uid(contract: Optional[str]) -> Optional[str]:
-    if not contract or '.' not in contract:
+    if not isinstance(contract, str) or '.' not in contract:
         return None
     product_month, exchange = contract.split('.')
     first_digit = next((i for i, c in enumerate(product_month) if c.isdigit()), len(product_month))
@@ -166,8 +166,8 @@ def _cn_futures_contract_maps(path: Optional[str] = None) -> tuple[Dict[str, str
             for row in mapping.itertuples(index=False)
         }
         product_to_contracts: Dict[str, List[str]] = {}
-        for row in mapping.itertuples(index=False):
-            product_to_contracts.setdefault(str(row.PRODUCT), []).append(str(row.CONTRACT_UID))
+        for contract_uid, product_name in contract_to_product.items():
+            product_to_contracts.setdefault(product_name, []).append(contract_uid)
 
         _CNFUTURES_CONTRACT_TO_PRODUCT_BY_PATH[path] = contract_to_product
         _CNFUTURES_PRODUCT_TO_CONTRACTS_BY_PATH[path] = product_to_contracts
@@ -219,8 +219,12 @@ class CNFutures(Futures):
 
     @classmethod
     def get_contract_parent(cls, contract_uid: str, mapping_path: Optional[str] = None) -> Optional["CNFutures"]:
-        contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
-        product_name = contract_to_product.get(str(contract_uid))
+        product_name = None
+        try:
+            contract_to_product, _ = _cn_futures_contract_maps(mapping_path)
+            product_name = contract_to_product.get(str(contract_uid))
+        except Exception:
+            product_name = None
         parent = cls.get_by_product_name(product_name) if product_name else None
         if parent is not None:
             return parent
