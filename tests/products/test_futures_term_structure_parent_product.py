@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tools.products import AdjustableTermStructure as ats
 from tools.products.Futures import Futures, FuturesContract
+from tools.products.product_utils import product_display_name
 from sources.LocalCNFutures import CNFutures as cn_futures_module
 
 
@@ -27,6 +28,24 @@ def test_futures_contract_parent_product_resolves_from_term_structure(monkeypatc
     assert calls['count'] == first_count
     assert ats.resolve_term_structure_product(contract).name == parent.name
     assert ats.resolve_term_structure_product('UNIT2406.TEST').name == parent.name
+
+
+def test_product_display_name_falls_back_to_parent_product_desc(monkeypatch):
+    parent = Futures('DESC.TEST', term_structure_path='/tmp/desc-term-structure.parquet', _local_only=True)
+    parent.desc = '描述品种'
+    contract = FuturesContract('DESC2406.TEST', _local_only=True)
+
+    def fake_get_contract_product_map(path):
+        if path == '/tmp/desc-term-structure.parquet':
+            return {'DESC2406.TEST': 'DESC.TEST'}
+        return {}
+
+    monkeypatch.setattr(ats, 'get_contract_product_map', fake_get_contract_product_map)
+
+    display = product_display_name(contract)
+
+    assert display['name'] == 'DESC2406.TEST'
+    assert display['desc'] == '描述品种'
 
 
 def test_cn_futures_contract_parent_product_uses_cn_futures_mapping(monkeypatch):

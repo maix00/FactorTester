@@ -166,7 +166,7 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         [[0.0, 1.0, 3.0, 2.0, 1.0]],
         [[1.0, 2.0, 1.0, 1.0, 0.0]],
     ], dtype=float)
-    amounts = positions * 100.0
+    amounts = positions * np.array([[[100.0] * len(products)], [[110.0] * len(products)]], dtype=float)
     group_result = GroupRunResult(
         fee_costs_np=np.zeros((2, 1), dtype=float),
         trade_notional_ratio_np=np.zeros((2, 1), dtype=float),
@@ -185,7 +185,7 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         group_names={0: 'A1'},
         hold_amounts_np=amounts,
         position_quantities_np=positions,
-        price_np=np.ones((2, len(products)), dtype=float) * 100.0,
+        price_np=np.array([[100.0] * len(products), [110.0] * len(products)], dtype=float),
         point_value_vec=np.ones(len(products), dtype=float),
         pre_rebalance_total_equity_np=np.array([[1000.0], [1250.0]], dtype=float),
         post_rebalance_total_equity_np=np.array([[990.0], [1240.0]], dtype=float),
@@ -231,15 +231,30 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     assert cells[1][0]['delta_amount'] == -20.0
     assert cells[2][0]['status'] == 'entering'
     assert cells[2][0]['delta_quantity'] == 1.0
+    assert cells[2][0]['previous_amount'] == 0.0
+    assert cells[2][0]['amount'] == 110.0
+    assert cells[2][0]['delta_amount'] == 110.0
     assert cells[3][0]['status'] == 'increasing'
     assert cells[3][0]['delta_quantity'] == 1.0
+    assert cells[3][0]['previous_amount'] == 110.0
+    assert cells[3][0]['amount'] == 220.0
+    assert cells[3][0]['delta_amount'] == 110.0
     assert cells[4][0]['status'] == 'decreasing'
     assert cells[4][0]['delta_quantity'] == -2.0
+    assert cells[4][0]['previous_amount'] == 330.0
+    assert cells[4][0]['amount'] == 110.0
+    assert cells[4][0]['delta_amount'] == -220.0
     assert cells[5][0]['status'] == 'pending_exit'
     assert cells[5][0]['quantity'] == 1.0
     assert cells[5][0]['delta_quantity'] == -1.0
+    assert cells[5][0]['previous_amount'] == 220.0
+    assert cells[5][0]['amount'] == 110.0
+    assert cells[5][0]['delta_amount'] == -110.0
     assert cells[6][0]['status'] == 'exiting'
     assert cells[6][0]['delta_quantity'] == -1.0
+    assert cells[6][0]['previous_amount'] == 110.0
+    assert cells[6][0]['amount'] == 0.0
+    assert cells[6][0]['delta_amount'] == -110.0
 
 
 def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch):
@@ -363,10 +378,11 @@ def test_group_snapshot_reports_neighbor_change_timestamps(monkeypatch):
     client = app.test_client()
     resp = client.post('/get_group_snapshot', json={
         'submission_id': 'sub-1',
-        'timestamp_ms': int(idx1.timestamp() * 1000),
+        'timestamp_ms': group_routes.to_epoch_ms(idx1, 'Asia/Shanghai'),
     })
 
     payload = resp.get_json()
     assert payload['has_prev_change'] is False
     assert payload['has_next_change'] is True
-    assert payload['next_change_timestamp_ms'] == int(idx2.timestamp() * 1000)
+    assert payload['next_change_timestamp_ms'] == group_routes.to_epoch_ms(idx2, 'Asia/Shanghai')
+    assert payload['display_timezone'] == 'Asia/Shanghai'

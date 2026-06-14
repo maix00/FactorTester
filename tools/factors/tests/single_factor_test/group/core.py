@@ -1144,7 +1144,10 @@ def _simulate_group_from_preloaded(
         if 'open' in fee_override and fee_override['open'] is not None:
             open_ratio_mat[g_idx, :] = float(fee_override['open'])
         if 'close' in fee_override and fee_override['close'] is not None:
-            close_ratio_mat[g_idx, :] = float(fee_override['close'])
+            close_override = float(fee_override['close'])
+            close_ratio_mat[g_idx, :] = close_override
+            if fee_override.get('close_today') is None:
+                close_today_ratio_mat[g_idx, :] = close_override
         if 'close_today' in fee_override and fee_override['close_today'] is not None:
             close_today_ratio_mat[g_idx, :] = float(fee_override['close_today'])
 

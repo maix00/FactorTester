@@ -745,6 +745,64 @@ def test_simulate_exposes_rebalance_cash_equity_and_fee_amounts():
     np.testing.assert_allclose(result['sell_fee_amount_np'][:, 0], [0.0, 18.0], atol=1e-12)
 
 
+def test_group_fee_close_override_applies_to_close_today_when_unspecified():
+    membership = np.array([[[True]], [[False]]], dtype=bool)
+
+    _, _, _, group_result = _simulate_group_from_preloaded(
+        SimpleNamespace(alias='fee-close-today'),
+        membership_np=membership,
+        returns_filled=np.zeros((2, 1), dtype=float),
+        price_np=np.full((2, 1), 100.0, dtype=float),
+        valid_cols=['P0'],
+        index_list=[pd.Timestamp('2026-01-01 09:30:00'), pd.Timestamp('2026-01-01 09:31:00')],
+        n_names={0: 'A1'},
+        group_configs=[{'fee_override': {'open': 0.0, 'close': 0.02}}],
+        use_closetoday_vec=np.array([True], dtype=bool),
+        rebalance_mode='each_period',
+        initial_capital=1000.0,
+        multi_session_active=False,
+        start_dt=DataTime.parse('2026-01-01 09:30:00'),
+        end_dt=DataTime.parse('2026-01-01 09:31:00'),
+        source_freq=DataFreq.MIN1,
+        open_ratio_vec=np.zeros(1, dtype=float),
+        close_ratio_vec=np.zeros(1, dtype=float),
+        close_today_ratio_vec=np.zeros(1, dtype=float),
+        open_fixed_vec=np.zeros(1, dtype=float),
+        close_fixed_vec=np.zeros(1, dtype=float),
+        close_today_fixed_vec=np.zeros(1, dtype=float),
+        point_value_vec=np.ones(1, dtype=float),
+        min_tick_vec=np.ones(1, dtype=float),
+        min_trade_quantity_vec=np.ones(1, dtype=float),
+        long_margin_ratio_vec=np.ones(1, dtype=float),
+        is_margin_traded_vec=np.zeros(1, dtype=bool),
+        positions_by_variety_code_lower={},
+    )
+
+    np.testing.assert_allclose(group_result.sell_fee_amount_np[:, 0], [0.0, 20.0], atol=1e-12)
+    np.testing.assert_allclose(group_result.fee_costs_np[:, 0], [0.0, 0.02], atol=1e-12)
+
+
+def test_simulate_fee_amounts_include_ratio_and_fixed_fees():
+    result = simulate_groups(
+        membership_np=np.array([[[True]], [[False]]], dtype=bool),
+        returns_np=np.zeros((2, 1), dtype=float),
+        open_fee_mat=np.full((1, 1), 0.01, dtype=float),
+        close_fee_mat=np.full((1, 1), 0.02, dtype=float),
+        open_fixed_mat=np.full((1, 1), 2.0, dtype=float),
+        close_fixed_mat=np.full((1, 1), 3.0, dtype=float),
+        rebalance_mode='each_period',
+        price_np=np.full((2, 1), 100.0, dtype=float),
+        min_tick_vec=np.ones(1, dtype=float),
+        min_trade_quantity_vec=np.ones(1, dtype=float),
+        initial_capital=1000.0,
+    )
+
+    # t=0 buys 9 contracts: 900 * 1% + 9 * 2 = 27.
+    # t=1 sells 9 contracts: 900 * 2% + 9 * 3 = 45.
+    np.testing.assert_allclose(result['buy_fee_amount_np'][:, 0], [27.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(result['sell_fee_amount_np'][:, 0], [0.0, 45.0], atol=1e-12)
+
+
 def test_empty_group_keeps_untradable_holding_in_multi_session():
     """An empty current group should not liquidate holdings whose product has no bar."""
     membership = np.zeros((2, 1, 1), dtype=bool)

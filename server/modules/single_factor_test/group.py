@@ -196,12 +196,53 @@ def _snapshot_amounts_from_simulated_positions(group_result: Any):
         return None
 
 
+def _snapshot_pre_rebalance_amounts_from_simulated_positions(group_result: Any):
+    positions = getattr(group_result, 'position_quantities_np', None)
+    prices = getattr(group_result, 'price_np', None)
+    if positions is None or prices is None:
+        return None
+    try:
+        position_arr = np.asarray(positions, dtype=float)
+        price_arr = np.asarray(prices, dtype=float)
+        if position_arr.ndim != 3 or price_arr.ndim != 2:
+            return None
+        if position_arr.shape[0] != price_arr.shape[0] or position_arr.shape[2] != price_arr.shape[1]:
+            return None
+        prev_positions = np.zeros_like(position_arr, dtype=float)
+        if position_arr.shape[0] > 1:
+            prev_positions[1:] = position_arr[:-1]
+        point_values = getattr(group_result, 'point_value_vec', None)
+        if point_values is None:
+            point_values_arr = np.ones(price_arr.shape[1], dtype=float)
+        else:
+            point_values_arr = np.asarray(point_values, dtype=float).reshape(price_arr.shape[1])
+            point_values_arr = np.where(np.isfinite(point_values_arr) & (point_values_arr > 0), point_values_arr, 1.0)
+        amount_arr = prev_positions * price_arr[:, np.newaxis, :] * point_values_arr[np.newaxis, np.newaxis, :]
+        return np.nan_to_num(amount_arr, nan=0.0, posinf=0.0, neginf=0.0)
+    except Exception:
+        return None
+
+
 def _snapshot_group_label(group_idx: int, group_names: Any) -> str:
     if isinstance(group_names, dict):
         for key in (group_idx, str(group_idx)):
             if key in group_names and group_names[key]:
                 return str(group_names[key])
     return f'Group {group_idx + 1}'
+
+
+def _snapshot_display_timezone(group_result: Any, valid_cols: list[Any] | None = None) -> str:
+    index_list = list(getattr(group_result, 'index_list', []) or [])
+    for idx_entry in index_list:
+        ts = _signal_time(idx_entry)
+        if isinstance(ts, pd.Timestamp) and ts.tzinfo is not None:
+            return str(ts.tz)
+    for product_ref in valid_cols or list(getattr(group_result, 'valid_cols', []) or []):
+        product = product_ref if isinstance(product_ref, Product) else _registered_product(str(product_ref))
+        timezone = getattr(product, 'timezone', None) if product is not None else None
+        if timezone:
+            return str(timezone)
+    return 'Asia/Shanghai'
 
 
 def _build_snapshot_matrix(
@@ -230,6 +271,7 @@ def _build_snapshot_matrix(
         except Exception:
             pass
     memberships = getattr(group_result, 'membership_np', None)
+    pre_rebalance_amounts = _snapshot_pre_rebalance_amounts_from_simulated_positions(group_result)
     total_equity_np = getattr(group_result, 'total_equity_np', None)
     cash_np = getattr(group_result, 'cash_np', None)
     pre_rebalance_total_equity_np = getattr(group_result, 'pre_rebalance_total_equity_np', None)
@@ -292,7 +334,12 @@ def _build_snapshot_matrix(
         cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
         cur_amt = amounts[t_idx, index] if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
         prev_pos = positions[prev_t_idx, index] if positions is not None and prev_t_idx is not None and prev_t_idx < positions.shape[0] else None
-        prev_amt = amounts[prev_t_idx, index] if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0] else None
+        prev_amt = (
+            pre_rebalance_amounts[t_idx, index]
+            if pre_rebalance_amounts is not None and t_idx is not None and t_idx < pre_rebalance_amounts.shape[0]
+            else amounts[prev_t_idx, index] if amounts is not None and prev_t_idx is not None and prev_t_idx < amounts.shape[0]
+            else None
+        )
         cur_mem = memberships[t_idx, index] if memberships is not None and t_idx is not None and t_idx < memberships.shape[0] else None
         prev_mem = memberships[prev_t_idx, index] if memberships is not None and prev_t_idx is not None and prev_t_idx < memberships.shape[0] else None
         return (cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem)
@@ -430,7 +477,7 @@ def _build_snapshot_matrix(
 
     _append_amount_row(
         '__total_equity__',
-        {'name': '总资产', 'desc': '调仓前/调仓后/期末'},
+        {'name': '总资产'},
         total_equity_np,
         pre_rebalance_matrix=pre_rebalance_total_equity_np,
         post_rebalance_matrix=post_rebalance_total_equity_np,
@@ -439,7 +486,7 @@ def _build_snapshot_matrix(
     )
     _append_amount_row(
         '__cash__',
-        {'name': '现金', 'desc': '调仓前/调仓后/期末'},
+        {'name': '现金'},
         cash_np,
         pre_rebalance_matrix=pre_rebalance_cash_np,
         post_rebalance_matrix=post_rebalance_cash_np,
@@ -1381,12 +1428,12 @@ def get_group_snapshot():
         def _epoch_seconds(value):
             ts = _signal_time(value)
             if isinstance(ts, pd.Timestamp):
-                ts_no_tz_untyped = ts.tz_localize(None) if ts.tzinfo else ts
-                return float(pd.Timestamp(ts_no_tz_untyped).value // 10**9)
+                return float(to_epoch_ms(ts, display_timezone) / 1000.0)
             if hasattr(ts, 'timestamp'):
-                return float(pd.Timestamp(ts).value // 10**9)
+                return float(to_epoch_ms(pd.Timestamp(ts), display_timezone) / 1000.0)
             return float(ts)
 
+        display_timezone = _snapshot_display_timezone(group_result, list(valid_cols_raw or []))
         time_epochs = np.array([_epoch_seconds(idx_entry) for idx_entry in time_entries], dtype=float)
 
         # 前端传来的 UTC epoch 毫秒
@@ -1478,6 +1525,7 @@ def get_group_snapshot():
             'has_prev': prev_entry is not None,
             'has_next': current_index >= 0 and current_index < len(all_timestamps_ms) - 1,
             'all_timestamps_ms': all_timestamps_ms,
+            'display_timezone': display_timezone,
             'change_timestamps_ms': change_timestamps_ms,
             'prev_change_timestamp_ms': prev_change_ms,
             'next_change_timestamp_ms': next_change_ms,

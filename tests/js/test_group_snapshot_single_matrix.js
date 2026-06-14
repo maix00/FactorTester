@@ -62,6 +62,7 @@ GT.results.snapshot.renderGroupSnapshot({
   has_prev: false,
   has_next: false,
   all_timestamps_ms: [1710000000000, 1710000060000],
+  display_timezone: 'Asia/Shanghai',
   summary: { avg_turnover: 12.3, total_changed: 4, total_prod_count: 2 },
 }, 1710000000000);
 
@@ -86,9 +87,12 @@ assert.match(body, /金额 \+60\.00/);
 assert.match(body, /金额 -20\.00/);
 assert.match(body, /调仓前 1250\.00/);
 assert.match(body, /调仓后 1240\.00/);
-assert.match(body, /期末\(下次调仓前\) 1300\.00/);
+assert.match(body, /期末 1300\.00/);
 assert.match(body, /买入费 7\.00/);
 assert.match(body, /卖出费 3\.00/);
+assert.match(body, /买入费 7\.00<\/div><div class="snapshot-summary-fees">卖出费 3\.00/);
+assert.match(body, /总资产<\/span>/);
+assert.doesNotMatch(body, /总资产<\/span><span class="snapshot-product-desc">/);
 assert.match(body, /新增/);
 assert.match(body, /增加/);
 assert.match(body, /减少/);

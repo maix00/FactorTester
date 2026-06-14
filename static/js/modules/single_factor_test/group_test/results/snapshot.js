@@ -228,8 +228,30 @@
     }
 
     /** 格式化时间戳 */
-    function _fmtTs(ts) {
+    function _fmtTs(ts, timezone) {
         var d = new Date(ts);
+        if (timezone && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+            try {
+                var parts = new Intl.DateTimeFormat('zh-CN', {
+                    timeZone: timezone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).formatToParts(d);
+                var values = {};
+                parts.forEach(function(part) {
+                    if (part.type !== 'literal') values[part.type] = part.value;
+                });
+                return values.year + '-' + values.month + '-' + values.day + ' '
+                    + values.hour + ':' + values.minute + ':' + values.second;
+            } catch (err) {
+                // Fall back to browser-local formatting below.
+            }
+        }
         return d.getFullYear() + '-' +
             String(d.getMonth() + 1).padStart(2, '0') + '-' +
             String(d.getDate()).padStart(2, '0') + ' ' +
@@ -294,7 +316,8 @@
         if (!p) return '—';
         if (typeof p === 'string') return '<span class="snapshot-product-name">' + _escape(p) + '</span>';
         var name = _escape(p.name || '');
-        var desc = p.desc && p.desc !== p.name ? ' <span class="snapshot-product-desc">' + _escape(p.desc) + '</span>' : '';
+        var isSummary = p.name === '总资产' || p.name === '现金';
+        var desc = !isSummary && p.desc && p.desc !== p.name ? ' <span class="snapshot-product-desc">' + _escape(p.desc) + '</span>' : '';
         var feeHtml = '';
         if (p.fee) {
             var parts = [];
@@ -334,12 +357,14 @@
             parts.push('<div class="snapshot-summary-amounts">'
                 + '<div>调仓前 ' + _formatAmount(cell.pre_rebalance_amount) + '</div>'
                 + '<div>调仓后 ' + _formatAmount(cell.post_rebalance_amount) + '</div>'
-                + '<div>期末(下次调仓前) ' + _formatAmount(cell.end_amount) + '</div>'
+                + '<div>期末 ' + _formatAmount(cell.end_amount) + '</div>'
                 + '</div>');
-            var feeParts = [];
-            if (cell.buy_fee_amount !== null && cell.buy_fee_amount !== undefined) feeParts.push('买入费 ' + _formatAmount(cell.buy_fee_amount));
-            if (cell.sell_fee_amount !== null && cell.sell_fee_amount !== undefined) feeParts.push('卖出费 ' + _formatAmount(cell.sell_fee_amount));
-            if (feeParts.length) parts.push('<div class="snapshot-summary-fees">' + feeParts.join(' · ') + '</div>');
+            if (cell.buy_fee_amount !== null && cell.buy_fee_amount !== undefined) {
+                parts.push('<div class="snapshot-summary-fees">买入费 ' + _formatAmount(cell.buy_fee_amount) + '</div>');
+            }
+            if (cell.sell_fee_amount !== null && cell.sell_fee_amount !== undefined) {
+                parts.push('<div class="snapshot-summary-fees">卖出费 ' + _formatAmount(cell.sell_fee_amount) + '</div>');
+            }
         } else if (cell.amount !== null && cell.amount !== undefined) {
             meta.push('金额 ' + _formatAmount(cell.amount));
         }
@@ -389,7 +414,7 @@
         var html = '';
         html += '<div class="snapshot-batch-section">';
         html += '<div class="snapshot-batch-header">仓位矩阵 · ' + _escape(matrix.label || matrix.key || '默认') + '</div>';
-        html += '<div class="snapshot-semantics-note">产品持仓为本期间调仓后的实际持仓；现金和总资产显示调仓前、调仓后、期末(下次调仓前)、调仓费用与持有期间变化。</div>';
+        html += '<div class="snapshot-semantics-note">本矩阵按标题所示期间展示。产品金额变化为本期调仓前旧持仓估值到调仓后新持仓金额的变化；总资产/现金变化为调仓后到期末的持有期间变化，期末指下一次调仓前。</div>';
         html += '<div class="snapshot-matrix-scroll">';
         html += '<table class="snapshot-matrix-table"><thead><tr>';
         html += '<th class="snapshot-prod-name-cell">产品</th>';
@@ -430,9 +455,10 @@
             _snapshotMatrixKey = data.default_matrix_key || (data.matrices[0] && data.matrices[0].key) || 'raw';
         }
 
-        var timeStr = _fmtTs(timestampMs);
+        var timezone = data.display_timezone || data.timezone || null;
+        var timeStr = _fmtTs(timestampMs, timezone);
         var nextTs = _nextTimestampMs(timestampMs);
-        var titlePeriod = nextTs ? (timeStr + ' 至 ' + _fmtTs(nextTs)) : (timeStr + ' 起');
+        var titlePeriod = nextTs ? (timeStr + ' 至 ' + _fmtTs(nextTs, timezone)) : (timeStr + ' 起');
         document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — ' + titlePeriod;
 
         var bodyEl = document.getElementById('snapshot_body');
