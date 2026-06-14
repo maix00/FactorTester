@@ -58,6 +58,8 @@ class GroupRunResult:
     liquidity_capacity_np: np.ndarray | None = None  # (T, M, P) float — 每期每品种成交额限额(元) (refs #110)
     liquidity_modes: list | None = None  # [str] per-group
     liquidity_percents: list | None = None  # [float] per-group
+    one_lot_margin_np: np.ndarray | None = None  # (T, M, P) float — 每期一手保证金 (refs #110)
+    one_lot_fee_np: np.ndarray | None = None  # (T, M, P) float — 每期一手手续费 (refs #110)
 
     def get_products_by_group(self) -> dict:
         """Lazy builder: {group_idx: {idx_entry: [product_names]}}."""

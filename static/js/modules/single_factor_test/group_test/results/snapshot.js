@@ -353,8 +353,11 @@
         }
         var meta = [];
         if (cell.selected) {
+            if (cell.one_lot_required_cash !== null && cell.one_lot_required_cash !== undefined) {
+                meta.push('一手预算 ' + _formatAmount(cell.one_lot_required_cash) + '（保证金 ' + _formatAmount(cell.one_lot_margin || 0) + ' + 手续费 ' + _formatAmount(cell.one_lot_fee || 0) + '）');
+            }
             if (cell.planned_qty !== null && cell.planned_qty !== undefined) {
-                meta.push('可开 ' + _formatQuantity(cell.planned_qty) + ' 手');
+                meta.push('计划开 ' + _formatQuantity(cell.planned_qty) + ' 手');
             }
             if (cell.planned_amount !== null && cell.planned_amount !== undefined) {
                 meta.push('计划金额 ' + _formatAmount(cell.planned_amount));

@@ -224,6 +224,10 @@ def _build_snapshot_matrix(
     amounts = getattr(group_result, 'hold_amounts_np', None)
     target_before_floor = getattr(group_result, 'target_amounts_before_floor_np', None)
     prev_end_amounts = getattr(group_result, 'prev_end_amounts_np', None)
+    # Per-lot cost arrays from simulate — exactly the values used inside simulate
+    # (NEVER recompute from input params; these come directly from the trading book)
+    one_lot_margin_np = getattr(group_result, 'one_lot_margin_np', None)
+    one_lot_fee_np = getattr(group_result, 'one_lot_fee_np', None)
     memberships = getattr(group_result, 'membership_np', None)
     total_equity_np = getattr(group_result, 'total_equity_np', None)
     cash_np = getattr(group_result, 'cash_np', None)
@@ -340,6 +344,8 @@ def _build_snapshot_matrix(
                     'target_budget_amount': 0.0,
                     'planned_qty': 0.0,
                     'planned_amount': 0.0,
+                    'one_lot_margin': 0.0,
+                    'one_lot_fee': 0.0,
                     'display': _row_display(resolved_product if resolved_product is not None else raw_product, [raw_name]),
                 }
                 if row_key not in row_order:
@@ -373,6 +379,16 @@ def _build_snapshot_matrix(
             if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] and g_idx < amounts.shape[1] and p_idx < amounts.shape[2]:
                 sim_planned_amount = _safe_float(amounts[t_idx, g_idx, p_idx]) or 0.0
                 group_rows[row_key]['planned_amount'] += float(sim_planned_amount)
+            # one_lot_margin / one_lot_fee: read directly from simulate-computed arrays
+            # (same values used inside _pack_openable_quantities / _row_required_capital).
+            # Used for diagnostic display to show per-lot budget;
+            # NEVER used for planned_qty computation.
+            if one_lot_margin_np is not None and t_idx is not None and t_idx < one_lot_margin_np.shape[0] and g_idx < one_lot_margin_np.shape[1] and p_idx < one_lot_margin_np.shape[2]:
+                sim_one_lot_margin = _safe_float(one_lot_margin_np[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['one_lot_margin'] = max(group_rows[row_key]['one_lot_margin'], float(sim_one_lot_margin))
+            if one_lot_fee_np is not None and t_idx is not None and t_idx < one_lot_fee_np.shape[0] and g_idx < one_lot_fee_np.shape[1] and p_idx < one_lot_fee_np.shape[2]:
+                sim_one_lot_fee = _safe_float(one_lot_fee_np[t_idx, g_idx, p_idx]) or 0.0
+                group_rows[row_key]['one_lot_fee'] = max(group_rows[row_key]['one_lot_fee'], float(sim_one_lot_fee))
         per_group.append(group_rows)
 
     columns = []
@@ -510,6 +526,9 @@ def _build_snapshot_matrix(
             planned_qty = row.get('planned_qty') or 0.0
             planned_amount = row.get('planned_amount') or 0.0
             target_budget_amount = row.get('target_budget_amount') or 0.0
+            one_lot_margin = row.get('one_lot_margin') or 0.0
+            one_lot_fee = row.get('one_lot_fee') or 0.0
+            one_lot_required_cash = one_lot_margin + one_lot_fee
             remaining_cash = None
             if post_rebalance_cash_np is not None and t_idx is not None:
                 try:
@@ -518,18 +537,22 @@ def _build_snapshot_matrix(
                 except Exception:
                     remaining_cash = None
             if desired_now and not cur_active:
-                # selected but not opened — diagnose using simulate data
+                # selected but not opened — diagnose with per-lot budget + simulate data
                 reasons = []
-                if remaining_cash is not None and remaining_cash < 1.0:
-                    reasons.append(f"剩余现金约 {int(round(float(remaining_cash))):,} 元")
-                if planned_qty < 1e-12 and target_budget_amount > 0:
-                    reasons.append(f"计划金额 {int(round(float(target_budget_amount))):,} 元，可开0手(流动性限额/保证金不足)")
-                if reasons:
-                    open_reason = '；'.join(reasons)
-                elif remaining_cash is not None:
-                    open_reason = f"剩余现金约 {int(round(float(remaining_cash))):,} 元"
-                else:
-                    open_reason = '资金不足以开仓'
+                if remaining_cash is not None:
+                    reasons.append(f"剩余现金 {int(round(float(remaining_cash))):,} 元")
+                if one_lot_required_cash > 0:
+                    reasons.append(f"一手预算 {int(round(float(one_lot_required_cash))):,} 元（保证金 {int(round(float(one_lot_margin))):,} + 手续费 {int(round(float(one_lot_fee))):,}）")
+                if target_budget_amount > 0:
+                    reasons.append(f"目标预算 {int(round(float(target_budget_amount))):,} 元")
+                if planned_qty < 1e-12 and target_budget_amount > 0 and remaining_cash is not None:
+                    if remaining_cash >= target_budget_amount and one_lot_required_cash > target_budget_amount:
+                        reasons.append(f"目标预算 {int(round(float(target_budget_amount))):,} < 一手预算 {int(round(float(one_lot_required_cash))):,}，不足以开1手")
+                    elif remaining_cash >= one_lot_required_cash:
+                        reasons.append(f"流动性限额限制：目标预算 {int(round(float(target_budget_amount))):,} → floor后0手")
+                    else:
+                        reasons.append(f"剩余现金 {int(round(float(remaining_cash))):,} < 一手预算 {int(round(float(one_lot_required_cash))):,}，资金不足")
+                open_reason = '；'.join(reasons) if reasons else '资金不足以开仓'
 
             if desired_now and not cur_active:
                 status = 'selected'
@@ -590,6 +613,9 @@ def _build_snapshot_matrix(
                 'planned_qty': round(float(planned_qty), 6),
                 'planned_amount': round(float(planned_amount), 6),
                 'target_budget_amount': round(float(target_budget_amount), 6),
+                'one_lot_margin': round(float(one_lot_margin), 2),
+                'one_lot_fee': round(float(one_lot_fee), 2),
+                'one_lot_required_cash': round(float(one_lot_required_cash), 2),
                 'liquidity_cap_amount': liquidity_cap_amount,
                 'source_names': row.get('source_names', []),
             })

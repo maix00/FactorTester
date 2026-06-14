@@ -219,6 +219,8 @@ def slice_group_run_result(
         liquidity_capacity_np=_take_group_axis(group_result.liquidity_capacity_np),
         liquidity_modes=list(group_result.liquidity_modes) if group_result.liquidity_modes is not None else None,
         liquidity_percents=list(group_result.liquidity_percents) if group_result.liquidity_percents is not None else None,
+        one_lot_margin_np=_take_group_axis(group_result.one_lot_margin_np),
+        one_lot_fee_np=_take_group_axis(group_result.one_lot_fee_np),
     )
 
 
@@ -1287,6 +1289,8 @@ def _simulate_group_from_preloaded(
         liquidity_capacity_np=liquidity_capacity_np,
         liquidity_modes=list(group_liquidity_modes) if group_liquidity_modes is not None else None,
         liquidity_percents=list(group_liquidity_percents) if group_liquidity_percents is not None else None,
+        one_lot_margin_np=sim_result.get('one_lot_margin_np'),
+        one_lot_fee_np=sim_result.get('one_lot_fee_np'),
     )
     returns_dict, report_df_out, cumulative_returns_np, _ = materialize_group_outputs_from_result(group_result)
     return returns_dict, report_df_out, cumulative_returns_np, group_result
@@ -1967,6 +1971,8 @@ def simulate_group_trading_book(
     buy_fee_amount_np = np.zeros((T, M), dtype=float)
     sell_fee_amount_np = np.zeros((T, M), dtype=float)
     liquidity_capacity_amounts_np = np.zeros((T, M, P), dtype=float)
+    one_lot_margin_np = np.zeros((T, M, P), dtype=float)
+    one_lot_fee_np = np.zeros((T, M, P), dtype=float)
 
     if not np.isfinite(initial_capital) or initial_capital <= 0:
         raise ValueError(f"initial_capital must be positive, got {initial_capital!r}")
@@ -2341,6 +2347,25 @@ def simulate_group_trading_book(
         buy_fee_amount_np[t] = np.nansum(buy_fee, axis=1)
         sell_fee_amount_np[t] = np.nansum(sell_fee, axis=1)
 
+        # Per-product per-group one-lot cost: uses exactly the same parameters
+        # as _pack_openable_quantities / _row_required_capital inside simulate.
+        # contract_value = price_t * point_values  (same as line ~2112)
+        # one_lot_notional = contract_value * lot_size  (same as used in floor)
+        # one_lot_margin = one_lot_notional * (margin_ratio if use_margin else 1.0)
+        # one_lot_fee   = one_lot_notional * open_rate + lot_size * open_fixed
+        # Broadcasting: contract_value (P,) * lot_sizes (P,) → one_lot_notional (P,)
+        #   one_lot_margin: (P,) * (M, P) → (M, P)
+        #   one_lot_fee:    (P,) * (M, P) + (P,) * (M, P) → (M, P)
+        one_lot_notional = contract_value * lot_sizes  # (P,)
+        one_lot_margin_row = np.where(
+            use_margin,
+            one_lot_notional * margin_ratios,
+            one_lot_notional,
+        )  # (M, P)
+        one_lot_fee_row = one_lot_notional * np.asarray(open_rate_mat, dtype=float) + lot_sizes * np.asarray(open_fixed_mat, dtype=float)  # (M, P)
+        one_lot_margin_np[t] = one_lot_margin_row
+        one_lot_fee_np[t] = one_lot_fee_row
+
         quantities = desired_quantities
         equity = end_equity
 
@@ -2366,6 +2391,8 @@ def simulate_group_trading_book(
         'buy_fee_amount_np': buy_fee_amount_np,
         'sell_fee_amount_np': sell_fee_amount_np,
         'liquidity_capacity_amounts_np': liquidity_capacity_amounts_np,
+        'one_lot_margin_np': one_lot_margin_np,
+        'one_lot_fee_np': one_lot_fee_np,
     }
 
 

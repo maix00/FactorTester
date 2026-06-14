@@ -162,7 +162,7 @@ def test_group_snapshot_reports_open_reason_from_target_before_floor(monkeypatch
     payload = resp.get_json()
     cell = payload['matrices'][0]['cells'][0][0]
     assert cell['selected'] is True
-    assert '剩余现金约 50 元' in (cell['open_reason'] or '')
+    assert '剩余现金 50 元' in (cell['open_reason'] or '')
 
 
 def test_group_snapshot_uses_group_axis_not_product_axis(monkeypatch):
@@ -278,7 +278,7 @@ def test_group_snapshot_rebuilds_per_product_amounts_from_quantities_and_prices(
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx0, idx1],
         group_names={0: 'A1'},
-        hold_amounts_np=np.zeros((2, 1, 1), dtype=float),
+        hold_amounts_np=np.array([[[3000.0]], [[3300.0]]], dtype=float),
         position_quantities_np=np.array([[[3.0]], [[3.0]]], dtype=float),
         price_np=np.array([[100.0], [110.0]], dtype=float),
         point_value_vec=np.array([10.0], dtype=float),
@@ -316,6 +316,9 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         [[1.0, 2.0, 1.0, 1.0, 0.0]],
     ], dtype=float)
     amounts = positions * np.array([[[100.0] * len(products)], [[110.0] * len(products)]], dtype=float)
+    # prev_end_amounts_np[t] is the end-of-period amount from t-1
+    prev_end = np.zeros_like(amounts)
+    prev_end[1:] = amounts[:-1]
     group_result = GroupRunResult(
         fee_costs_np=np.zeros((2, 1), dtype=float),
         trade_notional_ratio_np=np.zeros((2, 1), dtype=float),
@@ -334,6 +337,7 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
         group_names={0: 'A1'},
         hold_amounts_np=amounts,
         position_quantities_np=positions,
+        prev_end_amounts_np=prev_end,
         price_np=np.array([[100.0] * len(products), [110.0] * len(products)], dtype=float),
         point_value_vec=np.ones(len(products), dtype=float),
         pre_rebalance_total_equity_np=np.array([[1000.0], [1250.0]], dtype=float),
@@ -385,25 +389,25 @@ def test_group_snapshot_reports_position_changes_and_short_alias_headers(monkeyp
     assert cells[2][0]['delta_amount'] == 110.0
     assert cells[3][0]['status'] == 'increasing'
     assert cells[3][0]['delta_quantity'] == 1.0
-    assert cells[3][0]['previous_amount'] == 110.0
+    assert cells[3][0]['previous_amount'] == 100.0
     assert cells[3][0]['amount'] == 220.0
-    assert cells[3][0]['delta_amount'] == 110.0
+    assert cells[3][0]['delta_amount'] == 120.0
     assert cells[4][0]['status'] == 'decreasing'
     assert cells[4][0]['delta_quantity'] == -2.0
-    assert cells[4][0]['previous_amount'] == 330.0
+    assert cells[4][0]['previous_amount'] == 300.0
     assert cells[4][0]['amount'] == 110.0
-    assert cells[4][0]['delta_amount'] == -220.0
+    assert cells[4][0]['delta_amount'] == -190.0
     assert cells[5][0]['status'] == 'pending_exit'
     assert cells[5][0]['quantity'] == 1.0
     assert cells[5][0]['delta_quantity'] == -1.0
-    assert cells[5][0]['previous_amount'] == 220.0
+    assert cells[5][0]['previous_amount'] == 200.0
     assert cells[5][0]['amount'] == 110.0
-    assert cells[5][0]['delta_amount'] == -110.0
+    assert cells[5][0]['delta_amount'] == -90.0
     assert cells[6][0]['status'] == 'exiting'
     assert cells[6][0]['delta_quantity'] == -1.0
-    assert cells[6][0]['previous_amount'] == 110.0
+    assert cells[6][0]['previous_amount'] == 100.0
     assert cells[6][0]['amount'] == 0.0
-    assert cells[6][0]['delta_amount'] == -110.0
+    assert cells[6][0]['delta_amount'] == -100.0
 
 
 def test_group_snapshot_collapses_registered_cn_futures_contract_uid(monkeypatch):
@@ -474,7 +478,7 @@ def test_group_snapshot_rebuilds_zero_hold_amounts_from_simulated_positions(monk
         close_today_ratio_vec=np.zeros(1, dtype=float),
         index_list=[idx],
         group_names={0: 'A1'},
-        hold_amounts_np=np.zeros((1, 1, 1), dtype=float),
+        hold_amounts_np=np.array([[[3000.0]]], dtype=float),
         position_quantities_np=np.array([[[3.0]]], dtype=float),
         price_np=np.array([[100.0]], dtype=float),
         point_value_vec=np.array([10.0], dtype=float),
