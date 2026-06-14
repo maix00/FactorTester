@@ -2116,8 +2116,11 @@ def simulate_group_trading_book(
             prev_notional * margin_ratios,
             prev_notional,
         )
-        pre_rebalance_cash = _from_minor_units(
-            _floor_minor_units(equity) - _floor_minor_units(np.nansum(pre_rebalance_occupied, axis=1))
+        pre_rebalance_cash = np.maximum(
+            0,
+            _from_minor_units(
+                _floor_minor_units(equity) - _floor_minor_units(np.nansum(pre_rebalance_occupied, axis=1))
+            ),
         )
 
         # When membership is unchanged AND we are not in "each_period" mode
@@ -2189,7 +2192,7 @@ def simulate_group_trading_book(
                             continue
                         qty = result[row_idx, p_idx]
                         lot = lot_row[p_idx]
-                        max_lots = max(1, int(np.round(qty / lot, 10)))
+                        max_lots = int(np.floor(qty / lot + 1e-12))
                         capacity = executable_capacity_t[row_idx, p_idx]
                         if np.isfinite(capacity):
                             capacity_minor_units = int(_floor_minor_units(capacity))
@@ -2444,8 +2447,11 @@ def simulate_group_trading_book(
             position_notional * margin_ratios,
             position_notional,
         )
-        post_rebalance_cash = _from_minor_units(
-            _floor_minor_units(post_rebalance_total) - _floor_minor_units(np.nansum(start_occupied, axis=1))
+        post_rebalance_cash = np.maximum(
+            0,
+            _from_minor_units(
+                _floor_minor_units(post_rebalance_total) - _floor_minor_units(np.nansum(start_occupied, axis=1))
+            ),
         )
         net = gross - fee_ratio
         end_equity = _from_minor_units(_round_minor_units(equity * (1.0 + net)))
@@ -2486,7 +2492,7 @@ def simulate_group_trading_book(
         total_equity_np[t] = _round_minor_units(end_equity)
         pre_rebalance_cash_np[t] = _round_minor_units(pre_rebalance_cash)
         post_rebalance_cash_np[t] = _round_minor_units(post_rebalance_cash)
-        cash_np[t] = _floor_minor_units(end_equity) - _floor_minor_units(end_occupied)
+        cash_np[t] = np.maximum(0, _floor_minor_units(end_equity) - _floor_minor_units(end_occupied))
         buy_fee_amount_np[t] = _round_minor_units(np.nansum(buy_fee, axis=1))
         sell_fee_amount_np[t] = _round_minor_units(np.nansum(sell_fee, axis=1))
 

@@ -459,7 +459,7 @@
         (matrix.columns || []).forEach(function(col) {
             var label = col.label || col.name || '';
             var count = col.count !== undefined && col.count !== null ? Number(col.count) : null;
-            var countLabel = col.count_label || '持仓品种数(xxx)';
+            var countLabel = col.count_label || ('持仓品种数(' + (count !== null && isFinite(count) ? count : 0) + ')');
             html += '<th><div class="snapshot-col-label">' + _escape(label) + '</div>';
             if (count !== null && isFinite(count)) {
                 html += '<div class="snapshot-col-count">' + count + '</div>';

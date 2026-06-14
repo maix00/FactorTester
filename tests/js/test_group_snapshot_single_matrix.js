@@ -76,7 +76,7 @@ assert.match(title, /至/);
 assert.match(body, /仓位矩阵/);
 assert.match(body, /Group A/);
 assert.match(body, /Group B/);
-assert.match(body, /持仓品种数\(xxx\)/);
+assert.match(body, /持仓品种数\(1\)/);
 assert.match(body, /IF/);
 assert.match(body, /IC/);
 assert.match(body, /总资产/);
@@ -106,7 +106,7 @@ assert.match(body, /增加/);
 assert.match(body, /减少/);
 assert.match(body, /待卖/);
 assert.match(body, /已选中/);
-assert.match(body, /持仓品种数\(xxx\)/);
+assert.match(body, /持仓品种数\(1\)/);
 assert.match(stats, /一手资金需求/);
 assert.match(stats, /总体流动统计/);
 

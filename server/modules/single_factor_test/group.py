@@ -451,7 +451,7 @@ def _build_snapshot_matrix(
             'label': label,
             'index': g_idx,
             'count': selected_count,
-            'count_label': '持仓品种数(xxx)',
+            'count_label': f'持仓品种数({selected_count})',
         })
 
     cells = []

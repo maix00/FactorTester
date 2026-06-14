@@ -66,7 +66,7 @@ def test_group_snapshot_keeps_fee_display_helpers_alive(monkeypatch):
     assert payload['matrices'][0]['key'] == 'raw'
     assert payload['matrices'][0]['rows'][0]['name'] == product
     assert payload['matrices'][0]['cells'][0][0]['status'] == 'entering'
-    assert payload['matrices'][0]['columns'][0]['count_label'] == '持仓品种数(xxx)'
+    assert payload['matrices'][0]['columns'][0]['count_label'] == '持仓品种数(1)'
     assert payload['summary']['total_prod_count'] == 1
 
 
