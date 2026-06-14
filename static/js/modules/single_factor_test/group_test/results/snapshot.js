@@ -48,10 +48,18 @@
     // ---------- 获取并展示分组快照 ----------
     function fetchGroupSnapshot(timestampMs) {
         var submissionId = _activeSubmissionId();
-        console.log('[snapshot-debug] fetchGroupSnapshot called: timestampMs=', timestampMs, 'submissionId=', submissionId);
         if (!submissionId) {
-            console.warn('[snapshot-debug] No active submissionId — drawer will not open. Please select a submission first.');
             alert('请先在提交列表中选中一条提交记录，再点击图表查看持仓快照。');
+            return;
+        }
+
+        timestampMs = Number(timestampMs);
+        if (!isFinite(timestampMs)) {
+            document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
+            document.getElementById('snapshot_body').innerHTML = '<div style="padding:20px;color:#d40000;">图表点击未能定位到有效时间点</div>';
+            document.getElementById('snapshot_flow_stats').innerHTML = '';
+            _updateSnapshotNavButtons(null);
+            openSnapshotDrawer();
             return;
         }
 
@@ -63,16 +71,41 @@
         var nextBtn = document.getElementById('snapshot-next-btn');
         if (prevBtn) { prevBtn.disabled = true; prevBtn.textContent = '⏳ 加载中...'; prevBtn.style.opacity = '0.6'; }
         if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = '⏳ 加载中...'; nextBtn.style.opacity = '0.6'; }
+        document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 加载中';
+        document.getElementById('snapshot_body').innerHTML = '<div class="snapshot-empty-tab">正在加载持仓快照...</div>';
+        document.getElementById('snapshot_flow_stats').innerHTML = '';
+        openSnapshotDrawer();
 
-        fetch('/get_group_snapshot', {
+        var endpoint = '/get_group_snapshot';
+        if (window.location && window.location.origin && window.location.origin !== 'null') {
+            endpoint = window.location.origin.replace(/\/$/, '') + '/get_group_snapshot';
+        }
+        var requestOptions = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 submission_id: submissionId,
                 timestamp_ms: timestampMs
             })
+        };
+
+        Promise.resolve().then(function() {
+            return fetch(endpoint, requestOptions);
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            return res.text().then(function(text) {
+                var data = null;
+                try {
+                    data = text ? JSON.parse(text) : {};
+                } catch (e) {
+                    throw new Error('快照接口返回了非 JSON 响应: ' + text.slice(0, 300));
+                }
+                if (!res.ok && data && !data.error) {
+                    data.error = 'HTTP ' + res.status;
+                }
+                return data;
+            });
+        })
         .then(function(data) {
             if (!data.success) {
                 document.getElementById('snapshot_title').innerHTML = '📋 分组持仓快照 — 错误';
@@ -141,9 +174,7 @@
 
     function openSnapshotDrawer() {
         var overlay = document.getElementById('group-snapshot-drawer');
-        console.log('[snapshot-debug] openSnapshotDrawer called: overlay=', !!overlay, 'hasOpenClass=', overlay ? overlay.classList.contains('open') : null);
         if (overlay) overlay.classList.add('open');
-        if (overlay) console.log('[snapshot-debug] after add: hasOpenClass=', overlay.classList.contains('open'));
     }
 
     function closeSnapshotDrawer() {
@@ -153,12 +184,10 @@
 
     /** 绑定快照抽屉事件（关闭按钮 + 遮罩点击 + 前/后导航） */
     function bindSnapshotDrawerEvents() {
-        console.log('[snapshot-debug] bindSnapshotDrawerEvents called');
         var overlay = document.getElementById('group-snapshot-drawer');
         var closeBtn = document.getElementById('group-snapshot-drawer-close');
         var prevBtn = document.getElementById('snapshot-prev-btn');
         var nextBtn = document.getElementById('snapshot-next-btn');
-        console.log('[snapshot-debug] elements: overlay=', !!overlay, 'closeBtn=', !!closeBtn, 'prevBtn=', !!prevBtn, 'nextBtn=', !!nextBtn);
         if (closeBtn) closeBtn.addEventListener('click', closeSnapshotDrawer);
         if (prevBtn) prevBtn.addEventListener('click', function() { navigateSnapshot('prev'); });
         if (nextBtn) nextBtn.addEventListener('click', function() { navigateSnapshot('next'); });

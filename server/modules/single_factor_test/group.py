@@ -134,7 +134,8 @@ def _registered_product(product_name: str):
     return resolve_term_structure_product(product_name)
 
 
-def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]], *, collapsed_from: str | None = None) -> dict[str, Any]:
+def _snapshot_product_display(product_ref: Any, fee_rates: dict[str, dict[str, float]] | None = None, *, collapsed_from: str | None = None) -> dict[str, Any]:
+    fee_rates = fee_rates or {}
     raw_name = getattr(product_ref, 'name', str(product_ref) if product_ref is not None else '')
     product = product_ref if isinstance(product_ref, Product) else _registered_product(raw_name) if product_ref else None
     name = getattr(product, 'name', None) if product is not None else raw_name
@@ -214,6 +215,18 @@ def _build_snapshot_matrix(
             display['source_names'] = sources
         return display
 
+    product_rows = []
+    for raw_product in current_products:
+        raw_name = _product_name(raw_product)
+        resolved_product = _resolved_product(raw_product) if collapse_term_structure else raw_product
+        row_key = _product_name(resolved_product if resolved_product is not None else raw_product)
+        product_rows.append({
+            'raw_product': raw_product,
+            'raw_name': raw_name,
+            'resolved_product': resolved_product,
+            'row_key': row_key,
+        })
+
     def _group_index_map(index: int) -> tuple[Any, Any]:
         cur_pos = positions[t_idx, index] if positions is not None and t_idx is not None and t_idx < positions.shape[0] else None
         cur_amt = amounts[t_idx, index] if amounts is not None and t_idx is not None and t_idx < amounts.shape[0] else None
@@ -232,10 +245,11 @@ def _build_snapshot_matrix(
     for g_idx in range(group_count):
         cur_pos, cur_amt, prev_pos, prev_amt, cur_mem, prev_mem = _group_index_map(g_idx)
         group_rows: dict[str, dict[str, Any]] = {}
-        for p_idx, raw_product in enumerate(current_products):
-            raw_name = _product_name(raw_product)
-            row_key = _row_key(raw_product)
-            resolved_product = _resolved_product(raw_product) if collapse_term_structure else raw_product
+        for p_idx, product_row in enumerate(product_rows):
+            raw_product = product_row['raw_product']
+            raw_name = product_row['raw_name']
+            row_key = product_row['row_key']
+            resolved_product = product_row['resolved_product']
             cur_qty, cur_amount = _snapshot_actual_quantity(cur_pos, cur_amt, p_idx)
             prev_qty, prev_amount = _snapshot_actual_quantity(prev_pos, prev_amt, p_idx)
             if row_key not in group_rows:
