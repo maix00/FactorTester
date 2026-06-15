@@ -5,12 +5,11 @@
 # 描述一个具体的数据来源（如本地 CSV/Parquet 目录）：
 #   - 包含数据频率、文件路径函数、列名映射表、时区等元数据。
 #   - 支持判断一个 Product 是否在此数据源中存在实际文件。
-#   - 所有实例由 DataSourceMeta 元类维护的全局字典注册。
+#   - 所有实例由 _DataMultipleProviderMeta 元类维护的按子类注册表。
 #   - 路径解析通过 PathResolver 可插拔（默认 LocalPathResolver）。
 # =============================================================================
 from __future__ import annotations
 
-from abc import ABCMeta
 from typing import Any, Callable, Dict, Optional
 
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -18,56 +17,8 @@ from tools.base.UniqueObject import UniqueObject
 from tools.base.DistributedComponents import PathResolver, LocalPathResolver
 from tools.data.DataColumn import DataColumn
 from tools.data.DataFreq import DataFreq
+from tools.data import _DataMultipleProviderMeta
 
-class _DataMultipleProviderMeta(ABCMeta):
-    """
-    数据多提供器元类 — 可为任意子类提供全局注册表。
-
-    任一使用本元类的子类自动获得：
-      - for ds in SubClass          遍历所有已注册的实例
-      - ds in SubClass              判断某个实例是否已注册
-      - SubClass['alias']           按别名查找
-      - 默认实例管理：第一个被创建的实例自动成为默认
-
-    不硬编码任何子类名；所有引用通过 cls 动态解析。
-    """
-    # 按子类隔离注册表，避免不同子类同名 alias 冲突。
-    _sources_registry: Dict[type, Dict[str, Any]] = {}
-    _default_sources: Dict[type, Any] = {}
-
-    def _ensure_registry(cls):
-        """为当前子类懒初始化独立注册表。"""
-        if cls not in cls._sources_registry:
-            cls._sources_registry[cls] = {}
-        return cls._sources_registry[cls]
-
-    def __iter__(cls):
-        """for item in cls 语法支持。"""
-        return iter(cls._ensure_registry().values())
-
-    def __contains__(cls, item):
-        """in 运算符支持。"""
-        return item in cls._ensure_registry().values()
-
-    def __getitem__(cls, name: str):
-        """cls['alias'] 下标语法。"""
-        return cls._ensure_registry()[name]
-
-    def _register_source(cls, source):
-        """将源注册到当前子类的独立字典中（若未重复注册）。"""
-        reg = cls._ensure_registry()
-        if source.alias not in reg:
-            reg[source.alias] = source
-        return source
-
-    def get_default_source(cls):
-        """获取当前子类的默认数据源。"""
-        return cls._default_sources.get(cls)
-
-    def set_default_source(cls, source):
-        """设置当前子类的默认数据源。"""
-        cls._default_sources[cls] = source
-        return source
 
 class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
     """
@@ -153,7 +104,7 @@ class DataProviderProductTS(UniqueObject, metaclass=_DataMultipleProviderMeta):
 
     def delete(self):
         """删除本数据源并从注册表中移除。"""
-        _DataMultipleProviderMeta._ensure_registry(type(self)).pop(self.alias, None)
+        type(self)._ensure_registry().pop(self.alias, None)
         super().delete()
 
 if __name__ == '__main__':
