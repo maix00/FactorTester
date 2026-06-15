@@ -15,7 +15,7 @@ import sqlite3
 from datetime import date
 from typing import Any
 
-from sources.OpenCTP.client import CACHE_DB_PATH
+from tools.data.data_source.DataHub import DataHub
 from sources.visits import record_visit
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,7 @@ COLUMN_ORDER = list(COLUMNS)
 # SQLite
 # ---------------------------------------------------------------------------
 def _connect() -> sqlite3.Connection:
-    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = DataHub.get_instance().connect_store("openctp")
     cols_ddl = ", ".join(
         f'"{name}" {definition}' for name, definition in COLUMNS.items()
     )

@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from sources.OpenCTP.client import CACHE_DB_PATH
+from tools.data.data_source.DataHub import DataHub
 
 logger = logging.getLogger(__name__)
 
@@ -16,26 +16,25 @@ TABLE_NAME = "guosen_limit_order_volume"
 
 
 def _connect() -> sqlite3.Connection:
-    CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(CACHE_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return DataHub.get_instance().connect_store("openctp")
 
 
 def ensure_sqlite_store() -> str:
     """确保本地 SQLite 文件可写，并返回路径。"""
-    with _connect():
+    hub = DataHub.get_instance()
+    with hub.connect_store("openctp"):
         pass
-    return str(CACHE_DB_PATH)
+    return hub._get_sqlite_store("openctp").path()
 
 
 def save_table(df: pd.DataFrame) -> str:
     """把抓取到的表格保存到本地 SQLite。"""
-    ensure_sqlite_store()
-    with _connect() as conn:
+    hub = DataHub.get_instance()
+    path = hub._get_sqlite_store("openctp").path()
+    with hub.connect_store("openctp") as conn:
         df.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
-    logger.info("已写入本地 SQLite: %s (%d 行)", CACHE_DB_PATH, len(df))
-    return str(CACHE_DB_PATH)
+    logger.info("已写入本地 SQLite: %s (%d 行)", path, len(df))
+    return path
 
 
 def load_latest_table() -> pd.DataFrame | None:

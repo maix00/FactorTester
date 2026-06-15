@@ -1,9 +1,10 @@
 """DataHub — 统一数据中心。
 
 职责：
-  1. 管理 SQLite 数据库及其注册的 DataProvider（schema 建表 + 数据同步）
+  1. 管理所有本地 SQLite 数据库（注册/连接/schema/sync）
   2. 管理 DataFrame 加载器（按 namespace 注册），统一通过 IdleResourceManager 缓存
-  3. 全局单例：整个应用只应有一个 DataHub 实例
+  3. 提供 SQLite Web 浏览器所需的 list_stores / list_tables / read_table 接口
+  4. 全局单例：整个应用只应有一个 DataHub 实例
 
 用法：
     hub = DataHub.get_instance()
@@ -26,6 +27,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -36,21 +38,22 @@ from tools.base.IdleResourceManager import IdleResourceManager
 logger = logging.getLogger(__name__)
 
 
+# ── SQLiteStore 数据结构 ───────────────────────────────────────────
+@dataclass(frozen=True)
+class SQLiteStore:
+    """描述一个本地 SQLite 数据库。"""
+    key: str
+    label: str
+    path_getter: Callable[[], str]
+    ensure: Callable[[], str] | None = None
+
+    def path(self) -> str:
+        if self.ensure is not None:
+            return self.ensure()
+        return self.path_getter()
+
+
 class DataHub:
-    """
-    统一数据中心（全局单例）。
-
-    ── SQLite 管理 ──
-      - 持有多个数据库路径
-      - 注册/注销 DataProvider
-      - 统一 ensure_schema() / sync()
-
-    ── DataFrame 加载 ──
-      - register_loader(namespace, fn)  注册加载器
-      - load(namespace, key)           通过 IdleResourceManager 缓存加载
-      - touch(namespace, key)          仅更新时间戳
-      - invalidate(namespace, key)     强制失效
-    """
 
     _instance: 'DataHub | None' = None
     _instance_lock = threading.Lock()
@@ -67,7 +70,7 @@ class DataHub:
         if DataHub._instance is not None:
             raise RuntimeError("Use DataHub.get_instance()")
         # ── SQLite 管理 ──
-        self._stores: Dict[str, Path] = {}          # store_key → db_path
+        self._sqlite_stores: Dict[str, SQLiteStore] = {}  # store_key → SQLiteStore
         self._providers: Dict[str, 'DataProvider'] = {}
 
         # ── DataFrame 加载器 ──
@@ -75,32 +78,132 @@ class DataHub:
         self._idle_manager = IdleResourceManager.get_instance()
 
     # ═══════════════════════════════════════════════════════════════
-    # SQLite 管理
+    # SQLite Store 管理（替代 local_sql_data.py）
     # ═══════════════════════════════════════════════════════════════
 
-    def register_store(self, key: str, db_path: str | Path) -> None:
-        """注册一个 SQLite 数据库路径。"""
-        self._stores[key] = Path(db_path)
-        logger.info("Store registered: %s → %s", key, db_path)
+    def register_sqlite_store(self, store: SQLiteStore) -> SQLiteStore:
+        """注册一个 SQLiteStore。返回传入的 store。"""
+        self._sqlite_stores[store.key] = store
+        logger.info("SQLiteStore registered: %s (%s) → %s", store.key, store.label, store.path())
+        return store
 
-    def get_store_path(self, key: str) -> Path:
-        """获取已注册的数据库路径。"""
-        if key not in self._stores:
-            raise KeyError(f"Unknown store: {key}")
-        return self._stores[key]
+    def iter_sqlite_stores(self) -> List[SQLiteStore]:
+        """返回所有已注册的 SQLiteStore（按 key 排序）。"""
+        return [
+            self._sqlite_stores[key]
+            for key in sorted(self._sqlite_stores)
+        ]
 
-    def connect_store(self, store_key: str) -> sqlite3.Connection:
-        """打开指定 store 的数据库连接。"""
-        path = self.get_store_path(store_key)
+    def _get_sqlite_store(self, store_key: str) -> SQLiteStore:
+        store = self._sqlite_stores.get(store_key)
+        if store is None:
+            raise ValueError(f"Unknown SQLite store: {store_key}")
+        return store
+
+    def _connect_sqlite(self, store_key: str) -> sqlite3.Connection:
+        """打开指定 SQLiteStore 的数据库连接。"""
+        store = self._get_sqlite_store(store_key)
+        path = Path(store.path())
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         return conn
 
+    # ── SQLite Web 接口（供 sqlite_web_mount.py 和 core.py 使用）─
+
+    def list_stores(self) -> List[Dict[str, Any]]:
+        """列出所有 SQLite store（供 Web API / sqlite_web_mount 用）。"""
+        result = []
+        for store in self.iter_sqlite_stores():
+            tables = self.list_tables(store.key)
+            result.append({
+                "key": store.key,
+                "label": store.label,
+                "database": store.path(),
+                "tables": len(tables),
+            })
+        return result
+
+    def list_tables(self, store_key: str) -> List[Dict[str, Any]]:
+        """列出指定 store 的所有表（含行数）。"""
+        with self._connect_sqlite(store_key) as conn:
+            rows = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name
+                """
+            ).fetchall()
+            result = []
+            for row in rows:
+                name = str(row["name"])
+                count = conn.execute(
+                    f'SELECT COUNT(*) AS n FROM "{name}"'
+                ).fetchone()["n"]
+                result.append({"name": name, "rows": int(count)})
+        return result
+
+    def read_table(self, store_key: str, table_name: str,
+                   *, limit: int = 200, offset: int = 0) -> Dict[str, Any]:
+        """读取指定表的数据（分页）。"""
+        allowed = {item["name"] for item in self.list_tables(store_key)}
+        if table_name not in allowed:
+            raise ValueError(f"Unknown SQL table: {table_name}")
+        store = self._get_sqlite_store(store_key)
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+        with self._connect_sqlite(store_key) as conn:
+            columns = [
+                row["name"]
+                for row in conn.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()
+            ]
+            count = int(
+                conn.execute(
+                    f'SELECT COUNT(*) AS n FROM "{table_name}"'
+                ).fetchone()["n"]
+            )
+            rows = conn.execute(
+                f'SELECT * FROM "{table_name}" LIMIT ? OFFSET ?',
+                (limit, offset),
+            ).fetchall()
+        return {
+            "store": store.key,
+            "store_label": store.label,
+            "table": table_name,
+            "columns": columns,
+            "rows": [dict(row) for row in rows],
+            "total": count,
+            "limit": limit,
+            "offset": offset,
+            "database": store.path(),
+        }
+
+    # ═══════════════════════════════════════════════════════════════
+    # 旧 SQLite Store 管理（底层数据库路径，可选用）
+    # ═══════════════════════════════════════════════════════════════
+
+    def register_store(self, key: str, db_path: str | Path) -> None:
+        """（旧接口）注册一个 SQLite 数据库路径，内部转为 SQLiteStore。"""
+        store = SQLiteStore(key=key, label=key, path_getter=lambda p=str(db_path): p)
+        self._sqlite_stores[key] = store
+        logger.info("Store registered (legacy): %s → %s", key, db_path)
+
+    def get_store_path(self, key: str) -> Path:
+        """获取已注册的数据库路径。"""
+        store = self._get_sqlite_store(key)
+        return Path(store.path())
+
+    def connect_store(self, store_key: str) -> sqlite3.Connection:
+        """打开指定 store 的数据库连接（委托给 _connect_sqlite）。"""
+        return self._connect_sqlite(store_key)
+
     def init_stores(self) -> None:
         """遍历所有注册的 DataProvider，确保各自的表/Schema 存在。"""
-        for store_key in self._stores:
-            with self.connect_store(store_key) as conn:
+        for store_key in self._sqlite_stores:
+            with self._connect_sqlite(store_key) as conn:
                 for provider in self._providers.values():
                     try:
                         provider.ensure_schema(conn)

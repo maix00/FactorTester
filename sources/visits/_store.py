@@ -8,35 +8,31 @@ import time
 from datetime import date
 from typing import Any
 
-from sources.OpenCTP.client import CACHE_DB_PATH
+from tools.data.data_source.DataHub import DataHub
 
 logger = logging.getLogger(__name__)
 
-VISITS_DB_PATH = CACHE_DB_PATH
 TABLE_NAME = "source_visits"
 
 
 def _connect() -> sqlite3.Connection:
-    VISITS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(VISITS_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS source_visits (
-            source_key TEXT PRIMARY KEY,
-            source_label TEXT NOT NULL,
-            last_access_date TEXT NOT NULL,
-            last_access_at REAL NOT NULL
-        )
-        """
-    )
-    return conn
+    return DataHub.get_instance().connect_store("openctp")
 
 
 def ensure_visits_store() -> str:
-    with _connect():
-        pass
-    return str(VISITS_DB_PATH)
+    hub = DataHub.get_instance()
+    with hub.connect_store("openctp") as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_visits (
+                source_key TEXT PRIMARY KEY,
+                source_label TEXT NOT NULL,
+                last_access_date TEXT NOT NULL,
+                last_access_at REAL NOT NULL
+            )
+            """
+        )
+    return hub._get_sqlite_store("openctp").path()
 
 
 def record_visit(source_key: str, *, source_label: str, access_date: date | str | None = None) -> str:

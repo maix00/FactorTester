@@ -1,24 +1,23 @@
-"""Registry for local SQL stores exposed through the data browser."""
+"""SQLite Store 兼容层 — 委托给 DataHub。
+
+此模块保留原有 API（SQLiteStore, register_store, iter_stores, list_stores,
+list_tables, read_table, STORES），内部全部委托给 DataHub 单例。
+
+新代码应直接使用 DataHub.get_instance() 而非此模块。
+"""
+
 from __future__ import annotations
 
-import sqlite3
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
+from tools.data.data_source.DataHub import DataHub, SQLiteStore  # noqa: F401
 
 
-@dataclass(frozen=True)
-class SQLiteStore:
-    key: str
-    label: str
-    path_getter: Callable[[], str]
-    ensure: Callable[[], str] | None = None
+def _hub() -> DataHub:
+    return DataHub.get_instance()
 
-    def path(self) -> str:
-        if self.ensure is not None:
-            return self.ensure()
-        return self.path_getter()
 
+# ── 初始化：注册 openctp store ──────────────────────────────────
 
 def _openctp_store_path() -> str:
     from sources.OpenCTP.client import CACHE_DB_PATH
@@ -30,96 +29,35 @@ def _ensure_openctp_store() -> str:
     return ensure_sqlite_store()
 
 
-_STORE_REGISTRY: dict[str, SQLiteStore] = {
-    "openctp": SQLiteStore(
-        key="openctp",
-        label="本地数据 (onlinedata.sqlite)",
-        path_getter=_openctp_store_path,
-        ensure=_ensure_openctp_store,
-    ),
-}
+_hub().register_sqlite_store(SQLiteStore(
+    key="openctp",
+    label="本地数据 (onlinedata.sqlite)",
+    path_getter=_openctp_store_path,
+    ensure=_ensure_openctp_store,
+))
 
+
+# ── 兼容 API ──────────────────────────────────────────────────────
 
 def register_store(store: SQLiteStore) -> SQLiteStore:
-    _STORE_REGISTRY[store.key] = store
-    return store
+    return _hub().register_sqlite_store(store)
 
 
 def iter_stores() -> list[SQLiteStore]:
-    return [store for _, store in sorted(_STORE_REGISTRY.items(), key=lambda item: item[0])]
-
-
-STORES = _STORE_REGISTRY
+    return _hub().iter_sqlite_stores()
 
 
 def list_stores() -> list[dict[str, Any]]:
-    return [
-        {
-            "key": store.key,
-            "label": store.label,
-            "database": store.path(),
-            "tables": len(list_tables(store.key)),
-        }
-        for store in iter_stores()
-    ]
-
-
-def _store_or_raise(store_key: str) -> SQLiteStore:
-    store = _STORE_REGISTRY.get(store_key)
-    if store is None:
-        raise ValueError(f"Unknown SQL store: {store_key}")
-    return store
-
-
-def _connect(store_key: str) -> sqlite3.Connection:
-    store = _store_or_raise(store_key)
-    path = Path(store.path())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return _hub().list_stores()
 
 
 def list_tables(store_key: str) -> list[dict[str, Any]]:
-    with _connect(store_key) as conn:
-        rows = conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-            ORDER BY name
-            """
-        ).fetchall()
-        result = []
-        for row in rows:
-            name = str(row["name"])
-            count = conn.execute(f'SELECT COUNT(*) AS n FROM "{name}"').fetchone()["n"]
-            result.append({"name": name, "rows": int(count)})
-    return result
+    return _hub().list_tables(store_key)
 
 
-def read_table(store_key: str, table_name: str, *, limit: int = 200, offset: int = 0) -> dict[str, Any]:
-    allowed = {item["name"] for item in list_tables(store_key)}
-    if table_name not in allowed:
-        raise ValueError(f"Unknown SQL table: {table_name}")
-    store = _store_or_raise(store_key)
-    limit = max(1, min(int(limit), 1000))
-    offset = max(0, int(offset))
-    with _connect(store_key) as conn:
-        columns = [row["name"] for row in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()]
-        count = int(conn.execute(f'SELECT COUNT(*) AS n FROM "{table_name}"').fetchone()["n"])
-        rows = conn.execute(
-            f'SELECT * FROM "{table_name}" LIMIT ? OFFSET ?',
-            (limit, offset),
-        ).fetchall()
-    return {
-        "store": store.key,
-        "store_label": store.label,
-        "table": table_name,
-        "columns": columns,
-        "rows": [dict(row) for row in rows],
-        "total": count,
-        "limit": limit,
-        "offset": offset,
-        "database": store.path(),
-    }
+def read_table(store_key: str, table_name: str,
+               *, limit: int = 200, offset: int = 0) -> dict[str, Any]:
+    return _hub().read_table(store_key, table_name, limit=limit, offset=offset)
+
+
+STORES = {}  # 废弃，保留仅向后兼容
